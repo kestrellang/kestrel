@@ -21,6 +21,7 @@ pub struct StructFieldInfo {
     pub name: String,
     pub span: Span,
     pub is_mutable: bool,
+    pub is_computed: bool,
     pub ty: Ty,
 }
 
@@ -60,6 +61,7 @@ impl Query for StructFields {
                     name: field.metadata().name().value.clone(),
                     span: field.metadata().span().clone(),
                     is_mutable: field.is_mutable(),
+                    is_computed: field.is_computed(),
                     ty,
                 })
             })

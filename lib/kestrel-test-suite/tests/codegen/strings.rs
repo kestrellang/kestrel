@@ -3,14 +3,14 @@
 use super::compile_and_run;
 
 #[test]
-#[ignore]
+
 fn test_string_literal() {
     // Test that string literals compile
     let result = compile_and_run(
         r#"
 module Test
 
-func main() -> Int {
+func main() -> lang.i64 {
     let s = "hello";
     42
 }
@@ -23,13 +23,13 @@ func main() -> Int {
 }
 
 #[test]
-#[ignore]
+
 fn test_empty_string() {
     let result = compile_and_run(
         r#"
 module Test
 
-func main() -> Int {
+func main() -> lang.i64 {
     let s = "";
     42
 }
@@ -42,13 +42,13 @@ func main() -> Int {
 }
 
 #[test]
-#[ignore]
+
 fn test_multiple_strings() {
     let result = compile_and_run(
         r#"
 module Test
 
-func main() -> Int {
+func main() -> lang.i64 {
     let a = "hello";
     let b = "world";
     42
@@ -62,14 +62,14 @@ func main() -> Int {
 }
 
 #[test]
-#[ignore]
+
 fn test_duplicate_strings() {
     // Test that duplicate strings are deduplicated
     let result = compile_and_run(
         r#"
 module Test
 
-func main() -> Int {
+func main() -> lang.i64 {
     let a = "same";
     let b = "same";
     42

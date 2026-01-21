@@ -568,6 +568,7 @@ pub fn pattern_parser<'tokens>()
                     }
                 }
             })
+            .boxed()
     })
 }
 
@@ -579,7 +580,7 @@ pub fn emit_pattern_variant(sink: &mut EventSink, variant: &PatternVariant) {
             sink.start_node(SyntaxKind::WildcardPattern);
             sink.add_token(SyntaxKind::Underscore, span.clone());
             sink.finish_node();
-        }
+        },
         PatternVariant::Binding {
             var_span,
             name_span,
@@ -590,7 +591,7 @@ pub fn emit_pattern_variant(sink: &mut EventSink, variant: &PatternVariant) {
             }
             sink.add_token(SyntaxKind::Identifier, name_span.clone());
             sink.finish_node();
-        }
+        },
         PatternVariant::Tuple {
             lparen,
             elements,
@@ -610,25 +611,25 @@ pub fn emit_pattern_variant(sink: &mut EventSink, variant: &PatternVariant) {
             }
             sink.add_token(SyntaxKind::RParen, rparen.clone());
             sink.finish_node();
-        }
+        },
         PatternVariant::Literal(kind) => {
             sink.start_node(SyntaxKind::LiteralPattern);
             match kind {
                 LiteralPatternKind::Integer(span) => {
                     sink.add_token(SyntaxKind::Integer, span.clone());
-                }
+                },
                 LiteralPatternKind::Float(span) => {
                     sink.add_token(SyntaxKind::Float, span.clone());
-                }
+                },
                 LiteralPatternKind::String(span) => {
                     sink.add_token(SyntaxKind::String, span.clone());
-                }
+                },
                 LiteralPatternKind::Bool(span) => {
                     sink.add_token(SyntaxKind::Boolean, span.clone());
-                }
+                },
             }
             sink.finish_node();
-        }
+        },
         PatternVariant::Range {
             start,
             operator,
@@ -640,16 +641,16 @@ pub fn emit_pattern_variant(sink: &mut EventSink, variant: &PatternVariant) {
             match start {
                 LiteralPatternKind::Integer(span) => {
                     sink.add_token(SyntaxKind::Integer, span.clone());
-                }
+                },
                 LiteralPatternKind::Float(span) => {
                     sink.add_token(SyntaxKind::Float, span.clone());
-                }
+                },
                 LiteralPatternKind::String(span) => {
                     sink.add_token(SyntaxKind::String, span.clone());
-                }
+                },
                 LiteralPatternKind::Bool(span) => {
                     sink.add_token(SyntaxKind::Boolean, span.clone());
-                }
+                },
             }
             // Emit range operator
             if *inclusive {
@@ -661,19 +662,19 @@ pub fn emit_pattern_variant(sink: &mut EventSink, variant: &PatternVariant) {
             match end {
                 LiteralPatternKind::Integer(span) => {
                     sink.add_token(SyntaxKind::Integer, span.clone());
-                }
+                },
                 LiteralPatternKind::Float(span) => {
                     sink.add_token(SyntaxKind::Float, span.clone());
-                }
+                },
                 LiteralPatternKind::String(span) => {
                     sink.add_token(SyntaxKind::String, span.clone());
-                }
+                },
                 LiteralPatternKind::Bool(span) => {
                     sink.add_token(SyntaxKind::Boolean, span.clone());
-                }
+                },
             }
             sink.finish_node();
-        }
+        },
         PatternVariant::Enum {
             dot,
             case_name,
@@ -693,17 +694,17 @@ pub fn emit_pattern_variant(sink: &mut EventSink, variant: &PatternVariant) {
                                 sink.add_token(SyntaxKind::Colon, colon.clone());
                                 emit_pattern_variant_inner(sink, pattern);
                             }
-                        }
+                        },
                         EnumPatternArgData::Unlabeled(pattern) => {
                             emit_pattern_variant_inner(sink, pattern);
-                        }
+                        },
                     }
                     sink.finish_node();
                 }
                 sink.add_token(SyntaxKind::RParen, rparen.clone());
             }
             sink.finish_node();
-        }
+        },
         PatternVariant::Or {
             alternatives,
             or_spans,
@@ -716,7 +717,7 @@ pub fn emit_pattern_variant(sink: &mut EventSink, variant: &PatternVariant) {
                 }
             }
             sink.finish_node();
-        }
+        },
         PatternVariant::Struct {
             struct_name,
             lbrace,
@@ -743,7 +744,7 @@ pub fn emit_pattern_variant(sink: &mut EventSink, variant: &PatternVariant) {
             }
             sink.add_token(SyntaxKind::RBrace, rbrace.clone());
             sink.finish_node();
-        }
+        },
         PatternVariant::Array {
             lbracket,
             prefix,
@@ -776,7 +777,7 @@ pub fn emit_pattern_variant(sink: &mut EventSink, variant: &PatternVariant) {
             }
             sink.add_token(SyntaxKind::RBracket, rbracket.clone());
             sink.finish_node();
-        }
+        },
         PatternVariant::At {
             var_span,
             name_span,
@@ -791,17 +792,17 @@ pub fn emit_pattern_variant(sink: &mut EventSink, variant: &PatternVariant) {
             sink.add_token(SyntaxKind::At, at_span.clone());
             emit_pattern_variant_inner(sink, subpattern);
             sink.finish_node();
-        }
+        },
         PatternVariant::Rest(span) => {
             sink.start_node(SyntaxKind::RestPattern);
             sink.add_token(SyntaxKind::DotDot, span.clone());
             sink.finish_node();
-        }
+        },
         PatternVariant::Error(span) => {
             sink.start_node(SyntaxKind::ErrorPattern);
-            sink.error_at("Invalid pattern".to_string(), span.clone());
+            sink.error_at_span("Invalid pattern".to_string(), span.clone());
             sink.finish_node();
-        }
+        },
     }
     sink.finish_node(); // Finish Pattern wrapper
 }
@@ -814,7 +815,7 @@ fn emit_pattern_variant_inner(sink: &mut EventSink, variant: &PatternVariant) {
             sink.start_node(SyntaxKind::WildcardPattern);
             sink.add_token(SyntaxKind::Underscore, span.clone());
             sink.finish_node();
-        }
+        },
         PatternVariant::Binding {
             var_span,
             name_span,
@@ -825,7 +826,7 @@ fn emit_pattern_variant_inner(sink: &mut EventSink, variant: &PatternVariant) {
             }
             sink.add_token(SyntaxKind::Identifier, name_span.clone());
             sink.finish_node();
-        }
+        },
         PatternVariant::Tuple {
             lparen,
             elements,
@@ -840,25 +841,25 @@ fn emit_pattern_variant_inner(sink: &mut EventSink, variant: &PatternVariant) {
             }
             sink.add_token(SyntaxKind::RParen, rparen.clone());
             sink.finish_node();
-        }
+        },
         PatternVariant::Literal(kind) => {
             sink.start_node(SyntaxKind::LiteralPattern);
             match kind {
                 LiteralPatternKind::Integer(span) => {
                     sink.add_token(SyntaxKind::Integer, span.clone());
-                }
+                },
                 LiteralPatternKind::Float(span) => {
                     sink.add_token(SyntaxKind::Float, span.clone());
-                }
+                },
                 LiteralPatternKind::String(span) => {
                     sink.add_token(SyntaxKind::String, span.clone());
-                }
+                },
                 LiteralPatternKind::Bool(span) => {
                     sink.add_token(SyntaxKind::Boolean, span.clone());
-                }
+                },
             }
             sink.finish_node();
-        }
+        },
         PatternVariant::Range {
             start,
             operator,
@@ -870,16 +871,16 @@ fn emit_pattern_variant_inner(sink: &mut EventSink, variant: &PatternVariant) {
             match start {
                 LiteralPatternKind::Integer(span) => {
                     sink.add_token(SyntaxKind::Integer, span.clone());
-                }
+                },
                 LiteralPatternKind::Float(span) => {
                     sink.add_token(SyntaxKind::Float, span.clone());
-                }
+                },
                 LiteralPatternKind::String(span) => {
                     sink.add_token(SyntaxKind::String, span.clone());
-                }
+                },
                 LiteralPatternKind::Bool(span) => {
                     sink.add_token(SyntaxKind::Boolean, span.clone());
-                }
+                },
             }
             // Emit range operator
             if *inclusive {
@@ -891,19 +892,19 @@ fn emit_pattern_variant_inner(sink: &mut EventSink, variant: &PatternVariant) {
             match end {
                 LiteralPatternKind::Integer(span) => {
                     sink.add_token(SyntaxKind::Integer, span.clone());
-                }
+                },
                 LiteralPatternKind::Float(span) => {
                     sink.add_token(SyntaxKind::Float, span.clone());
-                }
+                },
                 LiteralPatternKind::String(span) => {
                     sink.add_token(SyntaxKind::String, span.clone());
-                }
+                },
                 LiteralPatternKind::Bool(span) => {
                     sink.add_token(SyntaxKind::Boolean, span.clone());
-                }
+                },
             }
             sink.finish_node();
-        }
+        },
         PatternVariant::Enum {
             dot,
             case_name,
@@ -923,17 +924,17 @@ fn emit_pattern_variant_inner(sink: &mut EventSink, variant: &PatternVariant) {
                                 sink.add_token(SyntaxKind::Colon, colon.clone());
                                 emit_pattern_variant_inner(sink, pattern);
                             }
-                        }
+                        },
                         EnumPatternArgData::Unlabeled(pattern) => {
                             emit_pattern_variant_inner(sink, pattern);
-                        }
+                        },
                     }
                     sink.finish_node();
                 }
                 sink.add_token(SyntaxKind::RParen, rparen.clone());
             }
             sink.finish_node();
-        }
+        },
         PatternVariant::Or {
             alternatives,
             or_spans,
@@ -946,7 +947,7 @@ fn emit_pattern_variant_inner(sink: &mut EventSink, variant: &PatternVariant) {
                 }
             }
             sink.finish_node();
-        }
+        },
         PatternVariant::Struct {
             struct_name,
             lbrace,
@@ -973,7 +974,7 @@ fn emit_pattern_variant_inner(sink: &mut EventSink, variant: &PatternVariant) {
             }
             sink.add_token(SyntaxKind::RBrace, rbrace.clone());
             sink.finish_node();
-        }
+        },
         PatternVariant::Array {
             lbracket,
             prefix,
@@ -1006,7 +1007,7 @@ fn emit_pattern_variant_inner(sink: &mut EventSink, variant: &PatternVariant) {
             }
             sink.add_token(SyntaxKind::RBracket, rbracket.clone());
             sink.finish_node();
-        }
+        },
         PatternVariant::At {
             var_span,
             name_span,
@@ -1021,17 +1022,17 @@ fn emit_pattern_variant_inner(sink: &mut EventSink, variant: &PatternVariant) {
             sink.add_token(SyntaxKind::At, at_span.clone());
             emit_pattern_variant_inner(sink, subpattern);
             sink.finish_node();
-        }
+        },
         PatternVariant::Rest(span) => {
             sink.start_node(SyntaxKind::RestPattern);
             sink.add_token(SyntaxKind::DotDot, span.clone());
             sink.finish_node();
-        }
+        },
         PatternVariant::Error(span) => {
             sink.start_node(SyntaxKind::ErrorPattern);
-            sink.error_at("Invalid pattern".to_string(), span.clone());
+            sink.error_at_span("Invalid pattern".to_string(), span.clone());
             sink.finish_node();
-        }
+        },
     }
 }
 
@@ -1046,18 +1047,18 @@ where
     match pattern_parser().parse(input).into_result() {
         Ok(variant) => {
             emit_pattern_variant(sink, &variant);
-        }
+        },
         Err(errors) => {
             // Even on error, we need to emit a valid tree structure
             sink.start_node(SyntaxKind::Pattern);
             sink.start_node(SyntaxKind::ErrorPattern);
             for error in errors {
                 let span = error.span();
-                sink.error_at(format!("Parse error: {:?}", error), to_kestrel_span(*span));
+                sink.error_at(format!("Parse error: {:?}", error), *span);
             }
             sink.finish_node(); // ErrorPattern
             sink.finish_node(); // Pattern
-        }
+        },
     }
 }
 
@@ -1072,13 +1073,13 @@ mod tests {
             .map(|spanned| (spanned.value, spanned.span))
             .collect();
 
-        let mut sink = EventSink::new();
+        let mut sink = EventSink::new(0);
         parse_pattern(source, tokens.into_iter(), &mut sink);
 
         let tree = TreeBuilder::new(source, sink.into_events()).build();
         Pattern {
             syntax: tree,
-            span: Span::from(0..source.len()),
+            span: Span::new(0, 0..source.len()),
         }
     }
 

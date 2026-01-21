@@ -3,6 +3,9 @@ name = "kestrel-semantic-type-inference"
 version.workspace = true
 edition.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
 kestrel-semantic-tree = { path = "../kestrel-semantic-tree" }
 kestrel-span = { path = "../kestrel-span" }

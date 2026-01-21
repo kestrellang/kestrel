@@ -58,17 +58,20 @@ impl IntoDiagnostic for ConditionNotBoolError {
     fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message(format!(
-                "{} condition must be `Bool`, found `{}`",
+                "{} condition must conform to `BooleanConditional`, found `{}`",
                 self.condition_kind, self.found
             ))
             .with_labels(vec![
-                Label::primary(self.span.file_id, self.span.range())
-                    .with_message(format!("expected `Bool`, found `{}`", self.found)),
+                Label::primary(self.span.file_id, self.span.range()).with_message(format!(
+                    "type `{}` does not conform to `BooleanConditional`",
+                    self.found
+                )),
             ])
     }
 }
 
 /// Error when if/else branches have incompatible types.
+#[allow(dead_code)]
 pub struct BranchTypeMismatchError {
     /// The span of the if expression
     pub if_span: Span,
@@ -102,6 +105,7 @@ impl IntoDiagnostic for BranchTypeMismatchError {
 }
 
 /// Error when array elements have inconsistent types.
+#[allow(dead_code)]
 pub struct ArrayElementTypeMismatchError {
     /// The span of the array literal
     pub array_span: Span,

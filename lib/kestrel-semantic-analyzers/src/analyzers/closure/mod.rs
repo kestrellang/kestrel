@@ -5,6 +5,7 @@ mod diagnostics;
 pub use diagnostics::*;
 
 use crate::analyzer::Analyzer;
+use crate::analyzers::type_assignability::is_assignable_with_constraints;
 use crate::context::AnalysisContext;
 use kestrel_semantic_model::LocalName;
 use kestrel_semantic_tree::expr::{ExprKind, Expression};
@@ -53,7 +54,7 @@ impl Analyzer for ClosureAnalyzer {
         }
 
         // Validate closure type matches expected type
-        validate_closure_type(expr, params, tail_expr, ctx);
+        validate_closure_type(expr, params, tail_expr, container_id, ctx);
 
         // Check for assignment to captured variables
         validate_capture_assignments(body, tail_expr.as_deref(), captures, container_id, ctx);
@@ -83,13 +84,14 @@ fn validate_it_usage(expr: &Expression, ctx: &mut AnalysisContext) {
 fn validate_closure_type(
     expr: &Expression,
     params: &Option<Vec<kestrel_semantic_tree::expr::ClosureParam>>,
-    tail_expr: &Option<Box<Expression>>,
+    _tail_expr: &Option<Box<Expression>>,
+    context_id: Option<semantic_tree::symbol::SymbolId>,
     ctx: &mut AnalysisContext,
 ) {
     // Extract the closure's function type
     if let TyKind::Function {
         params: param_tys,
-        return_type: return_ty,
+        return_type: _return_ty,
     } = expr.ty.kind()
     {
         // Check parameter count matches
@@ -109,13 +111,22 @@ fn validate_closure_type(
             // Check parameter types match
             for (i, (param, expected_ty)) in param_list.iter().zip(param_tys.iter()).enumerate() {
                 // Only check if the parameter has a concrete type (not Infer)
-                if !param.ty.is_infer() && param.ty.id() != expected_ty.id() {
-                    ctx.report(ClosureParamTypeMismatchError {
-                        span: param.span.clone(),
-                        index: i,
-                        actual: param.ty.to_string(),
-                        expected: expected_ty.to_string(),
-                    });
+                if !param.ty.is_infer() {
+                    // Use constraint-aware type checking if we have a context
+                    let types_match = if let Some(id) = context_id {
+                        is_assignable_with_constraints(&param.ty, expected_ty, ctx.model, id)
+                    } else {
+                        param.ty.is_assignable_to(expected_ty)
+                    };
+
+                    if !types_match {
+                        ctx.report(ClosureParamTypeMismatchError {
+                            span: param.span.clone(),
+                            index: i,
+                            actual: param.ty.to_string(),
+                            expected: expected_ty.to_string(),
+                        });
+                    }
                 }
             }
         }
@@ -186,29 +197,29 @@ fn find_assignments_to_locals(
     match &expr.kind {
         ExprKind::Assignment { target, value } => {
             // Check if the target is a LocalRef that matches one of our target locals
-            if let ExprKind::LocalRef(local_id) = &target.kind {
-                if target_locals.contains(local_id) {
-                    // Get the variable name
-                    if let Some(cid) = container_id {
-                        let name = ctx
-                            .model
-                            .query(LocalName {
-                                container_id: cid,
-                                local_id: *local_id,
-                            })
-                            .unwrap_or_else(|| "<unknown>".to_string());
+            if let ExprKind::LocalRef(local_id) = &target.kind
+                && target_locals.contains(local_id)
+            {
+                // Get the variable name
+                if let Some(cid) = container_id {
+                    let name = ctx
+                        .model
+                        .query(LocalName {
+                            container_id: cid,
+                            local_id: *local_id,
+                        })
+                        .unwrap_or_else(|| "<unknown>".to_string());
 
-                        ctx.report(CannotAssignToCapturedVariableError {
-                            span: target.span.clone(),
-                            name,
-                        });
-                    }
+                    ctx.report(CannotAssignToCapturedVariableError {
+                        span: target.span.clone(),
+                        name,
+                    });
                 }
             }
 
             // Continue walking the value expression
             find_assignments_to_locals(value, target_locals, container_id, ctx);
-        }
+        },
 
         // Recursively check other expression kinds
         ExprKind::If {
@@ -222,10 +233,10 @@ fn find_assignments_to_locals(
                 match condition {
                     kestrel_semantic_tree::expr::IfCondition::Expr(expr) => {
                         find_assignments_to_locals(expr, target_locals, container_id, ctx);
-                    }
+                    },
                     kestrel_semantic_tree::expr::IfCondition::Let { value, .. } => {
                         find_assignments_to_locals(value, target_locals, container_id, ctx);
-                    }
+                    },
                 }
             }
 
@@ -246,13 +257,13 @@ fn find_assignments_to_locals(
                         if let Some(val) = value {
                             find_assignments_to_locals(val, target_locals, container_id, ctx);
                         }
-                    }
+                    },
                     kestrel_semantic_tree::expr::ElseBranch::ElseIf(if_expr) => {
                         find_assignments_to_locals(if_expr, target_locals, container_id, ctx);
-                    }
+                    },
                 }
             }
-        }
+        },
 
         ExprKind::While {
             condition, body, ..
@@ -261,7 +272,7 @@ fn find_assignments_to_locals(
             for stmt in body {
                 walk_statement_for_assignments(stmt, target_locals, container_id, ctx);
             }
-        }
+        },
 
         ExprKind::WhileLet {
             conditions, body, ..
@@ -270,22 +281,22 @@ fn find_assignments_to_locals(
                 match condition {
                     kestrel_semantic_tree::expr::IfCondition::Expr(expr) => {
                         find_assignments_to_locals(expr, target_locals, container_id, ctx);
-                    }
+                    },
                     kestrel_semantic_tree::expr::IfCondition::Let { value, .. } => {
                         find_assignments_to_locals(value, target_locals, container_id, ctx);
-                    }
+                    },
                 }
             }
             for stmt in body {
                 walk_statement_for_assignments(stmt, target_locals, container_id, ctx);
             }
-        }
+        },
 
         ExprKind::Loop { body, .. } => {
             for stmt in body {
                 walk_statement_for_assignments(stmt, target_locals, container_id, ctx);
             }
-        }
+        },
 
         ExprKind::Closure {
             body, tail_expr, ..
@@ -297,34 +308,34 @@ fn find_assignments_to_locals(
             if let Some(tail) = tail_expr {
                 find_assignments_to_locals(tail, target_locals, container_id, ctx);
             }
-        }
+        },
 
         // Other expression kinds that contain sub-expressions
         ExprKind::Array(elements) | ExprKind::Tuple(elements) => {
             for elem in elements {
                 find_assignments_to_locals(elem, target_locals, container_id, ctx);
             }
-        }
+        },
 
         ExprKind::Grouping(inner) => {
             find_assignments_to_locals(inner, target_locals, container_id, ctx);
-        }
+        },
 
         ExprKind::FieldAccess { object, .. } => {
             find_assignments_to_locals(object, target_locals, container_id, ctx);
-        }
+        },
 
         ExprKind::TupleIndex { tuple, .. } => {
             find_assignments_to_locals(tuple, target_locals, container_id, ctx);
-        }
+        },
 
         ExprKind::MethodRef { receiver, .. } => {
             find_assignments_to_locals(receiver, target_locals, container_id, ctx);
-        }
+        },
 
         ExprKind::PrimitiveMethodRef { receiver, .. } => {
             find_assignments_to_locals(receiver, target_locals, container_id, ctx);
-        }
+        },
 
         ExprKind::Call {
             callee, arguments, ..
@@ -333,7 +344,7 @@ fn find_assignments_to_locals(
             for arg in arguments {
                 find_assignments_to_locals(&arg.value, target_locals, container_id, ctx);
             }
-        }
+        },
 
         ExprKind::PrimitiveMethodCall {
             receiver,
@@ -344,7 +355,7 @@ fn find_assignments_to_locals(
             for arg in arguments {
                 find_assignments_to_locals(&arg.value, target_locals, container_id, ctx);
             }
-        }
+        },
 
         ExprKind::DeferredMethodCall {
             receiver,
@@ -355,19 +366,25 @@ fn find_assignments_to_locals(
             for arg in arguments {
                 find_assignments_to_locals(&arg.value, target_locals, container_id, ctx);
             }
-        }
+        },
 
         ExprKind::ImplicitStructInit { arguments, .. } => {
             for arg in arguments {
                 find_assignments_to_locals(&arg.value, target_locals, container_id, ctx);
             }
-        }
+        },
+
+        ExprKind::DelegatingInit { arguments, .. } => {
+            for arg in arguments {
+                find_assignments_to_locals(&arg.value, target_locals, container_id, ctx);
+            }
+        },
 
         ExprKind::Return { value } => {
             if let Some(val) = value {
                 find_assignments_to_locals(val, target_locals, container_id, ctx);
             }
-        }
+        },
 
         // Implicit member access - check arguments if present
         ExprKind::ImplicitMemberAccess { arguments, .. } => {
@@ -376,7 +393,26 @@ fn find_assignments_to_locals(
                     find_assignments_to_locals(&arg.value, target_locals, container_id, ctx);
                 }
             }
-        }
+        },
+
+        // Lang intrinsics - walk arguments
+        ExprKind::LangIntrinsic { arguments, .. } => {
+            for arg in arguments {
+                find_assignments_to_locals(&arg.value, target_locals, container_id, ctx);
+            }
+        },
+
+        // Subscript call - walk receiver and arguments
+        ExprKind::SubscriptCall {
+            receiver,
+            arguments,
+            ..
+        } => {
+            find_assignments_to_locals(receiver, target_locals, container_id, ctx);
+            for arg in arguments {
+                find_assignments_to_locals(&arg.value, target_locals, container_id, ctx);
+            }
+        },
 
         // Leaf expressions - no sub-expressions to check
         ExprKind::Literal(_)
@@ -389,7 +425,8 @@ fn find_assignments_to_locals(
         | ExprKind::EnumCase { .. }
         | ExprKind::Break { .. }
         | ExprKind::Continue { .. }
-        | ExprKind::Error => {}
+        | ExprKind::LangIntrinsicRef(_)
+        | ExprKind::Error => {},
 
         ExprKind::Match { scrutinee, arms } => {
             find_assignments_to_locals(scrutinee, target_locals, container_id, ctx);
@@ -399,7 +436,7 @@ fn find_assignments_to_locals(
                 }
                 find_assignments_to_locals(&arm.body, target_locals, container_id, ctx);
             }
-        }
+        },
 
         ExprKind::Block { statements, value } => {
             for stmt in statements {
@@ -408,7 +445,7 @@ fn find_assignments_to_locals(
             if let Some(val) = value {
                 find_assignments_to_locals(val, target_locals, container_id, ctx);
             }
-        }
+        },
     }
 }
 
@@ -424,10 +461,10 @@ fn walk_statement_for_assignments(
             if let Some(val) = value {
                 find_assignments_to_locals(val, target_locals, container_id, ctx);
             }
-        }
+        },
         kestrel_semantic_tree::stmt::StatementKind::Expr(expr) => {
             find_assignments_to_locals(expr, target_locals, container_id, ctx);
-        }
+        },
         kestrel_semantic_tree::stmt::StatementKind::GuardLet {
             conditions,
             else_block,
@@ -436,10 +473,10 @@ fn walk_statement_for_assignments(
                 match condition {
                     kestrel_semantic_tree::expr::IfCondition::Expr(expr) => {
                         find_assignments_to_locals(expr, target_locals, container_id, ctx);
-                    }
+                    },
                     kestrel_semantic_tree::expr::IfCondition::Let { value, .. } => {
                         find_assignments_to_locals(value, target_locals, container_id, ctx);
-                    }
+                    },
                 }
             }
             for else_stmt in &else_block.statements {
@@ -448,9 +485,9 @@ fn walk_statement_for_assignments(
             if let Some(yield_expr) = &else_block.yield_expr {
                 find_assignments_to_locals(yield_expr, target_locals, container_id, ctx);
             }
-        }
+        },
         kestrel_semantic_tree::stmt::StatementKind::Deinit { .. } => {
             // Deinit statement has no expressions that could contain assignments
-        }
+        },
     }
 }

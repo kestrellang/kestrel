@@ -1,185 +1,122 @@
-// Buffer[T] - owning contiguous memory region
+// Buffer[T, A] - owning contiguous memory region
 
-public struct Buffer[T, A: Allocator = GlobalAllocator]: NonCopyable {
+module std.memory
+
+import std.result.(Optional)
+import std.core.(Bool, Copyable)
+import std.num.(Int64)
+import std.memory.(Layout, Pointer, Slice, RawPointer, Allocator, GlobalAllocator)
+import std.ffi.(memcpy, memmove, memset)
+
+public struct Buffer[T, A]: not Copyable where A: Allocator {
     private var ptr: Pointer[T]
-    private var cap: Int
+    private var cap: Int64
     private var allocator: A
 
-    // Allocate buffer with capacity
-    public init(capacity: Int) where A == GlobalAllocator {
-        self.allocator = GlobalAllocator()
-        let layout = Layout.array[T](count: capacity)
-        match self.allocator.allocate(layout: layout) {
-            .Some(let rawPtr) => {
-                self.ptr = rawPtr.as[T]()
-                self.cap = capacity
-            },
-            .None => panic("Buffer allocation failed")
+    // Allocate buffer with capacity using provided allocator
+    public init(capacity: Int64, allocator: A) {
+        self.allocator = allocator;
+        self.cap = capacity;
+        let layout = Layout.array[T](capacity);
+        let result = self.allocator.allocate(layout);
+        if result.isSome() {
+            self.ptr = result.unwrap().cast[T]()
+        } else {
+            lang.panic("Buffer allocation failed")
         }
     }
 
-    public init(capacity: Int, allocator: A) {
-        self.allocator = allocator
-        let layout = Layout.array[T](count: capacity)
-        match self.allocator.allocate(layout: layout) {
-            .Some(let rawPtr) => {
-                self.ptr = rawPtr.as[T]()
-                self.cap = capacity
-            },
-            .None => panic("Buffer allocation failed")
-        }
-    }
-
-    // Create from existing pointer (non-owning view)
-    private init(pointer: Pointer[T], capacity: Int, allocator: A) {
-        self.ptr = pointer
-        self.cap = capacity
-        self.allocator = allocator
+    // Create from existing pointer (takes ownership)
+    private init(pointer: Pointer[T], capacity: Int64, allocator: A) {
+        self.ptr = pointer;
+        self.cap = capacity;
+        self.allocator = allocator;
     }
 
     deinit {
-        let layout = Layout.array[T](count: self.cap)
-        self.allocator.deallocate(ptr: self.ptr.asRaw(), layout: layout)
+        let layout = Layout.array[T](self.cap);
+        self.allocator.deallocate(self.ptr.asRaw(), layout)
     }
 
-    public var capacity: Int { self.cap }
+    public var capacity: Int64 { self.cap }
 
     public var pointer: Pointer[T] { self.ptr }
 
-    // Safe access - returns Optional, bounds checked
-    public subscript(safe index: Int) -> Optional[T] {
-        get {
-            if index >= 0 and index < self.cap {
-                .Some(self.ptr.offset(by: index).read())
-            } else {
-                .None
-            }
-        }
-        set {
-            if index >= 0 and index < self.cap {
-                if let value = newValue {
-                    self.ptr.offset(by: index).write(value)
-                }
-            }
+    // Unchecked read - get element at index without bounds checking
+    public func read(unchecked index: Int64) -> T {
+        self.ptr.offset(by: index).read()
+    }
+
+    // Unchecked write - set element at index without bounds checking
+    public func write(unchecked index: Int64, value: T) {
+        self.ptr.offset(by: index).write(value)
+    }
+
+    // Safe read - returns Optional, bounds checked
+    public func read(at index: Int64) -> Optional[T] {
+        if index >= 0 and index < self.cap {
+            .Some(self.ptr.offset(by: index).read())
+        } else {
+            .None
         }
     }
 
-    // Wrapping access - indices wrap around
-    public subscript(wrapping index: Int) -> T {
-        get {
-            let wrapped = ((index % self.cap) + self.cap) % self.cap
-            self.ptr.offset(by: wrapped).read()
+    // Safe write - bounds checked, returns success
+    public func write(at index: Int64, value: T) -> Bool {
+        if index >= 0 and index < self.cap {
+            self.ptr.offset(by: index).write(value);
+            true
+        } else {
+            false
         }
-        set {
-            let wrapped = ((index % self.cap) + self.cap) % self.cap
-            self.ptr.offset(by: wrapped).write(newValue)
-        }
-    }
-
-    // Unchecked access - no bounds check
-    public subscript(unchecked index: Int) -> T {
-        get { self.ptr.offset(by: index).read() }
-        set { self.ptr.offset(by: index).write(newValue) }
     }
 
     // Bulk operations
-    public func fill(with value: T) where T: Cloneable {
-        for i in 0..<self.cap {
-            self.ptr.offset(by: i).write(value.clone())
-        }
-    }
+    // Note: These are commented out due to issues accessing .raw on expressions
+    // public func copy(from source: Pointer[T], count: Int64) {
+    //     let copyCount = if count < self.cap { count } else { self.cap };
+    //     let elementSize = Int64(intLiteral: lang.sizeof[T]());
+    //     let byteCount: Int64 = copyCount * elementSize;
+    //     memcpy(self.ptr.asRaw().raw, source.asRaw().raw, byteCount.raw);
+    // }
 
-    public func copy(from source: Buffer[T, A>, count: Int) {
-        let copyCount = if count < source.cap { count } else { source.cap }
-        let copyCount = if copyCount < self.cap { copyCount } else { self.cap }
-        lang.memcpy(self.ptr.asRaw().raw, source.ptr.asRaw().raw, copyCount * lang.sizeof[T]())
-    }
+    // public func move(from source: Pointer[T], count: Int64) {
+    //     let moveCount = if count < self.cap { count } else { self.cap };
+    //     let elementSize = Int64(intLiteral: lang.sizeof[T]());
+    //     let byteCount: Int64 = moveCount * elementSize;
+    //     memmove(self.ptr.asRaw().raw, source.asRaw().raw, byteCount.raw);
+    // }
 
-    public func move(from source: Buffer[T, A], count: Int) {
-        let moveCount = if count < source.cap { count } else { source.cap }
-        let moveCount = if moveCount < self.cap { moveCount } else { self.cap }
-        lang.memmove(self.ptr.asRaw().raw, source.ptr.asRaw().raw, moveCount * lang.sizeof[T]())
-    }
-
-    public func zeroFill() {
-        lang.memset(self.ptr.asRaw().raw, 0, self.cap * lang.sizeof[T]())
-    }
+    // public func zeroFill() {
+    //     let elementSize = Int64(intLiteral: lang.sizeof[T]());
+    //     let byteCount: Int64 = self.cap * elementSize;
+    //     memset(self.ptr.asRaw().raw, 0, byteCount.raw);
+    // }
 
     // Resizing
-    public func resize(to newCapacity: Int) {
-        let oldLayout = Layout.array[T](count: self.cap)
-        let newLayout = Layout.array[T](count: newCapacity)
+    public mutating func resize(to newCapacity: Int64) {
+        let oldLayout = Layout.array[T](self.cap);
+        let newLayout = Layout.array[T](newCapacity);
 
-        match self.allocator.reallocate(ptr: self.ptr.asRaw(), oldLayout: oldLayout, newLayout: newLayout) {
-            .Some(let newPtr) => {
-                self.ptr = newPtr.as[T]()
-                self.cap = newCapacity
-            },
-            .None => panic("Buffer resize failed")
+        let result = self.allocator.reallocate(self.ptr.asRaw(), oldLayout, newLayout);
+        if result.isSome() {
+            self.ptr = result.unwrap().cast[T]();
+            self.cap = newCapacity
+        } else {
+            lang.panic("Buffer resize failed")
         }
     }
 
-    // Get slice
+    // Get slice view
     public func asSlice() -> Slice[T] {
         Slice(pointer: self.ptr, count: self.cap)
     }
 
-    public func slice(from start: Int, to end: Int) -> Optional[Slice[T]] {
+    public func slice(from start: Int64, to end: Int64) -> Optional[Slice[T]] {
         if start >= 0 and end <= self.cap and start <= end {
             .Some(Slice(pointer: self.ptr.offset(by: start), count: end - start))
         } else {
             .None
         }
-    }
-}
-
-// ArcBox[T] - reference-counted box for COW types
-public struct ArcBox[T] {
-    private var ptr: Pointer[ArcBoxStorage[T]]
-
-    struct ArcBoxStorage[T] {
-        var refCount: Int  // Should be atomic
-        var value: T
-    }
-
-    public init(value: T) {
-        let layout = Layout.of[ArcBoxStorage[T]]()
-        let allocator = GlobalAllocator()
-        match allocator.allocate(layout: layout) {
-            .Some(let rawPtr) => {
-                self.ptr = rawPtr.as[ArcBoxStorage[T]]()
-                self.ptr.pointee = ArcBoxStorage(refCount: 1, value: value)
-            },
-            .None => panic("ArcBox allocation failed")
-        }
-    }
-
-    public var value: ref T {
-        self.ptr.pointee.value
-    }
-
-    public func isUnique() -> Bool {
-        self.ptr.pointee.refCount == 1
-    }
-
-    public func clone() -> ArcBox[T] {
-        lang.atomic_add(self.ptr.pointee.refCount, 1)
-        ArcBox(ptr: self.ptr)
-    }
-
-    public func deepClone() -> ArcBox[T] where T: Cloneable {
-        ArcBox(value: self.ptr.pointee.value.clone())
-    }
-
-    private func release() {
-        if lang.atomic_sub(self.ptr.pointee.refCount, 1) == 1 {
-            // Last reference, deallocate
-            let layout = Layout.of[ArcBoxStorage[T]]()
-            GlobalAllocator().deallocate(ptr: self.ptr.asRaw(), layout: layout)
-        }
-    }
-
-    deinit {
-        self.release()
     }
 }

@@ -11,7 +11,8 @@
 //! // Create a compilation with multiple source files
 //! let compilation = Compilation::builder()
 //!     .add_source("main.ks", "module Main\nfunc main() {}")
-//!     .build();
+//!     .build()
+//!     .expect("failed to build compilation");
 //!
 //! // Check for errors and emit diagnostics
 //! if compilation.has_errors() {
@@ -24,7 +25,7 @@
 //! compilation.build(&target, &Default::default(), "output".as_ref()).unwrap();
 //!
 //! // Or run the program directly
-//! let result = compilation.run(&target).unwrap();
+//! let result = compilation.run(&target, &Default::default()).unwrap();
 //! println!("Exit code: {}", result.exit_code);
 //! ```
 
@@ -33,12 +34,14 @@ mod compilation;
 pub mod error;
 pub mod run;
 mod source_file;
+pub mod stdlib;
 
 pub use builder::CompilationBuilder;
 pub use compilation::Compilation;
 pub use error::CompileError;
 pub use run::RunResult;
 pub use source_file::SourceFile;
+pub use stdlib::{StdLib, StdLibConfig, StdLibError};
 
 // Re-export commonly used types from dependencies
 pub use kestrel_reporting::{Diagnostic, DiagnosticContext, IntoDiagnostic, Label, Severity};

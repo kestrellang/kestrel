@@ -95,7 +95,7 @@ fn extract_return_type(ty: &SemanticTy) -> SemanticTy {
             // Shouldn't happen - closure should have function type
             // Return unit as fallback
             SemanticTy::unit(ty.span().clone())
-        }
+        },
     }
 }
 
@@ -331,12 +331,12 @@ fn create_closure_function(
         Some((_, env_struct_name)) => {
             let env_struct_ty = ctx.mir.ty_named(*env_struct_name, vec![]);
             ctx.mir.ty_ref(env_struct_ty)
-        }
+        },
         None => {
             // Non-capturing closure: use a raw pointer type for the unused env parameter
             let i8_ty = ctx.mir.intern_type(MirTy::I8);
             ctx.mir.ty_ptr(i8_ty)
-        }
+        },
     };
 
     let param_types: Vec<_> = params
@@ -423,6 +423,11 @@ fn create_closure_function(
         if let Some(expr) = tail_expr {
             let value = lower_expression(ctx, expr);
             if !ctx.is_block_terminated() {
+                // Mark the return value's local as moved so it doesn't get deinited.
+                // The caller takes ownership of the return value.
+                if let Some(local) = crate::expr::try_get_local_from_value(&value) {
+                    ctx.mark_moved(local);
+                }
                 ctx.emit_return(value);
             }
         } else {

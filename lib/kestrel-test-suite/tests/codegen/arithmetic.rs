@@ -1,199 +1,177 @@
 //! Arithmetic operation tests.
 
-use super::compile_and_run;
+use kestrel_test_suite::*;
 
 #[test]
-#[ignore] // Enable once codegen is working
 fn test_return_constant() {
-    let result = compile_and_run(
-        r#"
-module Test
+    Test::new(
+        r#"module Test
 
-func main() -> Int {
-    42
-}
-"#,
-    );
-    if result.exit_code != 42 {
-        eprintln!("stderr: {}", result.stderr);
-    }
-    assert_eq!(result.exit_code, 42);
-}
-
-#[test]
-#[ignore]
-fn test_add() {
-    let result = compile_and_run(
-        r#"
-module Test
-
-func main() -> Int {
-    let x = 10;
-    let y = 32;
-    x + y
-}
-"#,
-    );
-    if result.exit_code != 42 {
-        eprintln!("stderr: {}", result.stderr);
-    }
-    assert_eq!(result.exit_code, 42);
-}
-
-#[test]
-#[ignore]
-fn test_subtract() {
-    let result = compile_and_run(
-        r#"
-module Test
-
-func main() -> Int {
-    let x = 50;
-    let y = 8;
-    x - y
-}
-"#,
-    );
-    if result.exit_code != 42 {
-        eprintln!("stderr: {}", result.stderr);
-    }
-    assert_eq!(result.exit_code, 42);
-}
-
-#[test]
-#[ignore]
-fn test_multiply() {
-    let result = compile_and_run(
-        r#"
-module Test
-
-func main() -> Int {
-    let x = 6;
-    let y = 7;
-    x * y
-}
-"#,
-    );
-    if result.exit_code != 42 {
-        eprintln!("stderr: {}", result.stderr);
-    }
-    assert_eq!(result.exit_code, 42);
-}
-
-#[test]
-#[ignore]
-fn test_divide() {
-    let result = compile_and_run(
-        r#"
-module Test
-
-func main() -> Int {
-    let x = 84;
-    let y = 2;
-    x / y
-}
-"#,
-    );
-    if result.exit_code != 42 {
-        eprintln!("stderr: {}", result.stderr);
-    }
-    assert_eq!(result.exit_code, 42);
-}
-
-#[test]
-#[ignore]
-fn test_modulo() {
-    let result = compile_and_run(
-        r#"
-module Test
-
-func main() -> Int {
-    let x = 142;
-    let y = 100;
-    x % y
-}
-"#,
-    );
-    if result.exit_code != 42 {
-        eprintln!("stderr: {}", result.stderr);
-    }
-    assert_eq!(result.exit_code, 42);
-}
-
-#[test]
-#[ignore]
-fn test_negation() {
-    let result = compile_and_run(
-        r#"
-module Test
-
-func main() -> Int {
-    let x = -42;
-    -x
-}
-"#,
-    );
-    if result.exit_code != 42 {
-        eprintln!("stderr: {}", result.stderr);
-    }
-    assert_eq!(result.exit_code, 42);
-}
-
-#[test]
-#[ignore]
-fn test_complex_expression() {
-    let result = compile_and_run(
-        r#"
-module Test
-
-func main() -> Int {
-    let a = 10;
-    let b = 3;
-    let c = 2;
-    (a + b) * c + (a - b)
-}
-"#,
-    );
-    // (10 + 3) * 2 + (10 - 3) = 13 * 2 + 7 = 26 + 7 = 33
-    if result.exit_code != 33 {
-        eprintln!("stderr: {}", result.stderr);
-    }
-    assert_eq!(result.exit_code, 33);
-}
-
-#[test]
-#[ignore]
-fn test_return_zero() {
-    let result = compile_and_run(
-        r#"
-module Test
-
-func main() -> Int {
+func main() -> lang.i64 {
+    let x = 42;
+    if x != 42 { return 1 }
     0
 }
 "#,
-    );
-    if result.exit_code != 0 {
-        eprintln!("stderr: {}", result.stderr);
-    }
-    assert_eq!(result.exit_code, 0);
+    )
+    .with_stdlib()
+    .expect(Compiles)
+    .expect(Runs);
 }
 
 #[test]
-#[ignore]
-fn test_unit_main() {
-    let result = compile_and_run(
-        r#"
-module Test
+fn test_add() {
+    Test::new(
+        r#"module Test
 
-func main() {
-    let x = 42;
+func main() -> lang.i64 {
+    let x: std.num.Int64 = 10;
+    let y: std.num.Int64 = 32;
+    if x + y != 42 { return 1 }
+    0
 }
 "#,
-    );
-    // Unit main returns 0
-    if result.exit_code != 0 {
-        eprintln!("stderr: {}", result.stderr);
-    }
-    assert_eq!(result.exit_code, 0);
+    )
+    .with_stdlib()
+    .expect(Compiles)
+    .expect(Runs);
+}
+
+#[test]
+fn test_subtract() {
+    Test::new(
+        r#"module Test
+
+func main() -> lang.i64 {
+    let x: std.num.Int64 = 50;
+    let y: std.num.Int64 = 8;
+    if x - y != 42 { return 1 }
+    0
+}
+"#,
+    )
+    .with_stdlib()
+    .expect(Compiles)
+    .expect(Runs);
+}
+
+#[test]
+fn test_multiply() {
+    Test::new(
+        r#"module Test
+
+func main() -> lang.i64 {
+    let x: std.num.Int64 = 6;
+    let y: std.num.Int64 = 7;
+    if x * y != 42 { return 1 }
+    0
+}
+"#,
+    )
+    .with_stdlib()
+    .expect(Compiles)
+    .expect(Runs);
+}
+
+#[test]
+fn test_divide() {
+    Test::new(
+        r#"module Test
+
+func main() -> lang.i64 {
+    let x: std.num.Int64 = 84;
+    let y: std.num.Int64 = 2;
+    if x / y != 42 { return 1 }
+    0
+}
+"#,
+    )
+    .with_stdlib()
+    .expect(Compiles)
+    .expect(Runs);
+}
+
+#[test]
+fn test_modulo() {
+    Test::new(
+        r#"module Test
+
+func main() -> lang.i64 {
+    let x: std.num.Int64 = 142;
+    let y: std.num.Int64 = 100;
+    if x % y != 42 { return 1 }
+    0
+}
+"#,
+    )
+    .with_stdlib()
+    .expect(Compiles)
+    .expect(Runs);
+}
+
+#[test]
+fn test_negation() {
+    Test::new(
+        r#"module Test
+
+func main() -> lang.i64 {
+    let x: std.num.Int64 = -42;
+    if -x != 42 { return 1 }
+    0
+}
+"#,
+    )
+    .with_stdlib()
+    .expect(Compiles)
+    .expect(Runs);
+}
+
+#[test]
+fn test_complex_expression() {
+    Test::new(
+        r#"module Test
+
+func main() -> lang.i64 {
+    let a: std.num.Int64 = 10;
+    let b: std.num.Int64 = 3;
+    let c: std.num.Int64 = 2;
+    // (10 + 3) * 2 + (10 - 3) = 13 * 2 + 7 = 26 + 7 = 33
+    if (a + b) * c + (a - b) != 33 { return 1 }
+    0
+}
+"#,
+    )
+    .with_stdlib()
+    .expect(Compiles)
+    .expect(Runs);
+}
+
+#[test]
+fn test_return_zero() {
+    Test::new(
+        r#"module Test
+
+func main() -> lang.i64 {
+    0
+}
+"#,
+    )
+    .with_stdlib()
+    .expect(Compiles)
+    .expect(Runs);
+}
+
+#[test]
+fn test_unit_main() {
+    Test::new(
+        r#"module Test
+
+func main() {
+    let x: std.num.Int64 = 42;
+}
+"#,
+    )
+    .with_stdlib()
+    .expect(Compiles)
+    .expect(Runs);
 }

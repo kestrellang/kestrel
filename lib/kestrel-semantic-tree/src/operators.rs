@@ -45,26 +45,53 @@ impl BinaryOp {
     pub fn method_name(&self) -> &'static str {
         match self {
             BinaryOp::Add => "add",
-            BinaryOp::Sub => "sub",
-            BinaryOp::Mul => "mul",
-            BinaryOp::Div => "div",
-            BinaryOp::Rem => "rem",
-            BinaryOp::BitAnd => "bitAnd",
-            BinaryOp::BitOr => "bitOr",
-            BinaryOp::BitXor => "bitXor",
-            BinaryOp::Shl => "shl",
-            BinaryOp::Shr => "shr",
-            BinaryOp::Eq => "eq",
-            BinaryOp::Ne => "ne",
-            BinaryOp::Lt => "lt",
-            BinaryOp::Gt => "gt",
-            BinaryOp::Le => "le",
-            BinaryOp::Ge => "ge",
+            BinaryOp::Sub => "subtract",
+            BinaryOp::Mul => "multiply",
+            BinaryOp::Div => "divide",
+            BinaryOp::Rem => "modulo",
+            BinaryOp::BitAnd => "bitwiseAnd",
+            BinaryOp::BitOr => "bitwiseOr",
+            BinaryOp::BitXor => "bitwiseXor",
+            BinaryOp::Shl => "shiftLeft",
+            BinaryOp::Shr => "shiftRight",
+            BinaryOp::Eq => "equals",
+            BinaryOp::Ne => "notEquals",
+            BinaryOp::Lt => "lessThan",
+            BinaryOp::Gt => "greaterThan",
+            BinaryOp::Le => "lessThanOrEqual",
+            BinaryOp::Ge => "greaterThanOrEqual",
             BinaryOp::And => "logicalAnd",
             BinaryOp::Or => "logicalOr",
-            BinaryOp::RangeInclusive => "rangeInclusive",
-            BinaryOp::RangeExclusive => "rangeExclusive",
+            BinaryOp::RangeInclusive => "inclusiveRange",
+            BinaryOp::RangeExclusive => "exclusiveRange",
             BinaryOp::Coalesce => "coalesce",
+        }
+    }
+
+    /// Get the symbol representation of this operator for error messages.
+    pub fn symbol(&self) -> &'static str {
+        match self {
+            BinaryOp::Add => "+",
+            BinaryOp::Sub => "-",
+            BinaryOp::Mul => "*",
+            BinaryOp::Div => "/",
+            BinaryOp::Rem => "%",
+            BinaryOp::BitAnd => "&",
+            BinaryOp::BitOr => "|",
+            BinaryOp::BitXor => "^",
+            BinaryOp::Shl => "<<",
+            BinaryOp::Shr => ">>",
+            BinaryOp::Eq => "==",
+            BinaryOp::Ne => "!=",
+            BinaryOp::Lt => "<",
+            BinaryOp::Gt => ">",
+            BinaryOp::Le => "<=",
+            BinaryOp::Ge => ">=",
+            BinaryOp::And => "and",
+            BinaryOp::Or => "or",
+            BinaryOp::RangeInclusive => "..=",
+            BinaryOp::RangeExclusive => "..<",
+            BinaryOp::Coalesce => "??",
         }
     }
 }
@@ -73,7 +100,6 @@ impl BinaryOp {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum UnaryOp {
     // Prefix
-    Identity,   // +x
     Neg,        // -x
     BitNot,     // !x (prefix)
     LogicalNot, // not x
@@ -85,11 +111,20 @@ impl UnaryOp {
     /// Get the method name that this operator desugars to.
     pub fn method_name(&self) -> &'static str {
         match self {
-            UnaryOp::Identity => "identity",
-            UnaryOp::Neg => "neg",
-            UnaryOp::BitNot => "bitNot",
+            UnaryOp::Neg => "negate",
+            UnaryOp::BitNot => "bitwiseNot",
             UnaryOp::LogicalNot => "logicalNot",
             UnaryOp::Unwrap => "unwrap",
+        }
+    }
+
+    /// Get the symbol representation of this operator for error messages.
+    pub fn symbol(&self) -> &'static str {
+        match self {
+            UnaryOp::Neg => "-",
+            UnaryOp::BitNot => "!",
+            UnaryOp::LogicalNot => "not",
+            UnaryOp::Unwrap => "!",
         }
     }
 }
@@ -197,13 +232,6 @@ impl OperatorRegistry {
         );
 
         // Prefix operators
-        self.prefix.insert(
-            SyntaxKind::Plus,
-            PrefixEntry {
-                op: Identity,
-                precedence: PREFIX,
-            },
-        );
         self.prefix.insert(
             SyntaxKind::Minus,
             PrefixEntry {
@@ -420,20 +448,20 @@ impl OperatorRegistry {
     /// Determine what action to take given current token and minimum precedence.
     pub fn infix_action(&self, token: SyntaxKind, min_precedence: u8) -> InfixAction {
         // Check postfix first (higher precedence)
-        if let Some(entry) = self.postfix.get(&token) {
-            if entry.precedence >= min_precedence {
-                return InfixAction::Postfix(entry.op);
-            }
+        if let Some(entry) = self.postfix.get(&token)
+            && entry.precedence >= min_precedence
+        {
+            return InfixAction::Postfix(entry.op);
         }
 
         // Check infix
-        if let Some(entry) = self.infix.get(&token) {
-            if entry.precedence >= min_precedence {
-                return match entry.associativity {
-                    Associativity::Left => InfixAction::InfixLeft(entry.op, entry.precedence),
-                    Associativity::Right => InfixAction::InfixRight(entry.op, entry.precedence),
-                };
-            }
+        if let Some(entry) = self.infix.get(&token)
+            && entry.precedence >= min_precedence
+        {
+            return match entry.associativity {
+                Associativity::Left => InfixAction::InfixLeft(entry.op, entry.precedence),
+                Associativity::Right => InfixAction::InfixRight(entry.op, entry.precedence),
+            };
         }
 
         InfixAction::Stop
@@ -490,10 +518,10 @@ mod tests {
                             mul_prec > add_prec,
                             "* should have higher precedence than +"
                         );
-                    }
+                    },
                     _ => panic!("Expected InfixLeft for *"),
                 }
-            }
+            },
             _ => panic!("Expected InfixLeft for +"),
         }
     }
@@ -503,7 +531,7 @@ mod tests {
         let registry = OperatorRegistry::new();
 
         assert!(registry.prefix(SyntaxKind::Minus).is_some());
-        assert!(registry.prefix(SyntaxKind::Plus).is_some());
+        assert!(registry.prefix(SyntaxKind::Plus).is_none()); // Identity operator removed
         assert!(registry.prefix(SyntaxKind::Bang).is_some());
         assert!(registry.prefix(SyntaxKind::Not).is_some());
     }
@@ -513,7 +541,7 @@ mod tests {
         let registry = OperatorRegistry::new();
 
         match registry.infix_action(SyntaxKind::Bang, 0) {
-            InfixAction::Postfix(UnaryOp::Unwrap) => {}
+            InfixAction::Postfix(UnaryOp::Unwrap) => {},
             _ => panic!("Expected Postfix(Unwrap) for !"),
         }
     }
@@ -521,9 +549,9 @@ mod tests {
     #[test]
     fn test_method_names() {
         assert_eq!(BinaryOp::Add.method_name(), "add");
-        assert_eq!(BinaryOp::Sub.method_name(), "sub");
-        assert_eq!(BinaryOp::Eq.method_name(), "eq");
-        assert_eq!(UnaryOp::Neg.method_name(), "neg");
+        assert_eq!(BinaryOp::Sub.method_name(), "subtract");
+        assert_eq!(BinaryOp::Eq.method_name(), "equals");
+        assert_eq!(UnaryOp::Neg.method_name(), "negate");
         assert_eq!(UnaryOp::Unwrap.method_name(), "unwrap");
     }
 }

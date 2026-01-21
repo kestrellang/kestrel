@@ -46,19 +46,18 @@ fn walk_symbol(
         if matches!(
             kind,
             KestrelSymbolKind::Function | KestrelSymbolKind::Initializer
-        ) {
-            if let Some(body) = get_executable_body(symbol) {
-                for stmt in &body.statements {
-                    walk_statement(stmt, analyzers, model, ctx);
-                    if ctx.stopped {
-                        return;
-                    }
+        ) && let Some(body) = get_executable_body(symbol)
+        {
+            for stmt in &body.statements {
+                walk_statement(stmt, analyzers, model, ctx);
+                if ctx.stopped {
+                    return;
                 }
-                if let Some(yield_expr) = body.yield_expr() {
-                    walk_expression(yield_expr, analyzers, model, ctx);
-                    if ctx.stopped {
-                        return;
-                    }
+            }
+            if let Some(yield_expr) = body.yield_expr() {
+                walk_expression(yield_expr, analyzers, model, ctx);
+                if ctx.stopped {
+                    return;
                 }
             }
         }
@@ -104,10 +103,10 @@ fn walk_statement(
                 if let Some(value) = value {
                     walk_expression(value, analyzers, model, ctx);
                 }
-            }
+            },
             StatementKind::Expr(expr) => {
                 walk_expression(expr, analyzers, model, ctx);
-            }
+            },
             StatementKind::GuardLet {
                 conditions,
                 else_block,
@@ -117,13 +116,13 @@ fn walk_statement(
                     match condition {
                         kestrel_semantic_tree::expr::IfCondition::Expr(expr) => {
                             walk_expression(expr, analyzers, model, ctx);
-                        }
+                        },
                         kestrel_semantic_tree::expr::IfCondition::Let {
                             pattern, value, ..
                         } => {
                             walk_pattern(pattern, analyzers, model, ctx);
                             walk_expression(value, analyzers, model, ctx);
-                        }
+                        },
                     }
                 }
                 // Walk the else block statements
@@ -133,10 +132,10 @@ fn walk_statement(
                 if let Some(yield_expr) = &else_block.yield_expr {
                     walk_expression(yield_expr, analyzers, model, ctx);
                 }
-            }
+            },
             StatementKind::Deinit { .. } => {
                 // Deinit statement has no nested expressions to walk
-            }
+            },
         }
     }
 
@@ -171,8 +170,8 @@ fn walk_expression(
                         return;
                     }
                 }
-            }
-            ExprKind::OverloadedRef(_) => { /* leaf */ }
+            },
+            ExprKind::OverloadedRef(_) => { /* leaf */ },
             ExprKind::Loop { body, .. } => {
                 for stmt in body {
                     walk_statement(stmt, analyzers, model, ctx);
@@ -180,7 +179,7 @@ fn walk_expression(
                         return;
                     }
                 }
-            }
+            },
             ExprKind::Tuple(elements) => {
                 for e in elements {
                     walk_expression(e, analyzers, model, ctx);
@@ -188,22 +187,22 @@ fn walk_expression(
                         return;
                     }
                 }
-            }
+            },
             ExprKind::Grouping(inner) => {
                 walk_expression(inner, analyzers, model, ctx);
-            }
+            },
             ExprKind::FieldAccess { object, .. } => {
                 walk_expression(object, analyzers, model, ctx);
-            }
+            },
             ExprKind::TupleIndex { tuple, .. } => {
                 walk_expression(tuple, analyzers, model, ctx);
-            }
+            },
             ExprKind::MethodRef { receiver, .. } => {
                 walk_expression(receiver, analyzers, model, ctx);
-            }
+            },
             ExprKind::PrimitiveMethodRef { receiver, .. } => {
                 walk_expression(receiver, analyzers, model, ctx);
-            }
+            },
             ExprKind::Call {
                 callee, arguments, ..
             } => {
@@ -214,7 +213,7 @@ fn walk_expression(
                         return;
                     }
                 }
-            }
+            },
             ExprKind::PrimitiveMethodCall {
                 receiver,
                 arguments,
@@ -227,7 +226,7 @@ fn walk_expression(
                         return;
                     }
                 }
-            }
+            },
             ExprKind::DeferredMethodCall {
                 receiver,
                 arguments,
@@ -240,7 +239,7 @@ fn walk_expression(
                         return;
                     }
                 }
-            }
+            },
             ExprKind::ImplicitStructInit { arguments, .. } => {
                 for arg in arguments {
                     walk_expression(&arg.value, analyzers, model, ctx);
@@ -248,11 +247,19 @@ fn walk_expression(
                         return;
                     }
                 }
-            }
+            },
+            ExprKind::DelegatingInit { arguments, .. } => {
+                for arg in arguments {
+                    walk_expression(&arg.value, analyzers, model, ctx);
+                    if ctx.stopped {
+                        return;
+                    }
+                }
+            },
             ExprKind::Assignment { target, value } => {
                 walk_expression(target, analyzers, model, ctx);
                 walk_expression(value, analyzers, model, ctx);
-            }
+            },
             ExprKind::If {
                 conditions,
                 then_branch,
@@ -266,7 +273,7 @@ fn walk_expression(
                             if ctx.stopped {
                                 return;
                             }
-                        }
+                        },
                         kestrel_semantic_tree::expr::IfCondition::Let {
                             pattern, value, ..
                         } => {
@@ -278,7 +285,7 @@ fn walk_expression(
                             if ctx.stopped {
                                 return;
                             }
-                        }
+                        },
                     }
                 }
                 for stmt in then_branch {
@@ -302,13 +309,13 @@ fn walk_expression(
                             if let Some(v) = value {
                                 walk_expression(v, analyzers, model, ctx);
                             }
-                        }
+                        },
                         kestrel_semantic_tree::expr::ElseBranch::ElseIf(e) => {
                             walk_expression(e, analyzers, model, ctx);
-                        }
+                        },
                     }
                 }
-            }
+            },
             ExprKind::While {
                 condition, body, ..
             } => {
@@ -319,7 +326,7 @@ fn walk_expression(
                         return;
                     }
                 }
-            }
+            },
             ExprKind::WhileLet {
                 conditions, body, ..
             } => {
@@ -327,13 +334,13 @@ fn walk_expression(
                     match condition {
                         kestrel_semantic_tree::expr::IfCondition::Expr(expr) => {
                             walk_expression(expr, analyzers, model, ctx);
-                        }
+                        },
                         kestrel_semantic_tree::expr::IfCondition::Let {
                             pattern, value, ..
                         } => {
                             walk_pattern(pattern, analyzers, model, ctx);
                             walk_expression(value, analyzers, model, ctx);
-                        }
+                        },
                     }
                 }
                 for stmt in body {
@@ -342,7 +349,7 @@ fn walk_expression(
                         return;
                     }
                 }
-            }
+            },
             ExprKind::Closure {
                 body, tail_expr, ..
             } => {
@@ -357,7 +364,7 @@ fn walk_expression(
                 if let Some(tail) = tail_expr {
                     walk_expression(tail, analyzers, model, ctx);
                 }
-            }
+            },
             ExprKind::ImplicitMemberAccess { arguments, .. } => {
                 if let Some(args) = arguments {
                     for arg in args {
@@ -367,7 +374,7 @@ fn walk_expression(
                         }
                     }
                 }
-            }
+            },
             // Leaf kinds or handled elsewhere
             ExprKind::Literal(_)
             | ExprKind::LocalRef(_)
@@ -379,10 +386,10 @@ fn walk_expression(
             | ExprKind::Break { .. }
             | ExprKind::Continue { .. }
             | ExprKind::Return { value: None }
-            | ExprKind::Error => {}
+            | ExprKind::Error => {},
             ExprKind::Return { value: Some(v) } => {
                 walk_expression(v, analyzers, model, ctx);
-            }
+            },
             ExprKind::Match { scrutinee, arms } => {
                 walk_expression(scrutinee, analyzers, model, ctx);
                 for arm in arms {
@@ -392,7 +399,7 @@ fn walk_expression(
                     }
                     walk_expression(&arm.body, analyzers, model, ctx);
                 }
-            }
+            },
             ExprKind::Block { statements, value } => {
                 for stmt in statements {
                     walk_statement(stmt, analyzers, model, ctx);
@@ -403,7 +410,33 @@ fn walk_expression(
                 if let Some(val) = value {
                     walk_expression(val, analyzers, model, ctx);
                 }
-            }
+            },
+            // Lang intrinsics - walk arguments
+            ExprKind::LangIntrinsic { arguments, .. } => {
+                for arg in arguments {
+                    walk_expression(&arg.value, analyzers, model, ctx);
+                    if ctx.stopped {
+                        return;
+                    }
+                }
+            },
+            // Lang intrinsic ref - leaf node
+            ExprKind::LangIntrinsicRef(_) => {},
+
+            // Subscript call - walk receiver and arguments
+            ExprKind::SubscriptCall {
+                receiver,
+                arguments,
+                ..
+            } => {
+                walk_expression(receiver, analyzers, model, ctx);
+                for arg in arguments {
+                    walk_expression(&arg.value, analyzers, model, ctx);
+                    if ctx.stopped {
+                        return;
+                    }
+                }
+            },
         }
     }
 

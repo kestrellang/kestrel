@@ -52,7 +52,7 @@ impl IntoDiagnostic for InitializerError {
                         Label::primary(span.file_id, span.range()).with_message("self used here"),
                     ])
                     .with_notes(vec![format!("uninitialized fields: {}", fields)])
-            }
+            },
             InitializerError::ReturnBeforeFullyInitialized {
                 span,
                 uninitialized,
@@ -64,7 +64,7 @@ impl IntoDiagnostic for InitializerError {
                         Label::primary(span.file_id, span.range()).with_message("return here"),
                     ])
                     .with_notes(vec![format!("uninitialized fields: {}", fields)])
-            }
+            },
         }
     }
 }

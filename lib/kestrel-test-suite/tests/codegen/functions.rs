@@ -1,182 +1,165 @@
 //! Function call tests.
 
-use super::compile_and_run;
+use kestrel_test_suite::*;
 
 #[test]
-#[ignore]
 fn test_call_simple_function() {
-    let result = compile_and_run(
-        r#"
-module Test
+    Test::new(
+        r#"module Test
 
-func add(a: Int, b: Int) -> Int {
+func add(a: std.num.Int64, b: std.num.Int64) -> std.num.Int64 {
     a + b
 }
 
-func main() -> Int {
-    add(20, 22)
+func main() -> lang.i64 {
+    if add(20, 22) != 42 { return 1 }
+    0
 }
 "#,
-    );
-    if result.exit_code != 42 {
-        eprintln!("stderr: {}", result.stderr);
-    }
-    assert_eq!(result.exit_code, 42);
+    )
+    .with_stdlib()
+    .expect(Compiles)
+    .expect(Runs);
 }
 
 #[test]
-#[ignore]
 fn test_call_function_no_args() {
-    let result = compile_and_run(
-        r#"
-module Test
+    Test::new(
+        r#"module Test
 
-func get_answer() -> Int {
+func get_answer() -> std.num.Int64 {
     42
 }
 
-func main() -> Int {
-    get_answer()
+func main() -> lang.i64 {
+    if get_answer() != 42 { return 1 }
+    0
 }
 "#,
-    );
-    if result.exit_code != 42 {
-        eprintln!("stderr: {}", result.stderr);
-    }
-    assert_eq!(result.exit_code, 42);
+    )
+    .with_stdlib()
+    .expect(Compiles)
+    .expect(Runs);
 }
 
 #[test]
-#[ignore]
 fn test_call_function_chain() {
-    let result = compile_and_run(
-        r#"
-module Test
+    Test::new(
+        r#"module Test
 
-func double(x: Int) -> Int {
+func double(x: std.num.Int64) -> std.num.Int64 {
     x * 2
 }
 
-func add_ten(x: Int) -> Int {
+func add_ten(x: std.num.Int64) -> std.num.Int64 {
     x + 10
 }
 
-func main() -> Int {
-    add_ten(double(16))
+func main() -> lang.i64 {
+    // double(16) = 32, add_ten(32) = 42
+    if add_ten(double(16)) != 42 { return 1 }
+    0
 }
 "#,
-    );
-    // double(16) = 32, add_ten(32) = 42
-    if result.exit_code != 42 {
-        eprintln!("stderr: {}", result.stderr);
-    }
-    assert_eq!(result.exit_code, 42);
+    )
+    .with_stdlib()
+    .expect(Compiles)
+    .expect(Runs);
 }
 
 #[test]
-#[ignore]
 fn test_call_unit_function() {
-    let result = compile_and_run(
-        r#"
-module Test
+    Test::new(
+        r#"module Test
 
 func do_nothing() {
 }
 
-func main() -> Int {
+func main() -> lang.i64 {
     do_nothing();
-    42
+    0
 }
 "#,
-    );
-    if result.exit_code != 42 {
-        eprintln!("stderr: {}", result.stderr);
-    }
-    assert_eq!(result.exit_code, 42);
+    )
+    .with_stdlib()
+    .expect(Compiles)
+    .expect(Runs);
 }
 
 #[test]
-#[ignore]
 fn test_call_multiple_functions() {
-    let result = compile_and_run(
-        r#"
-module Test
+    Test::new(
+        r#"module Test
 
-func mul(a: Int, b: Int) -> Int {
+func mul(a: std.num.Int64, b: std.num.Int64) -> std.num.Int64 {
     a * b
 }
 
-func add(a: Int, b: Int) -> Int {
+func add(a: std.num.Int64, b: std.num.Int64) -> std.num.Int64 {
     a + b
 }
 
-func main() -> Int {
-    add(mul(6, 7), 0)
+func main() -> lang.i64 {
+    if add(mul(6, 7), 0) != 42 { return 1 }
+    0
 }
 "#,
-    );
-    if result.exit_code != 42 {
-        eprintln!("stderr: {}", result.stderr);
-    }
-    assert_eq!(result.exit_code, 42);
+    )
+    .with_stdlib()
+    .expect(Compiles)
+    .expect(Runs);
 }
 
 #[test]
-#[ignore]
 fn test_call_with_local_variables() {
-    let result = compile_and_run(
-        r#"
-module Test
+    Test::new(
+        r#"module Test
 
-func square(x: Int) -> Int {
+func square(x: std.num.Int64) -> std.num.Int64 {
     x * x
 }
 
-func main() -> Int {
-    let a = 6;
+func main() -> lang.i64 {
+    let a: std.num.Int64 = 6;
     let b = square(a);
-    b + 6
+    // square(6) = 36, 36 + 6 = 42
+    if b + 6 != 42 { return 1 }
+    0
 }
 "#,
-    );
-    // square(6) = 36, 36 + 6 = 42
-    if result.exit_code != 42 {
-        eprintln!("stderr: {}", result.stderr);
-    }
-    assert_eq!(result.exit_code, 42);
+    )
+    .with_stdlib()
+    .expect(Compiles)
+    .expect(Runs);
 }
 
 #[test]
-#[ignore]
 fn test_nested_function_calls() {
-    let result = compile_and_run(
-        r#"
-module Test
+    Test::new(
+        r#"module Test
 
-func add(a: Int, b: Int) -> Int {
+func add(a: std.num.Int64, b: std.num.Int64) -> std.num.Int64 {
     a + b
 }
 
-func main() -> Int {
-    add(add(10, 12), add(10, 10))
+func main() -> lang.i64 {
+    // add(10, 12) = 22, add(10, 10) = 20, add(22, 20) = 42
+    if add(add(10, 12), add(10, 10)) != 42 { return 1 }
+    0
 }
 "#,
-    );
-    // add(10, 12) = 22, add(10, 10) = 20, add(22, 20) = 42
-    if result.exit_code != 42 {
-        eprintln!("stderr: {}", result.stderr);
-    }
-    assert_eq!(result.exit_code, 42);
+    )
+    .with_stdlib()
+    .expect(Compiles)
+    .expect(Runs);
 }
 
 #[test]
-#[ignore]
 fn test_recursive_factorial() {
-    let result = compile_and_run(
-        r#"
-module Test
+    Test::new(
+        r#"module Test
 
-func factorial(n: Int) -> Int {
+func factorial(n: std.num.Int64) -> std.num.Int64 {
     if n <= 1 {
         1
     } else {
@@ -184,15 +167,14 @@ func factorial(n: Int) -> Int {
     }
 }
 
-func main() -> Int {
-    factorial(5)
+func main() -> lang.i64 {
+    // 5! = 120
+    if factorial(5) != 120 { return 1 }
+    0
 }
 "#,
-    );
-    // 5! = 120, but exit codes are limited to 0-255
-    // Let's use a smaller test value
-    if result.exit_code != 120 {
-        eprintln!("stderr: {}", result.stderr);
-    }
-    assert_eq!(result.exit_code, 120);
+    )
+    .with_stdlib()
+    .expect(Compiles)
+    .expect(Runs);
 }

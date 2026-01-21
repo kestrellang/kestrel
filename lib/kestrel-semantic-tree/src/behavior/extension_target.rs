@@ -5,8 +5,9 @@ use semantic_tree::behavior::Behavior;
 use crate::{
     behavior::KestrelBehaviorKind,
     language::KestrelLanguage,
+    symbol::protocol::ProtocolSymbol,
     symbol::type_parameter::TypeParameterSymbol,
-    ty::{Ty, WhereClause},
+    ty::{Ty, TyKind, WhereClause},
 };
 
 /// ExtensionTargetBehavior stores the resolved target type and constraints for an extension.
@@ -103,5 +104,31 @@ impl ExtensionTargetBehavior {
     /// Check if this extension is fully specialized (no type params)
     pub fn is_fully_specialized(&self) -> bool {
         self.type_arguments.iter().all(|ty| !ty.is_type_parameter())
+    }
+
+    /// Check if this is a protocol extension (target is a protocol)
+    pub fn is_protocol_extension(&self) -> bool {
+        matches!(self.target_type.kind(), TyKind::Protocol { .. })
+    }
+
+    /// Get the target protocol symbol if this is a protocol extension
+    pub fn target_protocol(&self) -> Option<&Arc<ProtocolSymbol>> {
+        if let TyKind::Protocol { symbol, .. } = self.target_type.kind() {
+            Some(symbol)
+        } else {
+            None
+        }
+    }
+
+    /// Calculate specificity for protocol extensions (number of where clause constraints)
+    ///
+    /// For protocol extensions, specificity is based on the number of constraints
+    /// in the where clause, not type arguments.
+    pub fn protocol_extension_specificity(&self) -> usize {
+        if self.is_protocol_extension() {
+            self.where_clause.constraints().len()
+        } else {
+            0
+        }
     }
 }

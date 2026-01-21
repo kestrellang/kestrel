@@ -57,3 +57,20 @@ impl IntoDiagnostic for UndeclaredLabelError {
             ])
     }
 }
+
+/// Error when a try expression is used (not yet supported)
+// TODO: Remove this error when try expressions are fully implemented
+pub struct TryExpressionNotSupportedError {
+    pub span: Span,
+}
+
+impl IntoDiagnostic for TryExpressionNotSupportedError {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
+        Diagnostic::error()
+            .with_message("try expressions are not yet supported")
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message("try expression used here"),
+            ])
+    }
+}

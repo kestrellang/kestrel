@@ -61,16 +61,16 @@ impl Analyzer for IrrefutablePatternAnalyzer {
             ExprKind::If { conditions, .. } => {
                 // Check each let condition for irrefutable patterns
                 for condition in conditions {
-                    if let IfCondition::Let { pattern, .. } = condition {
-                        if is_pattern_irrefutable(pattern) {
-                            ctx.report(IrrefutableIfLetWarning {
-                                pattern_span: pattern.span.clone(),
-                                pattern_description: describe_pattern(pattern),
-                            });
-                        }
+                    if let IfCondition::Let { pattern, .. } = condition
+                        && is_pattern_irrefutable(pattern)
+                    {
+                        ctx.report(IrrefutableIfLetWarning {
+                            pattern_span: pattern.span.clone(),
+                            pattern_description: describe_pattern(pattern),
+                        });
                     }
                 }
-            }
+            },
             ExprKind::Match { arms, .. } => {
                 // Check if any non-last arm has an irrefutable pattern (without a guard)
                 if arms.len() > 1 {
@@ -90,8 +90,8 @@ impl Analyzer for IrrefutablePatternAnalyzer {
                         }
                     }
                 }
-            }
-            _ => {}
+            },
+            _ => {},
         }
     }
 }
@@ -143,7 +143,7 @@ fn is_pattern_irrefutable(pattern: &Pattern) -> bool {
             }
             // Multi-case enum or unresolved type - refutable
             false
-        }
+        },
 
         // Range patterns are REFUTABLE - they don't cover all values
         PatternKind::Range { .. } => false,
@@ -151,7 +151,7 @@ fn is_pattern_irrefutable(pattern: &Pattern) -> bool {
         // Struct patterns are irrefutable if all field patterns are irrefutable
         PatternKind::Struct { fields, .. } => {
             fields.iter().all(|f| is_pattern_irrefutable(&f.pattern))
-        }
+        },
 
         // Array patterns are REFUTABLE - they check array length
         PatternKind::Array { .. } => false,
@@ -186,7 +186,7 @@ fn describe_pattern(pattern: &Pattern) -> String {
             }
             parts.extend(suffix.iter().map(describe_pattern));
             format!("({})", parts.join(", "))
-        }
+        },
         PatternKind::Literal { value } => {
             use kestrel_semantic_tree::expr::LiteralValue;
             match value {
@@ -196,7 +196,7 @@ fn describe_pattern(pattern: &Pattern) -> String {
                 LiteralValue::String(s) => format!("\"{}\"", s),
                 LiteralValue::Bool(b) => b.to_string(),
             }
-        }
+        },
         PatternKind::EnumVariant {
             case_name,
             bindings,
@@ -217,7 +217,7 @@ fn describe_pattern(pattern: &Pattern) -> String {
                     .collect();
                 format!(".{}({})", case_name, inner.join(", "))
             }
-        }
+        },
         PatternKind::Range {
             start,
             end,
@@ -234,7 +234,7 @@ fn describe_pattern(pattern: &Pattern) -> String {
             };
             let op = if *inclusive { "..=" } else { "..<" };
             format!("{}{}{}", start_str, op, end_str)
-        }
+        },
         PatternKind::Struct {
             struct_name,
             fields,
@@ -245,7 +245,7 @@ fn describe_pattern(pattern: &Pattern) -> String {
                 .map(|f| format!("{}: {}", f.field_name, describe_pattern(&f.pattern)))
                 .collect();
             format!("{} {{ {} }}", struct_name, inner.join(", "))
-        }
+        },
         PatternKind::Array {
             prefix,
             rest,
@@ -257,16 +257,16 @@ fn describe_pattern(pattern: &Pattern) -> String {
             }
             parts.extend(suffix.iter().map(describe_pattern));
             format!("[{}]", parts.join(", "))
-        }
+        },
         PatternKind::Or { alternatives } => {
             let parts: Vec<String> = alternatives.iter().map(describe_pattern).collect();
             parts.join(" | ")
-        }
+        },
         PatternKind::At {
             name, subpattern, ..
         } => {
             format!("{} @ {}", name, describe_pattern(subpattern))
-        }
+        },
         PatternKind::Rest => "..".to_string(),
         PatternKind::Error => "<error>".to_string(),
     }
@@ -282,7 +282,7 @@ mod tests {
     use kestrel_span::Span;
 
     fn test_span() -> Span {
-        Span::from(0..1)
+        Span::new(0, 0..1)
     }
 
     fn int_ty() -> Ty {

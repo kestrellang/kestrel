@@ -35,33 +35,6 @@ impl IntoDiagnostic for DuplicateDeinitError {
     }
 }
 
-/// Warning when a Copyable type has a deinit.
-///
-/// This is allowed but potentially confusing - the deinit will run for each copy.
-pub struct CopyableWithDeinitWarning {
-    /// Span of the deinit declaration
-    pub deinit_span: Span,
-    /// Name of the struct
-    pub struct_name: String,
-}
-
-impl IntoDiagnostic for CopyableWithDeinitWarning {
-    fn into_diagnostic(&self) -> Diagnostic<usize> {
-        Diagnostic::warning()
-            .with_message(format!(
-                "struct `{}` is Copyable but has deinit",
-                self.struct_name
-            ))
-            .with_labels(vec![
-                Label::primary(self.deinit_span.file_id, self.deinit_span.range())
-                    .with_message("deinit will run for each copy"),
-            ])
-            .with_notes(vec![
-                "consider marking the struct as `not Copyable` if it manages resources".to_string(),
-            ])
-    }
-}
-
 // =============================================================================
 // DEINIT STATEMENT ERRORS
 // =============================================================================

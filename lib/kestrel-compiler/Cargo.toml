@@ -3,6 +3,9 @@ name = "kestrel-compiler"
 version.workspace = true
 edition.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
 kestrel-lexer = { path = "../kestrel-lexer" }
 kestrel-parser = { path = "../kestrel-parser" }

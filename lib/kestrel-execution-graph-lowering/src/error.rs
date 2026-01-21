@@ -140,7 +140,7 @@ impl LoweringError {
 impl IntoDiagnostic for LoweringError {
     fn into_diagnostic(&self) -> Diagnostic<usize> {
         match self {
-            LoweringError::UnsupportedConstruct { construct, span } => Diagnostic::warning()
+            LoweringError::UnsupportedConstruct { construct, span } => Diagnostic::error()
                 .with_message(format!("unsupported construct: {}", construct))
                 .with_labels(vec![
                     Label::primary(span.file_id, span.range())
@@ -154,35 +154,35 @@ impl IntoDiagnostic for LoweringError {
                         .with_message("expected a function body"),
                 ]),
 
-            LoweringError::UnsupportedType { type_desc, span } => Diagnostic::warning()
+            LoweringError::UnsupportedType { type_desc, span } => Diagnostic::error()
                 .with_message(format!("unsupported type: {}", type_desc))
                 .with_labels(vec![
                     Label::primary(span.file_id, span.range())
                         .with_message("this type is not yet supported in MIR lowering"),
                 ]),
 
-            LoweringError::UnsupportedExpression { expr_kind, span } => Diagnostic::warning()
+            LoweringError::UnsupportedExpression { expr_kind, span } => Diagnostic::error()
                 .with_message(format!("unsupported expression: {}", expr_kind))
                 .with_labels(vec![
                     Label::primary(span.file_id, span.range())
                         .with_message("this expression kind is not yet supported in MIR lowering"),
                 ]),
 
-            LoweringError::UnsupportedStatement { stmt_kind, span } => Diagnostic::warning()
+            LoweringError::UnsupportedStatement { stmt_kind, span } => Diagnostic::error()
                 .with_message(format!("unsupported statement: {}", stmt_kind))
                 .with_labels(vec![
                     Label::primary(span.file_id, span.range())
                         .with_message("this statement kind is not yet supported in MIR lowering"),
                 ]),
 
-            LoweringError::UnsupportedPattern { pattern_kind, span } => Diagnostic::warning()
+            LoweringError::UnsupportedPattern { pattern_kind, span } => Diagnostic::error()
                 .with_message(format!("unsupported pattern: {}", pattern_kind))
                 .with_labels(vec![
                     Label::primary(span.file_id, span.range())
                         .with_message("this pattern kind is not yet supported in MIR lowering"),
                 ]),
 
-            LoweringError::UnsupportedItem { item_kind, span } => Diagnostic::warning()
+            LoweringError::UnsupportedItem { item_kind, span } => Diagnostic::error()
                 .with_message(format!("unsupported item: {}", item_kind))
                 .with_labels(vec![
                     Label::primary(span.file_id, span.range())
@@ -200,7 +200,7 @@ impl IntoDiagnostic for LoweringError {
                 } else {
                     diag
                 }
-            }
+            },
         }
     }
 }

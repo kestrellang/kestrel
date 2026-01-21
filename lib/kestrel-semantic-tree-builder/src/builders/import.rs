@@ -17,7 +17,7 @@ impl Builder for ImportBuilder {
     fn build_declaration(
         &self,
         syntax: &SyntaxNode,
-        source: &str,
+        _source: &str,
         file_id: usize,
         parent: Option<&Arc<dyn Symbol<KestrelLanguage>>>,
         _root: &Arc<dyn Symbol<KestrelLanguage>>,

@@ -20,6 +20,7 @@ pub enum IntBits {
 /// Float bit widths
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FloatBits {
+    F16,
     F32,
     F64,
 }

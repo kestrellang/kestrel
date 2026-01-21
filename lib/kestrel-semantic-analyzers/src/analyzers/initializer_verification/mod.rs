@@ -56,12 +56,13 @@ fn validate_initializer(symbol: &Arc<dyn Symbol<KestrelLanguage>>, ctx: &mut Ana
         return;
     }
 
-    // Collect field names and mutability
+    // Collect field names and mutability (excluding computed properties)
     let struct_id = parent.metadata().id();
     let fields: Vec<FieldInfo> = ctx
         .model
         .query(StructFields { struct_id })
         .into_iter()
+        .filter(|field| !field.is_computed) // Computed properties don't need initialization
         .map(|field| FieldInfo {
             name: field.name,
             is_let: !field.is_mutable,
@@ -192,10 +193,10 @@ fn analyze_block(
         }
         state = analyze_statement(stmt, state, ctx);
     }
-    if !state.diverged {
-        if let Some(expr) = yield_expr {
-            state = analyze_expression(expr, state, false, ctx);
-        }
+    if !state.diverged
+        && let Some(expr) = yield_expr
+    {
+        state = analyze_expression(expr, state, false, ctx);
     }
     state
 }
@@ -210,10 +211,10 @@ fn analyze_statement(
             if let Some(expr) = value {
                 state = analyze_expression(expr, state, false, ctx);
             }
-        }
+        },
         StatementKind::Expr(expr) => {
             state = analyze_expression(expr, state, false, ctx);
-        }
+        },
         StatementKind::GuardLet {
             conditions,
             else_block,
@@ -223,10 +224,10 @@ fn analyze_statement(
                 match condition {
                     kestrel_semantic_tree::expr::IfCondition::Expr(expr) => {
                         state = analyze_expression(expr, state, false, ctx);
-                    }
+                    },
                     kestrel_semantic_tree::expr::IfCondition::Let { value, .. } => {
                         state = analyze_expression(value, state, false, ctx);
-                    }
+                    },
                 }
             }
             // Analyze the else block (it diverges so we don't merge state)
@@ -236,10 +237,10 @@ fn analyze_statement(
                 ctx,
             );
             let _ = else_state;
-        }
+        },
         StatementKind::Deinit { .. } => {
             // Deinit doesn't involve field initialization
-        }
+        },
     }
     state
 }
@@ -253,72 +254,70 @@ fn analyze_expression(
     match &expr.kind {
         ExprKind::FieldAccess { object, field } => {
             if is_self_expr(object) {
-                if !is_assignment_target {
-                    if !state.assigned.contains(field) {
-                        ctx.errors.push(InitializerError::FieldReadBeforeAssigned {
-                            span: expr.span.clone(),
-                            field_name: field.clone(),
-                        });
-                    }
+                if !is_assignment_target && !state.assigned.contains(field) {
+                    ctx.errors.push(InitializerError::FieldReadBeforeAssigned {
+                        span: expr.span.clone(),
+                        field_name: field.clone(),
+                    });
                 }
             } else {
                 state = analyze_expression(object, state, false, ctx);
             }
-        }
+        },
         ExprKind::Call {
             callee, arguments, ..
         } => {
-            if let ExprKind::MethodRef { receiver, .. } = &callee.kind {
-                if is_self_expr(receiver) {
-                    let uninitialized: Vec<String> = ctx
-                        .all_fields
-                        .iter()
-                        .filter(|f| !state.assigned.contains(*f))
-                        .cloned()
-                        .collect();
-                    if !uninitialized.is_empty() {
-                        ctx.errors
-                            .push(InitializerError::SelfUsedBeforeFullyInitialized {
-                                span: expr.span.clone(),
-                                uninitialized,
-                            });
-                    }
+            if let ExprKind::MethodRef { receiver, .. } = &callee.kind
+                && is_self_expr(receiver)
+            {
+                let uninitialized: Vec<String> = ctx
+                    .all_fields
+                    .iter()
+                    .filter(|f| !state.assigned.contains(*f))
+                    .cloned()
+                    .collect();
+                if !uninitialized.is_empty() {
+                    ctx.errors
+                        .push(InitializerError::SelfUsedBeforeFullyInitialized {
+                            span: expr.span.clone(),
+                            uninitialized,
+                        });
                 }
             }
             state = analyze_expression(callee, state, false, ctx);
             for arg in arguments {
                 state = analyze_expression(&arg.value, state, false, ctx);
             }
-        }
+        },
         ExprKind::LocalRef(_)
         | ExprKind::SymbolRef(_)
         | ExprKind::TypeRef(_)
         | ExprKind::TypeParameterRef(_)
         | ExprKind::AssociatedTypeRef
-        | ExprKind::OverloadedRef(_) => {}
+        | ExprKind::OverloadedRef(_) => {},
         ExprKind::MethodRef { receiver, .. } => {
             state = analyze_expression(receiver, state, false, ctx);
-        }
+        },
         ExprKind::PrimitiveMethodRef { receiver, .. } => {
             state = analyze_expression(receiver, state, false, ctx);
-        }
+        },
         ExprKind::TupleIndex { tuple, .. } => {
             state = analyze_expression(tuple, state, false, ctx);
-        }
-        ExprKind::Literal(_) => {}
+        },
+        ExprKind::Literal(_) => {},
         ExprKind::Array(elements) => {
             for elem in elements {
                 state = analyze_expression(elem, state, false, ctx);
             }
-        }
+        },
         ExprKind::Tuple(elements) => {
             for elem in elements {
                 state = analyze_expression(elem, state, false, ctx);
             }
-        }
+        },
         ExprKind::Grouping(inner) => {
             state = analyze_expression(inner, state, false, ctx);
-        }
+        },
         ExprKind::PrimitiveMethodCall {
             receiver,
             arguments,
@@ -328,7 +327,7 @@ fn analyze_expression(
             for arg in arguments {
                 state = analyze_expression(&arg.value, state, false, ctx);
             }
-        }
+        },
         ExprKind::DeferredMethodCall {
             receiver,
             arguments,
@@ -338,30 +337,44 @@ fn analyze_expression(
             for arg in arguments {
                 state = analyze_expression(&arg.value, state, false, ctx);
             }
-        }
+        },
         ExprKind::ImplicitStructInit { arguments, .. } => {
             for arg in arguments {
                 state = analyze_expression(&arg.value, state, false, ctx);
             }
-        }
+        },
+        ExprKind::DelegatingInit { arguments, .. } => {
+            // Analyze the arguments first
+            for arg in arguments {
+                state = analyze_expression(&arg.value, state, false, ctx);
+            }
+            // After a delegating init call, ALL fields are considered initialized
+            // because the delegated initializer handles field initialization
+            for field in &ctx.all_fields {
+                state.assigned.insert(field.clone());
+            }
+            for field in &ctx.let_fields {
+                state.let_assigned.insert(field.clone());
+            }
+        },
         ExprKind::Assignment { target, value } => {
             state = analyze_expression(value, state, false, ctx);
-            if let ExprKind::FieldAccess { object, field } = &target.kind {
-                if is_self_expr(object) {
-                    if ctx.let_fields.contains(field) && state.let_assigned.contains(field) {
-                        ctx.errors.push(InitializerError::LetFieldAssignedTwice {
-                            span: target.span.clone(),
-                            field_name: field.clone(),
-                        });
-                    }
-                    state.assigned.insert(field.clone());
-                    if ctx.let_fields.contains(field) {
-                        state.let_assigned.insert(field.clone());
-                    }
+            if let ExprKind::FieldAccess { object, field } = &target.kind
+                && is_self_expr(object)
+            {
+                if ctx.let_fields.contains(field) && state.let_assigned.contains(field) {
+                    ctx.errors.push(InitializerError::LetFieldAssignedTwice {
+                        span: target.span.clone(),
+                        field_name: field.clone(),
+                    });
+                }
+                state.assigned.insert(field.clone());
+                if ctx.let_fields.contains(field) {
+                    state.let_assigned.insert(field.clone());
                 }
             }
             state = analyze_expression(target, state, true, ctx);
-        }
+        },
         ExprKind::If {
             conditions,
             then_branch,
@@ -373,10 +386,10 @@ fn analyze_expression(
                 match condition {
                     kestrel_semantic_tree::expr::IfCondition::Expr(e) => {
                         state = analyze_expression(e, state, false, ctx);
-                    }
+                    },
                     kestrel_semantic_tree::expr::IfCondition::Let { value, .. } => {
                         state = analyze_expression(value, state, false, ctx);
-                    }
+                    },
                 }
             }
             let pre = state.clone();
@@ -389,10 +402,10 @@ fn analyze_expression(
                 }
                 then_state = analyze_statement(stmt, then_state, ctx);
             }
-            if !then_state.diverged {
-                if let Some(value) = then_value {
-                    then_state = analyze_expression(value, then_state, false, ctx);
-                }
+            if !then_state.diverged
+                && let Some(value) = then_value
+            {
+                then_state = analyze_expression(value, then_state, false, ctx);
             }
             // else
             let else_state = if let Some(else_branch) = else_branch {
@@ -406,22 +419,22 @@ fn analyze_expression(
                             }
                             else_state = analyze_statement(stmt, else_state, ctx);
                         }
-                        if !else_state.diverged {
-                            if let Some(value) = value {
-                                else_state = analyze_expression(value, else_state, false, ctx);
-                            }
+                        if !else_state.diverged
+                            && let Some(value) = value
+                        {
+                            else_state = analyze_expression(value, else_state, false, ctx);
                         }
-                    }
+                    },
                     kestrel_semantic_tree::expr::ElseBranch::ElseIf(if_expr) => {
                         else_state = analyze_expression(if_expr, else_state, false, ctx);
-                    }
+                    },
                 }
                 else_state
             } else {
                 pre.clone()
             };
             state = then_state.merge(else_state);
-        }
+        },
         ExprKind::While {
             condition, body, ..
         } => {
@@ -435,7 +448,7 @@ fn analyze_expression(
                 body_state = analyze_statement(stmt, body_state, ctx);
             }
             // Ignore yield for while
-        }
+        },
         ExprKind::WhileLet {
             conditions, body, ..
         } => {
@@ -443,10 +456,10 @@ fn analyze_expression(
                 match condition {
                     kestrel_semantic_tree::expr::IfCondition::Expr(e) => {
                         state = analyze_expression(e, state, false, ctx);
-                    }
+                    },
                     kestrel_semantic_tree::expr::IfCondition::Let { value, .. } => {
                         state = analyze_expression(value, state, false, ctx);
-                    }
+                    },
                 }
             }
             // Body may execute zero times; so it doesn't contribute guaranteed initialization
@@ -458,7 +471,7 @@ fn analyze_expression(
                 body_state = analyze_statement(stmt, body_state, ctx);
             }
             // Ignore yield for while-let
-        }
+        },
         ExprKind::Loop { body, .. } => {
             let mut break_states: Vec<InitState> = Vec::new();
             let mut body_state = state.clone();
@@ -486,10 +499,10 @@ fn analyze_expression(
                 }
                 state = merged;
             }
-        }
+        },
         ExprKind::Break { .. } | ExprKind::Continue { .. } => {
             state.diverged = true;
-        }
+        },
         ExprKind::Return { value } => {
             if let Some(val) = value {
                 state = analyze_expression(val, state, false, ctx);
@@ -508,7 +521,7 @@ fn analyze_expression(
                     });
             }
             state.diverged = true;
-        }
+        },
         ExprKind::Closure {
             body, tail_expr, ..
         } => {
@@ -520,25 +533,39 @@ fn analyze_expression(
                 let _ = analyze_expression(tail, state.clone(), false, ctx);
             }
             // Closures don't change the initialization state of the enclosing scope
-        }
-        ExprKind::EnumCase { .. } => {}
+        },
+        ExprKind::EnumCase { .. } => {},
         ExprKind::ImplicitMemberAccess { arguments, .. } => {
             if let Some(args) = arguments {
                 for arg in args {
                     state = analyze_expression(&arg.value, state, false, ctx);
                 }
             }
-        }
+        },
         ExprKind::Match { scrutinee, arms } => {
             state = analyze_expression(scrutinee, state, false, ctx);
+
+            // Collect final state from each arm
+            let mut arm_states: Vec<InitState> = Vec::new();
             for arm in arms {
                 let mut arm_state = state.clone();
                 if let Some(guard) = &arm.guard {
                     arm_state = analyze_expression(guard, arm_state, false, ctx);
                 }
                 arm_state = analyze_expression(&arm.body, arm_state, false, ctx);
+                arm_states.push(arm_state);
             }
-        }
+
+            // Merge all arm states (similar to if-else merging)
+            if !arm_states.is_empty() {
+                let mut iter = arm_states.into_iter();
+                let mut merged = iter.next().unwrap();
+                for arm_state in iter {
+                    merged = merged.merge(arm_state);
+                }
+                state = merged;
+            }
+        },
         ExprKind::Block { statements, value } => {
             for stmt in statements {
                 if state.diverged {
@@ -546,13 +573,36 @@ fn analyze_expression(
                 }
                 state = analyze_statement(stmt, state, ctx);
             }
-            if !state.diverged {
-                if let Some(val) = value {
-                    state = analyze_expression(val, state, false, ctx);
-                }
+            if !state.diverged
+                && let Some(val) = value
+            {
+                state = analyze_expression(val, state, false, ctx);
             }
-        }
-        ExprKind::Error => {}
+        },
+        ExprKind::LangIntrinsic {
+            arguments,
+            intrinsic,
+        } => {
+            use kestrel_semantic_tree::expr::LangIntrinsic;
+            for arg in arguments {
+                state = analyze_expression(&arg.value, state, false, ctx);
+            }
+            // Check if this intrinsic diverges
+            if matches!(intrinsic, LangIntrinsic::PanicUnwind) {
+                state.diverged = true;
+            }
+        },
+        ExprKind::LangIntrinsicRef(_) | ExprKind::Error => {},
+        ExprKind::SubscriptCall {
+            receiver,
+            arguments,
+            ..
+        } => {
+            state = analyze_expression(receiver, state, false, ctx);
+            for arg in arguments {
+                state = analyze_expression(&arg.value, state, false, ctx);
+            }
+        },
     }
     state
 }
@@ -574,12 +624,12 @@ fn contains_break_at_top_level(kind: &StatementKind) -> bool {
                         if expr_contains_break_at_top_level(&expr.kind) {
                             return true;
                         }
-                    }
+                    },
                     kestrel_semantic_tree::expr::IfCondition::Let { value, .. } => {
                         if expr_contains_break_at_top_level(&value.kind) {
                             return true;
                         }
-                    }
+                    },
                 }
             }
             for stmt in &else_block.statements {
@@ -587,17 +637,17 @@ fn contains_break_at_top_level(kind: &StatementKind) -> bool {
                     return true;
                 }
             }
-            if let Some(yield_expr) = &else_block.yield_expr {
-                if expr_contains_break_at_top_level(&yield_expr.kind) {
-                    return true;
-                }
+            if let Some(yield_expr) = &else_block.yield_expr
+                && expr_contains_break_at_top_level(&yield_expr.kind)
+            {
+                return true;
             }
             false
-        }
+        },
         StatementKind::Deinit { .. } => {
             // Deinit doesn't contain break
             false
-        }
+        },
     }
 }
 
@@ -615,10 +665,10 @@ fn expr_contains_break_at_top_level(kind: &ExprKind) -> bool {
                     return true;
                 }
             }
-            if let Some(val) = then_value {
-                if expr_contains_break_at_top_level(&val.kind) {
-                    return true;
-                }
+            if let Some(val) = then_value
+                && expr_contains_break_at_top_level(&val.kind)
+            {
+                return true;
             }
             if let Some(else_b) = else_branch {
                 match else_b {
@@ -628,21 +678,21 @@ fn expr_contains_break_at_top_level(kind: &ExprKind) -> bool {
                                 return true;
                             }
                         }
-                        if let Some(val) = value {
-                            if expr_contains_break_at_top_level(&val.kind) {
-                                return true;
-                            }
+                        if let Some(val) = value
+                            && expr_contains_break_at_top_level(&val.kind)
+                        {
+                            return true;
                         }
-                    }
+                    },
                     kestrel_semantic_tree::expr::ElseBranch::ElseIf(if_expr) => {
                         if expr_contains_break_at_top_level(&if_expr.kind) {
                             return true;
                         }
-                    }
+                    },
                 }
             }
             false
-        }
+        },
         ExprKind::While { .. } | ExprKind::WhileLet { .. } | ExprKind::Loop { .. } => false,
         _ => false,
     }

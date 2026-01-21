@@ -5,7 +5,7 @@ mod basic {
 
     #[test]
     fn simple_type_alias() {
-        Test::new("module Test\ntype Simple = Int;")
+        Test::new("module Test\ntype Simple = lang.i64;")
             .expect(Compiles)
             .expect(Symbol::new("Simple").is(SymbolKind::TypeAlias));
     }
@@ -14,9 +14,9 @@ mod basic {
     fn visibility_modifiers() {
         Test::new(
             r#"module Test
-            public type PublicAlias = String;
-            internal type InternalAlias = Float;
-            fileprivate type FilePrivateAlias = Int;
+            public type PublicAlias = lang.str;
+            internal type InternalAlias = lang.f64;
+            fileprivate type FilePrivateAlias = lang.i64;
         "#,
         )
         .expect(Compiles)
@@ -41,9 +41,9 @@ mod basic {
     fn multiple_type_aliases() {
         Test::new(
             r#"module Test
-            type Result = Int;
-            type Maybe = String;
-            type List = Bool;
+            type Result = lang.i64;
+            type Maybe = lang.str;
+            type List = lang.i1;
         "#,
         )
         .expect(Compiles)
@@ -60,10 +60,10 @@ mod target_types {
     fn builtin_type_targets() {
         Test::new(
             r#"module Test
-            type IntAlias = Int;
-            type StringAlias = String;
-            type BoolAlias = Bool;
-            type FloatAlias = Float;
+            type IntAlias = lang.i64;
+            type StringAlias = lang.str;
+            type BoolAlias = lang.i1;
+            type FloatAlias = lang.f64;
         "#,
         )
         .expect(Compiles)
@@ -96,9 +96,9 @@ mod target_types {
     fn tuple_type_targets() {
         Test::new(
             r#"module Test
-            type Pair = (Int, String);
-            type Triple = (Int, String, Bool);
-            type Single = (Float);
+            type Pair = (lang.i64, lang.str);
+            type Triple = (lang.i64, lang.str, lang.i1);
+            type Single = (lang.f64);
         "#,
         )
         .expect(Compiles)
@@ -111,8 +111,8 @@ mod target_types {
     fn nested_tuple_types() {
         Test::new(
             r#"module Test
-            type NestedTuple = ((Int, String), Bool);
-            type ComplexNesting = (Int, (String, (Bool, Float)));
+            type NestedTuple = ((lang.i64, lang.str), lang.i1);
+            type ComplexNesting = (lang.i64, (lang.str, (lang.i1, lang.f64)));
         "#,
         )
         .expect(Compiles)
@@ -128,10 +128,10 @@ mod realistic {
     fn domain_type_aliases() {
         Test::new(
             r#"module Application.Types
-            public type UserID = String;
-            public type Email = String;
-            public type PhoneNumber = String;
-            public type Timestamp = Int;
+            public type UserID = lang.str;
+            public type Email = lang.str;
+            public type PhoneNumber = lang.str;
+            public type Timestamp = lang.i64;
         "#,
         )
         .expect(Compiles)
@@ -188,9 +188,9 @@ mod realistic {
     fn mixed_visibility_aliases() {
         Test::new(
             r#"module Test
-            public type PublicResult = Bool;
-            private type PrivateResult = Int;
-            internal type InternalResult = String;
+            public type PublicResult = lang.i1;
+            private type PrivateResult = lang.i64;
+            internal type InternalResult = lang.str;
         "#,
         )
         .expect(Compiles)
@@ -215,7 +215,7 @@ mod realistic {
     fn chained_aliases() {
         Test::new(
             r#"module Test
-            type Base = Int;
+            type Base = lang.i64;
             type Derived = Base;
             type Final = Derived;
         "#,
@@ -230,9 +230,9 @@ mod realistic {
     fn multiple_aliases_same_target() {
         Test::new(
             r#"module Test
-            type Alias1 = Int;
-            type Alias2 = Int;
-            type Alias3 = Int;
+            type Alias1 = lang.i64;
+            type Alias2 = lang.i64;
+            type Alias3 = lang.i64;
         "#,
         )
         .expect(Compiles)
@@ -307,7 +307,7 @@ mod cycle_detection {
     fn cycle_in_tuple_type() {
         Test::new(
             r#"module Test
-            type A = (B, Int);
+            type A = (B, lang.i64);
             type B = A;
         "#,
         )
@@ -319,7 +319,7 @@ mod cycle_detection {
         Test::new(
             r#"module Test
             type A = B;
-            type B = Int;
+            type B = lang.i64;
         "#,
         )
         .expect(Compiles)
@@ -334,7 +334,7 @@ mod cycle_detection {
             type A = B;
             type B = C;
             type C = D;
-            type D = Int;
+            type D = lang.i64;
         "#,
         )
         .expect(Compiles)
@@ -349,9 +349,9 @@ mod cycle_detection {
         Test::new(
             r#"module Test
             type A = B;
-            type B = Int;
+            type B = lang.i64;
             type X = Y;
-            type Y = String;
+            type Y = lang.str;
         "#,
         )
         .expect(Compiles)
@@ -365,8 +365,8 @@ mod cycle_detection {
     fn valid_tuple_with_alias_reference() {
         Test::new(
             r#"module Test
-            type A = (Int, B);
-            type B = String;
+            type A = (lang.i64, B);
+            type B = lang.str;
         "#,
         )
         .expect(Compiles)
@@ -378,8 +378,8 @@ mod cycle_detection {
     fn mixed_valid_and_cyclic() {
         Test::new(
             r#"module Test
-            type Valid1 = Int;
-            type Valid2 = String;
+            type Valid1 = lang.i64;
+            type Valid2 = lang.str;
             type Cycle1 = Cycle2;
             type Cycle2 = Cycle1;
         "#,
@@ -407,9 +407,101 @@ mod unresolved_types {
     fn type_alias_to_unknown_in_tuple() {
         Test::new(
             r#"module Test
-            type Foo = (Int, Unknown, String);
+            type Foo = (lang.i64, Unknown, lang.str);
         "#,
         )
         .expect(HasError("cannot find type"));
+    }
+}
+
+mod regression {
+    use super::*;
+
+    /// Regression test for: Type aliases don't work for member access
+    /// Issue: Type aliases like `type MyInt = Int64` could not be used to access
+    /// members or call constructors through the alias name.
+    #[test]
+    fn type_alias_static_method_access() {
+        Test::new(
+            r#"module Test
+            struct Counter {
+                var count: lang.i64
+
+                init(c: lang.i64) {
+                    self.count = c;
+                }
+
+                static func zero() -> Counter {
+                    Counter(0)
+                }
+            }
+
+            type C = Counter
+
+            func test() -> lang.i64 {
+                let c = C.zero();
+                c.count
+            }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("C").is(SymbolKind::TypeAlias));
+    }
+
+    /// Regression test for: Type aliases don't work for member access (init)
+    /// Issue: Calling init through a type alias failed.
+    #[test]
+    fn type_alias_init_call() {
+        Test::new(
+            r#"module Test
+            struct Counter {
+                var count: lang.i64
+
+                init(c: lang.i64) {
+                    self.count = c;
+                }
+            }
+
+            type C = Counter
+
+            func test() -> lang.i64 {
+                let c = C(42);
+                c.count
+            }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("C").is(SymbolKind::TypeAlias));
+    }
+
+    /// Regression test for: Type aliases don't expose methods
+    /// Issue: Type aliases didn't allow method calls through the alias, causing
+    /// "cannot access member on type" errors.
+    #[test]
+    fn type_alias_instance_method_call() {
+        Test::new(
+            r#"module Test
+            struct Counter {
+                var count: lang.i64
+
+                init(c: lang.i64) {
+                    self.count = c;
+                }
+
+                func getCount() -> lang.i64 {
+                    self.count
+                }
+            }
+
+            type C = Counter
+
+            func test() -> lang.i64 {
+                let c: C = Counter(42);
+                c.getCount()
+            }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("C").is(SymbolKind::TypeAlias));
     }
 }

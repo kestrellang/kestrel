@@ -144,7 +144,7 @@ mod function_calls {
             import Prelude
             
             struct Handle: not Copyable {
-                var fd: Int
+                var fd: lang.i64
             }
             
             func process[T](consuming x: T) where T: not Copyable { }
@@ -167,8 +167,8 @@ mod function_calls {
             import Prelude
             
             struct Point {
-                var x: Int
-                var y: Int
+                var x: lang.i64
+                var y: lang.i64
             }
             
             func process[T](consuming x: T) where T: not Copyable { }
@@ -197,7 +197,7 @@ mod struct_generics {
             import Prelude
             
             struct Handle: not Copyable {
-                var fd: Int
+                var fd: lang.i64
             }
             
             struct Wrapper[T] where T: not Copyable {

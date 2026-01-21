@@ -10,7 +10,9 @@ use std::sync::{Arc, Mutex};
 use crate::analyzer::Analyzer;
 use crate::context::AnalysisContext;
 
-use super::type_alias_cycles::diagnostics::{CircularTypeAliasError, CycleParticipant};
+use super::type_alias_cycles::diagnostics::{
+    CircularTypeAliasError, CycleParticipant, TypeAliasContainsInferError,
+};
 use kestrel_semantic_model::{ResolvedAliasedType, SymbolFor};
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
@@ -124,7 +126,7 @@ fn follow_type_alias_chain(
                 .and_then(|resolved| follow_type_alias_chain(&resolved, model, visited));
             visited.exit();
             result
-        }
+        },
         TyKind::Tuple(elements) => {
             for e in elements {
                 if let Some(c) = follow_type_alias_chain(e, model, visited) {
@@ -132,7 +134,7 @@ fn follow_type_alias_chain(
                 }
             }
             None
-        }
+        },
         TyKind::Function {
             params,
             return_type,
@@ -143,8 +145,67 @@ fn follow_type_alias_chain(
                 }
             }
             follow_type_alias_chain(return_type, model, visited)
-        }
+        },
         _ => None,
+    }
+}
+
+/// Check if a type alias definition contains unresolved (inferred) types.
+/// Type aliases must have fully specified types.
+#[allow(dead_code)]
+fn check_type_alias_for_infer(
+    type_alias: &Arc<dyn Symbol<KestrelLanguage>>,
+    model: &kestrel_semantic_model::SemanticModel,
+    ctx: &mut AnalysisContext,
+) {
+    let alias_id = type_alias.metadata().id();
+    let Some(resolved) = model.query(ResolvedAliasedType {
+        type_alias_id: alias_id,
+    }) else {
+        return;
+    };
+
+    if contains_infer_type(&resolved) {
+        ctx.report(TypeAliasContainsInferError {
+            span: type_alias.metadata().span().clone(),
+            alias_name: type_alias.metadata().name().value.clone(),
+        });
+    }
+}
+
+/// Recursively check if a type contains any inference placeholder types.
+#[allow(dead_code)]
+fn contains_infer_type(ty: &Ty) -> bool {
+    match ty.kind() {
+        TyKind::Infer => true,
+        TyKind::Pointer(inner) => contains_infer_type(inner),
+        TyKind::Array(inner) => contains_infer_type(inner),
+        TyKind::Tuple(elements) => elements.iter().any(contains_infer_type),
+        TyKind::Function {
+            params,
+            return_type,
+        } => params.iter().any(contains_infer_type) || contains_infer_type(return_type),
+        TyKind::Struct { substitutions, .. }
+        | TyKind::Protocol { substitutions, .. }
+        | TyKind::Enum { substitutions, .. }
+        | TyKind::TypeAlias { substitutions, .. } => substitutions.types().any(contains_infer_type),
+        TyKind::UnresolvedFunction {
+            param_info,
+            return_type,
+        } => {
+            let params_have_infer = match param_info {
+                kestrel_semantic_tree::ty::ParamInfo::Unconstrained => false,
+                kestrel_semantic_tree::ty::ParamInfo::ImplicitIt { it_type } => {
+                    contains_infer_type(it_type)
+                },
+                kestrel_semantic_tree::ty::ParamInfo::Explicit { param_types } => {
+                    param_types.iter().any(contains_infer_type)
+                },
+            };
+            params_have_infer || contains_infer_type(return_type)
+        },
+        // All other types (primitives, error, type parameters, etc.) don't contain infer
+        _ => false,
     }
 }
 

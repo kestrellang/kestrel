@@ -2,19 +2,17 @@
 
 use crate::CodegenOptions;
 use crate::error::CodegenError;
-use crate::monomorphize::{
-    FunctionInstantiation, MonomorphizationSet, Substitution, build_substitution,
-};
-use crate::types::translate_type;
-use kestrel_codegen::{Layout, LayoutCache, TargetConfig, mangle_name};
-use kestrel_execution_graph::{Function, FunctionDef, Id, MirContext, QualifiedNameData, Ty};
+use crate::monomorphize::{FunctionInstantiation, MonomorphizationSet, build_substitution};
+use crate::types::translate_type_ext;
+use kestrel_codegen::{LayoutCache, TargetConfig, mangle_function_with_self, mangle_name};
+use kestrel_execution_graph::{Function, FunctionDef, Id, MirContext, QualifiedName, Ty};
 
 use cranelift_codegen::Context as CraneliftContext;
 use cranelift_codegen::ir::types as cl_types;
 use cranelift_codegen::ir::{AbiParam, Function as CraneliftFunction, Signature, UserFuncName};
 use cranelift_codegen::isa::{CallConv, TargetIsa};
 use cranelift_codegen::settings::{self, Configurable};
-use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
+use cranelift_frontend::FunctionBuilderContext;
 use cranelift_module::{DataDescription, DataId, FuncId, Linkage, Module};
 use cranelift_object::{ObjectBuilder, ObjectModule};
 
@@ -96,6 +94,56 @@ impl<'a> CodegenContext<'a> {
         Ok(())
     }
 
+    /// Resolve the symbol name for a function instantiation.
+    pub(crate) fn symbol_name_for_instantiation(&self, inst: &FunctionInstantiation) -> String {
+        let func_def = &self.mir.functions[inst.func_id];
+        self.symbol_name_for_function(inst.func_id, func_def, &inst.type_args, inst.self_type)
+    }
+
+    /// Resolve the symbol name for a function definition and concrete type args.
+    pub(crate) fn symbol_name_for_function(
+        &self,
+        func_id: Id<Function>,
+        func_def: &FunctionDef,
+        type_args: &[Id<Ty>],
+        self_type: Option<Id<Ty>>,
+    ) -> String {
+        if self.is_main(func_def) {
+            "main".to_string()
+        } else if let Some(extern_info) = &func_def.extern_info {
+            extern_info.symbol_name.clone()
+        } else {
+            mangle_function_with_self(self.mir, func_id, type_args, self_type)
+        }
+    }
+
+    /// Resolve a symbol name by qualified name, falling back to mangling when unknown.
+    pub(crate) fn resolve_symbol_name(
+        &self,
+        name: Id<QualifiedName>,
+        type_args: &[Id<Ty>],
+        self_type: Option<Id<Ty>>,
+    ) -> String {
+        if let Some((func_id, func_def)) =
+            self.mir.functions.iter().find(|(_, def)| def.name == name)
+        {
+            self.symbol_name_for_function(func_id, func_def, type_args, self_type)
+        } else {
+            mangle_name(self.mir, name, type_args)
+        }
+    }
+
+    /// Resolve linkage for a function definition.
+    fn linkage_for_function(&self, func_def: &FunctionDef) -> Linkage {
+        if self.is_main(func_def) {
+            Linkage::Export
+        } else if func_def.extern_info.is_some() {
+            Linkage::Import
+        } else {
+            Linkage::Local
+        }
+    }
+
     /// Declare runtime helper functions (e.g., memcmp for string comparison).
     fn declare_runtime_helpers(&mut self) -> Result<(), CodegenError> {
         // Declare memcmp for string comparison
@@ -146,21 +194,8 @@ impl<'a> CodegenContext<'a> {
 
         for inst in instantiations {
             let func_def = &self.mir.functions[inst.func_id];
-            let is_main = self.is_main(func_def);
-
-            // Main function is exported as "main" for the C runtime
-            // Extern functions use Import linkage with their specified symbol name
-            // Other functions use mangled names (with type args for generics)
-            let (symbol_name, linkage) = if is_main {
-                ("main".to_string(), Linkage::Export)
-            } else if let Some(extern_info) = &func_def.extern_info {
-                (extern_info.symbol_name.clone(), Linkage::Import)
-            } else {
-                (
-                    mangle_name(self.mir, func_def.name, &inst.type_args),
-                    Linkage::Local,
-                )
-            };
+            let symbol_name = self.symbol_name_for_instantiation(&inst);
+            let linkage = self.linkage_for_function(func_def);
 
             // Skip if already declared (can happen with multiple paths to same instantiation)
             if self.func_ids_by_name.contains_key(&symbol_name) {
@@ -207,11 +242,7 @@ impl<'a> CodegenContext<'a> {
     ) -> Result<(), CodegenError> {
         let func_def = &self.mir.functions[inst.func_id];
         let is_main = self.is_main(func_def);
-        let symbol_name = if is_main {
-            "main".to_string()
-        } else {
-            mangle_name(self.mir, func_def.name, &inst.type_args)
-        };
+        let symbol_name = self.symbol_name_for_instantiation(inst);
 
         let cl_func_id = *self.func_ids_by_name.get(&symbol_name).ok_or_else(|| {
             CodegenError::FunctionDefinition {
@@ -221,7 +252,12 @@ impl<'a> CodegenContext<'a> {
         })?;
 
         // Build the substitution for this instantiation
-        let subst = build_substitution(self.mir, &func_def.type_params, &inst.type_args);
+        let mut subst = build_substitution(self.mir, &func_def.type_params, &inst.type_args);
+
+        // Set self_type if this instantiation has one (protocol extension methods)
+        if let Some(st) = inst.self_type {
+            subst.set_self_type(st);
+        }
 
         let sig = self.create_signature_with_subst(func_def, &inst.type_args);
         let mut cl_func =
@@ -282,31 +318,53 @@ impl<'a> CodegenContext<'a> {
         // Build substitution
         let subst = build_substitution(self.mir, &func_def.type_params, type_args);
 
+        // Return type (used for sret decisions)
+        let is_main = self.is_main(func_def);
+        let concrete_ret = subst
+            .apply_ty_readonly(self.mir, func_def.ret)
+            .expect("type substitution failed for return type");
+        let ret_ty = self.mir.ty(concrete_ret);
+        let is_aggregate_ret = matches!(
+            ret_ty,
+            kestrel_execution_graph::MirTy::Tuple(_)
+                | kestrel_execution_graph::MirTy::Named { .. }
+                | kestrel_execution_graph::MirTy::Str
+                | kestrel_execution_graph::MirTy::FuncThick { .. }
+        );
+        let needs_sret = !func_def.is_extern()
+            && !is_main
+            && !matches!(ret_ty, kestrel_execution_graph::MirTy::Unit)
+            && is_aggregate_ret;
+
+        if needs_sret {
+            let ptr_type = if self.target.is_64bit() {
+                cl_types::I64
+            } else {
+                cl_types::I32
+            };
+            sig.params.push(AbiParam::new(ptr_type));
+        }
+
         // Parameters - apply substitution to get concrete types
         for &param_id in &func_def.params {
             let param = &self.mir.params[param_id];
-            // For signature purposes, we need to use the original type if substitution
-            // would fail (readonly mode), but since collection already interned all types,
-            // this should always succeed. If not, fall back to original.
+            // Collection phase should have interned all types, so this should always succeed.
             let concrete_ty = subst
                 .apply_ty_readonly(self.mir, param.ty)
-                .unwrap_or(param.ty);
-            let cl_type = translate_type(self.mir, concrete_ty, self.target);
+                .expect("type substitution failed for param type");
+            let cl_type =
+                translate_type_ext(self.mir, concrete_ty, self.target, func_def.is_extern());
             sig.params.push(AbiParam::new(cl_type));
         }
 
         // Return type
         // Special case: main() must return i64 for C runtime even if Kestrel return type is Unit
-        let is_main = self.is_main(func_def);
-        let concrete_ret = subst
-            .apply_ty_readonly(self.mir, func_def.ret)
-            .unwrap_or(func_def.ret);
-        let ret_ty = self.mir.ty(concrete_ret);
         if is_main {
             // C runtime expects int main() - always return i64
             sig.returns.push(AbiParam::new(cl_types::I64));
-        } else if !matches!(ret_ty, kestrel_execution_graph::MirTy::Unit) {
-            let cl_type = translate_type(self.mir, concrete_ret, self.target);
+        } else if !matches!(ret_ty, kestrel_execution_graph::MirTy::Unit) && !needs_sret {
+            let cl_type =
+                translate_type_ext(self.mir, concrete_ret, self.target, func_def.is_extern());
             sig.returns.push(AbiParam::new(cl_type));
         }
 
@@ -374,7 +432,7 @@ impl<'a> CodegenContext<'a> {
 
 /// Create a Cranelift target ISA from the target config.
 fn create_isa(
-    target: &TargetConfig,
+    _target: &TargetConfig,
     options: &CodegenOptions,
 ) -> Result<Arc<dyn TargetIsa>, CodegenError> {
     let mut flags_builder = settings::builder();
@@ -383,13 +441,13 @@ fn create_isa(
     match options.opt_level {
         0 => {
             flags_builder.set("opt_level", "none").unwrap();
-        }
+        },
         1 => {
             flags_builder.set("opt_level", "speed").unwrap();
-        }
+        },
         _ => {
             flags_builder.set("opt_level", "speed_and_size").unwrap();
-        }
+        },
     }
 
     // Enable position-independent code for shared libraries

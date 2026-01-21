@@ -3,8 +3,8 @@
 //! These types represent concrete instantiations of generic items
 //! (functions, structs, enums) with specific type arguments.
 
+use indexmap::IndexSet;
 use kestrel_execution_graph::{Enum, Function, Id, Struct, Ty};
-use std::collections::HashSet;
 
 /// A concrete instantiation of a generic function.
 ///
@@ -16,12 +16,32 @@ pub struct FunctionInstantiation {
     /// The concrete type arguments.
     /// Empty for non-generic functions.
     pub type_args: Vec<Id<Ty>>,
+    /// The concrete type for `Self` (used for protocol extension methods).
+    /// None for functions that don't use Self type.
+    pub self_type: Option<Id<Ty>>,
 }
 
 impl FunctionInstantiation {
     /// Create a new function instantiation.
     pub fn new(func_id: Id<Function>, type_args: Vec<Id<Ty>>) -> Self {
-        Self { func_id, type_args }
+        Self {
+            func_id,
+            type_args,
+            self_type: None,
+        }
+    }
+
+    /// Create a new function instantiation with a Self type.
+    pub fn with_self_type(
+        func_id: Id<Function>,
+        type_args: Vec<Id<Ty>>,
+        self_type: Id<Ty>,
+    ) -> Self {
+        Self {
+            func_id,
+            type_args,
+            self_type: Some(self_type),
+        }
     }
 
     /// Create an instantiation for a non-generic function.
@@ -29,6 +49,7 @@ impl FunctionInstantiation {
         Self {
             func_id,
             type_args: Vec::new(),
+            self_type: None,
         }
     }
 }
@@ -76,14 +97,17 @@ impl EnumInstantiation {
 ///
 /// This is computed by the collection phase and used during codegen
 /// to know which instantiations need to be compiled.
+///
+/// Uses `IndexSet` instead of `HashSet` to ensure deterministic iteration order,
+/// which makes error messages and codegen output reproducible across runs.
 #[derive(Debug, Default)]
 pub struct MonomorphizationSet {
     /// All function instantiations that need to be compiled.
-    pub functions: HashSet<FunctionInstantiation>,
+    pub functions: IndexSet<FunctionInstantiation>,
     /// All struct instantiations that are used.
-    pub structs: HashSet<StructInstantiation>,
+    pub structs: IndexSet<StructInstantiation>,
     /// All enum instantiations that are used.
-    pub enums: HashSet<EnumInstantiation>,
+    pub enums: IndexSet<EnumInstantiation>,
 }
 
 impl MonomorphizationSet {

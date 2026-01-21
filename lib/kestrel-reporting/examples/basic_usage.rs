@@ -1,4 +1,4 @@
-use kestrel_reporting::{Diagnostic, DiagnosticContext, IntoDiagnostic, Label, Severity};
+use kestrel_reporting::{Diagnostic, DiagnosticContext, IntoDiagnostic, Label};
 use kestrel_span::Span;
 
 /// Example error type that implements IntoDiagnostic

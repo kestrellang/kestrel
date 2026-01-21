@@ -15,6 +15,28 @@ use semantic_tree::symbol::Symbol;
 use crate::declaration_binder::BindingContext;
 use crate::diagnostics::{CircularProtocolInheritanceError, InheritedAssociatedTypeConflictError};
 
+/// Check if `potential_ancestor` is an ancestor of `protocol` by recursively checking parent protocols.
+fn is_ancestor_protocol(protocol: &Arc<ProtocolSymbol>, potential_ancestor_name: &str) -> bool {
+    // Check direct parents
+    if let Some(conformances) = protocol.metadata().get_behavior::<ConformancesBehavior>() {
+        for parent_ty in conformances.conformances() {
+            if let TyKind::Protocol { symbol: parent, .. } = parent_ty.kind() {
+                let parent_name_value = parent.metadata().name().value.clone();
+                let parent_name = parent_name_value.as_str();
+                // Check if this parent is the ancestor we're looking for
+                if parent_name == potential_ancestor_name {
+                    return true;
+                }
+                // Recursively check if the ancestor is higher up in the hierarchy
+                if is_ancestor_protocol(parent, potential_ancestor_name) {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
 /// Flatten a protocol's inheritance hierarchy, collecting all methods and associated types.
 pub fn flatten_protocol(
     protocol: &Arc<ProtocolSymbol>,
@@ -61,7 +83,7 @@ pub fn flatten_protocol(
 
             ctx.diagnostics.throw(error);
             None
-        }
+        },
     }
 }
 
@@ -97,8 +119,8 @@ fn flatten_protocol_recursive(
         if let Some(conformances) = protocol.metadata().get_behavior::<ConformancesBehavior>() {
             let mut res = Ok(());
             for parent_ty in conformances.conformances() {
-                if let TyKind::Protocol { symbol: parent, .. } = parent_ty.kind() {
-                    if let Err(e) = flatten_protocol_recursive(
+                if let TyKind::Protocol { symbol: parent, .. } = parent_ty.kind()
+                    && let Err(e) = flatten_protocol_recursive(
                         parent,
                         methods,
                         associated_types,
@@ -107,10 +129,10 @@ fn flatten_protocol_recursive(
                         depth + 1,
                         max_depth,
                         ctx,
-                    ) {
-                        res = Err(e);
-                        break;
-                    }
+                    )
+                {
+                    res = Err(e);
+                    break;
                 }
             }
             res
@@ -137,23 +159,44 @@ fn flatten_protocol_recursive(
                         source_protocol_name: protocol_name.clone(),
                         definition_span: child.metadata().name().span.clone(),
                     });
-            }
+            },
             KestrelSymbolKind::AssociatedType => {
                 let type_name = child.metadata().name().value.clone();
 
                 // Check for conflict with inherited associated type
                 if let Some(existing) = associated_types.get(&type_name) {
-                    // Conflict: same associated type name from different protocols
-                    let error = InheritedAssociatedTypeConflictError {
-                        type_name: type_name.clone(),
-                        span: child.metadata().span().clone(),
-                        protocol1: existing.source_protocol_name.clone(),
-                        protocol2: protocol_name.clone(),
-                        definition_span1: existing.definition_span.clone(),
-                        definition_span2: child.metadata().name().span.clone(),
-                    };
-                    ctx.diagnostics.throw(error);
-                    continue; // Skip this one, keep existing
+                    // Check if the existing associated type came from an ancestor protocol
+                    let is_from_ancestor =
+                        is_ancestor_protocol(protocol, &existing.source_protocol_name);
+
+                    if is_from_ancestor {
+                        // This is OK: child protocol is refining/redeclaring parent's associated type
+                        // Allow the child's declaration to override the parent's
+                        if let Ok(assoc_type) = child.clone().downcast_arc::<AssociatedTypeSymbol>()
+                        {
+                            associated_types.insert(
+                                type_name,
+                                FlattenedAssociatedType {
+                                    symbol: assoc_type,
+                                    source_protocol_name: protocol_name.clone(),
+                                    definition_span: child.metadata().name().span.clone(),
+                                },
+                            );
+                        }
+                    } else {
+                        // Conflict: same associated type name from sibling protocols (diamond inheritance)
+                        let error = InheritedAssociatedTypeConflictError {
+                            type_name: type_name.clone(),
+                            span: child.metadata().span().clone(),
+                            protocol1: existing.source_protocol_name.clone(),
+                            protocol2: protocol_name.clone(),
+                            definition_span1: existing.definition_span.clone(),
+                            definition_span2: child.metadata().name().span.clone(),
+                        };
+                        ctx.diagnostics.throw(error);
+                        // Keep existing, skip this one
+                    }
+                    continue;
                 }
 
                 if let Ok(assoc_type) = child.clone().downcast_arc::<AssociatedTypeSymbol>() {
@@ -166,8 +209,8 @@ fn flatten_protocol_recursive(
                         },
                     );
                 }
-            }
-            _ => {}
+            },
+            _ => {},
         }
     }
 

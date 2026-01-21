@@ -75,6 +75,9 @@ pub enum Constraint {
     ///
     /// This constraint resolves type-directed member lookups. It's needed when
     /// the receiver type isn't yet known at constraint generation time.
+    ///
+    /// For method calls (DeferredMethodCall), this also includes argument types
+    /// so that parameter constraints can be created when the method is resolved.
     MemberAccess {
         /// The receiver type being accessed
         receiver: TyId,
@@ -82,6 +85,9 @@ pub enum Constraint {
         member: String,
         /// Whether this is a static member access (Type.member vs instance.member)
         is_static: bool,
+        /// Argument type IDs for method calls (empty for field access)
+        /// Used to create constraints between argument types and parameter types
+        arguments: Vec<TyId>,
         /// The result type of the member access
         result: TyId,
         /// The expression ID for tracking the value resolution
@@ -167,6 +173,7 @@ impl Constraint {
         receiver: TyId,
         member: String,
         is_static: bool,
+        arguments: Vec<TyId>,
         result: TyId,
         expr_id: ExprId,
         span: Span,
@@ -175,6 +182,7 @@ impl Constraint {
             receiver,
             member,
             is_static,
+            arguments,
             result,
             expr_id,
             span,

@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
-use kestrel_semantic_tree::ty::{Ty, TyKind};
+use kestrel_semantic_tree::ty::{Substitutions, Ty, TyKind};
 use kestrel_syntax_tree::utils::get_node_span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::{Symbol, SymbolId};
@@ -15,6 +15,51 @@ use crate::declaration_binder::BindingContext;
 use crate::diagnostics::{
     MissingParentProtocolConformanceError, NotAProtocolContext, NotAProtocolError,
 };
+
+/// In conformance lists, a bare protocol reference like `P` should apply default protocol type
+/// arguments (e.g. `protocol P[T = Self]` => `P[T = Self]`), rather than leaving inferred `_`
+/// placeholders from raw type reference resolution.
+fn apply_default_protocol_type_arguments_for_conformance(ty: Ty) -> Ty {
+    let TyKind::Protocol {
+        symbol,
+        substitutions,
+    } = ty.kind()
+    else {
+        return ty;
+    };
+
+    let type_params = symbol.type_parameters();
+    if type_params.is_empty() {
+        return ty;
+    }
+
+    let mut new_subs: Substitutions = substitutions.clone();
+    let mut changed = false;
+
+    for param in &type_params {
+        let param_id = param.metadata().id();
+        let existing = new_subs.get(param_id);
+
+        let should_fill = match existing {
+            None => true,
+            Some(existing_ty) => matches!(existing_ty.kind(), TyKind::Infer),
+        };
+        if !should_fill {
+            continue;
+        }
+
+        if let Some(default_ty) = param.default() {
+            new_subs.insert(param_id, default_ty.clone());
+            changed = true;
+        }
+    }
+
+    if changed {
+        Ty::generic_protocol(symbol.clone(), new_subs, ty.span().clone())
+    } else {
+        ty
+    }
+}
 
 /// Find a child node with the specified kind
 pub fn find_child(syntax: &SyntaxNode, kind: SyntaxKind) -> Option<SyntaxNode> {
@@ -73,11 +118,13 @@ pub fn resolve_conformance_list(
         let resolved_ty = resolve_type_from_ty_node(&ty_node, &mut type_ctx);
 
         // Validate that it's a protocol
-        match resolved_ty.kind() {
+        match resolved_ty.clone().kind() {
             TyKind::Protocol {
                 symbol: protocol_sym,
                 ..
             } => {
+                let resolved_ty =
+                    apply_default_protocol_type_arguments_for_conformance(resolved_ty);
                 if is_negative {
                     // Validate that this protocol allows negation
                     let protocol_id = protocol_sym.metadata().id();
@@ -108,7 +155,7 @@ pub fn resolve_conformance_list(
                 } else {
                     resolved.push(resolved_ty);
                 }
-            }
+            },
             TyKind::Struct {
                 symbol: struct_sym, ..
             } => {
@@ -120,13 +167,13 @@ pub fn resolve_conformance_list(
                 if !is_negative {
                     resolved.push(Ty::error(span));
                 }
-            }
+            },
             TyKind::Error => {
                 // Error already reported by type resolver
                 if !is_negative {
                     resolved.push(resolved_ty);
                 }
-            }
+            },
             _ => {
                 let type_name = format!("{:?}", resolved_ty.kind());
                 ctx.diagnostics.throw(NotAProtocolError {
@@ -137,7 +184,7 @@ pub fn resolve_conformance_list(
                 if !is_negative {
                     resolved.push(Ty::error(span));
                 }
-            }
+            },
         }
     }
 
@@ -172,7 +219,7 @@ fn validate_no_conflicting_conformances(
 
     // Check if there's a `not Copyable` in the negative conformances
     let copyable_id = ctx.model.builtin_registry().copyable_protocol();
-    let has_not_copyable = copyable_id.map_or(false, |copyable_id| {
+    let has_not_copyable = copyable_id.is_some_and(|copyable_id| {
         negative_conformances.iter().any(|ty| {
             if let TyKind::Protocol { symbol, .. } = ty.kind() {
                 symbol.metadata().id() == copyable_id
@@ -212,27 +259,25 @@ fn validate_no_conflicting_conformances(
             if let Some(parent_conformances) = protocol_symbol
                 .metadata()
                 .get_behavior::<ConformancesBehavior>()
+                && let Some(copyable_id) = copyable_id
             {
-                if let Some(copyable_id) = copyable_id {
-                    let inherits_copyable =
-                        parent_conformances.conformances().iter().any(|parent| {
-                            if let TyKind::Protocol {
-                                symbol: parent_sym, ..
-                            } = parent.kind()
-                            {
-                                parent_sym.metadata().id() == copyable_id
-                            } else {
-                                false
-                            }
-                        });
-
-                    if inherits_copyable {
-                        ctx.diagnostics.throw(ConflictingCopyableConformanceError {
-                            span: symbol.metadata().span().clone(),
-                            refining_protocol: protocol_symbol.metadata().name().value.clone(),
-                        });
-                        return; // Only report once
+                let inherits_copyable = parent_conformances.conformances().iter().any(|parent| {
+                    if let TyKind::Protocol {
+                        symbol: parent_sym, ..
+                    } = parent.kind()
+                    {
+                        parent_sym.metadata().id() == copyable_id
+                    } else {
+                        false
                     }
+                });
+
+                if inherits_copyable {
+                    ctx.diagnostics.throw(ConflictingCopyableConformanceError {
+                        span: symbol.metadata().span().clone(),
+                        refining_protocol: protocol_symbol.metadata().name().value.clone(),
+                    });
+                    return; // Only report once
                 }
             }
         }
@@ -246,12 +291,15 @@ fn validate_no_conflicting_conformances(
 ///
 /// Exception: If the parent protocol has implicit conformance (like Copyable),
 /// we don't require explicit conformance since all types implicitly conform.
+///
+/// Exception: If all methods in the parent protocol have default implementations via
+/// protocol extensions, explicit conformance is not required.
 fn validate_parent_protocol_conformances(
     conformances: &[Ty],
     symbol: &Arc<dyn Symbol<KestrelLanguage>>,
     ctx: &mut BindingContext,
 ) {
-    use kestrel_semantic_tree::builtins::LanguageFeature;
+    use kestrel_semantic_model::queries::ProtocolRequiredMethods;
     use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 
     // Only validate structs, not protocols
@@ -296,29 +344,37 @@ fn validate_parent_protocol_conformances(
                         // All types implicitly conform to these unless opted out
                         if let Some(feature) =
                             ctx.model.builtin_registry().protocol_feature(parent_id)
-                        {
-                            if let kestrel_semantic_tree::builtins::BuiltinKind::Protocol {
+                            && let kestrel_semantic_tree::builtins::BuiltinKind::Protocol {
                                 implicit_conformance: true,
                                 ..
                             } = feature.definition().kind
-                            {
-                                continue;
-                            }
+                        {
+                            continue;
                         }
 
                         // Check if the parent protocol is in our declared conformances
+                        // Skip this check if protocol has no required methods - conformance analyzer will handle
                         if !declared_protocol_ids.contains(&parent_id) {
-                            let child_name = protocol_symbol.metadata().name().value.clone();
-                            let parent_name = parent_protocol.metadata().name().value.clone();
-                            let struct_name = symbol.metadata().name().value.clone();
+                            // Use the ProtocolRequiredMethods query to check if there are actually required methods
+                            // If all methods have default implementations, we don't need explicit conformance
+                            let required_methods = ctx.model.query(ProtocolRequiredMethods {
+                                protocol_id: parent_id,
+                            });
 
-                            ctx.diagnostics
-                                .throw(MissingParentProtocolConformanceError {
-                                    span: symbol.metadata().span().clone(),
-                                    struct_name,
-                                    child_protocol: child_name,
-                                    parent_protocol: parent_name,
-                                });
+                            // Only report error if there are actually methods that need to be implemented
+                            if !required_methods.is_empty() {
+                                let child_name = protocol_symbol.metadata().name().value.clone();
+                                let parent_name = parent_protocol.metadata().name().value.clone();
+                                let struct_name = symbol.metadata().name().value.clone();
+
+                                ctx.diagnostics
+                                    .throw(MissingParentProtocolConformanceError {
+                                        span: symbol.metadata().span().clone(),
+                                        struct_name,
+                                        child_protocol: child_name,
+                                        parent_protocol: parent_name,
+                                    });
+                            }
                         }
                     }
                 }

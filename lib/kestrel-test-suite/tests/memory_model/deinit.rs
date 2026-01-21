@@ -4,7 +4,6 @@
 //! - Deinit parsing and semantic binding
 //! - DeinitBehavior attachment to parent structs
 //! - Duplicate deinit error detection
-//! - Copyable + deinit warning
 //! - Automatic deinit insertion at scope exit
 //!
 //! NOTE: Currently, deinit bodies with statements (e.g., `deinit { let x = 1 }`)
@@ -29,7 +28,7 @@ mod basic_deinit {
             import Prelude
             
             struct Handle: not Copyable {
-                var fd: Int
+                var fd: lang.i64
                 
                 deinit {}
             }
@@ -49,8 +48,8 @@ mod basic_deinit {
         Test::new(
             r#"module Test
             struct Point {
-                var x: Int
-                var y: Int
+                var x: lang.i64
+                var y: lang.i64
             }
         "#,
         )
@@ -70,9 +69,9 @@ mod basic_deinit {
             import Prelude
             
             struct Resource: not Copyable {
-                var id: Int
+                var id: lang.i64
                 
-                init(id: Int) {
+                init(id: lang.i64) {
                     self.id = id
                 }
                 
@@ -96,7 +95,7 @@ mod basic_deinit {
             import Prelude
             
             struct Handle: not Copyable {
-                var fd: Int
+                var fd: lang.i64
                 
                 deinit {}
             }
@@ -126,7 +125,7 @@ mod duplicate_deinit {
             import Prelude
             
             struct Handle: not Copyable {
-                var fd: Int
+                var fd: lang.i64
                 
                 deinit {}
                 
@@ -145,7 +144,7 @@ mod duplicate_deinit {
             import Prelude
             
             struct Handle: not Copyable {
-                var fd: Int
+                var fd: lang.i64
                 
                 deinit {}
                 deinit {}
@@ -157,26 +156,26 @@ mod duplicate_deinit {
 }
 
 // =============================================================================
-// COPYABLE + DEINIT WARNING
+// COPYABLE + DEINIT
 // =============================================================================
 
 mod copyable_with_deinit {
     use super::*;
 
     #[test]
-    fn copyable_struct_with_deinit_warning() {
-        // A Copyable struct with deinit should emit a warning
+    fn copyable_struct_with_deinit_compiles() {
+        // A Copyable struct with deinit should compile without warning
         Test::new(
             r#"module Test
             struct Counter {
-                var count: Int
-                
+                var count: lang.i64
+
                 deinit {}
             }
         "#,
         )
-        .expect(Compiles) // Should compile (warning, not error)
-        .expect(HasWarning("is Copyable but has deinit"))
+        .expect(Compiles)
+        .expect(NoWarnings)
         .expect(
             Symbol::new("Counter")
                 .is(SymbolKind::Struct)
@@ -191,10 +190,10 @@ mod copyable_with_deinit {
         Test::new(
             r#"module Test
             import Prelude
-            
+
             struct Handle: not Copyable {
-                var fd: Int
-                
+                var fd: lang.i64
+
                 deinit {}
             }
         "#,
@@ -215,14 +214,14 @@ mod copyable_with_deinit {
         Test::new(
             r#"module Test
             import Prelude
-            
+
             struct Handle: not Copyable {
-                var fd: Int
+                var fd: lang.i64
             }
-            
+
             struct Wrapper {
                 var handle: Handle
-                
+
                 deinit {}
             }
         "#,
@@ -253,9 +252,8 @@ mod deinit_with_features {
             import Prelude
             
             struct Connection: not Copyable {
-                var host: String
-                var port: Int
-                var connected: Bool
+                var host: lang.str                var port: lang.i64
+                var connected: lang.i1
                 
                 deinit {}
             }
@@ -280,7 +278,7 @@ mod deinit_with_features {
             protocol Resource {}
             
             struct Handle: Resource, not Copyable {
-                var fd: Int
+                var fd: lang.i64
                 
                 deinit {}
             }
@@ -326,11 +324,11 @@ mod deinit_statement {
             import Prelude
             
             struct Handle: not Copyable {
-                var fd: Int
+                var fd: lang.i64
                 deinit {}
             }
             
-            func getId(h: Handle) -> Int {
+            func getId(h: Handle) -> lang.i64 {
                 return h.fd
             }
             
@@ -365,7 +363,7 @@ mod deinit_statement {
             import Prelude
             
             struct Handle: not Copyable {
-                var fd: Int
+                var fd: lang.i64
                 deinit {}
             }
             
@@ -407,11 +405,11 @@ mod deinit_statement {
     //         protocol Copyable {}
     //
     //         struct Handle: not Copyable {
-    //             var fd: Int
+    //             var fd: lang.i64
     //             deinit {}
     //         }
     //
-    //         func example() -> Int {
+    //         func example() -> lang.i64 {
     //             var handle = Handle(fd: 42);
     //             deinit handle;
     //             handle = Handle(fd: 100);  // Reassign
@@ -430,7 +428,7 @@ mod deinit_statement {
             import Prelude
             
             struct Handle: not Copyable {
-                var fd: Int
+                var fd: lang.i64
                 deinit {}
             }
             
@@ -454,26 +452,27 @@ mod automatic_deinit {
 
     #[test]
     fn basic_scope_exit_deinit() {
-        // A non-copyable local with deinit should get a Deinit statement at scope exit
+        // A non-copyable local with deinit should get a deinit call at scope exit
         Test::new(
             r#"module Test
             import Prelude
-            
+
             struct Handle: not Copyable {
-                var fd: Int
+                var fd: lang.i64
                 deinit {}
             }
-            
+
             func example() {
                 let handle = Handle(fd: 42);
             }
         "#,
         )
         .expect(Compiles)
-        .expect(
-            MirFunction::new("Test.example")
-                .any_block(|b| b.has_statement(StatementPattern::AnyDeinit)),
-        );
+        .expect(MirFunction::new("Test.example").any_block(|b| {
+            b.has_statement(StatementPattern::DeinitCall {
+                ty: "Test.Handle".to_string(),
+            })
+        }));
     }
 
     #[test]
@@ -484,7 +483,7 @@ mod automatic_deinit {
         Test::new(
             r#"module Test
             struct Counter {
-                var count: Int
+                var count: lang.i64
             }
             
             func example() {
@@ -503,7 +502,7 @@ mod automatic_deinit {
             import Prelude
             
             struct Handle: not Copyable {
-                var fd: Int
+                var fd: lang.i64
                 deinit {}
             }
             
@@ -533,7 +532,7 @@ mod automatic_deinit {
             import Prelude
             
             struct Handle: not Copyable {
-                var fd: Int
+                var fd: lang.i64
                 deinit {}
             }
             
@@ -563,11 +562,11 @@ mod automatic_deinit {
             import Prelude
             
             struct Handle: not Copyable {
-                var fd: Int
+                var fd: lang.i64
                 deinit {}
             }
             
-            func example() -> Int {
+            func example() -> lang.i64 {
                 let handle = Handle(fd: 42);
                 return 0;
             }
@@ -589,7 +588,7 @@ mod automatic_deinit {
             import Prelude
             
             struct Handle: not Copyable {
-                var fd: Int
+                var fd: lang.i64
                 deinit {}
             }
             
@@ -617,11 +616,11 @@ mod automatic_deinit {
             import Prelude
             
             struct Handle: not Copyable {
-                var fd: Int
+                var fd: lang.i64
                 deinit {}
             }
             
-            func example(cond: Bool) {
+            func example(cond: lang.i1) {
                 if cond {
                     let h1 = Handle(fd: 1);
                 } else {
@@ -650,7 +649,7 @@ mod automatic_deinit {
             import Prelude
             
             struct Handle: not Copyable {
-                var fd: Int
+                var fd: lang.i64
                 deinit {}
             }
             
@@ -684,7 +683,7 @@ mod automatic_deinit {
             import Prelude
             
             struct Handle: not Copyable {
-                var fd: Int
+                var fd: lang.i64
                 deinit {}
             }
             
@@ -692,11 +691,11 @@ mod automatic_deinit {
                 return Handle(fd: 42);
             }
             
-            func useRef(handle h: Handle) -> Int {
+            func useRef(handle h: Handle) -> lang.i64 {
                 return h.fd
             }
             
-            func example() -> Int {
+            func example() -> lang.i64 {
                 // makeHandle() creates a temp, passed by ref to useRef
                 // The temp should be deinited after this statement
                 let result = useRef(handle: makeHandle());
@@ -720,7 +719,7 @@ mod automatic_deinit {
             import Prelude
             
             struct Handle: not Copyable {
-                var fd: Int
+                var fd: lang.i64
                 deinit {}
             }
             
@@ -754,13 +753,13 @@ mod automatic_deinit {
             import Prelude
             
             struct Handle: not Copyable {
-                var fd: Int
+                var fd: lang.i64
                 deinit {}
             }
             
             func consume(consuming h: Handle) {}
             
-            func example(cond: Bool) {
+            func example(cond: lang.i1) {
                 let handle = Handle(fd: 42);
                 if cond {
                     consume(handle);  // moved here
@@ -787,13 +786,13 @@ mod automatic_deinit {
             import Prelude
             
             struct Handle: not Copyable {
-                var fd: Int
+                var fd: lang.i64
                 deinit {}
             }
             
             func consume(consuming h: Handle) {}
             
-            func example(cond: Bool) {
+            func example(cond: lang.i1) {
                 let handle = Handle(fd: 42);
                 if cond {
                     consume(handle);  // moved here - flag should be false
@@ -819,13 +818,13 @@ mod automatic_deinit {
             import Prelude
             
             struct Handle: not Copyable {
-                var fd: Int
+                var fd: lang.i64
                 deinit {}
             }
             
             func consume(consuming h: Handle) {}
             
-            func example(cond: Bool) {
+            func example(cond: lang.i1) {
                 let handle = Handle(fd: 42);
                 if cond {
                     consume(handle);  // moved here
@@ -858,15 +857,15 @@ mod automatic_deinit {
             import Prelude
             
             struct Handle: not Copyable {
-                var fd: Int
+                var fd: lang.i64
                 deinit {}
             }
             
-            func getVal(h: Handle) -> Int {
+            func getVal(h: Handle) -> lang.i64 {
                 return h.fd
             }
             
-            func example(cond: Bool) {
+            func example(cond: lang.i1) {
                 let handle = Handle(fd: 42);
                 if cond {
                     let x = getVal(handle);  // borrowed, not moved
@@ -908,7 +907,7 @@ mod enum_deinit {
             import Prelude
             
             struct Handle: not Copyable {
-                var fd: Int
+                var fd: lang.i64
                 deinit {}
             }
             
@@ -939,13 +938,13 @@ mod enum_deinit {
             protocol Copyable {}
             
             enum Value {
-                case int(val: Int)
-                case pair(a: Int, b: Int)
+                case Int(val: lang.i64)
+                case pair(a: lang.i64, b: lang.i64)
                 case none
             }
-            
+
             func example() {
-                let v = Value.int(val: 42);
+                let v = Value.Int(val: 42);
             }
         "#,
         )
@@ -969,7 +968,7 @@ mod enum_deinit {
     //         protocol Copyable {}
     //
     //         enum Resource: not Copyable {
-    //             case active(val: Int)
+    //             case active(val: lang.i64)
     //             case inactive
     //
     //             deinit {}
@@ -996,7 +995,7 @@ mod enum_deinit {
             import Prelude
             
             struct Inner: not Copyable {
-                var id: Int
+                var id: lang.i64
                 deinit {}
             }
             

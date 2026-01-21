@@ -20,6 +20,91 @@ fn is_valid_identifier(lex: &mut logos::Lexer<Token>) -> bool {
     chars.all(|c| c.is_xid_continue())
 }
 
+/// Parse a raw string literal that starts with 3+ quotes and ends with the same number.
+/// The token has already matched the initial `"""`, so we need to:
+/// 1. Count any additional opening quotes (consecutive quotes at the start of remainder)
+/// 2. Determine the total quote count for this raw string
+/// 3. Find the matching closing quotes
+///
+/// For `""""content""""` (4-quote raw string):
+/// - regex matches `"""`
+/// - remainder is `"content""""`
+/// - 1 more quote at start → quote_count = 4
+/// - Content starts after that extra quote
+/// - We scan until we find 4 consecutive quotes
+///
+/// For `""""""` (empty 3-quote raw string):
+/// - regex matches `"""`
+/// - remainder is `"""`
+/// - If those 3 quotes are immediately followed by non-quote or EOF, they are closing quotes
+/// - quote_count = 3, empty content
+fn parse_raw_string(lex: &mut logos::Lexer<Token>) -> bool {
+    let remainder = lex.remainder();
+    let mut chars = remainder.chars().peekable();
+    let mut offset = 0;
+
+    // Count consecutive quotes at the start (these are additional opening quotes)
+    let mut additional_quotes = 0;
+    while chars.peek() == Some(&'"') {
+        // Look ahead: if this quote followed by (additional_quotes + 3) more quotes
+        // would give us exactly quote_count closing quotes, we should stop counting.
+        // The heuristic: if the next non-quote char comes right after, these aren't opening quotes.
+
+        // For now, use simple heuristic: if we see N quotes followed by non-quote or EOF,
+        // and N >= 3 (the initial match), then N total quotes form an empty raw string.
+        // Otherwise, continue counting as opening quotes.
+
+        // Actually, let's use a different approach: peek ahead to see if stopping now
+        // would result in a valid closing sequence immediately.
+        let peek_chars = remainder[additional_quotes..].chars();
+        let mut consecutive = 0;
+        for c in peek_chars.clone() {
+            if c == '"' {
+                consecutive += 1;
+            } else {
+                break;
+            }
+        }
+
+        // If we're at a point where the remaining quotes (after additional_quotes additional opening)
+        // exactly equals the quote count we'd need, it's an empty string
+        let potential_quote_count = 3 + additional_quotes;
+        if consecutive == potential_quote_count {
+            // This means we have exactly the right number of closing quotes for an empty string
+            // Don't count more opening quotes
+            break;
+        }
+
+        chars.next();
+        offset += 1;
+        additional_quotes += 1;
+    }
+
+    let quote_count = 3 + additional_quotes;
+
+    // Now scan for the closing sequence of `quote_count` quotes
+    let mut consecutive_quotes = 0;
+
+    for c in chars {
+        offset += c.len_utf8();
+
+        if c == '"' {
+            consecutive_quotes += 1;
+            if consecutive_quotes == quote_count {
+                // Found the closing sequence
+                lex.bump(offset);
+                return true;
+            }
+        } else {
+            consecutive_quotes = 0;
+        }
+    }
+
+    // Unterminated raw string - consume everything we've seen
+    lex.bump(offset);
+    true
+}
+
 /// Parse nested block comments and return the full comment as a token
 fn parse_block_comment(lex: &mut logos::Lexer<Token>) -> bool {
     let remainder = lex.remainder();
@@ -78,8 +163,14 @@ pub enum Token {
     #[regex(r"[\p{L}_][\p{L}\p{N}_]*", is_valid_identifier)]
     Identifier,
 
-    #[regex(r#""([^"\\]|\\.)*""#)]
+    // String literals - allow backslash-newline for line continuation
+    #[regex(r#""([^"\\]|\\(.|\r|\n))*""#)]
     String,
+
+    // Raw string literals: """content""" or """"content"""" etc.
+    // Must have higher priority than String to match first
+    #[regex(r#"""""#, parse_raw_string, priority = 2)]
+    RawString,
 
     // Integer literals with optional underscores: 1_000_000, 0xFF_FF, 0b1010_1010, 0o755_000
     #[regex(r"0[xX][0-9a-fA-F][0-9a-fA-F_]*|0[bB][01][01_]*|0[oO][0-7][0-7_]*|[0-9][0-9_]*")]
@@ -199,6 +290,9 @@ pub enum Token {
     #[token("return")]
     Return,
 
+    #[token("try")]
+    Try,
+
     #[token("while")]
     While,
 
@@ -207,6 +301,16 @@ pub enum Token {
 
     #[token("guard")]
     Guard,
+
+    // ===== Property Accessor Keywords =====
+    #[token("get")]
+    Get,
+
+    #[token("set")]
+    Set,
+
+    #[token("subscript")]
+    Subscript,
 
     // ===== Braces =====
     #[token("(")]
@@ -658,5 +762,44 @@ mod tests {
         assert_eq!(tokens[0].value, Token::In);
         assert_eq!(tokens[1].value, Token::Identifier); // inside
         assert_eq!(tokens[2].value, Token::Identifier); // inner
+    }
+
+    #[test]
+    fn test_raw_strings() {
+        // Basic raw string with 3 quotes
+        let source = r#""""hello world""""#;
+        let tokens = filter_trivia(lex(source, 0).collect());
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0].value, Token::RawString);
+
+        // Raw string with newlines
+        let source = "\"\"\"hello\nworld\"\"\"";
+        let tokens = filter_trivia(lex(source, 0).collect());
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0].value, Token::RawString);
+
+        // Raw string with 4 quotes (allows 3 quotes inside)
+        let source = r#"""""hello """ world"""""#;
+        let tokens = filter_trivia(lex(source, 0).collect());
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0].value, Token::RawString);
+
+        // Raw string with backslashes (no escape processing)
+        let source = r#""""hello\nworld""""#;
+        let tokens = filter_trivia(lex(source, 0).collect());
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0].value, Token::RawString);
+
+        // Empty raw string
+        let source = r#""""""""#;
+        let tokens = filter_trivia(lex(source, 0).collect());
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0].value, Token::RawString);
+
+        // Regular string is still recognized
+        let source = r#""hello""#;
+        let tokens = filter_trivia(lex(source, 0).collect());
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0].value, Token::String);
     }
 }

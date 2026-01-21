@@ -10,7 +10,7 @@ use semantic_tree::symbol::Symbol;
 use kestrel_syntax_tree::utils::{extract_name, find_child, get_node_span};
 
 use crate::builder::Builder;
-use kestrel_semantic_tree::behavior::visibility::{Visibility, find_visibility_scope};
+use kestrel_semantic_tree::behavior::visibility::find_visibility_scope;
 
 /// Builder for enum case declarations.
 ///
@@ -35,13 +35,13 @@ impl Builder for EnumCaseBuilder {
         let full_span = get_node_span(syntax, file_id);
 
         // Enum cases inherit visibility from the parent enum
-        // For now, we use internal visibility (same as default)
-        let visibility_scope = find_visibility_scope(None, parent, root);
-        let visibility_behavior = VisibilityBehavior::new(
-            Some(Visibility::Internal),
-            name_span.clone(),
-            visibility_scope,
-        );
+        let parent_visibility = parent
+            .and_then(|p| p.metadata().get_behavior::<VisibilityBehavior>())
+            .and_then(|v| v.visibility().copied());
+
+        let visibility_scope = find_visibility_scope(parent_visibility.as_ref(), parent, root);
+        let visibility_behavior =
+            VisibilityBehavior::new(parent_visibility, name_span.clone(), visibility_scope);
 
         let name = Spanned::new(name_str, name_span);
 

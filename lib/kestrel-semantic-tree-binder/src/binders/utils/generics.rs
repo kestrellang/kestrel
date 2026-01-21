@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use kestrel_semantic_model::{ResolveTypePath, SymbolFor, TypePathResolution};
 use kestrel_semantic_tree::behavior::generics::GenericsBehavior;
+use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::symbol::protocol::FlattenedProtocolBehavior;
 use kestrel_semantic_tree::symbol::type_parameter::TypeParameterSymbol;
@@ -12,7 +13,9 @@ use semantic_tree::symbol::{Symbol, SymbolId};
 
 use crate::binders::utils::type_paths::resolve_protocol_bound_path;
 use crate::declaration_binder::BindingContext;
-use crate::diagnostics::WhereClauseAssociatedTypeNotFoundError;
+use crate::diagnostics::{
+    DuplicateTypeParameterError, ShadowedTypeParameterError, WhereClauseAssociatedTypeNotFoundError,
+};
 use crate::resolution::type_resolver::{TypeSyntaxContext, resolve_type_from_ty_node};
 use kestrel_syntax_tree::utils::{extract_path_segments, find_child, get_node_span};
 
@@ -41,8 +44,21 @@ pub(crate) fn resolve_generics(
         })
         .collect();
 
+    // Check for duplicate and shadowed type parameter names
+    check_duplicate_type_parameters(&type_parameters, &symbol, ctx);
+
+    // Collect outer type parameters for where clause resolution.
+    // This allows method-level where clauses to reference parent type parameters.
+    // E.g., `func clone() -> Set[T, A] where T: Cloneable` can reference struct's T
+    let outer_type_params = collect_outer_type_parameters(&symbol);
+    let all_type_params: Vec<_> = type_parameters
+        .iter()
+        .chain(outer_type_params.iter())
+        .cloned()
+        .collect();
+
     let where_clause =
-        resolve_where_clause(syntax, source, file_id, context_id, ctx, &type_parameters);
+        resolve_where_clause(syntax, source, file_id, context_id, ctx, &all_type_params);
     GenericsBehavior::new(type_parameters, where_clause)
 }
 
@@ -113,6 +129,23 @@ fn resolve_type_bound(
         let path_segments = extract_path_from_node(&target_node);
         let target_span = get_node_span(&target_node, file_id);
 
+        // Check if this is a Self.Item: Protocol constraint (for protocol extensions)
+        if !path_segments.is_empty() && path_segments[0] == "Self" {
+            let bounds =
+                resolve_protocol_bounds_from_type_bound(syntax, source, file_id, context_id, ctx);
+            if bounds.is_empty() {
+                return None;
+            }
+
+            // Create SelfBound with the associated type path (everything after "Self")
+            let associated_type_path: Vec<String> = path_segments[1..].to_vec();
+            return Some(Constraint::self_bound(
+                associated_type_path,
+                target_span,
+                bounds,
+            ));
+        }
+
         if path_segments.len() >= 2 {
             // If the first segment is a type parameter, validate that the associated type exists
             // on at least one protocol bound (when possible).
@@ -142,7 +175,7 @@ fn resolve_type_bound(
         ));
     }
 
-    // Simple bound: T: Protocol or T: not Copyable
+    // Simple bound: T: Protocol or T: not Copyable or Self: Protocol
     let name_node = find_child(syntax, SyntaxKind::Name)?;
     let name_token = name_node
         .children_with_tokens()
@@ -155,6 +188,24 @@ fn resolve_type_bound(
         file_id,
         (text_range.start().into())..(text_range.end().into()),
     );
+
+    // Check if this is a Self: Protocol constraint (for protocol extensions)
+    if param_name == "Self" {
+        // Check if this is a negative bound (Self: not Copyable) - not typical but handle it
+        if find_child(syntax, SyntaxKind::NegativeConformance).is_some() {
+            // For now, negative Self bounds are not supported - fall through to regular handling
+            // which will create an unresolved constraint
+        } else {
+            let bounds =
+                resolve_protocol_bounds_from_type_bound(syntax, source, file_id, context_id, ctx);
+            if bounds.is_empty() {
+                return None;
+            }
+
+            // Create SelfBound with empty associated type path (just Self: Protocol)
+            return Some(Constraint::self_bound(Vec::new(), param_span, bounds));
+        }
+    }
 
     let param_id = type_params
         .iter()
@@ -319,7 +370,7 @@ fn resolve_path_in_where_clause(
                     match c {
                         Constraint::TypeBound { bounds, .. } => {
                             Some(bounds.iter().collect::<Vec<_>>())
-                        }
+                        },
                         _ => None,
                     }
                 } else {
@@ -335,8 +386,7 @@ fn resolve_path_in_where_clause(
                 for child in symbol.metadata().children() {
                     if child.metadata().kind() == KestrelSymbolKind::AssociatedType
                         && child.metadata().name().value == *assoc_type_name
-                    {
-                        if let Ok(assoc_sym) = child
+                        && let Ok(assoc_sym) = child
                             .clone()
                             .into_any_arc()
                             .downcast::<kestrel_semantic_tree::symbol::associated_type::AssociatedTypeSymbol>()
@@ -344,22 +394,19 @@ fn resolve_path_in_where_clause(
                             let container = Ty::type_parameter(type_param.clone(), span.clone());
                             return Ty::qualified_associated_type(assoc_sym, container, span.clone());
                         }
-                    }
                 }
 
                 if let Some(flattened) = symbol
                     .metadata()
                     .get_behavior::<FlattenedProtocolBehavior>()
+                    && let Some(flattened_assoc) = flattened.associated_types().get(assoc_type_name)
                 {
-                    if let Some(flattened_assoc) = flattened.associated_types().get(assoc_type_name)
-                    {
-                        let container = Ty::type_parameter(type_param.clone(), span.clone());
-                        return Ty::qualified_associated_type(
-                            flattened_assoc.symbol.clone(),
-                            container,
-                            span.clone(),
-                        );
-                    }
+                    let container = Ty::type_parameter(type_param.clone(), span.clone());
+                    return Ty::qualified_associated_type(
+                        flattened_assoc.symbol.clone(),
+                        container,
+                        span.clone(),
+                    );
                 }
             }
         }
@@ -523,10 +570,10 @@ fn extract_path_from_node(node: &SyntaxNode) -> Vec<String> {
         for child in path_node.children() {
             if child.kind() == SyntaxKind::PathElement {
                 for elem in child.children_with_tokens() {
-                    if let Some(token) = elem.into_token() {
-                        if token.kind() == SyntaxKind::Identifier {
-                            segments.push(token.text().to_string());
-                        }
+                    if let Some(token) = elem.into_token()
+                        && token.kind() == SyntaxKind::Identifier
+                    {
+                        segments.push(token.text().to_string());
                     }
                 }
             }
@@ -534,4 +581,113 @@ fn extract_path_from_node(node: &SyntaxNode) -> Vec<String> {
     }
 
     segments
+}
+
+/// Check for duplicate type parameter names within the same list,
+/// and for shadowing of type parameters from outer scopes.
+fn check_duplicate_type_parameters(
+    type_params: &[Arc<TypeParameterSymbol>],
+    symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+    ctx: &mut BindingContext,
+) {
+    use std::collections::HashMap;
+
+    // Check for duplicates within the same parameter list
+    let mut seen: HashMap<String, usize> = HashMap::new();
+
+    for (i, param) in type_params.iter().enumerate() {
+        let name = param.metadata().name().value.clone();
+        if let Some(&first_idx) = seen.get(&name) {
+            let first = &type_params[first_idx];
+            ctx.diagnostics.throw(DuplicateTypeParameterError {
+                name,
+                first_span: first.metadata().name().span.clone(),
+                duplicate_span: param.metadata().name().span.clone(),
+            });
+        } else {
+            seen.insert(name, i);
+        }
+    }
+
+    // Check for shadowing from outer scopes
+    let outer_type_params = collect_outer_type_parameters(symbol);
+
+    // For static methods, we allow shadowing of type parameters from the containing struct/enum
+    // because static methods don't have access to the instance's type parameters.
+    let allow_parent_shadowing = is_static_method(symbol);
+
+    for param in type_params {
+        let name = &param.metadata().name().value;
+        if let Some(outer_param) = outer_type_params
+            .iter()
+            .find(|p| &p.metadata().name().value == name)
+        {
+            // If this is a static method and the outer param is from the immediate parent (struct/enum),
+            // skip the shadowing error
+            if allow_parent_shadowing && is_from_immediate_parent(outer_param, symbol) {
+                continue;
+            }
+
+            ctx.diagnostics.throw(ShadowedTypeParameterError {
+                name: name.clone(),
+                outer_span: outer_param.metadata().name().span.clone(),
+                inner_span: param.metadata().name().span.clone(),
+            });
+        }
+    }
+}
+
+/// Collect type parameters from all ancestor scopes.
+fn collect_outer_type_parameters(
+    symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+) -> Vec<Arc<TypeParameterSymbol>> {
+    let mut result = Vec::new();
+    let mut current = symbol.metadata().parent();
+
+    while let Some(parent) = current {
+        // Collect type parameters from this ancestor
+        let children: Vec<Arc<dyn Symbol<KestrelLanguage>>> = parent.metadata().children();
+        for child in children {
+            if child.metadata().kind() == KestrelSymbolKind::TypeParameter
+                && let Ok(type_param) = child.downcast_arc::<TypeParameterSymbol>()
+            {
+                result.push(type_param);
+            }
+        }
+        current = parent.metadata().parent();
+    }
+
+    result
+}
+
+/// Check if the symbol is a static method.
+fn is_static_method(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> bool {
+    use kestrel_semantic_tree::symbol::function::FunctionSymbol;
+
+    if symbol.metadata().kind() != KestrelSymbolKind::Function {
+        return false;
+    }
+
+    if let Ok(func) = symbol.clone().downcast_arc::<FunctionSymbol>() {
+        func.is_static()
+    } else {
+        false
+    }
+}
+
+/// Check if a type parameter is from the immediate parent of the symbol.
+fn is_from_immediate_parent(
+    type_param: &Arc<TypeParameterSymbol>,
+    symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+) -> bool {
+    let Some(parent) = symbol.metadata().parent() else {
+        return false;
+    };
+
+    // Check if the type parameter's parent is the same as symbol's parent
+    if let Some(tp_parent) = type_param.metadata().parent() {
+        tp_parent.metadata().id() == parent.metadata().id()
+    } else {
+        false
+    }
 }

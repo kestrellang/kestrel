@@ -10,6 +10,7 @@ pub struct UnreachableCodeWarning {
 }
 
 #[derive(Clone, Copy)]
+#[allow(clippy::enum_variant_names)]
 pub enum UnreachableReason {
     AfterReturn,
     AfterBreak,

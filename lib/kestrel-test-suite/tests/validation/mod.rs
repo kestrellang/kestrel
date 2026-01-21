@@ -12,6 +12,7 @@
 
 mod cycles;
 mod dead_code;
+mod duplicate_callable;
 mod exhaustive_return;
 mod initializers;
 mod misc;

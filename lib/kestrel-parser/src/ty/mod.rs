@@ -196,6 +196,7 @@ pub(crate) fn ty_parser<'tokens>()
                         TyVariant::Tuple(lparen, types, rparen)
                     }
                 })
+                .boxed()
         };
 
         // Path type with optional type arguments: Foo or Foo[Int, String]
@@ -214,7 +215,8 @@ pub(crate) fn ty_parser<'tokens>()
                     .then_ignore(just(Token::RBracket))
                     .or_not(),
             )
-            .map(|(segments, args)| TyVariant::Path { segments, args });
+            .map(|(segments, args)| TyVariant::Path { segments, args })
+            .boxed();
 
         // Array type: [T]
         let array = skip_trivia()
@@ -226,10 +228,16 @@ pub(crate) fn ty_parser<'tokens>()
             )
             .map(|((lbracket, element_ty), rbracket)| {
                 TyVariant::Array(lbracket, Box::new(element_ty), rbracket)
-            });
+            })
+            .boxed();
 
         // Try never first, then inferred, then paren types, then array, then path
-        let base_ty = never.or(inferred).or(paren_types).or(array).or(path);
+        let base_ty = never
+            .or(inferred)
+            .or(paren_types)
+            .or(array)
+            .or(path)
+            .boxed();
 
         // Optional modifier: T?
         base_ty
@@ -245,6 +253,7 @@ pub(crate) fn ty_parser<'tokens>()
                     base
                 }
             })
+            .boxed()
     })
 }
 
@@ -262,13 +271,13 @@ where
     match ty_parser().parse(input).into_result() {
         Ok(variant) => {
             emit_ty_variant(sink, &variant);
-        }
+        },
         Err(errors) => {
             for error in errors {
                 let span = error.span();
-                sink.error_at(format!("Parse error: {:?}", error), to_kestrel_span(*span));
+                sink.error_at(format!("Parse error: {:?}", error), *span);
             }
-        }
+        },
     }
 }
 
@@ -277,16 +286,16 @@ pub(crate) fn emit_ty_variant(sink: &mut EventSink, variant: &TyVariant) {
     match variant {
         TyVariant::Unit(lparen_span, rparen_span) => {
             emit_unit_type(sink, lparen_span.clone(), rparen_span.clone());
-        }
+        },
         TyVariant::Never(bang_span) => {
             emit_never_type(sink, bang_span.clone());
-        }
+        },
         TyVariant::Inferred(underscore_span) => {
             emit_inferred_type(sink, underscore_span.clone());
-        }
+        },
         TyVariant::Tuple(lparen, types, rparen) => {
             emit_tuple_type(sink, lparen.clone(), types, rparen.clone());
-        }
+        },
         TyVariant::Function(lparen, params, rparen, arrow, return_ty) => {
             emit_function_type(
                 sink,
@@ -296,16 +305,16 @@ pub(crate) fn emit_ty_variant(sink: &mut EventSink, variant: &TyVariant) {
                 arrow.clone(),
                 return_ty,
             );
-        }
+        },
         TyVariant::Path { segments, args } => {
             emit_path_type(sink, segments, args.as_ref());
-        }
+        },
         TyVariant::Array(lbracket, element_ty, rbracket) => {
             emit_array_type(sink, lbracket.clone(), element_ty, rbracket.clone());
-        }
+        },
         TyVariant::Optional(base_ty, question_span) => {
             emit_optional_type(sink, base_ty, question_span.clone());
-        }
+        },
     }
 }
 
@@ -364,7 +373,11 @@ fn emit_path(sink: &mut EventSink, segments: &[Span]) {
     for (i, span) in segments.iter().enumerate() {
         if i > 0 {
             // Add the dot separator (between path elements)
-            sink.add_token(SyntaxKind::Dot, Span::from(span.start - 1..span.start));
+            let dot_start = span.start.saturating_sub(1);
+            sink.add_token(
+                SyntaxKind::Dot,
+                Span::new(span.file_id, dot_start..span.start),
+            );
         }
 
         // Wrap each identifier in a PathElement node
@@ -498,13 +511,13 @@ mod tests {
             .map(|spanned| (spanned.value, spanned.span))
             .collect();
 
-        let mut sink = EventSink::new();
+        let mut sink = EventSink::new(0);
         parse_ty(source, tokens.into_iter(), &mut sink);
 
         let tree = TreeBuilder::new(source, sink.into_events()).build();
         TyExpression {
             syntax: tree,
-            span: Span::from(0..source.len()),
+            span: Span::new(0, 0..source.len()),
         }
     }
 

@@ -1,7 +1,7 @@
 //! Statements (operations within basic blocks).
 
 use crate::MirContext;
-use crate::function::{Immediate, Place, Value};
+use crate::function::{FloatBits, Immediate, Place, Value};
 use crate::id::{Id, Local, QualifiedName, Ty};
 use crate::metadata::{Metadata, Prior};
 use std::fmt;
@@ -150,11 +150,8 @@ pub enum Rvalue {
     /// `tuple (v0, v1, ...)`
     Tuple(Vec<Value>),
 
-    /// `array [v0, v1, ...]`
-    Array {
-        element_ty: Id<Ty>,
-        elements: Vec<Value>,
-    },
+    /// `stack_alloc <element_ty>, <count>` - allocate buffer on stack, returns pointer
+    StackAlloc { element_ty: Id<Ty>, count: Value },
 
     /// `enum Enum.Variant` or `enum Enum.Variant(payload...)`
     EnumVariant {
@@ -187,7 +184,7 @@ pub enum Rvalue {
     IntToString(Value),
 
     // === Pointer operations ===
-    /// `ptr.offset <ptr>, <offset>`
+    /// `ptr.offset <ptr>, <offset>` - byte offset
     PtrOffset { ptr: Value, offset: Value },
     /// `ptr.to.ref <value>`
     PtrToRef(Value),
@@ -195,6 +192,40 @@ pub enum Rvalue {
     PtrToRefMut(Value),
     /// `ref.to.ptr <value>`
     RefToPtr(Value),
+    /// `ptr.null` - create null pointer
+    PtrNull { ty: Id<Ty> },
+    /// `ptr.from_address <addr>` - create pointer from integer address
+    PtrFromAddress { ty: Id<Ty>, address: Value },
+    /// `ptr.to_address <ptr>` - get address from pointer as integer
+    PtrToAddress { ptr: Value },
+    /// `ptr.read <ptr>` - load value from pointer
+    PtrRead { ptr: Value, ty: Id<Ty> },
+    /// `ptr.write <ptr>, <value>` - store value through pointer
+    PtrWrite { ptr: Value, value: Value },
+    /// `ptr.is_null <ptr>` - check if pointer is null
+    PtrIsNull { ptr: Value },
+    /// `ptr.cast <ptr>` - cast pointer to different type
+    PtrCast { ptr: Value, target_ty: Id<Ty> },
+    /// `sizeof <ty>` - size of type in bytes
+    SizeOf { ty: Id<Ty> },
+    /// `alignof <ty>` - alignment of type in bytes
+    AlignOf { ty: Id<Ty> },
+
+    // === Boolean (i1) intrinsics ===
+    /// `i1.eq <lhs>, <rhs>` - boolean equality
+    I1Eq { lhs: Value, rhs: Value },
+    /// `i1.and <lhs>, <rhs>` - boolean AND
+    I1And { lhs: Value, rhs: Value },
+    /// `i1.or <lhs>, <rhs>` - boolean OR
+    I1Or { lhs: Value, rhs: Value },
+    /// `i1.not <operand>` - boolean NOT
+    I1Not { operand: Value },
+
+    // === Atomic intrinsics ===
+    /// `atomic.add <ptr>, <delta>` - atomic fetch-add, returns old value
+    AtomicAdd { ptr: Value, delta: Value },
+    /// `atomic.sub <ptr>, <delta>` - atomic fetch-sub, returns old value
+    AtomicSub { ptr: Value, delta: Value },
 
     // === Callable operations ===
     /// `func.to.escaping path.to.function`
@@ -203,6 +234,25 @@ pub enum Rvalue {
     ApplyPartial {
         func: Id<QualifiedName>,
         captures: Vec<Value>,
+    },
+
+    // === Float intrinsics ===
+    /// Float constant: infinity or nan
+    FloatConst {
+        bits: FloatBits,
+        constant: FloatConstantKind,
+    },
+    /// Float predicate: is_nan or is_infinite
+    FloatPred {
+        bits: FloatBits,
+        pred: FloatPredicateKind,
+        operand: Value,
+    },
+    /// Float math unary operation
+    FloatMath {
+        bits: FloatBits,
+        op: FloatMathKind,
+        operand: Value,
     },
 }
 
@@ -321,6 +371,35 @@ pub enum CastKind {
     RefToImmut,
 }
 
+/// Float constant kinds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FloatConstantKind {
+    /// Positive infinity
+    Infinity,
+    /// NaN (Not a Number)
+    Nan,
+}
+
+/// Float predicate kinds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FloatPredicateKind {
+    /// Test if value is NaN
+    IsNan,
+    /// Test if value is infinite
+    IsInfinite,
+}
+
+/// Float math operation kinds (unary).
+/// Only includes operations supported natively by Cranelift.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FloatMathKind {
+    Floor,
+    Ceil,
+    Round,
+    Trunc,
+    Sqrt,
+}
+
 impl Statement {
     /// Create a new assignment statement.
     pub fn assign(dest: Place, rvalue: Rvalue) -> Self {
@@ -361,7 +440,7 @@ impl fmt::Display for StatementDisplay<'_> {
                     dest.display(self.ctx),
                     rvalue.display(self.ctx)
                 )
-            }
+            },
             StatementKind::Call { callee, args } => {
                 write!(f, "call {}", callee.display(self.ctx))?;
                 write!(f, "(")?;
@@ -372,18 +451,18 @@ impl fmt::Display for StatementDisplay<'_> {
                     write!(f, "{} {}", arg.mode, arg.value.display(self.ctx))?;
                 }
                 write!(f, ")")
-            }
+            },
             StatementKind::Deinit { place } => {
                 write!(f, "deinit {}", place.display(self.ctx))
-            }
+            },
             StatementKind::DeinitIf { place, flag } => {
                 let flag_name = &self.ctx.local(*flag).name;
                 write!(f, "deinit {} if %{}", place.display(self.ctx), flag_name)
-            }
+            },
             StatementKind::SetDeinitFlag { flag, value } => {
                 let flag_name = &self.ctx.local(*flag).name;
                 write!(f, "%{} = {}", flag_name, value)
-            }
+            },
         }
     }
 }
@@ -416,10 +495,10 @@ impl fmt::Display for RvalueDisplay<'_> {
                     lhs.display(self.ctx),
                     rhs.display(self.ctx)
                 )
-            }
+            },
             Rvalue::UnaryOp { op, operand } => {
                 write!(f, "{} {}", op.as_str(), operand.display(self.ctx))
-            }
+            },
             Rvalue::Construct { ty, fields } => {
                 write!(f, "construct {} {{ ", self.ctx.ty(*ty).display(self.ctx))?;
                 for (i, (name, value)) in fields.iter().enumerate() {
@@ -429,7 +508,7 @@ impl fmt::Display for RvalueDisplay<'_> {
                     write!(f, "{}: {}", name, value.display(self.ctx))?;
                 }
                 write!(f, " }}")
-            }
+            },
             Rvalue::Call { callee, args } => {
                 write!(f, "call {}", callee.display(self.ctx))?;
                 write!(f, "(")?;
@@ -440,7 +519,7 @@ impl fmt::Display for RvalueDisplay<'_> {
                     write!(f, "{} {}", arg.mode, arg.value.display(self.ctx))?;
                 }
                 write!(f, ")")
-            }
+            },
             Rvalue::Cast {
                 kind,
                 operand,
@@ -453,7 +532,7 @@ impl fmt::Display for RvalueDisplay<'_> {
                     operand.display(self.ctx),
                     self.ctx.ty(*target).display(self.ctx)
                 )
-            }
+            },
             Rvalue::StrPtr(v) => write!(f, "str.ptr {}", v.display(self.ctx)),
             Rvalue::StrLen(v) => write!(f, "str.len {}", v.display(self.ctx)),
             Rvalue::StrFromParts { ptr, len } => {
@@ -463,7 +542,7 @@ impl fmt::Display for RvalueDisplay<'_> {
                     ptr.display(self.ctx),
                     len.display(self.ctx)
                 )
-            }
+            },
             Rvalue::IntToString(v) => write!(f, "int.to_string {}", v.display(self.ctx)),
             Rvalue::PtrOffset { ptr, offset } => {
                 write!(
@@ -472,13 +551,13 @@ impl fmt::Display for RvalueDisplay<'_> {
                     ptr.display(self.ctx),
                     offset.display(self.ctx)
                 )
-            }
+            },
             Rvalue::PtrToRef(v) => write!(f, "ptr.to.ref {}", v.display(self.ctx)),
             Rvalue::PtrToRefMut(v) => write!(f, "ptr.to.ref_var {}", v.display(self.ctx)),
             Rvalue::RefToPtr(v) => write!(f, "ref.to.ptr {}", v.display(self.ctx)),
             Rvalue::FuncToEscaping(name) => {
                 write!(f, "func.to.escaping {}", self.ctx.name(*name))
-            }
+            },
             Rvalue::ApplyPartial { func, captures } => {
                 write!(f, "apply partial {}(", self.ctx.name(*func))?;
                 for (i, cap) in captures.iter().enumerate() {
@@ -488,7 +567,7 @@ impl fmt::Display for RvalueDisplay<'_> {
                     write!(f, "{}", cap.display(self.ctx))?;
                 }
                 write!(f, ")")
-            }
+            },
             Rvalue::Tuple(elements) => {
                 write!(f, "tuple (")?;
                 for (i, elem) in elements.iter().enumerate() {
@@ -498,20 +577,15 @@ impl fmt::Display for RvalueDisplay<'_> {
                     write!(f, "{}", elem.display(self.ctx))?;
                 }
                 write!(f, ")")
-            }
-            Rvalue::Array {
-                element_ty,
-                elements,
-            } => {
-                write!(f, "array[{}] [", self.ctx.ty(*element_ty).display(self.ctx))?;
-                for (i, elem) in elements.iter().enumerate() {
-                    if i > 0 {
-                        write!(f, ", ")?;
-                    }
-                    write!(f, "{}", elem.display(self.ctx))?;
-                }
-                write!(f, "]")
-            }
+            },
+            Rvalue::StackAlloc { element_ty, count } => {
+                write!(
+                    f,
+                    "stack_alloc[{}] {}",
+                    self.ctx.ty(*element_ty).display(self.ctx),
+                    count.display(self.ctx)
+                )
+            },
             Rvalue::EnumVariant {
                 enum_ty,
                 variant,
@@ -534,7 +608,143 @@ impl fmt::Display for RvalueDisplay<'_> {
                     write!(f, ")")?;
                 }
                 Ok(())
-            }
+            },
+            Rvalue::FloatConst { bits, constant } => {
+                let bits_str = match bits {
+                    FloatBits::F16 => "f16",
+                    FloatBits::F32 => "f32",
+                    FloatBits::F64 => "f64",
+                };
+                let const_str = match constant {
+                    FloatConstantKind::Infinity => "infinity",
+                    FloatConstantKind::Nan => "nan",
+                };
+                write!(f, "{}.{}", bits_str, const_str)
+            },
+            Rvalue::FloatPred {
+                bits,
+                pred,
+                operand,
+            } => {
+                let bits_str = match bits {
+                    FloatBits::F16 => "f16",
+                    FloatBits::F32 => "f32",
+                    FloatBits::F64 => "f64",
+                };
+                let pred_str = match pred {
+                    FloatPredicateKind::IsNan => "is_nan",
+                    FloatPredicateKind::IsInfinite => "is_infinite",
+                };
+                write!(f, "{}.{} {}", bits_str, pred_str, operand.display(self.ctx))
+            },
+            Rvalue::FloatMath { bits, op, operand } => {
+                let bits_str = match bits {
+                    FloatBits::F16 => "f16",
+                    FloatBits::F32 => "f32",
+                    FloatBits::F64 => "f64",
+                };
+                let op_str = match op {
+                    FloatMathKind::Floor => "floor",
+                    FloatMathKind::Ceil => "ceil",
+                    FloatMathKind::Round => "round",
+                    FloatMathKind::Trunc => "trunc",
+                    FloatMathKind::Sqrt => "sqrt",
+                };
+                write!(f, "{}.{} {}", bits_str, op_str, operand.display(self.ctx))
+            },
+            // Pointer intrinsic displays
+            Rvalue::PtrNull { ty } => {
+                write!(f, "ptr.null {}", self.ctx.ty(*ty).display(self.ctx))
+            },
+            Rvalue::PtrFromAddress { ty, address } => {
+                write!(
+                    f,
+                    "ptr.from_address {} {}",
+                    self.ctx.ty(*ty).display(self.ctx),
+                    address.display(self.ctx)
+                )
+            },
+            Rvalue::PtrToAddress { ptr } => {
+                write!(f, "ptr.to_address {}", ptr.display(self.ctx))
+            },
+            Rvalue::PtrRead { ptr, ty } => {
+                write!(
+                    f,
+                    "ptr.read {} {}",
+                    self.ctx.ty(*ty).display(self.ctx),
+                    ptr.display(self.ctx)
+                )
+            },
+            Rvalue::PtrWrite { ptr, value } => {
+                write!(
+                    f,
+                    "ptr.write {}, {}",
+                    ptr.display(self.ctx),
+                    value.display(self.ctx)
+                )
+            },
+            Rvalue::PtrIsNull { ptr } => {
+                write!(f, "ptr.is_null {}", ptr.display(self.ctx))
+            },
+            Rvalue::PtrCast { ptr, target_ty } => {
+                write!(
+                    f,
+                    "ptr.cast {} {}",
+                    self.ctx.ty(*target_ty).display(self.ctx),
+                    ptr.display(self.ctx)
+                )
+            },
+            Rvalue::SizeOf { ty } => {
+                write!(f, "sizeof {}", self.ctx.ty(*ty).display(self.ctx))
+            },
+            Rvalue::AlignOf { ty } => {
+                write!(f, "alignof {}", self.ctx.ty(*ty).display(self.ctx))
+            },
+            // Boolean (i1) intrinsics
+            Rvalue::I1Eq { lhs, rhs } => {
+                write!(
+                    f,
+                    "i1.eq {}, {}",
+                    lhs.display(self.ctx),
+                    rhs.display(self.ctx)
+                )
+            },
+            Rvalue::I1And { lhs, rhs } => {
+                write!(
+                    f,
+                    "i1.and {}, {}",
+                    lhs.display(self.ctx),
+                    rhs.display(self.ctx)
+                )
+            },
+            Rvalue::I1Or { lhs, rhs } => {
+                write!(
+                    f,
+                    "i1.or {}, {}",
+                    lhs.display(self.ctx),
+                    rhs.display(self.ctx)
+                )
+            },
+            Rvalue::I1Not { operand } => {
+                write!(f, "i1.not {}", operand.display(self.ctx))
+            },
+            // Atomic intrinsics
+            Rvalue::AtomicAdd { ptr, delta } => {
+                write!(
+                    f,
+                    "atomic.add {}, {}",
+                    ptr.display(self.ctx),
+                    delta.display(self.ctx)
+                )
+            },
+            Rvalue::AtomicSub { ptr, delta } => {
+                write!(
+                    f,
+                    "atomic.sub {}, {}",
+                    ptr.display(self.ctx),
+                    delta.display(self.ctx)
+                )
+            },
         }
     }
 }
@@ -596,7 +806,7 @@ impl fmt::Display for CalleeDisplay<'_> {
                     write!(f, "]")?;
                 }
                 Ok(())
-            }
+            },
             Callee::Thin(p) => write!(f, "{}", p.display(self.ctx)),
             Callee::Thick(p) => write!(f, "escaping {}", p.display(self.ctx)),
             Callee::Witness {
@@ -611,7 +821,7 @@ impl fmt::Display for CalleeDisplay<'_> {
                     method,
                     self.ctx.ty(*for_type).display(self.ctx)
                 )
-            }
+            },
         }
     }
 }

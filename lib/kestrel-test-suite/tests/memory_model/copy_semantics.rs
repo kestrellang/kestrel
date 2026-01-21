@@ -21,8 +21,8 @@ mod struct_copy_semantics {
         Test::new(
             r#"module Test
             struct Point {
-                var x: Int
-                var y: Int
+                var x: lang.i64
+                var y: lang.i64
             }
         "#,
         )
@@ -44,7 +44,7 @@ mod struct_copy_semantics {
             protocol Copyable {}
             
             struct Handle: not Copyable {
-                var fd: Int
+                var fd: lang.i64
             }
         "#,
         )
@@ -69,7 +69,7 @@ mod struct_copy_semantics {
             protocol Resource {}
             
             struct Handle: Resource, not Copyable {
-                var fd: Int
+                var fd: lang.i64
             }
         "#,
         )
@@ -159,8 +159,8 @@ mod enum_copy_semantics {
         Test::new(
             r#"module Test
             enum Result {
-                case Ok(value: Int)
-                case Err(code: Int)
+                case Ok(value: lang.i64)
+                case Err(code: lang.i64)
             }
         "#,
         )
@@ -213,8 +213,8 @@ mod mir_tests {
         Test::new(
             r#"module Test
             struct Point {
-                var x: Int
-                var y: Int
+                var x: lang.i64
+                var y: lang.i64
             }
             
             func consume(consuming p: Point) {}
@@ -245,7 +245,7 @@ mod mir_tests {
             protocol Copyable {}
             
             struct Handle: not Copyable {
-                var fd: Int
+                var fd: lang.i64
             }
             
             func consume(consuming h: Handle) {}
@@ -277,7 +277,7 @@ mod mir_tests {
             protocol Copyable {}
             
             struct Handle: not Copyable {
-                var fd: Int
+                var fd: lang.i64
             }
             
             func borrow_it(h: Handle) {}
@@ -365,10 +365,10 @@ mod mir_tests {
 
     #[test]
     fn primitive_types_are_copyable() {
-        // Primitive types like Int should always use Copy
+        // Primitive types like lang.i64 should always use Copy
         Test::new(
             r#"module Test
-            func consume(consuming n: Int) {}
+            func consume(consuming n: lang.i64) {}
             
             func test() {
                 let x = 42;
@@ -396,11 +396,11 @@ mod mir_tests {
             protocol Copyable {}
             
             struct Point {
-                var x: Int
-                var y: Int
+                var x: lang.i64
+                var y: lang.i64
             }
             struct Handle: not Copyable {
-                var fd: Int
+                var fd: lang.i64
             }
             
             func mixed(consuming p: Point, consuming h: Handle) {}
@@ -437,13 +437,13 @@ mod rvalue_tests {
         Test::new(
             r#"module Test
             struct Point {
-                var x: Int
-                var y: Int
+                var x: lang.i64
+                var y: lang.i64
             }
             
-            func consume(consuming p: Point) -> Int { p.x }
+            func consume(consuming p: Point) -> lang.i64 { p.x }
             
-            func test() -> Int {
+            func test() -> lang.i64 {
                 let pt = Point(x: 1, y: 2);
                 let pt2 = pt;
                 consume(pt2)
@@ -469,12 +469,12 @@ mod rvalue_tests {
             protocol Copyable {}
             
             struct Handle: not Copyable {
-                var fd: Int
+                var fd: lang.i64
             }
             
-            func consume(consuming h: Handle) -> Int { h.fd }
+            func consume(consuming h: Handle) -> lang.i64 { h.fd }
             
-            func test() -> Int {
+            func test() -> lang.i64 {
                 let h = Handle(fd: 42);
                 consume(h)
             }
@@ -508,7 +508,7 @@ mod field_propagation_tests {
             protocol Copyable {}
             
             struct Handle: not Copyable {
-                var fd: Int
+                var fd: lang.i64
             }
             
             struct Wrapper {
@@ -539,7 +539,7 @@ mod field_propagation_tests {
             protocol Copyable {}
             
             struct Handle: not Copyable {
-                var fd: Int
+                var fd: lang.i64
             }
             
             struct Inner {
@@ -576,12 +576,12 @@ mod field_propagation_tests {
         Test::new(
             r#"module Test
             struct Inner {
-                var x: Int
+                var x: lang.i64
             }
             
             struct Outer {
                 var inner: Inner
-                var y: Int
+                var y: lang.i64
             }
         "#,
         )
@@ -608,12 +608,12 @@ mod field_propagation_tests {
             protocol Copyable {}
             
             struct Handle: not Copyable {
-                var fd: Int
+                var fd: lang.i64
             }
             
             enum Result {
                 case Ok(value: Handle)
-                case Err(code: Int)
+                case Err(code: lang.i64)
             }
         "#,
         )
@@ -637,12 +637,12 @@ mod field_propagation_tests {
         Test::new(
             r#"module Test
             struct Point {
-                var x: Int
-                var y: Int
+                var x: lang.i64
+                var y: lang.i64
             }
             
             enum Shape {
-                case Circle(radius: Int)
+                case Circle(radius: lang.i64)
                 case Rectangle(origin: Point)
             }
         "#,
@@ -673,7 +673,7 @@ mod use_after_move_tests {
             protocol Copyable {}
             
             struct Handle: not Copyable {
-                var fd: Int
+                var fd: lang.i64
             }
             
             func consume(consuming h: Handle) {}
@@ -695,8 +695,8 @@ mod use_after_move_tests {
         Test::new(
             r#"module Test
             struct Point {
-                var x: Int
-                var y: Int
+                var x: lang.i64
+                var y: lang.i64
             }
             
             func consume(consuming p: Point) {}
@@ -721,12 +721,12 @@ mod use_after_move_tests {
             protocol Copyable {}
             
             struct Handle: not Copyable {
-                var fd: Int
+                var fd: lang.i64
             }
             
             func consume(consuming h: Handle) {}
             
-            func test() -> Int {
+            func test() -> lang.i64 {
                 var h = Handle(fd: 42);
                 consume(h);
                 h.fd
@@ -746,7 +746,7 @@ mod use_after_move_tests {
             protocol Copyable {}
             
             struct Handle: not Copyable {
-                var fd: Int
+                var fd: lang.i64
             }
             
             func consume(consuming h: Handle) {}
@@ -781,12 +781,12 @@ mod maybe_moved_tests {
             protocol Copyable {}
             
             struct Handle: not Copyable {
-                var fd: Int
+                var fd: lang.i64
             }
             
             func consume(consuming h: Handle) {}
             
-            func test(cond: Bool) {
+            func test(cond: lang.i1) {
                 var h = Handle(fd: 42);
                 if cond {
                     consume(h)
@@ -808,12 +808,12 @@ mod maybe_moved_tests {
             protocol Copyable {}
             
             struct Handle: not Copyable {
-                var fd: Int
+                var fd: lang.i64
             }
             
             func consume(consuming h: Handle) {}
             
-            func test(cond: Bool) {
+            func test(cond: lang.i1) {
                 var h = Handle(fd: 42);
                 if cond {
                     consume(h)
@@ -837,13 +837,13 @@ mod maybe_moved_tests {
             protocol Copyable {}
             
             struct Handle: not Copyable {
-                var fd: Int
+                var fd: lang.i64
             }
             
             func consume(consuming h: Handle) {}
             func borrow(h: Handle) {}
             
-            func test(cond: Bool) {
+            func test(cond: lang.i1) {
                 var h = Handle(fd: 42);
                 if cond {
                     borrow(h)
@@ -867,13 +867,13 @@ mod maybe_moved_tests {
             protocol Copyable {}
             
             struct Handle: not Copyable {
-                var fd: Int
+                var fd: lang.i64
             }
             
             func consume(consuming h: Handle) {}
             func borrow(h: Handle) {}
             
-            func test(cond: Bool) {
+            func test(cond: lang.i1) {
                 var h = Handle(fd: 42);
                 if cond {
                     borrow(h)
@@ -914,12 +914,12 @@ mod loop_move_tests {
             protocol Copyable {}
             
             struct Handle: not Copyable {
-                var fd: Int
+                var fd: lang.i64
             }
             
             func consume(consuming h: Handle) {}
             
-            func test(cond: Bool) {
+            func test(cond: lang.i1) {
                 var h = Handle(fd: 42);
                 while cond {
                     consume(h)
@@ -941,7 +941,7 @@ mod loop_move_tests {
             protocol Copyable {}
             
             struct Handle: not Copyable {
-                var fd: Int
+                var fd: lang.i64
             }
             
             func consume(consuming h: Handle) {}

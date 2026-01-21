@@ -8,7 +8,7 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use crate::common::{emit_module_path, module_declaration_parser_internal};
 use crate::event::{EventSink, TreeBuilder};
-use crate::input::{create_input, prepare_tokens, to_kestrel_span};
+use crate::input::{create_input, prepare_tokens};
 
 /// Represents a module declaration: module A.B.C
 ///
@@ -31,8 +31,11 @@ impl ModuleDeclaration {
     /// Create a new ModuleDeclaration from spans, building the syntax tree
     /// This is a convenience function that emits events and builds the tree
     pub fn new(source: &str, module_span: Span, path_segments: Vec<Span>) -> Self {
-        let full_span = Span::from(module_span.start..path_segments.last().unwrap().end);
-        let mut sink = EventSink::new();
+        let full_span = Span::new(
+            module_span.file_id,
+            module_span.start..path_segments.last().unwrap().end,
+        );
+        let mut sink = EventSink::new(0);
         emit_module_declaration(&mut sink, module_span, &path_segments);
         Self::from_events(source, sink.into_events(), full_span)
     }
@@ -64,15 +67,15 @@ where
     {
         Ok((module_span, path_segments)) => {
             emit_module_declaration(sink, module_span, &path_segments);
-        }
+        },
         Err(errors) => {
             // Emit error events for each parse error
             for error in errors {
                 // Chumsky errors have span information
                 let span = error.span();
-                sink.error_at(format!("Parse error: {:?}", error), to_kestrel_span(*span));
+                sink.error_at(format!("Parse error: {:?}", error), *span);
             }
-        }
+        },
     }
 }
 
@@ -98,7 +101,7 @@ mod tests {
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
 
-        let mut sink = EventSink::new();
+        let mut sink = EventSink::new(0);
         parse_module_path(source, tokens.into_iter(), &mut sink);
 
         let tree = TreeBuilder::new(source, sink.into_events()).build();
@@ -121,7 +124,7 @@ mod tests {
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
 
-        let mut sink = EventSink::new();
+        let mut sink = EventSink::new(0);
         parse_module_path(source, tokens.into_iter(), &mut sink);
 
         let tree = TreeBuilder::new(source, sink.into_events()).build();
@@ -146,13 +149,13 @@ mod tests {
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
 
-        let mut sink = EventSink::new();
+        let mut sink = EventSink::new(0);
         parse_module_declaration(source, tokens.into_iter(), &mut sink);
 
         let tree = TreeBuilder::new(source, sink.into_events()).build();
         let decl = ModuleDeclaration {
             syntax: tree,
-            span: Span::from(0..source.len()),
+            span: Span::new(0, 0..source.len()),
         };
         let path = decl.path();
 
@@ -180,13 +183,13 @@ mod tests {
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
 
-        let mut sink = EventSink::new();
+        let mut sink = EventSink::new(0);
         parse_module_declaration(source, tokens.into_iter(), &mut sink);
 
         let tree = TreeBuilder::new(source, sink.into_events()).build();
         let decl = ModuleDeclaration {
             syntax: tree,
-            span: Span::from(0..source.len()),
+            span: Span::new(0, 0..source.len()),
         };
         let path = decl.path();
 

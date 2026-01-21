@@ -1,0 +1,149 @@
+// Read trait and utilities
+
+module std.io.read
+
+import std.num.(Int64, UInt8)
+import std.result.(Result, Optional)
+import std.memory.(Slice, Pointer)
+import std.collections.(Array)
+import std.core.(Bool)
+import std.io.error.(Error)
+
+// Read trait - source of bytes
+public protocol Read {
+    // Read bytes into buffer, return number of bytes read.
+    // Returns 0 on EOF.
+    mutating func read(into buf: Slice[UInt8]) -> Result[Int64, Error]
+}
+
+// Empty reader - always returns EOF
+public struct Empty: Read {
+    public init() {}
+
+    public mutating func read(into buf: Slice[UInt8]) -> Result[Int64, Error] {
+        .Ok(0)
+    }
+}
+
+// Repeat reader - infinite stream of a byte
+public struct Repeat: Read {
+    var byte: UInt8
+
+    public init(byte: UInt8) {
+        self.byte = byte
+    }
+
+    public mutating func read(into buf: Slice[UInt8]) -> Result[Int64, Error] {
+        var i: Int64 = 0;
+        while i < buf.count {
+            buf.pointer.offset(by: i).write(self.byte);
+            i = i + 1
+        }
+        .Ok(buf.count)
+    }
+}
+
+// Cursor - read from a byte array
+public struct Cursor: Read {
+    var data: Array[UInt8]
+    var pos: Int64
+
+    public init(data: Array[UInt8]) {
+        self.data = data;
+        self.pos = 0;
+    }
+
+    public mutating func read(into buf: Slice[UInt8]) -> Result[Int64, Error] {
+        let available = self.data.count() - self.pos;
+        if available == 0 {
+            return .Ok(0)
+        }
+
+        var n: Int64 = buf.count;
+        if n > available {
+            n = available
+        }
+        var i: Int64 = 0;
+        while i < n {
+            buf.pointer.offset(by: i).write(self.data.getUnchecked(self.pos + i));
+            i = i + 1
+        }
+        self.pos = self.pos + n;
+        .Ok(n)
+    }
+
+    public func position() -> Int64 { self.pos }
+
+    public mutating func setPosition(to pos: Int64) {
+        let count = self.data.count();
+        if pos < 0 {
+            self.pos = 0
+        } else if pos > count {
+            self.pos = count
+        } else {
+            self.pos = pos
+        }
+    }
+}
+
+// Helper functions for readers
+
+// Read single byte from a reader
+public func readByte[R](reader: R) -> Result[Optional[UInt8], Error] where R: Read {
+    var buf = Array[UInt8](capacity: 1);
+    buf.append(0);
+    let slice = Slice(pointer: buf.pointer(), count: 1);
+    // TODO: add try back
+    match reader.read(into: slice) {
+        .Ok(n) => {
+            if n == 0 {
+                .Ok(.None)
+            } else {
+                .Ok(.Some(buf.getUnchecked(0)))
+            }
+        },
+        .Err(e) => .Err(e)
+    }
+}
+
+// Read all bytes from a reader into an array
+public func readAll[R](reader: R, into buf: Array[UInt8]) -> Result[Int64, Error] where R: Read {
+    var total: Int64 = 0;
+    var chunk = Array[UInt8](capacity: 4096);
+    // Initialize chunk with zeros
+    var i: Int64 = 0;
+    while i < 4096 {
+        chunk.append(0);
+        i = i + 1
+    }
+
+    var done: Bool = false;
+    var errorResult: Optional[Error] = .None;
+    while done == false {
+        let slice = Slice(pointer: chunk.pointer(), count: 4096);
+        // TODO: add try back
+        let readResult = reader.read(into: slice);
+        match readResult {
+            .Ok(n) => {
+                if n == 0 {
+                    done = true
+                } else {
+                    var j: Int64 = 0;
+                    while j < n {
+                        buf.append(chunk.getUnchecked(j));
+                        j = j + 1
+                    }
+                    total = total + n
+                }
+            },
+            .Err(e) => {
+                errorResult = .Some(e);
+                done = true
+            }
+        }
+    }
+    match errorResult {
+        .Some(e) => .Err(e),
+        .None => .Ok(total)
+    }
+}

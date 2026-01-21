@@ -78,6 +78,7 @@ fn attribute_arg_value_parser<'tokens>()
         .or(bool_literal_parser())
         .or(implicit_member_parser())
         .or(path_parser())
+        .boxed()
 }
 
 // =============================================================================
@@ -106,7 +107,7 @@ fn attribute_arg_parser<'tokens>()
         value,
     });
 
-    labeled.or(unlabeled)
+    labeled.or(unlabeled).boxed()
 }
 
 /// Parser for attribute arguments list: `(arg1, arg2, ...)`
@@ -125,6 +126,7 @@ fn attribute_args_parser<'tokens>()
             args,
             rparen_span,
         })
+        .boxed()
 }
 
 // =============================================================================
@@ -142,6 +144,7 @@ pub fn attribute_parser<'tokens>()
             name_span,
             args,
         })
+        .boxed()
 }
 
 /// Parser for a list of attributes (zero or more)
@@ -149,7 +152,7 @@ pub fn attribute_parser<'tokens>()
 /// This parser is used before declaration parsers to collect any attributes.
 pub fn attribute_list_parser<'tokens>()
 -> impl Parser<'tokens, ParserInput<'tokens>, Vec<AttributeData>, ParserExtra<'tokens>> + Clone {
-    attribute_parser().repeated().collect()
+    attribute_parser().repeated().collect().boxed()
 }
 
 #[cfg(test)]

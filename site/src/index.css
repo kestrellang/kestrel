@@ -26,7 +26,6 @@ body {
   font-family: var(--font-serif);
   background-color: var(--color-cream);
   color: var(--color-slate);
-  overflow-x: hidden;
 }
 
 /* Custom scrollbar - Webkit */
@@ -55,19 +54,33 @@ html {
   scrollbar-color: var(--color-rust) transparent;
 }
 
-/* Scroll snap container */
+/* Scroll container with sticky stacking + snap */
 .scroll-container {
+  position: relative;
   height: 100vh;
   overflow-y: auto;
-  overflow-x: hidden;
-  scroll-snap-type: y mandatory;
+  scroll-snap-type: y proximity;
 }
 
 .scroll-section {
+  position: sticky;
+  top: 0;
   height: 100vh;
+  overflow: hidden;
   scroll-snap-align: start;
-  scroll-snap-stop: always;
 }
+
+/* Stacking order - later sections slide over earlier ones */
+.scroll-section:nth-child(1) { z-index: 1; }
+.scroll-section:nth-child(2) { z-index: 2; }
+.scroll-section:nth-child(3) { z-index: 3; }
+.scroll-section:nth-child(4) { z-index: 4; }
+.scroll-section:nth-child(5) { z-index: 5; }
+.scroll-section:nth-child(6) { z-index: 6; }
+.scroll-section:nth-child(7) { z-index: 7; }
+.scroll-section:nth-child(8) { z-index: 8; }
+.scroll-section:nth-child(9) { z-index: 9; }
+.scroll-section:nth-child(10) { z-index: 10; }
 
 /* Typography */
 .font-serif {

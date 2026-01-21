@@ -35,17 +35,25 @@
 //!     // result is in %result
 //! ```
 
-use kestrel_execution_graph::{BinOp, Immediate, Place, Rvalue, Value};
+use kestrel_execution_graph::{
+    BinOp, CallArg, Callee, Immediate, Place, QualifiedNameData, Rvalue, Value,
+};
+use kestrel_semantic_model::SymbolFor;
 use kestrel_semantic_pattern_matching::{
     AccessPath, Binding, Constructor, DecisionTree, PathElement, compile,
 };
+use kestrel_semantic_tree::behavior::callable::CallableBehavior;
+use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
 use kestrel_semantic_tree::expr::{Expression, MatchArm};
+use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::ty::{Ty, TyKind};
+use semantic_tree::symbol::Symbol;
 
 use crate::context::LoweringContext;
 use crate::error::LoweringError;
 use crate::expr::lower_expression;
-use crate::ty::lower_type;
+use crate::name::qualified_name_for_symbol;
+use crate::ty::{lower_type, make_int_immediate};
 
 /// Lower a match expression to MIR.
 ///
@@ -88,7 +96,11 @@ pub fn lower_match_expr(
             let place = Place::local(scrutinee_local);
             ctx.emit_assign(place.clone(), Rvalue::Use(imm));
             place
-        }
+        },
+        Value::Unreachable => {
+            // Scrutinee diverged (e.g., was a return), so match is unreachable
+            return Value::Unreachable;
+        },
     };
 
     // Extract patterns and guards from arms
@@ -140,7 +152,7 @@ fn emit_decision_tree(
                 result_place,
                 join_block,
             );
-        }
+        },
 
         DecisionTree::Switch {
             path,
@@ -159,7 +171,7 @@ fn emit_decision_tree(
                 result_place,
                 join_block,
             );
-        }
+        },
 
         DecisionTree::Guard {
             arm_index,
@@ -178,12 +190,12 @@ fn emit_decision_tree(
                 result_place,
                 join_block,
             );
-        }
+        },
 
         DecisionTree::Failure => {
             // Unreachable - exhaustiveness checking should prevent this
             ctx.emit_unreachable();
-        }
+        },
     }
 }
 
@@ -211,8 +223,8 @@ fn emit_success(
         return;
     }
 
-    // Assign result
-    ctx.emit_assign_value(result_place.clone(), body_value);
+    // Assign result - use emit_move_value to mark the temp as moved, preventing double-free
+    ctx.emit_move_value(result_place.clone(), body_value);
 
     // Jump to join block
     ctx.emit_jump(join_block);
@@ -279,7 +291,7 @@ fn emit_switch(
                 result_place,
                 join_block,
             );
-        }
+        },
 
         TyKind::Enum { .. } => {
             emit_enum_switch(
@@ -292,12 +304,13 @@ fn emit_switch(
                 result_place,
                 join_block,
             );
-        }
+        },
 
-        TyKind::Int(_) => {
+        TyKind::Int(int_bits) => {
             emit_int_switch(
                 ctx,
                 &switch_place,
+                *int_bits,
                 cases,
                 default,
                 scrutinee,
@@ -305,7 +318,7 @@ fn emit_switch(
                 result_place,
                 join_block,
             );
-        }
+        },
 
         TyKind::String => {
             emit_string_switch(
@@ -318,7 +331,7 @@ fn emit_switch(
                 result_place,
                 join_block,
             );
-        }
+        },
 
         TyKind::Tuple(_) => {
             // Tuples have a single constructor - just recurse into the single case
@@ -329,18 +342,56 @@ fn emit_switch(
             } else {
                 ctx.emit_unreachable();
             }
-        }
+        },
 
         TyKind::Struct { .. } => {
-            // Structs have a single constructor - just recurse
-            if let Some((_, subtree)) = cases.first() {
-                emit_decision_tree(ctx, subtree, scrutinee, arms, result_place, join_block);
-            } else if let Some(default_tree) = default {
-                emit_decision_tree(ctx, default_tree, scrutinee, arms, result_place, join_block);
+            // For structs with literal constructors, check if they conform to Matchable
+            if has_literal_constructors(cases) {
+                if type_conforms_to_matchable(ctx, ty) {
+                    // Use the Matchable protocol for comparison
+                    emit_matchable_switch(
+                        ctx,
+                        &switch_place,
+                        ty,
+                        cases,
+                        default,
+                        scrutinee,
+                        arms,
+                        result_place,
+                        join_block,
+                    );
+                } else {
+                    // Fall back to comparison chain
+                    emit_comparison_chain(
+                        ctx,
+                        &switch_place,
+                        ty,
+                        cases,
+                        default,
+                        scrutinee,
+                        arms,
+                        result_place,
+                        join_block,
+                    );
+                }
             } else {
-                ctx.emit_unreachable();
+                // Structs have a single constructor - just recurse
+                if let Some((_, subtree)) = cases.first() {
+                    emit_decision_tree(ctx, subtree, scrutinee, arms, result_place, join_block);
+                } else if let Some(default_tree) = default {
+                    emit_decision_tree(
+                        ctx,
+                        default_tree,
+                        scrutinee,
+                        arms,
+                        result_place,
+                        join_block,
+                    );
+                } else {
+                    ctx.emit_unreachable();
+                }
             }
-        }
+        },
 
         _ => {
             // For other types, emit a comparison chain
@@ -355,7 +406,7 @@ fn emit_switch(
                 result_place,
                 join_block,
             );
-        }
+        },
     }
 }
 
@@ -462,6 +513,7 @@ fn emit_enum_switch(
 fn emit_int_switch(
     ctx: &mut LoweringContext,
     switch_place: &Place,
+    int_bits: kestrel_semantic_tree::ty::IntBits,
     cases: &[(Constructor, DecisionTree)],
     default: &Option<Box<DecisionTree>>,
     scrutinee: &Place,
@@ -472,6 +524,7 @@ fn emit_int_switch(
     emit_comparison_chain_int(
         ctx,
         switch_place,
+        int_bits,
         cases,
         default,
         scrutinee,
@@ -508,6 +561,7 @@ fn emit_string_switch(
 fn emit_comparison_chain_int(
     ctx: &mut LoweringContext,
     switch_place: &Place,
+    int_bits: kestrel_semantic_tree::ty::IntBits,
     cases: &[(Constructor, DecisionTree)],
     default: &Option<Box<DecisionTree>>,
     scrutinee: &Place,
@@ -549,7 +603,7 @@ fn emit_comparison_chain_int(
                     Rvalue::BinaryOp {
                         op: BinOp::Eq,
                         lhs: Value::Place(switch_place.clone()),
-                        rhs: Value::Immediate(Immediate::i64(*value)),
+                        rhs: Value::Immediate(make_int_immediate(int_bits, *value)),
                     },
                 );
 
@@ -562,7 +616,7 @@ fn emit_comparison_chain_int(
 
                 // Continue with next comparison
                 ctx.set_current_block(next_block);
-            }
+            },
 
             Constructor::IntRange { start, end } => {
                 // Range check: start <= switch_place && switch_place <= end
@@ -577,7 +631,7 @@ fn emit_comparison_chain_int(
                     cmp1_place.clone(),
                     Rvalue::BinaryOp {
                         op: BinOp::LeSigned,
-                        lhs: Value::Immediate(Immediate::i64(*start)),
+                        lhs: Value::Immediate(make_int_immediate(int_bits, *start)),
                         rhs: Value::Place(switch_place.clone()),
                     },
                 );
@@ -591,7 +645,7 @@ fn emit_comparison_chain_int(
                     Rvalue::BinaryOp {
                         op: BinOp::LeSigned,
                         lhs: Value::Place(switch_place.clone()),
-                        rhs: Value::Immediate(Immediate::i64(*end)),
+                        rhs: Value::Immediate(make_int_immediate(int_bits, *end)),
                     },
                 );
 
@@ -617,7 +671,7 @@ fn emit_comparison_chain_int(
 
                 // Continue with next comparison
                 ctx.set_current_block(next_block);
-            }
+            },
 
             _ => {
                 // Unsupported constructor for int switch
@@ -627,7 +681,7 @@ fn emit_comparison_chain_int(
                 ));
                 ctx.emit_unreachable();
                 return;
-            }
+            },
         }
     }
 
@@ -661,16 +715,10 @@ fn emit_comparison_chain_string(
     }
 
     // Build a chain of string comparisons
-    for (i, (ctor, tree)) in cases.iter().enumerate() {
+    for (ctor, tree) in cases.iter() {
         if let Constructor::StringLiteral(value) = ctor {
-            let is_last = i == cases.len() - 1;
-
             let match_block = ctx.create_block();
-            let next_block = if is_last && default.is_none() {
-                ctx.create_block()
-            } else {
-                ctx.create_block()
-            };
+            let next_block = ctx.create_block();
 
             // Compare: switch_place == value (using string comparison)
             let cmp_ty = ctx.mir.ty_bool();
@@ -719,10 +767,11 @@ fn emit_comparison_chain(
 ) {
     // For unsupported types, just try int comparison chain as fallback
     match ty.kind() {
-        TyKind::Int(_) => {
+        TyKind::Int(int_bits) => {
             emit_comparison_chain_int(
                 ctx,
                 switch_place,
+                *int_bits,
                 cases,
                 default,
                 scrutinee,
@@ -730,7 +779,7 @@ fn emit_comparison_chain(
                 result_place,
                 join_block,
             );
-        }
+        },
         TyKind::String => {
             emit_comparison_chain_string(
                 ctx,
@@ -742,7 +791,7 @@ fn emit_comparison_chain(
                 result_place,
                 join_block,
             );
-        }
+        },
         _ => {
             // Fallback: just emit default or first case
             if let Some(default_tree) = default {
@@ -752,7 +801,7 @@ fn emit_comparison_chain(
             } else {
                 ctx.emit_unreachable();
             }
-        }
+        },
     }
 }
 
@@ -794,4 +843,467 @@ fn emit_guard(
     // Emit failure path
     ctx.set_current_block(failure_block);
     emit_decision_tree(ctx, failure, scrutinee, arms, result_place, join_block);
+}
+
+/// Check if a type conforms to the Matchable protocol.
+fn type_conforms_to_matchable(ctx: &LoweringContext, ty: &Ty) -> bool {
+    use semantic_tree::symbol::Symbol;
+
+    // Get the Matchable protocol ID from the builtin registry
+    let Some(matchable_id) = ctx.model.builtin_registry().matchable_protocol() else {
+        return false;
+    };
+
+    // Helper to check conformances on a symbol
+    fn check_conformances(
+        symbol: &dyn Symbol<kestrel_semantic_tree::language::KestrelLanguage>,
+        matchable_id: semantic_tree::symbol::SymbolId,
+    ) -> bool {
+        if let Some(conformances) = symbol.metadata().get_behavior::<ConformancesBehavior>() {
+            for conf in conformances.conformances() {
+                if let TyKind::Protocol {
+                    symbol: conf_proto, ..
+                } = conf.kind()
+                    && conf_proto.metadata().id() == matchable_id
+                {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    // Check if the type is a struct or enum that conforms to Matchable
+    match ty.kind() {
+        TyKind::Struct { symbol, .. } => check_conformances(symbol.as_ref(), matchable_id),
+        TyKind::Enum { symbol, .. } => check_conformances(symbol.as_ref(), matchable_id),
+        _ => false,
+    }
+}
+
+/// Check if any of the constructors in the cases are literals that would
+/// require comparison (IntLiteral, StringLiteral, etc.)
+fn has_literal_constructors(cases: &[(Constructor, DecisionTree)]) -> bool {
+    cases.iter().any(|(ctor, _)| {
+        matches!(
+            ctor,
+            Constructor::IntLiteral(_)
+                | Constructor::StringLiteral(_)
+                | Constructor::CharLiteral(_)
+                | Constructor::IntRange { .. }
+                | Constructor::CharRange { .. }
+        )
+    })
+}
+
+/// Collect the qualified name parts for a symbol (namespace hierarchy).
+fn collect_symbol_name_parts(
+    symbol: &std::sync::Arc<
+        dyn semantic_tree::symbol::Symbol<kestrel_semantic_tree::language::KestrelLanguage>,
+    >,
+    parts: &mut Vec<String>,
+) {
+    // First, collect parent segments
+    if let Some(parent) = symbol.metadata().parent() {
+        collect_symbol_name_parts(&parent, parts);
+    }
+
+    // Then add this symbol's name
+    let kind = symbol.metadata().kind();
+    let name_value = &symbol.metadata().name().value;
+
+    // Skip root
+    if name_value == "<root>" {
+        return;
+    }
+
+    match kind {
+        KestrelSymbolKind::SourceFile => {},
+        KestrelSymbolKind::Module
+        | KestrelSymbolKind::Struct
+        | KestrelSymbolKind::Enum
+        | KestrelSymbolKind::Protocol
+        | KestrelSymbolKind::TypeAlias
+        | KestrelSymbolKind::Extension => {
+            parts.push(name_value.clone());
+        },
+        _ => {},
+    }
+}
+
+/// Emit MIR for a matchable switch using the Matchable protocol.
+fn emit_matchable_switch(
+    ctx: &mut LoweringContext,
+    switch_place: &Place,
+    ty: &Ty,
+    cases: &[(Constructor, DecisionTree)],
+    default: &Option<Box<DecisionTree>>,
+    scrutinee: &Place,
+    arms: &[MatchArm],
+    result_place: &Place,
+    join_block: kestrel_execution_graph::Id<kestrel_execution_graph::Block>,
+) {
+    // If no cases, go to default
+    if cases.is_empty() {
+        if let Some(default_tree) = default {
+            emit_decision_tree(ctx, default_tree, scrutinee, arms, result_place, join_block);
+        } else {
+            ctx.emit_unreachable();
+        }
+        return;
+    }
+
+    // Get the Matchable protocol for witness calls
+    let Some(matchable_id) = ctx.model.builtin_registry().matchable_protocol() else {
+        ctx.emit_error(LoweringError::internal(
+            "Matchable protocol not found in registry",
+            None,
+        ));
+        ctx.emit_unreachable();
+        return;
+    };
+
+    let Some(matchable_symbol) = ctx.model.query(SymbolFor { id: matchable_id }) else {
+        ctx.emit_error(LoweringError::internal(
+            "Matchable protocol symbol not found",
+            None,
+        ));
+        ctx.emit_unreachable();
+        return;
+    };
+
+    // Find the `matches` method in the Matchable protocol to get its return type
+    let matches_method = matchable_symbol
+        .metadata()
+        .children()
+        .into_iter()
+        .find(|child| {
+            child.metadata().kind() == KestrelSymbolKind::Function
+                && child.metadata().name().value == "matches"
+        });
+
+    let bool_mir_ty = if let Some(method) = matches_method {
+        if let Some(callable) = method.metadata().get_behavior::<CallableBehavior>() {
+            // Lower the return type to MIR
+            lower_type(ctx, callable.return_type())
+        } else {
+            // Fallback - shouldn't happen
+            ctx.mir.ty_bool()
+        }
+    } else {
+        // Fallback - shouldn't happen
+        ctx.mir.ty_bool()
+    };
+
+    let protocol_name = qualified_name_for_symbol(ctx, &matchable_symbol);
+    let for_type = lower_type(ctx, ty);
+
+    // Build a chain of Matchable.matches() calls
+    for (i, (ctor, tree)) in cases.iter().enumerate() {
+        let is_last = i == cases.len() - 1;
+
+        // Handle each constructor type
+        match ctor {
+            Constructor::IntLiteral(value) => {
+                // Create blocks for this case
+                let match_block = ctx.create_block();
+                let next_block = if is_last && default.is_none() {
+                    // Last case with no default - unreachable if not matched
+                    ctx.create_block()
+                } else {
+                    ctx.create_block()
+                };
+
+                // Create a temporary to hold the literal value
+                // The type must conform to ExpressibleByIntLiteral
+                let literal_local = ctx.create_temp("literal", for_type);
+                let literal_place = Place::local(literal_local);
+
+                // Initialize the struct from the literal using the ExpressibleByIntLiteral init
+                // This matches the pattern from lower_literal_init_call in expr.rs
+                if let TyKind::Struct {
+                    symbol: struct_symbol,
+                    ..
+                } = ty.kind()
+                {
+                    // Find the init with the intLiteral label
+                    let init_symbol =
+                        struct_symbol
+                            .metadata()
+                            .children()
+                            .into_iter()
+                            .find(|child| {
+                                if child.metadata().kind() != KestrelSymbolKind::Initializer {
+                                    return false;
+                                }
+                                // Check if this init has a parameter with the intLiteral label
+                                if let Some(callable) =
+                                    child.metadata().get_behavior::<CallableBehavior>()
+                                {
+                                    callable.parameters().first().is_some_and(|p| {
+                                        p.label.as_ref().is_some_and(|l| l.value == "intLiteral")
+                                    })
+                                } else {
+                                    false
+                                }
+                            });
+
+                    if let Some(init_sym) = init_symbol {
+                        // Build the qualified name for the init function
+                        let mut name_parts = Vec::new();
+                        collect_symbol_name_parts(
+                            &(struct_symbol.clone()
+                                as std::sync::Arc<
+                                    dyn semantic_tree::symbol::Symbol<
+                                            kestrel_semantic_tree::language::KestrelLanguage,
+                                        >,
+                                >),
+                            &mut name_parts,
+                        );
+
+                        // Get all labels from the found init symbol
+                        let init_name_suffix = if let Some(callable) =
+                            init_sym.metadata().get_behavior::<CallableBehavior>()
+                        {
+                            let labels: Vec<&str> = callable
+                                .parameters()
+                                .iter()
+                                .filter_map(|p| p.external_label())
+                                .collect();
+                            if labels.is_empty() {
+                                "init".to_string()
+                            } else {
+                                format!("init${}", labels.join("$"))
+                            }
+                        } else {
+                            "init$intLiteral".to_string()
+                        };
+                        name_parts.push(init_name_suffix);
+
+                        let init_name = ctx.mir.intern_name(QualifiedNameData::new(name_parts));
+
+                        // Create a mutable reference to the result place
+                        let ref_ty = ctx.mir.ty_ref_mut(for_type);
+                        let self_ref_local = ctx.create_temp("self_ref", ref_ty);
+                        let self_ref_place = Place::local(self_ref_local);
+
+                        // Emit: %self_ref = ref var %literal
+                        ctx.emit_assign(
+                            self_ref_place.clone(),
+                            Rvalue::RefMut(literal_place.clone()),
+                        );
+
+                        // Build call args: self_ref first (MutRef), then the i64 literal value (Borrow)
+                        let call_args = vec![
+                            CallArg::mutating(Value::Place(self_ref_place)),
+                            CallArg::borrow(Value::Immediate(Immediate::i64(*value))),
+                        ];
+
+                        // Create a temp for the unit return value of init
+                        let unit_ty = ctx.mir.ty_unit();
+                        let unit_local = ctx.create_temp("init_ret", unit_ty);
+                        let unit_place = Place::local(unit_local);
+
+                        // Call the init function
+                        let mir_callee = Callee::direct(init_name);
+                        ctx.emit_call_with_modes(unit_place, mir_callee, call_args);
+                    } else {
+                        // No init found - fall back to direct assignment (shouldn't happen for Matchable types)
+                        ctx.emit_assign(literal_place.clone(), Rvalue::Use(Immediate::i64(*value)));
+                    }
+                } else {
+                    // Not a struct type - fall back to direct assignment
+                    ctx.emit_assign(literal_place.clone(), Rvalue::Use(Immediate::i64(*value)));
+                }
+
+                // Call Matchable.matches(switch_place, literal_place)
+                // The matches method signature is: func matches(self, other: Self) -> Bool
+                // Both parameters are passed by borrow
+                let result_local = ctx.create_temp("matches_result", bool_mir_ty);
+                let result_place_local = Place::local(result_local);
+
+                let callee = Callee::witness(protocol_name, "matches", for_type);
+                let call_args = vec![
+                    CallArg::borrow(Value::Place(switch_place.clone())),
+                    CallArg::borrow(Value::Place(literal_place)),
+                ];
+
+                ctx.emit_call_with_modes(result_place_local.clone(), callee, call_args);
+
+                // Branch based on the bool result
+                ctx.emit_branch(Value::Place(result_place_local), match_block, next_block);
+
+                // Emit match body
+                ctx.set_current_block(match_block);
+                emit_decision_tree(ctx, tree, scrutinee, arms, result_place, join_block);
+
+                // Continue with next comparison
+                ctx.set_current_block(next_block);
+            },
+
+            Constructor::True | Constructor::False => {
+                let bool_value = matches!(ctor, Constructor::True);
+
+                // Create blocks for this case
+                let match_block = ctx.create_block();
+                let next_block = ctx.create_block();
+
+                // Create a temporary to hold the literal value
+                // The type must conform to ExpressibleByBoolLiteral
+                let literal_local = ctx.create_temp("literal", for_type);
+                let literal_place = Place::local(literal_local);
+
+                // Initialize the struct from the literal using the ExpressibleByBoolLiteral init
+                if let TyKind::Struct {
+                    symbol: struct_symbol,
+                    ..
+                } = ty.kind()
+                {
+                    // Find the init with the boolLiteral label
+                    let init_symbol =
+                        struct_symbol
+                            .metadata()
+                            .children()
+                            .into_iter()
+                            .find(|child| {
+                                if child.metadata().kind() != KestrelSymbolKind::Initializer {
+                                    return false;
+                                }
+                                // Check if this init has a parameter with the boolLiteral label
+                                if let Some(callable) =
+                                    child.metadata().get_behavior::<CallableBehavior>()
+                                {
+                                    callable.parameters().first().is_some_and(|p| {
+                                        p.label.as_ref().is_some_and(|l| l.value == "boolLiteral")
+                                    })
+                                } else {
+                                    false
+                                }
+                            });
+
+                    if let Some(init_sym) = init_symbol {
+                        // Build the qualified name for the init function
+                        let mut name_parts = Vec::new();
+                        collect_symbol_name_parts(
+                            &(struct_symbol.clone()
+                                as std::sync::Arc<
+                                    dyn semantic_tree::symbol::Symbol<
+                                            kestrel_semantic_tree::language::KestrelLanguage,
+                                        >,
+                                >),
+                            &mut name_parts,
+                        );
+
+                        // Get all labels from the found init symbol
+                        let init_name_suffix = if let Some(callable) =
+                            init_sym.metadata().get_behavior::<CallableBehavior>()
+                        {
+                            let labels: Vec<&str> = callable
+                                .parameters()
+                                .iter()
+                                .filter_map(|p| p.external_label())
+                                .collect();
+                            if labels.is_empty() {
+                                "init".to_string()
+                            } else {
+                                format!("init${}", labels.join("$"))
+                            }
+                        } else {
+                            "init$boolLiteral".to_string()
+                        };
+                        name_parts.push(init_name_suffix);
+
+                        let init_name = ctx.mir.intern_name(QualifiedNameData::new(name_parts));
+
+                        // Create a mutable reference to the result place
+                        let ref_ty = ctx.mir.ty_ref_mut(for_type);
+                        let self_ref_local = ctx.create_temp("self_ref", ref_ty);
+                        let self_ref_place = Place::local(self_ref_local);
+
+                        // Emit: %self_ref = ref var %literal
+                        ctx.emit_assign(
+                            self_ref_place.clone(),
+                            Rvalue::RefMut(literal_place.clone()),
+                        );
+
+                        // Build call args: self_ref first (MutRef), then the i1 literal value (Borrow)
+                        let call_args = vec![
+                            CallArg::mutating(Value::Place(self_ref_place)),
+                            CallArg::borrow(Value::Immediate(Immediate::bool(bool_value))),
+                        ];
+
+                        // Create a temp for the unit return value of init
+                        let unit_ty = ctx.mir.ty_unit();
+                        let unit_local = ctx.create_temp("init_ret", unit_ty);
+                        let unit_place = Place::local(unit_local);
+
+                        // Call the init function
+                        let mir_callee = Callee::direct(init_name);
+                        ctx.emit_call_with_modes(unit_place, mir_callee, call_args);
+                    } else {
+                        // No init found - fall back to direct assignment (shouldn't happen for Matchable types)
+                        ctx.emit_assign(
+                            literal_place.clone(),
+                            Rvalue::Use(Immediate::bool(bool_value)),
+                        );
+                    }
+                } else {
+                    // Not a struct type - fall back to direct assignment
+                    ctx.emit_assign(
+                        literal_place.clone(),
+                        Rvalue::Use(Immediate::bool(bool_value)),
+                    );
+                }
+
+                // Call Matchable.matches(switch_place, literal_place)
+                let result_local = ctx.create_temp("matches_result", bool_mir_ty);
+                let result_place_local = Place::local(result_local);
+
+                let callee = Callee::witness(protocol_name, "matches", for_type);
+                let call_args = vec![
+                    CallArg::borrow(Value::Place(switch_place.clone())),
+                    CallArg::borrow(Value::Place(literal_place)),
+                ];
+
+                ctx.emit_call_with_modes(result_place_local.clone(), callee, call_args);
+
+                // Branch based on the bool result
+                ctx.emit_branch(Value::Place(result_place_local), match_block, next_block);
+
+                // Emit match body
+                ctx.set_current_block(match_block);
+                emit_decision_tree(ctx, tree, scrutinee, arms, result_place, join_block);
+
+                // Continue with next comparison
+                ctx.set_current_block(next_block);
+            },
+
+            Constructor::StringLiteral(value) => {
+                ctx.emit_error(LoweringError::internal(
+                    format!(
+                        "Matchable switch with string literal '{}' not yet fully implemented",
+                        value
+                    ),
+                    None,
+                ));
+                continue;
+            },
+
+            _ => {
+                // For non-literal constructors, fall back to default handling
+                if is_last {
+                    emit_decision_tree(ctx, tree, scrutinee, arms, result_place, join_block);
+                    return;
+                }
+                continue;
+            },
+        }
+    }
+
+    // After all cases, emit default
+    if let Some(default_tree) = default {
+        emit_decision_tree(ctx, default_tree, scrutinee, arms, result_place, join_block);
+    } else {
+        ctx.emit_unreachable();
+    }
 }

@@ -6,10 +6,14 @@ use kestrel_semantic_tree::behavior::callable::CallableBehavior;
 use kestrel_semantic_tree::behavior::valued::ValueBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
+use kestrel_semantic_tree::ty::TyKind;
 use semantic_tree::symbol::{Symbol, SymbolId};
 
 use crate::SemanticModel;
-use crate::queries::{ExtensionsFor, IsVisibleFrom, ResolveName, SymbolFor, VisibleChildrenByName};
+use crate::queries::{
+    ExtensionsFor, IsVisibleFrom, ResolveName, ResolvedAliasedType, SymbolFor,
+    VisibleChildrenByName,
+};
 use crate::query::Query;
 use crate::resolution::{SymbolResolution, ValuePathResolution};
 
@@ -66,13 +70,13 @@ impl Query for ResolveValuePath {
                     };
                 }
                 symbols
-            }
+            },
             SymbolResolution::NotFound => {
                 return ValuePathResolution::NotFound {
                     segment: first.clone(),
                     index: 0,
                 };
-            }
+            },
         };
 
         if first_symbols.is_empty() {
@@ -106,7 +110,14 @@ impl Query for ResolveValuePath {
             };
         }
 
-        let mut current_symbol = current_symbol;
+        // Special case: if first segment is a type alias, resolve through to the underlying type
+        // This allows `MyInt.init()` where `type MyInt = Int64`
+        let mut current_symbol = if current_symbol.metadata().kind() == KestrelSymbolKind::TypeAlias
+        {
+            resolve_through_type_alias(&current_symbol, model).unwrap_or(current_symbol)
+        } else {
+            current_symbol
+        };
 
         for (index, segment) in self.path.iter().enumerate().skip(1) {
             let mut matches = model.query(VisibleChildrenByName {
@@ -141,13 +152,30 @@ impl Query for ResolveValuePath {
                             // Check if it's a static method (no receiver)
                             if let Some(callable) =
                                 child.metadata().get_behavior::<CallableBehavior>()
+                                && callable.is_static()
                             {
-                                if callable.is_static() {
-                                    matches.push(child);
-                                }
+                                matches.push(child);
                             }
                         }
                     }
+                }
+            }
+
+            // If current_symbol is an EnumCase and we can't find a child, return EnumCaseValue.
+            // Enum cases are values, not namespaces - remaining segments should be member accesses.
+            // This handles cases like `Player.player1.description()` where `player1` is an enum case
+            // and `description()` is a method call on that value.
+            if matches.is_empty() && current_symbol.metadata().kind() == KestrelSymbolKind::EnumCase
+            {
+                // Get the type of the enum case (which is the parent enum type)
+                if let Some(value_beh) = current_symbol.metadata().get_behavior::<ValueBehavior>() {
+                    return ValuePathResolution::EnumCaseValue {
+                        symbol_id: current_symbol.metadata().id(),
+                        ty: value_beh.ty().clone(),
+                        // index-1 because we're in segment at `index`, but current_symbol
+                        // was resolved in the previous iteration (or from first segment)
+                        resolved_index: index - 1,
+                    };
                 }
             }
 
@@ -163,17 +191,17 @@ impl Query for ResolveValuePath {
                         segment: segment.clone(),
                         index,
                     };
-                }
+                },
                 1 => {
                     current_symbol = matches.into_iter().next().unwrap();
-                }
+                },
                 _ => {
                     return ValuePathResolution::Ambiguous {
                         segment: segment.clone(),
                         index,
                         candidates: matches.iter().map(|s| s.metadata().id()).collect(),
                     };
-                }
+                },
             }
         }
 
@@ -236,5 +264,29 @@ fn extract_value_from_symbols(
 
     ValuePathResolution::NotAValue {
         symbol_id: symbol.metadata().id(),
+    }
+}
+
+/// Resolve through a type alias to get the underlying struct/enum symbol.
+///
+/// Type aliases like `type MyInt = Int64` should allow member access like `MyInt.init()`.
+/// This function follows the alias chain and returns the underlying type's symbol.
+fn resolve_through_type_alias(
+    type_alias_symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+    model: &SemanticModel,
+) -> Option<Arc<dyn Symbol<KestrelLanguage>>> {
+    // Get the resolved type for this type alias
+    let resolved_ty = model.query(ResolvedAliasedType {
+        type_alias_id: type_alias_symbol.metadata().id(),
+    })?;
+
+    // Expand any nested type aliases
+    let expanded = resolved_ty.expand_aliases();
+
+    // Extract the underlying struct/enum symbol from the type
+    match expanded.kind() {
+        TyKind::Struct { symbol, .. } => Some(symbol.clone() as Arc<dyn Symbol<KestrelLanguage>>),
+        TyKind::Enum { symbol, .. } => Some(symbol.clone() as Arc<dyn Symbol<KestrelLanguage>>),
+        _ => None,
     }
 }

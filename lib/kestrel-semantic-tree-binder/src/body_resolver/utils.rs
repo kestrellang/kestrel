@@ -11,10 +11,12 @@ use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
 use kestrel_semantic_tree::behavior::callable::CallableBehavior;
 use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
 use kestrel_semantic_tree::behavior::extension_target::ExtensionTargetBehavior;
+use kestrel_semantic_tree::behavior::implements::ImplementsBehavior;
 use kestrel_semantic_tree::behavior::typed::TypedBehavior;
 use kestrel_semantic_tree::expr::{ExprKind, Expression};
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::function::FunctionSymbol;
+use kestrel_semantic_tree::symbol::initializer::InitializerSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::symbol::protocol::ProtocolSymbol;
 use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
@@ -25,9 +27,7 @@ use kestrel_syntax_tree::SyntaxKind;
 use semantic_tree::symbol::{Symbol, SymbolId};
 
 use super::context::BodyResolutionContext;
-use crate::diagnostics::{
-    TypeParameterCannotBeUsedAsValueError, UnsupportedGenericProtocolBoundError,
-};
+use crate::diagnostics::TypeParameterCannotBeUsedAsValueError;
 
 /// Check if a syntax kind is an expression kind
 pub fn is_expression_kind(kind: SyntaxKind) -> bool {
@@ -55,6 +55,7 @@ pub fn is_expression_kind(kind: SyntaxKind) -> bool {
             | SyntaxKind::ExprBreak
             | SyntaxKind::ExprContinue
             | SyntaxKind::ExprReturn
+            | SyntaxKind::ExprTry
             | SyntaxKind::ExprTupleIndex
             | SyntaxKind::ExprClosure
             | SyntaxKind::ExprImplicitMemberAccess
@@ -122,10 +123,10 @@ pub fn get_callable_behavior(
     symbol: &Arc<dyn Symbol<KestrelLanguage>>,
 ) -> Option<CallableBehavior> {
     for behavior in symbol.metadata().behaviors() {
-        if behavior.kind() == KestrelBehaviorKind::Callable {
-            if let Some(callable) = behavior.as_ref().downcast_ref::<CallableBehavior>() {
-                return Some(callable.clone());
-            }
+        if behavior.kind() == KestrelBehaviorKind::Callable
+            && let Some(callable) = behavior.as_ref().downcast_ref::<CallableBehavior>()
+        {
+            return Some(callable.clone());
         }
     }
     None
@@ -141,11 +142,24 @@ pub fn create_struct_type(struct_symbol: &Arc<dyn Symbol<KestrelLanguage>>, span
     let sym_clone = Arc::clone(struct_symbol);
 
     match sym_clone.downcast_arc::<StructSymbol>() {
-        Ok(struct_arc) => Ty::r#struct(struct_arc, span),
+        Ok(struct_arc) => {
+            let type_params = struct_arc.type_parameters();
+            if type_params.is_empty() {
+                return Ty::r#struct(struct_arc, span);
+            }
+
+            // No explicit type arguments provided: treat as Struct[_, _, ...]
+            let mut substitutions = Substitutions::new();
+            for param in type_params {
+                substitutions.insert(param.metadata().id(), Ty::infer(span.clone()));
+            }
+
+            Ty::generic_struct(struct_arc, substitutions, span)
+        },
         Err(_) => {
             // This shouldn't happen if we're calling this on a struct symbol
             Ty::error(span)
-        }
+        },
     }
 }
 
@@ -199,7 +213,7 @@ pub fn create_struct_type_with_type_args(
             }
 
             Ty::generic_struct(struct_arc, substitutions, span)
-        }
+        },
         Err(_) => Ty::error(span),
     }
 }
@@ -257,7 +271,7 @@ pub fn create_generic_struct_type(
             }
 
             Ty::generic_struct(struct_arc, substitutions, span)
-        }
+        },
         Err(_) => Ty::error(span),
     }
 }
@@ -265,10 +279,10 @@ pub fn create_generic_struct_type(
 /// Get the type from a field symbol's TypedBehavior
 fn get_field_type(field: &Arc<dyn Symbol<KestrelLanguage>>) -> Option<Ty> {
     for behavior in field.metadata().behaviors() {
-        if behavior.kind() == KestrelBehaviorKind::Typed {
-            if let Some(typed) = behavior.as_ref().downcast_ref::<TypedBehavior>() {
-                return Some(typed.ty().clone());
-            }
+        if behavior.kind() == KestrelBehaviorKind::Typed
+            && let Some(typed) = behavior.as_ref().downcast_ref::<TypedBehavior>()
+        {
+            return Some(typed.ty().clone());
         }
     }
     None
@@ -283,6 +297,16 @@ pub fn get_type_container(
         TyKind::Struct { symbol, .. } => Some(symbol.clone() as Arc<dyn Symbol<KestrelLanguage>>),
         TyKind::Enum { symbol, .. } => Some(symbol.clone() as Arc<dyn Symbol<KestrelLanguage>>),
         TyKind::Protocol { symbol, .. } => Some(symbol.clone() as Arc<dyn Symbol<KestrelLanguage>>),
+        TyKind::TypeAlias { .. } => {
+            // Expand the type alias and recurse to get the container of the underlying type
+            let expanded = ty.expand_aliases();
+            // Avoid infinite recursion if expand_aliases returns the same type
+            if !matches!(expanded.kind(), TyKind::TypeAlias { .. }) {
+                get_type_container(&expanded, ctx)
+            } else {
+                None
+            }
+        },
         TyKind::SelfType => {
             // Resolve Self to the containing struct/protocol
             // Get the function symbol, then its parent (which should be the struct/protocol)
@@ -294,33 +318,49 @@ pub fn get_type_container(
                 KestrelSymbolKind::Struct | KestrelSymbolKind::Protocol => Some(parent),
                 KestrelSymbolKind::Extension => {
                     // For extension methods, Self refers to the target type
-                    // Get the ExtensionTargetBehavior and return the target struct/enum
+                    // Get the ExtensionTargetBehavior and return the target struct/enum/protocol
                     if let Some(target_beh) =
                         parent.metadata().get_behavior::<ExtensionTargetBehavior>()
                     {
                         match target_beh.target_type().kind() {
                             TyKind::Struct { symbol, .. } => {
                                 Some(symbol.clone() as Arc<dyn Symbol<KestrelLanguage>>)
-                            }
+                            },
                             TyKind::Enum { symbol, .. } => {
                                 Some(symbol.clone() as Arc<dyn Symbol<KestrelLanguage>>)
-                            }
+                            },
+                            TyKind::Protocol { symbol, .. } => {
+                                // For protocol extensions, return the protocol symbol
+                                // This allows calling protocol methods on self in default implementations
+                                Some(symbol.clone() as Arc<dyn Symbol<KestrelLanguage>>)
+                            },
                             _ => None,
                         }
                     } else {
                         None
                     }
-                }
+                },
+                KestrelSymbolKind::Field => {
+                    // For getters/setters, the hierarchy is Struct -> Field -> Getter/Setter
+                    // We need the grandparent (the Struct)
+                    let grandparent = parent.metadata().parent()?;
+                    match grandparent.metadata().kind() {
+                        KestrelSymbolKind::Struct | KestrelSymbolKind::Protocol => {
+                            Some(grandparent)
+                        },
+                        _ => None,
+                    }
+                },
                 _ => None,
             }
-        }
+        },
         // TypeParameter is handled separately via get_type_parameter_bounds
         // to support multiple protocol bounds
         _ => None,
     }
 }
 
-/// Get the where clause from a symbol that can have one (Function, Struct, Protocol).
+/// Get the where clause from a symbol that can have one (Function, Initializer, Struct, Protocol).
 ///
 /// Returns None if the symbol doesn't have a where clause or can't be downcast.
 /// Note: Returns a cloned WhereClause since FunctionSymbol now uses RwLock.
@@ -328,6 +368,10 @@ pub fn get_where_clause(symbol: &dyn Symbol<KestrelLanguage>) -> Option<WhereCla
     // Try FunctionSymbol
     if let Some(func) = symbol.as_any().downcast_ref::<FunctionSymbol>() {
         return Some(func.where_clause());
+    }
+    // Try InitializerSymbol
+    if let Some(init) = symbol.as_any().downcast_ref::<InitializerSymbol>() {
+        return Some(init.where_clause());
     }
     // Try StructSymbol
     if let Some(struc) = symbol.as_any().downcast_ref::<StructSymbol>() {
@@ -448,31 +492,6 @@ pub fn get_type_parameter_bounds_by_id(
         }
     }
 
-    // Validate that no bounds use generic protocols (with type arguments)
-    // Filter them out and emit errors
-    bounds = bounds
-        .into_iter()
-        .filter(|bound| {
-            if let TyKind::Protocol {
-                symbol,
-                substitutions,
-            } = bound.kind()
-            {
-                if !substitutions.is_empty() {
-                    // This is a generic protocol bound like Container[E]
-                    let protocol_name = symbol.metadata().name().value.clone();
-                    let error = UnsupportedGenericProtocolBoundError {
-                        span: bound.span().clone(),
-                        protocol_name,
-                    };
-                    ctx.diagnostics.add_diagnostic(error.into_diagnostic());
-                    return false; // Filter out this bound
-                }
-            }
-            true
-        })
-        .collect();
-
     bounds
 }
 
@@ -497,17 +516,17 @@ pub fn substitute_type(ty: &Ty, substitutions: &Substitutions) -> Ty {
                 .get(param_id)
                 .cloned()
                 .unwrap_or_else(|| ty.clone())
-        }
+        },
         TyKind::Array(element) => {
             Ty::array(substitute_type(element, substitutions), ty.span().clone())
-        }
+        },
         TyKind::Tuple(elements) => {
             let new_elements: Vec<Ty> = elements
                 .iter()
                 .map(|e| substitute_type(e, substitutions))
                 .collect();
             Ty::tuple(new_elements, ty.span().clone())
-        }
+        },
         TyKind::Function {
             params,
             return_type,
@@ -518,7 +537,7 @@ pub fn substitute_type(ty: &Ty, substitutions: &Substitutions) -> Ty {
                 .collect();
             let new_return = substitute_type(return_type, substitutions);
             Ty::function(new_params, new_return, ty.span().clone())
-        }
+        },
         TyKind::Struct {
             symbol,
             substitutions: inner_subs,
@@ -529,7 +548,7 @@ pub fn substitute_type(ty: &Ty, substitutions: &Substitutions) -> Ty {
                 new_subs.insert(*id, substitute_type(inner_ty, substitutions));
             }
             Ty::generic_struct(symbol.clone(), new_subs, ty.span().clone())
-        }
+        },
         TyKind::Enum {
             symbol,
             substitutions: inner_subs,
@@ -540,7 +559,7 @@ pub fn substitute_type(ty: &Ty, substitutions: &Substitutions) -> Ty {
                 new_subs.insert(*id, substitute_type(inner_ty, substitutions));
             }
             Ty::generic_enum(symbol.clone(), new_subs, ty.span().clone())
-        }
+        },
         // For simple types, just return a clone
         _ => ty.clone(),
     }
@@ -564,6 +583,9 @@ pub fn format_symbol_kind(kind: KestrelSymbolKind) -> String {
         KestrelSymbolKind::Struct => "struct".to_string(),
         KestrelSymbolKind::TypeAlias => "type alias".to_string(),
         KestrelSymbolKind::TypeParameter => "type parameter".to_string(),
+        KestrelSymbolKind::Getter => "getter".to_string(),
+        KestrelSymbolKind::Setter => "setter".to_string(),
+        KestrelSymbolKind::Subscript => "subscript".to_string(),
     }
 }
 
@@ -621,14 +643,14 @@ fn infer_from_type(
                     substitutions.insert(param_id, arg_ty.clone());
                 }
             }
-        }
+        },
 
         // For array types, recurse into element type
         TyKind::Array(elem_ty) => {
             if let TyKind::Array(arg_elem) = arg_ty.kind() {
                 infer_from_type(elem_ty, arg_elem, type_params, substitutions);
             }
-        }
+        },
 
         // For tuple types, recurse into each element
         TyKind::Tuple(elems) => {
@@ -637,7 +659,7 @@ fn infer_from_type(
                     infer_from_type(pe, ae, type_params, substitutions);
                 }
             }
-        }
+        },
 
         // For function types, recurse into params and return type
         TyKind::Function {
@@ -654,7 +676,7 @@ fn infer_from_type(
                 }
                 infer_from_type(return_type, arg_ret, type_params, substitutions);
             }
-        }
+        },
 
         // For struct types with substitutions, match the inner type arguments
         TyKind::Struct {
@@ -676,10 +698,32 @@ fn infer_from_type(
                     }
                 }
             }
-        }
+        },
+
+        // For enum types with substitutions, match the inner type arguments
+        TyKind::Enum {
+            symbol: param_enum,
+            substitutions: param_subs,
+        } => {
+            if let TyKind::Enum {
+                symbol: arg_enum,
+                substitutions: arg_subs,
+            } = arg_ty.kind()
+            {
+                // Only if same enum
+                if param_enum.metadata().id() == arg_enum.metadata().id() {
+                    // Match substitutions
+                    for (id, param_sub_ty) in param_subs.iter() {
+                        if let Some(arg_sub_ty) = arg_subs.get(*id) {
+                            infer_from_type(param_sub_ty, arg_sub_ty, type_params, substitutions);
+                        }
+                    }
+                }
+            }
+        },
 
         // Other types don't contribute to inference
-        _ => {}
+        _ => {},
     }
 }
 
@@ -715,10 +759,15 @@ pub fn verify_type_argument_constraints(
     let mut all_satisfied = true;
 
     for (param, arg) in type_params.iter().zip(type_args.iter()) {
-        let param_id = param.metadata().id();
-        let bounds = where_clause.bounds_for(param_id);
+        // Skip constraint checking for poison types to avoid cascading errors
+        if arg.is_poison() {
+            continue;
+        }
 
-        for bound in bounds {
+        let param_id = param.metadata().id();
+        let bounds_with_spans = where_clause.bounds_for_with_span(param_id);
+
+        for (bound, constraint_span) in bounds_with_spans {
             if !type_satisfies_bound(arg, bound, model) {
                 // Report constraint not satisfied
                 let param_name = param.metadata().name().value.clone();
@@ -730,7 +779,7 @@ pub fn verify_type_argument_constraints(
                     type_name,
                     constraint_name,
                     type_param_name: param_name,
-                    constraint_span: Some(bound.span().clone()),
+                    constraint_span: Some(constraint_span.clone()),
                 };
                 diagnostics.add_diagnostic(error.into_diagnostic());
                 all_satisfied = false;
@@ -771,12 +820,11 @@ pub fn type_satisfies_bound(
                     if let TyKind::Protocol {
                         symbol: conf_proto, ..
                     } = conf.kind()
+                        && conf_proto.metadata().id() == required_proto.metadata().id()
                     {
-                        if conf_proto.metadata().id() == required_proto.metadata().id() {
-                            return true;
-                        }
-                        // TODO: Check inherited protocols
+                        return true;
                     }
+                    // TODO: Check inherited protocols
                 }
             }
 
@@ -793,18 +841,17 @@ pub fn type_satisfies_bound(
                         if let TyKind::Protocol {
                             symbol: conf_proto, ..
                         } = conf.kind()
+                            && conf_proto.metadata().id() == required_proto.metadata().id()
                         {
-                            if conf_proto.metadata().id() == required_proto.metadata().id() {
-                                return true;
-                            }
-                            // TODO: Check inherited protocols
+                            return true;
                         }
+                        // TODO: Check inherited protocols
                     }
                 }
             }
 
             false
-        }
+        },
 
         // Type parameter - check if its bounds satisfy the required bound
         TyKind::TypeParameter(param) => {
@@ -813,24 +860,316 @@ pub fn type_satisfies_bound(
                 if let TyKind::Protocol {
                     symbol: pb_proto, ..
                 } = pb.kind()
+                    && pb_proto.metadata().id() == required_proto.metadata().id()
                 {
-                    if pb_proto.metadata().id() == required_proto.metadata().id() {
-                        return true;
-                    }
-                    // TODO: Check protocol inheritance
+                    return true;
                 }
+                // TODO: Check protocol inheritance
             }
             false
-        }
+        },
 
         // Primitive types - check for built-in protocol conformances
         // Currently primitives don't conform to user-defined protocols
         TyKind::Int(_) | TyKind::Float(_) | TyKind::Bool | TyKind::String => {
             // TODO: Add built-in protocol conformances (Equatable, etc.)
             false
-        }
+        },
+
+        // Inference placeholders - optimistically assume they will satisfy bounds
+        // once resolved. Type inference will catch actual violations later.
+        TyKind::Infer => true,
 
         // Other types don't satisfy protocol bounds
         _ => false,
+    }
+}
+
+/// Replace any remaining type parameters in a type with inference placeholders.
+///
+/// This is used when initializer parameter types might contain type parameters
+/// that weren't in the substitution map (due to symbol ID mismatches between
+/// how type parameters are stored in different phases).
+#[allow(dead_code)]
+pub fn replace_unsubstituted_type_params(ty: &Ty, span: &Span) -> Ty {
+    match ty.kind() {
+        // Type parameter - replace with inference placeholder
+        TyKind::TypeParameter(_) => Ty::infer(span.clone()),
+
+        // Composite types - recursively replace
+        TyKind::Tuple(elements) => {
+            let new_elements: Vec<Ty> = elements
+                .iter()
+                .map(|e| replace_unsubstituted_type_params(e, span))
+                .collect();
+            Ty::tuple(new_elements, ty.span().clone())
+        },
+
+        TyKind::Array(element) => {
+            let new_element = replace_unsubstituted_type_params(element, span);
+            Ty::array(new_element, ty.span().clone())
+        },
+
+        TyKind::Pointer(element) => {
+            let new_element = replace_unsubstituted_type_params(element, span);
+            Ty::pointer(new_element, ty.span().clone())
+        },
+
+        TyKind::Function {
+            params,
+            return_type,
+        } => {
+            let new_params: Vec<Ty> = params
+                .iter()
+                .map(|p| replace_unsubstituted_type_params(p, span))
+                .collect();
+            let new_return = replace_unsubstituted_type_params(return_type, span);
+            Ty::function(new_params, new_return, ty.span().clone())
+        },
+
+        TyKind::Struct {
+            symbol,
+            substitutions,
+        } => {
+            let mut new_subs = Substitutions::new();
+            for (key, sub_ty) in substitutions.iter() {
+                new_subs.insert(*key, replace_unsubstituted_type_params(sub_ty, span));
+            }
+            Ty::generic_struct(symbol.clone(), new_subs, ty.span().clone())
+        },
+
+        TyKind::Enum {
+            symbol,
+            substitutions,
+        } => {
+            let mut new_subs = Substitutions::new();
+            for (key, sub_ty) in substitutions.iter() {
+                new_subs.insert(*key, replace_unsubstituted_type_params(sub_ty, span));
+            }
+            Ty::generic_enum(symbol.clone(), new_subs, ty.span().clone())
+        },
+
+        TyKind::Protocol {
+            symbol,
+            substitutions,
+        } => {
+            let mut new_subs = Substitutions::new();
+            for (key, sub_ty) in substitutions.iter() {
+                new_subs.insert(*key, replace_unsubstituted_type_params(sub_ty, span));
+            }
+            Ty::generic_protocol(symbol.clone(), new_subs, ty.span().clone())
+        },
+
+        // Other types - return as-is
+        _ => ty.clone(),
+    }
+}
+
+/// Replace type parameters with inference placeholders, except for those in the preserved set.
+///
+/// This is used when initializer parameter types might contain type parameters
+/// that weren't in the substitution map, but we want to preserve type parameters
+/// that came from explicit type arguments (e.g., Pointer[T] where T is from the caller's scope).
+pub fn replace_type_params_except(
+    ty: &Ty,
+    preserved: &std::collections::HashSet<SymbolId>,
+    span: &Span,
+) -> Ty {
+    match ty.kind() {
+        // Type parameter - replace with inference placeholder unless preserved
+        TyKind::TypeParameter(tp) => {
+            if preserved.contains(&tp.metadata().id()) {
+                ty.clone() // Preserve this type parameter
+            } else {
+                Ty::infer(span.clone()) // Replace with inference
+            }
+        },
+
+        // Composite types - recursively process
+        TyKind::Tuple(elements) => {
+            let new_elements: Vec<Ty> = elements
+                .iter()
+                .map(|e| replace_type_params_except(e, preserved, span))
+                .collect();
+            Ty::tuple(new_elements, ty.span().clone())
+        },
+
+        TyKind::Array(element) => {
+            let new_element = replace_type_params_except(element, preserved, span);
+            Ty::array(new_element, ty.span().clone())
+        },
+
+        TyKind::Pointer(element) => {
+            let new_element = replace_type_params_except(element, preserved, span);
+            Ty::pointer(new_element, ty.span().clone())
+        },
+
+        TyKind::Function {
+            params,
+            return_type,
+        } => {
+            let new_params: Vec<Ty> = params
+                .iter()
+                .map(|p| replace_type_params_except(p, preserved, span))
+                .collect();
+            let new_return = replace_type_params_except(return_type, preserved, span);
+            Ty::function(new_params, new_return, ty.span().clone())
+        },
+
+        TyKind::Struct {
+            symbol,
+            substitutions,
+        } => {
+            let mut new_subs = Substitutions::new();
+            for (key, sub_ty) in substitutions.iter() {
+                new_subs.insert(*key, replace_type_params_except(sub_ty, preserved, span));
+            }
+            Ty::generic_struct(symbol.clone(), new_subs, ty.span().clone())
+        },
+
+        TyKind::Enum {
+            symbol,
+            substitutions,
+        } => {
+            let mut new_subs = Substitutions::new();
+            for (key, sub_ty) in substitutions.iter() {
+                new_subs.insert(*key, replace_type_params_except(sub_ty, preserved, span));
+            }
+            Ty::generic_enum(symbol.clone(), new_subs, ty.span().clone())
+        },
+
+        TyKind::Protocol {
+            symbol,
+            substitutions,
+        } => {
+            let mut new_subs = Substitutions::new();
+            for (key, sub_ty) in substitutions.iter() {
+                new_subs.insert(*key, replace_type_params_except(sub_ty, preserved, span));
+            }
+            Ty::generic_protocol(symbol.clone(), new_subs, ty.span().clone())
+        },
+
+        // Other types - return as-is
+        _ => ty.clone(),
+    }
+}
+
+// =============================================================================
+// Type-Directed Conformance Helpers
+// =============================================================================
+
+/// Get the ImplementsBehavior from a symbol if it has one.
+///
+/// This behavior links a struct method/initializer to the protocol method it implements.
+#[allow(dead_code)]
+pub fn get_implements_behavior(
+    symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+) -> Option<ImplementsBehavior> {
+    for behavior in symbol.metadata().behaviors() {
+        if behavior.kind() == KestrelBehaviorKind::Implements
+            && let Some(implements) = behavior.as_ref().downcast_ref::<ImplementsBehavior>()
+        {
+            return Some(implements.clone());
+        }
+    }
+    None
+}
+
+/// Find all conformances for a specific protocol from a list of conformances.
+///
+/// Returns conformances where the protocol symbol ID matches the given protocol ID.
+/// For example, given conformances `[Convertible[Int8], Equatable, Convertible[Int32]]`
+/// and protocol ID for `Convertible`, returns `[Convertible[Int8], Convertible[Int32]]`.
+#[allow(dead_code)]
+pub fn find_conformances_for_protocol(conformances: &[Ty], protocol_id: SymbolId) -> Vec<&Ty> {
+    conformances
+        .iter()
+        .filter(|ty| {
+            if let TyKind::Protocol { symbol, .. } = ty.kind() {
+                symbol.metadata().id() == protocol_id
+            } else {
+                false
+            }
+        })
+        .collect()
+}
+
+/// Get the type argument at a specific index from a protocol conformance.
+///
+/// For a conformance like `Convertible[Int32]`, this extracts the `Int32` type argument.
+/// The index refers to the position of the type parameter in the protocol definition.
+///
+/// Returns `None` if:
+/// - The type is not a protocol
+/// - The protocol has no type parameters
+/// - The index is out of bounds
+#[allow(dead_code)]
+pub fn get_conformance_type_arg(conformance_ty: &Ty, param_index: usize) -> Option<Ty> {
+    if let TyKind::Protocol {
+        symbol,
+        substitutions,
+    } = conformance_ty.kind()
+    {
+        // Get the protocol's type parameters to find the ID at the given index
+        let type_params = symbol.type_parameters();
+        let param = type_params.get(param_index)?;
+        let param_id = param.metadata().id();
+
+        // Look up the substituted type for this parameter
+        substitutions.get(param_id).cloned()
+    } else {
+        None
+    }
+}
+
+/// Find the best matching initializer using type-directed selection.
+///
+/// When multiple initializers match by label/arity (e.g., multiple `init(from:)` from
+/// different `Convertible[X]` conformances), this function selects the one whose
+/// parameter type matches the actual argument type.
+///
+/// # Arguments
+/// * `candidates` - Initializers that match by label/arity
+/// * `arg_types` - The actual argument types being passed
+/// * `_struct_symbol` - The struct being instantiated (reserved for future use)
+///
+/// # Returns
+/// The index of the best matching initializer, or `None` if:
+/// - No type-directed match is found (falls back to first match)
+/// - Multiple exact matches exist (ambiguity - should report error)
+pub fn find_type_directed_match(
+    candidates: &[(usize, &Arc<dyn Symbol<KestrelLanguage>>, CallableBehavior)],
+    arg_types: &[Ty],
+    _struct_symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+) -> Option<usize> {
+    // Skip if no arguments to match on
+    if arg_types.is_empty() {
+        return None;
+    }
+
+    let mut matches: Vec<usize> = Vec::new();
+
+    for (candidate_idx, (_, _init_sym, callable)) in candidates.iter().enumerate() {
+        let params = callable.parameters();
+        if params.is_empty() {
+            continue;
+        }
+
+        // Check if the first parameter type matches the first argument type
+        // This is a simple direct type comparison - if the init's parameter type
+        // is assignable from the argument type, it's a match
+        let param_ty = &params[0].ty;
+
+        if arg_types[0].is_assignable_to(param_ty) {
+            // Push the index within candidates, not the original index
+            matches.push(candidate_idx);
+        }
+    }
+
+    // Return the single match, or None if zero or multiple matches
+    if matches.len() == 1 {
+        Some(matches[0])
+    } else {
+        None // Either no matches (fall back to first) or ambiguous (should error)
     }
 }

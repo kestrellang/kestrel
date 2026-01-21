@@ -5,24 +5,27 @@
 //! statements and new basic blocks along the way.
 
 use kestrel_execution_graph::{
-    BinOp, CallArg, Callee, Id, Immediate, Local, MirTy, PassingMode, Place, QualifiedNameData,
-    Rvalue, UnOp, Value,
+    BinOp, CallArg, Callee, CastKind, Id, Immediate, Local, MirTy, PassingMode, Place,
+    QualifiedNameData, Rvalue, UnOp, Value,
 };
-use kestrel_semantic_model::SymbolFor;
+use kestrel_semantic_model::{StructFields, SymbolFor};
 use kestrel_semantic_tree::behavior::callable::{
     CallableBehavior, ParameterAccessMode, ReceiverKind,
 };
 use kestrel_semantic_tree::expr::{
     CallArgument, ElseBranch, ExprKind, Expression, IfCondition, LiteralValue, PrimitiveMethod,
 };
+use kestrel_semantic_tree::symbol::field::FieldSymbol;
+use kestrel_semantic_tree::symbol::initializer::InitializerSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
-use kestrel_semantic_tree::ty::{ParamInfo, Ty, TyKind};
+use kestrel_semantic_tree::ty::{Ty, TyKind};
+use semantic_tree::symbol::SymbolId;
 
 use crate::context::LoweringContext;
 use crate::error::LoweringError;
 use crate::name::qualified_name_for_symbol;
 use crate::stmt::lower_statement;
-use crate::ty::lower_type;
+use crate::ty::{lower_type, make_float_immediate, make_int_immediate, make_int_zero_for_mir_ty};
 
 /// Convert a ParameterAccessMode to a PassingMode based on type copyability.
 ///
@@ -43,7 +46,7 @@ fn access_mode_to_passing_mode(mode: ParameterAccessMode, arg_ty: &Ty) -> Passin
             } else {
                 PassingMode::Move
             }
-        }
+        },
     }
 }
 
@@ -77,9 +80,9 @@ fn emit_clone_call(ctx: &mut LoweringContext, value: &Value, ty: &Ty) -> Value {
                     ));
                     // Return a dummy value to allow compilation to continue
                     return Value::Immediate(Immediate::unit());
-                }
+                },
             }
-        }
+        },
         None => {
             // Cloneable builtin not registered - std library may not be loaded
             ctx.emit_error(LoweringError::internal(
@@ -88,7 +91,7 @@ fn emit_clone_call(ctx: &mut LoweringContext, value: &Value, ty: &Ty) -> Value {
             ));
             // Return a dummy value to allow compilation to continue
             return Value::Immediate(Immediate::unit());
-        }
+        },
     };
 
     // Create the witness callee: witness_method Cloneable.clone for T
@@ -151,11 +154,11 @@ fn build_call_args(
                             Some(ReceiverKind::Borrowing) | None => {
                                 // Immutable borrow of self - use PassingMode::Ref
                                 CallArg::borrow(value)
-                            }
+                            },
                             Some(ReceiverKind::Mutating) => {
                                 // Mutable borrow of self - use PassingMode::MutRef
                                 CallArg::mutating(value)
-                            }
+                            },
                             Some(ReceiverKind::Consuming) => {
                                 // Takes ownership of self
                                 if let Some(arg_ty) = arg_types.first().copied() {
@@ -169,11 +172,11 @@ fn build_call_args(
                                     // Fallback: assume move
                                     CallArg::moving(value)
                                 }
-                            }
+                            },
                             Some(ReceiverKind::Initializing) => {
                                 // For initializers, self is being constructed - pass as mutable ref
                                 CallArg::mutating(value)
-                            }
+                            },
                         }
                     } else {
                         let param_idx = i - param_offset;
@@ -196,12 +199,12 @@ fn build_call_args(
                                         // Create a reference to the argument
                                         let ref_value = create_ref(ctx, &value, arg_ty, false);
                                         CallArg::new(ref_value, PassingMode::Copy)
-                                    }
+                                    },
                                     ParameterAccessMode::Mutating => {
                                         // Create a mutable reference to the argument
                                         let ref_value = create_ref(ctx, &value, arg_ty, true);
                                         CallArg::new(ref_value, PassingMode::Copy)
-                                    }
+                                    },
                                     ParameterAccessMode::Consuming => {
                                         // Pass by value (copy or move)
                                         let mode = if arg_ty.is_copyable() {
@@ -210,7 +213,7 @@ fn build_call_args(
                                             PassingMode::Move
                                         };
                                         CallArg::new(value, mode)
-                                    }
+                                    },
                                 }
                             } else {
                                 // Fallback if type not found (shouldn't happen after type checking)
@@ -229,11 +232,11 @@ fn build_call_args(
                     }
                 })
                 .collect()
-        }
+        },
         None => {
             // No behavior available - default to Ref for all arguments
             arg_values.into_iter().map(CallArg::borrow).collect()
-        }
+        },
     }
 }
 
@@ -262,7 +265,7 @@ fn create_ref(ctx: &mut LoweringContext, value: &Value, ty: &Ty, is_mutable: boo
             ctx.emit_assign(ref_place.clone(), rvalue);
 
             Value::Place(ref_place)
-        }
+        },
         Value::Immediate(imm) => {
             // For immediates, we need to spill to a temp first, then take a reference
             let base_mir_ty = lower_type(ctx, ty);
@@ -289,13 +292,14 @@ fn create_ref(ctx: &mut LoweringContext, value: &Value, ty: &Ty, is_mutable: boo
             ctx.emit_assign(ref_place.clone(), rvalue);
 
             Value::Place(ref_place)
-        }
+        },
+        Value::Unreachable => Value::Unreachable,
     }
 }
 
 /// Extract the local ID from a Value if it's a simple local reference.
 /// Returns None for complex places (field access, etc.) or immediates.
-fn try_get_local_from_value(value: &Value) -> Option<Id<Local>> {
+pub fn try_get_local_from_value(value: &Value) -> Option<Id<Local>> {
     match value {
         Value::Place(place) => place.as_local(),
         _ => None,
@@ -305,10 +309,10 @@ fn try_get_local_from_value(value: &Value) -> Option<Id<Local>> {
 /// Mark locals as moved for any arguments passed with Move mode.
 fn mark_moved_args(ctx: &mut LoweringContext, call_args: &[CallArg]) {
     for arg in call_args {
-        if arg.mode == PassingMode::Move {
-            if let Some(local) = try_get_local_from_value(&arg.value) {
-                ctx.mark_moved(local);
-            }
+        if arg.mode == PassingMode::Move
+            && let Some(local) = try_get_local_from_value(&arg.value)
+        {
+            ctx.mark_moved(local);
         }
     }
 }
@@ -322,7 +326,7 @@ fn mark_moved_args(ctx: &mut LoweringContext, call_args: &[CallArg]) {
 /// represent the actual types expected by the callee. If the function type
 /// says `(i64, i64) -> i64`, the closure expects `i64` values, not references.
 fn build_indirect_call_args(
-    ctx: &mut LoweringContext,
+    _ctx: &mut LoweringContext,
     arg_values: Vec<Value>,
     arg_types: &[&Ty],
     _callee_ty: &Ty,
@@ -369,7 +373,7 @@ fn build_indirect_call_args(
 pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
     match &expr.kind {
         // === Literals ===
-        ExprKind::Literal(lit) => lower_literal(lit, expr),
+        ExprKind::Literal(lit) => lower_literal(ctx, lit, expr),
 
         // === Variable References ===
         ExprKind::LocalRef(local_id) => {
@@ -388,7 +392,7 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
             } else {
                 Value::Place(local_place)
             }
-        }
+        },
 
         ExprKind::SymbolRef(symbol_id) => {
             // SymbolRef represents a reference to a symbol as a first-class value.
@@ -405,11 +409,10 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
                         | KestrelSymbolKind::Initializer
                         | KestrelSymbolKind::EnumCase => {
                             // Function/callable reference as first-class value
-                            let func_name = qualified_name_for_symbol(ctx, &sym);
-                            // For now, emit without type args - generic function references
-                            // would need the substitutions from the expression context
-                            Value::Immediate(Immediate::function_ref(func_name))
-                        }
+                            // We need to generate a thunk to adapt the calling convention
+                            // from thin (no env) to thick (env as first param).
+                            lower_function_ref_as_value(ctx, &sym, &expr.ty, &expr.span)
+                        },
                         KestrelSymbolKind::Field => {
                             // Global variable access - not yet supported
                             ctx.emit_error(LoweringError::unsupported_expr(
@@ -417,28 +420,40 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
                                 expr.span.clone(),
                             ));
                             Value::Immediate(Immediate::error())
-                        }
+                        },
                         _ => {
                             ctx.emit_error(LoweringError::unsupported_expr(
                                 format!("SymbolRef to {:?}", kind),
                                 expr.span.clone(),
                             ));
                             Value::Immediate(Immediate::error())
-                        }
+                        },
                     }
-                }
+                },
                 None => {
                     ctx.emit_error(LoweringError::internal(
                         format!("symbol not found: {:?}", symbol_id),
                         Some(expr.span.clone()),
                     ));
                     Value::Immediate(Immediate::error())
-                }
+                },
             }
-        }
+        },
 
         // === Field Access ===
         ExprKind::FieldAccess { object, field } => {
+            // Check if this is a computed property access
+            // First, try to find the field symbol from the object's type
+            let field_info = find_field_info(ctx, &object.ty, field);
+
+            if let Some((field_id, is_computed)) = field_info
+                && is_computed
+            {
+                // Computed property - generate a getter call
+                return lower_getter_call(ctx, object, field_id, field, expr);
+            }
+
+            // Not computed - use direct field access
             let obj_value = lower_expression(ctx, object);
             match obj_value {
                 Value::Place(p) => Value::Place(p.field(field)),
@@ -450,9 +465,10 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
                         Some(expr.span.clone()),
                     ));
                     Value::Immediate(Immediate::error())
-                }
+                },
+                Value::Unreachable => Value::Unreachable,
             }
-        }
+        },
 
         ExprKind::TupleIndex { tuple, index } => {
             let tuple_value = lower_expression(ctx, tuple);
@@ -464,12 +480,40 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
                         Some(expr.span.clone()),
                     ));
                     Value::Immediate(Immediate::error())
-                }
+                },
+                Value::Unreachable => Value::Unreachable,
             }
-        }
+        },
 
         // === Assignment ===
         ExprKind::Assignment { target, value } => {
+            // Check if target is a computed property field access
+            if let ExprKind::FieldAccess {
+                object,
+                field: field_name,
+            } = &target.kind
+            {
+                let field_info = find_field_info(ctx, &object.ty, field_name);
+                if let Some((field_id, is_computed)) = field_info
+                    && is_computed
+                {
+                    // Computed property assignment - generate a setter call
+                    return lower_setter_call(ctx, object, field_id, field_name, value, expr);
+                }
+            }
+
+            // Check if target is a subscript call (subscript assignment)
+            if let ExprKind::SubscriptCall {
+                receiver,
+                getter,
+                arguments,
+            } = &target.kind
+            {
+                // Subscript assignment - generate a setter call
+                return lower_subscript_setter_call(ctx, receiver, *getter, arguments, value, expr);
+            }
+
+            // Not a computed property or subscript - use direct assignment
             let target_place = match lower_expression(ctx, target) {
                 Value::Place(p) => p,
                 Value::Immediate(_) => {
@@ -478,7 +522,8 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
                         Some(expr.span.clone()),
                     ));
                     return Value::Immediate(Immediate::error());
-                }
+                },
+                Value::Unreachable => return Value::Unreachable,
             };
 
             let rhs_value = lower_expression(ctx, value);
@@ -492,15 +537,16 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
                         Rvalue::Move(src_place)
                     };
                     ctx.emit_assign(target_place, rvalue);
-                }
+                },
                 Value::Immediate(imm) => {
                     ctx.emit_assign(target_place, Rvalue::Use(imm));
-                }
+                },
+                Value::Unreachable => return Value::Unreachable,
             }
 
             // Assignment expression yields unit (actually Never in semantic tree)
             Value::Immediate(Immediate::unit())
-        }
+        },
 
         // === Primitive Method Calls (operators) ===
         ExprKind::PrimitiveMethodCall {
@@ -521,7 +567,7 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
                 Some(expr.span.clone()),
             ));
             Value::Immediate(Immediate::error())
-        }
+        },
 
         // === Struct Construction ===
         ExprKind::ImplicitStructInit {
@@ -529,12 +575,25 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
             arguments,
         } => lower_struct_init(ctx, struct_type, arguments, expr),
 
+        // === Delegating Initializer ===
+        ExprKind::DelegatingInit {
+            initializer,
+            arguments,
+            substitutions,
+        } => lower_delegating_init(ctx, *initializer, arguments, substitutions, expr),
+
         // === Function/Method Calls ===
         ExprKind::Call {
             callee,
             arguments,
             substitutions,
         } => lower_call(ctx, callee, arguments, substitutions, expr),
+
+        ExprKind::SubscriptCall {
+            receiver,
+            getter,
+            arguments,
+        } => lower_subscript_call(ctx, receiver, *getter, arguments, expr),
 
         // === Control Flow ===
         ExprKind::If {
@@ -578,8 +637,8 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
                 ));
             }
             // Break never produces a value (it transfers control)
-            Value::Immediate(Immediate::unit())
-        }
+            Value::Unreachable
+        },
 
         ExprKind::Continue { loop_id, label: _ } => {
             // Find the target loop and jump to its header block
@@ -595,8 +654,8 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
                 ));
             }
             // Continue never produces a value (it transfers control)
-            Value::Immediate(Immediate::unit())
-        }
+            Value::Unreachable
+        },
 
         ExprKind::Return { value } => {
             let ret_value = if let Some(v) = value {
@@ -604,17 +663,22 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
             } else {
                 Value::Immediate(Immediate::unit())
             };
+            // Mark the return value's local as moved so it doesn't get deinited.
+            // The caller takes ownership of the return value.
+            if let Some(local) = try_get_local_from_value(&ret_value) {
+                ctx.mark_moved(local);
+            }
             // Emit deinits for all scopes before returning
             ctx.emit_all_scope_deinits();
             ctx.emit_return(ret_value);
-            // Return a unit value even though this is never used (block is terminated)
-            Value::Immediate(Immediate::unit())
-        }
+            // Return diverges - this value is never used (block is terminated)
+            Value::Unreachable
+        },
 
         // === Match Expressions ===
         ExprKind::Match { scrutinee, arms } => {
             crate::match_lowering::lower_match_expr(ctx, scrutinee, arms, expr)
-        }
+        },
 
         // === Block Expressions ===
         // Used for match arm bodies with statements. NOT a closure - executes inline.
@@ -636,9 +700,9 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
                 }
             } else {
                 // Block was terminated (e.g., by return) - value is unreachable
-                Value::Immediate(Immediate::unit())
+                Value::Unreachable
             }
-        }
+        },
 
         // === Closures ===
         ExprKind::Closure {
@@ -661,47 +725,7 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
         ),
 
         // === Other ===
-        ExprKind::Array(elements) => {
-            // Lower each element
-            let element_values: Vec<Value> =
-                elements.iter().map(|e| lower_expression(ctx, e)).collect();
-
-            // Get the array element type from the expression type
-            let (element_ty, elem_sem_ty) = match expr.ty.kind() {
-                kestrel_semantic_tree::ty::TyKind::Array(elem_ty) => {
-                    (lower_type(ctx, elem_ty), Some(elem_ty))
-                }
-                _ => {
-                    ctx.emit_error(LoweringError::internal(
-                        "array literal with non-array type",
-                        Some(expr.span.clone()),
-                    ));
-                    (ctx.mir.ty_error(), None)
-                }
-            };
-
-            // Create result local and emit array construction
-            let result_ty = lower_type(ctx, &expr.ty);
-            let result_local = ctx.create_temp("array", result_ty);
-            let result_place = Place::local(result_local);
-
-            // Track the temp for deinit if array element type needs deinit
-            if let Some(elem_ty) = elem_sem_ty {
-                if ctx.type_needs_deinit(elem_ty) {
-                    ctx.track_statement_temp(result_local);
-                }
-            }
-
-            ctx.emit_assign(
-                result_place.clone(),
-                Rvalue::Array {
-                    element_ty,
-                    elements: element_values,
-                },
-            );
-
-            Value::Place(result_place)
-        }
+        ExprKind::Array(elements) => lower_array_literal(ctx, elements, expr),
 
         ExprKind::Tuple(elements) => {
             // Lower each element
@@ -722,7 +746,7 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
             ctx.emit_assign(result_place.clone(), Rvalue::Tuple(element_values));
 
             Value::Place(result_place)
-        }
+        },
 
         ExprKind::Grouping(inner) => lower_expression(ctx, inner),
 
@@ -733,7 +757,7 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
                 Some(expr.span.clone()),
             ));
             Value::Immediate(Immediate::error())
-        }
+        },
 
         ExprKind::TypeRef(_) => {
             // Type references shouldn't appear as values
@@ -742,7 +766,7 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
                 Some(expr.span.clone()),
             ));
             Value::Immediate(Immediate::error())
-        }
+        },
 
         ExprKind::TypeParameterRef(_) => {
             ctx.emit_error(LoweringError::unsupported_expr(
@@ -750,7 +774,7 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
                 expr.span.clone(),
             ));
             Value::Immediate(Immediate::error())
-        }
+        },
 
         ExprKind::AssociatedTypeRef => {
             ctx.emit_error(LoweringError::unsupported_expr(
@@ -758,7 +782,7 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
                 expr.span.clone(),
             ));
             Value::Immediate(Immediate::error())
-        }
+        },
 
         ExprKind::MethodRef {
             receiver,
@@ -774,7 +798,7 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
                 &expr.ty,
                 &expr.span,
             )
-        }
+        },
 
         ExprKind::EnumCase { case_id } => {
             // Simple enum case (no associated values)
@@ -806,16 +830,16 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
                     );
 
                     Value::Place(result_place)
-                }
+                },
                 None => {
                     ctx.emit_error(LoweringError::internal(
                         format!("enum case symbol not found: {:?}", case_id),
                         Some(expr.span.clone()),
                     ));
                     Value::Immediate(Immediate::error())
-                }
+                },
             }
-        }
+        },
 
         ExprKind::ImplicitMemberAccess {
             member_name,
@@ -827,7 +851,7 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
                 Some(expr.span.clone()),
             ));
             Value::Immediate(Immediate::error())
-        }
+        },
 
         ExprKind::DeferredMethodCall { method_name, .. } => {
             // Should be resolved by type inference
@@ -836,24 +860,982 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
                 Some(expr.span.clone()),
             ));
             Value::Immediate(Immediate::error())
-        }
+        },
+
+        // === Language Intrinsics ===
+        ExprKind::LangIntrinsic {
+            intrinsic,
+            arguments,
+        } => {
+            use kestrel_execution_graph::TerminatorKind;
+            use kestrel_execution_graph::function::ImmediateKind;
+            use kestrel_semantic_tree::expr::LangIntrinsic;
+
+            match intrinsic {
+                LangIntrinsic::PanicUnwind => {
+                    // Lower the message argument
+                    let message_value = if let Some(arg) = arguments.first() {
+                        lower_expression(ctx, &arg.value)
+                    } else {
+                        // Should not happen after binder validation
+                        Value::Immediate(Immediate::string("panic".to_string()))
+                    };
+
+                    // Extract the message string
+                    let message = match message_value {
+                        Value::Immediate(imm) => {
+                            match &imm.kind {
+                                ImmediateKind::StringLiteral(s) => s.clone(),
+                                _ => {
+                                    // For non-constant strings, use a placeholder
+                                    "<dynamic panic message>".to_string()
+                                },
+                            }
+                        },
+                        _ => {
+                            // For non-immediate values, use a placeholder
+                            "<dynamic panic message>".to_string()
+                        },
+                    };
+
+                    // Emit the panic terminator
+                    ctx.emit_terminator(TerminatorKind::Panic(message));
+
+                    // Start a new unreachable block (panic never returns)
+                    let unreachable_block = ctx.create_block();
+                    ctx.set_current_block(unreachable_block);
+
+                    // Panic diverges - return Unreachable so callers don't try to use this value
+                    Value::Unreachable
+                },
+                LangIntrinsic::Cast { from, to } => {
+                    // Lower the operand argument
+                    let operand = if let Some(arg) = arguments.first() {
+                        lower_expression(ctx, &arg.value)
+                    } else {
+                        // Should not happen after binder validation
+                        ctx.emit_error(LoweringError::internal(
+                            "cast intrinsic missing argument",
+                            Some(expr.span.clone()),
+                        ));
+                        return Value::Immediate(Immediate::error());
+                    };
+
+                    // Determine the cast kind based on from/to primitives
+                    let cast_kind = determine_cast_kind(*from, *to);
+
+                    // Lower the target type
+                    let target_ty = lower_type(ctx, &expr.ty);
+
+                    // Emit the cast
+                    let result = ctx.create_temp("cast", target_ty);
+                    ctx.emit_assign(
+                        Place::local(result),
+                        Rvalue::Cast {
+                            kind: cast_kind,
+                            operand,
+                            target: target_ty,
+                        },
+                    );
+                    Value::Place(Place::local(result))
+                },
+                LangIntrinsic::IntBinary { op, .. } => {
+                    use kestrel_semantic_tree::expr::IntBinaryOp;
+                    let lhs = lower_expression(ctx, &arguments[0].value);
+                    let rhs = lower_expression(ctx, &arguments[1].value);
+
+                    let bin_op = match op {
+                        IntBinaryOp::Add => BinOp::AddSigned,
+                        IntBinaryOp::Sub => BinOp::SubSigned,
+                        IntBinaryOp::Mul => BinOp::MulSigned,
+                        IntBinaryOp::Eq => BinOp::Eq,
+                        IntBinaryOp::Ne => BinOp::Ne,
+                        IntBinaryOp::And => BinOp::And,
+                        IntBinaryOp::Or => BinOp::Or,
+                        IntBinaryOp::Xor => BinOp::Xor,
+                        IntBinaryOp::Shl => BinOp::Shl,
+                    };
+
+                    let result_ty = lower_type(ctx, &expr.ty);
+                    let result = ctx.create_temp("int_op", result_ty);
+                    ctx.emit_assign(
+                        Place::local(result),
+                        Rvalue::BinaryOp {
+                            op: bin_op,
+                            lhs,
+                            rhs,
+                        },
+                    );
+                    Value::Place(Place::local(result))
+                },
+                LangIntrinsic::IntBinarySigned { op, .. } => {
+                    use kestrel_semantic_tree::expr::SignedOp;
+                    let lhs = lower_expression(ctx, &arguments[0].value);
+                    let rhs = lower_expression(ctx, &arguments[1].value);
+
+                    let bin_op = match op {
+                        SignedOp::Div => BinOp::DivSigned,
+                        SignedOp::Rem => BinOp::RemSigned,
+                        SignedOp::Shr => BinOp::ShrSigned,
+                        SignedOp::Lt => BinOp::LtSigned,
+                        SignedOp::Le => BinOp::LeSigned,
+                        SignedOp::Gt => BinOp::GtSigned,
+                        SignedOp::Ge => BinOp::GeSigned,
+                    };
+
+                    let result_ty = lower_type(ctx, &expr.ty);
+                    let result = ctx.create_temp("signed_op", result_ty);
+                    ctx.emit_assign(
+                        Place::local(result),
+                        Rvalue::BinaryOp {
+                            op: bin_op,
+                            lhs,
+                            rhs,
+                        },
+                    );
+                    Value::Place(Place::local(result))
+                },
+                LangIntrinsic::IntBinaryUnsigned { op, .. } => {
+                    use kestrel_semantic_tree::expr::SignedOp;
+                    let lhs = lower_expression(ctx, &arguments[0].value);
+                    let rhs = lower_expression(ctx, &arguments[1].value);
+
+                    let bin_op = match op {
+                        SignedOp::Div => BinOp::DivUnsigned,
+                        SignedOp::Rem => BinOp::RemUnsigned,
+                        SignedOp::Shr => BinOp::ShrUnsigned,
+                        SignedOp::Lt => BinOp::LtUnsigned,
+                        SignedOp::Le => BinOp::LeUnsigned,
+                        SignedOp::Gt => BinOp::GtUnsigned,
+                        SignedOp::Ge => BinOp::GeUnsigned,
+                    };
+
+                    let result_ty = lower_type(ctx, &expr.ty);
+                    let result = ctx.create_temp("unsigned_op", result_ty);
+                    ctx.emit_assign(
+                        Place::local(result),
+                        Rvalue::BinaryOp {
+                            op: bin_op,
+                            lhs,
+                            rhs,
+                        },
+                    );
+                    Value::Place(Place::local(result))
+                },
+                LangIntrinsic::IntUnary { op, .. } => {
+                    use kestrel_semantic_tree::expr::IntUnaryOp;
+                    let operand = lower_expression(ctx, &arguments[0].value);
+
+                    let un_op = match op {
+                        IntUnaryOp::Neg => UnOp::Neg,
+                        IntUnaryOp::Not => UnOp::Not,
+                    };
+
+                    let result_ty = lower_type(ctx, &expr.ty);
+                    let result = ctx.create_temp("int_unary", result_ty);
+                    ctx.emit_assign(Place::local(result), Rvalue::UnaryOp { op: un_op, operand });
+                    Value::Place(Place::local(result))
+                },
+                LangIntrinsic::FloatBinary { op, .. } => {
+                    use kestrel_semantic_tree::expr::FloatBinaryOp;
+                    let lhs = lower_expression(ctx, &arguments[0].value);
+                    let rhs = lower_expression(ctx, &arguments[1].value);
+
+                    let bin_op = match op {
+                        FloatBinaryOp::Add => BinOp::FAdd,
+                        FloatBinaryOp::Sub => BinOp::FSub,
+                        FloatBinaryOp::Mul => BinOp::FMul,
+                        FloatBinaryOp::Div => BinOp::FDiv,
+                        FloatBinaryOp::Eq => BinOp::FEq,
+                        FloatBinaryOp::Ne => BinOp::FNe,
+                        FloatBinaryOp::Lt => BinOp::FLt,
+                        FloatBinaryOp::Le => BinOp::FLe,
+                        FloatBinaryOp::Gt => BinOp::FGt,
+                        FloatBinaryOp::Ge => BinOp::FGe,
+                    };
+
+                    let result_ty = lower_type(ctx, &expr.ty);
+                    let result = ctx.create_temp("float_op", result_ty);
+                    ctx.emit_assign(
+                        Place::local(result),
+                        Rvalue::BinaryOp {
+                            op: bin_op,
+                            lhs,
+                            rhs,
+                        },
+                    );
+                    Value::Place(Place::local(result))
+                },
+                LangIntrinsic::FloatUnary { op, .. } => {
+                    use kestrel_semantic_tree::expr::FloatUnaryOp;
+                    let operand = lower_expression(ctx, &arguments[0].value);
+
+                    let un_op = match op {
+                        FloatUnaryOp::Neg => UnOp::FNeg,
+                    };
+
+                    let result_ty = lower_type(ctx, &expr.ty);
+                    let result = ctx.create_temp("float_unary", result_ty);
+                    ctx.emit_assign(Place::local(result), Rvalue::UnaryOp { op: un_op, operand });
+                    Value::Place(Place::local(result))
+                },
+                LangIntrinsic::FloatConst {
+                    primitive,
+                    constant,
+                } => {
+                    use kestrel_execution_graph::function::{FloatBits, FloatConstantKind};
+                    use kestrel_semantic_tree::expr::{FloatConstant, LangPrimitive};
+
+                    let bits = match primitive {
+                        LangPrimitive::F16 => FloatBits::F16,
+                        LangPrimitive::F32 => FloatBits::F32,
+                        LangPrimitive::F64 => FloatBits::F64,
+                        _ => unreachable!("float constant on non-float primitive"),
+                    };
+
+                    let const_kind = match constant {
+                        FloatConstant::Infinity => FloatConstantKind::Infinity,
+                        FloatConstant::Nan => FloatConstantKind::Nan,
+                    };
+
+                    let result_ty = lower_type(ctx, &expr.ty);
+                    let result = ctx.create_temp("float_const", result_ty);
+                    ctx.emit_assign(
+                        Place::local(result),
+                        Rvalue::FloatConst {
+                            bits,
+                            constant: const_kind,
+                        },
+                    );
+                    Value::Place(Place::local(result))
+                },
+                LangIntrinsic::FloatPred { primitive, pred } => {
+                    use kestrel_execution_graph::function::{FloatBits, FloatPredicateKind};
+                    use kestrel_semantic_tree::expr::{FloatPredicate, LangPrimitive};
+
+                    let operand = lower_expression(ctx, &arguments[0].value);
+
+                    let bits = match primitive {
+                        LangPrimitive::F16 => FloatBits::F16,
+                        LangPrimitive::F32 => FloatBits::F32,
+                        LangPrimitive::F64 => FloatBits::F64,
+                        _ => unreachable!("float predicate on non-float primitive"),
+                    };
+
+                    let pred_kind = match pred {
+                        FloatPredicate::IsNan => FloatPredicateKind::IsNan,
+                        FloatPredicate::IsInfinite => FloatPredicateKind::IsInfinite,
+                    };
+
+                    let result_ty = lower_type(ctx, &expr.ty);
+                    let result = ctx.create_temp("float_pred", result_ty);
+                    ctx.emit_assign(
+                        Place::local(result),
+                        Rvalue::FloatPred {
+                            bits,
+                            pred: pred_kind,
+                            operand,
+                        },
+                    );
+                    Value::Place(Place::local(result))
+                },
+                LangIntrinsic::FloatMath { primitive, op } => {
+                    use kestrel_execution_graph::function::{FloatBits, FloatMathKind};
+                    use kestrel_semantic_tree::expr::{FloatMathOp, LangPrimitive};
+
+                    let operand = lower_expression(ctx, &arguments[0].value);
+
+                    let bits = match primitive {
+                        LangPrimitive::F16 => FloatBits::F16,
+                        LangPrimitive::F32 => FloatBits::F32,
+                        LangPrimitive::F64 => FloatBits::F64,
+                        _ => unreachable!("float math on non-float primitive"),
+                    };
+
+                    let math_kind = match op {
+                        FloatMathOp::Floor => FloatMathKind::Floor,
+                        FloatMathOp::Ceil => FloatMathKind::Ceil,
+                        FloatMathOp::Round => FloatMathKind::Round,
+                        FloatMathOp::Trunc => FloatMathKind::Trunc,
+                        FloatMathOp::Sqrt => FloatMathKind::Sqrt,
+                    };
+
+                    let result_ty = lower_type(ctx, &expr.ty);
+                    let result = ctx.create_temp("float_math", result_ty);
+                    ctx.emit_assign(
+                        Place::local(result),
+                        Rvalue::FloatMath {
+                            bits,
+                            op: math_kind,
+                            operand,
+                        },
+                    );
+                    Value::Place(Place::local(result))
+                },
+
+                // === Pointer intrinsics ===
+                LangIntrinsic::PtrNull { .. } => {
+                    let result_ty = lower_type(ctx, &expr.ty);
+                    let result = ctx.create_temp("ptr_null", result_ty);
+                    ctx.emit_assign(Place::local(result), Rvalue::PtrNull { ty: result_ty });
+                    Value::Place(Place::local(result))
+                },
+                LangIntrinsic::PtrFromAddress { .. } => {
+                    let address = lower_expression(ctx, &arguments[0].value);
+                    let result_ty = lower_type(ctx, &expr.ty);
+                    let result = ctx.create_temp("ptr_from_addr", result_ty);
+                    ctx.emit_assign(
+                        Place::local(result),
+                        Rvalue::PtrFromAddress {
+                            ty: result_ty,
+                            address,
+                        },
+                    );
+                    Value::Place(Place::local(result))
+                },
+                LangIntrinsic::PtrToAddress => {
+                    let ptr = lower_expression(ctx, &arguments[0].value);
+                    let result_ty = lower_type(ctx, &expr.ty);
+                    let result = ctx.create_temp("ptr_to_addr", result_ty);
+                    ctx.emit_assign(Place::local(result), Rvalue::PtrToAddress { ptr });
+                    Value::Place(Place::local(result))
+                },
+                LangIntrinsic::PtrTo { .. } => {
+                    let value = lower_expression(ctx, &arguments[0].value);
+                    let ref_value = create_ref(ctx, &value, &arguments[0].value.ty, false);
+                    let result_ty = lower_type(ctx, &expr.ty);
+                    let result = ctx.create_temp("ptr_to", result_ty);
+                    ctx.emit_assign(Place::local(result), Rvalue::RefToPtr(ref_value));
+                    Value::Place(Place::local(result))
+                },
+                LangIntrinsic::PtrRead { .. } => {
+                    let ptr = lower_expression(ctx, &arguments[0].value);
+                    let result_ty = lower_type(ctx, &expr.ty);
+                    let result = ctx.create_temp("ptr_read", result_ty);
+                    ctx.emit_assign(Place::local(result), Rvalue::PtrRead { ptr, ty: result_ty });
+                    Value::Place(Place::local(result))
+                },
+                LangIntrinsic::PtrWrite { .. } => {
+                    let ptr = lower_expression(ctx, &arguments[0].value);
+                    let value = lower_expression(ctx, &arguments[1].value);
+                    let result_ty = lower_type(ctx, &expr.ty);
+                    let result = ctx.create_temp("ptr_write", result_ty);
+                    ctx.emit_assign(Place::local(result), Rvalue::PtrWrite { ptr, value });
+                    Value::Place(Place::local(result))
+                },
+                LangIntrinsic::PtrOffset => {
+                    let ptr = lower_expression(ctx, &arguments[0].value);
+                    let offset = lower_expression(ctx, &arguments[1].value);
+                    let result_ty = lower_type(ctx, &expr.ty);
+                    let result = ctx.create_temp("ptr_offset", result_ty);
+                    ctx.emit_assign(Place::local(result), Rvalue::PtrOffset { ptr, offset });
+                    Value::Place(Place::local(result))
+                },
+                LangIntrinsic::PtrIsNull => {
+                    let ptr = lower_expression(ctx, &arguments[0].value);
+                    let result_ty = lower_type(ctx, &expr.ty);
+                    let result = ctx.create_temp("ptr_is_null", result_ty);
+                    ctx.emit_assign(Place::local(result), Rvalue::PtrIsNull { ptr });
+                    Value::Place(Place::local(result))
+                },
+                LangIntrinsic::CastPtr { .. } => {
+                    let ptr = lower_expression(ctx, &arguments[0].value);
+                    let result_ty = lower_type(ctx, &expr.ty);
+                    let result = ctx.create_temp("cast_ptr", result_ty);
+                    ctx.emit_assign(
+                        Place::local(result),
+                        Rvalue::PtrCast {
+                            ptr,
+                            target_ty: result_ty,
+                        },
+                    );
+                    Value::Place(Place::local(result))
+                },
+                LangIntrinsic::SizeOf { .. } => {
+                    // sizeof returns the size of the type parameter
+                    // For now, we need to get the type from the intrinsic
+                    let result_ty = lower_type(ctx, &expr.ty);
+                    let result = ctx.create_temp("sizeof", result_ty);
+                    // Get the pointee type from the SizeOf variant
+                    let size_ty = match intrinsic {
+                        LangIntrinsic::SizeOf { ty } => lower_type(ctx, ty),
+                        _ => unreachable!(),
+                    };
+                    ctx.emit_assign(Place::local(result), Rvalue::SizeOf { ty: size_ty });
+                    Value::Place(Place::local(result))
+                },
+                LangIntrinsic::AlignOf { .. } => {
+                    // alignof returns the alignment of the type parameter
+                    let result_ty = lower_type(ctx, &expr.ty);
+                    let result = ctx.create_temp("alignof", result_ty);
+                    let align_ty = match intrinsic {
+                        LangIntrinsic::AlignOf { ty } => lower_type(ctx, ty),
+                        _ => unreachable!(),
+                    };
+                    ctx.emit_assign(Place::local(result), Rvalue::AlignOf { ty: align_ty });
+                    Value::Place(Place::local(result))
+                },
+                // Boolean (i1) intrinsics
+                LangIntrinsic::I1Eq => {
+                    let lhs = lower_expression(ctx, &arguments[0].value);
+                    let rhs = lower_expression(ctx, &arguments[1].value);
+                    let result_ty = lower_type(ctx, &expr.ty);
+                    let result = ctx.create_temp("i1_eq", result_ty);
+                    ctx.emit_assign(Place::local(result), Rvalue::I1Eq { lhs, rhs });
+                    Value::Place(Place::local(result))
+                },
+                LangIntrinsic::I1And => {
+                    let lhs = lower_expression(ctx, &arguments[0].value);
+                    let rhs = lower_expression(ctx, &arguments[1].value);
+                    let result_ty = lower_type(ctx, &expr.ty);
+                    let result = ctx.create_temp("i1_and", result_ty);
+                    ctx.emit_assign(Place::local(result), Rvalue::I1And { lhs, rhs });
+                    Value::Place(Place::local(result))
+                },
+                LangIntrinsic::I1Or => {
+                    let lhs = lower_expression(ctx, &arguments[0].value);
+                    let rhs = lower_expression(ctx, &arguments[1].value);
+                    let result_ty = lower_type(ctx, &expr.ty);
+                    let result = ctx.create_temp("i1_or", result_ty);
+                    ctx.emit_assign(Place::local(result), Rvalue::I1Or { lhs, rhs });
+                    Value::Place(Place::local(result))
+                },
+                LangIntrinsic::I1Not => {
+                    let operand = lower_expression(ctx, &arguments[0].value);
+                    let result_ty = lower_type(ctx, &expr.ty);
+                    let result = ctx.create_temp("i1_not", result_ty);
+                    ctx.emit_assign(Place::local(result), Rvalue::I1Not { operand });
+                    Value::Place(Place::local(result))
+                },
+                // Atomic intrinsics
+                LangIntrinsic::AtomicAdd => {
+                    // First argument is a place expression - we need its address
+                    let place_value = lower_expression(ctx, &arguments[0].value);
+                    let ptr = match place_value {
+                        Value::Place(p) => {
+                            // Get address of place: ref -> ptr
+                            let ptr_ty = lower_type(ctx, &expr.ty);
+                            let ref_temp = ctx.create_temp("atomic_ref", ptr_ty);
+                            ctx.emit_assign(Place::local(ref_temp), Rvalue::Ref(p));
+                            let ptr_temp = ctx.create_temp("atomic_ptr", ptr_ty);
+                            ctx.emit_assign(
+                                Place::local(ptr_temp),
+                                Rvalue::RefToPtr(Value::Place(Place::local(ref_temp))),
+                            );
+                            Value::Place(Place::local(ptr_temp))
+                        },
+                        v => v, // Already a value (shouldn't happen, but pass through)
+                    };
+                    let delta = lower_expression(ctx, &arguments[1].value);
+                    let result_ty = lower_type(ctx, &expr.ty);
+                    let result = ctx.create_temp("atomic_add", result_ty);
+                    ctx.emit_assign(Place::local(result), Rvalue::AtomicAdd { ptr, delta });
+                    Value::Place(Place::local(result))
+                },
+                LangIntrinsic::AtomicSub => {
+                    // First argument is a place expression - we need its address
+                    let place_value = lower_expression(ctx, &arguments[0].value);
+                    let ptr = match place_value {
+                        Value::Place(p) => {
+                            // Get address of place: ref -> ptr
+                            let ptr_ty = lower_type(ctx, &expr.ty);
+                            let ref_temp = ctx.create_temp("atomic_ref", ptr_ty);
+                            ctx.emit_assign(Place::local(ref_temp), Rvalue::Ref(p));
+                            let ptr_temp = ctx.create_temp("atomic_ptr", ptr_ty);
+                            ctx.emit_assign(
+                                Place::local(ptr_temp),
+                                Rvalue::RefToPtr(Value::Place(Place::local(ref_temp))),
+                            );
+                            Value::Place(Place::local(ptr_temp))
+                        },
+                        v => v, // Already a value (shouldn't happen, but pass through)
+                    };
+                    let delta = lower_expression(ctx, &arguments[1].value);
+                    let result_ty = lower_type(ctx, &expr.ty);
+                    let result = ctx.create_temp("atomic_sub", result_ty);
+                    ctx.emit_assign(Place::local(result), Rvalue::AtomicSub { ptr, delta });
+                    Value::Place(Place::local(result))
+                },
+            }
+        },
+
+        ExprKind::LangIntrinsicRef(_) => {
+            // Intrinsic reference without a call - this is an error
+            // (intrinsics cannot be used as first-class values)
+            ctx.emit_error(LoweringError::internal(
+                "lang intrinsic cannot be used as a value",
+                Some(expr.span.clone()),
+            ));
+            Value::Immediate(Immediate::error())
+        },
 
         ExprKind::Error => {
             // Error expression - return error value (error already reported)
             Value::Immediate(Immediate::error())
-        }
+        },
     }
 }
 
-/// Lower a literal expression.
-fn lower_literal(lit: &LiteralValue, _expr: &Expression) -> Value {
-    match lit {
-        LiteralValue::Unit => Value::Immediate(Immediate::unit()),
-        LiteralValue::Integer(n) => Value::Immediate(Immediate::i64(*n)),
-        LiteralValue::Float(f) => Value::Immediate(Immediate::f64(*f)),
-        LiteralValue::Bool(b) => Value::Immediate(Immediate::bool(*b)),
-        LiteralValue::String(s) => Value::Immediate(Immediate::string(s.clone())),
+/// Lower an array literal expression.
+///
+/// Array literals like `[1, 2, 3]` are lowered to:
+/// 1. Stack allocate a buffer for the elements
+/// 2. Write each element to the buffer
+/// 3. Call the target type's init(_arrayLiteralPointer:_arrayLiteralCount:) method
+fn lower_array_literal(
+    ctx: &mut LoweringContext,
+    elements: &[Expression],
+    expr: &Expression,
+) -> Value {
+    // Get element type - either from the array type or from the first element
+    let element_sem_ty: Ty = match expr.ty.kind() {
+        TyKind::Array(elem_ty) => (**elem_ty).clone(),
+        TyKind::Struct { .. } => {
+            // For resolved struct types (like Array[Int, GlobalAllocator]),
+            // get element type from the first element
+            if let Some(first_elem) = elements.first() {
+                first_elem.ty.clone()
+            } else {
+                // Empty array - we can't determine element type from elements
+                // For now, use unit type as placeholder
+                Ty::unit(expr.span.clone())
+            }
+        },
+        _ => {
+            ctx.emit_error(LoweringError::internal(
+                "array literal with non-array type",
+                Some(expr.span.clone()),
+            ));
+            return Value::Immediate(Immediate::error());
+        },
+    };
+
+    let element_ty = lower_type(ctx, &element_sem_ty);
+    let count = elements.len();
+
+    // Lower each element expression
+    let element_values: Vec<Value> = elements.iter().map(|e| lower_expression(ctx, e)).collect();
+
+    // Allocate stack buffer for elements
+    let ptr_ty = ctx.mir.ty_ptr(element_ty);
+    let ptr_local = ctx.create_temp("array_literal_ptr", ptr_ty);
+    let ptr_place = Place::local(ptr_local);
+
+    let i64_ty = ctx.mir.ty_i64();
+    let count_value = Value::Immediate(Immediate::i64(count as i64));
+
+    ctx.emit_assign(
+        ptr_place.clone(),
+        Rvalue::StackAlloc {
+            element_ty,
+            count: count_value.clone(),
+        },
+    );
+
+    // Write each element to the buffer using PtrOffset and PtrWrite
+    // For computing byte offsets, we use index * sizeof(element_ty)
+    let sizeof_local = ctx.create_temp("elem_size", i64_ty);
+    ctx.emit_assign(
+        Place::local(sizeof_local),
+        Rvalue::SizeOf { ty: element_ty },
+    );
+
+    // Pre-compute unit type to avoid borrow issues
+    let unit_ty = ctx.mir.ty_unit();
+
+    for (i, elem_value) in element_values.into_iter().enumerate() {
+        if i == 0 {
+            // First element: write directly to ptr
+            let unit_local = ctx.create_temp("ptr_write", unit_ty);
+            ctx.emit_assign(
+                Place::local(unit_local),
+                Rvalue::PtrWrite {
+                    ptr: Value::Place(ptr_place.clone()),
+                    value: elem_value,
+                },
+            );
+        } else {
+            // Compute byte offset: i * sizeof(element_ty)
+            let index_value = Value::Immediate(Immediate::i64(i as i64));
+            let offset_local = ctx.create_temp("elem_offset", i64_ty);
+            ctx.emit_assign(
+                Place::local(offset_local),
+                Rvalue::BinaryOp {
+                    op: BinOp::MulSigned,
+                    lhs: index_value,
+                    rhs: Value::Place(Place::local(sizeof_local)),
+                },
+            );
+
+            // Compute element pointer: ptr + offset
+            let elem_ptr_local = ctx.create_temp("elem_ptr", ptr_ty);
+            ctx.emit_assign(
+                Place::local(elem_ptr_local),
+                Rvalue::PtrOffset {
+                    ptr: Value::Place(ptr_place.clone()),
+                    offset: Value::Place(Place::local(offset_local)),
+                },
+            );
+
+            // Write element value
+            let unit_local = ctx.create_temp("ptr_write", unit_ty);
+            ctx.emit_assign(
+                Place::local(unit_local),
+                Rvalue::PtrWrite {
+                    ptr: Value::Place(Place::local(elem_ptr_local)),
+                    value: elem_value,
+                },
+            );
+        }
     }
+
+    // Look up the init method with _arrayLiteralPointer and _arrayLiteralCount labels
+    // For now, we need to find the target type's init method
+    match expr.ty.kind() {
+        TyKind::Struct { symbol, .. } => {
+            // Call the struct's array literal init
+            lower_array_literal_init_call(ctx, expr, symbol, ptr_place, count_value)
+        },
+        TyKind::Array(_) => {
+            // Array type not resolved to concrete struct type
+            // This means type inference didn't give us a target type
+            // For now, emit an error - full implementation needs type inference changes
+            ctx.emit_error(LoweringError::unsupported_expr(
+                "array literal without concrete target type - use explicit type annotation",
+                expr.span.clone(),
+            ));
+            Value::Immediate(Immediate::error())
+        },
+        _ => {
+            ctx.emit_error(LoweringError::internal(
+                "unexpected array literal target type",
+                Some(expr.span.clone()),
+            ));
+            Value::Immediate(Immediate::error())
+        },
+    }
+}
+
+/// Lower an array literal init call to a struct type.
+fn lower_array_literal_init_call(
+    ctx: &mut LoweringContext,
+    expr: &Expression,
+    struct_symbol: &std::sync::Arc<kestrel_semantic_tree::symbol::r#struct::StructSymbol>,
+    ptr_place: Place,
+    count_value: Value,
+) -> Value {
+    use semantic_tree::symbol::Symbol;
+
+    // Find the init with _arrayLiteralPointer and _arrayLiteralCount parameters
+    let init_symbol = struct_symbol
+        .metadata()
+        .children()
+        .into_iter()
+        .find(|child| {
+            if child.metadata().kind() != KestrelSymbolKind::Initializer {
+                return false;
+            }
+            // Check if this init has parameters with the right labels
+            if let Some(callable) = child.metadata().get_behavior::<CallableBehavior>() {
+                let params = callable.parameters();
+                params.len() >= 2
+                    && params
+                        .first()
+                        .and_then(|p| p.label.as_ref())
+                        .is_some_and(|l| l.value == "_arrayLiteralPointer")
+                    && params
+                        .get(1)
+                        .and_then(|p| p.label.as_ref())
+                        .is_some_and(|l| l.value == "_arrayLiteralCount")
+            } else {
+                false
+            }
+        });
+
+    let Some(_init_sym) = init_symbol else {
+        ctx.emit_error(LoweringError::internal(
+            "array literal target type has no init(_arrayLiteralPointer:_arrayLiteralCount:)",
+            Some(expr.span.clone()),
+        ));
+        return Value::Immediate(Immediate::error());
+    };
+
+    // Build the qualified name for the init function
+    // Array literal inits are named: init$_arrayLiteralPointer$_arrayLiteralCount
+    let mut name_parts = Vec::new();
+    collect_symbol_name_parts(
+        &(struct_symbol.clone()
+            as std::sync::Arc<
+                dyn semantic_tree::symbol::Symbol<kestrel_semantic_tree::language::KestrelLanguage>,
+            >),
+        &mut name_parts,
+    );
+    name_parts.push("init$_arrayLiteralPointer$_arrayLiteralCount".to_string());
+
+    let init_name = ctx.mir.intern_name(QualifiedNameData::new(name_parts));
+
+    // Lower the result type
+    let result_ty = lower_type(ctx, &expr.ty);
+
+    // Allocate space for the result
+    let result_local = ctx.create_temp("array_literal", result_ty);
+    let result_place = Place::local(result_local);
+
+    // Create a mutable reference to the result place
+    let ref_ty = ctx.mir.ty_ref_mut(result_ty);
+    let self_ref_local = ctx.create_temp("self_ref", ref_ty);
+    let self_ref_place = Place::local(self_ref_local);
+
+    // Emit: %self_ref = ref var %result
+    ctx.emit_assign(self_ref_place.clone(), Rvalue::RefMut(result_place.clone()));
+
+    // Build call args: self_ref first (MutRef), then pointer and count
+    let call_args = vec![
+        CallArg::mutating(Value::Place(self_ref_place)),
+        CallArg::copy(Value::Place(ptr_place)),
+        CallArg::copy(count_value),
+    ];
+
+    // Create a temp for the unit return value of init (we discard it)
+    let unit_ty = ctx.mir.ty_unit();
+    let unit_local = ctx.create_temp("init_ret", unit_ty);
+    let unit_place = Place::local(unit_local);
+
+    // Extract type arguments from the struct type
+    let type_args = match extract_type_args_from_receiver(ctx, &expr.ty, Some(expr.span.clone())) {
+        Some(args) => args,
+        None => return Value::Immediate(Immediate::error()),
+    };
+
+    // Call the init function
+    let mir_callee = if type_args.is_empty() {
+        Callee::direct(init_name)
+    } else {
+        Callee::direct_generic(init_name, type_args)
+    };
+    ctx.emit_call_with_modes(unit_place, mir_callee, call_args);
+
+    // Return the initialized struct
+    Value::Place(result_place)
+}
+
+/// Lower a literal expression.
+///
+/// For primitive types (lang.i64, lang.f64, lang.i1, lang.str), returns the
+/// immediate value directly.
+///
+/// For struct types (Int64, Float64, Bool, String, etc. that conform to
+/// ExpressibleBy* protocols), generates an init call like:
+///   Int64.init(intLiteral: <immediate value>)
+fn lower_literal(ctx: &mut LoweringContext, lit: &LiteralValue, expr: &Expression) -> Value {
+    // Expand type aliases before matching - type aliases should be transparent
+    let ty = expr.ty.expand_aliases();
+
+    // Check the resolved type of the literal expression
+    match ty.kind() {
+        // Primitive types - return immediate directly
+        TyKind::Int(bits) => {
+            let LiteralValue::Integer(n) = lit else {
+                return Value::Immediate(Immediate::error());
+            };
+            Value::Immediate(make_int_immediate(*bits, *n))
+        },
+        TyKind::Float(bits) => {
+            let LiteralValue::Float(f) = lit else {
+                return Value::Immediate(Immediate::error());
+            };
+            Value::Immediate(make_float_immediate(*bits, *f))
+        },
+        TyKind::Bool => {
+            let LiteralValue::Bool(b) = lit else {
+                return Value::Immediate(Immediate::error());
+            };
+            Value::Immediate(Immediate::bool(*b))
+        },
+        TyKind::String => {
+            let LiteralValue::String(s) = lit else {
+                return Value::Immediate(Immediate::error());
+            };
+            Value::Immediate(Immediate::string(s.clone()))
+        },
+        TyKind::Unit => Value::Immediate(Immediate::unit()),
+
+        // Struct types - generate init call
+        TyKind::Struct { symbol, .. } => lower_literal_init_call(ctx, lit, expr, symbol),
+
+        // For inference variables or error types, fall back to immediate
+        TyKind::Infer | TyKind::Error => match lit {
+            LiteralValue::Unit => Value::Immediate(Immediate::unit()),
+            LiteralValue::Integer(n) => Value::Immediate(Immediate::i64(*n)),
+            LiteralValue::Float(f) => Value::Immediate(Immediate::f64(*f)),
+            LiteralValue::Bool(b) => Value::Immediate(Immediate::bool(*b)),
+            LiteralValue::String(s) => Value::Immediate(Immediate::string(s.clone())),
+        },
+
+        // Other types - this shouldn't happen for literals
+        other => {
+            // Note: Don't use {:?} on TyKind as it can cause infinite recursion
+            // due to circular symbol references in the Debug impl
+            let type_desc = match other {
+                TyKind::Enum { .. } => "enum",
+                TyKind::Protocol { .. } => "protocol",
+                TyKind::TypeParameter { .. } => "type parameter",
+                TyKind::Tuple { .. } => "tuple",
+                TyKind::Function { .. } => "function",
+                TyKind::Pointer { .. } => "pointer",
+                TyKind::TypeAlias { .. } => "type alias",
+                TyKind::SelfType => "Self",
+                TyKind::AssociatedType { .. } => "associated type",
+                _ => "unknown",
+            };
+            ctx.emit_error(LoweringError::internal(
+                format!("unexpected type for literal: {}", type_desc),
+                Some(expr.span.clone()),
+            ));
+            Value::Immediate(Immediate::error())
+        },
+    }
+}
+
+/// Lower a literal to an init call for struct types that conform to ExpressibleBy* protocols.
+///
+/// For example, `42` with type `Int64` becomes:
+///   1. Allocate temp for Int64 result
+///   2. Create mutable reference to it
+///   3. Call Int64.init(intLiteral: Immediate::i64(42))
+fn lower_literal_init_call(
+    ctx: &mut LoweringContext,
+    lit: &LiteralValue,
+    expr: &Expression,
+    struct_symbol: &std::sync::Arc<kestrel_semantic_tree::symbol::r#struct::StructSymbol>,
+) -> Value {
+    use semantic_tree::symbol::Symbol;
+
+    // Determine the init parameter label and primitive value based on literal type
+    let (init_label, primitive_value) = match lit {
+        LiteralValue::Integer(n) => ("intLiteral", Value::Immediate(Immediate::i64(*n))),
+        LiteralValue::Float(f) => ("floatLiteral", Value::Immediate(Immediate::f64(*f))),
+        LiteralValue::Bool(b) => ("boolLiteral", Value::Immediate(Immediate::bool(*b))),
+        LiteralValue::String(s) => (
+            "stringLiteral",
+            Value::Immediate(Immediate::string(s.clone())),
+        ),
+        LiteralValue::Unit => return Value::Immediate(Immediate::unit()),
+    };
+
+    // Find the init with the matching parameter label
+    let init_symbol = struct_symbol
+        .metadata()
+        .children()
+        .into_iter()
+        .find(|child| {
+            if child.metadata().kind() != KestrelSymbolKind::Initializer {
+                return false;
+            }
+            // Check if this init has a parameter with the right label
+            if let Some(callable) = child.metadata().get_behavior::<CallableBehavior>() {
+                callable
+                    .parameters()
+                    .first()
+                    .is_some_and(|p| p.label.as_ref().is_some_and(|l| l.value == init_label))
+            } else {
+                false
+            }
+        });
+
+    let Some(init_sym) = init_symbol else {
+        // No init found - fall back to immediate (this is the case for types
+        // where the init is trivial or the type doesn't have the protocol)
+        return match lit {
+            LiteralValue::Integer(n) => Value::Immediate(Immediate::i64(*n)),
+            LiteralValue::Float(f) => Value::Immediate(Immediate::f64(*f)),
+            LiteralValue::Bool(b) => Value::Immediate(Immediate::bool(*b)),
+            LiteralValue::String(s) => Value::Immediate(Immediate::string(s.clone())),
+            LiteralValue::Unit => Value::Immediate(Immediate::unit()),
+        };
+    };
+
+    // Build the qualified name for the init function
+    // Initializers are named with ALL their parameter labels: init$intLiteral, init$stringLiteral$length, etc.
+    let mut name_parts = Vec::new();
+    collect_symbol_name_parts(
+        &(struct_symbol.clone()
+            as std::sync::Arc<
+                dyn semantic_tree::symbol::Symbol<kestrel_semantic_tree::language::KestrelLanguage>,
+            >),
+        &mut name_parts,
+    );
+
+    // Get all labels from the found init symbol
+    let init_name_suffix =
+        if let Some(callable) = init_sym.metadata().get_behavior::<CallableBehavior>() {
+            // Use external labels if present, otherwise fall back to internal names
+            let name_parts: Vec<&str> = callable
+                .parameters()
+                .iter()
+                .map(|p| p.external_label().unwrap_or_else(|| p.internal_name()))
+                .collect();
+            if name_parts.is_empty() {
+                "init".to_string()
+            } else {
+                format!("init${}", name_parts.join("$"))
+            }
+        } else {
+            format!("init${}", init_label)
+        };
+    name_parts.push(init_name_suffix);
+
+    let init_name = ctx.mir.intern_name(QualifiedNameData::new(name_parts));
+
+    // Lower the result type
+    let result_ty = lower_type(ctx, &expr.ty);
+
+    // Allocate space for the result
+    let result_local = ctx.create_temp("literal", result_ty);
+    let result_place = Place::local(result_local);
+
+    // Create a mutable reference to the result place
+    let ref_ty = ctx.mir.ty_ref_mut(result_ty);
+    let self_ref_local = ctx.create_temp("self_ref", ref_ty);
+    let self_ref_place = Place::local(self_ref_local);
+
+    // Emit: %self_ref = ref var %result
+    ctx.emit_assign(self_ref_place.clone(), Rvalue::RefMut(result_place.clone()));
+
+    // Build call args: self_ref first (MutRef), then the primitive value(s)
+    // String literals are special: they need both ptr and length as separate args
+    let call_args = match lit {
+        LiteralValue::String(s) => {
+            // String.init(stringLiteral ptr: lang.ptr[lang.i8], length: lang.i64)
+            // expects two primitive args: ptr and length (passed by reference)
+            let ptr_value = Value::Immediate(Immediate::string_ptr(s.clone()));
+            let len_value = Value::Immediate(Immediate::i64(s.len() as i64));
+            vec![
+                CallArg::mutating(Value::Place(self_ref_place)),
+                CallArg::borrow(ptr_value),
+                CallArg::borrow(len_value),
+            ]
+        },
+        _ => {
+            // All literal init methods take the primitive by reference (borrow)
+            vec![
+                CallArg::mutating(Value::Place(self_ref_place)),
+                CallArg::borrow(primitive_value),
+            ]
+        },
+    };
+
+    // Create a temp for the unit return value of init (we discard it)
+    let unit_ty = ctx.mir.ty_unit();
+    let unit_local = ctx.create_temp("init_ret", unit_ty);
+    let unit_place = Place::local(unit_local);
+
+    // Call the init function
+    let mir_callee = Callee::direct(init_name);
+    ctx.emit_call_with_modes(unit_place, mir_callee, call_args);
+
+    // Return the initialized struct
+    Value::Place(result_place)
 }
 
 /// Lower a primitive method call (operators).
@@ -866,6 +1848,11 @@ fn lower_primitive_method_call(
 ) -> Value {
     let receiver_value = lower_expression(ctx, receiver);
 
+    // Early return if receiver diverged
+    if receiver_value.is_unreachable() {
+        return Value::Unreachable;
+    }
+
     // Determine if this is a unary or binary operation
     let result_ty = lower_type(ctx, &expr.ty);
     let result_local = ctx.create_temp("prim", result_ty);
@@ -873,40 +1860,25 @@ fn lower_primitive_method_call(
 
     match method {
         // === Unary Operations ===
-        PrimitiveMethod::IntNeg | PrimitiveMethod::IntIdentity => {
-            let op = match method {
-                PrimitiveMethod::IntNeg => UnOp::Neg,
-                PrimitiveMethod::IntIdentity => {
-                    // Identity just returns the value
-                    return receiver_value;
-                }
-                _ => unreachable!(),
-            };
+        PrimitiveMethod::IntNeg => {
             ctx.emit_assign(
                 result_place.clone(),
                 Rvalue::UnaryOp {
-                    op,
+                    op: UnOp::Neg,
                     operand: receiver_value,
                 },
             );
-        }
+        },
 
-        PrimitiveMethod::FloatNeg | PrimitiveMethod::FloatIdentity => {
-            let op = match method {
-                PrimitiveMethod::FloatNeg => UnOp::FNeg,
-                PrimitiveMethod::FloatIdentity => {
-                    return receiver_value;
-                }
-                _ => unreachable!(),
-            };
+        PrimitiveMethod::FloatNeg => {
             ctx.emit_assign(
                 result_place.clone(),
                 Rvalue::UnaryOp {
-                    op,
+                    op: UnOp::FNeg,
                     operand: receiver_value,
                 },
             );
-        }
+        },
 
         PrimitiveMethod::BoolNot => {
             ctx.emit_assign(
@@ -916,7 +1888,7 @@ fn lower_primitive_method_call(
                     operand: receiver_value,
                 },
             );
-        }
+        },
 
         PrimitiveMethod::IntBitNot => {
             ctx.emit_assign(
@@ -926,13 +1898,13 @@ fn lower_primitive_method_call(
                     operand: receiver_value,
                 },
             );
-        }
+        },
 
         // === String methods (unary) ===
         PrimitiveMethod::StringLength => {
             // string.length() -> StrLen(string)
             ctx.emit_assign(result_place.clone(), Rvalue::StrLen(receiver_value));
-        }
+        },
 
         PrimitiveMethod::StringIsEmpty => {
             // string.isEmpty() -> StrLen(string) == 0
@@ -951,12 +1923,12 @@ fn lower_primitive_method_call(
                     rhs: Value::Immediate(Immediate::i64(0)),
                 },
             );
-        }
+        },
 
         PrimitiveMethod::StringUnsafePtr => {
             // string.unsafePtr() -> StrPtr(string)
             ctx.emit_assign(result_place.clone(), Rvalue::StrPtr(receiver_value));
-        }
+        },
 
         // === Int methods (unary) ===
         PrimitiveMethod::IntAbs => {
@@ -975,7 +1947,8 @@ fn lower_primitive_method_call(
                     let temp_place = Place::local(temp);
                     ctx.emit_assign(temp_place.clone(), Rvalue::Use(imm.clone()));
                     temp_place
-                }
+                },
+                Value::Unreachable => unreachable!("already handled above"),
             };
 
             // Create blocks for the conditional
@@ -987,12 +1960,15 @@ fn lower_primitive_method_call(
             let cmp_ty = ctx.mir.ty_bool();
             let cmp_local = ctx.create_temp("is_neg", cmp_ty);
             let cmp_place = Place::local(cmp_local);
+            // Create a zero with the same bit width as the integer type
+            let zero_imm =
+                make_int_zero_for_mir_ty(ctx, int_ty).unwrap_or_else(|| Immediate::i64(0));
             ctx.emit_assign(
                 cmp_place.clone(),
                 Rvalue::BinaryOp {
                     op: BinOp::LtSigned,
                     lhs: Value::Place(receiver_place.clone()),
-                    rhs: Value::Immediate(Immediate::i64(0)),
+                    rhs: Value::Immediate(zero_imm),
                 },
             );
 
@@ -1016,7 +1992,7 @@ fn lower_primitive_method_call(
 
             // Continue from join block
             ctx.set_current_block(join_block);
-        }
+        },
 
         PrimitiveMethod::IntToString => {
             // Convert integer to string using the IntToString operation
@@ -1026,7 +2002,7 @@ fn lower_primitive_method_call(
 
             ctx.emit_assign(result_place.clone(), Rvalue::IntToString(receiver_value));
             return Value::Place(result_place);
-        }
+        },
 
         // === Binary Operations ===
         _ => {
@@ -1100,7 +2076,7 @@ fn lower_primitive_method_call(
                     rhs: rhs_value,
                 },
             );
-        }
+        },
     }
 
     Value::Place(result_place)
@@ -1144,6 +2120,95 @@ fn lower_struct_init(
     Value::Place(result_place)
 }
 
+/// Lower a delegating initializer call: `self.init(...)`
+///
+/// This is called from within an initializer body and calls another initializer
+/// on the same struct. The `self` parameter is passed implicitly.
+fn lower_delegating_init(
+    ctx: &mut LoweringContext,
+    initializer: SymbolId,
+    arguments: &[CallArgument],
+    substitutions: &kestrel_semantic_tree::ty::Substitutions,
+    _expr: &Expression,
+) -> Value {
+    use kestrel_semantic_tree::symbol::EnumSymbol;
+    use kestrel_semantic_tree::symbol::local::LocalId;
+    use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
+    use semantic_tree::symbol::Symbol;
+
+    // Get the initializer symbol
+    let Some(init_sym) = ctx.model.query(SymbolFor { id: initializer }) else {
+        ctx.emit_error(LoweringError::internal(
+            "delegating init: initializer symbol not found",
+            None,
+        ));
+        return Value::Immediate(Immediate::unit());
+    };
+
+    // Get the qualified name for the initializer
+    let init_name = qualified_name_for_symbol(ctx, &init_sym);
+
+    // Lower the arguments (excluding self - it's passed implicitly)
+    let arg_values: Vec<Value> = arguments
+        .iter()
+        .map(|arg| lower_expression(ctx, &arg.value))
+        .collect();
+
+    // Get `self` as the first argument - it's always local 0 in initializers
+    // self is already a &var Self in initializers
+    let self_local = ctx.get_local_unwrap(LocalId(0));
+    let self_value = Value::Place(Place::local(self_local));
+
+    // Build the full argument list: self + other args
+    let mut all_args = vec![self_value];
+    all_args.extend(arg_values);
+
+    // Get type arguments from the parent struct/enum
+    // Delegating inits need to pass the same type arguments as the enclosing generic type
+    let type_args: Vec<kestrel_execution_graph::Id<kestrel_execution_graph::Ty>> =
+        if let Some(parent) = init_sym.metadata().parent() {
+            let param_ids: Vec<SymbolId> =
+                if let Some(struct_sym) = parent.as_ref().downcast_ref::<StructSymbol>() {
+                    struct_sym
+                        .type_parameters()
+                        .iter()
+                        .map(|tp| Symbol::metadata(tp.as_ref()).id())
+                        .collect()
+                } else if let Some(enum_sym) = parent.as_ref().downcast_ref::<EnumSymbol>() {
+                    enum_sym
+                        .type_parameters()
+                        .iter()
+                        .map(|tp| Symbol::metadata(tp.as_ref()).id())
+                        .collect()
+                } else {
+                    vec![]
+                };
+
+            if let Some(ordered_types) = substitutions.types_in_order(&param_ids) {
+                ordered_types
+                    .into_iter()
+                    .map(|ty| lower_type(ctx, ty))
+                    .collect()
+            } else {
+                vec![]
+            }
+        } else {
+            vec![]
+        };
+
+    // Emit the call to the delegated initializer
+    // Delegating inits return unit (they modify self in-place)
+    let callee = if type_args.is_empty() {
+        Callee::direct(init_name)
+    } else {
+        Callee::direct_generic(init_name, type_args)
+    };
+    ctx.emit_call_unit(callee, all_args);
+
+    // Delegating init returns unit
+    Value::Immediate(Immediate::unit())
+}
+
 /// Lower a function call.
 fn lower_call(
     ctx: &mut LoweringContext,
@@ -1168,7 +2233,7 @@ fn lower_call(
     let get_ordered_type_args =
         |ctx: &mut LoweringContext,
          sym: &std::sync::Arc<dyn Symbol<kestrel_semantic_tree::language::KestrelLanguage>>|
-         -> Vec<kestrel_execution_graph::Id<kestrel_execution_graph::Ty>> {
+         -> Option<Vec<kestrel_execution_graph::Id<kestrel_execution_graph::Ty>>> {
             use kestrel_semantic_tree::symbol::EnumSymbol;
             use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
             use semantic_tree::symbol::SymbolId;
@@ -1217,25 +2282,68 @@ fn lower_call(
                         .map(|tp| Symbol::metadata(tp.as_ref()).id())
                         .collect(),
                 )
+            } else if sym.as_ref().downcast_ref::<InitializerSymbol>().is_some() {
+                // Initializers inherit type parameters from their parent struct/enum
+                let mut all_params: Vec<SymbolId> = Vec::new();
+                if let Some(parent) = sym.metadata().parent() {
+                    if let Some(struct_sym) = parent.as_ref().downcast_ref::<StructSymbol>() {
+                        for tp in struct_sym.type_parameters() {
+                            all_params.push(Symbol::metadata(tp.as_ref()).id());
+                        }
+                    } else if let Some(enum_sym) = parent.as_ref().downcast_ref::<EnumSymbol>() {
+                        for tp in enum_sym.type_parameters() {
+                            all_params.push(Symbol::metadata(tp.as_ref()).id());
+                        }
+                    }
+                }
+                Some(all_params)
             } else {
-                // For initializers and other symbols without type_parameters,
-                // they inherit from parent - just use the fallback
+                // For other symbols without type_parameters, use the fallback
                 None
             };
 
             if let Some(ids) = param_ids {
-                if let Some(ordered_types) = substitutions.types_in_order(&ids) {
-                    return ordered_types
-                        .into_iter()
-                        .map(|ty| lower_type(ctx, ty))
-                        .collect();
+                if ids.is_empty() {
+                    if substitutions.is_empty() {
+                        return Some(Vec::new());
+                    }
+                    ctx.emit_error(LoweringError::internal(
+                        format!(
+                            "missing type arguments for generic call to {}",
+                            sym.metadata().name().value
+                        ),
+                        Some(expr.span.clone()),
+                    ));
+                    return None;
                 }
+                if let Some(ordered_types) = substitutions.types_in_order(&ids) {
+                    return Some(
+                        ordered_types
+                            .into_iter()
+                            .map(|ty| lower_type(ctx, ty))
+                            .collect(),
+                    );
+                }
+                ctx.emit_error(LoweringError::internal(
+                    format!(
+                        "missing type arguments for generic call to {}",
+                        sym.metadata().name().value
+                    ),
+                    Some(expr.span.clone()),
+                ));
+                return None;
             }
-            // Fallback: use arbitrary order (should only happen for non-generic symbols or errors)
-            substitutions
-                .types()
-                .map(|ty| lower_type(ctx, ty))
-                .collect()
+            if substitutions.is_empty() {
+                return Some(Vec::new());
+            }
+            ctx.emit_error(LoweringError::internal(
+                format!(
+                    "missing type parameter order for generic call to {}",
+                    sym.metadata().name().value
+                ),
+                Some(expr.span.clone()),
+            ));
+            None
         };
 
     // Get the result type and create a temp for the result
@@ -1360,7 +2468,10 @@ fn lower_call(
                         } else {
                             // Regular initializer call
                             let func_name = qualified_name_for_symbol(ctx, &sym);
-                            let type_args = get_ordered_type_args(ctx, &sym);
+                            let type_args = match get_ordered_type_args(ctx, &sym) {
+                                Some(args) => args,
+                                None => return Value::Immediate(Immediate::error()),
+                            };
                             let mir_callee = if type_args.is_empty() {
                                 Callee::direct(func_name)
                             } else {
@@ -1373,7 +2484,10 @@ fn lower_call(
                     } else {
                         // Regular function call
                         let func_name = qualified_name_for_symbol(ctx, &sym);
-                        let type_args = get_ordered_type_args(ctx, &sym);
+                        let type_args = match get_ordered_type_args(ctx, &sym) {
+                            Some(args) => args,
+                            None => return Value::Immediate(Immediate::error()),
+                        };
                         let mir_callee = if type_args.is_empty() {
                             Callee::direct(func_name)
                         } else {
@@ -1392,16 +2506,16 @@ fn lower_call(
                         mark_moved_args(ctx, &call_args);
                         ctx.emit_call_with_modes(result_place.clone(), mir_callee, call_args);
                     }
-                }
+                },
                 None => {
                     ctx.emit_error(LoweringError::internal(
                         format!("symbol not found for call: {:?}", symbol_id),
                         Some(expr.span.clone()),
                     ));
                     return Value::Immediate(Immediate::error());
-                }
+                },
             }
-        }
+        },
 
         ExprKind::EnumCase { case_id } => {
             // Enum case with associated values (e.g., .Success(name: "...", potency: 100))
@@ -1418,16 +2532,16 @@ fn lower_call(
                             payload: arg_values,
                         },
                     );
-                }
+                },
                 None => {
                     ctx.emit_error(LoweringError::internal(
                         format!("enum case symbol not found: {:?}", case_id),
                         Some(expr.span.clone()),
                     ));
                     return Value::Immediate(Immediate::error());
-                }
+                },
             }
-        }
+        },
 
         ExprKind::MethodRef {
             receiver,
@@ -1441,6 +2555,13 @@ fn lower_call(
             // Check if this is a call on an associated type (also needs witness method lookup)
             let is_assoc_type_call = matches!(receiver.ty.kind(), TyKind::AssociatedType { .. });
             let is_static_assoc_type_call = matches!(receiver.kind, ExprKind::AssociatedTypeRef);
+
+            // Check if this is a call on Self type in a protocol context (needs witness method lookup)
+            let is_self_type_call = matches!(receiver.ty.kind(), TyKind::SelfType);
+
+            // Check if this is a call on a protocol type (protocol extension methods)
+            // When inside a protocol extension, `self` has type `Protocol` which also needs witness dispatch
+            let is_protocol_type_call = matches!(receiver.ty.kind(), TyKind::Protocol { .. });
 
             // Determine if this is an instance method call (has receiver value)
             let is_instance = !(is_static_type_param_call || is_static_assoc_type_call);
@@ -1481,49 +2602,83 @@ fn lower_call(
                         // Mark moved args before the call (call_args is consumed)
                         mark_moved_args(ctx, &call_args);
 
-                        // Check if this is a witness method call (method on type parameter or associated type)
-                        if is_type_param_call
+                        use kestrel_semantic_tree::behavior::implements::ImplementsBehavior;
+
+                        // Find the protocol that defines this method.
+                        // Priority: 1) ImplementsBehavior, 2) Protocol parent, 3) Extension conformances
+                        let protocol_symbol = if let Some(implements) =
+                            sym.metadata().get_behavior::<ImplementsBehavior>()
+                        {
+                            // Method explicitly implements a protocol method
+                            ctx.model.query(SymbolFor {
+                                id: implements.protocol(),
+                            })
+                        } else if let Some(parent) = sym.metadata().parent() {
+                            if parent.metadata().kind() == KestrelSymbolKind::Protocol {
+                                // Method is defined directly in a protocol
+                                Some(parent)
+                            } else if parent.metadata().kind() == KestrelSymbolKind::Extension {
+                                // Method is in an extension - find which protocol conformance it belongs to
+                                find_protocol_for_extension_method(&parent, method_name)
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        };
+
+                        // Check if receiver is a builtin primitive type (these use primitive methods, not witnesses)
+                        let is_builtin_type = matches!(
+                            receiver.ty.kind(),
+                            TyKind::Int(_) | TyKind::Float(_) | TyKind::Bool | TyKind::String
+                        );
+
+                        // Check if this requires witness dispatch:
+                        // 1. Receiver type requires witness dispatch (type parameter, associated type, Self, or protocol type)
+                        // 2. Method comes from a protocol extension on a non-builtin type
+                        let needs_witness_dispatch = (is_type_param_call
                             || is_static_type_param_call
                             || is_assoc_type_call
                             || is_static_assoc_type_call
-                        {
-                            // Get the protocol from the method's parent
-                            if let Some(parent) = sym.metadata().parent() {
-                                if parent.metadata().kind() == KestrelSymbolKind::Protocol {
-                                    let protocol_name = qualified_name_for_symbol(ctx, &parent);
-                                    let for_type = lower_type(ctx, &receiver.ty);
-                                    let mir_callee = Callee::witness(
-                                        protocol_name,
-                                        method_name.clone(),
-                                        for_type,
-                                    );
-                                    ctx.emit_call_with_modes(
-                                        result_place.clone(),
-                                        mir_callee,
-                                        call_args,
-                                    );
+                            || is_self_type_call
+                            || is_protocol_type_call)
+                            || (protocol_symbol.is_some() && !is_builtin_type);
+
+                        if needs_witness_dispatch {
+                            if let Some(protocol_sym) = protocol_symbol {
+                                let protocol_name = qualified_name_for_symbol(ctx, &protocol_sym);
+                                // For protocol type calls (inside protocol extensions), use Self type
+                                // which will be substituted with the concrete type at monomorphization
+                                let for_type = if is_protocol_type_call {
+                                    ctx.mir.ty_self()
                                 } else {
-                                    // Method's parent is not a protocol - shouldn't happen
-                                    ctx.emit_error(LoweringError::internal(
-                                        format!(
-                                            "method '{}' parent is not a protocol",
-                                            method_name
-                                        ),
-                                        Some(expr.span.clone()),
-                                    ));
-                                    return Value::Immediate(Immediate::error());
-                                }
+                                    lower_type(ctx, &receiver.ty)
+                                };
+                                let mir_callee =
+                                    Callee::witness(protocol_name, method_name.clone(), for_type);
+                                ctx.emit_call_with_modes(
+                                    result_place.clone(),
+                                    mir_callee,
+                                    call_args,
+                                );
                             } else {
+                                // Receiver type requires witness dispatch but method doesn't implement a protocol - shouldn't happen
                                 ctx.emit_error(LoweringError::internal(
-                                    format!("method '{}' has no parent", method_name),
+                                    format!(
+                                        "method '{}' on generic/protocol type doesn't implement a protocol method",
+                                        method_name
+                                    ),
                                     Some(expr.span.clone()),
                                 ));
                                 return Value::Immediate(Immediate::error());
                             }
                         } else {
-                            // Regular direct method call
+                            // Regular direct method call (concrete type, non-protocol method)
                             let func_name = qualified_name_for_symbol(ctx, &sym);
-                            let type_args = get_ordered_type_args(ctx, &sym);
+                            let type_args = match get_ordered_type_args(ctx, &sym) {
+                                Some(args) => args,
+                                None => return Value::Immediate(Immediate::error()),
+                            };
                             let mir_callee = if type_args.is_empty() {
                                 Callee::direct(func_name)
                             } else {
@@ -1531,14 +2686,14 @@ fn lower_call(
                             };
                             ctx.emit_call_with_modes(result_place.clone(), mir_callee, call_args);
                         }
-                    }
+                    },
                     None => {
                         ctx.emit_error(LoweringError::internal(
                             format!("method symbol not found for '{}'", method_name),
                             Some(expr.span.clone()),
                         ));
                         return Value::Immediate(Immediate::error());
-                    }
+                    },
                 }
             } else {
                 ctx.emit_error(LoweringError::internal(
@@ -1547,7 +2702,7 @@ fn lower_call(
                 ));
                 return Value::Immediate(Immediate::error());
             }
-        }
+        },
 
         ExprKind::TypeRef(symbol_id) => {
             // Calling a type = initializer call
@@ -1562,10 +2717,42 @@ fn lower_call(
             let symbol = ctx.model.query(SymbolFor { id: *symbol_id });
             match symbol {
                 Some(sym) => {
-                    // Build the init function name
+                    // Try to find the initializer symbol to get its CallableBehavior
+                    // Look for an "init" child of the type symbol
+                    let init_sym = sym
+                        .metadata()
+                        .children()
+                        .iter()
+                        .find(|child| {
+                            child.metadata().kind() == KestrelSymbolKind::Initializer
+                                && child.metadata().name().value == "init"
+                        })
+                        .cloned();
+
+                    let init_beh = init_sym
+                        .as_ref()
+                        .and_then(|s| s.metadata().get_behavior::<CallableBehavior>());
+
+                    // Build the init function name with labels
+                    // Initializers are named: init$label1$label2 (or just "init" if no labels)
                     let mut name_parts = Vec::new();
                     collect_symbol_name_parts(&sym, &mut name_parts);
-                    name_parts.push("init".to_string());
+
+                    let init_name_part = if let Some(beh) = &init_beh {
+                        let labels: Vec<&str> = beh
+                            .parameters()
+                            .iter()
+                            .filter_map(|p| p.external_label())
+                            .collect();
+                        if labels.is_empty() {
+                            "init".to_string()
+                        } else {
+                            format!("init${}", labels.join("$"))
+                        }
+                    } else {
+                        "init".to_string()
+                    };
+                    name_parts.push(init_name_part);
 
                     let init_name = ctx
                         .mir
@@ -1579,20 +2766,6 @@ fn lower_call(
 
                     // Emit: %self_ref = ref var %result
                     ctx.emit_assign(self_ref_place.clone(), Rvalue::RefMut(result_place.clone()));
-
-                    // Try to find the initializer symbol to get its CallableBehavior
-                    // Look for an "init" child of the type symbol
-                    let init_beh = sym
-                        .metadata()
-                        .children()
-                        .iter()
-                        .find(|child| {
-                            child.metadata().kind() == KestrelSymbolKind::Initializer
-                                && child.metadata().name().value == "init"
-                        })
-                        .and_then(|init_sym| {
-                            init_sym.metadata().get_behavior::<CallableBehavior>()
-                        });
 
                     // Build call args: self_ref first (always MutRef), then user args with their modes
                     let mut call_args = vec![CallArg::mutating(Value::Place(self_ref_place))];
@@ -1630,7 +2803,10 @@ fn lower_call(
                     let unit_place = Place::local(unit_local);
 
                     // Call the init function
-                    let type_args = get_ordered_type_args(ctx, &sym);
+                    let type_args = match get_ordered_type_args(ctx, &sym) {
+                        Some(args) => args,
+                        None => return Value::Immediate(Immediate::error()),
+                    };
                     let mir_callee = if type_args.is_empty() {
                         Callee::direct(init_name)
                     } else {
@@ -1641,7 +2817,7 @@ fn lower_call(
 
                     // result_place now contains the initialized struct
                     // (init wrote to it via the self_ref)
-                }
+                },
                 None => {
                     ctx.emit_error(LoweringError::internal(
                         format!(
@@ -1651,9 +2827,9 @@ fn lower_call(
                         Some(expr.span.clone()),
                     ));
                     return Value::Immediate(Immediate::error());
-                }
+                },
             }
-        }
+        },
 
         ExprKind::LocalRef(local_id) => {
             // Indirect call through a local variable (closure)
@@ -1666,7 +2842,7 @@ fn lower_call(
 
             // Closures are "thick" callables
             ctx.emit_call_with_modes(result_place.clone(), Callee::Thick(callee_place), call_args);
-        }
+        },
 
         _ => {
             // Other callee expressions - try to lower as a place for indirect call
@@ -1690,19 +2866,769 @@ fn lower_call(
                         Callee::Thin(callee_place)
                     };
                     ctx.emit_call_with_modes(result_place.clone(), mir_callee, call_args);
-                }
+                },
                 Value::Immediate(_) => {
                     ctx.emit_error(LoweringError::unsupported_expr(
                         "indirect call on immediate value",
                         expr.span.clone(),
                     ));
                     return Value::Immediate(Immediate::error());
+                },
+                Value::Unreachable => {
+                    return Value::Unreachable;
+                },
+            }
+        },
+    }
+
+    Value::Place(result_place)
+}
+
+/// Lower a subscript call: `array(0)`, `dict(key: "foo")`.
+///
+/// Subscript calls have a receiver (the collection), a getter function to call,
+/// and arguments (the index/key).
+fn lower_subscript_call(
+    ctx: &mut LoweringContext,
+    receiver: &Expression,
+    getter_id: SymbolId,
+    arguments: &[CallArgument],
+    expr: &Expression,
+) -> Value {
+    use kestrel_semantic_tree::behavior::callable::CallableBehavior;
+
+    // Lower the receiver expression (e.g., the array)
+    let receiver_value = lower_expression(ctx, receiver);
+
+    // Lower arguments (e.g., the index)
+    let arg_values: Vec<Value> = arguments
+        .iter()
+        .map(|arg| lower_expression(ctx, &arg.value))
+        .collect();
+
+    // Build the full argument list: receiver first, then subscript arguments
+    let mut all_args = vec![receiver_value];
+    all_args.extend(arg_values);
+
+    // Build argument types list
+    let mut all_arg_types: Vec<&Ty> = vec![&receiver.ty];
+    all_arg_types.extend(arguments.iter().map(|arg| &arg.value.ty));
+
+    // Get the result type and create a temp for it
+    let result_ty = lower_type(ctx, &expr.ty);
+    let result_local = ctx.create_temp("subscript", result_ty);
+    let result_place = Place::local(result_local);
+
+    // Track the temp for deinit if needed
+    if ctx.type_needs_deinit(&expr.ty) {
+        ctx.track_statement_temp(result_local);
+    }
+
+    // Get the getter symbol to build the call
+    let getter_symbol = ctx.model.query(SymbolFor { id: getter_id });
+    match getter_symbol {
+        Some(sym) => {
+            // Get the callable behavior for access mode info
+            let callable_beh = sym.metadata().get_behavior::<CallableBehavior>();
+
+            // Build the call arguments with proper access modes
+            let call_args = build_call_args(
+                ctx,
+                all_args,
+                &all_arg_types,
+                callable_beh.as_deref(),
+                true, // has_receiver = true for instance subscripts
+            );
+
+            // Mark moved arguments
+            mark_moved_args(ctx, &call_args);
+
+            // Get the qualified name of the getter
+            let func_name = qualified_name_for_symbol(ctx, &sym);
+
+            // Build type arguments from receiver's substitutions (for generic subscripts)
+            let type_args =
+                match get_type_args_for_receiver(ctx, &receiver.ty, Some(expr.span.clone())) {
+                    Some(args) => args,
+                    None => return Value::Immediate(Immediate::error()),
+                };
+
+            // Create the callee
+            let mir_callee = if type_args.is_empty() {
+                Callee::direct(func_name)
+            } else {
+                Callee::direct_generic(func_name, type_args)
+            };
+
+            // Emit the call
+            ctx.emit_call_with_modes(result_place.clone(), mir_callee, call_args);
+        },
+        None => {
+            ctx.emit_error(LoweringError::internal(
+                format!("subscript getter symbol not found: {:?}", getter_id),
+                Some(expr.span.clone()),
+            ));
+            return Value::Immediate(Immediate::error());
+        },
+    }
+
+    Value::Place(result_place)
+}
+
+/// Get type arguments from a receiver type for generic subscript calls.
+fn get_type_args_for_receiver(
+    ctx: &mut LoweringContext,
+    receiver_ty: &Ty,
+    span: Option<kestrel_span::Span>,
+) -> Option<Vec<kestrel_execution_graph::Id<kestrel_execution_graph::Ty>>> {
+    use kestrel_semantic_tree::behavior::generics::GenericsBehavior;
+    use semantic_tree::symbol::Symbol;
+
+    let (type_params, substitutions) = match receiver_ty.kind() {
+        TyKind::Struct {
+            symbol,
+            substitutions,
+        } => {
+            let params: Vec<_> =
+                if let Some(generics) = symbol.metadata().get_behavior::<GenericsBehavior>() {
+                    generics
+                        .type_parameters()
+                        .iter()
+                        .map(|p| p.metadata().id())
+                        .collect()
+                } else {
+                    vec![]
+                };
+            (params, substitutions)
+        },
+        TyKind::Enum {
+            symbol,
+            substitutions,
+        } => {
+            let params: Vec<_> =
+                if let Some(generics) = symbol.metadata().get_behavior::<GenericsBehavior>() {
+                    generics
+                        .type_parameters()
+                        .iter()
+                        .map(|p| p.metadata().id())
+                        .collect()
+                } else {
+                    vec![]
+                };
+            (params, substitutions)
+        },
+        _ => return Some(Vec::new()),
+    };
+
+    if type_params.is_empty() {
+        if substitutions.is_empty() {
+            return Some(Vec::new());
+        }
+        ctx.emit_error(LoweringError::internal(
+            "missing type parameter order for generic receiver".to_string(),
+            span,
+        ));
+        return None;
+    }
+
+    if let Some(ordered_types) = substitutions.types_in_order(&type_params) {
+        Some(
+            ordered_types
+                .into_iter()
+                .map(|ty| lower_type(ctx, ty))
+                .collect(),
+        )
+    } else {
+        ctx.emit_error(LoweringError::internal(
+            "missing type arguments for generic receiver".to_string(),
+            span,
+        ));
+        None
+    }
+}
+
+/// Lower a subscript setter call: `array(0) = value`.
+///
+/// This finds the setter function from the subscript symbol and generates a call
+/// with the receiver, index arguments, and new value.
+fn lower_subscript_setter_call(
+    ctx: &mut LoweringContext,
+    receiver: &Expression,
+    getter_id: SymbolId,
+    arguments: &[CallArgument],
+    new_value: &Expression,
+    expr: &Expression,
+) -> Value {
+    use kestrel_semantic_tree::behavior::callable::CallableBehavior;
+    use kestrel_semantic_tree::symbol::subscript::SubscriptSymbol;
+
+    // The getter_id is the getter symbol. We need to find the parent subscript
+    // and get the setter from it.
+    let getter_symbol = match ctx.model.query(SymbolFor { id: getter_id }) {
+        Some(sym) => sym,
+        None => {
+            ctx.emit_error(LoweringError::internal(
+                format!("subscript getter symbol not found: {:?}", getter_id),
+                Some(expr.span.clone()),
+            ));
+            return Value::Immediate(Immediate::error());
+        },
+    };
+
+    // Get the parent subscript symbol
+    let subscript = match getter_symbol.metadata().parent() {
+        Some(parent) if parent.metadata().kind() == KestrelSymbolKind::Subscript => parent,
+        _ => {
+            ctx.emit_error(LoweringError::internal(
+                "subscript getter has no subscript parent",
+                Some(expr.span.clone()),
+            ));
+            return Value::Immediate(Immediate::error());
+        },
+    };
+
+    // Get the subscript symbol to find the setter
+    let subscript_sym = match subscript.as_ref().downcast_ref::<SubscriptSymbol>() {
+        Some(s) => s,
+        None => {
+            ctx.emit_error(LoweringError::internal(
+                "parent is not a SubscriptSymbol",
+                Some(expr.span.clone()),
+            ));
+            return Value::Immediate(Immediate::error());
+        },
+    };
+
+    // Get the setter ID
+    let setter_id = match subscript_sym.setter_id() {
+        Some(id) => id,
+        None => {
+            ctx.emit_error(LoweringError::internal(
+                "subscript has no setter (read-only)",
+                Some(expr.span.clone()),
+            ));
+            return Value::Immediate(Immediate::error());
+        },
+    };
+
+    // Get the setter symbol
+    let setter_symbol = match ctx.model.query(SymbolFor { id: setter_id }) {
+        Some(sym) => sym,
+        None => {
+            ctx.emit_error(LoweringError::internal(
+                format!("subscript setter symbol not found: {:?}", setter_id),
+                Some(expr.span.clone()),
+            ));
+            return Value::Immediate(Immediate::error());
+        },
+    };
+
+    // Lower the receiver
+    let receiver_value = lower_expression(ctx, receiver);
+
+    // Lower the subscript arguments (e.g., the index)
+    let arg_values: Vec<Value> = arguments
+        .iter()
+        .map(|arg| lower_expression(ctx, &arg.value))
+        .collect();
+
+    // Lower the new value
+    let new_value_result = lower_expression(ctx, new_value);
+
+    // Build the full argument list: receiver first, then subscript arguments, then new value
+    let mut all_args = vec![receiver_value];
+    all_args.extend(arg_values);
+    all_args.push(new_value_result);
+
+    // Build argument types list
+    let mut all_arg_types: Vec<&Ty> = vec![&receiver.ty];
+    all_arg_types.extend(arguments.iter().map(|arg| &arg.value.ty));
+    all_arg_types.push(&new_value.ty);
+
+    // Setters return unit
+    let unit_ty = ctx.mir.ty_unit();
+    let unit_local = ctx.create_temp("subscript_set", unit_ty);
+    let unit_place = Place::local(unit_local);
+
+    // Get the callable behavior for access mode info
+    let callable_beh = setter_symbol.metadata().get_behavior::<CallableBehavior>();
+
+    // Build the call arguments with proper access modes
+    let call_args = build_call_args(
+        ctx,
+        all_args,
+        &all_arg_types,
+        callable_beh.as_deref(),
+        true, // has_receiver = true for instance subscripts
+    );
+
+    // Mark moved arguments
+    mark_moved_args(ctx, &call_args);
+
+    // Get the qualified name of the setter
+    let setter_name = qualified_name_for_symbol(ctx, &setter_symbol);
+
+    // Build type arguments from receiver's substitutions
+    let type_args = match get_type_args_for_receiver(ctx, &receiver.ty, Some(expr.span.clone())) {
+        Some(args) => args,
+        None => return Value::Immediate(Immediate::error()),
+    };
+
+    // Create the callee
+    let mir_callee = if type_args.is_empty() {
+        Callee::direct(setter_name)
+    } else {
+        Callee::direct_generic(setter_name, type_args)
+    };
+
+    // Emit the call
+    ctx.emit_call_with_modes(unit_place, mir_callee, call_args);
+
+    // Setter returns unit
+    Value::Immediate(Immediate::unit())
+}
+
+/// Find field information from a type.
+/// Returns (field_id, is_computed) if the field is found.
+fn find_field_info(ctx: &LoweringContext, ty: &Ty, field_name: &str) -> Option<(SymbolId, bool)> {
+    use semantic_tree::symbol::Symbol;
+
+    // Try to get the struct symbol from the type
+    if let Some(struct_sym) = ty.as_struct() {
+        // Query fields from the struct symbol
+        let struct_id = struct_sym.metadata().id();
+        let fields = ctx.model.query(StructFields { struct_id });
+        for field_info in fields {
+            if field_info.name == field_name {
+                return Some((field_info.field_id, field_info.is_computed));
+            }
+        }
+    }
+
+    // Try enum type - enums can also have computed properties
+    if let Some(enum_sym) = ty.as_enum() {
+        // Look through children for fields
+        for child in enum_sym.metadata().children() {
+            if child.metadata().kind() == KestrelSymbolKind::Field
+                && child.metadata().name().value == field_name
+            {
+                // Check if this field is computed
+                if let Ok(field_sym) = child.clone().downcast_arc::<FieldSymbol>() {
+                    return Some((field_sym.metadata().id(), field_sym.is_computed()));
                 }
             }
         }
     }
 
+    None
+}
+
+/// Lower a getter call for a computed property.
+fn lower_getter_call(
+    ctx: &mut LoweringContext,
+    object: &Expression,
+    field_id: SymbolId,
+    field_name: &str,
+    expr: &Expression,
+) -> Value {
+    // Get the field symbol to find the getter
+    let field_symbol = match ctx.model.query(SymbolFor { id: field_id }) {
+        Some(sym) => sym,
+        None => {
+            ctx.emit_error(LoweringError::internal(
+                format!("field symbol not found: {:?}", field_id),
+                Some(expr.span.clone()),
+            ));
+            return Value::Immediate(Immediate::error());
+        },
+    };
+
+    // Downcast to FieldSymbol to get getter
+    let field_sym: std::sync::Arc<FieldSymbol> = match field_symbol.clone().downcast_arc() {
+        Ok(f) => f,
+        Err(_) => {
+            ctx.emit_error(LoweringError::internal(
+                format!("could not downcast to FieldSymbol: {}", field_name),
+                Some(expr.span.clone()),
+            ));
+            return Value::Immediate(Immediate::error());
+        },
+    };
+
+    // Get the getter symbol ID
+    let getter_id = match field_sym.getter() {
+        Some(id) => id,
+        None => {
+            ctx.emit_error(LoweringError::internal(
+                format!("computed property '{}' has no getter", field_name),
+                Some(expr.span.clone()),
+            ));
+            return Value::Immediate(Immediate::error());
+        },
+    };
+
+    // Get the getter symbol
+    let getter_symbol = match ctx.model.query(SymbolFor { id: getter_id }) {
+        Some(sym) => sym,
+        None => {
+            ctx.emit_error(LoweringError::internal(
+                format!("getter symbol not found for '{}'", field_name),
+                Some(expr.span.clone()),
+            ));
+            return Value::Immediate(Immediate::error());
+        },
+    };
+
+    // Check if this is a static computed property
+    let is_static = field_sym.is_static();
+
+    // Get the result type and create a temp for the result
+    let result_ty = lower_type(ctx, &expr.ty);
+    let result_local = ctx.create_temp("getter_result", result_ty);
+    let result_place = Place::local(result_local);
+
+    // Track the temp for deinit if needed
+    if ctx.type_needs_deinit(&expr.ty) {
+        ctx.track_statement_temp(result_local);
+    }
+
+    // Build the qualified name for the getter
+    let getter_name = qualified_name_for_symbol(ctx, &getter_symbol);
+
+    // Get type arguments from the receiver's type for generic types
+    let type_args = match extract_type_args_from_receiver(ctx, &object.ty, Some(expr.span.clone()))
+    {
+        Some(args) => args,
+        None => return Value::Immediate(Immediate::error()),
+    };
+
+    // Look up CallableBehavior to get receiver access mode
+    let callable_beh = getter_symbol.metadata().get_behavior::<CallableBehavior>();
+
+    if is_static {
+        // Static computed property - no receiver
+        let mir_callee = if type_args.is_empty() {
+            Callee::direct(getter_name)
+        } else {
+            Callee::direct_generic(getter_name, type_args)
+        };
+        ctx.emit_call_with_modes(result_place.clone(), mir_callee, vec![]);
+    } else {
+        // Instance computed property - pass receiver
+        let receiver_value = lower_expression(ctx, object);
+
+        // Build call args with receiver
+        let call_args = if let Some(beh) = callable_beh {
+            match beh.receiver() {
+                Some(ReceiverKind::Borrowing) | None => {
+                    // Getter borrows self
+                    let ref_value = create_ref(ctx, &receiver_value, &object.ty, false);
+                    vec![CallArg::new(ref_value, PassingMode::Copy)]
+                },
+                Some(ReceiverKind::Mutating) => {
+                    // Getter needs mutable self (unusual but possible)
+                    let ref_value = create_ref(ctx, &receiver_value, &object.ty, true);
+                    vec![CallArg::new(ref_value, PassingMode::Copy)]
+                },
+                Some(ReceiverKind::Consuming) => {
+                    // Getter consumes self
+                    let mode = if object.ty.is_copyable() {
+                        PassingMode::Copy
+                    } else {
+                        PassingMode::Move
+                    };
+                    vec![CallArg::new(receiver_value, mode)]
+                },
+                Some(ReceiverKind::Initializing) => {
+                    // Shouldn't happen for getter
+                    vec![CallArg::mutating(receiver_value)]
+                },
+            }
+        } else {
+            // Default: borrow receiver
+            let ref_value = create_ref(ctx, &receiver_value, &object.ty, false);
+            vec![CallArg::new(ref_value, PassingMode::Copy)]
+        };
+
+        mark_moved_args(ctx, &call_args);
+        let mir_callee = if type_args.is_empty() {
+            Callee::direct(getter_name)
+        } else {
+            Callee::direct_generic(getter_name, type_args)
+        };
+        ctx.emit_call_with_modes(result_place.clone(), mir_callee, call_args);
+    }
+
     Value::Place(result_place)
+}
+
+/// Extract type arguments from a receiver's type.
+///
+/// For generic types like `Slice<Int>`, this extracts the type arguments `[Int]`
+/// in the order the type parameters are declared on the type.
+fn extract_type_args_from_receiver(
+    ctx: &mut LoweringContext,
+    receiver_ty: &Ty,
+    span: Option<kestrel_span::Span>,
+) -> Option<Vec<kestrel_execution_graph::Id<kestrel_execution_graph::Ty>>> {
+    use kestrel_semantic_tree::behavior::generics::GenericsBehavior;
+    use semantic_tree::symbol::Symbol;
+
+    // Get the type's substitutions and the parent type's parameter order
+    let (type_params, substitutions) =
+        if let Some((struct_sym, subs)) = receiver_ty.as_struct_with_subs() {
+            // Get type parameters from struct
+            let params: Vec<_> =
+                if let Some(generics) = struct_sym.metadata().get_behavior::<GenericsBehavior>() {
+                    generics
+                        .type_parameters()
+                        .iter()
+                        .map(|p| p.metadata().id())
+                        .collect()
+                } else {
+                    vec![]
+                };
+            (params, subs)
+        } else if let Some((enum_sym, subs)) = receiver_ty.as_enum_with_subs() {
+            // Get type parameters from enum
+            let params: Vec<_> =
+                if let Some(generics) = enum_sym.metadata().get_behavior::<GenericsBehavior>() {
+                    generics
+                        .type_parameters()
+                        .iter()
+                        .map(|p| p.metadata().id())
+                        .collect()
+                } else {
+                    vec![]
+                };
+            (params, subs)
+        } else {
+            return Some(vec![]);
+        };
+
+    // Get types in the correct order based on type parameter declaration order
+    if type_params.is_empty() {
+        if substitutions.is_empty() {
+            return Some(vec![]);
+        }
+        ctx.emit_error(LoweringError::internal(
+            "missing type parameter order for generic receiver".to_string(),
+            span,
+        ));
+        return None;
+    }
+
+    if let Some(ordered_types) = substitutions.types_in_order(&type_params) {
+        Some(
+            ordered_types
+                .into_iter()
+                .map(|ty| lower_type(ctx, ty))
+                .collect(),
+        )
+    } else {
+        ctx.emit_error(LoweringError::internal(
+            "missing type arguments for generic receiver".to_string(),
+            span,
+        ));
+        None
+    }
+}
+
+/// Lower a setter call for a computed property assignment.
+fn lower_setter_call(
+    ctx: &mut LoweringContext,
+    object: &Expression,
+    field_id: SymbolId,
+    field_name: &str,
+    rhs: &Expression,
+    expr: &Expression,
+) -> Value {
+    // Get the field symbol to find the setter
+    let field_symbol = match ctx.model.query(SymbolFor { id: field_id }) {
+        Some(sym) => sym,
+        None => {
+            ctx.emit_error(LoweringError::internal(
+                format!("field symbol not found: {:?}", field_id),
+                Some(expr.span.clone()),
+            ));
+            return Value::Immediate(Immediate::error());
+        },
+    };
+
+    // Downcast to FieldSymbol to get setter
+    let field_sym: std::sync::Arc<FieldSymbol> = match field_symbol.clone().downcast_arc() {
+        Ok(f) => f,
+        Err(_) => {
+            ctx.emit_error(LoweringError::internal(
+                format!("could not downcast to FieldSymbol: {}", field_name),
+                Some(expr.span.clone()),
+            ));
+            return Value::Immediate(Immediate::error());
+        },
+    };
+
+    // Get the setter symbol ID
+    let setter_id = match field_sym.setter() {
+        Some(id) => id,
+        None => {
+            ctx.emit_error(LoweringError::internal(
+                format!(
+                    "computed property '{}' has no setter (read-only)",
+                    field_name
+                ),
+                Some(expr.span.clone()),
+            ));
+            return Value::Immediate(Immediate::error());
+        },
+    };
+
+    // Get the setter symbol
+    let setter_symbol = match ctx.model.query(SymbolFor { id: setter_id }) {
+        Some(sym) => sym,
+        None => {
+            ctx.emit_error(LoweringError::internal(
+                format!("setter symbol not found for '{}'", field_name),
+                Some(expr.span.clone()),
+            ));
+            return Value::Immediate(Immediate::error());
+        },
+    };
+
+    // Check if this is a static computed property
+    let is_static = field_sym.is_static();
+
+    // Lower the right-hand side value
+    let rhs_value = lower_expression(ctx, rhs);
+
+    // Create a temp for the unit return value of setter
+    let unit_ty = ctx.mir.ty_unit();
+    let unit_local = ctx.create_temp("setter_ret", unit_ty);
+    let unit_place = Place::local(unit_local);
+
+    // Build the qualified name for the setter
+    let setter_name = qualified_name_for_symbol(ctx, &setter_symbol);
+
+    // Get type arguments from the receiver's type for generic types
+    let type_args = match extract_type_args_from_receiver(ctx, &object.ty, Some(expr.span.clone()))
+    {
+        Some(args) => args,
+        None => return Value::Immediate(Immediate::error()),
+    };
+
+    // Look up CallableBehavior to get parameter access modes
+    let callable_beh = setter_symbol.metadata().get_behavior::<CallableBehavior>();
+
+    if is_static {
+        // Static computed property - just pass the new value
+        let call_args = if let Some(beh) = callable_beh {
+            let params = beh.parameters();
+            if let Some(param) = params.first() {
+                let mode = access_mode_to_passing_mode(param.access_mode(), &rhs.ty);
+                vec![CallArg::new(rhs_value, mode)]
+            } else {
+                // Default: consuming parameter
+                let mode = if rhs.ty.is_copyable() {
+                    PassingMode::Copy
+                } else {
+                    PassingMode::Move
+                };
+                vec![CallArg::new(rhs_value, mode)]
+            }
+        } else {
+            // Default: consuming parameter
+            let mode = if rhs.ty.is_copyable() {
+                PassingMode::Copy
+            } else {
+                PassingMode::Move
+            };
+            vec![CallArg::new(rhs_value, mode)]
+        };
+
+        mark_moved_args(ctx, &call_args);
+        let mir_callee = if type_args.is_empty() {
+            Callee::direct(setter_name)
+        } else {
+            Callee::direct_generic(setter_name, type_args)
+        };
+        ctx.emit_call_with_modes(unit_place, mir_callee, call_args);
+    } else {
+        // Instance computed property - pass receiver and new value
+        let receiver_value = lower_expression(ctx, object);
+
+        // Build call args with receiver and newValue
+        let call_args = if let Some(beh) = callable_beh {
+            let mut args = Vec::new();
+
+            // Handle receiver based on ReceiverKind
+            // Setters typically need mutable receiver
+            match beh.receiver() {
+                Some(ReceiverKind::Borrowing) | None => {
+                    // Immutable borrow (unusual for setter but respect the behavior)
+                    let ref_value = create_ref(ctx, &receiver_value, &object.ty, false);
+                    args.push(CallArg::new(ref_value, PassingMode::Copy));
+                },
+                Some(ReceiverKind::Mutating) => {
+                    // Mutable borrow - typical for setters
+                    let ref_value = create_ref(ctx, &receiver_value, &object.ty, true);
+                    args.push(CallArg::new(ref_value, PassingMode::Copy));
+                },
+                Some(ReceiverKind::Consuming) => {
+                    // Consumes self
+                    let mode = if object.ty.is_copyable() {
+                        PassingMode::Copy
+                    } else {
+                        PassingMode::Move
+                    };
+                    args.push(CallArg::new(receiver_value, mode));
+                },
+                Some(ReceiverKind::Initializing) => {
+                    // Shouldn't happen for setter
+                    let ref_value = create_ref(ctx, &receiver_value, &object.ty, true);
+                    args.push(CallArg::new(ref_value, PassingMode::Copy));
+                },
+            }
+
+            // Handle newValue parameter
+            let params = beh.parameters();
+            if let Some(param) = params.first() {
+                let mode = access_mode_to_passing_mode(param.access_mode(), &rhs.ty);
+                args.push(CallArg::new(rhs_value, mode));
+            } else {
+                // Default: consuming parameter
+                let mode = if rhs.ty.is_copyable() {
+                    PassingMode::Copy
+                } else {
+                    PassingMode::Move
+                };
+                args.push(CallArg::new(rhs_value, mode));
+            }
+
+            args
+        } else {
+            // Default: mutable receiver, consuming newValue
+            let ref_value = create_ref(ctx, &receiver_value, &object.ty, true);
+            let mode = if rhs.ty.is_copyable() {
+                PassingMode::Copy
+            } else {
+                PassingMode::Move
+            };
+            vec![
+                CallArg::new(ref_value, PassingMode::Copy),
+                CallArg::new(rhs_value, mode),
+            ]
+        };
+
+        mark_moved_args(ctx, &call_args);
+        let mir_callee = if type_args.is_empty() {
+            Callee::direct(setter_name)
+        } else {
+            Callee::direct_generic(setter_name, type_args)
+        };
+        ctx.emit_call_with_modes(unit_place, mir_callee, call_args);
+    }
+
+    // Assignment expression yields unit
+    Value::Immediate(Immediate::unit())
 }
 
 /// Collect name segments from a symbol (helper for TypeRef init calls).
@@ -1729,7 +3655,7 @@ fn collect_symbol_name_parts(
     }
 
     match kind {
-        KestrelSymbolKind::SourceFile => {}
+        KestrelSymbolKind::SourceFile => {},
         KestrelSymbolKind::Module
         | KestrelSymbolKind::Struct
         | KestrelSymbolKind::Enum
@@ -1737,8 +3663,8 @@ fn collect_symbol_name_parts(
         | KestrelSymbolKind::TypeAlias
         | KestrelSymbolKind::Extension => {
             parts.push(name_value.clone());
-        }
-        _ => {}
+        },
+        _ => {},
     }
 }
 
@@ -1776,18 +3702,28 @@ fn lower_if(
     else_branch: &Option<ElseBranch>,
     expr: &Expression,
 ) -> Value {
-    // Get result type
-    let result_ty = lower_type(ctx, &expr.ty);
-    let result_local = ctx.create_temp("if_result", result_ty);
-    let result_place = Place::local(result_local);
+    // Check if all branches diverge (result type is Never)
+    // In this case, we should NOT create a result local since it will never be assigned
+    // This avoids SSA issues in codegen where an undefined local gets aliased to wrong types
+    let all_branches_diverge = matches!(expr.ty.kind(), kestrel_semantic_tree::ty::TyKind::Never);
 
-    // Track the temp for deinit if the result type needs deinit
-    if ctx.type_needs_deinit(&expr.ty) {
-        ctx.track_statement_temp(result_local);
-    }
+    // Only create result local and join block if branches converge
+    let (result_place, join_block) = if all_branches_diverge {
+        (None, None)
+    } else {
+        let result_ty = lower_type(ctx, &expr.ty);
+        let result_local = ctx.create_temp("if_result", result_ty);
+        let result_place = Place::local(result_local);
 
-    // Create the join block where both branches converge
-    let join_block = ctx.create_block();
+        // Track the temp for deinit if the result type needs deinit
+        if ctx.type_needs_deinit(&expr.ty) {
+            ctx.track_statement_temp(result_local);
+        }
+
+        // Create the join block where both branches converge
+        let join_block = ctx.create_block();
+        (Some(result_place), Some(join_block))
+    };
 
     // Create the else block
     let else_block_id = ctx.create_block();
@@ -1813,17 +3749,23 @@ fn lower_if(
     }
 
     // Evaluate then value before capturing statuses (might cause moves)
+    // Only assign to result_place if branches converge (result_place is Some)
     let _then_result_value = if !ctx.is_block_terminated() {
         if let Some(value_expr) = then_value {
             let result = lower_expression(ctx, value_expr);
-            if !ctx.is_block_terminated() {
-                ctx.emit_assign_value(result_place.clone(), result);
+            if !ctx.is_block_terminated()
+                && let Some(ref place) = result_place
+            {
+                // Use emit_move_value to mark the temp as moved, preventing double-free
+                ctx.emit_move_value(place.clone(), result);
             }
             true
-        } else {
-            // No then value - assign unit
-            ctx.emit_imm(result_place.clone(), Immediate::unit());
+        } else if let Some(ref place) = result_place {
+            // No then value - assign unit (only if we have a result place)
+            ctx.emit_imm(place.clone(), Immediate::unit());
             true
+        } else {
+            false
         }
     } else {
         false
@@ -1866,11 +3808,14 @@ fn lower_if(
             if !ctx.is_block_terminated() {
                 if let Some(value_expr) = value {
                     let else_result = lower_expression(ctx, value_expr);
-                    if !ctx.is_block_terminated() {
-                        ctx.emit_assign_value(result_place.clone(), else_result);
+                    if !ctx.is_block_terminated()
+                        && let Some(ref place) = result_place
+                    {
+                        // Use emit_move_value to mark the temp as moved, preventing double-free
+                        ctx.emit_move_value(place.clone(), else_result);
                     }
-                } else {
-                    ctx.emit_imm(result_place.clone(), Immediate::unit());
+                } else if let Some(ref place) = result_place {
+                    ctx.emit_imm(place.clone(), Immediate::unit());
                 }
             }
 
@@ -1878,31 +3823,36 @@ fn lower_if(
             else_final_terminated = ctx.is_block_terminated();
             else_scope = ctx.exit_scope_no_emit();
             else_final_block = ctx.current_block();
-        }
+        },
 
         Some(ElseBranch::ElseIf(else_if_expr)) => {
             // ElseIf is a nested if expression which will handle its own scopes
             let else_result = lower_expression(ctx, else_if_expr);
 
-            if !ctx.is_block_terminated() {
-                ctx.emit_assign_value(result_place.clone(), else_result);
+            if !ctx.is_block_terminated()
+                && let Some(ref place) = result_place
+            {
+                // Use emit_move_value to mark the temp as moved, preventing double-free
+                ctx.emit_move_value(place.clone(), else_result);
             }
 
             else_statuses = ctx.snapshot_parent_deinit_statuses();
             else_final_terminated = ctx.is_block_terminated();
             else_scope = ctx.exit_scope_no_emit();
             else_final_block = ctx.current_block();
-        }
+        },
 
         None => {
-            // No else branch - result is unit
-            ctx.emit_imm(result_place.clone(), Immediate::unit());
+            // No else branch - result is unit (only if we have a result place)
+            if let Some(ref place) = result_place {
+                ctx.emit_imm(place.clone(), Immediate::unit());
+            }
 
             else_statuses = ctx.snapshot_parent_deinit_statuses();
             else_final_terminated = ctx.is_block_terminated();
             else_scope = ctx.exit_scope_no_emit();
             else_final_block = ctx.current_block();
-        }
+        },
     }
 
     // === Compute branch merge for parent-scope locals ===
@@ -1915,50 +3865,56 @@ fn lower_if(
     };
 
     // === Emit flag settings and deinits for then branch ===
-    if let Some(then_block) = then_final_block {
-        if !then_final_terminated {
-            ctx.set_current_block(then_block);
+    if let Some(then_block) = then_final_block
+        && !then_final_terminated
+    {
+        ctx.set_current_block(then_block);
 
-            // Emit flag settings for divergent parent-scope locals
-            if let Some(ref merge) = merge_result {
-                for &flag in &merge.then_flag_false {
-                    ctx.set_deinit_flag(flag, false);
-                }
-                for &flag in &merge.then_flag_true {
-                    ctx.set_deinit_flag(flag, true);
-                }
+        // Emit flag settings for divergent parent-scope locals
+        if let Some(ref merge) = merge_result {
+            for &flag in &merge.then_flag_false {
+                ctx.set_deinit_flag(flag, false);
             }
-
-            // Emit deinits for branch-local variables
-            if let Some(ref scope) = then_scope {
-                ctx.emit_scope_deinits(scope);
+            for &flag in &merge.then_flag_true {
+                ctx.set_deinit_flag(flag, true);
             }
+        }
 
-            ctx.emit_jump(join_block);
+        // Emit deinits for branch-local variables
+        if let Some(ref scope) = then_scope {
+            ctx.emit_scope_deinits(scope);
+        }
+
+        // Jump to join block if we have one (branches converge)
+        if let Some(jb) = join_block {
+            ctx.emit_jump(jb);
         }
     }
 
     // === Emit flag settings and deinits for else branch ===
-    if let Some(else_block) = else_final_block {
-        if !else_final_terminated {
-            ctx.set_current_block(else_block);
+    if let Some(else_block) = else_final_block
+        && !else_final_terminated
+    {
+        ctx.set_current_block(else_block);
 
-            // Emit flag settings for divergent parent-scope locals
-            if let Some(ref merge) = merge_result {
-                for &flag in &merge.else_flag_false {
-                    ctx.set_deinit_flag(flag, false);
-                }
-                for &flag in &merge.else_flag_true {
-                    ctx.set_deinit_flag(flag, true);
-                }
+        // Emit flag settings for divergent parent-scope locals
+        if let Some(ref merge) = merge_result {
+            for &flag in &merge.else_flag_false {
+                ctx.set_deinit_flag(flag, false);
             }
-
-            // Emit deinits for branch-local variables
-            if let Some(ref scope) = else_scope {
-                ctx.emit_scope_deinits(scope);
+            for &flag in &merge.else_flag_true {
+                ctx.set_deinit_flag(flag, true);
             }
+        }
 
-            ctx.emit_jump(join_block);
+        // Emit deinits for branch-local variables
+        if let Some(ref scope) = else_scope {
+            ctx.emit_scope_deinits(scope);
+        }
+
+        // Jump to join block if we have one (branches converge)
+        if let Some(jb) = join_block {
+            ctx.emit_jump(jb);
         }
     }
 
@@ -1967,10 +3923,16 @@ fn lower_if(
         ctx.apply_merge_updates(merge.updates);
     }
 
-    // Continue with join block
-    ctx.set_current_block(join_block);
-
-    Value::Place(result_place)
+    // If all branches diverge, return unit placeholder (unreachable code)
+    // Otherwise, continue with join block and return the result place
+    if let (Some(jb), Some(place)) = (join_block, result_place) {
+        ctx.set_current_block(jb);
+        Value::Place(place)
+    } else {
+        // All branches diverge - return unit placeholder
+        // The current block is now undefined, but no code will use it
+        Value::Immediate(Immediate::unit())
+    }
 }
 
 /// Lower a chain of conditions for if/if-let.
@@ -2009,14 +3971,14 @@ fn lower_condition_chain(
                 ctx.set_current_block(next_block);
                 lower_condition_chain(ctx, conditions, index + 1, then_block, else_block);
             }
-        }
+        },
 
         IfCondition::Let { pattern, value, .. } => {
             // If-let condition: use pattern matching
             lower_if_let_condition(
                 ctx, pattern, value, conditions, index, then_block, else_block,
             );
-        }
+        },
     }
 }
 
@@ -2050,7 +4012,11 @@ fn lower_if_let_condition(
             let place = Place::local(scrutinee_local);
             ctx.emit_assign(place.clone(), Rvalue::Use(imm));
             place
-        }
+        },
+        Value::Unreachable => {
+            // Scrutinee diverged, if-let is unreachable
+            return;
+        },
     };
 
     // Compile the pattern into a decision tree
@@ -2098,7 +4064,7 @@ fn emit_if_let_decision_tree(
 
             // Continue with the rest of the condition chain
             lower_condition_chain(ctx, conditions, index + 1, then_block, else_block);
-        }
+        },
 
         DecisionTree::Switch {
             path,
@@ -2109,18 +4075,18 @@ fn emit_if_let_decision_tree(
             emit_if_let_switch(
                 ctx, path, ty, cases, default, scrutinee, conditions, index, then_block, else_block,
             );
-        }
+        },
 
         DecisionTree::Guard { .. } => {
             // Guards shouldn't appear in if-let (guards are a match-specific feature)
             // If they do, treat as failure
             ctx.emit_jump(else_block);
-        }
+        },
 
         DecisionTree::Failure => {
             // Pattern didn't match, go to else block
             ctx.emit_jump(else_block);
-        }
+        },
     }
 }
 
@@ -2158,7 +4124,7 @@ fn emit_if_let_switch(
                 then_block,
                 else_block,
             );
-        }
+        },
 
         TyKind::Enum { .. } => {
             emit_if_let_enum_switch(
@@ -2172,12 +4138,13 @@ fn emit_if_let_switch(
                 then_block,
                 else_block,
             );
-        }
+        },
 
-        TyKind::Int(_) => {
+        TyKind::Int(int_bits) => {
             emit_if_let_int_switch(
                 ctx,
                 &switch_place,
+                *int_bits,
                 cases,
                 default,
                 scrutinee,
@@ -2186,7 +4153,7 @@ fn emit_if_let_switch(
                 then_block,
                 else_block,
             );
-        }
+        },
 
         TyKind::String => {
             emit_if_let_string_switch(
@@ -2200,7 +4167,7 @@ fn emit_if_let_switch(
                 then_block,
                 else_block,
             );
-        }
+        },
 
         TyKind::Tuple(_) | TyKind::Struct { .. } => {
             // Single constructor types - just recurse into the case
@@ -2221,7 +4188,7 @@ fn emit_if_let_switch(
             } else {
                 ctx.emit_jump(else_block);
             }
-        }
+        },
 
         _ => {
             // For other types, try the default or first case
@@ -2242,7 +4209,7 @@ fn emit_if_let_switch(
             } else {
                 ctx.emit_jump(else_block);
             }
-        }
+        },
     }
 }
 
@@ -2387,6 +4354,7 @@ fn emit_if_let_enum_switch(
 fn emit_if_let_int_switch(
     ctx: &mut LoweringContext,
     switch_place: &Place,
+    int_bits: kestrel_semantic_tree::ty::IntBits,
     cases: &[(
         kestrel_semantic_pattern_matching::Constructor,
         kestrel_semantic_pattern_matching::DecisionTree,
@@ -2435,7 +4403,7 @@ fn emit_if_let_int_switch(
                     Rvalue::BinaryOp {
                         op: BinOp::Eq,
                         lhs: Value::Place(switch_place.clone()),
-                        rhs: Value::Immediate(Immediate::i64(*value)),
+                        rhs: Value::Immediate(make_int_immediate(int_bits, *value)),
                     },
                 );
 
@@ -2449,7 +4417,7 @@ fn emit_if_let_int_switch(
 
                 // Continue with next comparison
                 ctx.set_current_block(next_block);
-            }
+            },
 
             Constructor::IntRange { start, end } => {
                 let match_block = ctx.create_block();
@@ -2463,7 +4431,7 @@ fn emit_if_let_int_switch(
                     cmp1_place.clone(),
                     Rvalue::BinaryOp {
                         op: BinOp::LeSigned,
-                        lhs: Value::Immediate(Immediate::i64(*start)),
+                        lhs: Value::Immediate(make_int_immediate(int_bits, *start)),
                         rhs: Value::Place(switch_place.clone()),
                     },
                 );
@@ -2476,7 +4444,7 @@ fn emit_if_let_int_switch(
                     Rvalue::BinaryOp {
                         op: BinOp::LeSigned,
                         lhs: Value::Place(switch_place.clone()),
-                        rhs: Value::Immediate(Immediate::i64(*end)),
+                        rhs: Value::Immediate(make_int_immediate(int_bits, *end)),
                     },
                 );
 
@@ -2500,12 +4468,12 @@ fn emit_if_let_int_switch(
                 );
 
                 ctx.set_current_block(next_block);
-            }
+            },
 
             _ => {
                 // Skip unsupported constructors
                 continue;
-            }
+            },
         }
     }
 
@@ -2824,14 +4792,14 @@ fn lower_while_let_condition_chain(
                 ctx.set_current_block(next_block);
                 lower_while_let_condition_chain(ctx, conditions, index + 1, body_block, exit_block);
             }
-        }
+        },
 
         IfCondition::Let { pattern, value, .. } => {
             // While-let condition: use pattern matching
             lower_while_let_pattern_condition(
                 ctx, pattern, value, conditions, index, body_block, exit_block,
             );
-        }
+        },
     }
 }
 
@@ -2860,7 +4828,11 @@ fn lower_while_let_pattern_condition(
             let place = Place::local(scrutinee_local);
             ctx.emit_assign(place.clone(), Rvalue::Use(imm));
             place
-        }
+        },
+        Value::Unreachable => {
+            // Scrutinee diverged, while-let is unreachable
+            return;
+        },
     };
 
     // Compile the pattern into a decision tree
@@ -2903,7 +4875,7 @@ fn emit_while_let_decision_tree(
 
             // Continue with the rest of the condition chain
             lower_while_let_condition_chain(ctx, conditions, index + 1, body_block, exit_block);
-        }
+        },
 
         DecisionTree::Switch {
             path,
@@ -2914,17 +4886,17 @@ fn emit_while_let_decision_tree(
             emit_while_let_switch(
                 ctx, path, ty, cases, default, scrutinee, conditions, index, body_block, exit_block,
             );
-        }
+        },
 
         DecisionTree::Guard { .. } => {
             // Guards shouldn't appear in while-let patterns
             ctx.emit_jump(exit_block);
-        }
+        },
 
         DecisionTree::Failure => {
             // Pattern didn't match, exit the loop
             ctx.emit_jump(exit_block);
-        }
+        },
     }
 }
 
@@ -2962,7 +4934,7 @@ fn emit_while_let_switch(
                 body_block,
                 exit_block,
             );
-        }
+        },
 
         TyKind::Enum { .. } => {
             emit_while_let_enum_switch(
@@ -2976,12 +4948,13 @@ fn emit_while_let_switch(
                 body_block,
                 exit_block,
             );
-        }
+        },
 
-        TyKind::Int(_) => {
+        TyKind::Int(int_bits) => {
             emit_while_let_int_switch(
                 ctx,
                 &switch_place,
+                *int_bits,
                 cases,
                 default,
                 scrutinee,
@@ -2990,7 +4963,7 @@ fn emit_while_let_switch(
                 body_block,
                 exit_block,
             );
-        }
+        },
 
         TyKind::String => {
             emit_while_let_string_switch(
@@ -3004,7 +4977,7 @@ fn emit_while_let_switch(
                 body_block,
                 exit_block,
             );
-        }
+        },
 
         TyKind::Tuple(_) | TyKind::Struct { .. } => {
             // Single constructor types - just recurse into the case
@@ -3025,7 +4998,7 @@ fn emit_while_let_switch(
             } else {
                 ctx.emit_jump(exit_block);
             }
-        }
+        },
 
         _ => {
             // For other types, try the default or first case
@@ -3046,7 +5019,7 @@ fn emit_while_let_switch(
             } else {
                 ctx.emit_jump(exit_block);
             }
-        }
+        },
     }
 }
 
@@ -3190,6 +5163,7 @@ fn emit_while_let_enum_switch(
 fn emit_while_let_int_switch(
     ctx: &mut LoweringContext,
     switch_place: &Place,
+    int_bits: kestrel_semantic_tree::ty::IntBits,
     cases: &[(
         kestrel_semantic_pattern_matching::Constructor,
         kestrel_semantic_pattern_matching::DecisionTree,
@@ -3238,7 +5212,7 @@ fn emit_while_let_int_switch(
                     Rvalue::BinaryOp {
                         op: BinOp::Eq,
                         lhs: Value::Place(switch_place.clone()),
-                        rhs: Value::Immediate(Immediate::i64(*value)),
+                        rhs: Value::Immediate(make_int_immediate(int_bits, *value)),
                     },
                 );
 
@@ -3252,7 +5226,7 @@ fn emit_while_let_int_switch(
 
                 // Continue with next comparison
                 ctx.set_current_block(next_block);
-            }
+            },
 
             Constructor::IntRange { start, end } => {
                 let match_block = ctx.create_block();
@@ -3266,7 +5240,7 @@ fn emit_while_let_int_switch(
                     cmp1_place.clone(),
                     Rvalue::BinaryOp {
                         op: BinOp::LeSigned,
-                        lhs: Value::Immediate(Immediate::i64(*start)),
+                        lhs: Value::Immediate(make_int_immediate(int_bits, *start)),
                         rhs: Value::Place(switch_place.clone()),
                     },
                 );
@@ -3279,7 +5253,7 @@ fn emit_while_let_int_switch(
                     Rvalue::BinaryOp {
                         op: BinOp::LeSigned,
                         lhs: Value::Place(switch_place.clone()),
-                        rhs: Value::Immediate(Immediate::i64(*end)),
+                        rhs: Value::Immediate(make_int_immediate(int_bits, *end)),
                     },
                 );
 
@@ -3303,12 +5277,12 @@ fn emit_while_let_int_switch(
                 );
 
                 ctx.set_current_block(next_block);
-            }
+            },
 
             _ => {
                 // Skip unsupported constructors
                 continue;
-            }
+            },
         }
     }
 
@@ -3408,4 +5382,146 @@ fn emit_while_let_string_switch(
     } else {
         ctx.emit_jump(exit_block);
     }
+}
+
+/// Determine the MIR CastKind based on source and target primitive types.
+fn determine_cast_kind(
+    from: kestrel_semantic_tree::expr::LangPrimitive,
+    to: kestrel_semantic_tree::expr::LangPrimitive,
+) -> CastKind {
+    // Float <-> Float
+    if from.is_float() && to.is_float() {
+        if from.bit_width() < to.bit_width() {
+            return CastKind::FloatWiden;
+        } else {
+            return CastKind::FloatTruncate;
+        }
+    }
+
+    // Int <-> Float
+    if from.is_int() && to.is_float() {
+        return CastKind::IntToFloat;
+    }
+    if from.is_float() && to.is_int() {
+        return CastKind::FloatToInt;
+    }
+
+    // Int <-> Int (signed or unsigned)
+    if from.is_int() && to.is_int() {
+        if from.bit_width() < to.bit_width() {
+            return CastKind::IntWiden;
+        } else {
+            return CastKind::IntTruncate;
+        }
+    }
+
+    // Default: truncate (should not happen with valid casts)
+    CastKind::IntTruncate
+}
+
+/// Find the protocol that an extension method belongs to.
+///
+/// When an extension adds conformances (e.g., `extend Comparable: Less[Self]`),
+/// the methods in that extension implement protocol methods. This function
+/// finds the protocol that contains a method with the given name.
+fn find_protocol_for_extension_method(
+    extension: &std::sync::Arc<
+        dyn semantic_tree::symbol::Symbol<kestrel_semantic_tree::language::KestrelLanguage>,
+    >,
+    method_name: &str,
+) -> Option<
+    std::sync::Arc<
+        dyn semantic_tree::symbol::Symbol<kestrel_semantic_tree::language::KestrelLanguage>,
+    >,
+> {
+    use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
+    use kestrel_semantic_tree::language::KestrelLanguage;
+    use semantic_tree::symbol::Symbol;
+
+    // Get the conformances added by this extension
+    let conformances = extension
+        .metadata()
+        .get_behavior::<ConformancesBehavior>()?;
+
+    // Search through each protocol conformance
+    for protocol_ty in conformances.conformances() {
+        if let TyKind::Protocol { symbol, .. } = protocol_ty.kind() {
+            // Check if this protocol has a method with the given name
+            for child in symbol.metadata().children() {
+                if child.metadata().kind() == KestrelSymbolKind::Function
+                    && child.metadata().name().value == method_name
+                {
+                    return Some(symbol.clone() as std::sync::Arc<dyn Symbol<KestrelLanguage>>);
+                }
+            }
+        }
+    }
+
+    None
+}
+
+/// Lower a function reference being used as a first-class value.
+///
+/// When a function is used as a value (e.g., `let f = myFunction`), we need to
+/// wrap it in a thunk that adapts its calling convention to match the thick
+/// function calling convention used by closures.
+///
+/// The thunk accepts `(env_ptr, ...args...)` and ignores env_ptr, forwarding
+/// only the args to the original function.
+fn lower_function_ref_as_value(
+    ctx: &mut LoweringContext,
+    sym: &std::sync::Arc<
+        dyn semantic_tree::symbol::Symbol<kestrel_semantic_tree::language::KestrelLanguage>,
+    >,
+    expr_ty: &Ty,
+    _span: &kestrel_span::Span,
+) -> Value {
+    use kestrel_execution_graph::Rvalue;
+
+    // Get the function's qualified name
+    let func_name = qualified_name_for_symbol(ctx, sym);
+
+    // Extract parameter and return types from the expression's type
+    let (param_types, return_type) = match expr_ty.kind() {
+        TyKind::Function {
+            params,
+            return_type,
+        } => {
+            let mir_params: Vec<_> = params.iter().map(|p| lower_type(ctx, p)).collect();
+            let mir_ret = lower_type(ctx, return_type);
+            (mir_params, mir_ret)
+        },
+        _ => {
+            // Expression type is not a function - this shouldn't happen after type checking
+            // Fall back to old behavior (direct function ref)
+            return Value::Immediate(Immediate::function_ref(func_name));
+        },
+    };
+
+    // Generate or retrieve the thunk for this function
+    // For now, we don't handle generic type args - that would need more work
+    let type_args: Vec<kestrel_execution_graph::Id<kestrel_execution_graph::Ty>> = vec![];
+    let thunk_name =
+        ctx.get_or_create_function_thunk(func_name, &param_types, return_type, &type_args);
+
+    // Create a thick callable via ApplyPartial with empty captures
+    // This produces a struct { thunk_ptr, null_env }
+    let thick_ty = ctx
+        .mir
+        .intern_type(kestrel_execution_graph::MirTy::FuncThick {
+            params: param_types,
+            ret: return_type,
+        });
+    let result_local = ctx.create_temp("func_ref", thick_ty);
+    let result_place = Place::local(result_local);
+
+    ctx.emit_assign(
+        result_place.clone(),
+        Rvalue::ApplyPartial {
+            func: thunk_name,
+            captures: vec![],
+        },
+    );
+
+    Value::Place(result_place)
 }

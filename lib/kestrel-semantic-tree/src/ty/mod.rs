@@ -78,8 +78,8 @@ impl fmt::Display for Ty {
             TyKind::Never => f.write_str("!"),
             TyKind::Int(bits) => write!(f, "{:?}", bits),
             TyKind::Float(bits) => write!(f, "{:?}", bits),
-            TyKind::Bool => f.write_str("Bool"),
-            TyKind::String => f.write_str("String"),
+            TyKind::Bool => f.write_str("lang.i1"),
+            TyKind::String => f.write_str("lang.str"),
             TyKind::Tuple(elements) => {
                 f.write_char('(')?;
                 for (i, elem) in elements.iter().enumerate() {
@@ -89,8 +89,8 @@ impl fmt::Display for Ty {
                     write!(f, "{}", elem)?;
                 }
                 f.write_char(')')
-            }
-            TyKind::Array(elem) => write!(f, "[{}]", elem),
+            },
+            TyKind::Array(elem) => write!(f, "lang.array[{}]", elem),
             TyKind::Pointer(elem) => write!(f, "lang.ptr[{}]", elem),
             TyKind::Function {
                 params,
@@ -104,10 +104,10 @@ impl fmt::Display for Ty {
                     write!(f, "{}", p)?;
                 }
                 write!(f, ") -> {}", return_type)
-            }
+            },
             TyKind::TypeParameter(param_symbol) => {
                 f.write_str(&param_symbol.metadata().name().value)
-            }
+            },
             TyKind::Protocol {
                 symbol,
                 substitutions,
@@ -127,7 +127,7 @@ impl fmt::Display for Ty {
                         .filter_map(|tp| substitutions.get(tp.metadata().id()).cloned()),
                 )?;
                 f.write_char(']')
-            }
+            },
             TyKind::Struct {
                 symbol,
                 substitutions,
@@ -147,7 +147,7 @@ impl fmt::Display for Ty {
                         .filter_map(|tp| substitutions.get(tp.metadata().id()).cloned()),
                 )?;
                 f.write_char(']')
-            }
+            },
             TyKind::Enum {
                 symbol,
                 substitutions,
@@ -167,7 +167,7 @@ impl fmt::Display for Ty {
                         .filter_map(|tp| substitutions.get(tp.metadata().id()).cloned()),
                 )?;
                 f.write_char(']')
-            }
+            },
             TyKind::TypeAlias {
                 symbol,
                 substitutions,
@@ -187,13 +187,13 @@ impl fmt::Display for Ty {
                         .filter_map(|tp| substitutions.get(tp.metadata().id()).cloned()),
                 )?;
                 f.write_char(']')
-            }
+            },
             TyKind::AssociatedType { symbol, container } => {
                 if let Some(container_ty) = container {
                     write!(f, "{}.", container_ty)?;
                 }
                 f.write_str(&symbol.metadata().name().value)
-            }
+            },
             TyKind::SelfType => f.write_str("Self"),
             TyKind::Infer => f.write_str("_"),
             TyKind::Error => f.write_str("<error>"),
@@ -203,10 +203,10 @@ impl fmt::Display for Ty {
             } => match param_info {
                 ParamInfo::Unconstrained => {
                     write!(f, "(...) -> {}", return_type)
-                }
+                },
                 ParamInfo::ImplicitIt { it_type } => {
                     write!(f, "({}) -> {}", it_type, return_type)
-                }
+                },
                 ParamInfo::Explicit { param_types } => {
                     f.write_char('(')?;
                     for (i, p) in param_types.iter().enumerate() {
@@ -216,7 +216,7 @@ impl fmt::Display for Ty {
                         write!(f, "{}", p)?;
                     }
                     write!(f, ") -> {}", return_type)
-                }
+                },
             },
         }
     }
@@ -556,11 +556,11 @@ impl Ty {
                         } else {
                             ty.apply_substitutions(substitutions).expand_aliases()
                         }
-                    }
+                    },
                     // Alias not yet resolved - return as-is
                     None => self.clone(),
                 }
-            }
+            },
             // Not a type alias - return as-is
             _ => self.clone(),
         }
@@ -578,17 +578,17 @@ impl Ty {
                     .map(|e| e.substitute_self(replacement))
                     .collect();
                 Ty::tuple(new_elements, self.span.clone())
-            }
+            },
 
             TyKind::Array(element_type) => {
                 let new_element = element_type.substitute_self(replacement);
                 Ty::array(new_element, self.span.clone())
-            }
+            },
 
             TyKind::Pointer(element_type) => {
                 let new_element = element_type.substitute_self(replacement);
                 Ty::pointer(new_element, self.span.clone())
-            }
+            },
 
             TyKind::Function {
                 params,
@@ -600,13 +600,13 @@ impl Ty {
                     .collect();
                 let new_return = return_type.substitute_self(replacement);
                 Ty::function(new_params, new_return, self.span.clone())
-            }
+            },
 
             TyKind::AssociatedType { symbol, container } => match container {
                 Some(container_ty) => {
                     let new_container = container_ty.substitute_self(replacement);
                     Ty::qualified_associated_type(symbol.clone(), new_container, self.span.clone())
-                }
+                },
                 None => {
                     // Implicitly Self.Symbol, replace with replacement.Symbol
                     Ty::qualified_associated_type(
@@ -614,7 +614,7 @@ impl Ty {
                         replacement.clone(),
                         self.span.clone(),
                     )
-                }
+                },
             },
 
             TyKind::Struct {
@@ -626,7 +626,7 @@ impl Ty {
                     new_subs.insert(*id, ty.substitute_self(replacement));
                 }
                 Ty::generic_struct(symbol.clone(), new_subs, self.span.clone())
-            }
+            },
 
             TyKind::Enum {
                 symbol,
@@ -637,7 +637,7 @@ impl Ty {
                     new_subs.insert(*id, ty.substitute_self(replacement));
                 }
                 Ty::generic_enum(symbol.clone(), new_subs, self.span.clone())
-            }
+            },
 
             TyKind::Protocol {
                 symbol,
@@ -648,7 +648,7 @@ impl Ty {
                     new_subs.insert(*id, ty.substitute_self(replacement));
                 }
                 Ty::generic_protocol(symbol.clone(), new_subs, self.span.clone())
-            }
+            },
 
             TyKind::TypeAlias {
                 symbol,
@@ -659,7 +659,7 @@ impl Ty {
                     new_subs.insert(*id, ty.substitute_self(replacement));
                 }
                 Ty::generic_type_alias(symbol.clone(), new_subs, self.span.clone())
-            }
+            },
 
             TyKind::UnresolvedFunction {
                 param_info,
@@ -679,7 +679,7 @@ impl Ty {
                     },
                 };
                 Ty::unresolved_function(new_param_info, new_return, self.span.clone())
-            }
+            },
 
             _ => self.clone(),
         }
@@ -714,7 +714,7 @@ impl Ty {
                         .iter()
                         .zip(b_elems.iter())
                         .all(|(a, b)| a.is_specialization_of(b))
-            }
+            },
 
             // Arrays
             (TyKind::Array(a_elem), TyKind::Array(b_elem)) => a_elem.is_specialization_of(b_elem),
@@ -722,7 +722,7 @@ impl Ty {
             // Pointers
             (TyKind::Pointer(a_elem), TyKind::Pointer(b_elem)) => {
                 a_elem.is_specialization_of(b_elem)
-            }
+            },
 
             // Functions
             (
@@ -741,7 +741,7 @@ impl Ty {
                         .zip(b_params.iter())
                         .all(|(a, b)| a.is_specialization_of(b))
                     && a_ret.is_specialization_of(b_ret)
-            }
+            },
 
             // Structs
             (
@@ -757,7 +757,7 @@ impl Ty {
                 Symbol::<KestrelLanguage>::metadata(a_sym.as_ref()).id()
                     == Symbol::<KestrelLanguage>::metadata(b_sym.as_ref()).id()
                     && a_subs.is_specialization_of(b_subs)
-            }
+            },
 
             // Enums
             (
@@ -773,7 +773,7 @@ impl Ty {
                 Symbol::<KestrelLanguage>::metadata(a_sym.as_ref()).id()
                     == Symbol::<KestrelLanguage>::metadata(b_sym.as_ref()).id()
                     && a_subs.is_specialization_of(b_subs)
-            }
+            },
 
             // Protocols
             (
@@ -789,7 +789,7 @@ impl Ty {
                 Symbol::<KestrelLanguage>::metadata(a_sym.as_ref()).id()
                     == Symbol::<KestrelLanguage>::metadata(b_sym.as_ref()).id()
                     && a_subs.is_specialization_of(b_subs)
-            }
+            },
 
             // Error types match anything
             (TyKind::Error, _) | (_, TyKind::Error) => true,
@@ -821,7 +821,7 @@ impl Ty {
                         .iter()
                         .zip(b_elems.iter())
                         .all(|(a, b)| a.overlaps_with(b))
-            }
+            },
 
             // Arrays
             (TyKind::Array(a_elem), TyKind::Array(b_elem)) => a_elem.overlaps_with(b_elem),
@@ -846,7 +846,7 @@ impl Ty {
                         .zip(b_params.iter())
                         .all(|(a, b)| a.overlaps_with(b))
                     && a_ret.overlaps_with(b_ret)
-            }
+            },
 
             // Structs
             (
@@ -862,7 +862,7 @@ impl Ty {
                 Symbol::<KestrelLanguage>::metadata(a_sym.as_ref()).id()
                     == Symbol::<KestrelLanguage>::metadata(b_sym.as_ref()).id()
                     && a_subs.overlaps_with(b_subs)
-            }
+            },
 
             // Enums
             (
@@ -878,7 +878,7 @@ impl Ty {
                 Symbol::<KestrelLanguage>::metadata(a_sym.as_ref()).id()
                     == Symbol::<KestrelLanguage>::metadata(b_sym.as_ref()).id()
                     && a_subs.overlaps_with(b_subs)
-            }
+            },
 
             // Protocols
             (
@@ -894,7 +894,7 @@ impl Ty {
                 Symbol::<KestrelLanguage>::metadata(a_sym.as_ref()).id()
                     == Symbol::<KestrelLanguage>::metadata(b_sym.as_ref()).id()
                     && a_subs.overlaps_with(b_subs)
-            }
+            },
 
             // Error types overlap anything
             (TyKind::Error, _) | (_, TyKind::Error) => true,
@@ -950,7 +950,7 @@ impl Ty {
                         .iter()
                         .zip(b_elems.iter())
                         .all(|(a, b)| a.is_assignable_to(b))
-            }
+            },
 
             // Arrays - element type comparison
             (TyKind::Array(a_elem), TyKind::Array(b_elem)) => a_elem.is_assignable_to(b_elem),
@@ -976,7 +976,7 @@ impl Ty {
                         .zip(b_params.iter())
                         .all(|(a, b)| a.is_assignable_to(b))
                     && a_ret.is_assignable_to(b_ret)
-            }
+            },
 
             // Structs - nominal equality (same symbol by ID)
             (
@@ -993,7 +993,7 @@ impl Ty {
                 Symbol::<KestrelLanguage>::metadata(a_sym.as_ref()).id()
                     == Symbol::<KestrelLanguage>::metadata(b_sym.as_ref()).id()
                     && substitutions_equal(a_subs, b_subs)
-            }
+            },
 
             // Enums - nominal equality (same symbol by ID)
             (
@@ -1010,7 +1010,7 @@ impl Ty {
                 Symbol::<KestrelLanguage>::metadata(a_sym.as_ref()).id()
                     == Symbol::<KestrelLanguage>::metadata(b_sym.as_ref()).id()
                     && substitutions_equal(a_subs, b_subs)
-            }
+            },
 
             // Protocols - nominal equality (same symbol by ID)
             (
@@ -1026,14 +1026,14 @@ impl Ty {
                 Symbol::<KestrelLanguage>::metadata(a_sym.as_ref()).id()
                     == Symbol::<KestrelLanguage>::metadata(b_sym.as_ref()).id()
                     && substitutions_equal(a_subs, b_subs)
-            }
+            },
 
             // Type parameters - only the same type parameter is assignable to itself
             // Different type parameters (T vs U) are not compatible even with shared bounds
             (TyKind::TypeParameter(a), TyKind::TypeParameter(b)) => {
                 Symbol::<KestrelLanguage>::metadata(a.as_ref()).id()
                     == Symbol::<KestrelLanguage>::metadata(b.as_ref()).id()
-            }
+            },
 
             // Type parameter vs concrete type - not assignable
             // Future: where clause equality constraints (T == U, T.Item == Int) could allow this
@@ -1055,7 +1055,7 @@ impl Ty {
             ) => {
                 Symbol::<KestrelLanguage>::metadata(a_sym.as_ref()).id()
                     == Symbol::<KestrelLanguage>::metadata(b_sym.as_ref()).id()
-            }
+            },
 
             // Associated type can be assigned to anything (and vice versa) for now
             // This allows generic code to compile before constraint checking
@@ -1112,6 +1112,13 @@ impl Ty {
         is_associated_type => TyKind::AssociatedType { .. },
         /// Check if this is an unresolved function type (closure with unknown params)
         is_unresolved_function => TyKind::UnresolvedFunction { .. },
+    }
+
+    /// Check if this is a "poison" type that should suppress cascading errors.
+    /// Poison types include error types (from earlier errors) and unresolved inference variables.
+    /// When a type is poison, subsequent operations on it should not emit additional errors.
+    pub fn is_poison(&self) -> bool {
+        matches!(self.kind, TyKind::Error)
     }
 
     // === Accessor methods ===
@@ -1266,7 +1273,7 @@ impl Ty {
         match &self.kind {
             TyKind::AssociatedType { symbol, container } => {
                 Some((symbol, container.as_ref().map(|b| b.as_ref())))
-            }
+            },
             _ => None,
         }
     }
@@ -1430,7 +1437,7 @@ impl Ty {
                 let param_id = param.metadata().id();
                 // If there's a `not Copyable` bound, the type parameter is not copyable
                 !where_clause.has_not_copyable(param_id)
-            }
+            },
 
             // For all other types, delegate to the regular is_copyable check
             _ => self.is_copyable(),
@@ -1475,7 +1482,7 @@ mod tests {
 
     #[test]
     fn test_unit_type() {
-        let ty = Ty::unit(Span::from(0..2));
+        let ty = Ty::unit(Span::new(0, 0..2));
         assert!(ty.is_unit());
         assert!(!ty.is_never());
         assert!(!ty.is_tuple());
@@ -1486,21 +1493,21 @@ mod tests {
 
     #[test]
     fn test_never_type() {
-        let ty = Ty::never(Span::from(0..1));
+        let ty = Ty::never(Span::new(0, 0..1));
         assert!(!ty.is_unit());
         assert!(ty.is_never());
     }
 
     #[test]
     fn test_error_type() {
-        let ty = Ty::error(Span::from(0..5));
+        let ty = Ty::error(Span::new(0, 0..5));
         assert!(ty.is_error());
         assert!(!ty.is_unit());
     }
 
     #[test]
     fn test_self_type() {
-        let ty = Ty::self_type(Span::from(0..4));
+        let ty = Ty::self_type(Span::new(0, 0..4));
         assert!(ty.is_self_type());
         assert!(!ty.is_unit());
     }
@@ -1508,8 +1515,8 @@ mod tests {
     #[test]
     fn test_tuple_type() {
         let ty = Ty::tuple(
-            vec![Ty::unit(Span::from(0..2)), Ty::never(Span::from(3..4))],
-            Span::from(0..5),
+            vec![Ty::unit(Span::new(0, 0..2)), Ty::never(Span::new(0, 3..4))],
+            Span::new(0, 0..5),
         );
         assert!(ty.is_tuple());
         assert!(!ty.is_unit());
@@ -1523,9 +1530,9 @@ mod tests {
     #[test]
     fn test_function_type() {
         let ty = Ty::function(
-            vec![Ty::unit(Span::from(0..2)), Ty::never(Span::from(4..5))],
-            Ty::unit(Span::from(10..12)),
-            Span::from(0..12),
+            vec![Ty::unit(Span::new(0, 0..2)), Ty::never(Span::new(0, 4..5))],
+            Ty::unit(Span::new(0, 10..12)),
+            Span::new(0, 0..12),
         );
         assert!(ty.is_function());
         assert!(!ty.is_unit());
@@ -1540,13 +1547,13 @@ mod tests {
     #[test]
     fn test_nested_types() {
         let tuple_param = Ty::tuple(
-            vec![Ty::unit(Span::from(1..3)), Ty::never(Span::from(5..6))],
-            Span::from(0..7),
+            vec![Ty::unit(Span::new(0, 1..3)), Ty::never(Span::new(0, 5..6))],
+            Span::new(0, 0..7),
         );
         let fn_ty = Ty::function(
             vec![tuple_param],
-            Ty::unit(Span::from(12..14)),
-            Span::from(0..14),
+            Ty::unit(Span::new(0, 12..14)),
+            Span::new(0, 0..14),
         );
 
         assert!(fn_ty.is_function());
@@ -1564,8 +1571,8 @@ mod tests {
 
     #[test]
     fn test_join_never_with_int() {
-        let never = Ty::never(Span::from(0..1));
-        let int = Ty::int(IntBits::I64, Span::from(0..3));
+        let never = Ty::never(Span::new(0, 0..1));
+        let int = Ty::int(IntBits::I64, Span::new(0, 0..3));
 
         // Never joined with Int should give Int
         let result = never.join(&int);
@@ -1578,8 +1585,8 @@ mod tests {
 
     #[test]
     fn test_join_never_with_never() {
-        let never1 = Ty::never(Span::from(0..1));
-        let never2 = Ty::never(Span::from(2..3));
+        let never1 = Ty::never(Span::new(0, 0..1));
+        let never2 = Ty::never(Span::new(0, 2..3));
 
         // Never joined with Never should give Never
         let result = never1.join(&never2);
@@ -1588,8 +1595,8 @@ mod tests {
 
     #[test]
     fn test_join_error_propagates() {
-        let error = Ty::error(Span::from(0..1));
-        let int = Ty::int(IntBits::I64, Span::from(0..3));
+        let error = Ty::error(Span::new(0, 0..1));
+        let int = Ty::int(IntBits::I64, Span::new(0, 0..3));
 
         // Error joined with anything should give Error
         let result = error.join(&int);
@@ -1602,8 +1609,8 @@ mod tests {
 
     #[test]
     fn test_join_same_types() {
-        let int1 = Ty::int(IntBits::I64, Span::from(0..3));
-        let int2 = Ty::int(IntBits::I64, Span::from(4..7));
+        let int1 = Ty::int(IntBits::I64, Span::new(0, 0..3));
+        let int2 = Ty::int(IntBits::I64, Span::new(0, 4..7));
 
         // Same types should return the first
         let result = int1.join(&int2);
@@ -1614,29 +1621,29 @@ mod tests {
 
     #[test]
     fn test_assignable_same_primitives() {
-        let int1 = Ty::int(IntBits::I64, Span::from(0..3));
-        let int2 = Ty::int(IntBits::I64, Span::from(4..7));
+        let int1 = Ty::int(IntBits::I64, Span::new(0, 0..3));
+        let int2 = Ty::int(IntBits::I64, Span::new(0, 4..7));
         assert!(int1.is_assignable_to(&int2));
 
-        let bool1 = Ty::bool(Span::from(0..4));
-        let bool2 = Ty::bool(Span::from(5..9));
+        let bool1 = Ty::bool(Span::new(0, 0..4));
+        let bool2 = Ty::bool(Span::new(0, 5..9));
         assert!(bool1.is_assignable_to(&bool2));
 
-        let string1 = Ty::string(Span::from(0..6));
-        let string2 = Ty::string(Span::from(7..13));
+        let string1 = Ty::string(Span::new(0, 0..6));
+        let string2 = Ty::string(Span::new(0, 7..13));
         assert!(string1.is_assignable_to(&string2));
 
-        let unit1 = Ty::unit(Span::from(0..2));
-        let unit2 = Ty::unit(Span::from(3..5));
+        let unit1 = Ty::unit(Span::new(0, 0..2));
+        let unit2 = Ty::unit(Span::new(0, 3..5));
         assert!(unit1.is_assignable_to(&unit2));
     }
 
     #[test]
     fn test_not_assignable_different_primitives() {
-        let int = Ty::int(IntBits::I64, Span::from(0..3));
-        let float = Ty::float(FloatBits::F64, Span::from(0..3));
-        let bool_ty = Ty::bool(Span::from(0..4));
-        let string = Ty::string(Span::from(0..6));
+        let int = Ty::int(IntBits::I64, Span::new(0, 0..3));
+        let float = Ty::float(FloatBits::F64, Span::new(0, 0..3));
+        let bool_ty = Ty::bool(Span::new(0, 0..4));
+        let string = Ty::string(Span::new(0, 0..6));
 
         assert!(!int.is_assignable_to(&float));
         assert!(!int.is_assignable_to(&bool_ty));
@@ -1647,10 +1654,10 @@ mod tests {
 
     #[test]
     fn test_never_assignable_to_anything() {
-        let never = Ty::never(Span::from(0..1));
-        let int = Ty::int(IntBits::I64, Span::from(0..3));
-        let string = Ty::string(Span::from(0..6));
-        let unit = Ty::unit(Span::from(0..2));
+        let never = Ty::never(Span::new(0, 0..1));
+        let int = Ty::int(IntBits::I64, Span::new(0, 0..3));
+        let string = Ty::string(Span::new(0, 0..6));
+        let unit = Ty::unit(Span::new(0, 0..2));
 
         assert!(never.is_assignable_to(&int));
         assert!(never.is_assignable_to(&string));
@@ -1660,8 +1667,8 @@ mod tests {
 
     #[test]
     fn test_error_assignable_to_anything() {
-        let error = Ty::error(Span::from(0..1));
-        let int = Ty::int(IntBits::I64, Span::from(0..3));
+        let error = Ty::error(Span::new(0, 0..1));
+        let int = Ty::int(IntBits::I64, Span::new(0, 0..3));
 
         // Error is assignable to anything (suppress cascading)
         assert!(error.is_assignable_to(&int));
@@ -1672,92 +1679,101 @@ mod tests {
     fn test_assignable_tuples() {
         let tuple1 = Ty::tuple(
             vec![
-                Ty::int(IntBits::I64, Span::from(0..3)),
-                Ty::bool(Span::from(4..8)),
+                Ty::int(IntBits::I64, Span::new(0, 0..3)),
+                Ty::bool(Span::new(0, 4..8)),
             ],
-            Span::from(0..9),
+            Span::new(0, 0..9),
         );
         let tuple2 = Ty::tuple(
             vec![
-                Ty::int(IntBits::I64, Span::from(10..13)),
-                Ty::bool(Span::from(14..18)),
+                Ty::int(IntBits::I64, Span::new(0, 10..13)),
+                Ty::bool(Span::new(0, 14..18)),
             ],
-            Span::from(10..19),
+            Span::new(0, 10..19),
         );
         assert!(tuple1.is_assignable_to(&tuple2));
 
         // Different element types
         let tuple3 = Ty::tuple(
-            vec![Ty::string(Span::from(0..6)), Ty::bool(Span::from(7..11))],
-            Span::from(0..12),
+            vec![
+                Ty::string(Span::new(0, 0..6)),
+                Ty::bool(Span::new(0, 7..11)),
+            ],
+            Span::new(0, 0..12),
         );
         assert!(!tuple1.is_assignable_to(&tuple3));
 
         // Different lengths
         let tuple4 = Ty::tuple(
-            vec![Ty::int(IntBits::I64, Span::from(0..3))],
-            Span::from(0..4),
+            vec![Ty::int(IntBits::I64, Span::new(0, 0..3))],
+            Span::new(0, 0..4),
         );
         assert!(!tuple1.is_assignable_to(&tuple4));
     }
 
     #[test]
     fn test_assignable_arrays() {
-        let arr1 = Ty::array(Ty::int(IntBits::I64, Span::from(0..3)), Span::from(0..5));
-        let arr2 = Ty::array(Ty::int(IntBits::I64, Span::from(6..9)), Span::from(6..11));
+        let arr1 = Ty::array(
+            Ty::int(IntBits::I64, Span::new(0, 0..3)),
+            Span::new(0, 0..5),
+        );
+        let arr2 = Ty::array(
+            Ty::int(IntBits::I64, Span::new(0, 6..9)),
+            Span::new(0, 6..11),
+        );
         assert!(arr1.is_assignable_to(&arr2));
 
         // Different element types
-        let arr3 = Ty::array(Ty::string(Span::from(0..6)), Span::from(0..8));
+        let arr3 = Ty::array(Ty::string(Span::new(0, 0..6)), Span::new(0, 0..8));
         assert!(!arr1.is_assignable_to(&arr3));
     }
 
     #[test]
     fn test_assignable_functions() {
         let fn1 = Ty::function(
-            vec![Ty::int(IntBits::I64, Span::from(0..3))],
-            Ty::bool(Span::from(4..8)),
-            Span::from(0..9),
+            vec![Ty::int(IntBits::I64, Span::new(0, 0..3))],
+            Ty::bool(Span::new(0, 4..8)),
+            Span::new(0, 0..9),
         );
         let fn2 = Ty::function(
-            vec![Ty::int(IntBits::I64, Span::from(10..13))],
-            Ty::bool(Span::from(14..18)),
-            Span::from(10..19),
+            vec![Ty::int(IntBits::I64, Span::new(0, 10..13))],
+            Ty::bool(Span::new(0, 14..18)),
+            Span::new(0, 10..19),
         );
         assert!(fn1.is_assignable_to(&fn2));
 
         // Different param types
         let fn3 = Ty::function(
-            vec![Ty::string(Span::from(0..6))],
-            Ty::bool(Span::from(7..11)),
-            Span::from(0..12),
+            vec![Ty::string(Span::new(0, 0..6))],
+            Ty::bool(Span::new(0, 7..11)),
+            Span::new(0, 0..12),
         );
         assert!(!fn1.is_assignable_to(&fn3));
 
         // Different return type
         let fn4 = Ty::function(
-            vec![Ty::int(IntBits::I64, Span::from(0..3))],
-            Ty::string(Span::from(4..10)),
-            Span::from(0..11),
+            vec![Ty::int(IntBits::I64, Span::new(0, 0..3))],
+            Ty::string(Span::new(0, 4..10)),
+            Span::new(0, 0..11),
         );
         assert!(!fn1.is_assignable_to(&fn4));
 
         // Different arity
         let fn5 = Ty::function(
             vec![
-                Ty::int(IntBits::I64, Span::from(0..3)),
-                Ty::int(IntBits::I64, Span::from(4..7)),
+                Ty::int(IntBits::I64, Span::new(0, 0..3)),
+                Ty::int(IntBits::I64, Span::new(0, 4..7)),
             ],
-            Ty::bool(Span::from(8..12)),
-            Span::from(0..13),
+            Ty::bool(Span::new(0, 8..12)),
+            Span::new(0, 0..13),
         );
         assert!(!fn1.is_assignable_to(&fn5));
     }
 
     #[test]
     fn test_int_bit_widths_not_assignable() {
-        let i32_ty = Ty::int(IntBits::I32, Span::from(0..3));
-        let i64_ty = Ty::int(IntBits::I64, Span::from(0..3));
+        let i32_ty = Ty::int(IntBits::I32, Span::new(0, 0..3));
+        let i64_ty = Ty::int(IntBits::I64, Span::new(0, 0..3));
 
         // Different bit widths are not assignable
         assert!(!i32_ty.is_assignable_to(&i64_ty));

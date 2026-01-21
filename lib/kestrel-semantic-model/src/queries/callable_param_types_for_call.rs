@@ -38,7 +38,7 @@ impl<'a> Query for CallableParamTypesForCall<'a> {
                             .map(|p| p.ty.apply_substitutions(substitutions))
                             .collect(),
                     )
-                }
+                },
                 ExprKind::MethodRef {
                     candidates,
                     receiver,
@@ -64,7 +64,7 @@ impl<'a> Query for CallableParamTypesForCall<'a> {
                         );
                     }
                     None
-                }
+                },
                 _ => None,
             },
             ExprKind::ImplicitStructInit { .. } => {
@@ -77,7 +77,7 @@ impl<'a> Query for CallableParamTypesForCall<'a> {
                         .map(|field| field.ty.apply_substitutions(substitutions))
                         .collect(),
                 )
-            }
+            },
             _ => None,
         }
     }

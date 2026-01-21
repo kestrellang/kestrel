@@ -205,7 +205,7 @@ impl fmt::Display for FunctionDefDisplay<'_> {
                             self.ctx.type_param(*type_param).name,
                             self.ctx.name(*protocol)
                         )?;
-                    }
+                    },
                     WhereConstraint::TypeEquals {
                         base,
                         associated,
@@ -218,7 +218,7 @@ impl fmt::Display for FunctionDefDisplay<'_> {
                             associated,
                             self.ctx.ty(*equals).display(self.ctx)
                         )?;
-                    }
+                    },
                 }
             }
         }

@@ -299,6 +299,40 @@ impl IntoDiagnostic for AmbiguousConstrainedMethodError {
     }
 }
 
+/// Error when multiple protocol extensions provide the same method with equal specificity.
+pub struct AmbiguousProtocolExtensionMethodError {
+    /// Span of the method call
+    pub call_span: Span,
+    /// Name of the method being called
+    pub method_name: String,
+    /// The receiver type
+    pub receiver_type: String,
+    /// Names of the protocol extensions that provide this method (described by their constraints)
+    pub extension_descriptions: Vec<String>,
+}
+
+impl IntoDiagnostic for AmbiguousProtocolExtensionMethodError {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
+        Diagnostic::error()
+            .with_message(format!(
+                "ambiguous method '{}': multiple protocol extensions provide this method with equal specificity",
+                self.method_name
+            ))
+            .with_labels(vec![
+                Label::primary(self.call_span.file_id, self.call_span.range())
+                    .with_message("ambiguous method call"),
+            ])
+            .with_notes(vec![
+                format!(
+                    "Conflicting extensions on '{}': {}",
+                    self.receiver_type,
+                    self.extension_descriptions.join(", ")
+                ),
+                "Add a more specific constraint to disambiguate.".to_string(),
+            ])
+    }
+}
+
 /// Error when a type argument does not satisfy a constraint.
 pub struct ConstraintNotSatisfiedError {
     /// Span of the call site

@@ -18,8 +18,8 @@ mod basic_initialization {
 module Main
 
 struct Point {
-    var x: Int
-    var y: Int
+    var x: lang.i64
+    var y: lang.i64
 
     init() {
         self.x = 0;
@@ -38,8 +38,8 @@ struct Point {
 module Main
 
 struct Point {
-    var x: Int
-    var y: Int
+    var x: lang.i64
+    var y: lang.i64
 
     init() {
         self.x = 0;
@@ -58,7 +58,7 @@ struct Point {
 module Main
 
 struct Id {
-    let value: Int
+    let value: lang.i64
 
     init() {
         self.value = 1;
@@ -78,8 +78,8 @@ struct Id {
 module Main
 
 struct Point {
-    var x: Int
-    var y: Int
+    var x: lang.i64
+    var y: lang.i64
 
     init() {
         self.y = self.x;
@@ -103,9 +103,9 @@ mod if_else_branches {
 module Main
 
 struct Point {
-    var x: Int
+    var x: lang.i64
 
-    init(cond: Bool) {
+    init(cond: lang.i1) {
         if cond {
             self.x = 1;
         } else {
@@ -125,9 +125,9 @@ struct Point {
 module Main
 
 struct Point {
-    var x: Int
+    var x: lang.i64
 
-    init(cond: Bool) {
+    init(cond: lang.i1) {
         if cond {
             self.x = 1;
         }
@@ -147,9 +147,9 @@ struct Point {
 module Main
 
 struct Point {
-    var x: Int
+    var x: lang.i64
 
-    init(cond: Bool) {
+    init(cond: lang.i1) {
         if cond {
             self.x = 1;
             return;
@@ -169,12 +169,12 @@ struct Point {
 module Main
 
 struct Value {
-    var n: Int
+    var n: lang.i64
 
-    init(x: Int) {
-        if x == 1 {
+    init(x: lang.i64) {
+        if lang.i64_eq(x, 1) {
             self.n = 10;
-        } else if x == 2 {
+        } else if lang.i64_eq(x, 2) {
             self.n = 20;
         } else {
             self.n = 0;
@@ -197,8 +197,8 @@ mod return_handling {
 module Main
 
 struct Point {
-    var x: Int
-    var y: Int
+    var x: lang.i64
+    var y: lang.i64
 
     init() {
         self.x = 0;
@@ -218,8 +218,8 @@ struct Point {
 module Main
 
 struct Point {
-    var x: Int
-    var y: Int
+    var x: lang.i64
+    var y: lang.i64
 
     init() {
         self.x = 0;
@@ -240,10 +240,10 @@ struct Point {
 module Main
 
 struct Point {
-    var x: Int
-    var y: Int
+    var x: lang.i64
+    var y: lang.i64
 
-    init(quick: Bool) {
+    init(quick: lang.i1) {
         if quick {
             self.x = 0;
             self.y = 0;
@@ -270,9 +270,9 @@ mod while_loops {
 module Main
 
 struct Counter {
-    var value: Int
+    var value: lang.i64
 
-    init(cond: Bool) {
+    init(cond: lang.i1) {
         while cond {
             self.value = 0;
         }
@@ -291,12 +291,12 @@ struct Counter {
 module Main
 
 struct Counter {
-    var value: Int
+    var value: lang.i64
 
-    init(cond: Bool) {
+    init(cond: lang.i1) {
         self.value = 0;
         while cond {
-            self.value = self.value + 1;
+            self.value = lang.i64_add(self.value, 1);
         }
     }
 }
@@ -316,7 +316,7 @@ mod loop_with_break {
 module Main
 
 struct Value {
-    var n: Int
+    var n: lang.i64
 
     init() {
         loop {
@@ -341,7 +341,7 @@ mod uninitialized_variables {
             r#"
 module Main
 func test() {
-    var x: Int;
+    var x: lang.i64;
     let y = x;
 }
 "#,
@@ -361,9 +361,9 @@ mod let_fields_in_branches {
 module Main
 
 struct Id {
-    let value: Int
+    let value: lang.i64
 
-    init(cond: Bool) {
+    init(cond: lang.i1) {
         if cond {
             self.value = 1;
         } else {
@@ -384,9 +384,9 @@ struct Id {
 module Main
 
 struct Id {
-    let value: Int
+    let value: lang.i64
 
-    init(cond: Bool) {
+    init(cond: lang.i1) {
         if cond {
             self.value = 1;
         } else {
@@ -399,5 +399,166 @@ struct Id {
         )
         .expect(Fails)
         .expect(HasError("more than once"));
+    }
+}
+
+mod match_expressions {
+    use super::*;
+
+    #[test]
+    fn match_with_diverging_branch() {
+        // Regression test for: Match in init doesn't prove field initialization
+        // When one branch of a match diverges (e.g., panics) and the other initializes,
+        // the field should be considered initialized
+        Test::new(
+            r#"
+module Main
+
+enum Option[T] {
+    case Some(T)
+    case None
+}
+
+struct Container[T] {
+    var ptr: lang.ptr[T]
+
+    init(maybeValue: Option[lang.ptr[T]]) {
+        match maybeValue {
+            .Some(rawPtr) => {
+                self.ptr = rawPtr;
+            },
+            .None => lang.panic("allocation failed")
+        }
+    }
+}
+"#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn match_all_arms_initialize() {
+        // When all arms of a match initialize the field, it should be considered initialized
+        Test::new(
+            r#"
+module Main
+
+enum Result[T, E] {
+    case Ok(T)
+    case Err(E)
+}
+
+struct Container[T] {
+    var value: T
+
+    init(result: Result[T, lang.i64]) {
+        match result {
+            .Ok(v) => {
+                self.value = v;
+            },
+            .Err(_) => {
+                self.value = lang.panic("failed");
+            }
+        }
+    }
+}
+"#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn match_not_all_arms_initialize() {
+        // When not all arms initialize the field, it should fail
+        Test::new(
+            r#"
+module Main
+
+enum Option[T] {
+    case Some(T)
+    case None
+}
+
+struct Container[T] {
+    var ptr: lang.ptr[T]
+
+    init(maybeValue: Option[lang.ptr[T]]) {
+        match maybeValue {
+            .Some(rawPtr) => {
+                self.ptr = rawPtr;
+            },
+            .None => {
+                // This branch doesn't initialize ptr and doesn't diverge
+            }
+        }
+    }
+}
+"#,
+        )
+        .expect(Fails)
+        .expect(HasError("does not initialize all fields"));
+    }
+}
+
+mod extension_initializers {
+    use super::*;
+
+    #[test]
+    fn initializer_in_extension_can_be_called() {
+        // Initializers defined in extensions should be callable
+        Test::new(
+            r#"
+module Main
+
+public struct Foo {
+    var x: lang.i64
+    public init() { self.x = 0; }
+}
+
+extend Foo {
+    public init(value: lang.i64) {
+        self.x = value;
+    }
+}
+
+public func test() {
+    let f = Foo(42);
+}
+"#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn multiple_initializers_in_extension() {
+        // Multiple initializers can be defined in extensions
+        Test::new(
+            r#"
+module Main
+
+public struct Point {
+    var x: lang.i64
+    var y: lang.i64
+}
+
+extend Point {
+    public init(x: lang.i64, y: lang.i64) {
+        self.x = x;
+        self.y = y;
+    }
+
+    public init(value: lang.i64) {
+        self.x = value;
+        self.y = value;
+    }
+}
+
+public func test() {
+    let p1 = Point(1, 2);
+    let p2 = Point(5);
+}
+"#,
+        )
+        .expect(Compiles);
     }
 }

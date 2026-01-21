@@ -1,7 +1,5 @@
 use clap::{Parser, Subcommand};
-use kestrel_compiler::{Compilation, TargetConfig};
-use kestrel_lexer::lex;
-use kestrel_parser::{Parser as KestrelParser, parse_source_file};
+use kestrel_compiler::{Compilation, CompileError, TargetConfig};
 use std::fs;
 use std::path::Path;
 use std::process::ExitCode;
@@ -14,13 +12,9 @@ struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
 
-    /// Source files to process
-    #[arg(global = true)]
-    files: Vec<String>,
-
-    /// Show semantic tree after analysis
-    #[arg(long, global = true)]
-    tree: bool,
+    /// Show semantic tree after analysis (use --tree=full for detailed output)
+    #[arg(long, global = true, value_name = "MODE", num_args = 0..=1, default_missing_value = "summary")]
+    tree: Option<String>,
 
     /// Show symbol table after analysis
     #[arg(long, global = true)]
@@ -37,6 +31,14 @@ struct Cli {
     /// Verbose output
     #[arg(short, long, global = true)]
     verbose: bool,
+
+    /// Path to standard library (overrides default lang/std/)
+    #[arg(long = "std", global = true, value_name = "PATH")]
+    std_path: Option<String>,
+
+    /// Disable the standard library
+    #[arg(long = "no-std", global = true)]
+    no_std: bool,
 }
 
 #[derive(Subcommand)]
@@ -46,15 +48,19 @@ enum Commands {
         /// Source files to check
         files: Vec<String>,
     },
-    /// Parse source files and show syntax tree
-    Parse {
-        /// Source files to parse
-        files: Vec<String>,
-    },
     /// Compile and run a program
     Run {
-        /// Source file to run
-        file: String,
+        /// Source files to run
+        #[arg(required = true)]
+        files: Vec<String>,
+        /// Optimization level (0 = none, 1 = speed, 2 = speed+size)
+        #[arg(
+            short = 'O',
+            long = "opt-level",
+            value_name = "LEVEL",
+            default_value = "0"
+        )]
+        opt_level: u8,
         /// Link with a library (can be repeated, use :libname.a for static libs)
         #[arg(short = 'l', long = "link", value_name = "LIBRARY")]
         libraries: Vec<String>,
@@ -67,11 +73,20 @@ enum Commands {
     },
     /// Build an executable
     Build {
-        /// Source file to build
-        file: String,
+        /// Source files to build
+        #[arg(required = true)]
+        files: Vec<String>,
         /// Output file path (defaults to input filename without extension)
         #[arg(short, long)]
         output: Option<String>,
+        /// Optimization level (0 = none, 1 = speed, 2 = speed+size)
+        #[arg(
+            short = 'O',
+            long = "opt-level",
+            value_name = "LEVEL",
+            default_value = "0"
+        )]
+        opt_level: u8,
         /// Link with a library (can be repeated, use :libname.a for static libs)
         #[arg(short = 'l', long = "link", value_name = "LIBRARY")]
         libraries: Vec<String>,
@@ -90,7 +105,7 @@ fn read_source(path: &str) -> Option<String> {
         Err(e) => {
             eprintln!("error: cannot read '{}': {}", path, e);
             None
-        }
+        },
     }
 }
 
@@ -104,71 +119,104 @@ fn get_target_config(target: Option<&str>) -> Result<TargetConfig, ExitCode> {
     }
 }
 
+fn configure_stdlib(
+    builder: kestrel_compiler::CompilationBuilder,
+    std_path: Option<&str>,
+    no_std: bool,
+) -> kestrel_compiler::CompilationBuilder {
+    if no_std {
+        builder.without_std()
+    } else if let Some(path) = std_path {
+        builder.with_std_path(path)
+    } else {
+        builder
+    }
+}
+
+fn add_source_files(
+    mut builder: kestrel_compiler::CompilationBuilder,
+    files: &[String],
+    verbose: bool,
+) -> Result<kestrel_compiler::CompilationBuilder, ExitCode> {
+    for file in files {
+        if verbose {
+            eprintln!("  Reading {}", file);
+        }
+        let Some(content) = read_source(file) else {
+            return Err(ExitCode::from(1));
+        };
+        builder = builder.add_source(file.clone(), content);
+    }
+    Ok(builder)
+}
+
+fn build_codegen_options(
+    opt_level: u8,
+    libraries: Vec<String>,
+    library_paths: Vec<String>,
+    frameworks: Vec<String>,
+) -> kestrel_compiler::CodegenOptions {
+    kestrel_compiler::CodegenOptions {
+        opt_level,
+        libraries,
+        library_paths,
+        frameworks,
+        ..Default::default()
+    }
+}
+
 fn run_check(
     files: &[String],
-    show_tree: bool,
+    show_tree: Option<&str>,
     show_symbols: bool,
     show_execution_graph: bool,
     verbose: bool,
+    std_path: Option<&str>,
+    no_std: bool,
 ) -> ExitCode {
     if files.is_empty() {
         eprintln!("error: no input files");
         return ExitCode::from(1);
     }
 
-    let mut builder = Compilation::builder();
-    let mut io_ok = true;
-
-    for file in files {
-        if verbose {
-            eprintln!("  Reading {}", file);
-        }
-        let Some(content) = read_source(file) else {
-            io_ok = false;
-            continue;
-        };
-        builder = builder.add_source(file.clone(), content);
-    }
+    let builder = Compilation::builder();
+    let builder = configure_stdlib(builder, std_path, no_std);
+    let builder = match add_source_files(builder, files, verbose) {
+        Ok(b) => b,
+        Err(code) => return code,
+    };
 
     if verbose {
         eprintln!("  Compiling...");
     }
-    let compilation = builder.build();
+    let compilation = match builder.build() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("error: {}", e);
+            return ExitCode::from(1);
+        },
+    };
 
-    // Show results
-    if show_tree {
-        if let Some(model) = compilation.semantic_model() {
-            model.print_semantic_model();
-        }
+    if let Some(mode) = show_tree
+        && let Some(model) = compilation.semantic_model()
+    {
+        model.print_semantic_model(mode == "full");
     }
 
-    if show_symbols {
-        if let Some(model) = compilation.semantic_model() {
-            model.print_model_symbols();
-        }
+    if show_symbols && let Some(model) = compilation.semantic_model() {
+        model.print_model_symbols();
     }
 
-    // Lower to execution graph and display
-    if show_execution_graph {
-        if let Some(model) = compilation.semantic_model() {
-            let root = model.root();
-            let result = kestrel_execution_graph_lowering::lower_module(model, &root);
-
-            // Show lowering diagnostics if any
-            if !result.diagnostics.is_empty() {
-                for diag in &result.diagnostics {
-                    eprintln!("warning: {:?}", diag);
-                }
-            }
-
-            // Display the execution graph
-            print!("{}", result.mir.display());
+    if show_execution_graph && let Some(model) = compilation.semantic_model() {
+        let root = model.root();
+        let result = kestrel_execution_graph_lowering::lower_module(model, root);
+        for diag in &result.diagnostics {
+            eprintln!("warning: {:?}", diag);
         }
+        print!("{}", result.mir.display());
     }
 
-    // Emit diagnostics
-    let has_errors = !io_ok || compilation.has_errors();
-    if has_errors {
+    if compilation.has_errors() {
         compilation.diagnostics().emit().ok();
         ExitCode::from(1)
     } else {
@@ -179,79 +227,41 @@ fn run_check(
     }
 }
 
-fn run_parse(files: &[String], show_tree: bool) -> ExitCode {
+fn run_program(
+    files: &[String],
+    target: Option<&str>,
+    verbose: bool,
+    opt_level: u8,
+    libraries: Vec<String>,
+    library_paths: Vec<String>,
+    frameworks: Vec<String>,
+    std_path: Option<&str>,
+    no_std: bool,
+) -> ExitCode {
     if files.is_empty() {
         eprintln!("error: no input files");
         return ExitCode::from(1);
     }
 
-    let mut has_errors = false;
-
-    for file in files {
-        let content = match fs::read_to_string(file) {
-            Ok(c) => c,
-            Err(e) => {
-                eprintln!("error: cannot read '{}': {}", file, e);
-                has_errors = true;
-                continue;
-            }
-        };
-
-        let tokens: Vec<_> = lex(&content, 0) // Use file_id=0 for parse-only mode
-            .filter_map(|t| t.ok())
-            .map(|spanned| (spanned.value, spanned.span))
-            .collect();
-
-        let result = KestrelParser::parse(&content, tokens.into_iter(), parse_source_file);
-
-        println!("=== {} ===", file);
-
-        if !result.errors.is_empty() {
-            has_errors = true;
-            for error in &result.errors {
-                println!("error: {}", error.message);
-            }
-        } else {
-            println!("Parsed successfully.");
-        }
-
-        if show_tree {
-            println!("\n{:#?}", result.tree);
-        }
-
-        println!();
-    }
-
-    if has_errors {
-        ExitCode::from(1)
-    } else {
-        ExitCode::SUCCESS
-    }
-}
-
-fn run_program(
-    file: &str,
-    target: Option<&str>,
-    verbose: bool,
-    libraries: Vec<String>,
-    library_paths: Vec<String>,
-    frameworks: Vec<String>,
-) -> ExitCode {
     let target_config = match get_target_config(target) {
         Ok(t) => t,
         Err(code) => return code,
     };
 
-    if verbose {
-        eprintln!("  Reading {}", file);
-    }
-    let Some(content) = read_source(file) else {
-        return ExitCode::from(1);
+    let builder = Compilation::builder();
+    let builder = configure_stdlib(builder, std_path, no_std);
+    let builder = match add_source_files(builder, files, verbose) {
+        Ok(b) => b,
+        Err(code) => return code,
     };
 
-    let compilation = Compilation::builder()
-        .add_source(file.to_string(), content)
-        .build();
+    let compilation = match builder.build() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("error: {}", e);
+            return ExitCode::from(1);
+        },
+    };
 
     if compilation.has_errors() {
         compilation.diagnostics().emit().ok();
@@ -262,16 +272,10 @@ fn run_program(
         eprintln!("  Compiling and running...");
     }
 
-    let options = kestrel_compiler::CodegenOptions {
-        libraries,
-        library_paths,
-        frameworks,
-        ..Default::default()
-    };
+    let options = build_codegen_options(opt_level, libraries, library_paths, frameworks);
 
     match compilation.run(&target_config, &options) {
         Ok(result) => {
-            // Print stdout/stderr
             if !result.stdout.is_empty() {
                 print!("{}", result.stdout);
             }
@@ -279,53 +283,67 @@ fn run_program(
                 eprint!("{}", result.stderr);
             }
             ExitCode::from(result.exit_code as u8)
-        }
+        },
+        Err(CompileError::LoweringFailed(diagnostics)) => {
+            compilation.diagnostics().emit_additional(&diagnostics).ok();
+            ExitCode::from(1)
+        },
         Err(e) => {
             eprintln!("error: {}", e);
             ExitCode::from(1)
-        }
+        },
     }
 }
 
 fn run_build(
-    file: &str,
+    files: &[String],
     output: Option<&str>,
     target: Option<&str>,
     verbose: bool,
+    opt_level: u8,
     libraries: Vec<String>,
     library_paths: Vec<String>,
     frameworks: Vec<String>,
+    std_path: Option<&str>,
+    no_std: bool,
 ) -> ExitCode {
+    if files.is_empty() {
+        eprintln!("error: no input files");
+        return ExitCode::from(1);
+    }
+
     let target_config = match get_target_config(target) {
         Ok(t) => t,
         Err(code) => return code,
     };
 
-    if verbose {
-        eprintln!("  Reading {}", file);
-    }
-    let Some(content) = read_source(file) else {
-        return ExitCode::from(1);
+    let builder = Compilation::builder();
+    let builder = configure_stdlib(builder, std_path, no_std);
+    let builder = match add_source_files(builder, files, verbose) {
+        Ok(b) => b,
+        Err(code) => return code,
     };
 
-    // Determine output path
     let output_path = match output {
         Some(path) => path.to_string(),
         None => {
-            // Strip extension from input file
-            let path = Path::new(file);
+            let path = Path::new(&files[0]);
             let stem = path.file_stem().unwrap_or_default().to_string_lossy();
             if cfg!(windows) {
                 format!("{}.exe", stem)
             } else {
                 stem.to_string()
             }
-        }
+        },
     };
 
-    let compilation = Compilation::builder()
-        .add_source(file.to_string(), content)
-        .build();
+    let compilation = match builder.build() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("error: {}", e);
+            return ExitCode::from(1);
+        },
+    };
 
     if compilation.has_errors() {
         compilation.diagnostics().emit().ok();
@@ -336,23 +354,23 @@ fn run_build(
         eprintln!("  Building {}...", output_path);
     }
 
-    let options = kestrel_compiler::CodegenOptions {
-        libraries,
-        library_paths,
-        frameworks,
-        ..Default::default()
-    };
+    let options = build_codegen_options(opt_level, libraries, library_paths, frameworks);
+
     match compilation.build(&target_config, &options, Path::new(&output_path)) {
         Ok(()) => {
             if verbose {
                 eprintln!("  Built successfully: {}", output_path);
             }
             ExitCode::SUCCESS
-        }
+        },
+        Err(CompileError::LoweringFailed(diagnostics)) => {
+            compilation.diagnostics().emit_additional(&diagnostics).ok();
+            ExitCode::from(1)
+        },
         Err(e) => {
             eprintln!("error: {}", e);
             ExitCode::from(1)
-        }
+        },
     }
 }
 
@@ -362,55 +380,53 @@ fn main() -> ExitCode {
     match cli.command {
         Some(Commands::Check { files }) => run_check(
             &files,
-            cli.tree,
+            cli.tree.as_deref(),
             cli.symbols,
             cli.execution_graph,
             cli.verbose,
+            cli.std_path.as_deref(),
+            cli.no_std,
         ),
-        Some(Commands::Parse { files }) => run_parse(&files, cli.tree),
         Some(Commands::Run {
-            file,
+            files,
+            opt_level,
             libraries,
             library_paths,
             frameworks,
         }) => run_program(
-            &file,
+            &files,
             cli.target.as_deref(),
             cli.verbose,
+            opt_level,
             libraries,
             library_paths,
             frameworks,
+            cli.std_path.as_deref(),
+            cli.no_std,
         ),
         Some(Commands::Build {
-            file,
+            files,
             output,
+            opt_level,
             libraries,
             library_paths,
             frameworks,
         }) => run_build(
-            &file,
+            &files,
             output.as_deref(),
             cli.target.as_deref(),
             cli.verbose,
+            opt_level,
             libraries,
             library_paths,
             frameworks,
+            cli.std_path.as_deref(),
+            cli.no_std,
         ),
         None => {
-            // No subcommand: use global files
-            if cli.files.is_empty() {
-                eprintln!("error: no input files");
-                eprintln!("Run 'kestrel --help' for usage.");
-                ExitCode::from(1)
-            } else {
-                run_check(
-                    &cli.files,
-                    cli.tree,
-                    cli.symbols,
-                    cli.execution_graph,
-                    cli.verbose,
-                )
-            }
-        }
+            eprintln!("error: no command specified");
+            eprintln!("Run 'kestrel --help' for usage.");
+            ExitCode::from(1)
+        },
     }
 }

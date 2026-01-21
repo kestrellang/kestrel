@@ -13,7 +13,6 @@ use kestrel_semantic_tree::expr::LoopId;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::stmt::Statement;
 use kestrel_semantic_tree::symbol::function::FunctionSymbol;
-use kestrel_semantic_tree::symbol::local::LocalContainer;
 use kestrel_semantic_tree::ty::WhereClause;
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
@@ -117,7 +116,7 @@ impl<'a> BodyResolutionContext<'a> {
             loop_stack: Vec::new(),
             next_loop_id: 0,
             move_tracker: MoveTracker::new(),
-            where_clause: where_clause.unwrap_or_else(WhereClause::new),
+            where_clause: where_clause.unwrap_or_default(),
         }
     }
 
@@ -153,7 +152,7 @@ impl<'a> BodyResolutionContext<'a> {
             None => {
                 // Return innermost loop
                 self.loop_stack.last().map(|info| info.loop_id)
-            }
+            },
             Some(label_name) => {
                 // Search for labeled loop (from innermost to outermost)
                 self.loop_stack
@@ -161,7 +160,7 @@ impl<'a> BodyResolutionContext<'a> {
                     .rev()
                     .find(|info| info.label.as_deref() == Some(label_name))
                     .map(|info| info.loop_id)
-            }
+            },
         }
     }
 
@@ -224,21 +223,19 @@ pub fn resolve_code_block(block_node: &SyntaxNode, ctx: &mut BodyResolutionConte
             SyntaxKind::Statement | SyntaxKind::ExpressionStatement => {
                 // If this is the last child, check if it's a statement-wrapped expression
                 // without a semicolon (e.g., an if-expression as the final value)
-                if is_last {
-                    if let Some(expr) = try_extract_yield_expression(child, ctx) {
-                        yield_expr = Some(expr);
-                        continue;
-                    }
+                if is_last && let Some(expr) = try_extract_yield_expression(child, ctx) {
+                    yield_expr = Some(expr);
+                    continue;
                 }
                 if let Some(stmt) = resolve_statement(child, ctx) {
                     statements.push(stmt);
                 }
-            }
+            },
             SyntaxKind::VariableDeclaration => {
                 if let Some(stmt) = resolve_variable_declaration(child, ctx) {
                     statements.push(stmt);
                 }
-            }
+            },
             SyntaxKind::Expression => {
                 // If this is the last child without a semicolon, it's the yield expression
                 // Otherwise it's an expression statement
@@ -249,9 +246,9 @@ pub fn resolve_code_block(block_node: &SyntaxNode, ctx: &mut BodyResolutionConte
                     let span = get_node_span(child, ctx.file_id);
                     statements.push(Statement::expr(expr, span));
                 }
-            }
+            },
             // Skip tokens like braces
-            _ => {}
+            _ => {},
         }
     }
 
@@ -290,7 +287,7 @@ fn try_extract_yield_expression(
             SyntaxKind::ExpressionStatement => {
                 // Recurse into ExpressionStatement
                 return try_extract_yield_expression(&child, ctx);
-            }
+            },
             SyntaxKind::Expression => {
                 // Found the expression wrapper - look inside for the actual expression
                 if !has_trailing_semicolon(&child) {
@@ -299,19 +296,19 @@ fn try_extract_yield_expression(
                         return Some(resolve_expression(&child, ctx));
                     }
                 }
-            }
+            },
             // Also handle direct expression kinds (ExprIf, ExprMatch without Expression wrapper)
             SyntaxKind::ExprIf => {
                 if !has_trailing_semicolon(&child) && has_else_branch(&child) {
                     return Some(resolve_expression(&child, ctx));
                 }
-            }
+            },
             SyntaxKind::ExprMatch => {
                 if !has_trailing_semicolon(&child) {
                     return Some(resolve_expression(&child, ctx));
                 }
-            }
-            _ => {}
+            },
+            _ => {},
         }
     }
 
@@ -319,6 +316,7 @@ fn try_extract_yield_expression(
 }
 
 /// Check if a syntax kind could potentially be a yield expression.
+#[allow(dead_code)]
 fn can_syntax_kind_be_yield(kind: SyntaxKind) -> bool {
     matches!(kind, SyntaxKind::ExprIf | SyntaxKind::ExprMatch)
     // Note: ExprLoop and ExprWhile are NOT included because:
@@ -334,24 +332,24 @@ fn can_syntax_kind_be_yield(kind: SyntaxKind) -> bool {
 /// - Other expressions: always
 fn can_be_yield_expression(expr_node: &SyntaxNode) -> bool {
     // Look for the actual expression type inside the Expression wrapper
-    for child in expr_node.children() {
+    if let Some(child) = expr_node.children().next() {
         match child.kind() {
             SyntaxKind::ExprIf => {
                 // If-expression can be a yield only if it has an else branch
                 return has_else_branch(&child);
-            }
+            },
             SyntaxKind::ExprMatch => {
                 // Match expressions are always exhaustive and can be yield expressions
                 return true;
-            }
+            },
             SyntaxKind::ExprLoop | SyntaxKind::ExprWhile => {
                 // Loops cannot be yield expressions - they return () or Never
                 return false;
-            }
+            },
             _ => {
                 // Other expressions can be yield expressions
                 return true;
-            }
+            },
         }
     }
     // If we found nothing inside, it's probably a simple expression
@@ -398,11 +396,11 @@ fn has_else_branch(if_node: &SyntaxNode) -> bool {
                     SyntaxKind::ExprIf => {
                         // It's an "else if" - recursively check
                         return has_else_branch(&child);
-                    }
+                    },
                     SyntaxKind::CodeBlock => {
                         // It's a final "else { ... }" - check if it ends with a value
                         return block_ends_with_value_expression(&child);
-                    }
+                    },
                     SyntaxKind::Expression => {
                         // The else if might be wrapped in an Expression node
                         // Look inside for ExprIf
@@ -411,12 +409,12 @@ fn has_else_branch(if_node: &SyntaxNode) -> bool {
                                 return has_else_branch(&inner);
                             }
                         }
-                    }
-                    _ => {}
+                    },
+                    _ => {},
                 }
             }
             false
-        }
+        },
     }
 }
 
@@ -433,7 +431,7 @@ fn block_ends_with_value_expression(block: &SyntaxNode) -> bool {
             SyntaxKind::Expression => {
                 // Check if it's a value expression without semicolon
                 !has_trailing_semicolon(last)
-            }
+            },
             SyntaxKind::Statement | SyntaxKind::ExpressionStatement => {
                 // Check if it's a statement-wrapped expression that can be a value
                 // Look inside for the expression
@@ -448,21 +446,21 @@ fn block_ends_with_value_expression(block: &SyntaxNode) -> bool {
                                     return can_be_yield_expression(&inner);
                                 }
                             }
-                        }
+                        },
                         SyntaxKind::Expression => {
                             if !has_trailing_semicolon(&child) {
                                 return can_be_yield_expression(&child);
                             }
-                        }
-                        _ => {}
+                        },
+                        _ => {},
                     }
                 }
                 false
-            }
+            },
             SyntaxKind::VariableDeclaration => {
                 // let/var statements are not value expressions
                 false
-            }
+            },
             _ => false,
         }
     } else {
@@ -548,22 +546,22 @@ pub(crate) fn create_local_scope_for_body(
     // Create a dummy function for the LocalScope.
     // The actual local binding will go to this dummy, but that's okay
     // because we're attaching ExecutableBehavior to the real function
-    let name = Spanned::new(temp_name.to_string(), Span::from(0..0));
-    let visibility =
-        VisibilityBehavior::new(Some(Visibility::Private), Span::from(0..0), symbol.clone());
+    let dummy_span = Span::new(symbol.metadata().span().file_id, 0..0);
+    let name = Spanned::new(temp_name.to_string(), dummy_span.clone());
+    let visibility = VisibilityBehavior::new(
+        Some(Visibility::Private),
+        dummy_span.clone(),
+        symbol.clone(),
+    );
     let dummy_func = Arc::new(FunctionSymbol::new(
-        name,
-        Span::from(0..0),
-        visibility,
-        true,
-        true,
-        None,
+        name, dummy_span, visibility, true, true, None,
     ));
 
     LocalScope::new(dummy_func)
 }
 
 /// Backwards-compatible wrapper for older call sites.
+#[allow(dead_code)]
 fn create_local_scope_from_dyn(symbol: Arc<dyn Symbol<KestrelLanguage>>) -> LocalScope {
     create_local_scope_for_body(symbol, "__body_resolver_temp")
 }

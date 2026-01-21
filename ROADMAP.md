@@ -429,6 +429,7 @@
 See [docs/memory-model/implementation-plan.md](docs/memory-model/implementation-plan.md) for detailed implementation plan.
 
 ### Phase 11.1: Parameter Access Modes + MIR Foundation ✅
+
 - [x] Parser: `consuming`/`mutating` keywords on parameters
 - [x] Semantic model: `AccessMode` enum (Borrow, Mutating, Consuming)
 - [x] Call-site validation: `mutating` requires `var`, track moved variables
@@ -436,16 +437,19 @@ See [docs/memory-model/implementation-plan.md](docs/memory-model/implementation-
 - [x] Diagnostics: "cannot pass let to mutating", "use of moved value"
 
 ### Phase 11.2: Attributes ✅
+
 - [x] Parser: `@attribute` and `@attribute(args)` syntax
 - [x] Semantic model: `AttributesBehavior` on all declarations
 - [x] Known attributes: `@builtin(.Feature)` for language features
 
 ### Phase 11.3: Builtin Protocols ✅
+
 - [x] `@builtin(.Copyable)` protocol for implicit copy semantics
 - [x] `BuiltinRegistry` for tracking language feature protocols
 - [x] Validation: marker protocol requirements, duplicate detection
 
 ### Phase 11.4: Copyable / not Copyable ✅
+
 - [x] Parser: `not Copyable` in struct/enum conformance list
 - [x] Semantic model: `CopySemantics` (Copyable, Cloneable, NotCopyable) on structs/enums
 - [x] Inference: not Copyable if any field is not Copyable
@@ -453,6 +457,7 @@ See [docs/memory-model/implementation-plan.md](docs/memory-model/implementation-
 - [x] MIR: emit Copy vs Move based on type's CopySemantics
 
 ### Phase 11.5: Drop Semantics (RAII) ✅
+
 - [x] Parser: `deinit { }` blocks in structs
 - [x] Semantic model: `DeinitSymbol`, at most one per struct
 - [x] MIR: `Deinit` instruction, insert at scope exit (reverse order)
@@ -462,6 +467,7 @@ See [docs/memory-model/implementation-plan.md](docs/memory-model/implementation-
 - [x] Struct field drops in reverse order, enum variant drops via switch
 
 ### Phase 11.6: Cloneable Protocol ✅
+
 - [x] Define `@builtin(.Cloneable)` protocol inheriting from `Copyable`
 - [x] `@builtin(.Clone)` on `clone(self) -> Self` method
 - [x] For Cloneable types, copy emits witness call to `clone()`
@@ -469,12 +475,14 @@ See [docs/memory-model/implementation-plan.md](docs/memory-model/implementation-
 - [x] Conflicting conformance detection (`Cloneable + not Copyable` is error)
 
 ### Phase 11.7: Generics Integration ✅
+
 - [x] Parser: `where T: not Copyable` syntax in where clauses
 - [x] Default `[T]` = `[T: Copyable]` (can copy T values)
 - [x] `where T: not Copyable` relaxes bound (cannot copy, only move)
 - [x] Context-aware copyability checking in body resolution
 
 ### Future Work (Not Planned)
+
 - [ ] Conditional conformance: `Box[T]` Copyable iff `T` Copyable
 - [ ] Existential types: `any Protocol` syntax, dynamic dispatch
 
@@ -488,43 +496,117 @@ See [docs/memory-model/implementation-plan.md](docs/memory-model/implementation-
 - [ ] Executable Output
   - [ ] Binary or interpreted execution
 
-## Phase 13: Standard Library & Syntactic Sugar
+## Phase 13: Standard Library & Language Features ✅ COMPLETE
 
-- [ ] Standard Library
-  - [ ] Option[T], Result[T, E] (as regular enums)
-  - [ ] Collections (Array, Map, Set)
-  - [ ] String utilities
-  - [ ] I/O primitives
-- [ ] Syntactic Sugar
-  - [ ] `T?` for `Option[T]`
-  - [ ] `?` operator for error/option propagation
-  - [ ] Optional chaining `x?.foo`
-  - [ ] For loops (desugars to iterator protocol)
+### Computed Properties & Subscripts
 
----
+- [x] Computed properties with getter/setter
+- [x] Shorthand syntax: `var x: Int { expr }`
+- [x] Explicit accessors: `var x: Int { get { expr } set { expr } }`
+- [x] Protocol requirements: `{ get }` or `{ get set }`
+- [x] Subscripts with `subscript[T]?(params) -> Type { body }`
+- [x] `ExprKind::SubscriptCall` for `receiver[args]` expressions
 
-## Current Status
+### Protocol Extensions & Operators
 
-**Phase**: Phase 12 (Code Generation) - 🚧 NEXT
-**Progress**: Phases 1-11 complete. Core language and memory model fully implemented.
+- [x] Protocol extensions with default implementations
+- [x] `extend Protocol { ... }` syntax
+- [x] `Constraint::SelfBound` for conditional extensions
+- [x] Protocol operators (58 operator protocols)
+- [x] Operators desugar to protocol method calls
 
-**Completed Phases**:
+### Try Operator & Error Handling
 
-- ✅ Phase 1-9: Core language (types, generics, expressions, control flow, closures, enums, pattern matching)
-- ✅ Phase 10: Execution Graph IR and lowering
-- ✅ Phase 11: Memory Model (access modes, copy semantics, RAII, Cloneable)
+- [x] `try expr` syntax with high precedence
+- [x] Desugars to match on `tryExtract()` method
+- [x] `Tryable` and `FromResidual` protocols
+- [x] `ControlFlowEnum` with `Continue` and `Break` variants
 
-**Phase 10 Remaining**:
-- Analysis infrastructure (CFG utilities, dataflow analysis)
-- Optimization passes (DCE, constant folding, inlining)
+### Literal Protocols
 
-**Next Up**: Code generation (LLVM/WASM/bytecode target)
+- [x] `ExpressibleByIntegerLiteral`, `ExpressibleByFloatLiteral`, `ExpressibleByStringLiteral`, `ExpressibleByBoolLiteral`
+- [x] `ExpressibleByNilLiteral`, `ExpressibleByArrayLiteral`, `ExpressibleByDictionaryLiteral`
+- [x] Default literal type system via `@builtin` annotations
+- [x] Array literals with `_ExpressibleByArrayLiteral` protocol
 
-## Notes
+### Pattern Matching & Protocols
 
-- Structs replace classes for a simpler, more flexible type system
-- Protocols provide interface abstraction without inheritance complexity
-- Functions are first-class, enabling functional programming patterns
-- Function overloading supported via arity, types, and labels
-- Labeled parameters enable Swift-style named arguments
-- Standard library and syntactic sugar come last - core language first
+- [x] `Matchable` protocol with `matches(self, other: Self) -> Bool`
+- [x] `BooleanConditional` protocol for custom boolean conditions
+- [x] `Formattable` protocol with `format() -> String` method
+
+### Type System Enhancements
+
+- [x] Init where clauses: `init[T](params) where T: Protocol`
+- [x] Associated types in extensions
+- [x] Default generic substitution
+- [x] Self type improvements in method return types and parameters
+
+### Language Intrinsics
+
+- [x] Cast intrinsics: `lang.cast_<from>_<to>(value)`
+- [x] Integer intrinsics: Add, Sub, Mul, Eq, Ne, And, Or, Xor, Shl, Div, Rem, Shr
+- [x] Float intrinsics: Add, Sub, Mul, Div, comparisons, Neg, Floor, Ceil, Round, Trunc, Sqrt
+- [x] Pointer intrinsics: `ptr.null`, `ptr.read`, `ptr.write`, `sizeof[T]`, `alignof[T]`
+- [x] Atomic intrinsics: `atomic.add`, `atomic.sub`
+- [x] Builtins system with `lang` namespace
+
+### Syntax Improvements
+
+- [x] Enum cases without labels: `case Some(T)`
+- [x] Delegating initializers: `self.init(...)`
+- [x] String escape codes: `\n`, `\r`, `\t`, `\xNN`, `\u{NNNN}`, raw strings
+- [x] Multi-file spans for accurate error locations
+- [x] Optional semicolons in type aliases
+
+### Compiler Infrastructure
+
+- [x] Standard library integration with `--std` and `--no-std` flags
+- [x] Optimization levels: `-O` / `--opt-level` (0-2)
+- [x] Multi-file compilation
+- [x] Aggregate return ABI (SRET)
+
+### Standard Library
+
+- [x] Build standard library
+- [x] Build IO
+- [x] Build pong
+- [x] String escape codes
+- [x] Cleanup
+- [x] Remove old STD
+- [x] Move IO into standard library
+- [x] Build with std by default, add --no-std flag
+- [x] Fix matches on non-primitive types
+- [x] Add Formattable protocol
+- [x] Remove deinit + copyable warning
+- [x] Error for try
+- [x] Fix test suite
+- [x] Reference counting
+- [x] Add tests for features
+- [x] Add tests for STD
+
+## Phase 14 Syntactic Sugar
+
+### Types
+
+- [ ] Array Type Syntax
+- [ ] Dictionary Type Syntax
+- [ ] Optional Type Syntax
+- [ ] Result Type Syntax
+
+### Expressions
+
+- [ ] Try Operator
+- [ ] For Loops
+- [ ] And / Or Short Circuiting
+- [ ] Null Coalescing Operator
+- [ ] Optional Chaining
+- [ ] Compound Assignment Operator
+- [ ] Character Literals
+- [ ] String Interpolation
+
+### Goals
+
+- [ ] Web Server
+- [ ] Flock package manager
+- [ ] Jessup version manager

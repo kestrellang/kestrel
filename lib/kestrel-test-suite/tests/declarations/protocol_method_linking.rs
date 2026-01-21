@@ -28,10 +28,10 @@ mod basic {
         Test::new(
             r#"module Test
             protocol Comparable {
-                func compare(other: Int) -> Bool
+                func compare(other: lang.i64) -> lang.i1
             }
             struct Number: Comparable {
-                func compare(other: Int) -> Bool { true }
+                func compare(other: lang.i64) -> lang.i1 { true }
             }
         "#,
         )
@@ -48,10 +48,10 @@ mod basic {
         Test::new(
             r#"module Test
             protocol Greetable {
-                func greet(with name: String)
+                func greet(with name: lang.str)
             }
             struct Person: Greetable {
-                func greet(with name: String) { }
+                func greet(with name: lang.str) { }
             }
         "#,
         )
@@ -68,10 +68,10 @@ mod basic {
         Test::new(
             r#"module Test
             protocol Hashable {
-                func hash() -> Int
+                func hash() -> lang.i64
             }
             struct Point: Hashable {
-                func hash() -> Int { 42 }
+                func hash() -> lang.i64 { 42 }
             }
         "#,
         )
@@ -88,12 +88,12 @@ mod basic {
         Test::new(
             r#"module Test
             protocol Comparable {
-                func lessThan(other: Int) -> Bool
-                func equals(other: Int) -> Bool
+                func lessThan(other: lang.i64) -> lang.i1
+                func equals(other: lang.i64) -> lang.i1
             }
             struct Number: Comparable {
-                func lessThan(other: Int) -> Bool { true }
-                func equals(other: Int) -> Bool { false }
+                func lessThan(other: lang.i64) -> lang.i1 { true }
+                func equals(other: lang.i64) -> lang.i1 { false }
             }
         "#,
         )
@@ -150,11 +150,11 @@ mod inheritance {
                 func draw()
             }
             protocol Shape: Drawable {
-                func area() -> Int
+                func area() -> lang.i64
             }
             struct Circle: Drawable, Shape {
                 func draw() { }
-                func area() -> Int { 42 }
+                func area() -> lang.i64 { 42 }
             }
         "#,
         )
@@ -220,10 +220,10 @@ mod self_type {
         Test::new(
             r#"module Test
             protocol Comparable {
-                func compare(other: Self) -> Bool
+                func compare(other: Self) -> lang.i1
             }
             struct Number: Comparable {
-                func compare(other: Number) -> Bool { true }
+                func compare(other: Number) -> lang.i1 { true }
             }
         "#,
         )
@@ -288,8 +288,8 @@ mod associated_types {
                 func add(item: Item)
             }
             struct Box: Container {
-                type Item = Int;
-                func add(item: Int) { }
+                type Item = lang.i64;
+                func add(item: lang.i64) { }
             }
         "#,
         )
@@ -310,8 +310,8 @@ mod associated_types {
                 func next() -> Item
             }
             struct Counter: Iterator {
-                type Item = Int;
-                func next() -> Int { 0 }
+                type Item = lang.i64;
+                func next() -> lang.i64 { 0 }
             }
         "#,
         )
@@ -332,8 +332,8 @@ mod associated_types {
                 func getAll() -> [Element]
             }
             struct IntArray: Collection {
-                type Element = Int;
-                func getAll() -> [Int] { [] }
+                type Element = lang.i64;
+                func getAll() -> [lang.i64] { [] }
             }
         "#,
         )
@@ -342,6 +342,38 @@ mod associated_types {
             Symbol::new("IntArray.getAll")
                 .is(SymbolKind::Function)
                 .has(Behavior::ImplementsProtocol("Collection", "getAll")),
+        );
+    }
+
+    #[test]
+    fn generic_struct_with_generic_associated_type() {
+        // This mirrors the Range[T]: Iterable pattern where:
+        // - The struct is generic (Range[T])
+        // - The associated type binding references the struct's type param (type Iter = RangeIterator[T])
+        // - The method returns the associated type (func iter() -> Iter)
+        Test::new(
+            r#"module Test
+            struct Wrapper[T] {
+                var value: T
+                init(v: T) { self.value = v }
+            }
+            protocol Iterable {
+                type Iter
+                func iter() -> Iter
+            }
+            struct Container[T]: Iterable {
+                type Iter = Wrapper[T]
+                var data: T
+                init(d: T) { self.data = d }
+                func iter() -> Wrapper[T] { Wrapper(self.data) }
+            }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(
+            Symbol::new("Container.iter")
+                .is(SymbolKind::Function)
+                .has(Behavior::ImplementsProtocol("Iterable", "iter")),
         );
     }
 }
@@ -442,10 +474,10 @@ mod receiver_kinds {
         Test::new(
             r#"module Test
             protocol Factory {
-                static func create() -> Int
+                static func create() -> lang.i64
             }
             struct Item: Factory {
-                static func create() -> Int { 0 }
+                static func create() -> lang.i64 { 0 }
             }
         "#,
         )
@@ -541,12 +573,12 @@ mod edge_cases {
         Test::new(
             r#"module Test
             protocol Printer {
-                func print(value: Int)
-                func print(text: String)
+                func print(value value: lang.i64)
+                func print(text text: lang.str)
             }
             struct Console: Printer {
-                func print(value: Int) { }
-                func print(text: String) { }
+                func print(value value: lang.i64) { }
+                func print(text text: lang.str) { }
             }
         "#,
         )

@@ -1,6 +1,8 @@
 use crate::compilation::Compilation;
+use crate::stdlib::{StdLib, StdLibConfig, StdLibError};
 use std::fs;
 use std::io;
+use std::path::PathBuf;
 
 /// Builder for creating a `Compilation`.
 ///
@@ -9,6 +11,7 @@ use std::io;
 #[derive(Default)]
 pub struct CompilationBuilder {
     sources: Vec<(String, String)>, // (name, content) pairs
+    stdlib_config: StdLibConfig,
 }
 
 impl CompilationBuilder {
@@ -16,7 +19,20 @@ impl CompilationBuilder {
     pub fn new() -> Self {
         Self {
             sources: Vec::new(),
+            stdlib_config: StdLibConfig::default(),
         }
+    }
+
+    /// Configure the standard library path.
+    pub fn with_std_path(mut self, path: impl Into<PathBuf>) -> Self {
+        self.stdlib_config = self.stdlib_config.with_path(path);
+        self
+    }
+
+    /// Disable the standard library.
+    pub fn without_std(mut self) -> Self {
+        self.stdlib_config = StdLibConfig::disabled();
+        self
     }
 
     /// Add a source file from a string.
@@ -75,13 +91,25 @@ impl CompilationBuilder {
     /// # use kestrel_compiler::CompilationBuilder;
     /// let compilation = CompilationBuilder::new()
     ///     .add_source("main.ks", "module Main\nclass Foo {}")
-    ///     .build();
+    ///     .build()
+    ///     .expect("failed to build compilation");
     ///
     /// if compilation.has_errors() {
     ///     compilation.diagnostics().emit().unwrap();
     /// }
     /// ```
-    pub fn build(self) -> Compilation {
-        Compilation::from_sources(self.sources)
+    pub fn build(self) -> Result<Compilation, StdLibError> {
+        // Load stdlib first if enabled
+        let stdlib_sources = StdLib::load(&self.stdlib_config)?
+            .map(|s| s.sources)
+            .unwrap_or_default();
+
+        // Combine: stdlib first, then user sources
+        let all_sources: Vec<_> = stdlib_sources.into_iter().chain(self.sources).collect();
+
+        Ok(Compilation::from_sources(
+            all_sources,
+            self.stdlib_config.enabled,
+        ))
     }
 }

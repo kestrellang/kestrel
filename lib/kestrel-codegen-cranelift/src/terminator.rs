@@ -2,7 +2,7 @@
 
 use crate::context::CodegenContext;
 use crate::error::CodegenError;
-use crate::monomorphize::Substitution;
+use crate::monomorphize::{Substitution, build_substitution};
 use crate::place::compile_place_read;
 use crate::rvalue::compile_value;
 
@@ -12,7 +12,7 @@ use kestrel_execution_graph::{
 
 use cranelift_codegen::ir::condcodes::IntCC;
 use cranelift_codegen::ir::types as cl_types;
-use cranelift_codegen::ir::{InstBuilder, MemFlags};
+use cranelift_codegen::ir::{InstBuilder, MemFlags, Value as CraneliftValue};
 use cranelift_frontend::{FunctionBuilder, Variable};
 
 use std::collections::HashMap;
@@ -26,17 +26,48 @@ pub fn compile_terminator(
     builder: &mut FunctionBuilder<'_>,
     block_map: &HashMap<Id<Block>, cranelift_codegen::ir::Block>,
     local_map: &HashMap<Id<Local>, Variable>,
+    stack_locals: &std::collections::HashSet<Id<Local>>,
     is_main: bool,
+    sret_ptr: Option<CraneliftValue>,
 ) -> Result<(), CodegenError> {
     match &terminator.kind {
         TerminatorKind::Return(value) => {
-            let ret_ty = ctx.mir.ty(func_def.ret);
+            let concrete_ret = subst
+                .apply_ty_readonly(ctx.mir, func_def.ret)
+                .unwrap_or(func_def.ret);
+            let ret_ty = ctx.mir.ty(concrete_ret);
             if matches!(ret_ty, kestrel_execution_graph::MirTy::Unit) {
                 if is_main {
                     // main() must return 0 for success exit code
                     let zero = builder.ins().iconst(cl_types::I64, 0);
                     builder.ins().return_(&[zero]);
                 } else {
+                    builder.ins().return_(&[]);
+                }
+            } else if let Some(dest_ptr) = sret_ptr {
+                // Check if we're trying to return unit in a non-unit function
+                let is_unit_value = matches!(
+                    value,
+                    Value::Immediate(kestrel_execution_graph::Immediate {
+                        kind: kestrel_execution_graph::ImmediateKind::Unit,
+                        ..
+                    })
+                );
+                if is_unit_value {
+                    builder
+                        .ins()
+                        .trap(cranelift_codegen::ir::TrapCode::unwrap_user(3));
+                } else {
+                    let val = compile_value(
+                        ctx,
+                        func_def,
+                        subst,
+                        value,
+                        builder,
+                        local_map,
+                        stack_locals,
+                    )?;
+                    copy_aggregate_value(ctx, concrete_ret, dest_ptr, val, builder);
                     builder.ins().return_(&[]);
                 }
             } else {
@@ -53,35 +84,65 @@ pub fn compile_terminator(
                     // This is dead code - emit trap
                     builder
                         .ins()
-                        .trap(cranelift_codegen::ir::TrapCode::unwrap_user(1));
+                        .trap(cranelift_codegen::ir::TrapCode::unwrap_user(3));
                 } else {
-                    let val = compile_value(ctx, func_def, subst, value, builder, local_map)?;
+                    let val = compile_value(
+                        ctx,
+                        func_def,
+                        subst,
+                        value,
+                        builder,
+                        local_map,
+                        stack_locals,
+                    )?;
                     builder.ins().return_(&[val]);
                 }
             }
-        }
+        },
 
         TerminatorKind::Jump(target) => {
             let cl_block = block_map
                 .get(target)
                 .ok_or_else(|| CodegenError::Unsupported("unknown jump target".to_string()))?;
             builder.ins().jump(*cl_block, &[]);
-        }
+        },
 
         TerminatorKind::Branch {
             condition,
             then_block,
             else_block,
         } => {
-            let cond = compile_value(ctx, func_def, subst, condition, builder, local_map)?;
+            let cond = compile_value(
+                ctx,
+                func_def,
+                subst,
+                condition,
+                builder,
+                local_map,
+                stack_locals,
+            )?;
+            let ptr_type = if ctx.target.is_64bit() {
+                cl_types::I64
+            } else {
+                cl_types::I32
+            };
+            let cond = if builder.func.dfg.value_type(cond) == ptr_type {
+                // Bool is a wrapper struct in std2; branch on its underlying byte.
+                builder.ins().load(cl_types::I8, MemFlags::new(), cond, 0)
+            } else {
+                cond
+            };
+            // Bool is i8 in Cranelift, but brif expects a boolean condition.
+            // Explicitly compare with 0.
+            let cond_bool = builder.ins().icmp_imm(IntCC::NotEqual, cond, 0);
             let then_cl = block_map
                 .get(then_block)
                 .ok_or_else(|| CodegenError::Unsupported("unknown then block".to_string()))?;
             let else_cl = block_map
                 .get(else_block)
                 .ok_or_else(|| CodegenError::Unsupported("unknown else block".to_string()))?;
-            builder.ins().brif(cond, *then_cl, &[], *else_cl, &[]);
-        }
+            builder.ins().brif(cond_bool, *then_cl, &[], *else_cl, &[]);
+        },
 
         TerminatorKind::Switch {
             discriminant,
@@ -89,7 +150,8 @@ pub fn compile_terminator(
         } => {
             // Load the discriminant value from the enum
             // The discriminant is stored at offset 0 as an i32
-            let enum_ptr = compile_place_read(ctx, discriminant, builder, local_map, subst)?;
+            let enum_ptr =
+                compile_place_read(ctx, discriminant, builder, local_map, subst, stack_locals)?;
             let discr_val = builder
                 .ins()
                 .load(cl_types::I32, MemFlags::new(), enum_ptr, 0);
@@ -127,8 +189,17 @@ pub fn compile_terminator(
                     let expected_discr = case_def.discriminant as i64;
 
                     if i == cases.len() - 1 {
-                        // Last case - just jump unconditionally (exhaustive match)
-                        builder.ins().jump(*target_cl, &[]);
+                        // Last case - check if it's the only case or if we need to compare
+                        if cases.len() == 1 {
+                            builder.ins().jump(*target_cl, &[]);
+                        } else {
+                            let cmp =
+                                builder
+                                    .ins()
+                                    .icmp_imm(IntCC::Equal, discr_val, expected_discr);
+                            // If it's exhaustive, we can just jump, but let's be safe
+                            builder.ins().brif(cmp, *target_cl, &[], *target_cl, &[]);
+                        }
                     } else {
                         // Compare discriminant and branch
                         let cmp = builder
@@ -143,23 +214,63 @@ pub fn compile_terminator(
                     }
                 }
             }
-        }
+        },
 
         TerminatorKind::Panic(_msg) => {
             // TODO: Call panic handler
-            builder
-                .ins()
-                .trap(cranelift_codegen::ir::TrapCode::unwrap_user(0));
-        }
-
-        TerminatorKind::Unreachable => {
+            // User trap code 1 = panic
             builder
                 .ins()
                 .trap(cranelift_codegen::ir::TrapCode::unwrap_user(1));
-        }
+        },
+
+        TerminatorKind::Unreachable => {
+            // User trap code 2 = unreachable
+            builder
+                .ins()
+                .trap(cranelift_codegen::ir::TrapCode::unwrap_user(2));
+        },
     }
 
     Ok(())
+}
+
+fn copy_aggregate_value(
+    ctx: &mut CodegenContext<'_>,
+    ty: Id<kestrel_execution_graph::Ty>,
+    dest_ptr: CraneliftValue,
+    src_ptr: CraneliftValue,
+    builder: &mut FunctionBuilder<'_>,
+) {
+    // Unit types have zero size - nothing to copy
+    if matches!(ctx.mir.ty(ty), kestrel_execution_graph::MirTy::Unit) {
+        return;
+    }
+
+    let layout = ctx.layouts.layout_of(ty);
+    if layout.size == 0 {
+        return;
+    }
+
+    // Skip copy if src_ptr is a constant 0 (null pointer from Unit value).
+    // This can happen when if-else expressions have aggregate types but
+    // the branch values are from discarded statement results.
+    if let cranelift_codegen::ir::ValueDef::Result(inst, _) = builder.func.dfg.value_def(src_ptr)
+        && let cranelift_codegen::ir::InstructionData::UnaryImm { imm, .. } =
+            builder.func.dfg.insts[inst]
+        && imm.bits() == 0
+    {
+        return;
+    }
+
+    for offset in 0..layout.size {
+        let byte = builder
+            .ins()
+            .load(cl_types::I8, MemFlags::new(), src_ptr, offset as i32);
+        builder
+            .ins()
+            .store(MemFlags::new(), byte, dest_ptr, offset as i32);
+    }
 }
 
 /// Get the enum ID from a place expression.
@@ -184,7 +295,7 @@ fn get_enum_id_from_place(
                 "enum not found for type: {}",
                 name_data
             )))
-        }
+        },
         _ => Err(CodegenError::Unsupported(format!(
             "switch on non-enum type: {:?}",
             mir_ty
@@ -201,7 +312,7 @@ fn get_place_type(
         PlaceKind::Local(local_id) => {
             let local_def = ctx.mir.local(*local_id);
             Ok(local_def.ty)
-        }
+        },
         PlaceKind::Field { parent, name } => {
             // Get the parent's type, then look up the field type
             let parent_ty_id = get_place_type(ctx, parent)?;
@@ -209,7 +320,8 @@ fn get_place_type(
 
             // Find the struct and get the field type
             if let MirTy::Named {
-                name: type_name, ..
+                name: type_name,
+                type_args,
             } = parent_ty
             {
                 let type_name_data = ctx.mir.name(*type_name);
@@ -219,7 +331,20 @@ fn get_place_type(
                         for field_id in &struct_def.fields {
                             let field_def = &ctx.mir.fields[*field_id];
                             if field_def.name == *name {
-                                return Ok(field_def.ty);
+                                let mut field_ty = field_def.ty;
+
+                                // Apply substitution from struct's type params to concrete type args
+                                let type_params = &struct_def.type_params;
+                                if !type_params.is_empty() && type_params.len() == type_args.len() {
+                                    let subst = build_substitution(ctx.mir, type_params, type_args);
+                                    if let Ok(substituted_ty) =
+                                        subst.apply_ty_readonly(ctx.mir, field_ty)
+                                    {
+                                        field_ty = substituted_ty;
+                                    }
+                                }
+
+                                return Ok(field_ty);
                             }
                         }
                         return Err(CodegenError::Unsupported(format!(
@@ -238,11 +363,11 @@ fn get_place_type(
                     parent_ty
                 )))
             }
-        }
+        },
         PlaceKind::Downcast { parent, .. } => {
             // Downcast preserves the enum type
             get_place_type(ctx, parent)
-        }
+        },
         PlaceKind::Deref(parent) => {
             // Get the pointer/ref type and extract the pointee type
             let parent_ty_id = get_place_type(ctx, parent)?;
@@ -253,9 +378,122 @@ fn get_place_type(
                     "deref of non-pointer type".to_string(),
                 )),
             }
-        }
-        _ => Err(CodegenError::Unsupported(
-            "unsupported place kind for type lookup".to_string(),
-        )),
+        },
+        PlaceKind::Index { parent, index } => {
+            // Get the parent's type, then look up the field type by index
+            let parent_ty_id = get_place_type(ctx, parent)?;
+            let parent_ty = ctx.mir.ty(parent_ty_id);
+
+            // Check if the parent is a downcast - in that case, find the variant struct
+            if let PlaceKind::Downcast {
+                parent: grandparent,
+                variant,
+            } = &parent.kind
+            {
+                let enum_ty_id = get_place_type(ctx, grandparent)?;
+                let enum_ty = ctx.mir.ty(enum_ty_id);
+
+                if let MirTy::Named { name, type_args } = enum_ty {
+                    let name_data = ctx.mir.name(*name);
+                    for (_, enum_def) in ctx.mir.enums.iter() {
+                        if ctx.mir.name(enum_def.name) == name_data {
+                            let case_id = enum_def.case_by_name(variant).ok_or_else(|| {
+                                CodegenError::Unsupported(format!(
+                                    "enum case not found: {}",
+                                    variant
+                                ))
+                            })?;
+                            let case_def = &ctx.mir.enum_cases[case_id];
+                            let struct_id = case_def.struct_def.ok_or_else(|| {
+                                CodegenError::Unsupported(format!(
+                                    "enum case {} has no struct_def",
+                                    variant
+                                ))
+                            })?;
+                            let struct_def = ctx.mir.struct_def(struct_id);
+                            let fields: Vec<_> = struct_def.fields.clone();
+                            if *index >= fields.len() {
+                                return Err(CodegenError::Unsupported(format!(
+                                    "field index {} out of bounds",
+                                    index
+                                )));
+                            }
+                            let field_id = fields[*index];
+                            let field_def = &ctx.mir.fields[field_id];
+                            let mut field_ty = field_def.ty;
+
+                            // Apply substitution from enum's type params to concrete type args
+                            let type_params = &enum_def.type_params;
+                            if !type_params.is_empty() && type_params.len() == type_args.len() {
+                                let subst = build_substitution(ctx.mir, type_params, type_args);
+                                if let Ok(substituted_ty) =
+                                    subst.apply_ty_readonly(ctx.mir, field_ty)
+                                {
+                                    field_ty = substituted_ty;
+                                }
+                            }
+
+                            return Ok(field_ty);
+                        }
+                    }
+                }
+            }
+
+            // Regular struct or tuple
+            match parent_ty {
+                MirTy::Named {
+                    name: type_name,
+                    type_args,
+                } => {
+                    let type_name_data = ctx.mir.name(*type_name);
+                    for (_, struct_def) in ctx.mir.structs.iter() {
+                        if ctx.mir.name(struct_def.name) == type_name_data {
+                            let fields: Vec<_> = struct_def.fields.clone();
+                            if *index >= fields.len() {
+                                return Err(CodegenError::Unsupported(format!(
+                                    "field index {} out of bounds (struct has {} fields)",
+                                    index,
+                                    fields.len()
+                                )));
+                            }
+                            let field_id = fields[*index];
+                            let field_def = &ctx.mir.fields[field_id];
+                            let mut field_ty = field_def.ty;
+
+                            // Apply substitution from struct's type params to concrete type args
+                            let type_params = &struct_def.type_params;
+                            if !type_params.is_empty() && type_params.len() == type_args.len() {
+                                let subst = build_substitution(ctx.mir, type_params, type_args);
+                                if let Ok(substituted_ty) =
+                                    subst.apply_ty_readonly(ctx.mir, field_ty)
+                                {
+                                    field_ty = substituted_ty;
+                                }
+                            }
+
+                            return Ok(field_ty);
+                        }
+                    }
+                    Err(CodegenError::Unsupported(format!(
+                        "struct not found for index access: {}",
+                        type_name_data
+                    )))
+                },
+                MirTy::Tuple(elements) => {
+                    if *index >= elements.len() {
+                        return Err(CodegenError::Unsupported(format!(
+                            "tuple index {} out of bounds (len {})",
+                            index,
+                            elements.len()
+                        )));
+                    }
+                    Ok(elements[*index])
+                },
+                _ => Err(CodegenError::Unsupported(format!(
+                    "index access on unsupported type: {:?}",
+                    parent_ty
+                ))),
+            }
+        },
     }
 }

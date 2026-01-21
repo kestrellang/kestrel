@@ -22,7 +22,7 @@ mod basic_syntax {
             r#"
 module Main
 
-func test(b: Bool) -> Int {
+func test(b: lang.i1) -> lang.i64 {
     match b {
         true => 1,
         false => 0
@@ -45,7 +45,7 @@ enum Color {
     case Blue
 }
 
-func test(c: Color) -> Int {
+func test(c: Color) -> lang.i64 {
     match c {
         .Red => 1,
         .Green => 2,
@@ -69,7 +69,7 @@ enum Color {
     case Blue
 }
 
-func test(c: Color) -> Int {
+func test(c: Color) -> lang.i64 {
     match c {
         .Red => {
             let x = 1;
@@ -93,7 +93,7 @@ func test(c: Color) -> Int {
             r#"
 module Main
 
-func test(b: Bool) -> Int {
+func test(b: lang.i1) -> lang.i64 {
     match b {
         true => 1,
         false => 0
@@ -110,7 +110,7 @@ func test(b: Bool) -> Int {
             r#"
 module Main
 
-func test(b: Bool) -> Int {
+func test(b: lang.i1) -> lang.i64 {
     match b {
         true => 1,
         false => 0,
@@ -127,7 +127,7 @@ func test(b: Bool) -> Int {
             r#"
 module Main
 
-func test(b: Bool) -> Int {
+func test(b: lang.i1) -> lang.i64 {
     let result = match b {
         true => 42,
         false => 0
@@ -145,7 +145,7 @@ func test(b: Bool) -> Int {
             r#"
 module Main
 
-func test(b: Bool) -> Int {
+func test(b: lang.i1) -> lang.i64 {
     return match b {
         true => 1,
         false => 0
@@ -162,7 +162,7 @@ func test(b: Bool) -> Int {
             r#"
 module Main
 
-func test(a: Bool, b: Bool) -> Int {
+func test(a: lang.i1, b: lang.i1) -> lang.i64 {
     match a {
         true => match b {
             true => 1,
@@ -195,7 +195,7 @@ enum Option[T] {
     case None
 }
 
-func test(opt: Option[Int]) -> Int {
+func test(opt: Option[lang.i64]) -> lang.i64 {
     match opt {
         .Some(value) => value,
         .None => 0
@@ -217,7 +217,7 @@ enum Option[T] {
     case None
 }
 
-func test(opt: Option[Int]) -> Int {
+func test(opt: Option[lang.i64]) -> lang.i64 {
     match opt {
         .Some(value: v) => v,
         .None => 0
@@ -239,7 +239,7 @@ enum Result[T, E] {
     case Err(error: E)
 }
 
-func test(r: Result[Int, String]) -> Int {
+func test(r: Result[lang.i64, lang.str]) -> lang.i64 {
     match r {
         .Ok(value) => value,
         .Err(error) => 0
@@ -261,7 +261,7 @@ enum Option[T] {
     case None
 }
 
-func test(opt: Option[Int]) -> Bool {
+func test(opt: Option[lang.i64]) -> lang.i1 {
     match opt {
         .Some(_) => true,
         .None => false
@@ -283,7 +283,7 @@ enum Option[T] {
     case None
 }
 
-func test(opt: Option[Option[Int]]) -> Int {
+func test(opt: Option[Option[lang.i64]]) -> lang.i64 {
     match opt {
         .Some(value: .Some(inner)) => inner,
         .Some(value: .None) => 0,
@@ -315,7 +315,7 @@ enum Color {
     case Blue
 }
 
-func test(c: Color) -> String {
+func test(c: Color) -> lang.str {
     match c {
         .Red or .Green => "warm-ish",
         .Blue => "cool"
@@ -341,7 +341,7 @@ enum Color {
     case Purple
 }
 
-func test(c: Color) -> String {
+func test(c: Color) -> lang.str {
     match c {
         .Red or .Orange or .Yellow => "warm",
         .Green or .Blue or .Purple => "cool"
@@ -359,15 +359,15 @@ func test(c: Color) -> String {
 module Main
 
 enum Expr {
-    case Add(left: Int, right: Int)
-    case Sub(left: Int, right: Int)
-    case Mul(left: Int, right: Int)
+    case Add(left: lang.i64, right: lang.i64)
+    case Sub(left: lang.i64, right: lang.i64)
+    case Mul(left: lang.i64, right: lang.i64)
 }
 
-func test(e: Expr) -> Int {
+func test(e: Expr) -> lang.i64 {
     match e {
-        .Add(left, right) or .Sub(left, right) => left + right,
-        .Mul(left, right) => left * right
+        .Add(left, right) or .Sub(left, right) => lang.i64_add(left, right),
+        .Mul(left, right) => lang.i64_mul(left, right)
     }
 }
 "#,
@@ -386,7 +386,7 @@ enum Option[T] {
     case None
 }
 
-func test(opt: Option[Int]) -> Int {
+func test(opt: Option[lang.i64]) -> lang.i64 {
     match opt {
         .Some(value) or .None => value,
         _ => 0
@@ -409,7 +409,7 @@ enum Option[T] {
     case None
 }
 
-func test(opt: Option[Int]) -> String {
+func test(opt: Option[lang.i64]) -> lang.str {
     match opt {
         .Some(value: 1 or 2 or 3) => "small",
         .Some(_) => "large",
@@ -440,10 +440,10 @@ enum Option[T] {
     case None
 }
 
-func test(opt: Option[Int]) -> String {
+func test(opt: Option[lang.i64]) -> lang.str {
     match opt {
-        .Some(n) if n > 0 => "positive",
-        .Some(n) if n < 0 => "negative",
+        .Some(n) if lang.i64_signed_gt(n, 0) => "positive",
+        .Some(n) if lang.i64_signed_lt(n, 0) => "negative",
         .Some(_) => "zero",
         .None => "nothing"
     }
@@ -459,10 +459,10 @@ func test(opt: Option[Int]) -> String {
             r#"
 module Main
 
-func test(x: Int) -> String {
+func test(x: lang.i64) -> lang.str {
     match x {
-        n if n > 100 => "big",
-        n if n > 10 => "medium",
+        n if lang.i64_signed_gt(n, 100) => "big",
+        n if lang.i64_signed_gt(n, 10) => "medium",
         _ => "small"
     }
 }
@@ -473,11 +473,12 @@ func test(x: Int) -> String {
 
     #[test]
     fn guard_must_be_bool() {
+        // The guard condition `n` (a lang.i64) is not a boolean - should fail
         Test::new(
             r#"
 module Main
 
-func test(x: Int) -> Int {
+func test(x: lang.i64) -> lang.i64 {
     match x {
         n if n => n,
         _ => 0
@@ -496,18 +497,53 @@ func test(x: Int) -> Int {
 module Main
 
 enum Value {
-    case A(n: Int)
-    case B(n: Int)
+    case A(n: lang.i64)
+    case B(n: lang.i64)
 }
 
-func test(v: Value) -> String {
+func test(v: Value) -> lang.str {
     match v {
-        .A(n) or .B(n) if n > 0 => "positive",
+        .A(n) or .B(n) if lang.i64_signed_gt(n, 0) => "positive",
         _ => "other"
     }
 }
 "#,
         )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn guard_with_custom_boolean_conditional() {
+        // Custom Bool struct that wraps lang.i1 and implements BooleanConditional
+        Test::new(
+            r#"
+module Main
+
+@builtin(.BooleanConditional)
+protocol BooleanConditional {
+    func boolValue() -> lang.i1
+}
+
+struct Bool {
+    let value: lang.i1
+}
+
+extend Bool: BooleanConditional {
+    func boolValue() -> lang.i1 {
+        self.value
+    }
+}
+
+func test(x: lang.i64) -> lang.str {
+    let condition = Bool(value: lang.i64_signed_gt(x, 0));
+    match x {
+        n if condition => "positive",
+        _ => "non-positive"
+    }
+}
+"#,
+        )
+        .without_prelude()
         .expect(Compiles);
     }
 }
@@ -525,7 +561,7 @@ mod type_inference {
             r#"
 module Main
 
-func test(b: Bool) -> Int {
+func test(b: lang.i1) -> lang.i64 {
     let x = match b {
         true => 1,
         false => 0
@@ -543,7 +579,7 @@ func test(b: Bool) -> Int {
             r#"
 module Main
 
-func test(b: Bool) -> Int {
+func test(b: lang.i1) -> lang.i64 {
     match b {
         true => 1,
         false => "zero"
@@ -588,9 +624,9 @@ enum Option[T] {
     case None
 }
 
-func test(opt: Option[Int]) -> Int {
+func test(opt: Option[lang.i64]) -> lang.i64 {
     match opt {
-        .Some(x) => x + 1,
+        .Some(x) => lang.i64_add(x, 1),
         .None => 0
     }
 }
@@ -613,7 +649,7 @@ mod never_type {
             r#"
 module Main
 
-func test(b: Bool) -> Int {
+func test(b: lang.i1) -> lang.i64 {
     match b {
         true => return 42,
         false => 0
@@ -630,7 +666,7 @@ func test(b: Bool) -> Int {
             r#"
 module Main
 
-func test(b: Bool) -> Int {
+func test(b: lang.i1) -> lang.i64 {
     match b {
         true => return 1,
         false => return 0
@@ -647,7 +683,7 @@ func test(b: Bool) -> Int {
             r#"
 module Main
 
-func test() -> Int {
+func test() -> lang.i64 {
     var result = 0;
     loop {
         match true {
@@ -681,7 +717,7 @@ enum Color {
     case Green
 }
 
-func test(c: Color) -> Int {
+func test(c: Color) -> lang.i64 {
     match c {
         .Red => 1,
         .Blue => 2
@@ -699,7 +735,7 @@ func test(c: Color) -> Int {
             r#"
 module Main
 
-func test(x: Int) -> Int {
+func test(x: lang.i64) -> lang.i64 {
     match x {
         "hello" => 1,
         _ => 0
@@ -717,7 +753,7 @@ func test(x: Int) -> Int {
             r#"
 module Main
 
-func test(t: (Int, Int)) -> Int {
+func test(t: (lang.i64, lang.i64)) -> lang.i64 {
     match t {
         (x, x) => x
     }
@@ -734,9 +770,9 @@ func test(t: (Int, Int)) -> Int {
             r#"
 module Main
 
-func test(t: (Int, Int)) -> Int {
+func test(t: (lang.i64, lang.i64)) -> lang.i64 {
     match t {
-        (a, b, c) => a + b + c
+        (a, b, c) => lang.i64_add(lang.i64_add(a, b), c)
     }
 }
 "#,
@@ -756,9 +792,9 @@ enum Option[T] {
     case None
 }
 
-func test(opt: Option[Int]) -> Int {
+func test(opt: Option[lang.i64]) -> lang.i64 {
     match opt {
-        .Some(a, b) => a + b,
+        .Some(a, b) => lang.i64_add(a, b),
         .None => 0
     }
 }
@@ -773,7 +809,7 @@ func test(opt: Option[Int]) -> Int {
             r#"
 module Main
 
-func test(x: Float) -> Int {
+func test(x: lang.f64) -> lang.i64 {
     match x {
         3.14 => 1,
         _ => 0
@@ -804,7 +840,7 @@ enum Option[T] {
     case None
 }
 
-func test(opt: Option[Int]) -> Int {
+func test(opt: Option[lang.i64]) -> lang.i64 {
     match opt {
         .Some(x) => x,
         .None => x
@@ -822,10 +858,10 @@ func test(opt: Option[Int]) -> Int {
             r#"
 module Main
 
-func test(x: Int) -> Int {
+func test(x: lang.i64) -> lang.i64 {
     let y = 100;
     match x {
-        y => y + 1
+        y => lang.i64_add(y, 1)
     }
 }
 "#,
@@ -839,15 +875,128 @@ func test(x: Int) -> Int {
             r#"
 module Main
 
-func test(b: Bool) -> Int {
-    let multiplier = 10;
+func test(b: lang.i1) -> lang.i64 {
+    let multiplier: lang.i64 = 10;
     match b {
-        true => multiplier * 2,
+        true => lang.i64_mul(multiplier, 2),
         false => multiplier
     }
 }
 "#,
         )
+        .expect(Compiles);
+    }
+}
+
+// ============================================================================
+// REGRESSION TESTS
+// ============================================================================
+
+mod regression {
+    use super::*;
+
+    /// Test that integer literals in match patterns inherit the scrutinee type (primitive types).
+    ///
+    /// Previously, integer literal patterns always defaulted to I64, causing
+    /// type mismatches when matching against other primitive integer types like lang.i32.
+    ///
+    /// Issue: Integer literal type inference in match (for primitive types)
+    /// Fix: Use expected_ty from scrutinee when resolving integer literal patterns
+    #[test]
+    fn integer_literal_pattern_inherits_primitive_type() {
+        // Note: This tests primitive types (lang.i32), not wrapper structs (Int32)
+        // For wrapper structs, ExpressibleByIntLiteral protocol would be needed
+        Test::new(
+            r#"
+module Main
+
+func classify(code: lang.i32) -> lang.i64 {
+    match code {
+        0 => 1,
+        1 => 2,
+        2 => 3,
+        _ => 0
+    }
+}
+"#,
+        )
+        .without_prelude()
+        .expect(Compiles);
+    }
+
+    /// Test with lang.i8 to ensure the fix works for all primitive integer types.
+    #[test]
+    fn integer_literal_pattern_with_primitive_i8() {
+        Test::new(
+            r#"
+module Main
+
+func test(x: lang.i8) -> lang.i64 {
+    match x {
+        0 => 1,
+        1 => 2,
+        _ => 3
+    }
+}
+"#,
+        )
+        .without_prelude()
+        .expect(Compiles);
+    }
+
+    /// Test with lang.i16 to ensure the fix works for all primitive integer types.
+    #[test]
+    fn integer_literal_pattern_with_primitive_i16() {
+        Test::new(
+            r#"
+module Main
+
+func test(x: lang.i16) -> lang.i64 {
+    match x {
+        42 => 1,
+        _ => 0
+    }
+}
+"#,
+        )
+        .without_prelude()
+        .expect(Compiles);
+    }
+
+    /// Test that integer literals in match patterns work with wrapper struct types
+    /// that conform to ExpressibleByIntLiteral.
+    ///
+    /// This tests the full type inference path where the literal pattern's type
+    /// is inferred from the scrutinee type via the ExpressibleByIntLiteral protocol.
+    #[test]
+    fn integer_literal_pattern_with_wrapper_struct() {
+        Test::new(
+            r#"
+module Main
+
+@builtin(.ExpressibleByIntLiteral)
+protocol ExpressibleByIntLiteral {
+    init(intLiteral value: lang.i64)
+}
+
+struct MyInt: ExpressibleByIntLiteral {
+    var value: lang.i64
+
+    init(intLiteral value: lang.i64) {
+        self.value = value
+    }
+}
+
+func test_match(x: MyInt) -> lang.i64 {
+    match x {
+        0 => 100,
+        1 => 200,
+        _ => 300,
+    }
+}
+"#,
+        )
+        .without_prelude()
         .expect(Compiles);
     }
 }

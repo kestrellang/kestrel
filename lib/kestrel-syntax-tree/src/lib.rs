@@ -66,9 +66,14 @@ pub enum SyntaxKind {
     TypeAliasDeclaration,
     AliasedType,
     FieldDeclaration,
+    GetterClause,      // get { ... }
+    SetterClause,      // set { ... }
+    PropertyAccessors, // { get { } set { } } or { get } { get set }
     FunctionDeclaration,
     InitializerDeclaration,
     DeinitDeclaration,
+    SubscriptDeclaration,
+    SubscriptBody,
     FunctionBody,
     ParameterList,
     Parameter,
@@ -127,6 +132,7 @@ pub enum SyntaxKind {
     ExprInteger,              // 42, 0xFF, 0b1010, 0o17
     ExprFloat,                // 3.14, 1.0e10
     ExprString,               // "hello"
+    ExprRawString,            // """hello""" (raw/multi-line string)
     ExprBool,                 // true, false
     ExprArray,                // [1, 2, 3]
     ExprTuple,                // (1, 2, 3)
@@ -147,6 +153,7 @@ pub enum SyntaxKind {
     ExprBreak,                // break or break label
     ExprContinue,             // continue or continue label
     ExprReturn,               // return or return expr
+    ExprTry,                  // try expr
     ExprTupleIndex,           // tuple.0, tuple.1 (tuple element access)
     ExprClosure,              // { params in body } or { body }
     ClosureParams,            // (param, param) in closure
@@ -184,6 +191,7 @@ pub enum SyntaxKind {
     // Literals
     Identifier,
     String,
+    RawString, // """...""" raw string literal
     Integer,
     Float,
     Boolean,
@@ -214,6 +222,7 @@ pub enum SyntaxKind {
     Protocol,
     Public,
     Return,
+    Try,
     Static,
     Struct,
     Type,
@@ -223,6 +232,9 @@ pub enum SyntaxKind {
     In,
     Match,
     Guard,
+    Get,
+    Set,
+    Subscript,
 
     // Logical keywords
     And,
@@ -299,6 +311,7 @@ impl From<Token> for SyntaxKind {
             // Literals
             Token::Identifier => SyntaxKind::Identifier,
             Token::String => SyntaxKind::String,
+            Token::RawString => SyntaxKind::RawString,
             Token::Integer => SyntaxKind::Integer,
             Token::Float => SyntaxKind::Float,
             Token::Boolean => SyntaxKind::Boolean,
@@ -328,6 +341,7 @@ impl From<Token> for SyntaxKind {
             Token::Protocol => SyntaxKind::Protocol,
             Token::Public => SyntaxKind::Public,
             Token::Return => SyntaxKind::Return,
+            Token::Try => SyntaxKind::Try,
             Token::Static => SyntaxKind::Static,
             Token::Struct => SyntaxKind::Struct,
             Token::Type => SyntaxKind::Type,
@@ -337,6 +351,9 @@ impl From<Token> for SyntaxKind {
             Token::In => SyntaxKind::In,
             Token::Match => SyntaxKind::Match,
             Token::Guard => SyntaxKind::Guard,
+            Token::Get => SyntaxKind::Get,
+            Token::Set => SyntaxKind::Set,
+            Token::Subscript => SyntaxKind::Subscript,
             // Logical keywords
             Token::And => SyntaxKind::And,
             Token::Not => SyntaxKind::Not,
@@ -421,9 +438,14 @@ impl Language for KestrelLanguage {
         const TYPE_ALIAS_DECLARATION: u16 = SyntaxKind::TypeAliasDeclaration as u16;
         const ALIASED_TYPE: u16 = SyntaxKind::AliasedType as u16;
         const FIELD_DECLARATION: u16 = SyntaxKind::FieldDeclaration as u16;
+        const GETTER_CLAUSE: u16 = SyntaxKind::GetterClause as u16;
+        const SETTER_CLAUSE: u16 = SyntaxKind::SetterClause as u16;
+        const PROPERTY_ACCESSORS: u16 = SyntaxKind::PropertyAccessors as u16;
         const FUNCTION_DECLARATION: u16 = SyntaxKind::FunctionDeclaration as u16;
         const INITIALIZER_DECLARATION: u16 = SyntaxKind::InitializerDeclaration as u16;
         const DEINIT_DECLARATION: u16 = SyntaxKind::DeinitDeclaration as u16;
+        const SUBSCRIPT_DECLARATION: u16 = SyntaxKind::SubscriptDeclaration as u16;
+        const SUBSCRIPT_BODY: u16 = SyntaxKind::SubscriptBody as u16;
         const FUNCTION_BODY: u16 = SyntaxKind::FunctionBody as u16;
         const PARAMETER_LIST: u16 = SyntaxKind::ParameterList as u16;
         const PARAMETER: u16 = SyntaxKind::Parameter as u16;
@@ -485,6 +507,7 @@ impl Language for KestrelLanguage {
         const EXPR_BREAK: u16 = SyntaxKind::ExprBreak as u16;
         const EXPR_CONTINUE: u16 = SyntaxKind::ExprContinue as u16;
         const EXPR_RETURN: u16 = SyntaxKind::ExprReturn as u16;
+        const EXPR_TRY: u16 = SyntaxKind::ExprTry as u16;
         const EXPR_TUPLE_INDEX: u16 = SyntaxKind::ExprTupleIndex as u16;
         const EXPR_CLOSURE: u16 = SyntaxKind::ExprClosure as u16;
         const CLOSURE_PARAMS: u16 = SyntaxKind::ClosureParams as u16;
@@ -546,6 +569,7 @@ impl Language for KestrelLanguage {
         const PROTOCOL: u16 = SyntaxKind::Protocol as u16;
         const PUBLIC: u16 = SyntaxKind::Public as u16;
         const RETURN: u16 = SyntaxKind::Return as u16;
+        const TRY: u16 = SyntaxKind::Try as u16;
         const STATIC: u16 = SyntaxKind::Static as u16;
         const STRUCT: u16 = SyntaxKind::Struct as u16;
         const TYPE: u16 = SyntaxKind::Type as u16;
@@ -555,6 +579,9 @@ impl Language for KestrelLanguage {
         const IN: u16 = SyntaxKind::In as u16;
         const MATCH: u16 = SyntaxKind::Match as u16;
         const GUARD: u16 = SyntaxKind::Guard as u16;
+        const GET: u16 = SyntaxKind::Get as u16;
+        const SET: u16 = SyntaxKind::Set as u16;
+        const SUBSCRIPT: u16 = SyntaxKind::Subscript as u16;
         // Logical keywords
         const AND: u16 = SyntaxKind::And as u16;
         const NOT: u16 = SyntaxKind::Not as u16;
@@ -632,9 +659,14 @@ impl Language for KestrelLanguage {
             TYPE_ALIAS_DECLARATION => SyntaxKind::TypeAliasDeclaration,
             ALIASED_TYPE => SyntaxKind::AliasedType,
             FIELD_DECLARATION => SyntaxKind::FieldDeclaration,
+            GETTER_CLAUSE => SyntaxKind::GetterClause,
+            SETTER_CLAUSE => SyntaxKind::SetterClause,
+            PROPERTY_ACCESSORS => SyntaxKind::PropertyAccessors,
             FUNCTION_DECLARATION => SyntaxKind::FunctionDeclaration,
             INITIALIZER_DECLARATION => SyntaxKind::InitializerDeclaration,
             DEINIT_DECLARATION => SyntaxKind::DeinitDeclaration,
+            SUBSCRIPT_DECLARATION => SyntaxKind::SubscriptDeclaration,
+            SUBSCRIPT_BODY => SyntaxKind::SubscriptBody,
             FUNCTION_BODY => SyntaxKind::FunctionBody,
             PARAMETER_LIST => SyntaxKind::ParameterList,
             PARAMETER => SyntaxKind::Parameter,
@@ -697,6 +729,7 @@ impl Language for KestrelLanguage {
             EXPR_BREAK => SyntaxKind::ExprBreak,
             EXPR_CONTINUE => SyntaxKind::ExprContinue,
             EXPR_RETURN => SyntaxKind::ExprReturn,
+            EXPR_TRY => SyntaxKind::ExprTry,
             EXPR_TUPLE_INDEX => SyntaxKind::ExprTupleIndex,
             EXPR_CLOSURE => SyntaxKind::ExprClosure,
             CLOSURE_PARAMS => SyntaxKind::ClosureParams,
@@ -758,6 +791,7 @@ impl Language for KestrelLanguage {
             PROTOCOL => SyntaxKind::Protocol,
             PUBLIC => SyntaxKind::Public,
             RETURN => SyntaxKind::Return,
+            TRY => SyntaxKind::Try,
             STATIC => SyntaxKind::Static,
             STRUCT => SyntaxKind::Struct,
             TYPE => SyntaxKind::Type,
@@ -767,6 +801,9 @@ impl Language for KestrelLanguage {
             IN => SyntaxKind::In,
             MATCH => SyntaxKind::Match,
             GUARD => SyntaxKind::Guard,
+            GET => SyntaxKind::Get,
+            SET => SyntaxKind::Set,
+            SUBSCRIPT => SyntaxKind::Subscript,
             // Logical keywords
             AND => SyntaxKind::And,
             NOT => SyntaxKind::Not,

@@ -47,13 +47,13 @@ impl Analyzer for StructCycleAnalyzer {
         symbol: &Arc<dyn Symbol<KestrelLanguage>>,
         _ctx: &mut AnalysisContext,
     ) {
-        if symbol.metadata().kind() == KestrelSymbolKind::Struct {
-            if let Ok(struct_sym) = symbol.clone().downcast_arc::<StructSymbol>() {
-                self.structs
-                    .lock()
-                    .unwrap()
-                    .push(CollectedStruct { struct_sym });
-            }
+        if symbol.metadata().kind() == KestrelSymbolKind::Struct
+            && let Ok(struct_sym) = symbol.clone().downcast_arc::<StructSymbol>()
+        {
+            self.structs
+                .lock()
+                .unwrap()
+                .push(CollectedStruct { struct_sym });
         }
     }
 
@@ -74,6 +74,10 @@ fn check_struct_for_cycles(
     let struct_name = struct_sym.metadata().name().value.clone();
 
     for field in model.query(StructFieldTypes { struct_id }) {
+        // Skip computed properties - they don't store values, so can't cause infinite-size types
+        if field.is_computed {
+            continue;
+        }
         let field_ty = field.ty;
         let field_name = field.name;
         let field_span = field.span;
@@ -133,6 +137,10 @@ fn check_type_for_struct_cycle(
                 return Some(cycle);
             }
             for field in model.query(StructFieldTypes { struct_id }) {
+                // Skip computed properties - they don't store values
+                if field.is_computed {
+                    continue;
+                }
                 if let Some(c) = check_type_for_struct_cycle(&field.ty, detector, model) {
                     detector.exit();
                     return Some(c);
@@ -140,7 +148,7 @@ fn check_type_for_struct_cycle(
             }
             detector.exit();
             None
-        }
+        },
         TyKind::Tuple(elements) => {
             for e in elements {
                 if let Some(c) = check_type_for_struct_cycle(e, detector, model) {
@@ -148,7 +156,7 @@ fn check_type_for_struct_cycle(
                 }
             }
             None
-        }
+        },
         TyKind::Array(_) => None,
         TyKind::Function { .. } => None,
         _ => None,

@@ -73,6 +73,8 @@
 pub mod mir;
 
 use std::cell::OnceCell;
+use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Prelude source containing builtin protocols.
 ///
@@ -93,6 +95,181 @@ public protocol Cloneable: Copyable {
 
 @builtin(.FFISafe)
 public protocol FFISafe {}
+
+@builtin(.ControlFlowEnum)
+public enum ControlFlow[C, B] {
+    case Continue(C)
+    case Break(B)
+}
+
+@builtin(.TryableProtocol)
+public protocol Tryable {
+    type Output
+    type Early
+
+    @builtin(.TryExtractMethod)
+    func tryExtract() -> ControlFlow[Output, Early]
+}
+
+@builtin(.FromResidualProtocol)
+public protocol FromResidual[Early] {
+    @builtin(.FromResidualMethod)
+    static func fromResidual(residual: Early) -> Self
+}
+
+@builtin(.BooleanConditional)
+public protocol BooleanConditional {
+    func asBool() -> lang.i1
+}
+
+@builtin(.Matchable)
+public protocol Matchable {
+    func matches(other: Self) -> lang.i1
+}
+
+// Arithmetic operator protocols
+@builtin(.AddOperatorProtocol)
+public protocol AddOperatorProtocol {
+    @builtin(.AddOperatorMethod)
+    func add(rhs: Self) -> Self
+}
+
+@builtin(.SubtractOperatorProtocol)
+public protocol SubtractOperatorProtocol {
+    @builtin(.SubtractOperatorMethod)
+    func subtract(rhs: Self) -> Self
+}
+
+@builtin(.MultiplyOperatorProtocol)
+public protocol MultiplyOperatorProtocol {
+    @builtin(.MultiplyOperatorMethod)
+    func multiply(rhs: Self) -> Self
+}
+
+@builtin(.DivideOperatorProtocol)
+public protocol DivideOperatorProtocol {
+    @builtin(.DivideOperatorMethod)
+    func divide(rhs: Self) -> Self
+}
+
+@builtin(.ModuloOperatorProtocol)
+public protocol ModuloOperatorProtocol {
+    @builtin(.ModuloOperatorMethod)
+    func modulo(rhs: Self) -> Self
+}
+
+@builtin(.NegateOperatorProtocol)
+public protocol NegateOperatorProtocol {
+    @builtin(.NegateOperatorMethod)
+    func negate() -> Self
+}
+
+// Comparison operator protocols
+@builtin(.EqualsOperatorProtocol)
+public protocol EqualsOperatorProtocol {
+    @builtin(.EqualsOperatorMethod)
+    func equals(rhs: Self) -> lang.i1
+}
+
+@builtin(.NotEqualsOperatorProtocol)
+public protocol NotEqualsOperatorProtocol {
+    @builtin(.NotEqualsOperatorMethod)
+    func notEquals(rhs: Self) -> lang.i1
+}
+
+@builtin(.LessThanOperatorProtocol)
+public protocol LessThanOperatorProtocol {
+    @builtin(.LessThanOperatorMethod)
+    func lessThan(rhs: Self) -> lang.i1
+}
+
+@builtin(.GreaterThanOperatorProtocol)
+public protocol GreaterThanOperatorProtocol {
+    @builtin(.GreaterThanOperatorMethod)
+    func greaterThan(rhs: Self) -> lang.i1
+}
+
+@builtin(.LessOrEqualOperatorProtocol)
+public protocol LessOrEqualOperatorProtocol {
+    @builtin(.LessOrEqualOperatorMethod)
+    func lessThanOrEqual(rhs: Self) -> lang.i1
+}
+
+@builtin(.GreaterOrEqualOperatorProtocol)
+public protocol GreaterOrEqualOperatorProtocol {
+    @builtin(.GreaterOrEqualOperatorMethod)
+    func greaterThanOrEqual(rhs: Self) -> lang.i1
+}
+
+// Bitwise operator protocols
+@builtin(.BitwiseAndOperatorProtocol)
+public protocol BitwiseAndOperatorProtocol {
+    @builtin(.BitwiseAndOperatorMethod)
+    func bitwiseAnd(rhs: Self) -> Self
+}
+
+@builtin(.BitwiseOrOperatorProtocol)
+public protocol BitwiseOrOperatorProtocol {
+    @builtin(.BitwiseOrOperatorMethod)
+    func bitwiseOr(rhs: Self) -> Self
+}
+
+@builtin(.BitwiseXorOperatorProtocol)
+public protocol BitwiseXorOperatorProtocol {
+    @builtin(.BitwiseXorOperatorMethod)
+    func bitwiseXor(rhs: Self) -> Self
+}
+
+@builtin(.ShiftLeftOperatorProtocol)
+public protocol ShiftLeftOperatorProtocol {
+    @builtin(.ShiftLeftOperatorMethod)
+    func shiftLeft(rhs: Self) -> Self
+}
+
+@builtin(.ShiftRightOperatorProtocol)
+public protocol ShiftRightOperatorProtocol {
+    @builtin(.ShiftRightOperatorMethod)
+    func shiftRight(rhs: Self) -> Self
+}
+
+@builtin(.BitwiseNotOperatorProtocol)
+public protocol BitwiseNotOperatorProtocol {
+    @builtin(.BitwiseNotOperatorMethod)
+    func bitwiseNot() -> Self
+}
+
+// Logical operator protocols
+@builtin(.LogicalNotOperatorProtocol)
+public protocol LogicalNotOperatorProtocol {
+    @builtin(.LogicalNotOperatorMethod)
+    func logicalNot() -> lang.i1
+}
+
+// Literal protocols
+@builtin(.ExpressibleByIntLiteral)
+public protocol ExpressibleByIntegerLiteral {
+    init(intLiteral value: lang.i64)
+}
+
+@builtin(.ExpressibleByFloatLiteral)
+public protocol ExpressibleByFloatLiteral {
+    init(floatLiteral value: lang.f64)
+}
+
+@builtin(.ExpressibleByStringLiteral)
+public protocol ExpressibleByStringLiteral {
+    init(stringLiteral value: lang.str)
+}
+
+@builtin(.ExpressibleByBoolLiteral)
+public protocol ExpressibleByBoolLiteral {
+    init(boolLiteral value: lang.i1)
+}
+
+@builtin(.ExpressibleByNilLiteral)
+public protocol ExpressibleByNilLiteral {
+    init(nilLiteral value: ())
+}
 "#,
 );
 use std::sync::Arc;
@@ -118,6 +295,41 @@ use semantic_tree::symbol::Symbol as SymbolTrait;
 pub use kestrel_semantic_tree::behavior::callable::ReceiverKind as Receiver;
 pub use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind as SymbolKind;
 
+/// Load the standard library from disk.
+///
+/// Searches for the stdlib in the following locations (in order):
+/// 1. `KESTREL_STD_PATH` environment variable
+/// 2. `lang/std` relative to the Cargo manifest directory (for tests)
+/// 3. `lang/std` relative to current directory (development)
+/// 4. `lib/std` relative to executable (installed)
+fn load_stdlib() -> Result<Vec<(String, String)>, String> {
+    use kestrel_compiler::stdlib::{StdLib, StdLibConfig};
+    use std::path::PathBuf;
+
+    // First try the CARGO_MANIFEST_DIR-based path (for tests)
+    // We need to go up from lib/kestrel-test-suite to the project root
+    let manifest_path = option_env!("CARGO_MANIFEST_DIR")
+        .map(PathBuf::from)
+        .and_then(|p| p.parent().and_then(|p| p.parent()).map(|p| p.to_path_buf()))
+        .map(|p| p.join("lang/std"));
+
+    let config = if let Some(path) = manifest_path {
+        if path.exists() {
+            StdLibConfig::default().with_path(path)
+        } else {
+            StdLibConfig::default()
+        }
+    } else {
+        StdLibConfig::default()
+    };
+
+    match StdLib::load(&config) {
+        Ok(Some(stdlib)) => Ok(stdlib.sources),
+        Ok(None) => Ok(Vec::new()), // Stdlib disabled
+        Err(e) => Err(e.to_string()),
+    }
+}
+
 /// Visibility levels for test expectations
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Visibility {
@@ -127,6 +339,17 @@ pub enum Visibility {
     Public,
 }
 
+/// Result of running a compiled program.
+#[derive(Debug, Clone)]
+pub struct RunResult {
+    /// Exit code of the program.
+    pub exit_code: i32,
+    /// Standard output.
+    pub stdout: String,
+    /// Standard error.
+    pub stderr: String,
+}
+
 /// Test context containing compilation results
 pub struct TestContext {
     pub semantic_model: SemanticModel,
@@ -134,6 +357,8 @@ pub struct TestContext {
     pub has_errors: bool,
     /// Lazily computed MIR lowering result
     mir_result: OnceCell<kestrel_execution_graph_lowering::LoweringResult>,
+    /// Lazily computed run result
+    run_result: OnceCell<Result<RunResult, String>>,
 }
 
 impl TestContext {
@@ -141,8 +366,76 @@ impl TestContext {
     pub fn mir(&self) -> &kestrel_execution_graph_lowering::LoweringResult {
         self.mir_result.get_or_init(|| {
             let root = self.semantic_model.root();
-            kestrel_execution_graph_lowering::lower_module(&self.semantic_model, &root)
+            kestrel_execution_graph_lowering::lower_module(&self.semantic_model, root)
         })
+    }
+
+    /// Get the run result, compiling and running the program lazily if needed.
+    pub fn run_result(&self) -> Result<&RunResult, String> {
+        self.run_result
+            .get_or_init(|| self.compile_and_run())
+            .as_ref()
+            .map_err(|e| e.clone())
+    }
+
+    /// Compile to executable and run, capturing the output.
+    fn compile_and_run(&self) -> Result<RunResult, String> {
+        // Get MIR (this already handles errors)
+        let mir_result = self.mir();
+        if !mir_result.diagnostics.is_empty() {
+            return Err(format!("MIR lowering failed: {:?}", mir_result.diagnostics));
+        }
+
+        // Create temp directory
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let temp_dir = std::env::temp_dir().join(format!(
+            "kestrel_test_run_{}_{:?}_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos(),
+            std::thread::current().id(),
+            COUNTER.fetch_add(1, Ordering::SeqCst)
+        ));
+        std::fs::create_dir_all(&temp_dir)
+            .map_err(|e| format!("Failed to create temp dir: {}", e))?;
+
+        // Determine executable name
+        let exe_name = if cfg!(windows) { "test.exe" } else { "test" };
+        let exe_path = temp_dir.join(exe_name);
+
+        // Clone MIR for codegen (we need mutable access)
+        let mut mir = mir_result.mir.clone();
+
+        // Compile and link
+        use kestrel_codegen::TargetConfig;
+        use kestrel_codegen_cranelift::{CodegenOptions, compile_and_link};
+
+        let target = TargetConfig::host();
+        let options = CodegenOptions::default();
+
+        if let Err(e) = compile_and_link(&mut mir, &target, &options, &exe_path) {
+            let _ = std::fs::remove_dir_all(&temp_dir);
+            return Err(format!("Codegen failed: {}", e));
+        }
+
+        // Run the executable
+        let result = match Command::new(&exe_path).output() {
+            Ok(output) => RunResult {
+                exit_code: output.status.code().unwrap_or(-1),
+                stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+                stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+            },
+            Err(e) => {
+                let _ = std::fs::remove_dir_all(&temp_dir);
+                return Err(format!("Failed to run executable: {}", e));
+            },
+        };
+
+        // Cleanup
+        let _ = std::fs::remove_dir_all(&temp_dir);
+
+        Ok(result)
     }
 }
 
@@ -153,6 +446,9 @@ pub struct Test {
     /// Whether to include the prelude module with builtin protocols.
     /// Default is `true`. Use `.without_prelude()` to opt out.
     include_prelude: bool,
+    /// Whether to include the standard library.
+    /// Default is `false`. Use `.with_stdlib()` to enable.
+    include_stdlib: bool,
 }
 
 impl Test {
@@ -165,6 +461,7 @@ impl Test {
             files: vec![("test.ks".to_string(), source.to_string())],
             context: None,
             include_prelude: true,
+            include_stdlib: false,
         }
     }
 
@@ -180,6 +477,7 @@ impl Test {
                 .collect(),
             context: None,
             include_prelude: true,
+            include_stdlib: false,
         }
     }
 
@@ -201,6 +499,21 @@ impl Test {
         self
     }
 
+    /// Include the standard library from `lang/std/`.
+    ///
+    /// This loads the actual stdlib files and enables std auto-import.
+    /// Use this for tests that need access to stdlib types like `Int64`, `String`, etc.
+    pub fn with_stdlib(mut self) -> Self {
+        self.include_stdlib = true;
+        self
+    }
+
+    /// Exclude the standard library (default behavior).
+    pub fn without_stdlib(mut self) -> Self {
+        self.include_stdlib = false;
+        self
+    }
+
     /// Compile the test files and store the result
     fn compile(&mut self) {
         if self.context.is_some() {
@@ -211,9 +524,37 @@ impl Test {
         let mut diagnostics = DiagnosticContext::new();
         let mut has_parse_errors = false;
 
-        // Collect all files to compile (prelude first if enabled, then test files)
+        // Load stdlib files if enabled
+        let stdlib_files: Vec<(String, String)> = if self.include_stdlib {
+            builder.enable_std_auto_import();
+            match load_stdlib() {
+                Ok(files) => files,
+                Err(e) => {
+                    // Create context with error
+                    let diagnostic = kestrel_reporting::Diagnostic::error()
+                        .with_message(format!("Failed to load stdlib: {}", e));
+                    diagnostics.add_diagnostic(diagnostic);
+                    self.context = Some(TestContext {
+                        semantic_model: builder.build(),
+                        diagnostics,
+                        has_errors: true,
+                        mir_result: OnceCell::new(),
+                        run_result: OnceCell::new(),
+                    });
+                    return;
+                },
+            }
+        } else {
+            Vec::new()
+        };
+
+        // Collect all files to compile (stdlib first if enabled, then prelude if not using stdlib, then test files)
+        // Note: When using stdlib, we don't include the prelude since stdlib has its own protocol definitions
         let mut all_files: Vec<(&str, &str)> = Vec::new();
-        if self.include_prelude {
+        for (name, content) in &stdlib_files {
+            all_files.push((name.as_str(), content.as_str()));
+        }
+        if self.include_prelude && !self.include_stdlib {
             all_files.push((PRELUDE_SOURCE.0, PRELUDE_SOURCE.1));
         }
         for (name, content) in &self.files {
@@ -228,13 +569,13 @@ impl Test {
                 .map(|spanned| (spanned.value, spanned.span))
                 .collect();
 
-            let result = Parser::parse(content, tokens.into_iter(), parse_source_file);
+            let result = Parser::parse(content, tokens.into_iter(), parse_source_file, file_id);
 
             if !result.errors.is_empty() {
                 has_parse_errors = true;
                 // Add parse errors to diagnostics
                 for error in &result.errors {
-                    let span = error.span.clone().unwrap_or(Span::from(0..1));
+                    let span = error.span.clone().unwrap_or(Span::new(0, 0..1));
                     let diagnostic = kestrel_reporting::Diagnostic::error()
                         .with_message(&error.message)
                         .with_labels(vec![kestrel_reporting::Label::primary(
@@ -275,6 +616,7 @@ impl Test {
             diagnostics,
             has_errors,
             mir_result: OnceCell::new(),
+            run_result: OnceCell::new(),
         });
     }
 
@@ -441,6 +783,159 @@ impl Expectable for NoWarnings {
     }
 }
 
+// ============================================================================
+// Run expectations
+// ============================================================================
+
+/// Expects the program to compile, link, and run successfully (exit code 0).
+pub struct Runs;
+
+impl Expectable for Runs {
+    fn check(&self, ctx: &TestContext) -> Result<(), String> {
+        if ctx.has_errors {
+            return Err(format!(
+                "Expected program to run, but compilation failed with {} error(s)",
+                ctx.diagnostics.len()
+            ));
+        }
+
+        let result = ctx.run_result()?;
+        if result.exit_code == 0 {
+            Ok(())
+        } else {
+            Err(format!(
+                "Expected program to run successfully (exit code 0), but got exit code {}\nstderr: {}",
+                result.exit_code, result.stderr
+            ))
+        }
+    }
+}
+
+/// Expects a specific exit code from the program.
+pub struct ExitCode(pub i32);
+
+impl Expectable for ExitCode {
+    fn check(&self, ctx: &TestContext) -> Result<(), String> {
+        if ctx.has_errors {
+            return Err(format!(
+                "Expected program to run with exit code {}, but compilation failed with {} error(s)",
+                self.0,
+                ctx.diagnostics.len()
+            ));
+        }
+
+        let result = ctx.run_result()?;
+        if result.exit_code == self.0 {
+            Ok(())
+        } else {
+            Err(format!(
+                "Expected exit code {}, but got {}\nstdout: {}\nstderr: {}",
+                self.0, result.exit_code, result.stdout, result.stderr
+            ))
+        }
+    }
+}
+
+/// Expects stdout to contain a specific string.
+pub struct StdoutContains(pub &'static str);
+
+impl Expectable for StdoutContains {
+    fn check(&self, ctx: &TestContext) -> Result<(), String> {
+        if ctx.has_errors {
+            return Err(format!(
+                "Expected stdout to contain '{}', but compilation failed with {} error(s)",
+                self.0,
+                ctx.diagnostics.len()
+            ));
+        }
+
+        let result = ctx.run_result()?;
+        if result.stdout.contains(self.0) {
+            Ok(())
+        } else {
+            Err(format!(
+                "Expected stdout to contain '{}', but got:\n{}",
+                self.0, result.stdout
+            ))
+        }
+    }
+}
+
+/// Expects stdout to equal a specific string exactly.
+pub struct StdoutEquals(pub &'static str);
+
+impl Expectable for StdoutEquals {
+    fn check(&self, ctx: &TestContext) -> Result<(), String> {
+        if ctx.has_errors {
+            return Err(format!(
+                "Expected stdout to equal '{}', but compilation failed with {} error(s)",
+                self.0,
+                ctx.diagnostics.len()
+            ));
+        }
+
+        let result = ctx.run_result()?;
+        if result.stdout == self.0 {
+            Ok(())
+        } else {
+            Err(format!(
+                "Expected stdout to equal '{}', but got:\n{}",
+                self.0, result.stdout
+            ))
+        }
+    }
+}
+
+/// Expects stderr to contain a specific string.
+pub struct StderrContains(pub &'static str);
+
+impl Expectable for StderrContains {
+    fn check(&self, ctx: &TestContext) -> Result<(), String> {
+        if ctx.has_errors {
+            return Err(format!(
+                "Expected stderr to contain '{}', but compilation failed with {} error(s)",
+                self.0,
+                ctx.diagnostics.len()
+            ));
+        }
+
+        let result = ctx.run_result()?;
+        if result.stderr.contains(self.0) {
+            Ok(())
+        } else {
+            Err(format!(
+                "Expected stderr to contain '{}', but got:\n{}",
+                self.0, result.stderr
+            ))
+        }
+    }
+}
+
+/// Expects stderr to equal a specific string exactly.
+pub struct StderrEquals(pub &'static str);
+
+impl Expectable for StderrEquals {
+    fn check(&self, ctx: &TestContext) -> Result<(), String> {
+        if ctx.has_errors {
+            return Err(format!(
+                "Expected stderr to equal '{}', but compilation failed with {} error(s)",
+                self.0,
+                ctx.diagnostics.len()
+            ));
+        }
+
+        let result = ctx.run_result()?;
+        if result.stderr == self.0 {
+            Ok(())
+        } else {
+            Err(format!(
+                "Expected stderr to equal '{}', but got:\n{}",
+                self.0, result.stderr
+            ))
+        }
+    }
+}
+
 /// Symbol expectation with chainable behavior checks
 ///
 /// Symbols can be found by simple name or by dot-separated path:
@@ -586,10 +1081,35 @@ impl Symbol {
 
 impl Expectable for Symbol {
     fn check(&self, ctx: &TestContext) -> Result<(), String> {
-        let root = ctx.semantic_model.root();
-        let symbol = self
-            .find_symbol(root)
-            .ok_or_else(|| format!("Symbol '{}' not found", self.path))?;
+        // If kind is specified AND path is a simple name (no dots), use registry
+        // for precise lookup to avoid finding wrong symbols
+        // (e.g., type parameters from prelude's ControlFlow[C, B])
+        let symbol = if let Some(expected_kind) = &self.kind {
+            if !self.path.contains('.') {
+                // Simple name - use registry for O(1) lookup by kind
+                let matches = ctx
+                    .semantic_model
+                    .registry()
+                    .find_by_kind_and_name(*expected_kind, &self.path);
+                if matches.is_empty() {
+                    return Err(format!(
+                        "Symbol '{}' with kind {:?} not found",
+                        self.path, expected_kind
+                    ));
+                }
+                matches.into_iter().next().unwrap()
+            } else {
+                // Path-based lookup - use tree search
+                let root = ctx.semantic_model.root();
+                self.find_symbol(root)
+                    .ok_or_else(|| format!("Symbol '{}' not found", self.path))?
+            }
+        } else {
+            // No kind specified - fall back to tree search
+            let root = ctx.semantic_model.root();
+            self.find_symbol(root)
+                .ok_or_else(|| format!("Symbol '{}' not found", self.path))?
+        };
 
         // Check kind if specified
         if let Some(expected_kind) = &self.kind {
@@ -702,7 +1222,7 @@ impl Behavior {
                             (Some(SemanticVisibility::Internal), Visibility::Internal) => true,
                             (Some(SemanticVisibility::Fileprivate), Visibility::Fileprivate) => {
                                 true
-                            }
+                            },
                             (None, Visibility::Internal) => true, // Default is internal
                             _ => false,
                         };
@@ -712,7 +1232,7 @@ impl Behavior {
                                 path, actual, expected
                             ));
                         }
-                    }
+                    },
                     None => {
                         // No visibility behavior means internal (default)
                         if *expected != Visibility::Internal {
@@ -721,10 +1241,10 @@ impl Behavior {
                                 path, expected
                             ));
                         }
-                    }
+                    },
                 }
                 Ok(())
-            }
+            },
             Behavior::TypeParamCount(expected) => {
                 let count = get_type_param_count(symbol);
                 if count != *expected {
@@ -734,7 +1254,7 @@ impl Behavior {
                     ));
                 }
                 Ok(())
-            }
+            },
             Behavior::IsGeneric(expected) => {
                 let is_generic = get_type_param_count(symbol) > 0;
                 if is_generic != *expected {
@@ -746,7 +1266,7 @@ impl Behavior {
                     ));
                 }
                 Ok(())
-            }
+            },
             Behavior::FieldCount(expected) => {
                 let count = get_field_count(symbol);
                 if count != *expected {
@@ -756,7 +1276,7 @@ impl Behavior {
                     ));
                 }
                 Ok(())
-            }
+            },
             Behavior::IsStatic(expected) => {
                 let is_static = get_is_static(symbol);
                 if is_static != Some(*expected) {
@@ -766,7 +1286,7 @@ impl Behavior {
                     ));
                 }
                 Ok(())
-            }
+            },
             Behavior::HasBody(expected) => {
                 let has_body = get_has_body(symbol);
                 if has_body != Some(*expected) {
@@ -776,7 +1296,7 @@ impl Behavior {
                     ));
                 }
                 Ok(())
-            }
+            },
             Behavior::ParameterCount(expected) => {
                 let count = get_parameter_count(symbol);
                 if count != Some(*expected) {
@@ -786,7 +1306,7 @@ impl Behavior {
                     ));
                 }
                 Ok(())
-            }
+            },
             Behavior::ConformanceCount(expected) => {
                 let count = get_conformance_count(symbol);
                 if count != *expected {
@@ -796,7 +1316,7 @@ impl Behavior {
                     ));
                 }
                 Ok(())
-            }
+            },
             Behavior::IsInstanceMethod(expected) => {
                 let is_instance = get_is_instance_method(symbol);
                 if is_instance != Some(*expected) {
@@ -806,7 +1326,7 @@ impl Behavior {
                     ));
                 }
                 Ok(())
-            }
+            },
             Behavior::ReceiverKind(expected) => {
                 let receiver = get_receiver_kind(symbol);
                 if receiver != Some(*expected) {
@@ -816,7 +1336,7 @@ impl Behavior {
                     ));
                 }
                 Ok(())
-            }
+            },
             Behavior::ChildCount(expected) => {
                 // Count children excluding type parameters (they're structural, not semantic)
                 let count = symbol
@@ -832,7 +1352,7 @@ impl Behavior {
                     ));
                 }
                 Ok(())
-            }
+            },
             Behavior::ImplementsProtocol(protocol_name, method_name) => {
                 let implements_info = get_implements_protocol_info(symbol);
                 match implements_info {
@@ -843,16 +1363,16 @@ impl Behavior {
                                 path, actual_protocol, actual_method, protocol_name, method_name
                             ));
                         }
-                    }
+                    },
                     None => {
                         return Err(format!(
                             "Symbol '{}' does not implement any protocol method, expected '{}.{}'",
                             path, protocol_name, method_name
                         ));
-                    }
+                    },
                 }
                 Ok(())
-            }
+            },
             Behavior::ImplementsProtocolNone => {
                 let implements_info = get_implements_protocol_info(symbol);
                 if let Some((protocol_name, method_name)) = implements_info {
@@ -862,7 +1382,7 @@ impl Behavior {
                     ));
                 }
                 Ok(())
-            }
+            },
             Behavior::HasAttribute(attr_name) => {
                 let has_attr = get_has_attribute(symbol, attr_name);
                 if !has_attr {
@@ -872,7 +1392,7 @@ impl Behavior {
                     ));
                 }
                 Ok(())
-            }
+            },
             Behavior::AttributeCount(expected) => {
                 let count = get_attribute_count(symbol);
                 if count != *expected {
@@ -882,7 +1402,7 @@ impl Behavior {
                     ));
                 }
                 Ok(())
-            }
+            },
             Behavior::AttributeArgCount(attr_name, expected) => {
                 let count = get_attribute_arg_count(symbol, attr_name);
                 match count {
@@ -896,7 +1416,7 @@ impl Behavior {
                         path, attr_name
                     )),
                 }
-            }
+            },
             Behavior::HasNegativeConformance(protocol_name) => {
                 let has_neg = has_negative_conformance_to(symbol, protocol_name);
                 if has_neg {
@@ -907,7 +1427,7 @@ impl Behavior {
                         path, protocol_name
                     ))
                 }
-            }
+            },
             Behavior::ConformsTo(protocol_name) => {
                 let conforms = conforms_to_protocol(symbol, protocol_name);
                 if conforms {
@@ -918,7 +1438,7 @@ impl Behavior {
                         path, protocol_name
                     ))
                 }
-            }
+            },
             Behavior::IsCopyable(expected) => {
                 let is_copyable = get_is_copyable(symbol);
                 match is_copyable {
@@ -937,9 +1457,9 @@ impl Behavior {
                                 path
                             ))
                         }
-                    }
+                    },
                 }
-            }
+            },
             Behavior::IsCloneable(expected) => {
                 let is_cloneable = get_is_cloneable(symbol);
                 match is_cloneable {
@@ -958,9 +1478,9 @@ impl Behavior {
                                 path
                             ))
                         }
-                    }
+                    },
                 }
-            }
+            },
             Behavior::HasDeinit(expected) => {
                 let has_deinit = get_has_deinit(symbol);
                 if has_deinit == *expected {
@@ -971,7 +1491,7 @@ impl Behavior {
                         path, has_deinit, expected
                     ))
                 }
-            }
+            },
         }
     }
 }
@@ -997,7 +1517,7 @@ impl std::fmt::Debug for Behavior {
             Behavior::AttributeArgCount(name, n) => write!(f, "AttributeArgCount({}, {})", name, n),
             Behavior::HasNegativeConformance(name) => {
                 write!(f, "HasNegativeConformance({})", name)
-            }
+            },
             Behavior::ConformsTo(name) => write!(f, "ConformsTo({})", name),
             Behavior::IsCopyable(b) => write!(f, "IsCopyable({})", b),
             Behavior::IsCloneable(b) => write!(f, "IsCloneable({})", b),

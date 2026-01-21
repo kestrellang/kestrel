@@ -1,6 +1,6 @@
 //! Protocol method definitions.
 
-use crate::id::{Id, Ty};
+use crate::id::{Id, Ty, TypeParam};
 use crate::metadata::{Metadata, Prior};
 
 /// A method signature in a protocol.
@@ -10,6 +10,8 @@ pub struct ProtocolMethodDef {
     pub priors: Vec<Prior<ProtocolMethodDef>>,
     /// Method name.
     pub name: String,
+    /// Type parameters for this method (e.g., `H` in `func hash[H](...)`).
+    pub type_params: Vec<Id<TypeParam>>,
     /// Parameters as (name, type) pairs.
     pub params: Vec<(String, Id<Ty>)>,
     /// Return type.
@@ -24,6 +26,7 @@ impl ProtocolMethodDef {
             meta: Metadata::new(),
             priors: Vec::new(),
             name: name.into(),
+            type_params: Vec::new(),
             params: Vec::new(),
             ret,
             has_default: false,

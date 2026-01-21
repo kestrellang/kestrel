@@ -148,40 +148,34 @@ fn check_import_conflicts(
                 };
                 for item in import_data.items() {
                     let name = item.alias.clone().unwrap_or_else(|| item.name.clone());
-                    if let Some(existing_sources) = name_sources.get(&name) {
-                        if let Some(first) = existing_sources.first() {
-                            ctx.report(ImportConflictError {
-                                name: name.clone(),
-                                import_span: item.span.clone(),
-                                existing_span: first.span.clone(),
-                                existing_is_import: first.is_import,
-                            });
-                        }
-                    }
-                    name_sources
-                        .entry(name)
-                        .or_insert_with(Vec::new)
-                        .push(NameSource {
-                            span: item.span.clone(),
-                            is_import: true,
+                    if let Some(existing_sources) = name_sources.get(&name)
+                        && let Some(first) = existing_sources.first()
+                    {
+                        ctx.report(ImportConflictError {
+                            name: name.clone(),
+                            import_span: item.span.clone(),
+                            existing_span: first.span.clone(),
+                            existing_is_import: first.is_import,
                         });
+                    }
+                    name_sources.entry(name).or_default().push(NameSource {
+                        span: item.span.clone(),
+                        is_import: true,
+                    });
                 }
-            }
+            },
             KestrelSymbolKind::Struct
             | KestrelSymbolKind::Protocol
             | KestrelSymbolKind::TypeAlias
             | KestrelSymbolKind::Function => {
                 let name = child.metadata().name().value.clone();
                 let name_span = child.metadata().name().span.clone();
-                name_sources
-                    .entry(name)
-                    .or_insert_with(Vec::new)
-                    .push(NameSource {
-                        span: name_span,
-                        is_import: false,
-                    });
-            }
-            _ => {}
+                name_sources.entry(name).or_default().push(NameSource {
+                    span: name_span,
+                    is_import: false,
+                });
+            },
+            _ => {},
         }
     }
 
@@ -239,7 +233,7 @@ fn get_visibility_info(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> (String, ke
                 None => "internal".to_string(),
             };
             (vis_str, symbol.metadata().span())
-        }
+        },
         None => ("internal".to_string(), symbol.metadata().span()),
     }
 }

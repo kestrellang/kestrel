@@ -1,133 +1,236 @@
 // Iterator adapter types
 
-// MapIterator
-public struct MapIterator[I: Iterator, U]: Iterator {
+module std.iter
+
+import std.result.(Optional)
+import std.core.(Bool, Cloneable)
+import std.num.(Int64)
+import std.iter.(Iterator)
+
+// MapIterator - transforms each element
+public struct MapIterator[I, U]: Iterator where I: Iterator {
     type Item = U
 
     private var inner: I
     private var transform: (I.Item) -> U
 
     public init(inner: I, transform: (I.Item) -> U) {
-        self.inner = inner
-        self.transform = transform
+        self.inner = inner;
+        self.transform = transform;
     }
 
-    public func next() -> Optional[U] {
-        self.inner.next().map(self.transform)
+    public mutating func next() -> Optional[U] {
+        let item = self.inner.next();
+        if item.isSome() {
+            .Some(self.transform(item.unwrap()))
+        } else {
+            .None
+        }
     }
 }
 
-// FilterIterator
-public struct FilterIterator[I: Iterator]: Iterator {
+// FilterIterator - yields only elements matching predicate
+public struct FilterIterator[I]: Iterator where I: Iterator {
     type Item = I.Item
 
     private var inner: I
     private var predicate: (I.Item) -> Bool
 
     public init(inner: I, predicate: (I.Item) -> Bool) {
-        self.inner = inner
-        self.predicate = predicate
+        self.inner = inner;
+        self.predicate = predicate;
     }
 
-    public func next() -> Optional[I.Item] {
-        while let item = self.inner.next() {
-            if self.predicate(item) {
-                return .Some(item)
+    public mutating func next() -> Optional[I.Item] {
+        var done: Bool = false;
+        var result: Optional[I.Item] = .None;
+        while done == false {
+            let item = self.inner.next();
+            if item.isNone() {
+                done = true
+            } else {
+                let value = item.unwrap();
+                if self.predicate(value) {
+                    result = .Some(value);
+                    done = true
+                }
             }
         }
-        .None
+        result
     }
 }
 
-// FilterMapIterator
-public struct FilterMapIterator[I: Iterator, U]: Iterator {
+// FilterMapIterator - filters and transforms in one step
+public struct FilterMapIterator[I, U]: Iterator where I: Iterator {
     type Item = U
 
     private var inner: I
     private var transform: (I.Item) -> Optional[U]
 
     public init(inner: I, transform: (I.Item) -> Optional[U]) {
-        self.inner = inner
-        self.transform = transform
+        self.inner = inner;
+        self.transform = transform;
     }
 
-    public func next() -> Optional[U] {
-        while let item = self.inner.next() {
-            if let result = self.transform(item) {
-                return .Some(result)
-            }
-        }
-        .None
-    }
-}
-
-// FlatMapIterator
-public struct FlatMapIterator[I: Iterator, Inner: Iterable]: Iterator {
-    type Item = Inner.Item
-
-    private var inner: I
-    private var transform: (I.Item) -> Inner
-    private var current: Optional[Inner.Iter]
-
-    public init(inner: I, transform: (I.Item) -> Inner, current: Optional[Inner.Iter]) {
-        self.inner = inner
-        self.transform = transform
-        self.current = current
-    }
-
-    public func next() -> Optional[Inner.Item] {
-        while true {
-            if let currentIter = self.current {
-                if let item = currentIter.next() {
-                    return .Some(item)
-                }
-                self.current = .None
-            }
-
-            if let outerItem = self.inner.next() {
-                self.current = .Some(self.transform(outerItem).iter())
+    public mutating func next() -> Optional[U] {
+        var done: Bool = false;
+        var result: Optional[U] = .None;
+        while done == false {
+            let item = self.inner.next();
+            if item.isNone() {
+                done = true
             } else {
-                return .None
+                let transformed = self.transform(item.unwrap());
+                if transformed.isSome() {
+                    result = transformed;
+                    done = true
+                }
             }
         }
+        result
     }
 }
 
-// InspectIterator
-public struct InspectIterator[I: Iterator]: Iterator {
+// TakeWhileIterator - takes elements while predicate is true
+public struct TakeWhileIterator[I]: Iterator where I: Iterator {
     type Item = I.Item
 
     private var inner: I
-    private var action: (I.Item) -> Void
+    private var predicate: (I.Item) -> Bool
+    private var done: Bool
 
-    public init(inner: I, action: (I.Item) -> Void) {
-        self.inner = inner
-        self.action = action
+    public init(inner: I, predicate: (I.Item) -> Bool) {
+        self.inner = inner;
+        self.predicate = predicate;
+        self.done = false;
     }
 
-    public func next() -> Optional[I.Item] {
-        self.inner.next().map { item in
-            self.action(item)
-            item
+    public mutating func next() -> Optional[I.Item] {
+        if self.done {
+            return .None
+        }
+
+        let item = self.inner.next();
+        if item.isNone() {
+            self.done = true;
+            return .None
+        }
+
+        let value = item.unwrap();
+        if self.predicate(value) {
+            .Some(value)
+        } else {
+            self.done = true;
+            .None
         }
     }
 }
 
-// TakeIterator
-public struct TakeIterator[I: Iterator]: Iterator {
+// ZipIterator - pairs elements from two iterators
+public struct ZipIterator[A, B]: Iterator where A: Iterator, B: Iterator {
+    type Item = (A.Item, B.Item)
+
+    private var first: A
+    private var second: B
+
+    public init(first: A, second: B) {
+        self.first = first;
+        self.second = second;
+    }
+
+    public mutating func next() -> Optional[(A.Item, B.Item)] {
+        let a = self.first.next();
+        if a.isNone() {
+            return .None
+        }
+        let b = self.second.next();
+        if b.isNone() {
+            return .None
+        }
+        let pair = (a.unwrap(), b.unwrap());
+        .Some(pair)
+    }
+}
+
+// EnumerateIterator - yields (index, item) pairs
+public struct EnumerateIterator[I]: Iterator where I: Iterator {
+    type Item = (Int64, I.Item)
+
+    private var inner: I
+    private var index: Int64
+
+    public init(inner: I) {
+        self.inner = inner;
+        self.index = Int64(intLiteral: 0);
+    }
+
+    public mutating func next() -> Optional[(Int64, I.Item)] {
+        let item = self.inner.next();
+        if item.isSome() {
+            let i = self.index;
+            self.index = self.index + Int64(intLiteral: 1);
+            .Some((i, item.unwrap()))
+        } else {
+            .None
+        }
+    }
+}
+
+// SkipWhileIterator - skips elements while predicate is true
+public struct SkipWhileIterator[I]: Iterator where I: Iterator {
     type Item = I.Item
 
     private var inner: I
-    private var remaining: Int
+    private var predicate: (I.Item) -> Bool
+    private var doneSkipping: Bool
 
-    public init(inner: I, remaining: Int) {
-        self.inner = inner
-        self.remaining = remaining
+    public init(inner: I, predicate: (I.Item) -> Bool) {
+        self.inner = inner;
+        self.predicate = predicate;
+        self.doneSkipping = false;
     }
 
-    public func next() -> Optional[I.Item] {
-        if self.remaining > 0 {
-            self.remaining -= 1
+    public mutating func next() -> Optional[I.Item] {
+        if self.doneSkipping {
+            return self.inner.next()
+        }
+
+        // Skip while predicate is true
+        var found: Bool = false;
+        var result: Optional[I.Item] = .None;
+        while found == false {
+            let item = self.inner.next();
+            if item.isNone() {
+                self.doneSkipping = true;
+                found = true
+            } else {
+                let value = item.unwrap();
+                if self.predicate(value) == false {
+                    self.doneSkipping = true;
+                    result = .Some(value);
+                    found = true
+                }
+            }
+        }
+        result
+    }
+}
+
+// TakeIterator - takes first n elements
+public struct TakeIterator[I]: Iterator where I: Iterator {
+    type Item = I.Item
+
+    private var inner: I
+    private var remaining: Int64
+
+    public init(inner: I, count: Int64) {
+        self.inner = inner;
+        self.remaining = count;
+    }
+
+    public mutating func next() -> Optional[I.Item] {
+        if self.remaining > Int64(intLiteral: 0) {
+            self.remaining = self.remaining - Int64(intLiteral: 1);
             self.inner.next()
         } else {
             .None
@@ -135,179 +238,50 @@ public struct TakeIterator[I: Iterator]: Iterator {
     }
 }
 
-// TakeWhileIterator
-public struct TakeWhileIterator[I: Iterator]: Iterator {
+// SkipIterator - skips first n elements
+public struct SkipIterator[I]: Iterator where I: Iterator {
     type Item = I.Item
 
     private var inner: I
-    private var predicate: (I.Item) -> Bool
-    private var done: Bool
+    private var remaining: Int64
 
-    public init(inner: I, predicate: (I.Item) -> Bool, done: Bool) {
-        self.inner = inner
-        self.predicate = predicate
-        self.done = done
+    public init(inner: I, count: Int64) {
+        self.inner = inner;
+        self.remaining = count;
     }
 
-    public func next() -> Optional[I.Item] {
-        if self.done {
-            return .None
-        }
-
-        if let item = self.inner.next() {
-            if self.predicate(item) {
-                return .Some(item)
-            }
-            self.done = true
-        }
-        .None
-    }
-}
-
-// SkipIterator
-public struct SkipIterator[I: Iterator]: Iterator {
-    type Item = I.Item
-
-    private var inner: I
-    private var remaining: Int
-
-    public init(inner: I, remaining: Int) {
-        self.inner = inner
-        self.remaining = remaining
-    }
-
-    public func next() -> Optional[I.Item] {
-        while self.remaining > 0 {
-            if self.inner.next().isNone {
+    public mutating func next() -> Optional[I.Item] {
+        // Skip remaining elements first
+        while self.remaining > Int64(intLiteral: 0) {
+            let item = self.inner.next();
+            if item.isNone() {
                 return .None
             }
-            self.remaining -= 1
+            self.remaining = self.remaining - Int64(intLiteral: 1)
         }
         self.inner.next()
     }
 }
 
-// SkipWhileIterator
-public struct SkipWhileIterator[I: Iterator]: Iterator {
-    type Item = I.Item
-
-    private var inner: I
-    private var predicate: (I.Item) -> Bool
-    private var done: Bool
-
-    public init(inner: I, predicate: (I.Item) -> Bool, done: Bool) {
-        self.inner = inner
-        self.predicate = predicate
-        self.done = done
-    }
-
-    public func next() -> Optional[I.Item] {
-        if self.done {
-            return self.inner.next()
-        }
-
-        while let item = self.inner.next() {
-            if not self.predicate(item) {
-                self.done = true
-                return .Some(item)
-            }
-        }
-        .None
-    }
-}
-
-// StepByIterator
-public struct StepByIterator[I: Iterator]: Iterator {
-    type Item = I.Item
-
-    private var inner: I
-    private var step: Int
-    private var first: Bool
-
-    public init(inner: I, step: Int, first: Bool) {
-        self.inner = inner
-        self.step = step
-        self.first = first
-    }
-
-    public func next() -> Optional[I.Item] {
-        if self.first {
-            self.first = false
-            return self.inner.next()
-        }
-
-        for _ in 0..<(self.step - 1) {
-            if self.inner.next().isNone {
-                return .None
-            }
-        }
-        self.inner.next()
-    }
-}
-
-// EnumerateIterator
-public struct EnumerateIterator[I: Iterator]: Iterator {
-    type Item = (Int, I.Item)
-
-    private var inner: I
-    private var index: Int
-
-    public init(inner: I, index: Int) {
-        self.inner = inner
-        self.index = index
-    }
-
-    public func next() -> Optional[(Int, I.Item)] {
-        self.inner.next().map { item in
-            let i = self.index
-            self.index += 1
-            (i, item)
-        }
-    }
-}
-
-// ZipIterator
-public struct ZipIterator[A: Iterator, B: Iterator]: Iterator {
-    type Item = (A.Item, B.Item)
-
-    private var first: A
-    private var second: B
-
-    public init(first: A, second: B) {
-        self.first = first
-        self.second = second
-    }
-
-    public func next() -> Optional[(A.Item, B.Item)] {
-        if let a = self.first.next() {
-            if let b = self.second.next() {
-                return .Some((a, b))
-            }
-        }
-        .None
-    }
-}
-
-// ChainIterator
-public struct ChainIterator[A: Iterator, B: Iterator]: Iterator
-    where B.Item == A.Item
-{
+// ChainIterator - chains two iterators together
+public struct ChainIterator[A, B]: Iterator where A: Iterator, B: Iterator, B.Item = A.Item {
     type Item = A.Item
 
     private var first: A
     private var second: B
     private var firstDone: Bool
 
-    public init(first: A, second: B, firstDone: Bool) {
-        self.first = first
-        self.second = second
-        self.firstDone = firstDone
+    public init(first: A, second: B) {
+        self.first = first;
+        self.second = second;
+        self.firstDone = false;
     }
 
-    public func next() -> Optional[A.Item] {
+    public mutating func next() -> Optional[A.Item] {
         if not self.firstDone {
-            if let item = self.first.next() {
-                return .Some(item)
+            let item = self.first.next();
+            if item.isSome() {
+                return item
             }
             self.firstDone = true
         }
@@ -315,176 +289,140 @@ public struct ChainIterator[A: Iterator, B: Iterator]: Iterator
     }
 }
 
-// CycleIterator
-public struct CycleIterator[I: Iterator + Cloneable]: Iterator {
-    type Item = I.Item
-
-    private var original: I
-    private var current: I
-
-    public init(original: I, current: I) {
-        self.original = original
-        self.current = current
-    }
-
-    public func next() -> Optional[I.Item] {
-        if let item = self.current.next() {
-            return .Some(item)
-        }
-        self.current = self.original.clone()
-        self.current.next()
-    }
-}
-
-// IntersperseIterator
-public struct IntersperseIterator[I: Iterator]: Iterator where I.Item: Cloneable {
-    type Item = I.Item
-
-    private var inner: I
-    private var separator: I.Item
-    private var needsSeparator: Bool
-
-    public init(inner: I, separator: I.Item, needsSeparator: Bool) {
-        self.inner = inner
-        self.separator = separator
-        self.needsSeparator = needsSeparator
-    }
-
-    public func next() -> Optional[I.Item] {
-        if self.needsSeparator {
-            self.needsSeparator = false
-            return .Some(self.separator.clone())
-        }
-
-        self.inner.next().map { item in
-            self.needsSeparator = true
-            item
-        }
-    }
-}
-
-// PeekableIterator
-public struct PeekableIterator[I: Iterator]: Iterator {
+// PeekableIterator - allows peeking at next element without consuming
+public struct PeekableIterator[I]: Iterator where I: Iterator {
     type Item = I.Item
 
     private var inner: I
     private var peeked: Optional[Optional[I.Item]]
 
-    public init(inner: I, peeked: Optional[Optional[I.Item]>) {
-        self.inner = inner
-        self.peeked = peeked
+    public init(inner: I) {
+        self.inner = inner;
+        self.peeked = .None;
     }
 
-    public func peek() -> Optional[I.Item] {
-        if self.peeked.isNone {
+    public mutating func peek() -> Optional[I.Item] {
+        if self.peeked.isNone() {
             self.peeked = .Some(self.inner.next())
         }
         self.peeked.unwrap()
     }
 
-    public func next() -> Optional[I.Item] {
-        if let p = self.peeked {
-            self.peeked = .None
-            return p
+    public mutating func next() -> Optional[I.Item] {
+        if self.peeked.isSome() {
+            let result = self.peeked.unwrap();
+            self.peeked = .None;
+            return result
         }
         self.inner.next()
     }
+}
 
-    public func nextIf(predicate: (I.Item) -> Bool) -> Optional[I.Item] {
-        if let item = self.peek() {
-            if predicate(item) {
-                return self.next()
-            }
+// CycleIterator - repeats iterator forever
+public struct CycleIterator[I]: Iterator where I: Iterator, I: Cloneable {
+    type Item = I.Item
+
+    private var original: I
+    private var current: I
+
+    public init(iter: I) {
+        self.original = iter.clone();
+        self.current = iter;
+    }
+
+    public mutating func next() -> Optional[I.Item] {
+        let item = self.current.next();
+        if item.isSome() {
+            return item
         }
-        .None
+        self.current = self.original.clone();
+        self.current.next()
     }
 }
 
 // FuseIterator - stops permanently after first None
-public struct FuseIterator[I: Iterator]: Iterator {
+public struct FuseIterator[I]: Iterator where I: Iterator {
     type Item = I.Item
 
     private var inner: I
     private var done: Bool
 
-    public init(inner: I, done: Bool) {
-        self.inner = inner
-        self.done = done
+    public init(inner: I) {
+        self.inner = inner;
+        self.done = false;
     }
 
-    public func next() -> Optional[I.Item] {
+    public mutating func next() -> Optional[I.Item] {
         if self.done {
             return .None
         }
 
-        match self.inner.next() {
-            .Some(let item) => .Some(item),
-            .None => {
-                self.done = true
-                .None
-            }
+        let item = self.inner.next();
+        if item.isNone() {
+            self.done = true
         }
+        item
     }
 }
 
-// EmptyIterator
+// EmptyIterator - yields nothing
 public struct EmptyIterator[T]: Iterator {
     type Item = T
 
     public init() {}
 
-    public func next() -> Optional[T] {
+    public mutating func next() -> Optional[T] {
         .None
     }
 }
 
-// OnceIterator
+// OnceIterator - yields a single value
 public struct OnceIterator[T]: Iterator {
     type Item = T
 
     private var value: Optional[T]
 
     public init(value: T) {
-        self.value = .Some(value)
+        self.value = .Some(value);
     }
 
-    public func next() -> Optional[T] {
-        let result = self.value
-        self.value = .None
+    public mutating func next() -> Optional[T] {
+        let result = self.value;
+        self.value = .None;
         result
     }
 }
 
-// RepeatIterator
-public struct RepeatIterator[T: Cloneable]: Iterator {
+// RepeatIterator - yields the same value forever
+public struct RepeatIterator[T]: Iterator where T: Cloneable {
     type Item = T
 
     private var value: T
 
     public init(value: T) {
-        self.value = value
+        self.value = value;
     }
 
-    public func next() -> Optional[T] {
+    public mutating func next() -> Optional[T] {
         .Some(self.value.clone())
     }
 }
 
-// RepeatNIterator
-public struct RepeatNIterator[T: Cloneable]: Iterator {
+// RepeatNIterator - yields the same value n times
+public struct RepeatNIterator[T]: Iterator where T: Cloneable {
     type Item = T
 
     private var value: T
-    private var remaining: Int
+    private var remaining: Int64
 
-    public init(value: T, count: Int) {
-        self.value = value
-        self.remaining = count
+    public init(value value: T, count count: Int64) {
+        self.value = value;
+        self.remaining = count;
     }
 
-    public func next() -> Optional[T] {
-        if self.remaining > 0 {
-            self.remaining -= 1
+    public mutating func next() -> Optional[T] {
+        if self.remaining > Int64(intLiteral: 0) {
+            self.remaining = self.remaining - Int64(intLiteral: 1);
             .Some(self.value.clone())
         } else {
             .None
@@ -498,13 +436,13 @@ public func empty[T]() -> EmptyIterator[T] {
 }
 
 public func once[T](value: T) -> OnceIterator[T] {
-    OnceIterator(value: value)
+    OnceIterator(value)
 }
 
-public func repeat[T: Cloneable](value: T) -> RepeatIterator[T] {
-    RepeatIterator(value: value)
+public func repeatValue[T](value: T) -> RepeatIterator[T] where T: Cloneable {
+    RepeatIterator(value)
 }
 
-public func repeatN[T: Cloneable](value: T, count: Int) -> RepeatNIterator[T] {
+public func repeatN[T](value: T, count: Int64) -> RepeatNIterator[T] where T: Cloneable {
     RepeatNIterator(value: value, count: count)
 }

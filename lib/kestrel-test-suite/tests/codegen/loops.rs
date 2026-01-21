@@ -1,34 +1,32 @@
 //! Loop tests (loop, while, break, continue).
 
-use super::compile_and_run;
+use kestrel_test_suite::*;
 
 // =============================================================================
 // Simple loop with break
 // =============================================================================
 
 #[test]
-#[ignore]
 fn test_simple_loop_with_break() {
-    let result = compile_and_run(
-        r#"
-module Test
+    Test::new(
+        r#"module Test
 
-func main() -> Int {
-    var x = 0;
+func main() -> lang.i64 {
+    var x: std.num.Int64 = 0;
     loop {
         x = x + 1;
         if x == 42 {
             break
         }
     }
-    x
+    if x != 42 { return 1 }
+    0
 }
 "#,
-    );
-    if result.exit_code != 42 {
-        eprintln!("stderr: {}", result.stderr);
-    }
-    assert_eq!(result.exit_code, 42);
+    )
+    .with_stdlib()
+    .expect(Compiles)
+    .expect(Runs);
 }
 
 // =============================================================================
@@ -36,70 +34,64 @@ func main() -> Int {
 // =============================================================================
 
 #[test]
-#[ignore]
 fn test_while_loop() {
-    let result = compile_and_run(
-        r#"
-module Test
+    Test::new(
+        r#"module Test
 
-func main() -> Int {
-    var x = 0;
+func main() -> lang.i64 {
+    var x: std.num.Int64 = 0;
     while x < 42 {
         x = x + 1;
     }
-    x
+    if x != 42 { return 1 }
+    0
 }
 "#,
-    );
-    if result.exit_code != 42 {
-        eprintln!("stderr: {}", result.stderr);
-    }
-    assert_eq!(result.exit_code, 42);
+    )
+    .with_stdlib()
+    .expect(Compiles)
+    .expect(Runs);
 }
 
 #[test]
-#[ignore]
 fn test_while_loop_condition_false() {
-    let result = compile_and_run(
-        r#"
-module Test
+    Test::new(
+        r#"module Test
 
-func main() -> Int {
-    var x = 100;
+func main() -> lang.i64 {
+    var x: std.num.Int64 = 100;
     while x < 42 {
         x = x + 1;
     }
-    x
+    // Loop body never executes, x stays 100
+    if x != 100 { return 1 }
+    0
 }
 "#,
-    );
-    // Loop body never executes, x stays 100
-    if result.exit_code != 100 {
-        eprintln!("stderr: {}", result.stderr);
-    }
-    assert_eq!(result.exit_code, 100);
+    )
+    .with_stdlib()
+    .expect(Compiles)
+    .expect(Runs);
 }
 
 #[test]
-#[ignore]
 fn test_while_loop_decrement() {
-    let result = compile_and_run(
-        r#"
-module Test
+    Test::new(
+        r#"module Test
 
-func main() -> Int {
-    var x = 50;
+func main() -> lang.i64 {
+    var x: std.num.Int64 = 50;
     while x > 42 {
         x = x - 1;
     }
-    x
+    if x != 42 { return 1 }
+    0
 }
 "#,
-    );
-    if result.exit_code != 42 {
-        eprintln!("stderr: {}", result.stderr);
-    }
-    assert_eq!(result.exit_code, 42);
+    )
+    .with_stdlib()
+    .expect(Compiles)
+    .expect(Runs);
 }
 
 // =============================================================================
@@ -107,46 +99,42 @@ func main() -> Int {
 // =============================================================================
 
 #[test]
-#[ignore]
 fn test_nested_loops() {
-    let result = compile_and_run(
-        r#"
-module Test
+    Test::new(
+        r#"module Test
 
-func main() -> Int {
-    var sum = 0;
-    var i = 0;
+func main() -> lang.i64 {
+    var sum: std.num.Int64 = 0;
+    var i: std.num.Int64 = 0;
     while i < 6 {
-        var j = 0;
+        var j: std.num.Int64 = 0;
         while j < 7 {
             sum = sum + 1;
             j = j + 1;
         }
         i = i + 1;
     }
-    sum
+    // 6 * 7 = 42
+    if sum != 42 { return 1 }
+    0
 }
 "#,
-    );
-    // 6 * 7 = 42
-    if result.exit_code != 42 {
-        eprintln!("stderr: {}", result.stderr);
-    }
-    assert_eq!(result.exit_code, 42);
+    )
+    .with_stdlib()
+    .expect(Compiles)
+    .expect(Runs);
 }
 
 #[test]
-#[ignore]
 fn test_nested_loops_with_break() {
-    let result = compile_and_run(
-        r#"
-module Test
+    Test::new(
+        r#"module Test
 
-func main() -> Int {
-    var sum = 0;
-    var i = 0;
+func main() -> lang.i64 {
+    var sum: std.num.Int64 = 0;
+    var i: std.num.Int64 = 0;
     while i < 10 {
-        var j = 0;
+        var j: std.num.Int64 = 0;
         while j < 10 {
             sum = sum + 1;
             if sum == 42 {
@@ -159,14 +147,14 @@ func main() -> Int {
         }
         i = i + 1;
     }
-    sum
+    if sum != 42 { return 1 }
+    0
 }
 "#,
-    );
-    if result.exit_code != 42 {
-        eprintln!("stderr: {}", result.stderr);
-    }
-    assert_eq!(result.exit_code, 42);
+    )
+    .with_stdlib()
+    .expect(Compiles)
+    .expect(Runs);
 }
 
 // =============================================================================
@@ -174,15 +162,13 @@ func main() -> Int {
 // =============================================================================
 
 #[test]
-#[ignore]
 fn test_continue() {
-    let result = compile_and_run(
-        r#"
-module Test
+    Test::new(
+        r#"module Test
 
-func main() -> Int {
-    var sum = 0;
-    var i = 0;
+func main() -> lang.i64 {
+    var sum: std.num.Int64 = 0;
+    var i: std.num.Int64 = 0;
     while i < 10 {
         i = i + 1;
         if i == 5 {
@@ -190,27 +176,25 @@ func main() -> Int {
         }
         sum = sum + i;
     }
-    sum
+    // 1+2+3+4+6+7+8+9+10 = 55-5 = 50
+    if sum != 50 { return 1 }
+    0
 }
 "#,
-    );
-    // 1+2+3+4+6+7+8+9+10 = 55-5 = 50
-    if result.exit_code != 50 {
-        eprintln!("stderr: {}", result.stderr);
-    }
-    assert_eq!(result.exit_code, 50);
+    )
+    .with_stdlib()
+    .expect(Compiles)
+    .expect(Runs);
 }
 
 #[test]
-#[ignore]
 fn test_continue_in_loop() {
-    let result = compile_and_run(
-        r#"
-module Test
+    Test::new(
+        r#"module Test
 
-func main() -> Int {
-    var sum = 0;
-    var i = 0;
+func main() -> lang.i64 {
+    var sum: std.num.Int64 = 0;
+    var i: std.num.Int64 = 0;
     loop {
         i = i + 1;
         if i > 10 {
@@ -221,15 +205,15 @@ func main() -> Int {
         }
         sum = sum + i;
     }
-    sum
+    // 1+2+3+4+6+7+8+9+10 = 50
+    if sum != 50 { return 1 }
+    0
 }
 "#,
-    );
-    // 1+2+3+4+6+7+8+9+10 = 50
-    if result.exit_code != 50 {
-        eprintln!("stderr: {}", result.stderr);
-    }
-    assert_eq!(result.exit_code, 50);
+    )
+    .with_stdlib()
+    .expect(Compiles)
+    .expect(Runs);
 }
 
 // =============================================================================
@@ -237,52 +221,46 @@ func main() -> Int {
 // =============================================================================
 
 #[test]
-#[ignore]
 fn test_loop_with_early_return() {
-    let result = compile_and_run(
-        r#"
-module Test
+    Test::new(
+        r#"module Test
 
-func main() -> Int {
-    var x = 0;
+func main() -> lang.i64 {
+    var x: std.num.Int64 = 0;
     loop {
         x = x + 1;
         if x == 42 {
-            return x
+            return 0
         }
     }
 }
 "#,
-    );
-    if result.exit_code != 42 {
-        eprintln!("stderr: {}", result.stderr);
-    }
-    assert_eq!(result.exit_code, 42);
+    )
+    .with_stdlib()
+    .expect(Compiles)
+    .expect(Runs);
 }
 
 #[test]
-#[ignore]
 fn test_while_loop_with_early_return() {
-    let result = compile_and_run(
-        r#"
-module Test
+    Test::new(
+        r#"module Test
 
-func main() -> Int {
-    var x = 0;
+func main() -> lang.i64 {
+    var x: std.num.Int64 = 0;
     while x < 100 {
         x = x + 1;
         if x == 42 {
-            return x
+            return 0
         }
     }
-    0
+    1
 }
 "#,
-    );
-    if result.exit_code != 42 {
-        eprintln!("stderr: {}", result.stderr);
-    }
-    assert_eq!(result.exit_code, 42);
+    )
+    .with_stdlib()
+    .expect(Compiles)
+    .expect(Runs);
 }
 
 // =============================================================================
@@ -290,65 +268,58 @@ func main() -> Int {
 // =============================================================================
 
 #[test]
-#[ignore]
 fn test_countdown_loop() {
-    let result = compile_and_run(
-        r#"
-module Test
+    Test::new(
+        r#"module Test
 
-func main() -> Int {
-    var countdown = 10;
-    var result = 0;
+func main() -> lang.i64 {
+    var countdown: std.num.Int64 = 10;
+    var result: std.num.Int64 = 0;
     while countdown > 0 {
         result = result + countdown;
         countdown = countdown - 1;
     }
-    result
+    // 10+9+8+7+6+5+4+3+2+1 = 55
+    if result != 55 { return 1 }
+    0
 }
 "#,
-    );
-    // 10+9+8+7+6+5+4+3+2+1 = 55
-    if result.exit_code != 55 {
-        eprintln!("stderr: {}", result.stderr);
-    }
-    assert_eq!(result.exit_code, 55);
+    )
+    .with_stdlib()
+    .expect(Compiles)
+    .expect(Runs);
 }
 
 #[test]
-#[ignore]
 fn test_factorial_loop() {
-    let result = compile_and_run(
-        r#"
-module Test
+    Test::new(
+        r#"module Test
 
-func main() -> Int {
-    var n = 5;
-    var result = 1;
+func main() -> lang.i64 {
+    var n: std.num.Int64 = 5;
+    var result: std.num.Int64 = 1;
     while n > 1 {
         result = result * n;
         n = n - 1;
     }
-    result
+    // 5! = 120
+    if result != 120 { return 1 }
+    0
 }
 "#,
-    );
-    // 5! = 120
-    // Note: exit codes are typically 0-255, but macOS allows larger values
-    if result.exit_code != 120 {
-        eprintln!("stderr: {}", result.stderr);
-    }
-    assert_eq!(result.exit_code, 120);
+    )
+    .with_stdlib()
+    .expect(Compiles)
+    .expect(Runs);
 }
 
 #[test]
-#[ignore]
 fn test_loop_multiple_breaks() {
-    let result = compile_and_run(
-        r#"
-module Test
+    Test::new(
+        r#"module Test
 
-func main() -> Int {
-    var x = 0;
+func main() -> lang.i64 {
+    var x: std.num.Int64 = 0;
     loop {
         x = x + 1;
         if x == 10 {
@@ -358,35 +329,33 @@ func main() -> Int {
             break
         }
     }
-    x
+    // First break at x == 10
+    if x != 10 { return 1 }
+    0
 }
 "#,
-    );
-    // First break at x == 10
-    if result.exit_code != 10 {
-        eprintln!("stderr: {}", result.stderr);
-    }
-    assert_eq!(result.exit_code, 10);
+    )
+    .with_stdlib()
+    .expect(Compiles)
+    .expect(Runs);
 }
 
 #[test]
-#[ignore]
 fn test_loop_zero_iterations() {
-    let result = compile_and_run(
-        r#"
-module Test
+    Test::new(
+        r#"module Test
 
-func main() -> Int {
-    var x = 42;
+func main() -> lang.i64 {
+    var x: std.num.Int64 = 42;
     while false {
         x = 0;
     }
-    x
+    if x != 42 { return 1 }
+    0
 }
 "#,
-    );
-    if result.exit_code != 42 {
-        eprintln!("stderr: {}", result.stderr);
-    }
-    assert_eq!(result.exit_code, 42);
+    )
+    .with_stdlib()
+    .expect(Compiles)
+    .expect(Runs);
 }

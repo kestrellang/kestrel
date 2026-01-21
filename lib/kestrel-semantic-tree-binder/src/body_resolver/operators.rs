@@ -6,23 +6,21 @@
 
 use std::sync::LazyLock;
 
-use kestrel_reporting::IntoDiagnostic;
 use kestrel_semantic_tree::expr::{CallArgument, Expression, PrimitiveMethod};
 use kestrel_semantic_tree::operators::{BinaryOp, InfixAction, OperatorRegistry, UnaryOp};
-use kestrel_semantic_tree::ty::{Ty, TyKind};
+use kestrel_semantic_tree::ty::{FloatBits, IntBits, Ty, TyKind};
 use kestrel_span::Span;
-use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
-
-use crate::diagnostics::{UnsupportedBinaryOperator, UnsupportedUnaryOperator};
 use kestrel_syntax_tree::utils::get_node_span;
+use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use super::context::BodyResolutionContext;
 use super::expressions::resolve_expression;
+use crate::diagnostics::OperatorOnLangIntrinsicType;
 
 /// Global operator registry used for Pratt parsing.
 static OPERATOR_REGISTRY: LazyLock<OperatorRegistry> = LazyLock::new(OperatorRegistry::new);
 
-/// Resolve a prefix unary expression: -expr, +expr, !expr, not expr
+/// Resolve a prefix unary expression: -expr, !expr, not expr
 pub fn resolve_unary_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> Expression {
     let span = get_node_span(node, ctx.file_id);
 
@@ -33,7 +31,7 @@ pub fn resolve_unary_expression(node: &SyntaxNode, ctx: &mut BodyResolutionConte
         .find(|t| {
             matches!(
                 t.kind(),
-                SyntaxKind::Minus | SyntaxKind::Plus | SyntaxKind::Bang | SyntaxKind::Not
+                SyntaxKind::Minus | SyntaxKind::Bang | SyntaxKind::Not
             )
         });
 
@@ -43,13 +41,12 @@ pub fn resolve_unary_expression(node: &SyntaxNode, ctx: &mut BodyResolutionConte
 
     let op_span: Span = {
         let range = op_token.text_range();
-        Span::from((range.start().into())..(range.end().into()))
+        Span::new(span.file_id, range.start().into()..range.end().into())
     };
 
     // Determine the unary operator
     let op = match op_token.kind() {
         SyntaxKind::Minus => UnaryOp::Neg,
-        SyntaxKind::Plus => UnaryOp::Identity,
         SyntaxKind::Bang => UnaryOp::BitNot,
         SyntaxKind::Not => UnaryOp::LogicalNot,
         _ => return Expression::error(span),
@@ -85,7 +82,7 @@ pub fn resolve_postfix_expression(
 
     let op_span: Span = {
         let range = op_token.text_range();
-        Span::from((range.start().into())..(range.end().into()))
+        Span::new(span.file_id, range.start().into()..range.end().into())
     };
 
     // Find and resolve the operand expression
@@ -157,7 +154,7 @@ fn collect_binary_operands(
 
     let op_info = op_token.map(|t| {
         let range = t.text_range();
-        let span: Span = Span::from((range.start().into())..(range.end().into()));
+        let span: Span = Span::new(ctx.file_id, range.start().into()..range.end().into());
         (t.kind(), span)
     });
 
@@ -286,26 +283,26 @@ where
                 operators.next(); // consume operator
 
                 let rhs = pratt_parse_bp(operands, operators, prec + 1, full_span.clone(), ctx);
-                let expr_span = Span::from(lhs.span.start..rhs.span.end);
+                let expr_span = Span::new(lhs.span.file_id, lhs.span.start..rhs.span.end);
                 lhs = desugar_binary_op(op, lhs, rhs, op_span, expr_span, ctx);
-            }
+            },
 
             InfixAction::InfixRight(op, prec) => {
                 let op_span = op_span.clone();
                 operators.next(); // consume operator
 
                 let rhs = pratt_parse_bp(operands, operators, prec, full_span.clone(), ctx);
-                let expr_span = Span::from(lhs.span.start..rhs.span.end);
+                let expr_span = Span::new(lhs.span.file_id, lhs.span.start..rhs.span.end);
                 lhs = desugar_binary_op(op, lhs, rhs, op_span, expr_span, ctx);
-            }
+            },
 
             InfixAction::Postfix(op) => {
                 let op_span = op_span.clone();
                 operators.next(); // consume operator
 
-                let expr_span = Span::from(lhs.span.start..op_span.end);
+                let expr_span = Span::new(lhs.span.file_id, lhs.span.start..op_span.end);
                 lhs = desugar_unary_op(op, lhs, op_span, expr_span, ctx);
-            }
+            },
         }
     }
 
@@ -317,167 +314,201 @@ fn desugar_binary_op(
     op: BinaryOp,
     lhs: Expression,
     rhs: Expression,
-    op_span: Span,
+    _op_span: Span,
     full_span: Span,
     ctx: &mut BodyResolutionContext,
 ) -> Expression {
+    // If either operand has a poison type, propagate error without cascading diagnostics.
+    if lhs.ty.is_poison() || rhs.ty.is_poison() {
+        return Expression::error(full_span);
+    }
+
+    // Check if LHS is a lang intrinsic type - operators are not allowed on these types
+    if is_lang_intrinsic_type(&lhs.ty) {
+        ctx.diagnostics.throw(OperatorOnLangIntrinsicType {
+            span: full_span.clone(),
+            operator: op.symbol().to_string(),
+            type_name: lang_intrinsic_type_name(&lhs.ty),
+            suggested_intrinsic: suggested_binary_intrinsic(&lhs.ty, op),
+        });
+        return Expression::error(full_span);
+    }
+
     let method_name = op.method_name();
 
-    // Check for primitive method
-    if let Some(prim_method) = lookup_primitive_binary_method(&lhs.ty, method_name) {
-        let arg = CallArgument::unlabeled(rhs.clone(), rhs.span.clone());
-        return Expression::primitive_method_call(lhs, prim_method, vec![arg], full_span);
-    }
-
-    // If lhs type is Infer, don't emit error yet - type inference will resolve it.
-    if matches!(lhs.ty.kind(), TyKind::Infer) {
-        // For binary operations where the type is unknown, we need to set an appropriate
-        // result type based on the operator category:
-        // - Arithmetic ops (+ - * / %): result has same type as operands
-        // - Comparison ops (< > <= >= == !=): result is Bool
-        // - Logical ops (&& ||): result is Bool
-        let result_ty = match op {
-            // Comparison operators always return Bool
-            BinaryOp::Eq
-            | BinaryOp::Ne
-            | BinaryOp::Lt
-            | BinaryOp::Le
-            | BinaryOp::Gt
-            | BinaryOp::Ge => Ty::bool(full_span.clone()),
-            // Logical operators return Bool
-            BinaryOp::And | BinaryOp::Or => Ty::bool(full_span.clone()),
-            // Arithmetic operators return the same type as operands
-            _ => lhs.ty.clone(),
-        };
-        let arg = CallArgument::unlabeled(rhs.clone(), rhs.span.clone());
-        // Use a placeholder method - type inference will correct this
-        return Expression::primitive_method_call_with_type(
-            lhs,
-            placeholder_method_for_op(op),
-            vec![arg],
-            result_ty,
-            full_span,
-        );
-    }
-
-    // For non-primitive types, emit an error since we don't support user-defined operators yet
-    let error = UnsupportedBinaryOperator {
-        operator_span: op_span.clone(),
-        operator: operator_symbol(op),
-        lhs_span: lhs.span.clone(),
-        lhs_type: lhs.ty.to_string(),
-        rhs_span: rhs.span.clone(),
-        rhs_type: rhs.ty.to_string(),
-    };
-    ctx.diagnostics.add_diagnostic(error.into_diagnostic());
-    Expression::error(full_span)
-}
-
-/// Get a placeholder primitive method for an operator.
-/// This is used when the operand type is Infer and we need to create a placeholder.
-fn placeholder_method_for_op(op: BinaryOp) -> PrimitiveMethod {
-    match op {
-        BinaryOp::Add => PrimitiveMethod::IntAdd,
-        BinaryOp::Sub => PrimitiveMethod::IntSub,
-        BinaryOp::Mul => PrimitiveMethod::IntMul,
-        BinaryOp::Div => PrimitiveMethod::IntDiv,
-        BinaryOp::Rem => PrimitiveMethod::IntRem,
-        BinaryOp::BitAnd => PrimitiveMethod::IntBitAnd,
-        BinaryOp::BitOr => PrimitiveMethod::IntBitOr,
-        BinaryOp::BitXor => PrimitiveMethod::IntBitXor,
-        BinaryOp::Shl => PrimitiveMethod::IntShl,
-        BinaryOp::Shr => PrimitiveMethod::IntShr,
-        BinaryOp::Eq => PrimitiveMethod::IntEq,
-        BinaryOp::Ne => PrimitiveMethod::IntNe,
-        BinaryOp::Lt => PrimitiveMethod::IntLt,
-        BinaryOp::Le => PrimitiveMethod::IntLe,
-        BinaryOp::Gt => PrimitiveMethod::IntGt,
-        BinaryOp::Ge => PrimitiveMethod::IntGe,
-        BinaryOp::And => PrimitiveMethod::BoolAnd,
-        BinaryOp::Or => PrimitiveMethod::BoolOr,
-        // Range and coalesce operators are not primitive methods - use a placeholder
-        BinaryOp::RangeInclusive | BinaryOp::RangeExclusive | BinaryOp::Coalesce => {
-            PrimitiveMethod::IntAdd // Placeholder, these should be handled differently
-        }
-    }
-}
-
-/// Get the symbol representation of a binary operator for error messages.
-fn operator_symbol(op: BinaryOp) -> String {
-    match op {
-        BinaryOp::Add => "+".to_string(),
-        BinaryOp::Sub => "-".to_string(),
-        BinaryOp::Mul => "*".to_string(),
-        BinaryOp::Div => "/".to_string(),
-        BinaryOp::Rem => "%".to_string(),
-        BinaryOp::BitAnd => "&".to_string(),
-        BinaryOp::BitOr => "|".to_string(),
-        BinaryOp::BitXor => "^".to_string(),
-        BinaryOp::Shl => "<<".to_string(),
-        BinaryOp::Shr => ">>".to_string(),
-        BinaryOp::Eq => "==".to_string(),
-        BinaryOp::Ne => "!=".to_string(),
-        BinaryOp::Lt => "<".to_string(),
-        BinaryOp::Le => "<=".to_string(),
-        BinaryOp::Gt => ">".to_string(),
-        BinaryOp::Ge => ">=".to_string(),
-        BinaryOp::And => "and".to_string(),
-        BinaryOp::Or => "or".to_string(),
-        BinaryOp::RangeInclusive => "..=".to_string(),
-        BinaryOp::RangeExclusive => "..<".to_string(),
-        BinaryOp::Coalesce => "??".to_string(),
-    }
-}
-
-/// Get the symbol representation of a unary operator for error messages.
-fn unary_operator_symbol(op: UnaryOp) -> String {
-    match op {
-        UnaryOp::Neg => "-".to_string(),
-        UnaryOp::Identity => "+".to_string(),
-        UnaryOp::BitNot => "!".to_string(),
-        UnaryOp::LogicalNot => "not".to_string(),
-        UnaryOp::Unwrap => "!".to_string(),
-    }
+    // For non-primitive types, create a DeferredMethodCall.
+    // Type inference will resolve this to a concrete protocol method call.
+    // All operators use Infer - type inference will determine the actual return type
+    // from the resolved method (e.g., Bool for comparisons, Output associated type for arithmetic).
+    let result_ty = Ty::infer(full_span.clone());
+    let arg = CallArgument::unlabeled(rhs.clone(), rhs.span.clone());
+    Expression::deferred_method_call(
+        lhs,
+        method_name.to_string(),
+        vec![arg],
+        result_ty,
+        full_span,
+    )
 }
 
 /// Desugar a unary operator into a method call: operand.method_name()
 fn desugar_unary_op(
     op: UnaryOp,
     operand: Expression,
-    op_span: Span,
+    _op_span: Span,
     full_span: Span,
     ctx: &mut BodyResolutionContext,
 ) -> Expression {
-    let method_name = op.method_name();
-
-    // Check for primitive method
-    if let Some(prim_method) = lookup_primitive_unary_method(&operand.ty, method_name) {
-        return Expression::primitive_method_call(operand, prim_method, vec![], full_span);
+    // If operand has a poison type, propagate error without cascading diagnostics.
+    if operand.ty.is_poison() {
+        return Expression::error(full_span);
     }
 
-    // For non-primitive types, emit an error since we don't support user-defined operators yet
-    let error = UnsupportedUnaryOperator {
-        operator_span: op_span.clone(),
-        operator: unary_operator_symbol(op),
-        operand_span: operand.span.clone(),
-        operand_type: operand.ty.to_string(),
+    // Check if operand is a lang intrinsic type - operators are not allowed on these types
+    // Exception: unwrap operator (!) is allowed as it's not a numeric/bitwise operation
+    if op != UnaryOp::Unwrap && is_lang_intrinsic_type(&operand.ty) {
+        ctx.diagnostics.throw(OperatorOnLangIntrinsicType {
+            span: full_span.clone(),
+            operator: op.symbol().to_string(),
+            type_name: lang_intrinsic_type_name(&operand.ty),
+            suggested_intrinsic: suggested_unary_intrinsic(&operand.ty, op),
+        });
+        return Expression::error(full_span);
+    }
+
+    let method_name = op.method_name();
+
+    // For non-primitive types, create a DeferredMethodCall.
+    // Type inference will resolve this to a concrete protocol method call.
+    // Use Infer so type inference determines the actual return type from the resolved method.
+    let result_ty = Ty::infer(full_span.clone());
+    Expression::deferred_method_call(
+        operand,
+        method_name.to_string(),
+        vec![],
+        result_ty,
+        full_span,
+    )
+}
+
+/// Check if a type is a lang intrinsic type that should not support operators.
+/// These types require explicit intrinsic function calls.
+fn is_lang_intrinsic_type(ty: &Ty) -> bool {
+    matches!(
+        ty.kind(),
+        TyKind::Int(_) | TyKind::Float(_) | TyKind::Bool | TyKind::Pointer(_) | TyKind::Array(_)
+    )
+}
+
+/// Get the display name for a lang intrinsic type.
+fn lang_intrinsic_type_name(ty: &Ty) -> String {
+    match ty.kind() {
+        TyKind::Int(bits) => match bits {
+            IntBits::I8 => "lang.i8".to_string(),
+            IntBits::I16 => "lang.i16".to_string(),
+            IntBits::I32 => "lang.i32".to_string(),
+            IntBits::I64 => "lang.i64".to_string(),
+        },
+        TyKind::Float(bits) => match bits {
+            FloatBits::F16 => "lang.f16".to_string(),
+            FloatBits::F32 => "lang.f32".to_string(),
+            FloatBits::F64 => "lang.f64".to_string(),
+        },
+        TyKind::Bool => "lang.i1".to_string(),
+        TyKind::Pointer(elem) => format!("lang.ptr[{}]", elem),
+        TyKind::Array(elem) => format!("lang.array[{}]", elem),
+        _ => format!("{}", ty),
+    }
+}
+
+/// Get the suggested intrinsic function name for a binary operator on a type.
+fn suggested_binary_intrinsic(ty: &Ty, op: BinaryOp) -> String {
+    let prefix = match ty.kind() {
+        TyKind::Int(bits) => match bits {
+            IntBits::I8 => "lang.i8",
+            IntBits::I16 => "lang.i16",
+            IntBits::I32 => "lang.i32",
+            IntBits::I64 => "lang.i64",
+        },
+        TyKind::Float(bits) => match bits {
+            FloatBits::F16 => "lang.f16",
+            FloatBits::F32 => "lang.f32",
+            FloatBits::F64 => "lang.f64",
+        },
+        TyKind::Bool => "lang.i1",
+        TyKind::Pointer(_) => "lang.ptr",
+        TyKind::Array(_) => "lang.array",
+        _ => "lang",
     };
-    ctx.diagnostics.add_diagnostic(error.into_diagnostic());
-    Expression::error(full_span)
+
+    let op_name = match op {
+        BinaryOp::Add => "_add",
+        BinaryOp::Sub => "_sub",
+        BinaryOp::Mul => "_mul",
+        BinaryOp::Div => "_signed_div", // Suggest signed by default
+        BinaryOp::Rem => "_signed_rem",
+        BinaryOp::Eq => "_eq",
+        BinaryOp::Ne => "_ne",
+        BinaryOp::Lt => "_signed_lt",
+        BinaryOp::Le => "_signed_le",
+        BinaryOp::Gt => "_signed_gt",
+        BinaryOp::Ge => "_signed_ge",
+        BinaryOp::BitAnd => "_and",
+        BinaryOp::BitOr => "_or",
+        BinaryOp::BitXor => "_xor",
+        BinaryOp::Shl => "_shl",
+        BinaryOp::Shr => "_signed_shr",
+        BinaryOp::And => "_and",
+        BinaryOp::Or => "_or",
+        _ => "(a, b)",
+    };
+
+    format!("{}{}(a, b)", prefix, op_name)
+}
+
+/// Get the suggested intrinsic function name for a unary operator on a type.
+fn suggested_unary_intrinsic(ty: &Ty, op: UnaryOp) -> String {
+    let prefix = match ty.kind() {
+        TyKind::Int(bits) => match bits {
+            IntBits::I8 => "lang.i8",
+            IntBits::I16 => "lang.i16",
+            IntBits::I32 => "lang.i32",
+            IntBits::I64 => "lang.i64",
+        },
+        TyKind::Float(bits) => match bits {
+            FloatBits::F16 => "lang.f16",
+            FloatBits::F32 => "lang.f32",
+            FloatBits::F64 => "lang.f64",
+        },
+        TyKind::Bool => "lang.i1",
+        TyKind::Pointer(_) => "lang.ptr",
+        _ => "lang",
+    };
+
+    let op_name = match op {
+        UnaryOp::Neg => "_neg",
+        UnaryOp::BitNot => "_not",
+        UnaryOp::LogicalNot => "_not",
+        UnaryOp::Unwrap => "", // No intrinsic for unwrap
+    };
+
+    format!("{}{}(a)", prefix, op_name)
 }
 
 /// Look up a primitive method on a type for binary operators.
 /// Uses the centralized PrimitiveMethod::lookup.
+#[allow(dead_code)]
 fn lookup_primitive_binary_method(ty: &Ty, method_name: &str) -> Option<PrimitiveMethod> {
     PrimitiveMethod::lookup(ty, method_name)
 }
 
 /// Look up a primitive method on a type for unary operators.
 /// Uses the centralized PrimitiveMethod::lookup, with special handling
-/// for `!` (bitNot) on Bool which maps to logicalNot.
+/// for `!` (bitwiseNot) on Bool which maps to logicalNot.
+#[allow(dead_code)]
 fn lookup_primitive_unary_method(ty: &Ty, method_name: &str) -> Option<PrimitiveMethod> {
-    // Special case: `!` (bitNot) on Bool maps to logicalNot for compatibility
-    if matches!(ty.kind(), TyKind::Bool) && method_name == "bitNot" {
+    // Special case: `!` (bitwiseNot) on Bool maps to logicalNot for compatibility
+    if matches!(ty.kind(), TyKind::Bool) && method_name == "bitwiseNot" {
         return Some(PrimitiveMethod::BoolNot);
     }
     PrimitiveMethod::lookup(ty, method_name)

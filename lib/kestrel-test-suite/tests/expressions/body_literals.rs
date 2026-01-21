@@ -14,19 +14,19 @@ mod literal_expressions {
             r#"
 module Main
 
-func getInt() -> Int {
+func getInt() -> lang.i64 {
     42
 }
 
-func getFloat() -> Float {
+func getFloat() -> lang.f64 {
     3.14
 }
 
-func getString() -> String {
+func getString() -> lang.str {
     "hello world"
 }
 
-func getBool() -> Bool {
+func getBool() -> lang.i1 {
     true
 }
 
@@ -78,15 +78,15 @@ mod composite_expressions {
             r#"
 module Main
 
-func getSimpleArray() -> [Int] {
+func getSimpleArray() -> [lang.i64] {
     [1, 2, 3]
 }
 
-func getNestedArray() -> [[Int]] {
+func getNestedArray() -> [[lang.i64]] {
     [[1, 2], [3, 4]]
 }
 
-func getMultiElementArray() -> [Int] {
+func getMultiElementArray() -> [lang.i64] {
     [1, 2, 3, 4, 5]
 }
 "#,
@@ -118,15 +118,15 @@ func getMultiElementArray() -> [Int] {
             r#"
 module Main
 
-func getSimpleTuple() -> (Int, String) {
+func getSimpleTuple() -> (lang.i64, lang.str) {
     (42, "hello")
 }
 
-func getNestedTuple() -> ((Int, Int), String) {
+func getNestedTuple() -> ((lang.i64, lang.i64), lang.str) {
     ((1, 2), "point")
 }
 
-func getGroupedLiteral() -> Int {
+func getGroupedLiteral() -> lang.i64 {
     (42)
 }
 "#,

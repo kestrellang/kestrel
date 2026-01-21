@@ -15,11 +15,12 @@ use crate::attribute::attribute_list_parser;
 use crate::common::ConformanceListData;
 use crate::common::{
     ProtocolBodyItem, ProtocolDeclarationData, emit_protocol_declaration,
-    function_declaration_parser_internal, identifier, initializer_declaration_parser_internal,
-    token, visibility_parser_internal,
+    field_declaration_parser_internal, function_declaration_parser_internal, identifier,
+    initializer_declaration_parser_internal, subscript_declaration_parser_internal, token,
+    visibility_parser_internal,
 };
 use crate::event::{EventSink, TreeBuilder};
-use crate::input::{ParserExtra, ParserInput, create_input, prepare_tokens, to_kestrel_span};
+use crate::input::{ParserExtra, ParserInput, create_input, prepare_tokens};
 use crate::type_alias::type_alias_declaration_parser_internal;
 use crate::type_param::{conformance_list_parser, type_parameter_list_parser, where_clause_parser};
 
@@ -93,23 +94,34 @@ impl ProtocolDeclaration {
     }
 }
 
-/// Parser for protocol body items (functions, associated types, or initializers)
+/// Parser for protocol body items (functions, subscripts, associated types, initializers, or property requirements)
 fn protocol_body_item_parser<'tokens>()
 -> impl Parser<'tokens, ParserInput<'tokens>, ProtocolBodyItem, ParserExtra<'tokens>> + Clone {
     let function = function_declaration_parser_internal().map(ProtocolBodyItem::Function);
+
+    let subscript = subscript_declaration_parser_internal().map(ProtocolBodyItem::Subscript);
 
     let associated_type =
         type_alias_declaration_parser_internal().map(ProtocolBodyItem::AssociatedType);
 
     let initializer = initializer_declaration_parser_internal().map(ProtocolBodyItem::Initializer);
 
-    // Try function first, then associated type, then initializer
+    let field = field_declaration_parser_internal().map(ProtocolBodyItem::Field);
+
+    // Try function first, then subscript, then associated type, then initializer, then field (property requirement)
     // This works because:
     // - function starts with visibility? followed by (static)? (mutating/consuming)? 'func'
+    // - subscript starts with visibility? followed by (static)? 'subscript'
     // - associated type starts with visibility? followed by 'type'
     // - initializer starts with visibility? followed by 'init'
+    // - field starts with visibility? followed by (static)? 'let'/'var'
     // Chumsky will backtrack correctly when the keyword doesn't match
-    function.or(associated_type).or(initializer)
+    function
+        .or(subscript)
+        .or(associated_type)
+        .or(initializer)
+        .or(field)
+        .boxed()
 }
 
 /// Internal Chumsky parser for protocol declaration
@@ -165,6 +177,7 @@ pub fn protocol_declaration_parser_internal<'tokens>()
                 }
             },
         )
+        .boxed()
 }
 
 /// Parse a protocol declaration and emit events
@@ -183,13 +196,13 @@ where
     {
         Ok(data) => {
             emit_protocol_declaration(sink, data);
-        }
+        },
         Err(errors) => {
             for error in errors {
                 let span = error.span();
-                sink.error_at(format!("Parse error: {:?}", error), to_kestrel_span(*span));
+                sink.error_at(format!("Parse error: {:?}", error), *span);
             }
-        }
+        },
     }
 }
 
@@ -204,12 +217,12 @@ mod tests {
             .filter_map(|t| t.ok())
             .map(|spanned| (spanned.value, spanned.span))
             .collect();
-        let mut sink = EventSink::new();
+        let mut sink = EventSink::new(0);
         parse_protocol_declaration(source, tokens.into_iter(), &mut sink);
         let tree = TreeBuilder::new(source, sink.into_events()).build();
         ProtocolDeclaration {
             syntax: tree,
-            span: Span::from(0..source.len()),
+            span: Span::new(0, 0..source.len()),
         }
     }
 
@@ -277,7 +290,8 @@ mod tests {
 
     #[test]
     fn test_protocol_method_with_generics() {
-        let decl = parse("protocol Container { func get[T](index: Int) -> T }");
+        // Note: can't use "get" as function name since it's a keyword for computed properties
+        let decl = parse("protocol Container { func element[T](index: Int) -> T }");
         assert_eq!(decl.name(), Some("Container".to_string()));
         let methods = decl.methods();
         assert_eq!(methods.len(), 1);

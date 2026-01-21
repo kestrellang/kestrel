@@ -6,11 +6,13 @@ use crate::context::AnalysisContext;
 use kestrel_semantic_model::CallableParamTypesForCall;
 use kestrel_semantic_tree::behavior::callable::CallableBehavior;
 use kestrel_semantic_tree::behavior::executable::ExecutableBehavior;
+use kestrel_semantic_tree::builtins::LanguageFeature;
 use kestrel_semantic_tree::expr::{
     CallArgument, ElseBranch, ExprKind, Expression, IfCondition, compute_block_type,
 };
 use kestrel_semantic_tree::stmt::{Statement, StatementKind};
 use kestrel_semantic_tree::ty::Ty;
+use kestrel_semantic_type_inference::TypeOracle;
 use semantic_tree::symbol::Symbol;
 
 mod diagnostics;
@@ -86,10 +88,10 @@ impl Analyzer for TypeCheckAnalyzer {
         match &expr.kind {
             ExprKind::Return { value } => {
                 self.check_return(value.as_ref().map(|v| v.as_ref()), expr, ctx);
-            }
+            },
             ExprKind::Assignment { target, value } => {
                 self.check_assignment(target, value, ctx);
-            }
+            },
             ExprKind::If {
                 conditions,
                 then_branch,
@@ -109,17 +111,24 @@ impl Analyzer for TypeCheckAnalyzer {
                     expr,
                     ctx,
                 );
-            }
+            },
             ExprKind::While { condition, .. } => {
                 self.check_while_condition(condition, ctx);
-            }
+            },
+            ExprKind::Match { arms, .. } => {
+                for arm in arms {
+                    if let Some(guard) = &arm.guard {
+                        self.check_guard_condition(guard, ctx);
+                    }
+                }
+            },
             ExprKind::Call { arguments, .. } | ExprKind::ImplicitStructInit { arguments, .. } => {
                 self.check_call_arguments(expr, arguments, ctx);
-            }
+            },
             ExprKind::Array(elements) => {
                 self.check_array_elements(elements, expr, ctx);
-            }
-            _ => {}
+            },
+            _ => {},
         }
     }
 
@@ -191,7 +200,7 @@ impl TypeCheckAnalyzer {
                         context: "return value".to_string(),
                     });
                 }
-            }
+            },
             None => {
                 if !expected_ty.is_unit() && !is_initializer {
                     ctx.report(TypeMismatchError {
@@ -201,7 +210,7 @@ impl TypeCheckAnalyzer {
                         context: "return value".to_string(),
                     });
                 }
-            }
+            },
         }
     }
 
@@ -217,13 +226,29 @@ impl TypeCheckAnalyzer {
     }
 
     fn check_if_condition(&self, condition: &Expression, ctx: &mut AnalysisContext) {
-        if !condition.ty.is_bool() && !condition.ty.is_error() {
-            ctx.report(ConditionNotBoolError {
-                span: condition.span.clone(),
-                found: condition.ty.to_string(),
-                condition_kind: "if",
-            });
+        if condition.ty.is_poison() {
+            return;
         }
+
+        // Accept primitive lang.bool directly
+        if condition.ty.is_bool() {
+            return;
+        }
+
+        // Check BooleanConditional conformance
+        if let Some(protocol_id) = ctx
+            .model
+            .builtin_protocol(LanguageFeature::BooleanConditional)
+            && ctx.model.conforms_to(&condition.ty, protocol_id)
+        {
+            return;
+        }
+
+        ctx.report(ConditionNotBoolError {
+            span: condition.span.clone(),
+            found: condition.ty.to_string(),
+            condition_kind: "if",
+        });
     }
 
     fn check_if_branches(
@@ -242,7 +267,7 @@ impl TypeCheckAnalyzer {
         if then_ty.is_never() || else_ty.is_never() {
             return;
         }
-        if then_ty.is_error() || else_ty.is_error() {
+        if then_ty.is_poison() || else_ty.is_poison() {
             return;
         }
         if !self.is_assignable(&then_ty, &else_ty, ctx) {
@@ -265,13 +290,55 @@ impl TypeCheckAnalyzer {
     }
 
     fn check_while_condition(&self, condition: &Expression, ctx: &mut AnalysisContext) {
-        if !condition.ty.is_bool() && !condition.ty.is_error() {
-            ctx.report(ConditionNotBoolError {
-                span: condition.span.clone(),
-                found: condition.ty.to_string(),
-                condition_kind: "while",
-            });
+        if condition.ty.is_poison() {
+            return;
         }
+
+        // Accept primitive lang.bool directly
+        if condition.ty.is_bool() {
+            return;
+        }
+
+        // Check BooleanConditional conformance
+        if let Some(protocol_id) = ctx
+            .model
+            .builtin_protocol(LanguageFeature::BooleanConditional)
+            && ctx.model.conforms_to(&condition.ty, protocol_id)
+        {
+            return;
+        }
+
+        ctx.report(ConditionNotBoolError {
+            span: condition.span.clone(),
+            found: condition.ty.to_string(),
+            condition_kind: "while",
+        });
+    }
+
+    fn check_guard_condition(&self, condition: &Expression, ctx: &mut AnalysisContext) {
+        if condition.ty.is_poison() {
+            return;
+        }
+
+        // Accept primitive lang.bool directly
+        if condition.ty.is_bool() {
+            return;
+        }
+
+        // Check BooleanConditional conformance
+        if let Some(protocol_id) = ctx
+            .model
+            .builtin_protocol(LanguageFeature::BooleanConditional)
+            && ctx.model.conforms_to(&condition.ty, protocol_id)
+        {
+            return;
+        }
+
+        ctx.report(ConditionNotBoolError {
+            span: condition.span.clone(),
+            found: condition.ty.to_string(),
+            condition_kind: "guard",
+        });
     }
 
     fn check_call_arguments(
@@ -311,11 +378,11 @@ impl TypeCheckAnalyzer {
         }
         let first = &elements[0];
         let expected_ty = &first.ty;
-        if expected_ty.is_error() {
+        if expected_ty.is_poison() {
             return;
         }
         for (i, elem) in elements.iter().enumerate().skip(1) {
-            if elem.ty.is_error() {
+            if elem.ty.is_poison() {
                 continue;
             }
             if !self.is_assignable(&elem.ty, expected_ty, ctx) {

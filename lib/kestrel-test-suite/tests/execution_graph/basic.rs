@@ -12,7 +12,7 @@ mod basic_functions {
         Test::new(
             r#"
             module Main
-            func answer() -> Int { 42 }
+            func answer() -> lang.i64 { 42 }
         "#,
         )
         .expect(Compiles)
@@ -30,7 +30,7 @@ mod basic_functions {
         Test::new(
             r#"
             module Main
-            func add(a: Int, b: Int) -> Int { a + b }
+            func add(a: lang.i64, b: lang.i64) -> lang.i64 { lang.i64_add(a, b) }
         "#,
         )
         .expect(Compiles)
@@ -49,10 +49,10 @@ mod basic_functions {
         Test::new(
             r#"
             module Main
-            func calculate(x: Int, y: Int) -> Int {
-                let sum = x + y;
-                let product = x * y;
-                sum + product
+            func calculate(x: lang.i64, y: lang.i64) -> lang.i64 {
+                let sum = lang.i64_add(x, y);
+                let product = lang.i64_mul(x, y);
+                lang.i64_add(sum, product)
             }
         "#,
         )
@@ -74,9 +74,9 @@ mod basic_functions {
         Test::new(
             r#"
             module Main
-            func one() -> Int { 1 }
-            func two() -> Int { 2 }
-            func three() -> Int { 3 }
+            func one() -> lang.i64 { 1 }
+            func two() -> lang.i64 { 2 }
+            func three() -> lang.i64 { 3 }
         "#,
         )
         .expect(Compiles)
@@ -94,8 +94,8 @@ mod control_flow {
         Test::new(
             r#"
             module Main
-            func abs(x: Int) -> Int {
-                if x < 0 { -x } else { x }
+            func abs(x: lang.i64) -> lang.i64 {
+                if lang.i64_signed_lt(x, 0) { lang.i64_neg(x) } else { x }
             }
         "#,
         )
@@ -114,8 +114,8 @@ mod control_flow {
         Test::new(
             r#"
             module Main
-            func max(a: Int, b: Int) -> Int {
-                if a > b { a } else { b }
+            func max(a: lang.i64, b: lang.i64) -> lang.i64 {
+                if lang.i64_signed_gt(a, b) { a } else { b }
             }
         "#,
         )
@@ -138,8 +138,8 @@ mod structs {
             r#"
             module Main
             struct Point {
-                let x: Int
-                let y: Int
+                let x: lang.i64
+                let y: lang.i64
             }
         "#,
         )
@@ -159,11 +159,11 @@ mod structs {
             r#"
             module Main
             struct Point {
-                let x: Int
-                let y: Int
+                let x: lang.i64
+                let y: lang.i64
                 
-                func distanceSquared() -> Int {
-                    self.x * self.x + self.y * self.y
+                func distanceSquared() -> lang.i64 {
+                    lang.i64_add(lang.i64_mul(self.x, self.x), lang.i64_mul(self.y, self.y))
                 }
             }
         "#,
@@ -183,8 +183,8 @@ mod structs {
             r#"
             module Main
             struct Point {
-                let x: Int
-                let y: Int
+                let x: lang.i64
+                let y: lang.i64
             }
             
             func makePoint() -> Point {
@@ -244,7 +244,7 @@ mod enums {
                 case Blue
             }
             
-            func toInt(c: Color) -> Int {
+            func toInt(c: Color) -> lang.i64 {
                 match c {
                     .Red => 1,
                     .Green => 2,
@@ -267,7 +267,7 @@ mod enums {
             r#"
             module Main
             enum Option {
-                case Some(value: Int)
+                case Some(value: lang.i64)
                 case None
             }
         "#,

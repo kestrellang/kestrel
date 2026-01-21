@@ -46,7 +46,7 @@ fn extract_access_mode(param_node: &SyntaxNode) -> ParameterAccessMode {
             match token.kind() {
                 SyntaxKind::Mutating => return ParameterAccessMode::Mutating,
                 SyntaxKind::Consuming => return ParameterAccessMode::Consuming,
-                _ => {}
+                _ => {},
             }
         }
     }
@@ -84,6 +84,7 @@ fn resolve_single_parameter(
             bind_name,
         )
     } else {
+        // Single name - use it as both the label and internal binding name.
         let name = extract_identifier_from_name(&name_nodes[0])?;
         let span = get_node_span(&name_nodes[0], file_id);
         let label = implicit_labels.then(|| Spanned::new(name.clone(), span.clone()));

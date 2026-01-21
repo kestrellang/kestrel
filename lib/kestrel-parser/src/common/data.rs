@@ -7,6 +7,7 @@ use kestrel_lexer::Token;
 use kestrel_span::Span;
 
 use crate::block::CodeBlockData;
+use crate::expr::ExprVariant;
 use crate::ty::TyVariant;
 use crate::type_param::{TypeParameterData, WhereClauseData};
 
@@ -136,6 +137,18 @@ pub struct FunctionDeclarationData {
     pub body: Option<CodeBlockData>, // Optional code block - None for protocol methods
 }
 
+/// Body data for computed properties
+#[derive(Debug, Clone)]
+pub enum ComputedBodyData {
+    /// Shorthand: `{ expr }`
+    Shorthand(CodeBlockData),
+    /// Explicit: `{ get { } set { } }`
+    Accessors {
+        getter: Option<CodeBlockData>, // None for protocol `{ get }`
+        setter: Option<CodeBlockData>, // None for protocol `{ get set }`
+    },
+}
+
 /// Raw parsed data for field declaration internals
 #[derive(Debug, Clone)]
 pub struct FieldDeclarationData {
@@ -147,22 +160,28 @@ pub struct FieldDeclarationData {
     pub name_span: Span,
     pub colon_span: Span,
     pub ty: TyVariant,
+    /// For computed properties: shorthand body OR accessors
+    pub computed_body: Option<ComputedBodyData>,
+    /// For constant initialization: (equals_span, expression)
+    pub initializer: Option<(Span, ExprVariant)>,
     /// Optional trailing semicolon (for inline field declarations)
     pub semicolon: Option<Span>,
 }
 
 /// Raw parsed data for initializer declaration internals
 ///
-/// Initializer syntax: `(visibility)? init(params) { body }?`
+/// Initializer syntax: `(visibility)? init[T]?(params) where ...? { body }?`
 /// Body is optional for protocol initializer declarations.
 #[derive(Debug, Clone)]
 pub struct InitializerDeclarationData {
     pub attributes: Vec<AttributeData>,
     pub visibility: Option<(Token, Span)>,
     pub init_span: Span,
+    pub type_params: Option<(Span, Vec<TypeParameterData>, Span)>,
     pub lparen: Span,
     pub parameters: Vec<ParameterData>,
     pub rparen: Span,
+    pub where_clause: Option<WhereClauseData>,
     pub body: Option<CodeBlockData>,
 }
 
@@ -214,6 +233,7 @@ pub struct StructDeclarationData {
 pub enum TypeDeclarationBodyItem {
     Field(FieldDeclarationData),
     Function(FunctionDeclarationData),
+    Subscript(SubscriptDeclarationData),
     Initializer(InitializerDeclarationData),
     Deinit(DeinitDeclarationData), // deinit { } - only valid in struct bodies
     Struct(Box<StructDeclarationData>), // Boxed to avoid infinite size
@@ -234,11 +254,18 @@ pub enum TypeDeclarationBodyItem {
 #[deprecated(note = "Use TypeDeclarationBodyItem instead")]
 pub type StructBodyItem = TypeDeclarationBodyItem;
 
-/// Raw parsed data for enum case parameter (label: Type)
+/// Raw parsed data for enum case parameter
+///
+/// Supports both named (`label: Type`) and unnamed (`Type`) forms:
+/// - Named: `case Some(value: T)` - label and colon present
+/// - Unnamed: `case Some(T)` - label and colon are None
 #[derive(Debug, Clone)]
 pub struct EnumCaseParameterData {
-    pub label: Span,
-    pub colon: Span,
+    /// Optional label name (None for unnamed parameters)
+    pub label: Option<Span>,
+    /// Optional colon (present only when label is present)
+    pub colon: Option<Span>,
+    /// The type of the parameter
     pub ty: TyVariant,
 }
 
@@ -285,6 +312,7 @@ pub struct ProtocolDeclarationData {
 /// Raw parsed data for type alias declaration internals
 #[derive(Debug, Clone)]
 pub struct TypeAliasDeclarationData {
+    pub attributes: Vec<AttributeData>,
     pub visibility: Option<(Token, Span)>,
     pub type_span: Span,
     /// The target of the type alias - simple name or qualified path
@@ -292,10 +320,12 @@ pub struct TypeAliasDeclarationData {
     pub type_params: Option<(Span, Vec<TypeParameterData>, Span)>,
     /// Optional bounds for associated types (: Equatable, Hashable)
     pub bounds: Option<AssociatedTypeBoundsData>,
+    /// Optional where clause for associated types (where Iter.Item = Item)
+    pub where_clause: Option<WhereClauseData>,
     /// Optional equals span and aliased type (= Type)
     /// For associated types in protocols, this may be None (abstract associated type)
     pub aliased: Option<(Span, TyVariant)>,
-    pub semicolon_span: Span,
+    pub semicolon_span: Option<Span>,
 }
 
 /// Target for type alias - either simple name or qualified path
@@ -326,8 +356,10 @@ pub struct AssociatedTypeBoundsData {
 #[derive(Debug, Clone)]
 pub enum ProtocolBodyItem {
     Function(FunctionDeclarationData),
+    Subscript(SubscriptDeclarationData),
     AssociatedType(TypeAliasDeclarationData),
     Initializer(InitializerDeclarationData),
+    Field(FieldDeclarationData),
 }
 
 /// Raw parsed data for extension declaration internals
@@ -353,5 +385,38 @@ pub struct ExtensionDeclarationData {
 #[derive(Debug, Clone)]
 pub enum ExtensionBodyItem {
     Function(FunctionDeclarationData),
+    Subscript(SubscriptDeclarationData),
     Initializer(InitializerDeclarationData),
+    TypeAlias(TypeAliasDeclarationData),
+}
+
+/// Raw parsed data for subscript declaration internals
+///
+/// Subscript syntax: `(visibility)? (static)? subscript[T]?(params) -> Type (where ...)? { body }`
+/// Body can be shorthand `{ expr }`, explicit `{ get { } set { } }`, or protocol `{ get }` / `{ get set }`
+#[derive(Debug, Clone)]
+pub struct SubscriptDeclarationData {
+    pub attributes: Vec<AttributeData>,
+    pub visibility: Option<(Token, Span)>,
+    pub is_static: Option<Span>,
+    pub subscript_span: Span,
+    pub type_params: Option<(Span, Vec<TypeParameterData>, Span)>,
+    pub lparen: Span,
+    pub parameters: Vec<ParameterData>,
+    pub rparen: Span,
+    pub return_type: (Span, TyVariant), // (arrow_span, return_ty) - required for subscripts
+    pub where_clause: Option<WhereClauseData>,
+    pub body: SubscriptBodyData,
+}
+
+/// Body data for subscript declarations
+#[derive(Debug, Clone)]
+pub enum SubscriptBodyData {
+    /// Shorthand: `{ expr }` - just a code block with an expression
+    Shorthand(CodeBlockData),
+    /// Explicit: `{ get { } set { } }` - with explicit getter and optional setter
+    Accessors {
+        getter: Option<CodeBlockData>, // None for protocol `{ get }`
+        setter: Option<CodeBlockData>, // None for protocol `{ get set }` without body
+    },
 }

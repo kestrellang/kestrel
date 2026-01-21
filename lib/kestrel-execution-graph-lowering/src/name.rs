@@ -1,6 +1,7 @@
 //! Qualified name generation from semantic symbols.
 
 use kestrel_execution_graph::{Id, QualifiedName, QualifiedNameData};
+use kestrel_semantic_tree::behavior::callable::CallableBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::extension::ExtensionSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
@@ -44,13 +45,13 @@ fn collect_name_segments(symbol: &Arc<dyn Symbol<KestrelLanguage>>, segments: &m
 
     match kind {
         // Skip source files - they don't contribute to the qualified name
-        KestrelSymbolKind::SourceFile => {}
+        KestrelSymbolKind::SourceFile => {},
 
         // Module contributes its name
         KestrelSymbolKind::Module => {
             let name = symbol.metadata().name();
             segments.push(name.value.clone());
-        }
+        },
 
         // Types contribute their name
         KestrelSymbolKind::Struct
@@ -59,7 +60,7 @@ fn collect_name_segments(symbol: &Arc<dyn Symbol<KestrelLanguage>>, segments: &m
         | KestrelSymbolKind::TypeAlias => {
             let name = symbol.metadata().name();
             segments.push(name.value.clone());
-        }
+        },
 
         // Extensions contribute the name of their target type
         KestrelSymbolKind::Extension => {
@@ -73,19 +74,19 @@ fn collect_name_segments(symbol: &Arc<dyn Symbol<KestrelLanguage>>, segments: &m
                         } => {
                             let name = target_sym.metadata().name();
                             segments.push(name.value.clone());
-                        }
+                        },
                         TyKind::Enum {
                             symbol: target_sym, ..
                         } => {
                             let name = target_sym.metadata().name();
                             segments.push(name.value.clone());
-                        }
+                        },
                         TyKind::Protocol {
                             symbol: target_sym, ..
                         } => {
                             let name = target_sym.metadata().name();
                             segments.push(name.value.clone());
-                        }
+                        },
                         // For primitive types, use their string representation
                         TyKind::Int(_) => segments.push("Int".to_string()),
                         TyKind::Float(_) => segments.push("Float".to_string()),
@@ -95,7 +96,7 @@ fn collect_name_segments(symbol: &Arc<dyn Symbol<KestrelLanguage>>, segments: &m
                         // For other types, fall back to the synthetic name
                         _ => {
                             segments.push("(extension)".to_string());
-                        }
+                        },
                     }
                 } else {
                     // No target type available, use synthetic name
@@ -105,42 +106,84 @@ fn collect_name_segments(symbol: &Arc<dyn Symbol<KestrelLanguage>>, segments: &m
                 // Couldn't downcast, use synthetic name
                 segments.push("(extension)".to_string());
             }
-        }
+        },
 
-        // Functions and initializers contribute their name
+        // Functions contribute their name, with labels for overload differentiation
+        // e.g., unwrap(orElse:) becomes "unwrap$orElse", unwrap() becomes "unwrap"
         KestrelSymbolKind::Function => {
             let name = symbol.metadata().name();
-            segments.push(name.value.clone());
-        }
+            if let Some(callable) = symbol.metadata().get_behavior::<CallableBehavior>() {
+                let labels: Vec<&str> = callable
+                    .parameters()
+                    .iter()
+                    .filter_map(|p| p.external_label())
+                    .collect();
+
+                if labels.is_empty() {
+                    segments.push(name.value.clone());
+                } else {
+                    segments.push(format!("{}${}", name.value, labels.join("$")));
+                }
+            } else {
+                segments.push(name.value.clone());
+            }
+        },
 
         KestrelSymbolKind::Initializer => {
-            // Initializers are named "init"
-            segments.push("init".to_string());
-        }
+            // Initializers include parameter labels in the name for overload differentiation
+            // e.g., init(intLiteral:) becomes "init$intLiteral", init() becomes "init"
+            // For unlabeled params, we use internal names (e.g., init$ptr$len$cap)
+            if let Some(callable) = symbol.metadata().get_behavior::<CallableBehavior>() {
+                // Use external labels if present, otherwise fall back to internal names
+                let name_parts: Vec<&str> = callable
+                    .parameters()
+                    .iter()
+                    .map(|p| p.external_label().unwrap_or_else(|| p.internal_name()))
+                    .collect();
+
+                if name_parts.is_empty() {
+                    segments.push("init".to_string());
+                } else {
+                    segments.push(format!("init${}", name_parts.join("$")));
+                }
+            } else {
+                segments.push("init".to_string());
+            }
+        },
 
         // Enum cases contribute their name
         KestrelSymbolKind::EnumCase => {
             let name = symbol.metadata().name();
             segments.push(name.value.clone());
-        }
+        },
 
-        // Fields, imports, type parameters don't typically form part of qualified names
-        // for items, but we include them for completeness
+        // Fields don't contribute to qualified names - they're containers for getters/setters
+        // which already include the field name in their synthetic name (e.g., "get:fieldName")
         KestrelSymbolKind::Field => {
-            let name = symbol.metadata().name();
-            segments.push(name.value.clone());
-        }
+            // Don't add field name - getter/setter will add "get:fieldName" or "set:fieldName"
+        },
 
         KestrelSymbolKind::Import
         | KestrelSymbolKind::TypeParameter
         | KestrelSymbolKind::AssociatedType => {
             // These don't contribute to qualified names
-        }
+        },
 
         KestrelSymbolKind::Deinit => {
             // Deinit blocks are named "deinit"
             segments.push("deinit".to_string());
-        }
+        },
+
+        KestrelSymbolKind::Getter | KestrelSymbolKind::Setter => {
+            // Getters and setters use their synthetic name (e.g., "get:fieldName", "set:fieldName")
+            let name = symbol.metadata().name();
+            segments.push(name.value.clone());
+        },
+
+        KestrelSymbolKind::Subscript => {
+            // Subscripts use the synthetic name "subscript" since they're identified by signature
+            segments.push("subscript".to_string());
+        },
     }
 }
 

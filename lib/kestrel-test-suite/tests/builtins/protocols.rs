@@ -34,7 +34,7 @@ mod success {
             r#"module Test
             @builtin(.ExpressibleByIntLiteral)
             protocol ExpressibleByIntLiteral {
-                init(intLiteral value: Int)
+                init(intLiteral value: lang.i64)
             }
         "#,
         )
@@ -56,7 +56,7 @@ mod success {
             
             @builtin(.ExpressibleByIntLiteral)
             protocol ExpressibleByIntLiteral {
-                init(intLiteral value: Int)
+                init(intLiteral value: lang.i64)
             }
         "#,
         )

@@ -12,7 +12,7 @@
 //! fn test_basic_function() {
 //!     Test::new(r#"
 //!         module Main
-//!         func add(a: Int, b: Int) -> Int { a + b }
+//!         func add(a: lang.i64, b: lang.i64) -> lang.i64 { a + b }
 //!     "#)
 //!     .expect(Compiles)
 //!     .expect(Mir::compiles())
@@ -94,7 +94,7 @@ impl Mir {
             MirFunction::new(&format!(
                 "{}.\"{}\"",
                 module,
-                format!("{}.closure.{}", func, index)
+                format_args!("{func}.closure.{index}")
             ))
         } else {
             // No dot - just use parent as-is
@@ -113,7 +113,7 @@ impl Mir {
             MirStruct::new(&format!(
                 "{}.\"{}\"",
                 module,
-                format!("{}.closure.{}.env", func, index)
+                format_args!("{func}.closure.{index}.env")
             ))
         } else {
             MirStruct::new(&format!("\"{}.closure.{}.env\"", parent, index))

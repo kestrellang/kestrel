@@ -76,7 +76,7 @@ impl MirEnum {
                     ));
                 }
                 Ok(())
-            }
+            },
 
             EnumExpectation::CaseCount(expected) => {
                 let actual = def.cases.len();
@@ -87,7 +87,7 @@ impl MirEnum {
                     ));
                 }
                 Ok(())
-            }
+            },
 
             EnumExpectation::TypeParamCount(expected) => {
                 let actual = def.type_params.len();
@@ -98,7 +98,7 @@ impl MirEnum {
                     ));
                 }
                 Ok(())
-            }
+            },
 
             EnumExpectation::CaseHasStruct {
                 case_name,
@@ -118,7 +118,7 @@ impl MirEnum {
                 }
 
                 Ok(())
-            }
+            },
         }
     }
 }

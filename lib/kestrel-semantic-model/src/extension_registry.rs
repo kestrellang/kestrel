@@ -46,7 +46,7 @@ impl ExtensionRegistry {
         self.extensions_by_target
             .write()
             .entry(target_id)
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(extension_id);
     }
 

@@ -12,7 +12,7 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use crate::common::{StructDeclarationData, emit_struct_declaration};
 use crate::event::{EventSink, TreeBuilder};
-use crate::input::{ParserExtra, ParserInput, create_input, prepare_tokens, to_kestrel_span};
+use crate::input::{ParserExtra, ParserInput, create_input, prepare_tokens};
 use crate::type_decl::struct_declaration_parser_unified;
 
 use chumsky::prelude::*;
@@ -119,13 +119,13 @@ where
     {
         Ok(data) => {
             emit_struct_declaration(sink, data);
-        }
+        },
         Err(errors) => {
             for error in errors {
                 let span = error.span();
-                sink.error_at(format!("Parse error: {:?}", error), to_kestrel_span(*span));
+                sink.error_at(format!("Parse error: {:?}", error), *span);
             }
-        }
+        },
     }
 }
 
@@ -140,12 +140,12 @@ mod tests {
             .filter_map(|t| t.ok())
             .map(|spanned| (spanned.value, spanned.span))
             .collect();
-        let mut sink = EventSink::new();
+        let mut sink = EventSink::new(0);
         parse_struct_declaration(source, tokens.into_iter(), &mut sink);
         let tree = TreeBuilder::new(source, sink.into_events()).build();
         StructDeclaration {
             syntax: tree,
-            span: Span::from(0..source.len()),
+            span: Span::new(0, 0..source.len()),
         }
     }
 
@@ -386,5 +386,22 @@ mod tests {
             .children()
             .any(|c| c.kind() == SyntaxKind::FunctionBody);
         assert!(has_body, "deinit should have a FunctionBody child");
+    }
+
+    #[test]
+    fn test_struct_with_trailing_comma_in_conformance() {
+        // Test that trailing comma before opening brace is allowed
+        let decl = parse("struct Point: Drawable, Equatable, { }");
+        assert_eq!(decl.name(), Some("Point".to_string()));
+        let conformance_list = decl
+            .syntax
+            .children()
+            .find(|child| child.kind() == SyntaxKind::ConformanceList)
+            .expect("Expected ConformanceList node");
+        let conformance_count = conformance_list
+            .children()
+            .filter(|c| c.kind() == SyntaxKind::ConformanceItem)
+            .count();
+        assert_eq!(conformance_count, 2);
     }
 }

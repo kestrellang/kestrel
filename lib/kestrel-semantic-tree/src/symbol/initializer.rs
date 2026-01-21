@@ -5,11 +5,13 @@ use semantic_tree::symbol::{Symbol, SymbolMetadata, SymbolMetadataBuilder};
 
 use crate::{
     behavior::callable::{CallableBehavior, CallableSignature, SignatureType},
+    behavior::generics::GenericsBehavior,
     behavior::visibility::VisibilityBehavior,
     language::KestrelLanguage,
     symbol::kind::KestrelSymbolKind,
     symbol::local::{Local, LocalContainer, LocalId},
-    ty::Ty,
+    symbol::type_parameter::TypeParameterSymbol,
+    ty::{Ty, WhereClause},
 };
 
 // Re-export CallableParameter as Parameter for convenience
@@ -186,5 +188,45 @@ impl InitializerSymbol {
     /// Get the number of locals
     pub fn local_count(&self) -> usize {
         self.locals.read().unwrap().len()
+    }
+
+    /// Get the where clause for this initializer.
+    ///
+    /// The where clause contains type parameter constraints like `where T: Protocol`.
+    /// Returns an empty WhereClause if no constraints are defined.
+    pub fn where_clause(&self) -> WhereClause {
+        self.metadata
+            .get_behavior::<GenericsBehavior>()
+            .map(|g| g.where_clause().clone())
+            .unwrap_or_default()
+    }
+
+    /// Get the type parameters for this initializer.
+    ///
+    /// During BUILD phase (before GenericsBehavior is attached), this gets
+    /// TypeParameter children directly. After BIND, it uses the GenericsBehavior.
+    pub fn type_parameters(&self) -> Vec<Arc<TypeParameterSymbol>> {
+        // First try GenericsBehavior (available after BIND)
+        if let Some(g) = self.metadata.get_behavior::<GenericsBehavior>() {
+            return g.type_parameters().to_vec();
+        }
+
+        // Fallback: get TypeParameter children (available during BUILD)
+        self.metadata
+            .children()
+            .into_iter()
+            .filter_map(|c| {
+                if c.metadata().kind() == KestrelSymbolKind::TypeParameter {
+                    c.downcast_arc::<TypeParameterSymbol>().ok()
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
+    /// Check if this initializer is generic (has its own type parameters)
+    pub fn is_generic(&self) -> bool {
+        !self.type_parameters().is_empty()
     }
 }

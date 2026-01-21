@@ -16,11 +16,13 @@ use kestrel_lexer::Token;
 use kestrel_span::Span;
 
 use super::data::{
-    DeinitDeclarationData, FieldDeclarationData, FunctionDeclarationData,
+    ComputedBodyData, DeinitDeclarationData, FieldDeclarationData, FunctionDeclarationData,
     InitializerDeclarationData, ParameterAccessMode, ParameterData, ReceiverModifier,
+    SubscriptBodyData, SubscriptDeclarationData,
 };
 use crate::attribute::attribute_list_parser;
 use crate::block::{CodeBlockData, code_block_parser};
+use crate::expr::expr_parser;
 use crate::input::{ParserExtra, ParserInput, to_kestrel_span};
 use crate::ty::{TyVariant, ty_parser};
 use crate::type_param::{type_parameter_list_parser, where_clause_parser};
@@ -81,6 +83,7 @@ pub fn module_path_parser_internal<'tokens>()
         .separated_by(token(Token::Dot))
         .at_least(1)
         .collect()
+        .boxed()
 }
 
 /// Internal Chumsky parser for optional visibility modifier
@@ -112,7 +115,9 @@ pub fn visibility_parser_internal<'tokens>()
 /// - `module A.B.C` → `(span(module), [span(A), span(B), span(C)])`
 pub fn module_declaration_parser_internal<'tokens>()
 -> impl Parser<'tokens, ParserInput<'tokens>, (Span, Vec<Span>), ParserExtra<'tokens>> + Clone {
-    token(Token::Module).then(module_path_parser_internal())
+    token(Token::Module)
+        .then(module_path_parser_internal())
+        .boxed()
 }
 
 /// Internal parser for import item (identifier or identifier as alias)
@@ -126,7 +131,9 @@ pub fn module_declaration_parser_internal<'tokens>()
 /// - `Foo as Bar` → `(span(Foo), Some(span(Bar)))`
 pub fn import_item_parser_internal<'tokens>()
 -> impl Parser<'tokens, ParserInput<'tokens>, (Span, Option<Span>), ParserExtra<'tokens>> + Clone {
-    identifier().then(token(Token::As).ignore_then(identifier()).or_not())
+    identifier()
+        .then(token(Token::As).ignore_then(identifier()).or_not())
+        .boxed()
 }
 
 /// Internal parser for import items list
@@ -148,6 +155,7 @@ pub fn import_items_parser_internal<'tokens>()
                 .collect(),
         )
         .then_ignore(token(Token::RParen))
+        .boxed()
 }
 
 /// Internal parser for import declaration
@@ -194,6 +202,7 @@ pub fn import_declaration_parser_internal<'tokens>() -> impl Parser<
             };
             (import_span, path_segments, alias, items)
         })
+        .boxed()
 }
 
 // =============================================================================
@@ -326,18 +335,20 @@ pub(crate) fn parameter_parser<'tokens>()
         });
 
     // Try labeled first (more specific), then unlabeled
-    labeled.or(unlabeled)
+    labeled.or(unlabeled).boxed()
 }
 
 /// Parser for parameter list (zero or more parameters separated by commas)
 pub(crate) fn parameter_list_parser<'tokens>()
 -> impl Parser<'tokens, ParserInput<'tokens>, Vec<ParameterData>, ParserExtra<'tokens>> + Clone {
-    skip_trivia().ignore_then(
-        parameter_parser()
-            .separated_by(just(Token::Comma).map_with(|_, e| to_kestrel_span(e.span())))
-            .allow_trailing()
-            .collect(),
-    )
+    skip_trivia()
+        .ignore_then(
+            parameter_parser()
+                .separated_by(just(Token::Comma).map_with(|_, e| to_kestrel_span(e.span())))
+                .allow_trailing()
+                .collect(),
+        )
+        .boxed()
 }
 
 /// Parser for optional return type: `-> Type`
@@ -353,6 +364,7 @@ pub(crate) fn return_type_parser<'tokens>()
         .then(ty_parser())
         .map(|(arrow, ty)| (arrow, ty))
         .or_not()
+        .boxed()
 }
 
 /// Parser for optional function body (code block)
@@ -362,7 +374,7 @@ pub(crate) fn return_type_parser<'tokens>()
 /// - `None` if no body (e.g., protocol method declarations)
 pub fn function_body_parser<'tokens>()
 -> impl Parser<'tokens, ParserInput<'tokens>, Option<CodeBlockData>, ParserExtra<'tokens>> + Clone {
-    code_block_parser().map(Some).or(empty().to(None))
+    code_block_parser().map(Some).or(empty().to(None)).boxed()
 }
 
 // =============================================================================
@@ -439,11 +451,98 @@ pub fn function_declaration_parser_internal<'tokens>()
                 }
             },
         )
+        .boxed()
+}
+
+// =============================================================================
+// Computed Property Parsers
+// =============================================================================
+
+/// Parser for computed property body
+///
+/// Handles three forms:
+/// 1. Shorthand: `{ expr }` - just a code block with an expression
+/// 2. Explicit accessors: `{ get { expr } }` or `{ get { expr } set { expr } }`
+/// 3. Protocol requirements: `{ get }` or `{ get set }` (no bodies, just keywords)
+///
+/// Returns `None` if no `{` follows (stored property), or `Some(ComputedBodyData)`.
+fn computed_body_parser<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, Option<ComputedBodyData>, ParserExtra<'tokens>> + Clone
+{
+    // Protocol requirement: { get } or { get set }
+    // These have no code block bodies, just keywords
+    let protocol_requirement = skip_trivia()
+        .ignore_then(just(Token::LBrace))
+        .ignore_then(skip_trivia())
+        .ignore_then(just(Token::Get))
+        .ignore_then(
+            skip_trivia()
+                .ignore_then(just(Token::Set))
+                .map(|_| true)
+                .or(empty().to(false)),
+        )
+        .then_ignore(skip_trivia())
+        .then_ignore(just(Token::RBrace))
+        .map(|has_setter| ComputedBodyData::Accessors {
+            getter: None,
+            setter: if has_setter {
+                Some(CodeBlockData {
+                    lbrace: Span::new(0, 0..0),
+                    items: vec![],
+                    rbrace: Span::new(0, 0..0),
+                })
+            } else {
+                None
+            },
+        });
+
+    // Explicit accessors: { get { body } set { body }? }
+    // getter is required, setter is optional
+    let explicit_accessors = skip_trivia()
+        .ignore_then(just(Token::LBrace))
+        .ignore_then(skip_trivia())
+        .ignore_then(just(Token::Get))
+        .ignore_then(code_block_parser())
+        .then(
+            skip_trivia()
+                .ignore_then(just(Token::Set))
+                .ignore_then(code_block_parser())
+                .or_not(),
+        )
+        .then_ignore(skip_trivia())
+        .then_ignore(just(Token::RBrace))
+        .map(|(getter_body, setter_body)| ComputedBodyData::Accessors {
+            getter: Some(getter_body),
+            setter: setter_body,
+        });
+
+    // Shorthand: { expr } - parsed as a code block
+    // This is just a regular code block
+    let shorthand = code_block_parser().map(ComputedBodyData::Shorthand);
+
+    // Try protocol requirement first (most specific - has get/set keywords but no code blocks)
+    // Then explicit accessors (has get keyword followed by code block)
+    // Then shorthand (just a code block)
+    // Finally, nothing (stored property)
+    protocol_requirement
+        .or(explicit_accessors)
+        .or(shorthand)
+        .map(Some)
+        .or(empty().to(None))
+        .boxed()
 }
 
 /// Parser for a field declaration
 ///
-/// Syntax: `(@attr)* (visibility)? (static)? let/var name: Type (;)?`
+/// Syntax: `(@attr)* (visibility)? (static)? let/var name: Type (ComputedBody | Initializer)? (;)?`
+///
+/// ComputedBody can be:
+/// - Shorthand: `{ expr }` - just a code block with an expression
+/// - Explicit accessors: `{ get { expr } }` or `{ get { expr } set { expr } }`
+/// - Protocol requirements: `{ get }` or `{ get set }` (no bodies, just keywords)
+///
+/// Initializer is:
+/// - `= expr` - for constant initialization (e.g., `let STDIN: i64 = 0`)
 ///
 /// This is the single source of truth for field declaration parsing.
 /// An optional trailing semicolon is allowed for inline field declarations.
@@ -456,18 +555,36 @@ pub fn field_declaration_parser_internal<'tokens>()
         .then(identifier())
         .then(token(Token::Colon))
         .then(ty_parser())
+        .then(computed_body_parser())
+        .then(
+            // Optional initializer: = expr
+            skip_trivia()
+                .ignore_then(token(Token::Equals))
+                .then(expr_parser())
+                .map(|(eq, expr)| (eq, expr))
+                .or_not(),
+        )
         .then(token(Token::Semicolon).or_not())
         .map(
             |(
                 (
                     (
                         (
-                            (((attributes, visibility), is_static), (mutability_span, is_mutable)),
-                            name_span,
+                            (
+                                (
+                                    (
+                                        ((attributes, visibility), is_static),
+                                        (mutability_span, is_mutable),
+                                    ),
+                                    name_span,
+                                ),
+                                colon_span,
+                            ),
+                            ty,
                         ),
-                        colon_span,
+                        computed_body,
                     ),
-                    ty,
+                    initializer,
                 ),
                 semicolon,
             )| {
@@ -480,10 +597,13 @@ pub fn field_declaration_parser_internal<'tokens>()
                     name_span,
                     colon_span,
                     ty,
+                    computed_body,
+                    initializer,
                     semicolon,
                 }
             },
         )
+        .boxed()
 }
 
 /// Parser for an initializer declaration
@@ -498,23 +618,40 @@ pub fn initializer_declaration_parser_internal<'tokens>()
     attribute_list_parser()
         .then(visibility_parser_internal())
         .then(token(Token::Init))
+        .then(type_parameter_list_parser().or_not())
         .then(token(Token::LParen))
         .then(parameter_list_parser())
         .then(token(Token::RParen))
+        .then(where_clause_parser().or_not())
         .then(function_body_parser())
         .map(
-            |((((((attributes, visibility), init_span), lparen), parameters), rparen), body)| {
+            |(
+                (
+                    (
+                        (
+                            ((((attributes, visibility), init_span), type_params), lparen),
+                            parameters,
+                        ),
+                        rparen,
+                    ),
+                    where_clause,
+                ),
+                body,
+            )| {
                 InitializerDeclarationData {
                     attributes,
                     visibility,
                     init_span,
+                    type_params,
                     lparen,
                     parameters,
                     rparen,
+                    where_clause,
                     body,
                 }
             },
         )
+        .boxed()
 }
 
 /// Parser for a deinitializer declaration
@@ -529,4 +666,149 @@ pub fn deinit_declaration_parser_internal<'tokens>()
     token(Token::Deinit)
         .then(code_block_parser())
         .map(|(deinit_span, body)| DeinitDeclarationData { deinit_span, body })
+        .boxed()
+}
+
+// =============================================================================
+// Subscript Parsers
+// =============================================================================
+
+/// Parser for subscript body
+///
+/// Handles three forms:
+/// 1. Shorthand: `{ expr }` - just a code block with an expression
+/// 2. Explicit accessors: `{ get { expr } }` or `{ get { expr } set { expr } }`
+/// 3. Protocol requirements: `{ get }` or `{ get set }` (no bodies, just keywords)
+fn subscript_body_parser<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, SubscriptBodyData, ParserExtra<'tokens>> + Clone {
+    // Protocol requirement: { get } or { get set }
+    // These have no code block bodies, just keywords
+    let protocol_requirement = skip_trivia()
+        .ignore_then(just(Token::LBrace))
+        .ignore_then(skip_trivia())
+        .ignore_then(just(Token::Get))
+        .ignore_then(
+            skip_trivia()
+                .ignore_then(just(Token::Set))
+                .map(|_| true)
+                .or(empty().to(false)),
+        )
+        .then_ignore(skip_trivia())
+        .then_ignore(just(Token::RBrace))
+        .map(|has_setter| SubscriptBodyData::Accessors {
+            getter: None,
+            setter: if has_setter {
+                Some(CodeBlockData {
+                    lbrace: Span::new(0, 0..0),
+                    items: vec![],
+                    rbrace: Span::new(0, 0..0),
+                })
+            } else {
+                None
+            },
+        });
+
+    // Explicit accessors: { get { body } set { body }? }
+    // getter is required, setter is optional
+    let explicit_accessors = skip_trivia()
+        .ignore_then(just(Token::LBrace))
+        .ignore_then(skip_trivia())
+        .ignore_then(just(Token::Get))
+        .ignore_then(code_block_parser())
+        .then(
+            skip_trivia()
+                .ignore_then(just(Token::Set))
+                .ignore_then(code_block_parser())
+                .or_not(),
+        )
+        .then_ignore(skip_trivia())
+        .then_ignore(just(Token::RBrace))
+        .map(|(getter_body, setter_body)| SubscriptBodyData::Accessors {
+            getter: Some(getter_body),
+            setter: setter_body,
+        });
+
+    // Shorthand: { expr } - parsed as a code block
+    // This is just a regular code block
+    let shorthand = code_block_parser().map(SubscriptBodyData::Shorthand);
+
+    // Try protocol requirement first (most specific - has get/set keywords but no code blocks)
+    // Then explicit accessors (has get keyword followed by code block)
+    // Then shorthand (just a code block)
+    protocol_requirement
+        .or(explicit_accessors)
+        .or(shorthand)
+        .boxed()
+}
+
+/// Parser for required return type: `-> Type`
+///
+/// Unlike optional return type parser, this requires the arrow and type.
+/// Used for subscripts which must have a return type.
+fn required_return_type_parser<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, (Span, TyVariant), ParserExtra<'tokens>> + Clone {
+    skip_trivia()
+        .ignore_then(just(Token::Arrow).map_with(|_, e| to_kestrel_span(e.span())))
+        .then(ty_parser())
+        .boxed()
+}
+
+/// Parser for a subscript declaration
+///
+/// Syntax: `(@attr)* (visibility)? (static)? subscript[T, U]?(params) -> Type (where ...)? { body }`
+///
+/// This is the single source of truth for subscript declaration parsing.
+pub fn subscript_declaration_parser_internal<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, SubscriptDeclarationData, ParserExtra<'tokens>> + Clone
+{
+    attribute_list_parser()
+        .then(visibility_parser_internal())
+        .then(static_parser())
+        .then(token(Token::Subscript))
+        .then(type_parameter_list_parser().or_not())
+        .then(token(Token::LParen))
+        .then(parameter_list_parser())
+        .then(token(Token::RParen))
+        .then(required_return_type_parser())
+        .then(where_clause_parser().or_not())
+        .then(subscript_body_parser())
+        .map(
+            |(
+                (
+                    (
+                        (
+                            (
+                                (
+                                    (
+                                        (((attributes, visibility), is_static), subscript_span),
+                                        type_params,
+                                    ),
+                                    lparen,
+                                ),
+                                parameters,
+                            ),
+                            rparen,
+                        ),
+                        return_type,
+                    ),
+                    where_clause,
+                ),
+                body,
+            )| {
+                SubscriptDeclarationData {
+                    attributes,
+                    visibility,
+                    is_static,
+                    subscript_span,
+                    type_params,
+                    lparen,
+                    parameters,
+                    rparen,
+                    return_type,
+                    where_clause,
+                    body,
+                }
+            },
+        )
+        .boxed()
 }

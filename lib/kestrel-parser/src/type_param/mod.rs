@@ -94,14 +94,16 @@ pub struct WhereClauseData {
 /// Parser for a path (used in type positions): Ident or Ident.Ident.Ident
 fn path_parser<'tokens>()
 -> impl Parser<'tokens, ParserInput<'tokens>, Vec<Span>, ParserExtra<'tokens>> + Clone {
-    skip_trivia().ignore_then(
-        select! {
-            Token::Identifier = e => to_kestrel_span(e.span()),
-        }
-        .separated_by(just(Token::Dot))
-        .at_least(1)
-        .collect(),
-    )
+    skip_trivia()
+        .ignore_then(
+            select! {
+                Token::Identifier = e => to_kestrel_span(e.span()),
+            }
+            .separated_by(just(Token::Dot))
+            .at_least(1)
+            .collect(),
+        )
+        .boxed()
 }
 
 /// Parser for a single type argument (recursive to handle nested generics)
@@ -125,6 +127,7 @@ fn type_argument_parser<'tokens>()
                     .or_not(),
             )
             .map(|(path, args)| TypeArgumentData { path, args })
+            .boxed()
     })
 }
 
@@ -142,6 +145,7 @@ pub fn type_argument_list_parser<'tokens>()
         )
         .then_ignore(skip_trivia())
         .then_ignore(just(Token::RBracket))
+        .boxed()
 }
 
 /// Parser for type arguments with bracket spans: [Type, Type, ...]
@@ -160,6 +164,7 @@ pub fn type_argument_list_with_spans_parser<'tokens>()
         .then_ignore(skip_trivia())
         .then(just(Token::RBracket).map_with(|_, e| to_kestrel_span(e.span())))
         .map(|((lbracket, args), rbracket)| (lbracket, args, rbracket))
+        .boxed()
 }
 
 /// Parser for optional type arguments after a path
@@ -169,6 +174,7 @@ pub fn path_with_optional_args_parser<'tokens>()
     path_parser()
         .then(type_argument_list_parser().or_not())
         .map(|(path, args)| TypeArgumentData { path, args })
+        .boxed()
 }
 
 /// Parser for a single type parameter: T or T = Default
@@ -186,6 +192,7 @@ fn type_parameter_parser<'tokens>()
                 .or_not(),
         )
         .map(|(name, default)| TypeParameterData { name, default })
+        .boxed()
 }
 
 /// Parser for type parameter list: [T, U, V] or [T, U = String]
@@ -205,6 +212,7 @@ pub fn type_parameter_list_parser<'tokens>()
                 .ignore_then(just(Token::RBracket).map_with(|_, e| to_kestrel_span(e.span()))),
         )
         .map(|((lbracket, params), rbracket)| (lbracket, params, rbracket))
+        .boxed()
 }
 
 /// Parser for a single positive type bound: T: Proto and Proto2 or T.Item: Proto
@@ -228,6 +236,7 @@ fn positive_type_bound_parser<'tokens>()
                 .collect(),
         )
         .map(|(path, bounds)| TypeBoundData { path, bounds })
+        .boxed()
 }
 
 /// Parser for a negative type bound: T: not Copyable
@@ -246,6 +255,7 @@ fn negative_type_bound_parser<'tokens>()
             not_span,
             bound,
         })
+        .boxed()
 }
 
 /// Parser for a type equality constraint: T.Item = Type
@@ -262,6 +272,7 @@ fn type_equality_parser<'tokens>()
             equals_span,
             right,
         })
+        .boxed()
 }
 
 /// Parser for a single where clause constraint (bound, negative bound, or equality)
@@ -275,6 +286,7 @@ fn where_constraint_parser<'tokens>()
         .map(WhereConstraintData::Equality)
         .or(negative_type_bound_parser().map(WhereConstraintData::NegativeBound))
         .or(positive_type_bound_parser().map(WhereConstraintData::Bound))
+        .boxed()
 }
 
 /// Parser for where clause: where T: Proto, U: Other, T.Item = Int
@@ -292,6 +304,7 @@ pub fn where_clause_parser<'tokens>()
             where_span,
             constraints,
         })
+        .boxed()
 }
 
 /// Parser for a single conformance item: Proto or not Proto
@@ -306,6 +319,7 @@ fn conformance_item_parser<'tokens>()
         )
         .then(crate::ty::ty_parser())
         .map(|(not_span, ty)| crate::common::ConformanceItemData { not_span, ty })
+        .boxed()
 }
 
 /// Parser for conformance list: : Proto1, Proto2[T], not Copyable
@@ -321,10 +335,12 @@ pub fn conformance_list_parser<'tokens>() -> impl Parser<
         .then(
             conformance_item_parser()
                 .separated_by(just(Token::Comma))
+                .allow_trailing()
                 .at_least(1)
                 .collect(),
         )
         .map(|(colon_span, conformances)| (colon_span, conformances))
+        .boxed()
 }
 
 /// Emit events for a type parameter list
@@ -379,7 +395,7 @@ pub fn emit_where_clause(sink: &mut EventSink, data: WhereClauseData) {
             WhereConstraintData::Bound(bound) => emit_type_bound(sink, bound),
             WhereConstraintData::NegativeBound(neg_bound) => {
                 emit_negative_type_bound(sink, neg_bound)
-            }
+            },
             WhereConstraintData::Equality(equality) => emit_type_equality(sink, equality),
         }
     }
@@ -534,7 +550,7 @@ fn emit_path(sink: &mut EventSink, segments: &[Span]) {
             // The dot should be a single character somewhere in this gap
             let dot_start = end;
             let dot_end = (end + 1).min(span.start);
-            sink.add_token(SyntaxKind::Dot, Span::from(dot_start..dot_end));
+            sink.add_token(SyntaxKind::Dot, Span::new(span.file_id, dot_start..dot_end));
         }
         sink.start_node(SyntaxKind::PathElement);
         sink.add_token(SyntaxKind::Identifier, span.clone());
@@ -658,7 +674,7 @@ mod tests {
         match &data.constraints[0] {
             WhereConstraintData::NegativeBound(neg_bound) => {
                 assert_eq!(neg_bound.path.len(), 1); // T
-            }
+            },
             _ => panic!("Expected NegativeBound constraint"),
         }
     }
@@ -670,11 +686,11 @@ mod tests {
         let data = result.unwrap();
         assert_eq!(data.constraints.len(), 2);
         match &data.constraints[0] {
-            WhereConstraintData::Bound(_) => {}
+            WhereConstraintData::Bound(_) => {},
             _ => panic!("Expected Bound for first constraint"),
         }
         match &data.constraints[1] {
-            WhereConstraintData::NegativeBound(_) => {}
+            WhereConstraintData::NegativeBound(_) => {},
             _ => panic!("Expected NegativeBound for second constraint"),
         }
     }

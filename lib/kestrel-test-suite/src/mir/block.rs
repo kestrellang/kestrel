@@ -103,7 +103,7 @@ impl MirBlock {
                         block_index, actual, expected
                     ));
                 }
-            }
+            },
 
             BlockExpectation::AtLeastStatements(expected) => {
                 let actual = block.statements.len();
@@ -113,7 +113,7 @@ impl MirBlock {
                         block_index, actual, expected
                     ));
                 }
-            }
+            },
 
             BlockExpectation::HasStatement(pattern) => {
                 let found = block.statements.iter().any(|stmt_id| {
@@ -127,7 +127,7 @@ impl MirBlock {
                         pattern.display()
                     ));
                 }
-            }
+            },
 
             BlockExpectation::StatementAt(idx, pattern) => {
                 if *idx >= block.statements.len() {
@@ -148,7 +148,7 @@ impl MirBlock {
                         stmt.kind
                     ));
                 }
-            }
+            },
 
             BlockExpectation::Terminates(pattern) => {
                 if !pattern.matches(block, all_blocks, ctx) {
@@ -164,7 +164,7 @@ impl MirBlock {
                         actual
                     ));
                 }
-            }
+            },
 
             BlockExpectation::HasSuccessor(expected_idx) => {
                 let successors = block
@@ -189,7 +189,7 @@ impl MirBlock {
                         block_index, expected_idx, actual_indices
                     ));
                 }
-            }
+            },
 
             BlockExpectation::SuccessorCount(expected) => {
                 let actual = block
@@ -203,7 +203,7 @@ impl MirBlock {
                         block_index, actual, expected
                     ));
                 }
-            }
+            },
         }
         Ok(())
     }

@@ -39,14 +39,14 @@ mod basic_init {
 
     #[test]
     fn init_with_arguments() {
-        // T(x: 1) with labeled argument
+        // T(v) with positional argument
         Test::new(
             r#"module Test
             protocol Factory {
-                init(value: Int)
+                init(value: lang.i64)
             }
-            func make[T](v: Int) -> T where T: Factory {
-                return T(value: v)
+            func make[T](v: lang.i64) -> T where T: Factory {
+                return T(v)
             }
         "#,
         )
@@ -55,14 +55,14 @@ mod basic_init {
 
     #[test]
     fn init_with_multiple_arguments() {
-        // T(a: 1, b: 2) with multiple arguments
+        // T(a, b) with multiple positional arguments
         Test::new(
             r#"module Test
             protocol Factory {
-                init(x: Int, y: Int)
+                init(x: lang.i64, y: lang.i64)
             }
-            func make[T](a: Int, b: Int) -> T where T: Factory {
-                return T(x: a, y: b)
+            func make[T](a: lang.i64, b: lang.i64) -> T where T: Factory {
+                return T(a, b)
             }
         "#,
         )
@@ -76,13 +76,13 @@ mod basic_init {
             r#"module Test
             protocol Factory {
                 init()
-                init(value: Int)
+                init(value: lang.i64)
             }
             func makeDefault[T]() -> T where T: Factory {
                 return T()
             }
-            func makeWithValue[T](v: Int) -> T where T: Factory {
-                return T(value: v)
+            func makeWithValue[T](v: lang.i64) -> T where T: Factory {
+                return T(v)
             }
         "#,
         )
@@ -115,9 +115,9 @@ mod basic_static_method {
         Test::new(
             r#"module Test
             protocol Factory {
-                static func create(value value: Int) -> Self
+                static func create(value value: lang.i64) -> Self
             }
-            func make[T](v: Int) -> T where T: Factory {
+            func make[T](v: lang.i64) -> T where T: Factory {
                 return T.create(value: v)
             }
         "#,
@@ -131,9 +131,9 @@ mod basic_static_method {
         Test::new(
             r#"module Test
             protocol Describable {
-                static func typeName() -> String
+                static func typeName() -> lang.str
             }
-            func getName[T]() -> String where T: Describable {
+            func getName[T]() -> lang.str where T: Describable {
                 return T.typeName()
             }
         "#,
@@ -225,7 +225,7 @@ mod multiple_bounds {
                 init()
             }
             protocol Describable {
-                func describe() -> String
+                func describe() -> lang.str
             }
             func make[T]() -> T where T: Creatable, T: Describable {
                 return T()
@@ -244,9 +244,9 @@ mod multiple_bounds {
                 static func create() -> Self
             }
             protocol Describable {
-                func describe() -> String
+                func describe() -> lang.str
             }
-            func makeAndDescribe[T]() -> String where T: Factory, T: Describable {
+            func makeAndDescribe[T]() -> lang.str where T: Factory, T: Describable {
                 let item: T = T.create();
                 return item.describe()
             }
@@ -264,9 +264,9 @@ mod multiple_bounds {
                 static func create() -> Self
             }
             protocol Describable {
-                func describe() -> String
+                func describe() -> lang.str
             }
-            func makeAndDescribe[T]() -> String where T: Factory and Describable {
+            func makeAndDescribe[T]() -> lang.str where T: Factory and Describable {
                 let item: T = T.create();
                 return item.describe()
             }
@@ -285,7 +285,7 @@ mod error_cases {
         Test::new(
             r#"module Test
             protocol Empty {
-                func doSomething() -> Int
+                func doSomething() -> lang.i64
             }
             func make[T]() -> T where T: Empty {
                 return T()
@@ -301,7 +301,7 @@ mod error_cases {
         Test::new(
             r#"module Test
             protocol Factory {
-                func instanceMethod() -> Int
+                func instanceMethod() -> lang.i64
             }
             func make[T]() -> T where T: Factory {
                 return T.create()
@@ -397,7 +397,7 @@ mod error_cases {
         Test::new(
             r#"module Test
             protocol Factory {
-                init(value: Int)
+                init(value: lang.i64)
             }
             func make[T]() -> T where T: Factory {
                 return T(wrong: 1)
@@ -409,11 +409,11 @@ mod error_cases {
 
     #[test]
     fn wrong_argument_count() {
-        // T() when protocol expects T(value: Int)
+        // T() when protocol expects T(value: lang.i64)
         Test::new(
             r#"module Test
             protocol Factory {
-                init(value: Int)
+                init(value: lang.i64)
             }
             func make[T]() -> T where T: Factory {
                 return T()
@@ -492,7 +492,7 @@ mod inherited_protocols {
                 init()
             }
             protocol Child: Base {
-                func extra() -> Int
+                func extra() -> lang.i64
             }
             func make[T]() -> T where T: Child {
                 return T()
@@ -511,7 +511,7 @@ mod inherited_protocols {
                 static func create() -> Self
             }
             protocol Child: Base {
-                func extra() -> Int
+                func extra() -> lang.i64
             }
             func make[T]() -> T where T: Child {
                 return T.create()
@@ -545,7 +545,7 @@ mod edge_cases {
 
     #[test]
     fn generic_protocol_bound() {
-        // T: Container[E] with generic protocol
+        // T: Container[E] with generic protocol - NOW SUPPORTED
         Test::new(
             r#"module Test
             protocol Container[E] {
@@ -556,7 +556,7 @@ mod edge_cases {
             }
         "#,
         )
-        .expect(HasError("generic protocol bounds"));
+        .expect(Compiles);
     }
 
     #[test]
@@ -600,9 +600,9 @@ mod edge_cases {
         Test::new(
             r#"module Test
             protocol Counter {
-                static func count() -> Int
+                static func count() -> lang.i64
             }
-            func getCount[T]() -> Int where T: Counter {
+            func getCount[T]() -> lang.i64 where T: Counter {
                 return T.count()
             }
         "#,
@@ -621,6 +621,158 @@ mod edge_cases {
             }
             func makeBothWays[T]() -> (T, T) where T: Factory {
                 return (T(), T.create())
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+}
+
+mod generic_protocol_bounds {
+    use super::*;
+
+    #[test]
+    fn basic_generic_protocol_bound_instance_method() {
+        // where T: Converter[lang.i64] - instance method with return type substitution
+        Test::new(
+            r#"module Test
+            protocol Converter[Target] {
+                func convert() -> Target
+            }
+            func useConverter[T](val: T) -> lang.i64 where T: Converter[lang.i64] {
+                val.convert()
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn generic_protocol_bound_with_type_parameter() {
+        // where T: Container[E] - protocol arg is another type param
+        Test::new(
+            r#"module Test
+            protocol Container[E] {
+                func first() -> E
+            }
+            func getFirst[T, E](c: T) -> E where T: Container[E] {
+                c.first()
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn generic_protocol_bound_static_method() {
+        // Static method on generic protocol bound
+        Test::new(
+            r#"module Test
+            protocol Factory[T] {
+                static func create() -> T
+            }
+            func makeWidget[F]() -> lang.i64 where F: Factory[lang.i64] {
+                F.create()
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn generic_protocol_bound_init() {
+        // Init on generic protocol bound
+        Test::new(
+            r#"module Test
+            protocol Buildable[T] {
+                init(value: T)
+            }
+            func build[B](v: lang.i64) -> B where B: Buildable[lang.i64] {
+                B(v)
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn generic_protocol_bound_self_and_type_param() {
+        // Method uses both Self and protocol type param
+        Test::new(
+            r#"module Test
+            protocol Transformer[Output] {
+                func transform() -> Output
+                func chain(other: Self) -> Output
+            }
+            func apply[T](a: T, b: T) -> lang.i64 where T: Transformer[lang.i64] {
+                a.chain(b)
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn generic_protocol_inheritance() {
+        // Child protocol inherits from generic parent
+        Test::new(
+            r#"module Test
+            protocol Converter[T] {
+                func convert() -> T
+            }
+            protocol IntConverter: Converter[lang.i64] {
+                func convertTwice() -> lang.i64
+            }
+            func useIntConverter[T](val: T) -> lang.i64 where T: IntConverter {
+                val.convert()
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn generic_protocol_bound_multiple_type_params() {
+        // Protocol with multiple type parameters
+        Test::new(
+            r#"module Test
+            protocol BiConverter[From, To] {
+                func convert(input: From) -> To
+            }
+            func transform[T](c: T, input: lang.str) -> lang.i64 where T: BiConverter[lang.str, lang.i64] {
+                c.convert(input)
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn recursive_type_param_in_bound() {
+        // where T: Comparable[T] - common pattern
+        Test::new(
+            r#"module Test
+            protocol Comparable[Other] {
+                func compare(other: Other) -> lang.i64
+            }
+            func compareToSelf[T](a: T, b: T) -> lang.i64 where T: Comparable[T] {
+                a.compare(b)
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn generic_protocol_with_parameter_types() {
+        // Protocol type param used in method parameter types
+        Test::new(
+            r#"module Test
+            protocol Processor[Input] {
+                func process(input: Input) -> lang.i64
+            }
+            func runProcessor[P](p: P, input: lang.str) -> lang.i64 where P: Processor[lang.str] {
+                p.process(input)
             }
         "#,
         )

@@ -119,7 +119,7 @@ mod validation_errors {
             r#"module Test
             @builtin(.ExpressibleByIntLiteral)
             protocol ExpressibleByIntLiteral {
-                init(intLiteral value: Int)
+                init(intLiteral value: lang.i64)
             }
             
             struct Foo: not ExpressibleByIntLiteral {}
@@ -142,7 +142,7 @@ mod validation_errors {
             }
             
             struct Handle: Cloneable, not Copyable {
-                var fd: Int
+                var fd: lang.i64
                 
                 func clone() -> Handle {
                     Handle(fd: self.fd)
@@ -169,7 +169,7 @@ mod validation_errors {
             }
             
             struct Handle: not Copyable, Cloneable {
-                var fd: Int
+                var fd: lang.i64
                 
                 func clone() -> Handle {
                     Handle(fd: self.fd)
@@ -227,7 +227,7 @@ mod semantic {
             protocol Copyable {}
             
             struct Handle: not Copyable {
-                var fd: Int
+                var fd: lang.i64
             }
         "#,
         )
@@ -250,7 +250,7 @@ mod semantic {
             protocol Resource {}
             
             struct Handle: Resource, not Copyable {
-                var fd: Int
+                var fd: lang.i64
             }
         "#,
         )

@@ -31,7 +31,7 @@ mod basic {
         Test::new(
             r#"module Test
             protocol Hashable {
-                func hash() -> Int
+                func hash() -> lang.i64
             }
         "#,
         )
@@ -54,9 +54,9 @@ mod basic {
         Test::new(
             r#"module Test
             protocol Comparable {
-                func lessThan(other: Self) -> Bool
-                func greaterThan(other: Self) -> Bool
-                func equals(other: Self) -> Bool
+                func lessThan(other: Self) -> lang.i1
+                func greaterThan(other: Self) -> lang.i1
+                func equals(other: Self) -> lang.i1
             }
         "#,
         )
@@ -162,6 +162,22 @@ mod conformance {
                 .has(Behavior::ConformanceCount(1)),
         );
     }
+
+    #[test]
+    fn protocol_conformance_applies_default_type_arguments() {
+        Test::new(
+            r#"module Test
+            protocol Multipliable[Rhs = Self] {
+                func multiply(other: Rhs) -> Self
+            }
+            struct Box: Multipliable {
+                init() { }
+                func multiply(other: Box) -> Box { Box() }
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
 }
 
 mod inheritance {
@@ -210,7 +226,7 @@ mod inheritance {
                 func draw()
             }
             protocol Shape: Drawable {
-                func area() -> Int
+                func area() -> lang.i64
             }
         "#,
         )
@@ -296,12 +312,12 @@ mod validation {
         Test::new(
             r#"module Test
             protocol Comparable {
-                func lessThan(other: Int) -> Bool
-                func equals(other: Int) -> Bool
+                func lessThan(other: lang.i64) -> lang.i1
+                func equals(other: lang.i64) -> lang.i1
             }
             struct Number: Comparable {
-                func lessThan(other: Int) -> Bool { true }
-                func equals(other: Int) -> Bool { false }
+                func lessThan(other: lang.i64) -> lang.i1 { true }
+                func equals(other: lang.i64) -> lang.i1 { false }
             }
         "#,
         )
@@ -329,11 +345,11 @@ mod validation {
         Test::new(
             r#"module Test
             protocol Comparable {
-                func lessThan(other: Int) -> Bool
-                func equals(other: Int) -> Bool
+                func lessThan(other: lang.i64) -> lang.i1
+                func equals(other: lang.i64) -> lang.i1
             }
             struct Number: Comparable {
-                func lessThan(other: Int) -> Bool { }
+                func lessThan(other: lang.i64) -> lang.i1 { }
             }
         "#,
         )
@@ -350,11 +366,11 @@ mod validation {
                 func draw()
             }
             protocol Shape: Drawable {
-                func area() -> Int
+                func area() -> lang.i64
             }
             struct Circle: Drawable, Shape {
                 func draw() { }
-                func area() -> Int { 42 }
+                func area() -> lang.i64 { 42 }
             }
         "#,
         )
@@ -375,10 +391,10 @@ mod validation {
                 func draw()
             }
             protocol Shape: Drawable {
-                func area() -> Int
+                func area() -> lang.i64
             }
             struct Circle: Shape {
-                func area() -> Int { }
+                func area() -> lang.i64 { }
             }
         "#,
         )
@@ -390,10 +406,10 @@ mod validation {
         Test::new(
             r#"module Test
             protocol Hashable {
-                func hash() -> Int
+                func hash() -> lang.i64
             }
             struct Point: Hashable {
-                func hash() -> String { }
+                func hash() -> lang.str { }
             }
         "#,
         )
@@ -405,10 +421,10 @@ mod validation {
         Test::new(
             r#"module Test
             protocol Comparable {
-                func compare(other: Int) -> Bool
+                func compare(other: lang.i64) -> lang.i1
             }
             struct Number: Comparable {
-                func compare() -> Bool { }
+                func compare() -> lang.i1 { }
             }
         "#,
         )
@@ -513,10 +529,10 @@ mod validation {
         Test::new(
             r#"module Test
             protocol Greetable {
-                func greet(with name: String)
+                func greet(with name: lang.str)
             }
             struct Person: Greetable {
-                func greet(with name: String) { }
+                func greet(with name: lang.str) { }
             }
         "#,
         )
@@ -538,13 +554,311 @@ mod validation {
         Test::new(
             r#"module Test
             protocol Greetable {
-                func greet(with name: String)
+                func greet(with name: lang.str)
             }
             struct Person: Greetable {
-                func greet(using name: String) { }
+                func greet(using name: lang.str) { }
             }
         "#,
         )
         .expect(HasError("does not implement method 'greet'"));
+    }
+}
+
+mod regression {
+    use super::*;
+
+    /// Regression test for: Generic init with where clause not supported
+    /// Issue: Generic initializers with where clauses in protocols weren't getting their
+    /// type parameters registered as child symbols during semantic analysis, causing
+    /// "cannot find type 'I' in this scope" errors.
+    #[test]
+    fn generic_init_with_where_clause() {
+        Test::new(
+            r#"module Test
+            public protocol Iterator {
+                type Item
+            }
+
+            public protocol Collectable {
+                type Item
+
+                init[I](from iter: I) where I: Iterator, I.Item = Item
+            }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("Collectable").is(SymbolKind::Protocol));
+    }
+
+    /// Regression test for: Child protocol cannot redeclare parent's associated type
+    /// Issue: When a protocol inherits from another protocol and redeclares an associated type
+    /// with the same name, the compiler incorrectly treated this as a conflict error.
+    /// This should be allowed - children can refine/override parent associated types.
+    #[test]
+    fn child_protocol_can_redeclare_parent_associated_type() {
+        Test::new(
+            r#"module Test
+            public protocol _ExpressibleByArrayLiteral {
+                type Element
+            }
+
+            public protocol ExpressibleByArrayLiteral: _ExpressibleByArrayLiteral {
+                type Element
+            }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(
+            Symbol::new("_ExpressibleByArrayLiteral")
+                .is(SymbolKind::Protocol)
+                .has(Behavior::ChildCount(1)),
+        )
+        .expect(
+            Symbol::new("ExpressibleByArrayLiteral")
+                .is(SymbolKind::Protocol)
+                .has(Behavior::ChildCount(1))
+                .has(Behavior::ConformanceCount(1)),
+        );
+    }
+
+    /// Regression test for: Diamond inheritance should still error on conflicting associated types
+    /// This test ensures that the fix for allowing child protocols to redeclare parent's associated
+    /// types doesn't break the legitimate error case where two sibling protocols define the same
+    /// associated type (diamond inheritance conflict).
+    #[test]
+    fn diamond_inheritance_associated_type_conflict() {
+        Test::new(
+            r#"module Test
+            protocol A {
+                type Element
+            }
+
+            protocol B {
+                type Element
+            }
+
+            protocol C: A, B {
+            }
+        "#,
+        )
+        .expect(HasError("conflicting associated type 'Element'"));
+    }
+
+    /// Regression test for: Protocol extension default implementations not inherited
+    /// Issue: When a protocol extends another protocol and provides a default implementation
+    /// via `extend`, types conforming to the child protocol should automatically get the
+    /// default implementation without having to implement it themselves.
+    #[test]
+    fn protocol_extension_default_implementation() {
+        Test::new(
+            r#"module Test
+            public protocol Parent {
+                func parentMethod() -> lang.i64
+            }
+
+            // Provide default implementation in an extension
+            extend Parent {
+                public func parentMethod() -> lang.i64 {
+                    42
+                }
+            }
+
+            public protocol Child: Parent {
+                func childMethod() -> lang.i64
+            }
+
+            // MyStruct should only need to implement childMethod,
+            // not parentMethod (it has a default implementation)
+            public struct MyStruct: Child {
+                public func childMethod() -> lang.i64 {
+                    10
+                }
+            }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("MyStruct").is(SymbolKind::Struct));
+    }
+}
+
+mod type_directed_conformance {
+    use super::*;
+
+    /// When a type has multiple initializers with the same label but different parameter types
+    /// (from implementing multiple instantiations of a generic protocol), the compiler should
+    /// select the correct one based on the argument type.
+    #[test]
+    fn initializer_selected_by_argument_type() {
+        Test::new(
+            r#"module Test
+
+            public struct Wrapper8 {
+                var raw: lang.i8
+                public init(raw: lang.i8) { self.raw = raw }
+            }
+
+            public struct Wrapper32 {
+                var raw: lang.i32
+                public init(raw: lang.i32) { self.raw = raw }
+            }
+
+            // Target struct with differently-labeled inits
+            public struct Target {
+                var value: lang.i64
+
+                public init(from8 value: Wrapper8) {
+                    self.value = lang.cast_i8_i64(value.raw)
+                }
+
+                public init(from32 value: Wrapper32) {
+                    self.value = lang.cast_i32_i64(value.raw)
+                }
+            }
+
+            public func test() {
+                let w8 = Wrapper8(lang.cast_i64_i8(1));
+                let w32 = Wrapper32(lang.cast_i64_i32(42));
+
+                // These should work - different labels select correct init
+                let t1 = Target(from8: w8);
+                let t2 = Target(from32: w32);
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    /// When a struct has multiple initializers with different labels but multiple candidates
+    /// match by arity, the argument type determines which is called.
+    #[test]
+    fn type_directed_selection_with_different_labels() {
+        Test::new(
+            r#"module Test
+
+            public struct Small {
+                var x: lang.i8
+                public init() { self.x = lang.cast_i64_i8(0) }
+            }
+
+            public struct Large {
+                var x: lang.i32
+                public init() { self.x = lang.cast_i64_i32(0) }
+            }
+
+            public struct Target {
+                var value: lang.i64
+
+                public init(fromSmall other: Small) {
+                    self.value = lang.cast_i8_i64(other.x)
+                }
+
+                public init(fromLarge other: Large) {
+                    self.value = lang.cast_i32_i64(other.x)
+                }
+            }
+
+            public func test() {
+                let s = Small();
+                let l = Large();
+
+                // Different labels - type-directed selection validates correct init is called
+                let t1 = Target(fromSmall: s);
+                let t2 = Target(fromLarge: l);
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    /// When a struct has multiple initializers with the same label implementing
+    /// different protocol conformances, the argument type determines which is called.
+    #[test]
+    fn protocol_based_init_overloads() {
+        Test::new(
+            r#"module Test
+
+            public protocol Convertible[T] {
+                init(from other: T)
+            }
+
+            public struct Small {
+                var x: lang.i8
+                public init() { self.x = lang.cast_i64_i8(0) }
+            }
+
+            public struct Large {
+                var x: lang.i32
+                public init() { self.x = lang.cast_i64_i32(0) }
+            }
+
+            public struct Target: Convertible[Small], Convertible[Large] {
+                var value: lang.i64
+
+                public init(from other: Small) {
+                    self.value = lang.cast_i8_i64(other.x)
+                }
+
+                public init(from other: Large) {
+                    self.value = lang.cast_i32_i64(other.x)
+                }
+            }
+
+            public func test() {
+                let s = Small();
+                let l = Large();
+
+                // Type-directed conformance: selects init based on argument type
+                let t1 = Target(from: s);  // Should call init(from: Small)
+                let t2 = Target(from: l);  // Should call init(from: Large)
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    /// Test that method calls also use type-directed selection when multiple
+    /// methods match by label/arity but differ in parameter types.
+    #[test]
+    fn method_call_type_directed_selection() {
+        Test::new(
+            r#"module Test
+
+            public struct SmallValue {
+                var x: lang.i8
+                public init() { self.x = lang.cast_i64_i8(5) }
+            }
+
+            public struct LargeValue {
+                var x: lang.i32
+                public init() { self.x = lang.cast_i64_i32(100) }
+            }
+
+            public struct Processor {
+                var result: lang.i64
+
+                public init() { self.result = 0 }
+
+                public func processSmall(value: SmallValue) -> lang.i64 {
+                    lang.cast_i8_i64(value.x)
+                }
+
+                public func processLarge(value: LargeValue) -> lang.i64 {
+                    lang.cast_i32_i64(value.x)
+                }
+            }
+
+            public func test() {
+                let p = Processor();
+                let s = SmallValue();
+                let l = LargeValue();
+
+                // Method calls - function params don't have external labels by default
+                let r1 = p.processSmall(s);
+                let r2 = p.processLarge(l);
+            }
+        "#,
+        )
+        .expect(Compiles);
     }
 }

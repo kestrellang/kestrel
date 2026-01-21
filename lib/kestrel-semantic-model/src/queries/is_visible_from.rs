@@ -48,7 +48,7 @@ impl Query for IsVisibleFrom {
                 let visibility_scope = visibility_behavior.visibility_scope();
                 Arc::ptr_eq(&context_symbol, visibility_scope)
                     || is_ancestor(visibility_scope, &context_symbol)
-            }
+            },
             Some(Visibility::Internal) => {
                 let target_module = model.query(AncestorOfKind {
                     symbol_id: self.target,
@@ -63,12 +63,12 @@ impl Query for IsVisibleFrom {
                     (Some(t), Some(c)) => t == c,
                     _ => true, // If we can't determine modules, default to visible
                 }
-            }
+            },
             Some(Visibility::Fileprivate) => {
                 let visibility_scope = visibility_behavior.visibility_scope();
                 Arc::ptr_eq(&context_symbol, visibility_scope)
                     || is_ancestor(visibility_scope, &context_symbol)
-            }
+            },
             None => true, // Default visibility (internal) - visible everywhere
         }
     }

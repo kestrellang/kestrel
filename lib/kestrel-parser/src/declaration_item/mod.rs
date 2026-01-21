@@ -20,6 +20,7 @@ use crate::common::{
     ProtocolDeclarationData,
     // Shared data types
     StructDeclarationData,
+    SubscriptDeclarationData,
     TypeAliasDeclarationData,
     emit_enum_declaration,
     emit_extension_declaration,
@@ -30,11 +31,13 @@ use crate::common::{
     emit_module_declaration,
     emit_protocol_declaration,
     emit_struct_declaration,
+    emit_subscript_declaration,
     emit_type_alias_declaration,
     field_declaration_parser_internal,
     function_declaration_parser_internal,
     import_declaration_parser_internal,
     module_declaration_parser_internal,
+    subscript_declaration_parser_internal,
 };
 use crate::enum_decl::{EnumDeclaration, parse_enum_declaration};
 use crate::event::EventSink;
@@ -44,12 +47,13 @@ use crate::extension::{
 use crate::field::{FieldDeclaration, parse_field_declaration};
 use crate::function::{FunctionDeclaration, parse_function_declaration};
 use crate::import::{ImportDeclaration, parse_import_declaration};
-use crate::input::{ParserExtra, ParserInput, create_input, prepare_tokens, to_kestrel_span};
+use crate::input::{ParserExtra, ParserInput, create_input, prepare_tokens};
 use crate::module::{ModuleDeclaration, parse_module_declaration};
 use crate::protocol::{
     ProtocolDeclaration, parse_protocol_declaration, protocol_declaration_parser_internal,
 };
 use crate::r#struct::{StructDeclaration, parse_struct_declaration};
+use crate::subscript::{SubscriptDeclaration, parse_subscript_declaration};
 use crate::type_alias::{
     TypeAliasDeclaration, parse_type_alias_declaration, type_alias_declaration_parser_internal,
 };
@@ -66,6 +70,7 @@ pub enum DeclarationItem {
     Extension(ExtensionDeclaration),
     Field(FieldDeclaration),
     Function(FunctionDeclaration),
+    Subscript(SubscriptDeclaration),
     TypeAlias(TypeAliasDeclaration),
 }
 
@@ -81,6 +86,7 @@ impl DeclarationItem {
             DeclarationItem::Extension(decl) => &decl.span,
             DeclarationItem::Field(decl) => &decl.span,
             DeclarationItem::Function(decl) => &decl.span,
+            DeclarationItem::Subscript(decl) => &decl.span,
             DeclarationItem::TypeAlias(decl) => &decl.span,
         }
     }
@@ -96,6 +102,7 @@ impl DeclarationItem {
             DeclarationItem::Extension(decl) => &decl.syntax,
             DeclarationItem::Field(decl) => &decl.syntax,
             DeclarationItem::Function(decl) => &decl.syntax,
+            DeclarationItem::Subscript(decl) => &decl.syntax,
             DeclarationItem::TypeAlias(decl) => &decl.syntax,
         }
     }
@@ -117,6 +124,7 @@ enum DeclarationItemData {
     Extension(ExtensionDeclarationData),
     Field(FieldDeclarationData),
     Function(FunctionDeclarationData),
+    Subscript(SubscriptDeclarationData),
     TypeAlias(TypeAliasDeclarationData),
 }
 
@@ -138,7 +146,7 @@ where
     I: Iterator<Item = (Token, Span)> + Clone,
     F: FnOnce(&str, I, &mut EventSink),
 {
-    let mut temp_sink = EventSink::new();
+    let mut temp_sink = EventSink::new(0);
     parse_fn(source, tokens, &mut temp_sink);
 
     let has_errors = temp_sink
@@ -196,6 +204,9 @@ fn declaration_item_parser_internal<'tokens>()
 
     let function_parser = function_declaration_parser_internal().map(DeclarationItemData::Function);
 
+    let subscript_parser =
+        subscript_declaration_parser_internal().map(DeclarationItemData::Subscript);
+
     let field_parser = field_declaration_parser_internal().map(DeclarationItemData::Field);
 
     let type_alias_parser =
@@ -208,8 +219,10 @@ fn declaration_item_parser_internal<'tokens>()
         .or(type_declaration_parser) // Handles both struct and enum
         .or(extension_parser)
         .or(function_parser)
+        .or(subscript_parser)
         .or(field_parser)
         .or(type_alias_parser)
+        .boxed()
 }
 
 /// Internal Chumsky parser for multiple declaration items
@@ -221,6 +234,7 @@ fn declaration_items_parser_internal<'tokens>()
         .at_least(0)
         .collect()
         .then_ignore(skip_trivia())
+        .boxed()
 }
 
 /// Emit a declaration item to the event sink
@@ -230,31 +244,34 @@ fn emit_declaration_item(sink: &mut EventSink, data: DeclarationItemData) {
     match data {
         DeclarationItemData::Module(module_span, path_segments) => {
             emit_module_declaration(sink, module_span, &path_segments);
-        }
+        },
         DeclarationItemData::Import(import_span, path_segments, alias, items) => {
             emit_import_declaration(sink, import_span, &path_segments, alias, items);
-        }
+        },
         DeclarationItemData::Protocol(data) => {
             emit_protocol_declaration(sink, data);
-        }
+        },
         DeclarationItemData::Struct(data) => {
             emit_struct_declaration(sink, data);
-        }
+        },
         DeclarationItemData::Enum(data) => {
             emit_enum_declaration(sink, data);
-        }
+        },
         DeclarationItemData::Extension(data) => {
             emit_extension_declaration(sink, data);
-        }
+        },
         DeclarationItemData::Function(data) => {
             emit_function_declaration(sink, data);
-        }
+        },
+        DeclarationItemData::Subscript(data) => {
+            emit_subscript_declaration(sink, data);
+        },
         DeclarationItemData::Field(data) => {
             emit_field_declaration(sink, data);
-        }
+        },
         DeclarationItemData::TypeAlias(data) => {
             emit_type_alias_declaration(sink, data);
-        }
+        },
     }
 }
 
@@ -288,6 +305,9 @@ where
     if try_parse(source, tokens.clone(), sink, parse_function_declaration) {
         return;
     }
+    if try_parse(source, tokens.clone(), sink, parse_subscript_declaration) {
+        return;
+    }
     if try_parse(source, tokens.clone(), sink, parse_field_declaration) {
         return;
     }
@@ -296,7 +316,7 @@ where
     }
 
     // All failed - emit error
-    sink.error_no_span("Expected module, import, protocol, struct, enum, extension, function, field, or type alias declaration".to_string());
+    sink.error_no_span("Expected module, import, protocol, struct, enum, extension, function, subscript, field, or type alias declaration".to_string());
 }
 
 /// Parse a source file (multiple declaration items) and emit events
@@ -319,13 +339,13 @@ where
             for item_data in items {
                 emit_declaration_item(sink, item_data);
             }
-        }
+        },
         Err(errors) => {
             for error in errors {
                 let span = error.span();
-                sink.error_at(format!("Parse error: {:?}", error), to_kestrel_span(*span));
+                sink.error_at(format!("Parse error: {:?}", error), *span);
             }
-        }
+        },
     }
 
     sink.finish_node();
@@ -345,7 +365,7 @@ mod tests {
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
 
-        let mut sink = EventSink::new();
+        let mut sink = EventSink::new(0);
         parse_declaration_item(source, tokens.into_iter(), &mut sink);
 
         let events = sink.events();
@@ -363,7 +383,7 @@ mod tests {
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
 
-        let mut sink = EventSink::new();
+        let mut sink = EventSink::new(0);
         parse_declaration_item(source, tokens.into_iter(), &mut sink);
 
         let events = sink.events();
@@ -381,7 +401,7 @@ mod tests {
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
 
-        let mut sink = EventSink::new();
+        let mut sink = EventSink::new(0);
         parse_source_file(source, tokens.into_iter(), &mut sink);
 
         let events = sink.events();
@@ -402,7 +422,7 @@ mod tests {
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
 
-        let mut sink = EventSink::new();
+        let mut sink = EventSink::new(0);
         parse_source_file(source, tokens.into_iter(), &mut sink);
 
         let events = sink.events();
@@ -430,7 +450,7 @@ mod tests {
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
 
-        let mut sink = EventSink::new();
+        let mut sink = EventSink::new(0);
         parse_source_file(source, tokens.into_iter(), &mut sink);
 
         let events = sink.events();
@@ -458,7 +478,7 @@ mod tests {
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
 
-        let mut sink = EventSink::new();
+        let mut sink = EventSink::new(0);
         parse_source_file(source, tokens.into_iter(), &mut sink);
 
         let events = sink.events();
@@ -483,7 +503,7 @@ mod tests {
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
 
-        let mut sink = EventSink::new();
+        let mut sink = EventSink::new(0);
         parse_source_file(source, tokens.into_iter(), &mut sink);
 
         let events = sink.events();
@@ -519,7 +539,7 @@ mod tests {
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
 
-        let mut sink = EventSink::new();
+        let mut sink = EventSink::new(0);
         parse_source_file(source, tokens.into_iter(), &mut sink);
 
         let events = sink.events();
@@ -563,7 +583,7 @@ mod tests {
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
 
-        let mut sink = EventSink::new();
+        let mut sink = EventSink::new(0);
         parse_source_file(source, tokens.into_iter(), &mut sink);
 
         let tree = TreeBuilder::new(source, sink.into_events()).build();
@@ -611,7 +631,7 @@ mod tests {
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
 
-        let mut sink = EventSink::new();
+        let mut sink = EventSink::new(0);
         parse_source_file(source, tokens.into_iter(), &mut sink);
 
         let events = sink.events();
@@ -645,7 +665,7 @@ mod tests {
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
 
-        let mut sink = EventSink::new();
+        let mut sink = EventSink::new(0);
         parse_source_file(source, tokens.into_iter(), &mut sink);
 
         let events = sink.events();
@@ -685,7 +705,7 @@ mod tests {
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
 
-        let mut sink = EventSink::new();
+        let mut sink = EventSink::new(0);
         parse_source_file(source, tokens.into_iter(), &mut sink);
 
         let tree = TreeBuilder::new(source, sink.into_events()).build();
@@ -737,7 +757,7 @@ mod tests {
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
 
-        let mut sink = EventSink::new();
+        let mut sink = EventSink::new(0);
         parse_source_file(source, tokens.into_iter(), &mut sink);
 
         let events = sink.events();
@@ -780,7 +800,7 @@ mod tests {
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
 
-        let mut sink = EventSink::new();
+        let mut sink = EventSink::new(0);
         parse_source_file(source, tokens.into_iter(), &mut sink);
 
         let events = sink.events();

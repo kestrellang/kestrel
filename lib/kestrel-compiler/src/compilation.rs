@@ -41,12 +41,15 @@ impl Compilation {
     }
 
     /// Internal method to create a compilation from source files.
-    pub(crate) fn from_sources(sources: Vec<(String, String)>) -> Self {
+    pub(crate) fn from_sources(sources: Vec<(String, String)>, stdlib_enabled: bool) -> Self {
         let mut diagnostics = DiagnosticContext::new();
         let mut source_files = Vec::new();
 
         // Create the semantic model builder (build/lowering phase)
         let mut builder = SemanticModelBuilder::new();
+        if stdlib_enabled {
+            builder.enable_std_auto_import();
+        }
 
         // Phase 1, 2 & 3: Lex, parse, and add each file to the semantic tree
         for (name, source) in sources {
@@ -74,7 +77,8 @@ impl Compilation {
                 .collect();
 
             // Phase 2: Parsing
-            let parse_result = Parser::parse(&source, tokens.into_iter(), parse_source_file);
+            let parse_result =
+                Parser::parse(&source, tokens.into_iter(), parse_source_file, file_id);
 
             // Collect parse errors
             for error in &parse_result.errors {
@@ -167,7 +171,7 @@ impl Compilation {
             .ok_or(CompileError::NoSemanticModel)?;
 
         let root = model.root();
-        let result = kestrel_execution_graph_lowering::lower_module(model, &root);
+        let result = kestrel_execution_graph_lowering::lower_module(model, root);
 
         if result.has_errors() {
             return Err(CompileError::LoweringFailed(result.diagnostics));

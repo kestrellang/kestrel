@@ -224,14 +224,14 @@ impl SignatureType {
             TyKind::String => SignatureType::String,
             TyKind::Tuple(elements) => {
                 SignatureType::Tuple(elements.iter().map(SignatureType::from_ty).collect())
-            }
+            },
             TyKind::Array(element_type) => {
                 SignatureType::Array(Box::new(SignatureType::from_ty(element_type)))
-            }
+            },
             TyKind::Pointer(_) => {
                 // Pointer types are represented as a named type for signature matching
                 SignatureType::Named(vec!["lang".to_string(), "ptr".to_string()])
-            }
+            },
             TyKind::Function {
                 params,
                 return_type,
@@ -244,32 +244,46 @@ impl SignatureType {
             TyKind::Infer => SignatureType::Named(vec!["_".to_string()]),
             TyKind::TypeParameter(param) => {
                 SignatureType::Named(vec![param.metadata().name().value.clone()])
-            }
+            },
             TyKind::Struct { symbol, .. } => {
                 SignatureType::Named(vec![symbol.metadata().name().value.clone()])
-            }
+            },
             TyKind::Enum { symbol, .. } => {
                 SignatureType::Named(vec![symbol.metadata().name().value.clone()])
-            }
-            TyKind::Protocol { symbol, .. } => {
-                SignatureType::Named(vec![symbol.metadata().name().value.clone()])
-            }
+            },
+            TyKind::Protocol {
+                symbol,
+                substitutions,
+            } => {
+                // Include type arguments in the signature to distinguish
+                // Conv[Int8] from Conv[Int32]
+                let mut parts = vec![symbol.metadata().name().value.clone()];
+                // Add type arguments in order of the protocol's type parameters
+                for type_param in symbol.type_parameters() {
+                    if let Some(sub_ty) = substitutions.get(type_param.metadata().id()) {
+                        // Recursively convert the substitution type
+                        let sub_sig = SignatureType::from_ty(sub_ty);
+                        parts.push(format!("{:?}", sub_sig));
+                    }
+                }
+                SignatureType::Named(parts)
+            },
             TyKind::TypeAlias { symbol, .. } => {
                 // For type aliases, use the alias name
                 // (could also resolve to underlying type)
                 SignatureType::Named(vec![symbol.metadata().name().value.clone()])
-            }
+            },
             TyKind::AssociatedType { symbol, .. } => {
                 // For associated types, use the associated type name
                 SignatureType::Named(vec![symbol.metadata().name().value.clone()])
-            }
+            },
             TyKind::UnresolvedFunction { return_type, .. } => {
                 // Treat as a function type with unknown params
                 SignatureType::Function {
                     params: vec![], // Unknown params
                     return_type: Box::new(SignatureType::from_ty(return_type)),
                 }
-            }
+            },
         }
     }
 }
@@ -306,6 +320,43 @@ pub struct MethodLookupKey {
     pub labels: Vec<Option<String>>,
     /// Parameter types
     pub param_types: Vec<SignatureType>,
+}
+
+/// Key for duplicate callable detection.
+///
+/// In Kestrel, overloading is label-based only - two callables with the same
+/// name and labels are duplicates regardless of parameter/return types.
+///
+/// Examples:
+/// - `func foo(x: Int)` and `func foo(x: String)` → DUPLICATES (same name + labels)
+/// - `func foo(x: Int)` and `func foo(y: Int)` → Valid overloads (different labels)
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct DuplicateKey {
+    /// Name of the callable
+    pub name: String,
+    /// Labels for each parameter (None = unlabeled positional parameter)
+    pub labels: Vec<Option<String>>,
+}
+
+impl DuplicateKey {
+    /// Create a new duplicate key
+    pub fn new(name: String, labels: Vec<Option<String>>) -> Self {
+        Self { name, labels }
+    }
+
+    /// Format the key for display in error messages
+    pub fn display(&self) -> String {
+        let params: Vec<String> = self
+            .labels
+            .iter()
+            .map(|label| match label {
+                Some(l) => format!("{}:", l),
+                None => "_:".to_string(),
+            })
+            .collect();
+
+        format!("{}({})", self.name, params.join(", "))
+    }
 }
 
 impl CallableSignature {
@@ -468,6 +519,20 @@ impl CallableBehavior {
         CallableSignature::new(name.to_string(), labels, param_types, return_type)
     }
 
+    /// Generate a key for duplicate detection (name + labels only).
+    ///
+    /// In Kestrel, overloading is label-based - two callables with the same
+    /// name and labels are duplicates regardless of types.
+    pub fn duplicate_key(&self, name: &str) -> DuplicateKey {
+        let labels: Vec<Option<String>> = self
+            .parameters
+            .iter()
+            .map(|p| p.external_label().map(|s| s.to_string()))
+            .collect();
+
+        DuplicateKey::new(name.to_string(), labels)
+    }
+
     /// Get the function type representation of this callable
     pub fn function_type(&self) -> Ty {
         let param_types: Vec<Ty> = self.parameters.iter().map(|p| p.ty.clone()).collect();
@@ -487,7 +552,7 @@ mod tests {
     use kestrel_span::Spanned;
 
     fn make_name(s: &str) -> Name {
-        Spanned::new(s.to_string(), Span::from(0..s.len()))
+        Spanned::new(s.to_string(), Span::new(0, 0..s.len()))
     }
 
     #[test]
@@ -606,11 +671,11 @@ mod tests {
         use crate::ty::IntBits;
         // Unlabeled parameters have None for labels
         let params = vec![
-            CallableParameter::new(make_name("x"), Ty::int(IntBits::I64, Span::from(0..3))),
-            CallableParameter::new(make_name("y"), Ty::int(IntBits::I64, Span::from(5..8))),
+            CallableParameter::new(make_name("x"), Ty::int(IntBits::I64, Span::new(0, 0..3))),
+            CallableParameter::new(make_name("y"), Ty::int(IntBits::I64, Span::new(0, 5..8))),
         ];
-        let return_ty = Ty::int(IntBits::I64, Span::from(13..16));
-        let behavior = CallableBehavior::new(params, return_ty, Span::from(0..20));
+        let return_ty = Ty::int(IntBits::I64, Span::new(0, 13..16));
+        let behavior = CallableBehavior::new(params, return_ty, Span::new(0, 0..20));
 
         let sig = behavior.signature("add");
 
@@ -625,10 +690,10 @@ mod tests {
         let params = vec![CallableParameter::with_label(
             make_name("with"),
             make_name("name"),
-            Ty::string(Span::from(0..6)),
+            Ty::string(Span::new(0, 0..6)),
         )];
-        let return_ty = Ty::unit(Span::from(10..12));
-        let behavior = CallableBehavior::new(params, return_ty, Span::from(0..15));
+        let return_ty = Ty::unit(Span::new(0, 10..12));
+        let behavior = CallableBehavior::new(params, return_ty, Span::new(0, 0..15));
 
         let sig = behavior.signature("greet");
 

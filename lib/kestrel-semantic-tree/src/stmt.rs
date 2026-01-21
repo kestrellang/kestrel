@@ -156,14 +156,14 @@ impl Statement {
                         } else {
                             "let"
                         }
-                    }
+                    },
                     PatternKind::At { mutability, .. } => {
                         if *mutability == Mutability::Mutable {
                             "var"
                         } else {
                             "let"
                         }
-                    }
+                    },
                     PatternKind::Wildcard
                     | PatternKind::Tuple { .. }
                     | PatternKind::Literal { .. }
@@ -181,7 +181,7 @@ impl Statement {
                     .map(|v| format!(" = {}", v.debug_compact()))
                     .unwrap_or_default();
                 format!("{} {}{};", keyword, name, value_str)
-            }
+            },
             StatementKind::Expr(expr) => format!("{};", expr.debug_compact()),
             StatementKind::GuardLet { conditions, .. } => {
                 let conds: Vec<_> = conditions
@@ -190,15 +190,15 @@ impl Statement {
                         IfCondition::Let { pattern, value, .. } => {
                             let name = pattern.name().unwrap_or("<pattern>");
                             format!("let {} = {}", name, value.debug_compact())
-                        }
+                        },
                         IfCondition::Expr(e) => e.debug_compact(),
                     })
                     .collect();
                 format!("guard {} else {{ ... }}", conds.join(", "))
-            }
+            },
             StatementKind::Deinit { name, .. } => {
                 format!("deinit {};", name)
-            }
+            },
         }
     }
 }
@@ -217,11 +217,11 @@ mod tests {
             LocalId(0),
             Mutability::Immutable,
             "x".to_string(),
-            crate::ty::Ty::int(crate::ty::IntBits::I64, Span::from(5..8)),
-            Span::from(0..8),
+            crate::ty::Ty::int(crate::ty::IntBits::I64, Span::new(0, 5..8)),
+            Span::new(0, 0..8),
         );
-        let value = Expression::integer(42, Span::from(11..13));
-        let stmt = Statement::binding(pattern, Some(value), Span::from(0..14));
+        let value = Expression::integer(42, Span::new(0, 11..13));
+        let stmt = Statement::binding(pattern, Some(value), Span::new(0, 0..14));
 
         assert!(stmt.is_binding());
         assert!(!stmt.is_expr());
@@ -231,8 +231,8 @@ mod tests {
 
     #[test]
     fn test_expr_statement() {
-        let expr = Expression::unit(Span::from(0..2));
-        let stmt = Statement::expr(expr, Span::from(0..3));
+        let expr = Expression::unit(Span::new(0, 0..2));
+        let stmt = Statement::expr(expr, Span::new(0, 0..3));
 
         assert!(stmt.is_expr());
         assert!(!stmt.is_binding());

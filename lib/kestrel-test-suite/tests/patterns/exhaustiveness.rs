@@ -22,7 +22,7 @@ mod basic {
             r#"
 module Main
 
-func test(b: Bool) -> Int {
+func test(b: lang.i1) -> lang.i64 {
     match b {
         true => 1,
         false => 0
@@ -34,12 +34,37 @@ func test(b: Bool) -> Int {
     }
 
     #[test]
+    fn exhaustive_self_match_in_enum_method() {
+        Test::new(
+            r#"
+module Main
+
+enum Toggle {
+    case On
+    case Off
+}
+
+extend Toggle {
+    func asBool() -> lang.i1 {
+        match self {
+            .On => true,
+            .Off => false
+        }
+    }
+}
+"#,
+        )
+        .without_prelude()
+        .expect(Compiles);
+    }
+
+    #[test]
     fn non_exhaustive_bool() {
         Test::new(
             r#"
 module Main
 
-func test(b: Bool) -> Int {
+func test(b: lang.i1) -> lang.i64 {
     match b {
         true => 1
     }
@@ -62,7 +87,7 @@ enum Color {
     case Blue
 }
 
-func test(c: Color) -> Int {
+func test(c: Color) -> lang.i64 {
     match c {
         .Red => 1,
         .Green => 2,
@@ -86,7 +111,7 @@ enum Color {
     case Blue
 }
 
-func test(c: Color) -> Int {
+func test(c: Color) -> lang.i64 {
     match c {
         .Red => 1,
         .Green => 2
@@ -110,7 +135,7 @@ enum Color {
     case Blue
 }
 
-func test(c: Color) -> Int {
+func test(c: Color) -> lang.i64 {
     match c {
         .Red => 1,
         _ => 0
@@ -132,7 +157,7 @@ enum Option[T] {
     case None
 }
 
-func test(opt: Option[Int]) -> Int {
+func test(opt: Option[lang.i64]) -> lang.i64 {
     match opt {
         .Some(value) => value,
         .None => 0
@@ -154,7 +179,7 @@ enum Option[T] {
     case None
 }
 
-func test(opt: Option[Int]) -> Int {
+func test(opt: Option[lang.i64]) -> lang.i64 {
     match opt {
         .Some(value) => value
     }
@@ -184,9 +209,9 @@ enum Option[T] {
     case None
 }
 
-func test(opt: Option[Int]) -> String {
+func test(opt: Option[lang.i64]) -> lang.str {
     match opt {
-        .Some(n) if n > 0 => "positive",
+        .Some(n) if lang.i64_signed_gt(n, 0) => "positive",
         .None => "nothing"
     }
 }
@@ -207,9 +232,9 @@ enum Option[T] {
     case None
 }
 
-func test(opt: Option[Int]) -> String {
+func test(opt: Option[lang.i64]) -> lang.str {
     match opt {
-        .Some(n) if n > 0 => "positive",
+        .Some(n) if lang.i64_signed_gt(n, 0) => "positive",
         .Some(_) => "non-positive",
         .None => "nothing"
     }
@@ -225,10 +250,10 @@ func test(opt: Option[Int]) -> String {
             r#"
 module Main
 
-func test(x: Int) -> String {
+func test(x: lang.i64) -> lang.str {
     match x {
-        n if n > 0 => "positive",
-        n if n < 0 => "negative"
+        n if lang.i64_signed_gt(n, 0) => "positive",
+        n if lang.i64_signed_lt(n, 0) => "negative"
     }
 }
 "#,
@@ -243,10 +268,10 @@ func test(x: Int) -> String {
             r#"
 module Main
 
-func test(x: Int) -> String {
+func test(x: lang.i64) -> lang.str {
     match x {
-        n if n > 0 => "positive",
-        n if n < 0 => "negative",
+        n if lang.i64_signed_gt(n, 0) => "positive",
+        n if lang.i64_signed_lt(n, 0) => "negative",
         _ => "zero"
     }
 }
@@ -257,7 +282,7 @@ func test(x: Int) -> String {
 }
 
 // ============================================================================
-// INFINITE TYPES (INT, STRING)
+// INFINITE TYPES (lang.i64, STRING)
 // ============================================================================
 
 mod infinite_types {
@@ -269,7 +294,7 @@ mod infinite_types {
             r#"
 module Main
 
-func test(x: Int) -> String {
+func test(x: lang.i64) -> lang.str {
     match x {
         0 => "zero",
         1 => "one"
@@ -287,7 +312,7 @@ func test(x: Int) -> String {
             r#"
 module Main
 
-func test(x: Int) -> String {
+func test(x: lang.i64) -> lang.str {
     match x {
         0 => "zero",
         1 => "one",
@@ -305,7 +330,7 @@ func test(x: Int) -> String {
             r#"
 module Main
 
-func test(s: String) -> Int {
+func test(s: lang.str) -> lang.i64 {
     match s {
         "hello" => 1,
         "world" => 2
@@ -323,7 +348,7 @@ func test(s: String) -> Int {
             r#"
 module Main
 
-func test(s: String) -> Int {
+func test(s: lang.str) -> lang.i64 {
     match s {
         "hello" => 1,
         "world" => 2,
@@ -349,7 +374,7 @@ mod tuples {
             r#"
 module Main
 
-func test(t: (Bool, Bool)) -> Int {
+func test(t: (lang.i1, lang.i1)) -> lang.i64 {
     match t {
         (true, true) => 1,
         (true, false) => 2,
@@ -368,7 +393,7 @@ func test(t: (Bool, Bool)) -> Int {
             r#"
 module Main
 
-func test(t: (Bool, Bool)) -> Int {
+func test(t: (lang.i1, lang.i1)) -> lang.i64 {
     match t {
         (true, true) => 1,
         (true, false) => 2,
@@ -387,7 +412,7 @@ func test(t: (Bool, Bool)) -> Int {
             r#"
 module Main
 
-func test(t: (Bool, Bool)) -> Int {
+func test(t: (lang.i1, lang.i1)) -> lang.i64 {
     match t {
         (true, true) => 1,
         _ => 0
@@ -404,7 +429,7 @@ func test(t: (Bool, Bool)) -> Int {
             r#"
 module Main
 
-func test(t: (Bool, Bool)) -> Int {
+func test(t: (lang.i1, lang.i1)) -> lang.i64 {
     match t {
         (true, _) => 1,
         (false, _) => 0
@@ -434,7 +459,7 @@ enum Option[T] {
     case None
 }
 
-func test(opt: Option[Bool]) -> Int {
+func test(opt: Option[lang.i1]) -> lang.i64 {
     match opt {
         .Some(value: true) => 1,
         .Some(value: false) => 2,
@@ -457,7 +482,7 @@ enum Option[T] {
     case None
 }
 
-func test(opt: Option[Bool]) -> Int {
+func test(opt: Option[lang.i1]) -> lang.i64 {
     match opt {
         .Some(value: true) => 1,
         .None => 0
@@ -480,7 +505,7 @@ enum Option[T] {
     case None
 }
 
-func test(opt: Option[Bool]) -> Int {
+func test(opt: Option[lang.i1]) -> lang.i64 {
     match opt {
         .Some(value: true) => 1,
         .Some(_) => 2,
@@ -512,7 +537,7 @@ enum Color {
     case Blue
 }
 
-func test(c: Color) -> Int {
+func test(c: Color) -> lang.i64 {
     match c {
         .Red => 1,
         _ => 0,
@@ -536,7 +561,7 @@ enum Color {
     case Blue
 }
 
-func test(c: Color) -> Int {
+func test(c: Color) -> lang.i64 {
     match c {
         .Red => 1,
         .Red => 2,
@@ -560,7 +585,7 @@ enum Option[T] {
     case None
 }
 
-func test(opt: Option[Int]) -> Int {
+func test(opt: Option[lang.i64]) -> lang.i64 {
     match opt {
         .Some(_) => 1,
         .Some(value: 42) => 2,
@@ -578,7 +603,7 @@ func test(opt: Option[Int]) -> Int {
             r#"
 module Main
 
-func test(x: Int) -> String {
+func test(x: lang.i64) -> lang.str {
     match x {
         0..=10 => "first",
         5..=15 => "second",
@@ -597,10 +622,10 @@ func test(x: Int) -> String {
 module Main
 
 enum E {
-    case A(x: Int, y: Int)
+    case A(x: lang.i64, y: lang.i64)
 }
 
-func test(e: E) -> Int {
+func test(e: E) -> lang.i64 {
     match e {
         .A(x: 1, y: _) => 1,
         .A(x: _, y: 1) => 2,
@@ -619,11 +644,11 @@ func test(e: E) -> Int {
             r#"
 module Main
 
-func test(arr: [Int]) -> Int {
+func test(arr: [lang.i64]) -> lang.i64 {
     match arr {
         [] => 0,
         [x] => x,
-        [first, ..rest, last] => first + last,
+        [first, ..rest, last] => lang.i64_add(first, last),
         [..] => -1 // UNREACHABLE
     }
 }
@@ -652,7 +677,7 @@ enum Color {
     case Blue
 }
 
-func test(c: Color) -> Int {
+func test(c: Color) -> lang.i64 {
     match c {
         .Red or .Green => 1,
         .Blue => 2
@@ -676,7 +701,7 @@ enum Color {
     case Yellow
 }
 
-func test(c: Color) -> Int {
+func test(c: Color) -> lang.i64 {
     match c {
         .Red or .Green => 1,
         .Blue => 2
@@ -702,7 +727,7 @@ mod empty_match {
             r#"
 module Main
 
-func test(x: Int) -> Int {
+func test(x: lang.i64) -> lang.i64 {
     match x {
     }
 }

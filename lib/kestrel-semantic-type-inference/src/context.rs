@@ -107,12 +107,12 @@ impl<'a> InferenceContext<'a> {
         match ty.kind() {
             TyKind::Array(elem_ty) | TyKind::Pointer(elem_ty) => {
                 self.register_type(elem_ty);
-            }
+            },
             TyKind::Tuple(elem_tys) => {
                 for elem_ty in elem_tys {
                     self.register_type(elem_ty);
                 }
-            }
+            },
             TyKind::Function {
                 params,
                 return_type,
@@ -121,7 +121,7 @@ impl<'a> InferenceContext<'a> {
                     self.register_type(param_ty);
                 }
                 self.register_type(return_type);
-            }
+            },
             TyKind::Struct { substitutions, .. }
             | TyKind::Enum { substitutions, .. }
             | TyKind::Protocol { substitutions, .. }
@@ -129,12 +129,12 @@ impl<'a> InferenceContext<'a> {
                 for (_, sub_ty) in substitutions.iter() {
                     self.register_type(sub_ty);
                 }
-            }
+            },
             TyKind::AssociatedType { container, .. } => {
                 if let Some(container_ty) = container {
                     self.register_type(container_ty);
                 }
-            }
+            },
             TyKind::UnresolvedFunction {
                 param_info,
                 return_type,
@@ -143,15 +143,15 @@ impl<'a> InferenceContext<'a> {
                 match param_info {
                     ParamInfo::ImplicitIt { it_type } => {
                         self.register_type(it_type);
-                    }
+                    },
                     ParamInfo::Explicit { param_types } => {
                         for pt in param_types {
                             self.register_type(pt);
                         }
-                    }
-                    ParamInfo::Unconstrained => {}
+                    },
+                    ParamInfo::Unconstrained => {},
                 }
-            }
+            },
             // Leaf types - no nested types to register
             TyKind::Int(_)
             | TyKind::Float(_)
@@ -162,7 +162,7 @@ impl<'a> InferenceContext<'a> {
             | TyKind::Infer
             | TyKind::Error
             | TyKind::SelfType
-            | TyKind::TypeParameter(_) => {}
+            | TyKind::TypeParameter(_) => {},
         }
     }
 
@@ -203,17 +203,22 @@ impl<'a> InferenceContext<'a> {
     ///
     /// This is used when resolving `receiver.member` where the receiver type
     /// is not yet known.
+    ///
+    /// For method calls, `arguments` contains the type IDs of the call arguments.
+    /// When the method is resolved, constraints will be created to equate
+    /// argument types with parameter types (enabling proper type inference for literals).
     pub fn member_access(
         &mut self,
         receiver: TyId,
         member: String,
         is_static: bool,
+        arguments: Vec<TyId>,
         result: TyId,
         expr_id: ExprId,
         span: Span,
     ) {
         self.constraints.push(Constraint::member_access(
-            receiver, member, is_static, result, expr_id, span,
+            receiver, member, is_static, arguments, result, expr_id, span,
         ));
     }
 
@@ -350,6 +355,7 @@ impl<'a> InferenceContext<'a> {
         self.errors.push(error);
     }
 
+    #[allow(dead_code)]
     pub(crate) fn errors(&self) -> &[InferenceError] {
         &self.errors
     }
@@ -377,7 +383,7 @@ mod tests {
             _is_static: bool,
         ) -> Result<crate::oracle::MemberResolution, MemberError> {
             Err(MemberError::NotFound {
-                receiver_ty: Ty::unit(Span::from(0..0)),
+                receiver_ty: Ty::unit(Span::new(0, 0..0)),
                 member: String::new(),
             })
         }
@@ -391,6 +397,13 @@ mod tests {
         }
 
         fn symbol_name(&self, _symbol_id: SymbolId) -> Option<String> {
+            None
+        }
+
+        fn builtin_protocol(
+            &self,
+            _feature: kestrel_semantic_tree::builtins::LanguageFeature,
+        ) -> Option<SymbolId> {
             None
         }
     }
@@ -408,10 +421,10 @@ mod tests {
         let oracle = TestOracle;
         let mut ctx = InferenceContext::new(&oracle);
 
-        let ty1 = Ty::unit(Span::from(0..2));
-        let ty2 = Ty::unit(Span::from(3..5));
+        let ty1 = Ty::unit(Span::new(0, 0..2));
+        let ty2 = Ty::unit(Span::new(0, 3..5));
 
-        ctx.equate(ty1.id(), ty2.id(), Span::from(0..5));
+        ctx.equate(ty1.id(), ty2.id(), Span::new(0, 0..5));
 
         assert_eq!(ctx.constraints.len(), 1);
     }

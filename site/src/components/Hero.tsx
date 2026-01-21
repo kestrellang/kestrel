@@ -9,14 +9,11 @@ export default function Hero() {
   }, []);
 
   return (
-    <section className="scroll-section relative overflow-hidden bg-[#f8f6f1]">
+    <section className="scroll-section bg-[#f8f6f1]">
       {/* GitHub icon in top right */}
       <a
         href="https://github.com/jkpdino/kestrel"
-        className={`absolute top-6 right-6 z-20 p-3 rounded-full text-[var(--color-slate)] hover:text-[var(--color-rust)] hover:bg-[var(--color-slate)]/5 transition-all ${
-          isVisible ? "opacity-100 translate-y-0" : "opacity-0 -translate-y-4"
-        }`}
-        style={{ transitionDuration: "1000ms", transitionDelay: "400ms" }}>
+        className="absolute top-6 right-6 z-20 p-3 rounded-full text-[var(--color-slate)] hover:text-[#f5deb3] hover:bg-[var(--color-rust)]">
         <Github className="w-6 h-6" />
       </a>
 
@@ -53,7 +50,7 @@ export default function Hero() {
                 ? "opacity-100 translate-y-0"
                 : "opacity-0 translate-y-10"
             }`}>
-            A programming language for humans.
+            Systems programming, refined.
           </p>
 
           {/* Sub-tagline */}
@@ -63,7 +60,7 @@ export default function Hero() {
                 ? "opacity-100 translate-y-0"
                 : "opacity-0 translate-y-10"
             }`}>
-            Intent. Clarity. Flow.
+            Bare metal power. Zero mental overhead.
           </p>
         </div>
 

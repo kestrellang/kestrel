@@ -4,6 +4,7 @@
 //! Each query is a struct that implements the Query trait.
 
 mod ancestor_of_kind;
+mod associated_type_bindings_for_enum;
 mod associated_type_bindings_for_struct;
 mod callable_param_types_for_call;
 mod child_by_name;
@@ -22,8 +23,11 @@ mod is_inside_any;
 mod is_visible_from;
 mod local_name;
 mod protocol_associated_types_with_defaults;
+mod protocol_initializers_with_definer;
 mod protocol_methods_with_definer;
+mod protocol_required_initializers;
 mod protocol_required_methods;
+mod protocol_required_properties;
 mod resolve_module_path;
 mod resolve_name;
 mod resolve_type_path;
@@ -38,6 +42,7 @@ mod visible_children;
 mod visible_children_by_name;
 
 pub use ancestor_of_kind::AncestorOfKind;
+pub use associated_type_bindings_for_enum::AssociatedTypeBindingsForEnum;
 pub use associated_type_bindings_for_struct::AssociatedTypeBindingsForStruct;
 pub use callable_param_types_for_call::CallableParamTypesForCall;
 pub use child_by_name::ChildByName;
@@ -56,8 +61,11 @@ pub use is_inside_any::IsInsideAny;
 pub use is_visible_from::IsVisibleFrom;
 pub use local_name::LocalName;
 pub use protocol_associated_types_with_defaults::ProtocolAssociatedTypesWithDefaults;
+pub use protocol_initializers_with_definer::ProtocolInitializersWithDefiner;
 pub use protocol_methods_with_definer::ProtocolMethodsWithDefiner;
+pub use protocol_required_initializers::ProtocolRequiredInitializers;
 pub use protocol_required_methods::ProtocolRequiredMethods;
+pub use protocol_required_properties::{PropertyRequirement, ProtocolRequiredProperties};
 pub use resolve_module_path::ResolveModulePath;
 pub use resolve_name::ResolveName;
 pub use resolve_type_path::ResolveTypePath;

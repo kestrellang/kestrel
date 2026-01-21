@@ -39,6 +39,7 @@ impl DeclarationBinder for EnumCaseBinder {
         let attributes_behavior = crate::binders::utils::attributes::resolve_attributes(
             syntax,
             &source,
+            file_id,
             context.diagnostics,
         );
         symbol.metadata().add_behavior(attributes_behavior);
@@ -89,12 +90,13 @@ fn resolve_enum_case_parameters(
         None => return Vec::new(),
     };
 
-    // Parse each EnumCaseParameter (label: Type)
+    // Parse each EnumCaseParameter (label: Type or just Type)
     param_list
         .children()
         .filter(|child| child.kind() == SyntaxKind::EnumCaseParameter)
-        .filter_map(|param_node| {
-            resolve_enum_case_parameter(&param_node, source, file_id, context_id, ctx)
+        .enumerate()
+        .filter_map(|(index, param_node)| {
+            resolve_enum_case_parameter(&param_node, source, file_id, context_id, ctx, index)
         })
         .collect()
 }
@@ -105,51 +107,68 @@ fn resolve_enum_case_parameter(
     file_id: usize,
     context_id: SymbolId,
     ctx: &mut BindingContext,
+    index: usize,
 ) -> Option<Parameter> {
-    // Find the label (Name node) and type (Ty node)
-    let name_node = param_node
-        .children()
-        .find(|c| c.kind() == SyntaxKind::Name)?;
+    // Find the type (Ty node) - required for all parameters
     let ty_node = param_node.children().find(|c| c.kind() == SyntaxKind::Ty)?;
 
-    // Extract label text
-    let label_text = extract_identifier_from_name(&name_node)?;
-    let label_span = get_node_span(&name_node, file_id);
+    // Find the optional label (Name node) - only present for named parameters
+    let name_node = param_node.children().find(|c| c.kind() == SyntaxKind::Name);
 
     // Resolve type
     let mut type_ctx =
         TypeSyntaxContext::new(ctx.model, ctx.diagnostics, source, file_id, context_id);
     let resolved_ty = resolve_type_from_ty_node(&ty_node, &mut type_ctx);
 
+    // Get type span for synthetic names
+    let ty_span = get_node_span(&ty_node, file_id);
+
+    // Extract label if present, otherwise generate synthetic name
+    let (label, bind_name, bind_span) = if let Some(name) = name_node {
+        // Named parameter: `label: Type`
+        let label_text = extract_identifier_from_name(&name)?;
+        let label_span = get_node_span(&name, file_id);
+        (
+            Some(Spanned::new(label_text.clone(), label_span.clone())),
+            label_text,
+            label_span,
+        )
+    } else {
+        // Unnamed parameter: just `Type`
+        // Use index-based synthetic name for bind_name, no label for call site
+        let synthetic_name = format!("_{}", index);
+        (None, synthetic_name, ty_span)
+    };
+
     Some(Parameter {
         // Enum case parameters use default borrow mode
         access_mode: kestrel_semantic_tree::behavior::callable::ParameterAccessMode::Borrow,
-        // Enum case parameters always have labels (like init parameters)
-        label: Some(Spanned::new(label_text.clone(), label_span.clone())),
-        bind_name: Spanned::new(label_text, label_span),
+        // Label is None for unnamed parameters (positional matching in patterns)
+        label,
+        bind_name: Spanned::new(bind_name, bind_span),
         ty: resolved_ty,
     })
 }
 
 fn get_parent_enum_type(symbol: &Arc<dyn Symbol<KestrelLanguage>>, span: kestrel_span::Span) -> Ty {
     // Get parent enum symbol
-    if let Some(parent) = symbol.metadata().parent() {
-        if let Ok(enum_sym) = parent.downcast_arc::<EnumSymbol>() {
-            let type_params = enum_sym.type_parameters();
-            if type_params.is_empty() {
-                // Non-generic enum - return simple enum type
-                return Ty::r#enum(enum_sym, span);
-            } else {
-                // Generic enum - create type with type parameter references
-                // e.g., for Option[T], return Option[T] where T maps to TypeParameter(T)
-                // This allows type inference to properly unify when called
-                let mut substitutions = Substitutions::new();
-                for param in &type_params {
-                    let param_ty = Ty::type_parameter(param.clone(), span.clone());
-                    substitutions.insert(param.metadata().id(), param_ty);
-                }
-                return Ty::generic_enum(enum_sym, substitutions, span);
+    if let Some(parent) = symbol.metadata().parent()
+        && let Ok(enum_sym) = parent.downcast_arc::<EnumSymbol>()
+    {
+        let type_params = enum_sym.type_parameters();
+        if type_params.is_empty() {
+            // Non-generic enum - return simple enum type
+            return Ty::r#enum(enum_sym, span);
+        } else {
+            // Generic enum - create type with type parameter references
+            // e.g., for Option[T], return Option[T] where T maps to TypeParameter(T)
+            // This allows type inference to properly unify when called
+            let mut substitutions = Substitutions::new();
+            for param in &type_params {
+                let param_ty = Ty::type_parameter(param.clone(), span.clone());
+                substitutions.insert(param.metadata().id(), param_ty);
             }
+            return Ty::generic_enum(enum_sym, substitutions, span);
         }
     }
     Ty::error(span)

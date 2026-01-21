@@ -150,7 +150,7 @@ impl FunctionSymbol {
     pub fn return_type(&self) -> Ty {
         self.get_callable()
             .map(|c| c.return_type().clone())
-            .unwrap_or_else(|| Ty::error(Span::from(0..0)))
+            .unwrap_or_else(|| Ty::error(Span::new(self.metadata.span().file_id, 0..0)))
     }
 
     /// Get the function's parameters
@@ -187,7 +187,7 @@ impl FunctionSymbol {
     pub fn function_type(&self) -> Ty {
         self.get_callable()
             .map(|c| c.function_type())
-            .unwrap_or_else(|| Ty::error(Span::from(0..0)))
+            .unwrap_or_else(|| Ty::error(Span::new(self.metadata.span().file_id, 0..0)))
     }
 
     /// Get parameter labels for display/debugging
@@ -261,7 +261,7 @@ impl FunctionSymbol {
         self.metadata
             .get_behavior::<GenericsBehavior>()
             .map(|g| g.where_clause().clone())
-            .unwrap_or_else(WhereClause::new)
+            .unwrap_or_default()
     }
 
     /// Add a new local variable to this function.

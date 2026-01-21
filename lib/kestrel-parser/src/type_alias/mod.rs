@@ -32,14 +32,15 @@ use kestrel_lexer::Token;
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
+use crate::attribute::attribute_list_parser;
 use crate::common::{
     AssociatedTypeBoundsData, AssociatedTypeTargetData, TypeAliasDeclarationData,
     emit_type_alias_declaration, identifier, token, visibility_parser_internal,
 };
 use crate::event::{EventSink, TreeBuilder};
-use crate::input::{ParserExtra, ParserInput, create_input, prepare_tokens, to_kestrel_span};
+use crate::input::{ParserExtra, ParserInput, create_input, prepare_tokens};
 use crate::ty::{TyVariant, ty_parser};
-use crate::type_param::type_parameter_list_parser;
+use crate::type_param::{type_parameter_list_parser, where_clause_parser};
 
 /// Represents a type alias declaration: (visibility)? type Name[T]? = Type;
 ///
@@ -150,6 +151,7 @@ fn associated_type_bounds_parser<'tokens>()
                 .collect(),
         )
         .map(|(colon_span, bounds)| AssociatedTypeBoundsData { colon_span, bounds })
+        .boxed()
 }
 
 /// Parser for associated type target (simple name or qualified path)
@@ -196,7 +198,7 @@ fn associated_type_target_parser<'tokens>()
                 None => {
                     // Simple case: just an identifier
                     AssociatedTypeTargetData::Simple(first_name)
-                }
+                },
                 Some(((type_args, dot_span), name_span)) => {
                     // Qualified case: first_name[type_args]?.name
                     // Reconstruct protocol_path as a TyVariant::Path
@@ -209,9 +211,10 @@ fn associated_type_target_parser<'tokens>()
                         dot_span,
                         name_span,
                     }
-                }
+                },
             }
         })
+        .boxed()
 }
 
 /// Internal Chumsky parser for type alias declaration
@@ -224,29 +227,40 @@ fn associated_type_target_parser<'tokens>()
 pub fn type_alias_declaration_parser_internal<'tokens>()
 -> impl Parser<'tokens, ParserInput<'tokens>, TypeAliasDeclarationData, ParserExtra<'tokens>> + Clone
 {
-    visibility_parser_internal()
+    attribute_list_parser()
+        .then(visibility_parser_internal())
         .then(token(Token::Type))
         .then(associated_type_target_parser())
         .then(type_parameter_list_parser().or_not())
         .then(associated_type_bounds_parser().or_not())
+        .then(where_clause_parser().or_not())
         .then(token(Token::Equals).then(ty_parser()).or_not())
-        .then(token(Token::Semicolon))
+        .then(token(Token::Semicolon).or_not())
         .map(
             |(
-                (((((visibility, type_span), target), type_params), bounds), aliased),
+                (
+                    (
+                        (((((attributes, visibility), type_span), target), type_params), bounds),
+                        where_clause,
+                    ),
+                    aliased,
+                ),
                 semicolon_span,
             )| {
                 TypeAliasDeclarationData {
+                    attributes,
                     visibility,
                     type_span,
                     target,
                     type_params,
                     bounds,
+                    where_clause,
                     aliased,
                     semicolon_span,
                 }
             },
         )
+        .boxed()
 }
 
 /// Parse a type alias declaration and emit events
@@ -265,13 +279,13 @@ where
     {
         Ok(data) => {
             emit_type_alias_declaration(sink, data);
-        }
+        },
         Err(errors) => {
             for error in errors {
                 let span = error.span();
-                sink.error_at(format!("Parse error: {:?}", error), to_kestrel_span(*span));
+                sink.error_at(format!("Parse error: {:?}", error), *span);
             }
-        }
+        },
     }
 }
 
@@ -288,13 +302,13 @@ mod tests {
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
 
-        let mut sink = EventSink::new();
+        let mut sink = EventSink::new(0);
         parse_type_alias_declaration(source, tokens.into_iter(), &mut sink);
 
         let tree = TreeBuilder::new(source, sink.into_events()).build();
         let decl = TypeAliasDeclaration {
             syntax: tree,
-            span: Span::from(0..source.len()),
+            span: Span::new(0, 0..source.len()),
         };
 
         assert_eq!(decl.name(), Some("Alias".to_string()));
@@ -310,13 +324,13 @@ mod tests {
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
 
-        let mut sink = EventSink::new();
+        let mut sink = EventSink::new(0);
         parse_type_alias_declaration(source, tokens.into_iter(), &mut sink);
 
         let tree = TreeBuilder::new(source, sink.into_events()).build();
         let decl = TypeAliasDeclaration {
             syntax: tree,
-            span: Span::from(0..source.len()),
+            span: Span::new(0, 0..source.len()),
         };
 
         assert_eq!(decl.name(), Some("PublicAlias".to_string()));
@@ -331,13 +345,13 @@ mod tests {
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
 
-        let mut sink = EventSink::new();
+        let mut sink = EventSink::new(0);
         parse_type_alias_declaration(source, tokens.into_iter(), &mut sink);
 
         let tree = TreeBuilder::new(source, sink.into_events()).build();
         let decl = TypeAliasDeclaration {
             syntax: tree,
-            span: Span::from(0..source.len()),
+            span: Span::new(0, 0..source.len()),
         };
 
         assert_eq!(decl.name(), Some("Box".to_string()));
@@ -353,13 +367,13 @@ mod tests {
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
 
-        let mut sink = EventSink::new();
+        let mut sink = EventSink::new(0);
         parse_type_alias_declaration(source, tokens.into_iter(), &mut sink);
 
         let tree = TreeBuilder::new(source, sink.into_events()).build();
         let decl = TypeAliasDeclaration {
             syntax: tree,
-            span: Span::from(0..source.len()),
+            span: Span::new(0, 0..source.len()),
         };
 
         assert_eq!(decl.name(), Some("Item".to_string()));
@@ -382,13 +396,13 @@ mod tests {
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
 
-        let mut sink = EventSink::new();
+        let mut sink = EventSink::new(0);
         parse_type_alias_declaration(source, tokens.into_iter(), &mut sink);
 
         let tree = TreeBuilder::new(source, sink.into_events()).build();
         let decl = TypeAliasDeclaration {
             syntax: tree,
-            span: Span::from(0..source.len()),
+            span: Span::new(0, 0..source.len()),
         };
 
         assert_eq!(decl.name(), Some("TupleAlias".to_string()));

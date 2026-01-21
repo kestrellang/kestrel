@@ -1,8 +1,9 @@
 use std::sync::Arc;
 
+use kestrel_prelude::lang;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::type_parameter::TypeParameterSymbol;
-use kestrel_semantic_tree::ty::{Constraint, Ty, WhereClause};
+use kestrel_semantic_tree::ty::{Constraint, FloatBits, IntBits, Ty, WhereClause};
 use kestrel_span::{Span, Spanned};
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
@@ -23,10 +24,10 @@ pub fn extract_type_parameters(
     let mut type_params = Vec::new();
 
     for child in type_param_list.children() {
-        if child.kind() == SyntaxKind::TypeParameter {
-            if let Some(param) = parse_type_parameter(&child, source, file_id, parent.clone()) {
-                type_params.push(Arc::new(param));
-            }
+        if child.kind() == SyntaxKind::TypeParameter
+            && let Some(param) = parse_type_parameter(&child, source, file_id, parent.clone())
+        {
+            type_params.push(Arc::new(param));
         }
     }
 
@@ -68,29 +69,29 @@ fn extract_type_param_name(
     file_id: usize,
 ) -> Option<(String, kestrel_span::Span)> {
     for child in syntax.children_with_tokens() {
-        if let Some(token) = child.into_token() {
-            if token.kind() == SyntaxKind::Identifier {
+        if let Some(token) = child.into_token()
+            && token.kind() == SyntaxKind::Identifier
+        {
+            let text_range = token.text_range();
+            let span: kestrel_span::Span = Span::new(
+                file_id,
+                (text_range.start().into())..(text_range.end().into()),
+            );
+            return Some((token.text().to_string(), span));
+        }
+    }
+
+    if let Some(name_node) = find_child(syntax, SyntaxKind::Name) {
+        for child in name_node.children_with_tokens() {
+            if let Some(token) = child.into_token()
+                && token.kind() == SyntaxKind::Identifier
+            {
                 let text_range = token.text_range();
                 let span: kestrel_span::Span = Span::new(
                     file_id,
                     (text_range.start().into())..(text_range.end().into()),
                 );
                 return Some((token.text().to_string(), span));
-            }
-        }
-    }
-
-    if let Some(name_node) = find_child(syntax, SyntaxKind::Name) {
-        for child in name_node.children_with_tokens() {
-            if let Some(token) = child.into_token() {
-                if token.kind() == SyntaxKind::Identifier {
-                    let text_range = token.text_range();
-                    let span: kestrel_span::Span = Span::new(
-                        file_id,
-                        (text_range.start().into())..(text_range.end().into()),
-                    );
-                    return Some((token.text().to_string(), span));
-                }
             }
         }
     }
@@ -104,6 +105,7 @@ fn extract_default_type(syntax: &SyntaxNode, source: &str, file_id: usize) -> Op
     extract_ty_from_node(&ty_node, source, file_id)
 }
 
+#[allow(clippy::only_used_in_recursion)]
 fn extract_ty_from_node(ty_node: &SyntaxNode, source: &str, file_id: usize) -> Option<Ty> {
     let span = get_node_span(ty_node, file_id);
     let variant_node = ty_node.children().next()?;
@@ -116,10 +118,28 @@ fn extract_ty_from_node(ty_node: &SyntaxNode, source: &str, file_id: usize) -> O
             let segments = extract_path_segments(&path_node);
             if segments.is_empty() {
                 None
+            } else if segments.len() == 1 && segments[0] == "Self" {
+                // Special case: Self type reference
+                Some(Ty::self_type(span))
+            } else if segments.len() == 2 && segments[0] == lang::LANG {
+                // Handle lang.* primitive types that can be resolved at parse time
+                match segments[1].as_str() {
+                    lang::I8 => Some(Ty::int(IntBits::I8, span)),
+                    lang::I16 => Some(Ty::int(IntBits::I16, span)),
+                    lang::I32 => Some(Ty::int(IntBits::I32, span)),
+                    lang::I64 => Some(Ty::int(IntBits::I64, span)),
+                    lang::F16 => Some(Ty::float(FloatBits::F16, span)),
+                    lang::F32 => Some(Ty::float(FloatBits::F32, span)),
+                    lang::F64 => Some(Ty::float(FloatBits::F64, span)),
+                    lang::I1 => Some(Ty::bool(span)),
+                    lang::STR => Some(Ty::string(span)),
+                    _ => Some(Ty::error(span)),
+                }
             } else {
+                // Other path types can't be fully resolved at parse time
                 Some(Ty::error(span))
             }
-        }
+        },
         SyntaxKind::TyTuple => {
             let elements: Vec<Ty> = variant_node
                 .children()
@@ -127,7 +147,7 @@ fn extract_ty_from_node(ty_node: &SyntaxNode, source: &str, file_id: usize) -> O
                 .filter_map(|c| extract_ty_from_node(&c, source, file_id))
                 .collect();
             Some(Ty::tuple(elements, span))
-        }
+        },
         _ => None,
     }
 }
@@ -151,13 +171,13 @@ pub fn extract_where_clause(
                 if let Some(constraint) = parse_type_bound(&child, source, file_id, type_params) {
                     constraints.push(constraint);
                 }
-            }
+            },
             SyntaxKind::TypeEquality => {
                 if let Some(constraint) = parse_type_equality(&child, source, file_id) {
                     constraints.push(constraint);
                 }
-            }
-            _ => {}
+            },
+            _ => {},
         }
     }
 
@@ -166,7 +186,7 @@ pub fn extract_where_clause(
 
 fn parse_type_bound(
     syntax: &SyntaxNode,
-    source: &str,
+    _source: &str,
     file_id: usize,
     type_params: &[Arc<TypeParameterSymbol>],
 ) -> Option<Constraint> {

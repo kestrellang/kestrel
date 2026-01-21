@@ -1,55 +1,70 @@
 // Bool type
 
+module std.core
+
 import std.ffi.(FFISafe)
+import std.text.(String)
 
 public struct Bool:
     Equatable,
-    Hashable,
+    Matchable,
+    Formattable,
     And[Bool],
     Or[Bool],
     Not,
     ExpressibleByBoolLiteral,
+    BooleanConditional,
     FFISafe
 {
-    private var value: lang.bool
+    private var value: lang.i1
 
     // ExpressibleByBoolLiteral
-    public init(boolLiteral value: Bool) {
-        self.value = value.value
+    public init(boolLiteral value: lang.i1) {
+        self.value = value
     }
 
     // Equatable
     public func equals(other: Bool) -> Bool {
-        lang.bool_eq(self.value, other.value)
+        Bool(boolLiteral: lang.i1_eq(self.value, other.value))
     }
 
-    // Hashable
-    public func hash[H: Hasher](into hasher: ref H) {
-        if self.value {
-            hasher.write(bytes: [1 as UInt8])
-        } else {
-            hasher.write(bytes: [0 as UInt8])
-        }
+    // Matchable
+    public func matches(other: Bool) -> Bool {
+        Bool(boolLiteral: lang.i1_eq(self.value, other.value))
     }
+
+    // Hashable - deferred until Hasher has write method
+    // public func hash[H](mutating into hasher: H) where H: Hasher {
+    //     ...
+    // }
+
+    // Associated type bindings
+    type And.Output = Bool
+    type Or.Output = Bool
+    type Not.Output = Bool
 
     // And
-    type Output = Bool
-
-    public func and(other: Bool) -> Bool {
-        Bool(value: lang.bool_and(self.value, other.value))
+    public func logicalAnd(other: Bool) -> Bool {
+        Bool(boolLiteral: lang.i1_and(self.value, other.value))
     }
 
     // Or
-    public func or(other: Bool) -> Bool {
-        Bool(value: lang.bool_or(self.value, other.value))
+    public func logicalOr(other: Bool) -> Bool {
+        Bool(boolLiteral: lang.i1_or(self.value, other.value))
     }
 
     // Not
-    public func not() -> Bool {
-        Bool(value: lang.bool_not(self.value))
+    public func logicalNot() -> Bool {
+        Bool(boolLiteral: lang.i1_not(self.value))
+    }
+
+    // BooleanConditional
+    public func boolValue() -> lang.i1 {
+        self.value
+    }
+
+    // Formattable
+    public func format() -> String {
+        if self.value { "true" } else { "false" }
     }
 }
-
-// Constants
-public let true: Bool = Bool(value: lang.bool_true)
-public let false: Bool = Bool(value: lang.bool_false)

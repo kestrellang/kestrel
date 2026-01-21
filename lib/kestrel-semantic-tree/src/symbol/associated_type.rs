@@ -5,10 +5,13 @@ use semantic_tree::behavior::Behavior;
 use semantic_tree::symbol::{Symbol, SymbolMetadata, SymbolMetadataBuilder};
 
 use crate::{
-    behavior::{KestrelBehaviorKind, typed::TypedBehavior, visibility::VisibilityBehavior},
+    behavior::{
+        KestrelBehaviorKind, generics::GenericsBehavior, typed::TypedBehavior,
+        visibility::VisibilityBehavior,
+    },
     language::KestrelLanguage,
     symbol::kind::KestrelSymbolKind,
-    ty::Ty,
+    ty::{Ty, WhereClause},
 };
 
 /// Represents an associated type declaration in a protocol.
@@ -100,6 +103,16 @@ impl AssociatedTypeSymbol {
     /// Check if this associated type has constraint bounds
     pub fn has_bounds(&self) -> bool {
         self.bounds().map(|b| !b.is_empty()).unwrap_or(false)
+    }
+
+    /// Get the where clause for this associated type.
+    ///
+    /// Returns empty where clause if not yet bound or no where clause exists.
+    pub fn where_clause(&self) -> WhereClause {
+        self.metadata
+            .get_behavior::<GenericsBehavior>()
+            .map(|g| g.where_clause().clone())
+            .unwrap_or_default()
     }
 }
 

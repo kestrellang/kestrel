@@ -9,13 +9,13 @@ fn parse_expr_from_source(source: &str) -> Expression {
         .map(|spanned| (spanned.value, spanned.span))
         .collect();
 
-    let mut sink = EventSink::new();
+    let mut sink = EventSink::new(0);
     parse_expr(source, tokens.into_iter(), &mut sink);
 
     let tree = TreeBuilder::new(source, sink.into_events()).build();
     Expression {
         syntax: tree,
-        span: Span::from(0..source.len()),
+        span: Span::new(0, 0..source.len()),
     }
 }
 

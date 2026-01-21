@@ -11,8 +11,9 @@ kestrel-execution-graph-lowering = { path = "lib/kestrel-execution-graph-lowerin
 clap = { workspace = true }
 
 [workspace.package]
-version = "0.11.0"
+version = "0.13.0"
 edition = "2024"
+license = "Apache-2.0"
 
 [workspace.dependencies]
 chumsky = "0.12"
@@ -48,6 +49,29 @@ members = [
     "lib/kestrel-codegen-cranelift",
     "lib/kestrel-test-suite"
 ]
+
+# Workspace-wide lint configuration
+# Individual crates inherit these with [lints] workspace = true
+[workspace.lints.rust]
+unused_imports = "warn"
+dead_code = "warn"
+unused_variables = "warn"
+unused_mut = "warn"
+
+[workspace.lints.clippy]
+# Deny categories that indicate bugs
+correctness = { level = "deny", priority = -1 }
+suspicious = { level = "deny", priority = -1 }
+
+# Warn on style and performance issues
+style = { level = "warn", priority = -1 }
+perf = { level = "warn", priority = -1 }
+complexity = { level = "warn", priority = -1 }
+
+# Specific lint overrides (allow some noisy lints)
+too_many_arguments = "allow"  # Common in compiler code
+large_enum_variant = "allow"  # AST nodes are naturally large
+type_complexity = "allow"     # Parser combinators have complex types
 
 # Reduce stack frame size in debug builds for recursive parsers
 [profile.dev]

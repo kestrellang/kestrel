@@ -28,22 +28,22 @@ pub fn resolve_statement(
         match child.kind() {
             SyntaxKind::VariableDeclaration => {
                 return resolve_variable_declaration(&child, ctx);
-            }
+            },
             SyntaxKind::ExpressionStatement => {
                 return resolve_expression_statement(&child, ctx);
-            }
+            },
             SyntaxKind::GuardLetStatement => {
                 return resolve_guard_let_statement(&child, ctx);
-            }
+            },
             SyntaxKind::DeinitStatement => {
                 return resolve_deinit_statement(&child, ctx);
-            }
+            },
             SyntaxKind::Expression => {
                 let expr = resolve_expression(&child, ctx);
                 let span = get_node_span(&child, ctx.file_id);
                 return Some(Statement::expr(expr, span));
-            }
-            _ => {}
+            },
+            _ => {},
         }
     }
     None
@@ -103,13 +103,13 @@ pub fn resolve_variable_declaration(
 
     // Track moves for non-copyable types
     // If the value is a LocalRef to a non-copyable type, mark the source as moved
-    if let Some(ref value_expr) = value {
-        if let ExprKind::LocalRef(source_local_id) = &value_expr.kind {
-            // Use context-aware check that considers `T: not Copyable` bounds
-            if !value_expr.ty.is_copyable_in_context(ctx.where_clause()) {
-                ctx.move_tracker
-                    .mark_moved(*source_local_id, value_expr.span.clone());
-            }
+    if let Some(ref value_expr) = value
+        && let ExprKind::LocalRef(source_local_id) = &value_expr.kind
+    {
+        // Use context-aware check that considers `T: not Copyable` bounds
+        if !value_expr.ty.is_copyable_in_context(ctx.where_clause()) {
+            ctx.move_tracker
+                .mark_moved(*source_local_id, value_expr.span.clone());
         }
     }
 
@@ -295,7 +295,7 @@ pub fn resolve_deinit_statement(
             };
             ctx.diagnostics.add_diagnostic(error.into_diagnostic());
             return None;
-        }
+        },
     };
 
     // Check if the variable has already been moved

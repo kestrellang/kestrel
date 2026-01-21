@@ -46,7 +46,7 @@ fn apply_to_statement(stmt: &Statement, solution: &Solution) -> Statement {
                 pattern: resolved_pattern,
                 value: resolved_value,
             }
-        }
+        },
         StatementKind::Expr(expr) => StatementKind::Expr(apply_to_expression(expr, solution)),
         StatementKind::GuardLet {
             conditions,
@@ -61,14 +61,14 @@ fn apply_to_statement(stmt: &Statement, solution: &Solution) -> Statement {
                 conditions: resolved_conditions,
                 else_block: resolved_else_block,
             }
-        }
+        },
         StatementKind::Deinit { local_id, name } => {
             // Deinit statement doesn't contain types that need resolution
             StatementKind::Deinit {
                 local_id: *local_id,
                 name: name.clone(),
             }
-        }
+        },
     };
 
     Statement::new(kind, stmt.span.clone())
@@ -126,7 +126,7 @@ fn apply_to_expression(expr: &Expression, solution: &Solution) -> Expression {
                     arguments: resolved_arguments,
                 }
             }
-        }
+        },
         ExprKind::Error => ExprKind::Error,
         ExprKind::Break { loop_id, label } => ExprKind::Break {
             loop_id: *loop_id,
@@ -154,7 +154,7 @@ fn apply_to_expression(expr: &Expression, solution: &Solution) -> Expression {
 
         ExprKind::Grouping(inner) => {
             ExprKind::Grouping(Box::new(apply_to_expression(inner, solution)))
-        }
+        },
 
         ExprKind::FieldAccess { object, field } => ExprKind::FieldAccess {
             object: Box::new(apply_to_expression(object, solution)),
@@ -191,7 +191,7 @@ fn apply_to_expression(expr: &Expression, solution: &Solution) -> Expression {
                 .iter()
                 .map(|arg| apply_to_argument(arg, solution))
                 .collect(),
-            substitutions: substitutions.clone(),
+            substitutions: resolve_substitutions(substitutions, solution),
         },
 
         ExprKind::PrimitiveMethodCall {
@@ -216,7 +216,7 @@ fn apply_to_expression(expr: &Expression, solution: &Solution) -> Expression {
                 method: resolved_method,
                 arguments: resolved_arguments,
             }
-        }
+        },
 
         ExprKind::DeferredMethodCall {
             receiver,
@@ -252,7 +252,7 @@ fn apply_to_expression(expr: &Expression, solution: &Solution) -> Expression {
                     arguments: resolved_arguments,
                 }
             }
-        }
+        },
 
         ExprKind::ImplicitStructInit {
             struct_type,
@@ -263,6 +263,19 @@ fn apply_to_expression(expr: &Expression, solution: &Solution) -> Expression {
                 .iter()
                 .map(|arg| apply_to_argument(arg, solution))
                 .collect(),
+        },
+
+        ExprKind::DelegatingInit {
+            initializer,
+            arguments,
+            substitutions,
+        } => ExprKind::DelegatingInit {
+            initializer: *initializer,
+            arguments: arguments
+                .iter()
+                .map(|arg| apply_to_argument(arg, solution))
+                .collect(),
+            substitutions: substitutions.clone(),
         },
 
         ExprKind::Assignment { target, value } => ExprKind::Assignment {
@@ -401,7 +414,7 @@ fn apply_to_expression(expr: &Expression, solution: &Solution) -> Expression {
                 uses_it: *uses_it,
                 implicit_param: resolved_implicit_param,
             }
-        }
+        },
 
         ExprKind::Match { scrutinee, arms } => {
             let resolved_scrutinee = Box::new(apply_to_expression(scrutinee, solution));
@@ -413,7 +426,7 @@ fn apply_to_expression(expr: &Expression, solution: &Solution) -> Expression {
                 scrutinee: resolved_scrutinee,
                 arms: resolved_arms,
             }
-        }
+        },
 
         ExprKind::Block { statements, value } => {
             let resolved_statements = statements
@@ -427,7 +440,36 @@ fn apply_to_expression(expr: &Expression, solution: &Solution) -> Expression {
                 statements: resolved_statements,
                 value: resolved_value,
             }
-        }
+        },
+
+        // Language intrinsics - apply solution to arguments and resolve intrinsic types
+        ExprKind::LangIntrinsic {
+            intrinsic,
+            arguments,
+        } => ExprKind::LangIntrinsic {
+            intrinsic: resolve_intrinsic(intrinsic, solution, &resolved_ty),
+            arguments: arguments
+                .iter()
+                .map(|arg| apply_to_argument(arg, solution))
+                .collect(),
+        },
+
+        // Language intrinsic reference - no changes needed
+        ExprKind::LangIntrinsicRef(intrinsic) => ExprKind::LangIntrinsicRef(intrinsic.clone()),
+
+        // Subscript call - apply solution to receiver and arguments
+        ExprKind::SubscriptCall {
+            receiver,
+            getter,
+            arguments,
+        } => ExprKind::SubscriptCall {
+            receiver: Box::new(apply_to_expression(receiver, solution)),
+            getter: *getter,
+            arguments: arguments
+                .iter()
+                .map(|arg| apply_to_argument(arg, solution))
+                .collect(),
+        },
     };
 
     Expression::new(kind, resolved_ty, expr.span.clone(), expr.mutable)
@@ -456,7 +498,7 @@ fn apply_to_else_branch(branch: &ElseBranch, solution: &Solution) -> ElseBranch 
         },
         ElseBranch::ElseIf(if_expr) => {
             ElseBranch::ElseIf(Box::new(apply_to_expression(if_expr, solution)))
-        }
+        },
     }
 }
 
@@ -619,14 +661,12 @@ fn apply_to_pattern(pattern: &Pattern, solution: &Solution) -> Pattern {
 }
 
 /// Resolve a type using the solution.
-/// If the type is an inference placeholder, look it up in the solution.
+/// If the type is an inference placeholder or unresolved function, look it up in the solution.
 /// Recursively resolves nested types.
 fn resolve_type(ty: &Ty, solution: &Solution) -> Ty {
-    // If this type is an inference placeholder, look it up
-    if matches!(ty.kind(), TyKind::Infer) {
-        if let Some(resolved) = solution.get_type(ty.id()) {
-            return resolve_type(resolved, solution);
-        }
+    // Check if this type has a substitution (for Infer and UnresolvedFunction types)
+    if let Some(resolved) = solution.get_type(ty.id()) {
+        return resolve_type(resolved, solution);
     }
 
     // For compound types, recursively resolve components
@@ -635,11 +675,11 @@ fn resolve_type(ty: &Ty, solution: &Solution) -> Ty {
             let resolved_elements: Vec<_> =
                 elements.iter().map(|e| resolve_type(e, solution)).collect();
             Ty::tuple(resolved_elements, ty.span().clone())
-        }
+        },
         TyKind::Array(elem) => {
             let resolved_elem = resolve_type(elem, solution);
             Ty::array(resolved_elem, ty.span().clone())
-        }
+        },
         TyKind::Function {
             params,
             return_type,
@@ -648,7 +688,7 @@ fn resolve_type(ty: &Ty, solution: &Solution) -> Ty {
                 params.iter().map(|p| resolve_type(p, solution)).collect();
             let resolved_return = resolve_type(return_type, solution);
             Ty::function(resolved_params, resolved_return, ty.span().clone())
-        }
+        },
         TyKind::UnresolvedFunction {
             param_info,
             return_type,
@@ -667,10 +707,163 @@ fn resolve_type(ty: &Ty, solution: &Solution) -> Ty {
                 },
             };
             Ty::unresolved_function(resolved_param_info, resolved_return, ty.span().clone())
-        }
-        // Nominal types with substitutions would need recursive resolution too,
-        // but for now just return the original type
+        },
+        // Struct types with substitutions - resolve any inference placeholders in substitutions
+        TyKind::Struct {
+            symbol,
+            substitutions,
+        } => {
+            let resolved_subs = resolve_substitutions(substitutions, solution);
+            Ty::generic_struct(symbol.clone(), resolved_subs, ty.span().clone())
+        },
+        // Enum types with substitutions - resolve any inference placeholders in substitutions
+        TyKind::Enum {
+            symbol,
+            substitutions,
+        } => {
+            let resolved_subs = resolve_substitutions(substitutions, solution);
+            Ty::generic_enum(symbol.clone(), resolved_subs, ty.span().clone())
+        },
+        // Pointer types - resolve pointee
+        TyKind::Pointer(pointee) => Ty::pointer(resolve_type(pointee, solution), ty.span().clone()),
+        // Other types - no inference placeholders to resolve
         _ => ty.clone(),
+    }
+}
+
+/// Resolve inference placeholders within substitutions.
+fn resolve_substitutions(subs: &Substitutions, solution: &Solution) -> Substitutions {
+    let mut resolved = Substitutions::new();
+    for (id, ty) in subs.iter() {
+        resolved.insert(*id, resolve_type(ty, solution));
+    }
+    resolved
+}
+
+/// Resolve embedded types within a LangIntrinsic, using the expression's resolved type.
+///
+/// Many lang intrinsics carry type information that may start as inference placeholders
+/// (e.g., `PtrNull { pointee_ty: Ty::infer() }`). After type inference, we need to
+/// resolve these placeholders to their concrete types. For intrinsics that return pointer
+/// types, we can extract the pointee type from the expression's resolved return type.
+fn resolve_intrinsic(
+    intrinsic: &kestrel_semantic_tree::expr::LangIntrinsic,
+    solution: &Solution,
+    expr_ty: &Ty,
+) -> kestrel_semantic_tree::expr::LangIntrinsic {
+    use kestrel_semantic_tree::expr::LangIntrinsic;
+
+    match intrinsic {
+        // Intrinsics that return Pointer[T] - extract T from the expression's type
+        LangIntrinsic::PtrNull { pointee_ty } => {
+            let resolved_pointee = if let TyKind::Pointer(ptr_pointee) = expr_ty.kind() {
+                // Extract pointee type from the expression's resolved pointer type
+                resolve_type(ptr_pointee, solution)
+            } else {
+                // Fallback: just resolve the embedded type
+                resolve_type(pointee_ty, solution)
+            };
+            LangIntrinsic::PtrNull {
+                pointee_ty: resolved_pointee,
+            }
+        },
+        LangIntrinsic::PtrFromAddress { pointee_ty } => {
+            let resolved_pointee = if let TyKind::Pointer(ptr_pointee) = expr_ty.kind() {
+                resolve_type(ptr_pointee, solution)
+            } else {
+                resolve_type(pointee_ty, solution)
+            };
+            LangIntrinsic::PtrFromAddress {
+                pointee_ty: resolved_pointee,
+            }
+        },
+        LangIntrinsic::PtrTo { pointee_ty } => {
+            let resolved_pointee = if let TyKind::Pointer(ptr_pointee) = expr_ty.kind() {
+                resolve_type(ptr_pointee, solution)
+            } else {
+                resolve_type(pointee_ty, solution)
+            };
+            LangIntrinsic::PtrTo {
+                pointee_ty: resolved_pointee,
+            }
+        },
+        LangIntrinsic::PtrRead { pointee_ty } => LangIntrinsic::PtrRead {
+            pointee_ty: resolve_type(pointee_ty, solution),
+        },
+        LangIntrinsic::PtrWrite { pointee_ty } => LangIntrinsic::PtrWrite {
+            pointee_ty: resolve_type(pointee_ty, solution),
+        },
+        LangIntrinsic::CastPtr { target_ty } => {
+            let resolved_target = if let TyKind::Pointer(ptr_pointee) = expr_ty.kind() {
+                resolve_type(ptr_pointee, solution)
+            } else {
+                resolve_type(target_ty, solution)
+            };
+            LangIntrinsic::CastPtr {
+                target_ty: resolved_target,
+            }
+        },
+        LangIntrinsic::SizeOf { ty } => LangIntrinsic::SizeOf {
+            ty: resolve_type(ty, solution),
+        },
+        LangIntrinsic::AlignOf { ty } => LangIntrinsic::AlignOf {
+            ty: resolve_type(ty, solution),
+        },
+
+        // Intrinsics without embedded types - just clone
+        LangIntrinsic::PanicUnwind => LangIntrinsic::PanicUnwind,
+        LangIntrinsic::Cast { from, to } => LangIntrinsic::Cast {
+            from: *from,
+            to: *to,
+        },
+        LangIntrinsic::IntBinary { primitive, op } => LangIntrinsic::IntBinary {
+            primitive: *primitive,
+            op: *op,
+        },
+        LangIntrinsic::IntBinarySigned { primitive, op } => LangIntrinsic::IntBinarySigned {
+            primitive: *primitive,
+            op: *op,
+        },
+        LangIntrinsic::IntBinaryUnsigned { primitive, op } => LangIntrinsic::IntBinaryUnsigned {
+            primitive: *primitive,
+            op: *op,
+        },
+        LangIntrinsic::IntUnary { primitive, op } => LangIntrinsic::IntUnary {
+            primitive: *primitive,
+            op: *op,
+        },
+        LangIntrinsic::FloatBinary { primitive, op } => LangIntrinsic::FloatBinary {
+            primitive: *primitive,
+            op: *op,
+        },
+        LangIntrinsic::FloatUnary { primitive, op } => LangIntrinsic::FloatUnary {
+            primitive: *primitive,
+            op: *op,
+        },
+        LangIntrinsic::FloatConst {
+            primitive,
+            constant,
+        } => LangIntrinsic::FloatConst {
+            primitive: *primitive,
+            constant: *constant,
+        },
+        LangIntrinsic::FloatPred { primitive, pred } => LangIntrinsic::FloatPred {
+            primitive: *primitive,
+            pred: *pred,
+        },
+        LangIntrinsic::FloatMath { primitive, op } => LangIntrinsic::FloatMath {
+            primitive: *primitive,
+            op: *op,
+        },
+        LangIntrinsic::PtrToAddress => LangIntrinsic::PtrToAddress,
+        LangIntrinsic::PtrOffset => LangIntrinsic::PtrOffset,
+        LangIntrinsic::PtrIsNull => LangIntrinsic::PtrIsNull,
+        LangIntrinsic::I1Eq => LangIntrinsic::I1Eq,
+        LangIntrinsic::I1And => LangIntrinsic::I1And,
+        LangIntrinsic::I1Or => LangIntrinsic::I1Or,
+        LangIntrinsic::I1Not => LangIntrinsic::I1Not,
+        LangIntrinsic::AtomicAdd => LangIntrinsic::AtomicAdd,
+        LangIntrinsic::AtomicSub => LangIntrinsic::AtomicSub,
     }
 }
 
@@ -681,14 +874,35 @@ fn resolve_type(ty: &Ty, solution: &Solution) -> Ty {
 /// the actual types are known but the `Local` entries in the container still have
 /// the old placeholder types. When subsequent code references these locals via
 /// `LocalRef`, it reads the type from the container, so we must update it.
-pub fn apply_solution_to_locals(container: &dyn LocalContainer, solution: &Solution) {
+///
+/// Additionally, compound types (like `Struct[Infer]`) may contain inference
+/// placeholders in their substitutions that need to be resolved.
+///
+/// The `self` local is created with `SelfType` which needs to be resolved to
+/// the concrete type (struct, enum, or extension target type).
+pub fn apply_solution_to_locals(
+    container: &dyn LocalContainer,
+    solution: &Solution,
+    concrete_self_type: Option<&Ty>,
+) {
     for local in container.locals() {
         let ty = local.ty();
-        if matches!(ty.kind(), TyKind::Infer) {
-            if let Some(resolved) = solution.get_type(ty.id()) {
-                let fully_resolved = resolve_type(resolved, solution);
-                container.update_local_type(local.id(), fully_resolved);
+
+        // Handle SelfType -> concrete type (must check first before resolve_type)
+        if matches!(ty.kind(), TyKind::SelfType) {
+            if let Some(concrete) = concrete_self_type {
+                container.update_local_type(local.id(), concrete.clone());
             }
+            continue;
+        }
+
+        // Resolve ALL types, not just TyKind::Infer at the top level.
+        // This handles cases like `Wrapper[Infer]` where the struct's substitutions
+        // contain inference placeholders that need to be resolved.
+        let resolved = resolve_type(ty, solution);
+        if resolved.id() != ty.id() {
+            // Only update if the type actually changed
+            container.update_local_type(local.id(), resolved);
         }
     }
 }

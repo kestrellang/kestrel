@@ -76,7 +76,7 @@ fn validate_assignment_target(
                     },
                 ));
             }
-        }
+        },
         ExprKind::FieldAccess { object, field } => {
             let is_self_in_init = is_initializer && is_self_expr(object);
             if !is_self_in_init && !target.is_mutable() {
@@ -87,7 +87,7 @@ fn validate_assignment_target(
                     },
                 ));
             }
-        }
+        },
         ExprKind::TupleIndex { tuple: _, index } => {
             if !target.is_mutable() {
                 out.push(AssignmentError::ImmutableField(
@@ -97,7 +97,7 @@ fn validate_assignment_target(
                     },
                 ));
             }
-        }
+        },
         // Invalid targets
         ExprKind::Literal(_)
         | ExprKind::Array(_)
@@ -108,6 +108,7 @@ fn validate_assignment_target(
         | ExprKind::PrimitiveMethodRef { .. }
         | ExprKind::DeferredMethodCall { .. }
         | ExprKind::ImplicitStructInit { .. }
+        | ExprKind::DelegatingInit { .. }
         | ExprKind::MethodRef { .. }
         | ExprKind::SymbolRef(_)
         | ExprKind::OverloadedRef(_)
@@ -127,13 +128,18 @@ fn validate_assignment_target(
         | ExprKind::Closure { .. }
         | ExprKind::Match { .. }
         | ExprKind::Block { .. }
+        | ExprKind::LangIntrinsic { .. }
+        | ExprKind::LangIntrinsicRef(_)
+        | ExprKind::SubscriptCall { .. }
         | ExprKind::Error => {
+            // Note: SubscriptCall could be a valid assignment target if the subscript
+            // has a setter, but that validation is deferred to call resolution.
             out.push(AssignmentError::InvalidTarget(
                 CannotAssignToExpressionError {
                     span: target.span.clone(),
                 },
             ));
-        }
+        },
     }
     out
 }

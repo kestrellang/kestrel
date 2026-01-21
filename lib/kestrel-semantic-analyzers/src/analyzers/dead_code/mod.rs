@@ -137,13 +137,13 @@ fn analyze_statement(stmt: &Statement, errors: &mut Vec<UnreachableCodeWarning>)
                         if div != Divergence::None {
                             return div;
                         }
-                    }
+                    },
                     kestrel_semantic_tree::expr::IfCondition::Let { value, .. } => {
                         let div = analyze_expression(value, errors);
                         if div != Divergence::None {
                             return div;
                         }
-                    }
+                    },
                 }
             }
             // The else block must diverge, but the guard-let itself doesn't diverge
@@ -154,11 +154,11 @@ fn analyze_statement(stmt: &Statement, errors: &mut Vec<UnreachableCodeWarning>)
                 errors,
             );
             Divergence::None
-        }
+        },
         StatementKind::Deinit { .. } => {
             // Deinit is a simple statement that doesn't diverge
             Divergence::None
-        }
+        },
     }
 }
 
@@ -169,7 +169,7 @@ fn analyze_expression(expr: &Expression, errors: &mut Vec<UnreachableCodeWarning
                 let _ = analyze_expression(val, errors);
             }
             Divergence::Returns
-        }
+        },
         ExprKind::Break { .. } => Divergence::Breaks,
         ExprKind::Continue { .. } => Divergence::Continues,
         ExprKind::If {
@@ -194,7 +194,7 @@ fn analyze_expression(expr: &Expression, errors: &mut Vec<UnreachableCodeWarning
                 match else_b {
                     ElseBranch::Block { statements, value } => {
                         analyze_block(statements, value.as_deref(), errors)
-                    }
+                    },
                     ElseBranch::ElseIf(if_expr) => analyze_expression(if_expr, errors),
                 }
             } else {
@@ -206,7 +206,7 @@ fn analyze_expression(expr: &Expression, errors: &mut Vec<UnreachableCodeWarning
             } else {
                 Divergence::None
             }
-        }
+        },
         ExprKind::While {
             condition, body, ..
         } => {
@@ -228,7 +228,7 @@ fn analyze_expression(expr: &Expression, errors: &mut Vec<UnreachableCodeWarning
                 body_div = analyze_statement(stmt, errors);
             }
             Divergence::None
-        }
+        },
         ExprKind::WhileLet {
             conditions, body, ..
         } => {
@@ -239,13 +239,13 @@ fn analyze_expression(expr: &Expression, errors: &mut Vec<UnreachableCodeWarning
                         if div.diverges() {
                             return div;
                         }
-                    }
+                    },
                     kestrel_semantic_tree::expr::IfCondition::Let { value, .. } => {
                         let div = analyze_expression(value, errors);
                         if div.diverges() {
                             return div;
                         }
-                    }
+                    },
                 }
             }
             let mut body_div = Divergence::None;
@@ -262,7 +262,7 @@ fn analyze_expression(expr: &Expression, errors: &mut Vec<UnreachableCodeWarning
                 body_div = analyze_statement(stmt, errors);
             }
             Divergence::None
-        }
+        },
         ExprKind::Loop { body, .. } => {
             let mut body_div = Divergence::None;
             let mut has_break = false;
@@ -289,7 +289,7 @@ fn analyze_expression(expr: &Expression, errors: &mut Vec<UnreachableCodeWarning
             } else {
                 Divergence::None
             }
-        }
+        },
         ExprKind::Call {
             callee, arguments, ..
         } => {
@@ -304,14 +304,14 @@ fn analyze_expression(expr: &Expression, errors: &mut Vec<UnreachableCodeWarning
                 }
             }
             Divergence::None
-        }
+        },
         ExprKind::Assignment { target, value } => {
             let div = analyze_expression(value, errors);
             if div.diverges() {
                 return div;
             }
             analyze_expression(target, errors)
-        }
+        },
         ExprKind::Grouping(inner) => analyze_expression(inner, errors),
         ExprKind::Array(elements) => {
             for e in elements {
@@ -321,7 +321,7 @@ fn analyze_expression(expr: &Expression, errors: &mut Vec<UnreachableCodeWarning
                 }
             }
             Divergence::None
-        }
+        },
         ExprKind::Tuple(elements) => {
             for e in elements {
                 let d = analyze_expression(e, errors);
@@ -330,7 +330,7 @@ fn analyze_expression(expr: &Expression, errors: &mut Vec<UnreachableCodeWarning
                 }
             }
             Divergence::None
-        }
+        },
         ExprKind::FieldAccess { object, .. } => analyze_expression(object, errors),
         ExprKind::TupleIndex { tuple, .. } => analyze_expression(tuple, errors),
         ExprKind::MethodRef { receiver, .. } => analyze_expression(receiver, errors),
@@ -351,7 +351,7 @@ fn analyze_expression(expr: &Expression, errors: &mut Vec<UnreachableCodeWarning
                 }
             }
             Divergence::None
-        }
+        },
         ExprKind::DeferredMethodCall {
             receiver,
             arguments,
@@ -368,7 +368,7 @@ fn analyze_expression(expr: &Expression, errors: &mut Vec<UnreachableCodeWarning
                 }
             }
             Divergence::None
-        }
+        },
         ExprKind::ImplicitStructInit { arguments, .. } => {
             for arg in arguments {
                 let d = analyze_expression(&arg.value, errors);
@@ -377,7 +377,16 @@ fn analyze_expression(expr: &Expression, errors: &mut Vec<UnreachableCodeWarning
                 }
             }
             Divergence::None
-        }
+        },
+        ExprKind::DelegatingInit { arguments, .. } => {
+            for arg in arguments {
+                let d = analyze_expression(&arg.value, errors);
+                if d.diverges() {
+                    return d;
+                }
+            }
+            Divergence::None
+        },
         ExprKind::Closure {
             body, tail_expr, ..
         } => {
@@ -395,7 +404,7 @@ fn analyze_expression(expr: &Expression, errors: &mut Vec<UnreachableCodeWarning
             }
             // Closures don't cause divergence in the enclosing scope
             Divergence::None
-        }
+        },
         // Implicit member access - check arguments if present
         ExprKind::ImplicitMemberAccess { arguments, .. } => {
             if let Some(args) = arguments {
@@ -407,7 +416,46 @@ fn analyze_expression(expr: &Expression, errors: &mut Vec<UnreachableCodeWarning
                 }
             }
             Divergence::None
-        }
+        },
+        // Lang intrinsics - analyze arguments, then check for divergence (panic never returns)
+        ExprKind::LangIntrinsic {
+            intrinsic,
+            arguments,
+        } => {
+            for arg in arguments {
+                let d = analyze_expression(&arg.value, errors);
+                if d.diverges() {
+                    return d;
+                }
+            }
+            // Check divergence based on intrinsic type
+            match intrinsic {
+                // panic_unwind never returns
+                kestrel_semantic_tree::expr::LangIntrinsic::PanicUnwind => Divergence::Returns,
+                // All other intrinsics return a value normally
+                _ => Divergence::None,
+            }
+        },
+
+        // Subscript call - analyze receiver and arguments
+        ExprKind::SubscriptCall {
+            receiver,
+            arguments,
+            ..
+        } => {
+            let d = analyze_expression(receiver, errors);
+            if d.diverges() {
+                return d;
+            }
+            for arg in arguments {
+                let d = analyze_expression(&arg.value, errors);
+                if d.diverges() {
+                    return d;
+                }
+            }
+            Divergence::None
+        },
+
         // Leaf expressions
         ExprKind::Literal(_)
         | ExprKind::LocalRef(_)
@@ -417,6 +465,7 @@ fn analyze_expression(expr: &Expression, errors: &mut Vec<UnreachableCodeWarning
         | ExprKind::TypeParameterRef(_)
         | ExprKind::AssociatedTypeRef
         | ExprKind::EnumCase { .. }
+        | ExprKind::LangIntrinsicRef(_)
         | ExprKind::Error => Divergence::None,
 
         // Match expressions - all arms must diverge for the match to diverge
@@ -444,13 +493,12 @@ fn analyze_expression(expr: &Expression, errors: &mut Vec<UnreachableCodeWarning
                     Divergence::None
                 }
             }
-        }
+        },
 
         // Block expressions - analyze statements and value
         ExprKind::Block { statements, value } => {
-            let block_div = analyze_block(statements, value.as_deref(), errors);
-            block_div
-        }
+            analyze_block(statements, value.as_deref(), errors)
+        },
     }
 }
 
@@ -481,18 +529,18 @@ fn expression_contains_break(expr: &Expression) -> bool {
                     .map(|b| match b {
                         ElseBranch::Block { statements, .. } => {
                             statements.iter().any(|s| statement_contains_break(&s.kind))
-                        }
+                        },
                         ElseBranch::ElseIf(e) => expression_contains_break(e),
                     })
                     .unwrap_or(false)
-        }
+        },
         ExprKind::While { body, .. }
         | ExprKind::WhileLet { body, .. }
         | ExprKind::Loop { body, .. } => body.iter().any(|s| statement_contains_break(&s.kind)),
         ExprKind::Grouping(inner) => expression_contains_break(inner),
         ExprKind::Array(elements) | ExprKind::Tuple(elements) => {
             elements.iter().any(expression_contains_break)
-        }
+        },
         ExprKind::FieldAccess { object, .. } => expression_contains_break(object),
         ExprKind::TupleIndex { tuple, .. } => expression_contains_break(tuple),
         ExprKind::MethodRef { receiver, .. } => expression_contains_break(receiver),
@@ -504,7 +552,7 @@ fn expression_contains_break(expr: &Expression) -> bool {
                 || arguments
                     .iter()
                     .any(|a| expression_contains_break(&a.value))
-        }
+        },
         ExprKind::PrimitiveMethodCall {
             receiver,
             arguments,
@@ -514,13 +562,13 @@ fn expression_contains_break(expr: &Expression) -> bool {
                 || arguments
                     .iter()
                     .any(|a| expression_contains_break(&a.value))
-        }
+        },
         ExprKind::ImplicitStructInit { arguments, .. } => arguments
             .iter()
             .any(|a| expression_contains_break(&a.value)),
         ExprKind::Assignment { target, value } => {
             expression_contains_break(target) || expression_contains_break(value)
-        }
+        },
         _ => false,
     }
 }

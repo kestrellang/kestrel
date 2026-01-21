@@ -14,5 +14,5 @@ pub mod mangle;
 pub mod target;
 
 pub use layout::{Layout, LayoutCache};
-pub use mangle::{Mangler, mangle_name};
+pub use mangle::{Mangler, mangle_function, mangle_function_with_self, mangle_name};
 pub use target::TargetConfig;

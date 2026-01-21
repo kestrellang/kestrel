@@ -42,7 +42,7 @@ impl SymbolRegistry {
         self.kind_name_index
             .write()
             .entry((kind, name))
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(id);
     }
 

@@ -59,6 +59,32 @@ impl WhereClause {
                 Constraint::InheritedAssociatedTypeBound { .. } => None,
                 // Type equality constraints don't contribute bounds
                 Constraint::TypeEquality { .. } => None,
+                // SelfBound constraints apply to Self, not type parameters
+                Constraint::SelfBound { .. } => None,
+            })
+            .flatten()
+            .collect()
+    }
+
+    /// Get all bounds for a specific type parameter along with the constraint's param span.
+    ///
+    /// Returns tuples of (bound, constraint_span) where constraint_span is the span
+    /// of the type parameter name in the where clause (e.g., span of "F" in "F: Formattable").
+    pub fn bounds_for_with_span(&self, param_id: SymbolId) -> Vec<(&Ty, &Span)> {
+        self.constraints
+            .iter()
+            .filter_map(|c| match c {
+                Constraint::TypeBound {
+                    param: Some(id),
+                    bounds,
+                    param_span,
+                    ..
+                } if *id == param_id => Some(bounds.iter().map(move |b| (b, param_span))),
+                Constraint::TypeBound { .. } => None,
+                Constraint::NegativeBound { .. } => None,
+                Constraint::InheritedAssociatedTypeBound { .. } => None,
+                Constraint::TypeEquality { .. } => None,
+                Constraint::SelfBound { .. } => None,
             })
             .flatten()
             .collect()
@@ -93,7 +119,7 @@ impl WhereClause {
                 } else {
                     false
                 }
-            }
+            },
             _ => false,
         })
     }
@@ -168,6 +194,21 @@ pub enum Constraint {
         /// The span of the entire constraint
         span: Span,
     },
+    /// A constraint on Self or Self's associated type in a protocol extension.
+    ///
+    /// Syntax: `Self: Protocol` or `Self.Item: Protocol`
+    ///
+    /// Used in protocol extension where clauses to constrain which conforming
+    /// types receive the extension's methods.
+    SelfBound {
+        /// The path after Self (empty for `Self: Protocol`, non-empty for `Self.Item: Protocol`)
+        /// For `Self.Item.SubItem: Protocol`, this would be `["Item", "SubItem"]`
+        associated_type_path: Vec<String>,
+        /// The span of the entire Self path (e.g., span of "Self.Item")
+        path_span: Span,
+        /// The bounds that must be satisfied (protocol types)
+        bounds: Vec<Ty>,
+    },
 }
 
 impl Constraint {
@@ -237,6 +278,33 @@ impl Constraint {
         }
     }
 
+    /// Create a Self bound constraint for protocol extensions
+    ///
+    /// Used for where clauses like `Self: Protocol` or `Self.Item: Protocol`
+    pub fn self_bound(associated_type_path: Vec<String>, path_span: Span, bounds: Vec<Ty>) -> Self {
+        Constraint::SelfBound {
+            associated_type_path,
+            path_span,
+            bounds,
+        }
+    }
+
+    /// Check if this is a Self bound constraint (for protocol extensions)
+    pub fn is_self_bound(&self) -> bool {
+        matches!(self, Constraint::SelfBound { .. })
+    }
+
+    /// Get the associated type path for a Self bound (empty for `Self: Protocol`)
+    pub fn self_bound_associated_type_path(&self) -> Option<&[String]> {
+        match self {
+            Constraint::SelfBound {
+                associated_type_path,
+                ..
+            } => Some(associated_type_path),
+            _ => None,
+        }
+    }
+
     /// Get the type parameter this constraint applies to (if resolved)
     pub fn param_id(&self) -> Option<SymbolId> {
         match self {
@@ -244,6 +312,8 @@ impl Constraint {
             Constraint::NegativeBound { param, .. } => *param,
             Constraint::InheritedAssociatedTypeBound { .. } => None,
             Constraint::TypeEquality { .. } => None,
+            // SelfBound doesn't reference a type parameter - it references Self
+            Constraint::SelfBound { .. } => None,
         }
     }
 
@@ -254,6 +324,7 @@ impl Constraint {
             Constraint::NegativeBound { param_name, .. } => param_name,
             Constraint::InheritedAssociatedTypeBound { path, .. } => path,
             Constraint::TypeEquality { .. } => "",
+            Constraint::SelfBound { .. } => "Self",
         }
     }
 
@@ -264,6 +335,7 @@ impl Constraint {
             Constraint::NegativeBound { param_span, .. } => param_span,
             Constraint::InheritedAssociatedTypeBound { span, .. } => span,
             Constraint::TypeEquality { span, .. } => span,
+            Constraint::SelfBound { path_span, .. } => path_span,
         }
     }
 
@@ -276,6 +348,8 @@ impl Constraint {
             Constraint::InheritedAssociatedTypeBound { .. } => false,
             // Type equality constraints are always resolved
             Constraint::TypeEquality { .. } => false,
+            // SelfBound is always "resolved" in the sense that Self is a known concept
+            Constraint::SelfBound { .. } => false,
         }
     }
 
@@ -308,6 +382,7 @@ impl Constraint {
         match self {
             Constraint::TypeBound { bounds, .. } => bounds,
             Constraint::InheritedAssociatedTypeBound { bounds, .. } => bounds,
+            Constraint::SelfBound { bounds, .. } => bounds,
             Constraint::NegativeBound { .. } => &[],
             Constraint::TypeEquality { .. } => &[],
         }
@@ -338,10 +413,10 @@ mod tests {
     fn test_where_clause_with_constraints() {
         let param_id = SymbolId::new();
         // Use error type as placeholder for protocol bound in test
-        let bound = Ty::error(Span::from(0..8));
+        let bound = Ty::error(Span::new(0, 0..8));
 
         let constraint =
-            Constraint::type_bound(param_id, "T".to_string(), Span::from(0..1), vec![bound]);
+            Constraint::type_bound(param_id, "T".to_string(), Span::new(0, 0..1), vec![bound]);
         let wc = WhereClause::with_constraints(vec![constraint]);
 
         assert!(!wc.is_empty());
@@ -356,10 +431,10 @@ mod tests {
         let param_id = SymbolId::new();
         let other_id = SymbolId::new();
         // Use error type as placeholder for protocol bound in test
-        let bound = Ty::error(Span::from(0..8));
+        let bound = Ty::error(Span::new(0, 0..8));
 
         let constraint =
-            Constraint::type_bound(param_id, "T".to_string(), Span::from(0..1), vec![bound]);
+            Constraint::type_bound(param_id, "T".to_string(), Span::new(0, 0..1), vec![bound]);
         let wc = WhereClause::with_constraints(vec![constraint]);
 
         // Looking for bounds on a different param
@@ -370,9 +445,9 @@ mod tests {
     #[test]
     fn test_unresolved_constraint() {
         // Use error type as placeholder for protocol bound in test
-        let bound = Ty::error(Span::from(0..8));
+        let bound = Ty::error(Span::new(0, 0..8));
         let constraint =
-            Constraint::unresolved_type_bound("U".to_string(), Span::from(0..1), vec![bound]);
+            Constraint::unresolved_type_bound("U".to_string(), Span::new(0, 0..1), vec![bound]);
 
         assert!(constraint.is_unresolved());
         assert_eq!(constraint.param_name(), "U");

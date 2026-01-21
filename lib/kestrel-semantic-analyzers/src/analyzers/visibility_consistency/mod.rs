@@ -108,7 +108,7 @@ fn find_less_visible_type(
                 }
             }
             None
-        }
+        },
         TyKind::Enum {
             symbol: enum_symbol,
             substitutions,
@@ -123,7 +123,7 @@ fn find_less_visible_type(
                 }
             }
             None
-        }
+        },
         TyKind::Protocol {
             symbol: protocol_symbol,
             substitutions,
@@ -138,7 +138,7 @@ fn find_less_visible_type(
                 }
             }
             None
-        }
+        },
         TyKind::TypeAlias {
             symbol: alias_symbol,
             substitutions,
@@ -153,7 +153,7 @@ fn find_less_visible_type(
                 }
             }
             None
-        }
+        },
         TyKind::Tuple(elements) => {
             for elem in elements {
                 if let Some(result) = find_less_visible_type(elem, required_level) {
@@ -161,10 +161,10 @@ fn find_less_visible_type(
                 }
             }
             None
-        }
+        },
         TyKind::Array(element_type) | TyKind::Pointer(element_type) => {
             find_less_visible_type(element_type, required_level)
-        }
+        },
         TyKind::Function {
             params,
             return_type,
@@ -175,22 +175,40 @@ fn find_less_visible_type(
                 }
             }
             find_less_visible_type(return_type, required_level)
-        }
+        },
         TyKind::AssociatedType {
             symbol: assoc_symbol,
             container,
         } => {
-            let level = get_visibility_level_from_symbol(assoc_symbol);
+            // Associated types in protocols inherit the protocol's visibility
+            // (they have no explicit visibility keyword in syntax)
+            let level = {
+                let direct_level = get_visibility_level_from_symbol(assoc_symbol);
+
+                // Check if parent is a protocol with higher visibility
+                if let Some(parent) = assoc_symbol.metadata().parent() {
+                    if parent.metadata().kind() == KestrelSymbolKind::Protocol {
+                        let protocol_level = get_symbol_visibility_level(&parent);
+                        // Use the higher of direct or protocol visibility
+                        std::cmp::max(direct_level, protocol_level)
+                    } else {
+                        direct_level
+                    }
+                } else {
+                    direct_level
+                }
+            };
+
             if level < required_level {
                 return Some((assoc_symbol.metadata().name().value.clone(), level));
             }
-            if let Some(container_ty) = container {
-                if let Some(result) = find_less_visible_type(container_ty, required_level) {
-                    return Some(result);
-                }
+            if let Some(container_ty) = container
+                && let Some(result) = find_less_visible_type(container_ty, required_level)
+            {
+                return Some(result);
             }
             None
-        }
+        },
         TyKind::UnresolvedFunction {
             param_info,
             return_type,
@@ -205,7 +223,7 @@ fn find_less_visible_type(
             match param_info {
                 ParamInfo::ImplicitIt { it_type } => {
                     find_less_visible_type(it_type, required_level)
-                }
+                },
                 ParamInfo::Explicit { param_types } => {
                     for pt in param_types {
                         if let Some(result) = find_less_visible_type(pt, required_level) {
@@ -213,10 +231,10 @@ fn find_less_visible_type(
                         }
                     }
                     None
-                }
+                },
                 ParamInfo::Unconstrained => None,
             }
-        }
+        },
         TyKind::Unit
         | TyKind::Never
         | TyKind::Int(_)
@@ -244,7 +262,7 @@ impl Analyzer for VisibilityConsistencyAnalyzer {
 
         // Check if this is a method in a public protocol
         let is_method_in_public_protocol = kind == KestrelSymbolKind::Function
-            && symbol.metadata().parent().map_or(false, |p| {
+            && symbol.metadata().parent().is_some_and(|p| {
                 p.metadata().kind() == KestrelSymbolKind::Protocol
                     && get_symbol_visibility_level(&p) == VisibilityLevel::Public
             });
@@ -254,7 +272,7 @@ impl Analyzer for VisibilityConsistencyAnalyzer {
                 KestrelSymbolKind::Function => check_function_visibility(symbol, ctx),
                 KestrelSymbolKind::TypeAlias => check_type_alias_visibility(symbol, ctx),
                 KestrelSymbolKind::Field => check_field_visibility(symbol, ctx),
-                _ => {}
+                _ => {},
             }
         }
     }
@@ -323,16 +341,15 @@ fn check_type_alias_visibility(
 fn check_field_visibility(symbol: &Arc<dyn Symbol<KestrelLanguage>>, ctx: &mut AnalysisContext) {
     let name = &symbol.metadata().name().value;
     let span = symbol.metadata().declaration_span().clone();
-    if let Some(typed) = symbol.metadata().get_behavior::<TypedBehavior>() {
-        if let Some((_type_name, type_level)) =
+    if let Some(typed) = symbol.metadata().get_behavior::<TypedBehavior>()
+        && let Some((_type_name, type_level)) =
             find_less_visible_type(typed.ty(), VisibilityLevel::Public)
-        {
-            ctx.report(FieldTypeLessVisibleError {
-                span,
-                field_name: name.clone(),
-                field_visibility: "public".to_string(),
-                field_type_visibility: type_level.name().to_string(),
-            });
-        }
+    {
+        ctx.report(FieldTypeLessVisibleError {
+            span,
+            field_name: name.clone(),
+            field_visibility: "public".to_string(),
+            field_type_visibility: type_level.name().to_string(),
+        });
     }
 }

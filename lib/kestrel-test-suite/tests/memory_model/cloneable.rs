@@ -98,7 +98,7 @@ mod parsing {
             }
             
             struct MyData: Cloneable {
-                var value: Int
+                var value: lang.i64
                 
                 func clone() -> MyData {
                     MyData(value: self.value)
@@ -137,7 +137,7 @@ mod copy_semantics {
             }
             
             struct MyData: Cloneable {
-                var value: Int
+                var value: lang.i64
                 
                 func clone() -> MyData {
                     MyData(value: self.value)
@@ -163,8 +163,8 @@ mod copy_semantics {
         Test::new(
             r#"module Test
             struct Point {
-                var x: Int
-                var y: Int
+                var x: lang.i64
+                var y: lang.i64
             }
         "#,
         )
@@ -192,7 +192,7 @@ mod copy_semantics {
             }
             
             struct Inner: Cloneable {
-                var value: Int
+                var value: lang.i64
                 
                 func clone() -> Inner {
                     Inner(value: self.value)
@@ -222,7 +222,7 @@ mod copy_semantics {
             }
             
             struct Inner: Cloneable {
-                var value: Int
+                var value: lang.i64
                 
                 func clone() -> Inner {
                     Inner(value: self.value)
@@ -253,7 +253,7 @@ mod copy_semantics {
             }
             
             struct Inner: Cloneable {
-                var value: Int
+                var value: lang.i64
                 
                 func clone() -> Inner {
                     Inner(value: self.value)
@@ -303,7 +303,7 @@ mod conflicting_conformance {
             }
             
             struct Invalid: Cloneable, not Copyable {
-                var value: Int
+                var value: lang.i64
                 
                 func clone() -> Invalid {
                     Invalid(value: self.value)
@@ -340,7 +340,7 @@ mod mir_tests {
             }
             
             struct Data: Cloneable {
-                var value: Int
+                var value: lang.i64
                 
                 func clone() -> Data {
                     Data(value: self.value)
@@ -376,7 +376,7 @@ mod mir_tests {
             }
             
             struct Data: Cloneable {
-                var value: Int
+                var value: lang.i64
                 
                 func clone() -> Data {
                     Data(value: self.value)
@@ -418,7 +418,7 @@ mod mir_tests {
             }
             
             struct Data: Cloneable {
-                var value: Int
+                var value: lang.i64
                 
                 func clone() -> Data {
                     Data(value: self.value)
@@ -460,7 +460,7 @@ mod mir_tests {
             }
             
             struct Data: Cloneable {
-                var value: Int
+                var value: lang.i64
                 
                 func clone() -> Data {
                     Data(value: self.value)
@@ -497,8 +497,8 @@ mod mir_tests {
         Test::new(
             r#"module Test
             struct Point {
-                var x: Int
-                var y: Int
+                var x: lang.i64
+                var y: lang.i64
             }
             
             func consume(consuming p: Point) {}
@@ -618,7 +618,7 @@ mod generic_tests {
             }
             
             struct Data: Cloneable {
-                var value: Int
+                var value: lang.i64
                 
                 func clone() -> Data {
                     Data(value: self.value)
@@ -653,8 +653,8 @@ mod generic_tests {
             }
             
             struct Point {
-                var x: Int
-                var y: Int
+                var x: lang.i64
+                var y: lang.i64
             }
             
             func makeClone[T](item: T) -> T where T: Cloneable {
@@ -693,7 +693,7 @@ mod witness_tests {
             }
             
             struct Data: Cloneable {
-                var value: Int
+                var value: lang.i64
                 
                 func clone() -> Data {
                     Data(value: self.value)
@@ -734,7 +734,7 @@ mod multiple_args_tests {
             }
             
             struct Data: Cloneable {
-                var value: Int
+                var value: lang.i64
                 
                 func clone() -> Data {
                     Data(value: self.value)
@@ -776,12 +776,12 @@ mod multiple_args_tests {
             }
             
             struct Point {
-                var x: Int
-                var y: Int
+                var x: lang.i64
+                var y: lang.i64
             }
             
             struct Data: Cloneable {
-                var value: Int
+                var value: lang.i64
                 
                 func clone() -> Data {
                     Data(value: self.value)
@@ -831,7 +831,7 @@ mod value_preservation_tests {
             }
             
             struct Data: Cloneable {
-                var value: Int
+                var value: lang.i64
                 
                 func clone() -> Data {
                     Data(value: self.value)

@@ -4,8 +4,13 @@
 //! Each round attempts to solve all pending constraints. Constraints that cannot
 //! be solved yet (because their types aren't resolved) are deferred to the next round.
 
+// InferenceError contains spans and strings, making it large. Boxing would add
+// complexity for little benefit since errors are rare.
+#![allow(clippy::result_large_err)]
+
 use std::collections::HashSet;
 
+use kestrel_semantic_tree::builtins::LanguageFeature;
 use kestrel_semantic_tree::ty::{ParamInfo, Ty, TyId, TyKind};
 use kestrel_span::Span;
 
@@ -36,10 +41,100 @@ pub fn solve(mut ctx: InferenceContext<'_>) -> Solution {
         }
     }
 
+    // Apply default types for unresolved literal types
+    apply_default_literal_types(&mut ctx);
+
+    // Run another round to verify conformances after defaults are applied
+    loop {
+        let progress = solve_round(&mut ctx);
+        if !progress {
+            break;
+        }
+    }
+
     // Check that everything was resolved, add error if not
     check_fully_resolved(&mut ctx);
 
     ctx.into_solution()
+}
+
+/// Apply default types for unresolved literal types.
+///
+/// When a literal's type is still ambiguous (Infer) after the main solving loop,
+/// we apply the default type for that literal kind:
+/// - Integer literals → Int64 (configurable via DefaultIntegerLiteralType)
+/// - Float literals → Float64 (configurable via DefaultFloatLiteralType)
+/// - String literals → String
+/// - Bool literals → Bool
+fn apply_default_literal_types(ctx: &mut InferenceContext<'_>) {
+    // Collect literal constraints where the type is still Infer
+    let constraints = ctx.take_constraints();
+    let mut literals_to_default: Vec<(TyId, LanguageFeature, Span)> = Vec::new();
+
+    for constraint in &constraints {
+        if let Constraint::Conforms { ty, protocol } = constraint {
+            let resolved = resolve_type(ctx, *ty);
+            if matches!(resolved.kind(), TyKind::Infer) {
+                // Check if this is a literal protocol
+                if let Some(feature) = get_literal_feature_for_protocol(ctx, protocol.symbol_id) {
+                    literals_to_default.push((*ty, feature, protocol.span.clone()));
+                }
+            }
+        }
+    }
+
+    // Put constraints back (except for literal constraints that we're defaulting)
+    for constraint in constraints {
+        if let Constraint::Conforms { ty, protocol } = &constraint {
+            let resolved = resolve_type(ctx, *ty);
+            if matches!(resolved.kind(), TyKind::Infer)
+                && get_literal_feature_for_protocol(ctx, protocol.symbol_id).is_some()
+            {
+                // Skip this constraint - we're applying a default type
+                continue;
+            }
+        }
+        ctx.push_constraint(constraint);
+    }
+
+    // Apply defaults
+    for (ty_id, feature, span) in literals_to_default {
+        let default_ty = match feature {
+            LanguageFeature::ExpressibleByIntLiteral => ctx.oracle().default_integer_type(span),
+            LanguageFeature::ExpressibleByFloatLiteral => ctx.oracle().default_float_type(span),
+            LanguageFeature::ExpressibleByStringLiteral => ctx.oracle().default_string_type(span),
+            LanguageFeature::ExpressibleByBoolLiteral => ctx.oracle().default_boolean_type(span),
+            _ => continue,
+        };
+
+        // Register the default type and substitute
+        ctx.register_type(&default_ty);
+        ctx.substitutions_mut().insert(ty_id, default_ty);
+    }
+}
+
+/// Check if a protocol symbol ID corresponds to a literal expression protocol.
+fn get_literal_feature_for_protocol(
+    ctx: &InferenceContext<'_>,
+    protocol_id: semantic_tree::symbol::SymbolId,
+) -> Option<LanguageFeature> {
+    // Check each literal protocol
+    let features = [
+        LanguageFeature::ExpressibleByIntLiteral,
+        LanguageFeature::ExpressibleByFloatLiteral,
+        LanguageFeature::ExpressibleByStringLiteral,
+        LanguageFeature::ExpressibleByBoolLiteral,
+    ];
+
+    for feature in features {
+        if let Some(id) = ctx.oracle().builtin_protocol(feature)
+            && id == protocol_id
+        {
+            return Some(feature);
+        }
+    }
+
+    None
 }
 
 /// Run one round of constraint solving.
@@ -58,7 +153,7 @@ fn solve_round(ctx: &mut InferenceContext<'_>) -> bool {
                 // Accumulate error and mark as progress (constraint was processed)
                 ctx.add_error(error);
                 progress = true;
-            }
+            },
         }
     }
 
@@ -83,10 +178,13 @@ fn try_solve(
             receiver,
             member,
             is_static,
+            arguments,
             result,
             expr_id,
             span,
-        } => resolve_member(ctx, *receiver, member, *is_static, *result, *expr_id, span),
+        } => resolve_member(
+            ctx, *receiver, member, *is_static, arguments, *result, *expr_id, span,
+        ),
         Constraint::ImplicitMember {
             expr_ty,
             member_name,
@@ -144,7 +242,7 @@ fn unify(
             // Map one to the other
             ctx.substitutions_mut().insert(ty_a.id(), ty_b.clone());
             Ok(SolveResult::Solved)
-        }
+        },
 
         // One is an inference placeholder - substitute it
         (TyKind::Infer, _) => {
@@ -157,7 +255,7 @@ fn unify(
             }
             ctx.substitutions_mut().insert(ty_a.id(), ty_b.clone());
             Ok(SolveResult::Solved)
-        }
+        },
         (_, TyKind::Infer) => {
             if occurs_check(ty_b.id(), &ty_a, ctx) {
                 return Err(InferenceError::occurs_check(
@@ -168,7 +266,7 @@ fn unify(
             }
             ctx.substitutions_mut().insert(ty_b.id(), ty_a.clone());
             Ok(SolveResult::Solved)
-        }
+        },
 
         // Error types unify with anything (suppress cascading errors)
         (TyKind::Error, _) | (_, TyKind::Error) => Ok(SolveResult::Solved),
@@ -191,7 +289,7 @@ fn unify(
                 ParamInfo::Unconstrained => {
                     // Accept any arity - no param constraints to check
                     // Just unify return types
-                }
+                },
                 ParamInfo::ImplicitIt { it_type } => {
                     if expected_params.len() != 1 {
                         return Err(InferenceError::it_used_with_wrong_arity(
@@ -201,7 +299,7 @@ fn unify(
                     }
                     // Equate the it_type with the expected single parameter
                     ctx.equate(it_type.id(), expected_params[0].id(), span.clone());
-                }
+                },
                 ParamInfo::Explicit { param_types } => {
                     if param_types.len() != expected_params.len() {
                         return Err(InferenceError::closure_arity_mismatch(
@@ -213,12 +311,14 @@ fn unify(
                     for (a, b) in param_types.iter().zip(expected_params.iter()) {
                         ctx.equate(a.id(), b.id(), span.clone());
                     }
-                }
+                },
             }
             // Unify return types
             ctx.equate(ret_unresolved.id(), expected_return.id(), span.clone());
+            // Store substitution: UnresolvedFunction -> Function
+            ctx.substitutions_mut().insert(ty_a.id(), ty_b.clone());
             Ok(SolveResult::Solved)
-        }
+        },
 
         // Function with UnresolvedFunction (symmetric case)
         (
@@ -234,7 +334,7 @@ fn unify(
             match param_info {
                 ParamInfo::Unconstrained => {
                     // Accept any arity - no param constraints to check
-                }
+                },
                 ParamInfo::ImplicitIt { it_type } => {
                     if expected_params.len() != 1 {
                         return Err(InferenceError::it_used_with_wrong_arity(
@@ -243,7 +343,7 @@ fn unify(
                         ));
                     }
                     ctx.equate(it_type.id(), expected_params[0].id(), span.clone());
-                }
+                },
                 ParamInfo::Explicit { param_types } => {
                     if param_types.len() != expected_params.len() {
                         return Err(InferenceError::closure_arity_mismatch(
@@ -255,11 +355,13 @@ fn unify(
                     for (a, b) in param_types.iter().zip(expected_params.iter()) {
                         ctx.equate(a.id(), b.id(), span.clone());
                     }
-                }
+                },
             }
             ctx.equate(ret_unresolved.id(), expected_return.id(), span.clone());
+            // Store substitution: UnresolvedFunction -> Function
+            ctx.substitutions_mut().insert(ty_b.id(), ty_a.clone());
             Ok(SolveResult::Solved)
-        }
+        },
 
         // UnresolvedFunction with UnresolvedFunction
         (
@@ -277,14 +379,14 @@ fn unify(
                 (ParamInfo::Unconstrained, _) | (_, ParamInfo::Unconstrained) => {
                     // One is unconstrained, the other's constraints win
                     // Just unify return types
-                }
+                },
                 (
                     ParamInfo::ImplicitIt { it_type: it_a },
                     ParamInfo::ImplicitIt { it_type: it_b },
                 ) => {
                     // Both use it - unify the it types
                     ctx.equate(it_a.id(), it_b.id(), span.clone());
-                }
+                },
                 (
                     ParamInfo::Explicit {
                         param_types: params_a,
@@ -304,7 +406,7 @@ fn unify(
                     for (a, b) in params_a.iter().zip(params_b.iter()) {
                         ctx.equate(a.id(), b.id(), span.clone());
                     }
-                }
+                },
                 (ParamInfo::ImplicitIt { it_type }, ParamInfo::Explicit { param_types })
                 | (ParamInfo::Explicit { param_types }, ParamInfo::ImplicitIt { it_type }) => {
                     // ImplicitIt requires exactly 1 param
@@ -316,11 +418,11 @@ fn unify(
                         ));
                     }
                     ctx.equate(it_type.id(), param_types[0].id(), span.clone());
-                }
+                },
             }
             ctx.equate(ret_a.id(), ret_b.id(), span.clone());
             Ok(SolveResult::Solved)
-        }
+        },
 
         // Structural unification for compound types
         (TyKind::Tuple(elems_a), TyKind::Tuple(elems_b)) => {
@@ -335,17 +437,17 @@ fn unify(
                 ctx.equate(ea.id(), eb.id(), span.clone());
             }
             Ok(SolveResult::Solved)
-        }
+        },
 
         (TyKind::Array(elem_a), TyKind::Array(elem_b)) => {
             ctx.equate(elem_a.id(), elem_b.id(), span.clone());
             Ok(SolveResult::Solved)
-        }
+        },
 
         (TyKind::Pointer(elem_a), TyKind::Pointer(elem_b)) => {
             ctx.equate(elem_a.id(), elem_b.id(), span.clone());
             Ok(SolveResult::Solved)
-        }
+        },
 
         (
             TyKind::Function {
@@ -468,7 +570,7 @@ fn unify(
                 ctx.equate(ret_a.id(), ret_b.id(), span.clone());
                 Ok(SolveResult::Solved)
             }
-        }
+        },
 
         // Nominal types - check symbol equality and unify type arguments
         (
@@ -520,7 +622,7 @@ fn unify(
                 }
             }
             Ok(SolveResult::Solved)
-        }
+        },
 
         (
             TyKind::Protocol {
@@ -568,7 +670,7 @@ fn unify(
                 }
             }
             Ok(SolveResult::Solved)
-        }
+        },
 
         (
             TyKind::Enum {
@@ -616,7 +718,7 @@ fn unify(
                 }
             }
             Ok(SolveResult::Solved)
-        }
+        },
 
         // Type parameters - only equal if they're the same parameter
         (TyKind::TypeParameter(param_a), TyKind::TypeParameter(param_b)) => {
@@ -635,26 +737,35 @@ fn unify(
                     span.clone(),
                 ))
             }
-        }
+        },
 
         // Associated types - defer if not yet resolved
         (TyKind::AssociatedType { .. }, _) | (_, TyKind::AssociatedType { .. }) => {
             // Associated types need to be normalized first
             Ok(SolveResult::Deferred)
-        }
+        },
 
         // Self type matches Self or compatible struct/protocol
         (TyKind::SelfType, TyKind::SelfType) => Ok(SolveResult::Solved),
         (TyKind::SelfType, TyKind::Struct { .. }) | (TyKind::Struct { .. }, TyKind::SelfType) => {
             Ok(SolveResult::Solved)
-        }
+        },
         (TyKind::SelfType, TyKind::Protocol { .. })
         | (TyKind::Protocol { .. }, TyKind::SelfType) => Ok(SolveResult::Solved),
 
         // Struct to Protocol - check conformance
-        (TyKind::Struct { .. }, TyKind::Protocol { symbol, .. }) => {
+        (TyKind::Struct { substitutions, .. }, TyKind::Protocol { symbol, .. }) => {
             use kestrel_semantic_tree::language::KestrelLanguage;
             use semantic_tree::symbol::Symbol;
+
+            // Defer if struct has unresolved inference placeholders in substitutions
+            // (conformance check needs fully resolved types to match extensions)
+            if substitutions
+                .iter()
+                .any(|(_, ty)| matches!(ty.kind(), TyKind::Infer))
+            {
+                return Ok(SolveResult::Deferred);
+            }
 
             let protocol_id = Symbol::<KestrelLanguage>::metadata(symbol.as_ref()).id();
             if ctx.oracle().conforms_to(&ty_a, protocol_id) {
@@ -666,10 +777,18 @@ fn unify(
                     span.clone(),
                 ))
             }
-        }
-        (TyKind::Protocol { symbol, .. }, TyKind::Struct { .. }) => {
+        },
+        (TyKind::Protocol { symbol, .. }, TyKind::Struct { substitutions, .. }) => {
             use kestrel_semantic_tree::language::KestrelLanguage;
             use semantic_tree::symbol::Symbol;
+
+            // Defer if struct has unresolved inference placeholders in substitutions
+            if substitutions
+                .iter()
+                .any(|(_, ty)| matches!(ty.kind(), TyKind::Infer))
+            {
+                return Ok(SolveResult::Deferred);
+            }
 
             let protocol_id = Symbol::<KestrelLanguage>::metadata(symbol.as_ref()).id();
             if ctx.oracle().conforms_to(&ty_b, protocol_id) {
@@ -681,12 +800,20 @@ fn unify(
                     span.clone(),
                 ))
             }
-        }
+        },
 
         // Enum to Protocol - check conformance
-        (TyKind::Enum { .. }, TyKind::Protocol { symbol, .. }) => {
+        (TyKind::Enum { substitutions, .. }, TyKind::Protocol { symbol, .. }) => {
             use kestrel_semantic_tree::language::KestrelLanguage;
             use semantic_tree::symbol::Symbol;
+
+            // Defer if enum has unresolved inference placeholders in substitutions
+            if substitutions
+                .iter()
+                .any(|(_, ty)| matches!(ty.kind(), TyKind::Infer))
+            {
+                return Ok(SolveResult::Deferred);
+            }
 
             let protocol_id = Symbol::<KestrelLanguage>::metadata(symbol.as_ref()).id();
             if ctx.oracle().conforms_to(&ty_a, protocol_id) {
@@ -698,10 +825,18 @@ fn unify(
                     span.clone(),
                 ))
             }
-        }
-        (TyKind::Protocol { symbol, .. }, TyKind::Enum { .. }) => {
+        },
+        (TyKind::Protocol { symbol, .. }, TyKind::Enum { substitutions, .. }) => {
             use kestrel_semantic_tree::language::KestrelLanguage;
             use semantic_tree::symbol::Symbol;
+
+            // Defer if enum has unresolved inference placeholders in substitutions
+            if substitutions
+                .iter()
+                .any(|(_, ty)| matches!(ty.kind(), TyKind::Infer))
+            {
+                return Ok(SolveResult::Deferred);
+            }
 
             let protocol_id = Symbol::<KestrelLanguage>::metadata(symbol.as_ref()).id();
             if ctx.oracle().conforms_to(&ty_b, protocol_id) {
@@ -713,7 +848,7 @@ fn unify(
                     span.clone(),
                 ))
             }
-        }
+        },
 
         // Primitive types - exact match required
         (TyKind::Unit, TyKind::Unit) => Ok(SolveResult::Solved),
@@ -722,19 +857,19 @@ fn unify(
         (TyKind::Int(bits_a), TyKind::Int(bits_b)) if bits_a == bits_b => Ok(SolveResult::Solved),
         (TyKind::Float(bits_a), TyKind::Float(bits_b)) if bits_a == bits_b => {
             Ok(SolveResult::Solved)
-        }
+        },
 
         // Type aliases - expand and retry
         (TyKind::TypeAlias { .. }, _) => {
             let expanded = ctx.oracle().expand_type_alias(&ty_a);
             ctx.equate(expanded.id(), ty_b.id(), span.clone());
             Ok(SolveResult::Solved)
-        }
+        },
         (_, TyKind::TypeAlias { .. }) => {
             let expanded = ctx.oracle().expand_type_alias(&ty_b);
             ctx.equate(ty_a.id(), expanded.id(), span.clone());
             Ok(SolveResult::Solved)
-        }
+        },
 
         // No match - type mismatch
         _ => Err(InferenceError::type_mismatch(
@@ -796,7 +931,7 @@ fn normalize(
             ctx.register_type(&resolved_assoc);
             ctx.equate(resolved_assoc.id(), result, span.clone());
             Ok(SolveResult::Solved)
-        }
+        },
         None => Err(InferenceError::associated_type_not_found(
             base_ty.clone(),
             assoc_name.to_string(),
@@ -811,11 +946,20 @@ fn resolve_member(
     receiver: TyId,
     member: &str,
     is_static: bool,
+    arguments: &[TyId],
     result: TyId,
     expr_id: kestrel_semantic_tree::expr::ExprId,
     span: &Span,
 ) -> Result<SolveResult, InferenceError> {
-    let receiver_ty = resolve_type(ctx, receiver);
+    let mut receiver_ty = resolve_type(ctx, receiver);
+
+    // Expand type aliases before member lookup.
+    // Type aliases (e.g., Int -> Int64) need to be expanded to their underlying
+    // type so we can look up methods on the actual struct.
+    while matches!(receiver_ty.kind(), TyKind::TypeAlias { .. }) {
+        receiver_ty = ctx.oracle().expand_type_alias(&receiver_ty);
+        ctx.register_type(&receiver_ty);
+    }
 
     // If the receiver type is still an inference placeholder, defer
     if matches!(receiver_ty.kind(), TyKind::Infer) {
@@ -834,12 +978,29 @@ fn resolve_member(
             // Register and unify the member type with the result
             ctx.register_type(&resolution.ty);
             ctx.equate(resolution.ty.id(), result, span.clone());
+
+            // Create constraints for argument types vs parameter types.
+            // This enables proper type inference for literals in expressions like `int32 + 5`
+            // where the literal `5` should be constrained to Int32 (not defaulted to Int64).
+            for (arg_ty_id, param_ty) in arguments.iter().zip(resolution.parameters.iter()) {
+                ctx.register_type(param_ty);
+                ctx.equate(*arg_ty_id, param_ty.id(), span.clone());
+            }
+
+            // For Self-returning methods (like negate()), equate receiver with result.
+            // This enables bidirectional type inference: when the result type is constrained
+            // by context (e.g., Int16), that constraint propagates back to the receiver,
+            // allowing literals like `-32768` to infer correctly as Int16.
+            if resolution.returns_self {
+                ctx.equate(receiver, result, span.clone());
+            }
+
             Ok(SolveResult::Solved)
-        }
+        },
         Err(MemberError::UnknownType) => {
             // Shouldn't happen since we checked for Infer above, but defer anyway
             Ok(SolveResult::Deferred)
-        }
+        },
         Err(MemberError::NotFound { .. }) => Err(InferenceError::member_not_found(
             receiver_ty.clone(),
             member.to_string(),
@@ -911,7 +1072,7 @@ fn resolve_implicit_member(
             ctx.values_mut()
                 .insert(expr_id, ValueResolution::simple(case.metadata().id()));
             Ok(SolveResult::Solved)
-        }
+        },
 
         // Simple case but args provided - error
         (None, false) => Err(InferenceError::member_not_found(
@@ -932,7 +1093,7 @@ fn resolve_implicit_member(
             ctx.values_mut()
                 .insert(expr_id, ValueResolution::simple(case.metadata().id()));
             Ok(SolveResult::Solved)
-        }
+        },
 
         // Case with params, args provided - validate
         (Some(cb), false) => {
@@ -961,6 +1122,8 @@ fn resolve_implicit_member(
             for ((label, _), param) in argument_tys.iter().zip(params.iter()) {
                 let expected_label = param.label.as_ref().map(|l| l.value.as_str());
                 let actual_label = label.as_deref();
+
+                // Labels must match exactly: if param has label, arg must provide it
                 if actual_label != expected_label {
                     labels_match = false;
                     break;
@@ -988,7 +1151,7 @@ fn resolve_implicit_member(
             ctx.values_mut()
                 .insert(expr_id, ValueResolution::simple(case.metadata().id()));
             Ok(SolveResult::Solved)
-        }
+        },
     }
 }
 
@@ -1204,7 +1367,7 @@ fn resolve_type(ctx: &InferenceContext<'_>, id: TyId) -> Ty {
         .or_else(|| ctx.type_registry().get(&current_id).cloned())
         .unwrap_or_else(|| {
             // If not found anywhere, create an inference placeholder
-            Ty::infer(Span::from(0..0))
+            Ty::infer(Span::new(0, 0..0))
         })
 }
 
@@ -1230,10 +1393,10 @@ fn occurs_check_inner(
     }
 
     // If this type has a substitution, check that too
-    if let Some(subst) = ctx.substitutions().get(&ty.id()) {
-        if occurs_check_inner(var, subst, ctx, visited) {
-            return true;
-        }
+    if let Some(subst) = ctx.substitutions().get(&ty.id())
+        && occurs_check_inner(var, subst, ctx, visited)
+    {
+        return true;
     }
 
     // Recursively check compound types
@@ -1251,7 +1414,7 @@ fn occurs_check_inner(
                 .iter()
                 .any(|p| occurs_check_inner(var, p, ctx, visited))
                 || occurs_check_inner(var, return_type, ctx, visited)
-        }
+        },
         TyKind::Struct { substitutions, .. }
         | TyKind::Enum { substitutions, .. }
         | TyKind::Protocol { substitutions, .. }
@@ -1276,7 +1439,7 @@ fn occurs_check_inner(
                     .any(|p| occurs_check_inner(var, p, ctx, visited)),
                 ParamInfo::Unconstrained => false,
             }
-        }
+        },
         // Leaf types
         _ => false,
     }
@@ -1296,7 +1459,7 @@ fn check_fully_resolved(ctx: &mut InferenceContext<'_>) {
         match try_solve(ctx, &constraint) {
             Ok(SolveResult::Solved) => {
                 // Great, constraint is now solved
-            }
+            },
             Ok(SolveResult::Deferred) => {
                 // Still can't solve - check if it's an ImplicitMember that we can
                 // report a better error for
@@ -1313,11 +1476,11 @@ fn check_fully_resolved(ctx: &mut InferenceContext<'_>) {
                     // Put it back for generic error checking below
                     ctx.push_constraint(constraint);
                 }
-            }
+            },
             Err(error) => {
                 // Constraint failed - record the error
                 ctx.add_error(error);
-            }
+            },
         }
     }
 
@@ -1326,7 +1489,7 @@ fn check_fully_resolved(ctx: &mut InferenceContext<'_>) {
     // Check all registered types
     for (id, ty) in ctx.type_registry() {
         if matches!(ty.kind(), TyKind::Infer) && !ctx.substitutions().contains_key(id) {
-            unresolved.push(*id);
+            unresolved.push((*id, ty.span().clone()));
         }
     }
 
@@ -1336,20 +1499,20 @@ fn check_fully_resolved(ctx: &mut InferenceContext<'_>) {
             Constraint::Equals { a, b, .. } => {
                 check_resolved_id(*a, ctx, &mut unresolved);
                 check_resolved_id(*b, ctx, &mut unresolved);
-            }
+            },
             Constraint::Conforms { ty, .. } => {
                 check_resolved_id(*ty, ctx, &mut unresolved);
-            }
+            },
             Constraint::Normalizes { base, result, .. } => {
                 check_resolved_id(*base, ctx, &mut unresolved);
                 check_resolved_id(*result, ctx, &mut unresolved);
-            }
+            },
             Constraint::MemberAccess {
                 receiver, result, ..
             } => {
                 check_resolved_id(*receiver, ctx, &mut unresolved);
                 check_resolved_id(*result, ctx, &mut unresolved);
-            }
+            },
             Constraint::ImplicitMember {
                 expr_ty,
                 argument_tys,
@@ -1359,7 +1522,7 @@ fn check_fully_resolved(ctx: &mut InferenceContext<'_>) {
                 for (_, arg_ty) in argument_tys {
                     check_resolved_id(*arg_ty, ctx, &mut unresolved);
                 }
-            }
+            },
             Constraint::EnumPatternBinding {
                 enum_ty,
                 binding_tys,
@@ -1369,7 +1532,7 @@ fn check_fully_resolved(ctx: &mut InferenceContext<'_>) {
                 for (_, binding_ty) in binding_tys {
                     check_resolved_id(*binding_ty, ctx, &mut unresolved);
                 }
-            }
+            },
             Constraint::StructPatternBinding {
                 struct_ty,
                 field_bindings,
@@ -1379,22 +1542,22 @@ fn check_fully_resolved(ctx: &mut InferenceContext<'_>) {
                 for (_, binding_ty) in field_bindings {
                     check_resolved_id(*binding_ty, ctx, &mut unresolved);
                 }
-            }
+            },
         }
     }
 
     if !unresolved.is_empty() {
-        // Deduplicate
-        unresolved.sort_by_key(|id| id.raw());
-        unresolved.dedup();
+        // Deduplicate by TyId
+        unresolved.sort_by_key(|(id, _)| id.raw());
+        unresolved.dedup_by_key(|(id, _)| id.raw());
         ctx.add_error(InferenceError::ambiguous(unresolved));
     }
 }
 
-fn check_resolved_id(id: TyId, ctx: &InferenceContext<'_>, unresolved: &mut Vec<TyId>) {
+fn check_resolved_id(id: TyId, ctx: &InferenceContext<'_>, unresolved: &mut Vec<(TyId, Span)>) {
     let ty = resolve_type(ctx, id);
-    if matches!(ty.kind(), TyKind::Infer) {
-        unresolved.push(id);
+    if matches!(ty.kind(), TyKind::Infer | TyKind::UnresolvedFunction { .. }) {
+        unresolved.push((id, ty.span().clone()));
     }
 }
 
@@ -1415,7 +1578,7 @@ mod tests {
             _is_static: bool,
         ) -> Result<MemberResolution, MemberError> {
             Err(MemberError::NotFound {
-                receiver_ty: Ty::unit(Span::from(0..0)),
+                receiver_ty: Ty::unit(Span::new(0, 0..0)),
                 member: String::new(),
             })
         }
@@ -1431,6 +1594,10 @@ mod tests {
         fn symbol_name(&self, _symbol_id: SymbolId) -> Option<String> {
             None
         }
+
+        fn builtin_protocol(&self, _feature: LanguageFeature) -> Option<SymbolId> {
+            None
+        }
     }
 
     #[test]
@@ -1438,12 +1605,12 @@ mod tests {
         let oracle = TestOracle;
         let mut ctx = InferenceContext::new(&oracle);
 
-        let ty1 = Ty::int(kestrel_semantic_tree::ty::IntBits::I64, Span::from(0..3));
-        let ty2 = Ty::int(kestrel_semantic_tree::ty::IntBits::I64, Span::from(4..7));
+        let ty1 = Ty::int(kestrel_semantic_tree::ty::IntBits::I64, Span::new(0, 0..3));
+        let ty2 = Ty::int(kestrel_semantic_tree::ty::IntBits::I64, Span::new(0, 4..7));
 
         ctx.register_type(&ty1);
         ctx.register_type(&ty2);
-        ctx.equate(ty1.id(), ty2.id(), Span::from(0..7));
+        ctx.equate(ty1.id(), ty2.id(), Span::new(0, 0..7));
 
         let solution = ctx.solve();
         assert!(!solution.has_errors());
@@ -1454,12 +1621,12 @@ mod tests {
         let oracle = TestOracle;
         let mut ctx = InferenceContext::new(&oracle);
 
-        let infer_ty = Ty::infer(Span::from(0..1));
-        let concrete_ty = Ty::int(kestrel_semantic_tree::ty::IntBits::I64, Span::from(2..5));
+        let infer_ty = Ty::infer(Span::new(0, 0..1));
+        let concrete_ty = Ty::int(kestrel_semantic_tree::ty::IntBits::I64, Span::new(0, 2..5));
 
         ctx.register_type(&infer_ty);
         ctx.register_type(&concrete_ty);
-        ctx.equate(infer_ty.id(), concrete_ty.id(), Span::from(0..5));
+        ctx.equate(infer_ty.id(), concrete_ty.id(), Span::new(0, 0..5));
 
         let solution = ctx.solve();
         assert!(!solution.has_errors());
@@ -1474,12 +1641,12 @@ mod tests {
         let oracle = TestOracle;
         let mut ctx = InferenceContext::new(&oracle);
 
-        let int_ty = Ty::int(kestrel_semantic_tree::ty::IntBits::I64, Span::from(0..3));
-        let string_ty = Ty::string(Span::from(4..10));
+        let int_ty = Ty::int(kestrel_semantic_tree::ty::IntBits::I64, Span::new(0, 0..3));
+        let string_ty = Ty::string(Span::new(0, 4..10));
 
         ctx.register_type(&int_ty);
         ctx.register_type(&string_ty);
-        ctx.equate(int_ty.id(), string_ty.id(), Span::from(0..10));
+        ctx.equate(int_ty.id(), string_ty.id(), Span::new(0, 0..10));
 
         let solution = ctx.solve();
         assert!(solution.has_errors());

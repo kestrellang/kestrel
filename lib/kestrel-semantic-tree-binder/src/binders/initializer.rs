@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use kestrel_semantic_tree::behavior::callable::{CallableBehavior, ReceiverKind};
+use kestrel_semantic_tree::behavior::generics::GenericsBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::function::Parameter;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
@@ -9,7 +10,6 @@ use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
 
-use crate::body_resolver::MoveTracker;
 use crate::declaration_binder::{BindingContext, DeclarationBinder};
 use crate::resolution::LocalScope;
 use kestrel_syntax_tree::utils::find_child;
@@ -39,13 +39,23 @@ impl DeclarationBinder for InitializerBinder {
         let attributes_behavior = crate::binders::utils::attributes::resolve_attributes(
             syntax,
             &source,
+            file_id,
             context.diagnostics,
         );
         symbol.metadata().add_behavior(attributes_behavior);
 
+        // Extract type parameters and resolve where clause bounds FIRST
+        // This must happen before resolving parameter/return types so that
+        // T.Item paths can find the protocol bounds for T
+        let generics_behavior = crate::binders::utils::generics::resolve_generics(
+            syntax, &source, file_id, symbol_id, context,
+        );
+        symbol.metadata().add_behavior(generics_behavior);
+
         // Extract and resolve parameters from syntax
+        // Initializers use explicit labels only (like functions), not implicit labels
         let resolved_params = crate::binders::utils::parameters::resolve_parameters_from_syntax(
-            syntax, &source, file_id, symbol_id, context, true,
+            syntax, &source, file_id, symbol_id, context, false,
         );
 
         // Initializers return unit type - they don't return a value
@@ -165,6 +175,12 @@ fn resolve_initializer_body(
         );
     }
 
+    // Get where clause from GenericsBehavior if present
+    let where_clause = symbol
+        .metadata()
+        .get_behavior::<GenericsBehavior>()
+        .map(|g| g.where_clause().clone());
+
     // Create body resolution context
     let mut body_ctx = BodyResolutionContext::new_with_scope(
         context.model,
@@ -173,7 +189,7 @@ fn resolve_initializer_body(
         file_id,
         symbol.metadata().id(),
         local_scope,
-        None, // Initializer doesn't have its own where clause
+        where_clause,
     );
 
     resolve_body_and_attach_executable(symbol, body_node, &mut body_ctx);
@@ -181,16 +197,37 @@ fn resolve_initializer_body(
 
 /// Get the type of `self` for an initializer
 ///
-/// Returns the type of the containing struct.
+/// Returns the concrete type of the containing struct with type parameters.
 fn get_self_type(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> Option<Ty> {
+    use kestrel_semantic_tree::behavior::extension_target::ExtensionTargetBehavior;
+    use kestrel_semantic_tree::behavior::generics::GenericsBehavior;
+    use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
+    use kestrel_semantic_tree::ty::Substitutions;
+
     let parent = symbol.metadata().parent()?;
     let parent_span = parent.metadata().span().clone();
 
     match parent.metadata().kind() {
         KestrelSymbolKind::Struct => {
-            // Use Self type which refers to the containing struct
-            Some(Ty::self_type(parent_span))
-        }
+            // Create concrete struct type with type parameters mapping to themselves
+            let struct_arc = Arc::clone(&parent).downcast_arc::<StructSymbol>().ok()?;
+            let mut substitutions = Substitutions::new();
+            if let Some(generics) = parent.metadata().get_behavior::<GenericsBehavior>() {
+                for param in generics.type_parameters() {
+                    let param_id = param.metadata().id();
+                    let param_ty = Ty::type_parameter(param.clone(), parent_span.clone());
+                    substitutions.insert(param_id, param_ty);
+                }
+            }
+            Some(Ty::generic_struct(struct_arc, substitutions, parent_span))
+        },
+        KestrelSymbolKind::Extension => {
+            // For extension initializers, get the target struct type from ExtensionTargetBehavior
+            let target_behavior = parent
+                .metadata()
+                .get_behavior::<ExtensionTargetBehavior>()?;
+            Some(target_behavior.target_type().clone())
+        },
         _ => None,
     }
 }

@@ -84,7 +84,7 @@ mod enums_with_payloads {
             module Main
 
             enum Option {
-                case Some(value: Int)
+                case Some(value: lang.i64)
                 case None
             }
         "#,
@@ -106,8 +106,8 @@ mod enums_with_payloads {
             module Main
 
             enum Result {
-                case Ok(value: Int)
-                case Err(message: String)
+                case Ok(value: lang.i64)
+                case Err(message: lang.str)
             }
         "#,
         )
@@ -128,8 +128,8 @@ mod enums_with_payloads {
             module Main
 
             enum Shape {
-                case Circle(x: Int, y: Int, radius: Int)
-                case Rectangle(x: Int, y: Int, width: Int, height: Int)
+                case Circle(x: lang.i64, y: lang.i64, radius: lang.i64)
+                case Rectangle(x: lang.i64, y: lang.i64, width: lang.i64, height: lang.i64)
             }
         "#,
         )
@@ -158,7 +158,7 @@ mod enum_construction {
             module Main
 
             enum Option {
-                case Some(value: Int)
+                case Some(value: lang.i64)
                 case None
             }
 
@@ -180,11 +180,11 @@ mod enum_construction {
             module Main
 
             enum Option {
-                case Some(value: Int)
+                case Some(value: lang.i64)
                 case None
             }
 
-            func makeSome(x: Int) -> Option {
+            func makeSome(x: lang.i64) -> Option {
                 Option.Some(value: x)
             }
         "#,
@@ -241,7 +241,7 @@ mod match_on_enums {
                 case Blue
             }
             
-            func toInt(c: Color) -> Int {
+            func toInt(c: Color) -> lang.i64 {
                 match c {
                     .Red => 1,
                     .Green => 2,
@@ -267,11 +267,11 @@ mod match_on_enums {
             module Main
 
             enum Option {
-                case Some(value: Int)
+                case Some(value: lang.i64)
                 case None
             }
 
-            func unwrapOr(opt: Option, default: Int) -> Int {
+            func unwrapOr(opt: Option, default: lang.i64) -> lang.i64 {
                 match opt {
                     .Some(value) => value,
                     .None => default
@@ -297,11 +297,11 @@ mod match_on_enums {
             module Main
 
             enum Shape {
-                case Circle(x: Int, y: Int, radius: Int)
-                case Point(x: Int, y: Int)
+                case Circle(x: lang.i64, y: lang.i64, radius: lang.i64)
+                case Point(x: lang.i64, y: lang.i64)
             }
 
-            func getX(s: Shape) -> Int {
+            func getX(s: Shape) -> lang.i64 {
                 match s {
                     .Circle(x, y, radius) => x,
                     .Point(x, y) => x
@@ -334,7 +334,7 @@ mod recursive_enums {
             module Main
 
             indirect enum Tree {
-                case Leaf(value: Int)
+                case Leaf(value: lang.i64)
                 case Node(left: Tree, right: Tree)
             }
         "#,
@@ -357,14 +357,14 @@ mod recursive_enums {
             module Main
 
             indirect enum Tree {
-                case Leaf(value: Int)
+                case Leaf(value: lang.i64)
                 case Node(left: Tree, right: Tree)
             }
 
-            func sum(tree: Tree) -> Int {
+            func sum(tree: Tree) -> lang.i64 {
                 match tree {
                     .Leaf(value) => value,
-                    .Node(left, right) => sum(left) + sum(right)
+                    .Node(left, right) => lang.i64_add(sum(left), sum(right))
                 }
             }
         "#,
@@ -386,7 +386,7 @@ mod recursive_enums {
             module Main
 
             indirect enum List {
-                case Cons(head: Int, tail: List)
+                case Cons(head: lang.i64, tail: List)
                 case Nil
             }
         "#,
@@ -417,17 +417,17 @@ mod enum_struct_payloads {
             module Main
 
             struct Point {
-                let x: Int
-                let y: Int
+                let x: lang.i64
+                let y: lang.i64
             }
 
             struct Size {
-                let width: Int
-                let height: Int
+                let width: lang.i64
+                let height: lang.i64
             }
 
             enum Shape {
-                case Circle(center: Point, radius: Int)
+                case Circle(center: Point, radius: lang.i64)
                 case Rectangle(origin: Point, size: Size)
             }
         "#,
@@ -440,7 +440,7 @@ mod enum_struct_payloads {
                 .has_case("Rectangle")
                 .has_case_count(2),
         )
-        .expect(Mir::struct_count(4)); // Point, Size, and 2 enum case structs
+        .expect(Mir::struct_count(6)); // Point, Size, 2 enum case structs, and 2 Prelude.ControlFlow case structs
     }
 
     #[test]
@@ -451,19 +451,19 @@ mod enum_struct_payloads {
             module Main
 
             struct Circle {
-                let radius: Int
-                
-                func area() -> Int {
-                    self.radius * self.radius * 3
+                let radius: lang.i64
+
+                func area() -> lang.i64 {
+                    lang.i64_mul(lang.i64_mul(self.radius, self.radius), 3)
                 }
             }
 
             struct Rectangle {
-                let width: Int
-                let height: Int
-                
-                func area() -> Int {
-                    self.width * self.height
+                let width: lang.i64
+                let height: lang.i64
+
+                func area() -> lang.i64 {
+                    lang.i64_mul(self.width, self.height)
                 }
             }
 
@@ -472,7 +472,7 @@ mod enum_struct_payloads {
                 case RectShape(r: Rectangle)
             }
 
-            func getArea(s: Shape) -> Int {
+            func getArea(s: Shape) -> lang.i64 {
                 match s {
                     .CircleShape(c) => c.area(),
                     .RectShape(r) => r.area()
@@ -507,8 +507,8 @@ mod nested_match {
             module Main
 
             enum Inner {
-                case A(x: Int)
-                case B(y: Int)
+                case A(x: lang.i64)
+                case B(y: lang.i64)
             }
 
             enum Outer {
@@ -516,15 +516,15 @@ mod nested_match {
                 case Right(inner: Inner)
             }
 
-            func getValue(outer: Outer) -> Int {
+            func getValue(outer: Outer) -> lang.i64 {
                 match outer {
                     .Left(inner) => match inner {
                         .A(x) => x,
                         .B(y) => y
                     },
                     .Right(inner) => match inner {
-                        .A(x) => x * 2,
-                        .B(y) => y * 2
+                        .A(x) => lang.i64_mul(x, 2),
+                        .B(y) => lang.i64_mul(y, 2)
                     }
                 }
             }
@@ -563,7 +563,7 @@ mod wildcard_patterns {
                 case Sunday
             }
 
-            func isMonday(day: Weekday) -> Bool {
+            func isMonday(day: Weekday) -> lang.i1 {
                 match day {
                     .Monday => true,
                     _ => false

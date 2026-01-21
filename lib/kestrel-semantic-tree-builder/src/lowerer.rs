@@ -25,6 +25,7 @@ pub struct SemanticModelBuilder {
     root: Arc<dyn Symbol<KestrelLanguage>>,
     syntax_map: HashMap<SymbolId, SyntaxNode>,
     sources: HashMap<String, String>,
+    std_auto_import: bool,
 }
 
 impl SemanticModelBuilder {
@@ -33,7 +34,16 @@ impl SemanticModelBuilder {
             root: Arc::new(RootSymbol::new()),
             syntax_map: HashMap::new(),
             sources: HashMap::new(),
+            std_auto_import: false,
         }
+    }
+
+    /// Enable auto-import of standard library modules.
+    ///
+    /// When enabled, all symbols from std.* modules will be automatically
+    /// imported into user source files (non-std modules).
+    pub fn enable_std_auto_import(&mut self) {
+        self.std_auto_import = true;
     }
 
     pub fn add_file(
@@ -49,7 +59,7 @@ impl SemanticModelBuilder {
         let parent_module = match extract_module_path(syntax) {
             Some(path_segments) if !path_segments.is_empty() => {
                 build_module_hierarchy(&root, &path_segments, file_id)
-            }
+            },
             _ => root.clone(),
         };
 
@@ -76,8 +86,117 @@ impl SemanticModelBuilder {
             .insert(file_name.to_string(), source.to_string());
     }
 
-    pub fn build(self) -> SemanticModel {
+    pub fn build(mut self) -> SemanticModel {
+        // If auto-import is enabled, inject synthetic imports into user source files
+        if self.std_auto_import {
+            self.inject_std_imports();
+        }
+
         SemanticModel::new(self.root, self.syntax_map, self.sources)
+    }
+
+    /// Inject synthetic wildcard imports for all std.* modules into user source files.
+    fn inject_std_imports(&mut self) {
+        use kestrel_semantic_tree::symbol::import::{ImportDataBehavior, ImportSymbol};
+
+        // Collect all std.* module paths (including submodules)
+        let std_modules = self.collect_std_module_paths(&self.root.clone(), vec![]);
+
+        // Collect all user source files (non-std modules)
+        let user_source_files = self.collect_user_source_files(&self.root.clone());
+
+        // For each user source file, inject synthetic imports for all std modules
+        for source_file in user_source_files {
+            // Get the file_id from the source file's span
+            let file_id = source_file.metadata().span().file_id;
+
+            for module_path in &std_modules {
+                // Create synthetic import with correct file_id
+                let import_name = module_path.join(".");
+                let span = Span::synthetic(file_id);
+                let name = Spanned::new(import_name.clone(), span.clone());
+
+                let import_symbol = ImportSymbol::new(name, source_file.clone(), span.clone());
+                let import_arc: Arc<dyn Symbol<KestrelLanguage>> = Arc::new(import_symbol);
+
+                // Create import data with no items (wildcard import) and no alias
+                let module_path_with_spans: Vec<(String, Span)> = module_path
+                    .iter()
+                    .map(|s| (s.clone(), Span::synthetic(file_id)))
+                    .collect();
+
+                let import_data = ImportDataBehavior::new(
+                    module_path_with_spans,
+                    span,
+                    None,   // no alias
+                    vec![], // no items = wildcard
+                );
+                import_arc.metadata().add_behavior(import_data);
+
+                source_file.metadata().add_child(&import_arc);
+            }
+        }
+    }
+
+    /// Recursively collect all module paths that start with "std".
+    fn collect_std_module_paths(
+        &self,
+        symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+        current_path: Vec<String>,
+    ) -> Vec<Vec<String>> {
+        let mut result = Vec::new();
+
+        for child in symbol.metadata().children() {
+            if child.metadata().kind() == KestrelSymbolKind::Module {
+                let name = child.metadata().name().value.clone();
+                let mut new_path = current_path.clone();
+                new_path.push(name.clone());
+
+                // If this is a std module (path starts with "std"), add it
+                if new_path.first().map(|s| s.as_str()) == Some("std") {
+                    result.push(new_path.clone());
+                }
+
+                // Recursively collect submodules
+                let submodule_paths = self.collect_std_module_paths(&child, new_path);
+                result.extend(submodule_paths);
+            }
+        }
+
+        result
+    }
+
+    /// Collect all source files that are NOT in std.* modules.
+    fn collect_user_source_files(
+        &self,
+        symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+    ) -> Vec<Arc<dyn Symbol<KestrelLanguage>>> {
+        let mut result = Vec::new();
+        self.collect_user_source_files_recursive(symbol, &mut result, false);
+        result
+    }
+
+    fn collect_user_source_files_recursive(
+        &self,
+        symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+        result: &mut Vec<Arc<dyn Symbol<KestrelLanguage>>>,
+        in_std: bool,
+    ) {
+        for child in symbol.metadata().children() {
+            match child.metadata().kind() {
+                KestrelSymbolKind::Module => {
+                    let name = child.metadata().name().value.clone();
+                    let is_std = name == "std" || in_std;
+                    self.collect_user_source_files_recursive(&child, result, is_std);
+                },
+                KestrelSymbolKind::SourceFile => {
+                    if !in_std {
+                        result.push(child.clone());
+                    }
+                },
+                _ => {},
+            }
+        }
     }
 
     /// Walk syntax tree and build symbols (iterative to avoid stack overflow on deep trees)
@@ -107,6 +226,24 @@ impl SemanticModelBuilder {
                 ) {
                     self.syntax_map
                         .insert(symbol.metadata().id(), current_syntax.clone());
+
+                    // For field declarations with computed properties, add getter/setter
+                    // syntax mappings for the child symbols created by the field builder
+                    if current_syntax.kind() == kestrel_syntax_tree::SyntaxKind::FieldDeclaration {
+                        self.add_computed_property_syntax_mappings(
+                            &symbol,
+                            &current_syntax,
+                            file_id,
+                        );
+                    }
+
+                    // For subscript declarations, add getter/setter syntax mappings
+                    // for the child symbols created by the subscript builder
+                    if current_syntax.kind()
+                        == kestrel_syntax_tree::SyntaxKind::SubscriptDeclaration
+                    {
+                        self.add_subscript_syntax_mappings(&symbol, &current_syntax, file_id);
+                    }
 
                     if !builder.is_terminal() {
                         // Add children in reverse order so they're processed left-to-right
@@ -142,6 +279,138 @@ impl SemanticModelBuilder {
     }
 }
 
+impl SemanticModelBuilder {
+    /// Add syntax mappings for getter/setter symbols that are children of a field.
+    ///
+    /// The field builder creates getter/setter symbols as children of the field
+    /// for computed properties, but those symbols need their syntax nodes added
+    /// to the syntax_map so the binder can access them.
+    fn add_computed_property_syntax_mappings(
+        &mut self,
+        field_symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+        field_syntax: &SyntaxNode,
+        _file_id: usize,
+    ) {
+        use kestrel_syntax_tree::SyntaxKind;
+
+        // Find the PropertyAccessors node in the field syntax
+        let Some(accessors) = field_syntax
+            .children()
+            .find(|child| child.kind() == SyntaxKind::PropertyAccessors)
+        else {
+            return;
+        };
+
+        // Get the getter clause syntax (explicit form)
+        let getter_clause = accessors
+            .children()
+            .find(|child| child.kind() == SyntaxKind::GetterClause);
+
+        // Get the shorthand body (CodeBlock directly in PropertyAccessors)
+        let shorthand_body = accessors
+            .children()
+            .find(|child| child.kind() == SyntaxKind::CodeBlock);
+
+        // Get the setter clause syntax
+        let setter_clause = accessors
+            .children()
+            .find(|child| child.kind() == SyntaxKind::SetterClause);
+
+        // Map getter/setter symbols to their syntax nodes
+        for child in field_symbol.metadata().children() {
+            match child.metadata().kind() {
+                KestrelSymbolKind::Getter => {
+                    // Prefer explicit GetterClause, fall back to shorthand CodeBlock
+                    if let Some(ref getter_syntax) = getter_clause {
+                        self.syntax_map
+                            .insert(child.metadata().id(), getter_syntax.clone());
+                    } else if let Some(ref body_syntax) = shorthand_body {
+                        self.syntax_map
+                            .insert(child.metadata().id(), body_syntax.clone());
+                    }
+                },
+                KestrelSymbolKind::Setter => {
+                    if let Some(ref setter_syntax) = setter_clause {
+                        self.syntax_map
+                            .insert(child.metadata().id(), setter_syntax.clone());
+                    }
+                },
+                _ => {},
+            }
+        }
+    }
+
+    /// Add syntax mappings for getter/setter symbols that are children of a subscript.
+    ///
+    /// The subscript builder creates getter/setter symbols as children of the subscript,
+    /// but those symbols need their syntax nodes added to the syntax_map so the binder
+    /// can access them.
+    fn add_subscript_syntax_mappings(
+        &mut self,
+        subscript_symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+        subscript_syntax: &SyntaxNode,
+        _file_id: usize,
+    ) {
+        use kestrel_syntax_tree::SyntaxKind;
+
+        // Find the SubscriptBody node in the subscript syntax
+        let Some(body) = subscript_syntax
+            .children()
+            .find(|child| child.kind() == SyntaxKind::SubscriptBody)
+        else {
+            return;
+        };
+
+        // Check for PropertyAccessors (explicit get/set form)
+        let accessors = body
+            .children()
+            .find(|child| child.kind() == SyntaxKind::PropertyAccessors);
+
+        // Get the getter clause syntax (explicit form)
+        let getter_clause = accessors.as_ref().and_then(|acc| {
+            acc.children()
+                .find(|child| child.kind() == SyntaxKind::GetterClause)
+        });
+
+        // Get the shorthand body (CodeBlock directly in SubscriptBody)
+        let shorthand_body = if accessors.is_none() {
+            body.children()
+                .find(|child| child.kind() == SyntaxKind::CodeBlock)
+        } else {
+            None
+        };
+
+        // Get the setter clause syntax
+        let setter_clause = accessors.as_ref().and_then(|acc| {
+            acc.children()
+                .find(|child| child.kind() == SyntaxKind::SetterClause)
+        });
+
+        // Map getter/setter symbols to their syntax nodes
+        for child in subscript_symbol.metadata().children() {
+            match child.metadata().kind() {
+                KestrelSymbolKind::Getter => {
+                    // Prefer explicit GetterClause, fall back to shorthand CodeBlock
+                    if let Some(ref getter_syntax) = getter_clause {
+                        self.syntax_map
+                            .insert(child.metadata().id(), getter_syntax.clone());
+                    } else if let Some(ref body_syntax) = shorthand_body {
+                        self.syntax_map
+                            .insert(child.metadata().id(), body_syntax.clone());
+                    }
+                },
+                KestrelSymbolKind::Setter => {
+                    if let Some(ref setter_syntax) = setter_clause {
+                        self.syntax_map
+                            .insert(child.metadata().id(), setter_syntax.clone());
+                    }
+                },
+                _ => {},
+            }
+        }
+    }
+}
+
 impl Default for SemanticModelBuilder {
     fn default() -> Self {
         Self::new()
@@ -174,7 +443,7 @@ fn builder_for(
     use crate::builders::{
         DeinitBuilder, EnumBuilder, EnumCaseBuilder, ExtensionBuilder, FieldBuilder,
         FunctionBuilder, ImportBuilder, InitializerBuilder, ModuleBuilder, ProtocolBuilder,
-        StructBuilder, TerminalBuilder, TypeAliasBuilder,
+        StructBuilder, SubscriptBuilder, TerminalBuilder, TypeAliasBuilder,
     };
     use kestrel_syntax_tree::SyntaxKind;
 
@@ -189,6 +458,7 @@ fn builder_for(
     static MODULE: ModuleBuilder = ModuleBuilder;
     static PROTOCOL: ProtocolBuilder = ProtocolBuilder;
     static STRUCT: StructBuilder = StructBuilder;
+    static SUBSCRIPT: SubscriptBuilder = SubscriptBuilder;
     static TERMINAL: TerminalBuilder = TerminalBuilder;
     static TYPE_ALIAS: TypeAliasBuilder = TypeAliasBuilder;
 
@@ -205,6 +475,7 @@ fn builder_for(
         SyntaxKind::FunctionDeclaration => Some(&FUNCTION),
         SyntaxKind::InitializerDeclaration => Some(&INITIALIZER),
         SyntaxKind::DeinitDeclaration => Some(&DEINIT),
+        SyntaxKind::SubscriptDeclaration => Some(&SUBSCRIPT),
         SyntaxKind::Visibility | SyntaxKind::Name => Some(&TERMINAL),
         _ => None,
     }
@@ -281,12 +552,12 @@ struct RootSymbol {
 
 impl RootSymbol {
     fn new() -> Self {
-        let name = Spanned::new("<root>".to_string(), Span::from(0..0));
+        let name = Spanned::new("<root>".to_string(), Span::new(0, 0..0));
 
         let metadata = SymbolMetadataBuilder::new(KestrelSymbolKind::Module)
             .with_name(name)
-            .with_declaration_span(Span::from(0..0))
-            .with_span(Span::from(0..0))
+            .with_declaration_span(Span::new(0, 0..0))
+            .with_span(Span::new(0, 0..0))
             .build();
 
         Self { metadata }

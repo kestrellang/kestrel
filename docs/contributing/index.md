@@ -16,12 +16,15 @@ This guide helps you understand the Kestrel compiler codebase and contribute eff
 Detailed implementation guides (in `.claude/commands/`):
 - **write-feature.md** - Complete 7-step guide for adding language features (lexer through tests)
 - **write-parser.md** - Detailed parser implementation guide
-- **validation-passes.md** - Creating semantic validation passes
 
-Language semantics (in `docs/semantics/`):
-- Formal definitions of modules, functions, structs, protocols, etc.
+Compiler internals (in `docs/internals/`):
+- Parser architecture, execution graph, validation passes
+- Type inference design, monomorphization
+- Formal language semantics (modules, functions, structs, protocols, etc.)
 - Type resolution and name resolution rules
-- Error conditions and messages
+
+Implementation plans (in `docs/plans/`):
+- Feature-specific implementation plans organized by topic
 
 ## Codebase Overview
 
@@ -43,8 +46,11 @@ kestrel/
 │   ├── kestrel-reporting/      # Diagnostics
 │   └── semantic-tree/          # Language-agnostic symbol infra
 ├── docs/
+│   ├── language/               # User-facing language guide
 │   ├── contributing/           # This guide
-│   └── semantics/              # Language semantics
+│   ├── internals/              # Compiler architecture & semantics
+│   ├── memory-model/           # Runtime memory semantics
+│   └── plans/                  # Implementation plans
 └── src/main.rs                 # CLI entry point
 ```
 

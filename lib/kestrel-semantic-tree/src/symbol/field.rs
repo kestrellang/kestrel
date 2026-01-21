@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use kestrel_span::{Name, Span};
-use semantic_tree::symbol::{Symbol, SymbolMetadata, SymbolMetadataBuilder};
+use semantic_tree::symbol::{Symbol, SymbolId, SymbolMetadata, SymbolMetadataBuilder};
 
 use crate::{
     behavior::visibility::VisibilityBehavior, language::KestrelLanguage,
@@ -13,12 +13,13 @@ pub struct FieldSymbol {
     metadata: SymbolMetadata<KestrelLanguage>,
     is_static: bool,
     is_mutable: bool,
+    is_computed: bool,
     field_type: Ty,
 }
 
 impl Symbol<KestrelLanguage> for FieldSymbol {
     fn metadata(&self) -> &SymbolMetadata<KestrelLanguage> {
-        return &self.metadata;
+        &self.metadata
     }
 }
 
@@ -30,6 +31,7 @@ impl FieldSymbol {
         visibility: VisibilityBehavior,
         is_static: bool,
         is_mutable: bool,
+        is_computed: bool,
         field_type: Ty,
         parent: Option<Arc<dyn Symbol<KestrelLanguage>>>,
     ) -> Self {
@@ -47,6 +49,7 @@ impl FieldSymbol {
             metadata: builder.build(),
             is_static,
             is_mutable,
+            is_computed,
             field_type,
         }
     }
@@ -61,8 +64,37 @@ impl FieldSymbol {
         self.is_mutable
     }
 
+    /// Check if this field is a computed property
+    pub fn is_computed(&self) -> bool {
+        self.is_computed
+    }
+
     /// Get the field's type
     pub fn field_type(&self) -> &Ty {
         &self.field_type
+    }
+
+    /// Get the getter symbol for this computed property (if it exists)
+    pub fn getter(&self) -> Option<SymbolId> {
+        if !self.is_computed {
+            return None;
+        }
+        self.metadata()
+            .children()
+            .into_iter()
+            .find(|child| child.metadata().kind() == KestrelSymbolKind::Getter)
+            .map(|s| s.metadata().id())
+    }
+
+    /// Get the setter symbol for this computed property (if it exists)
+    pub fn setter(&self) -> Option<SymbolId> {
+        if !self.is_computed {
+            return None;
+        }
+        self.metadata()
+            .children()
+            .into_iter()
+            .find(|child| child.metadata().kind() == KestrelSymbolKind::Setter)
+            .map(|s| s.metadata().id())
     }
 }

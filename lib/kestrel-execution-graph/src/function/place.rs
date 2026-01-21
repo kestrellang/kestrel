@@ -135,19 +135,19 @@ impl fmt::Display for PlaceDisplay<'_> {
         match &self.place.kind {
             PlaceKind::Local(id) => {
                 write!(f, "%{}", self.ctx.locals[*id].name)
-            }
+            },
             PlaceKind::Field { parent, name } => {
                 write!(f, "{}.{}", parent.display(self.ctx), name)
-            }
+            },
             PlaceKind::Index { parent, index } => {
                 write!(f, "{}.{}", parent.display(self.ctx), index)
-            }
+            },
             PlaceKind::Downcast { parent, variant } => {
                 write!(f, "{}.{}", parent.display(self.ctx), variant)
-            }
+            },
             PlaceKind::Deref(inner) => {
                 write!(f, "(deref {})", inner.display(self.ctx))
-            }
+            },
         }
     }
 }

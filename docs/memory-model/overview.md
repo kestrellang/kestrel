@@ -24,6 +24,7 @@ The memory model includes:
 | Access Modes | [access-modes.md](access-modes.md) |
 | Copy Semantics | [copy-semantics.md](copy-semantics.md) |
 | Cloneable Protocol | [cloneable.md](cloneable.md) |
+| MIR ABI | [abi.md](abi.md) |
 | Generics | [generics.md](generics.md) |
 | Closures | [closures.md](closures.md) |
 | Drop Semantics | [drop-semantics.md](drop-semantics.md) |
@@ -40,5 +41,4 @@ func consume(consuming point: Point) { ... } // Consuming - takes ownership
 ```
 
 There are no user-facing reference types (`&T`). Borrowing is a calling convention, not a type constructor.
-
 

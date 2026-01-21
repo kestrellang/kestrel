@@ -1,13 +1,16 @@
-// Optional type
+// Optional type - represents a value that may or may not be present
 
-public enum Optional[T]: ExpressibleByNilLiteral {
+module std.result
+
+import std.core.(Equatable, Formattable, Bool, ControlFlow, Tryable, FromResidual)
+import std.text.(String)
+// Note: Iterator import creates circular dependency - Iterator imports Optional
+// import std.iter.(Iterator)
+
+// Optional[T] - either Some(value) or None
+public enum Optional[T] {
     case Some(T)
     case None
-
-    // ExpressibleByNilLiteral
-    public init(nilLiteral value: Nil) {
-        self = .None
-    }
 
     // Convenience constructors
     public static func some(value: T) -> Optional[T] {
@@ -18,15 +21,15 @@ public enum Optional[T]: ExpressibleByNilLiteral {
         .None
     }
 
-    // Properties
-    public var isSome: Bool {
+    // Properties - using functions due to computed property parsing issues in enums
+    public func isSome() -> Bool {
         match self {
             .Some(_) => true,
             .None => false
         }
     }
 
-    public var isNone: Bool {
+    public func isNone() -> Bool {
         match self {
             .Some(_) => false,
             .None => true
@@ -36,51 +39,43 @@ public enum Optional[T]: ExpressibleByNilLiteral {
     // Unwrapping
     public func unwrap() -> T {
         match self {
-            .Some(let value) => value,
-            .None => panic("called unwrap() on None")
+            .Some(value) => value,
+            .None => lang.panic("called unwrap() on None")
         }
     }
 
-    public func unwrap(or default: T) -> T {
+    public func unwrapOr(default: T) -> T {
         match self {
-            .Some(let value) => value,
+            .Some(value) => value,
             .None => default
         }
     }
 
     public func unwrap(orElse defaultFn: () -> T) -> T {
         match self {
-            .Some(let value) => value,
+            .Some(value) => value,
             .None => defaultFn()
-        }
-    }
-
-    // expect with custom message
-    public func expect(message: String) -> T {
-        match self {
-            .Some(let value) => value,
-            .None => panic(message)
         }
     }
 
     // Transformations
     public func map[U](transform: (T) -> U) -> Optional[U] {
         match self {
-            .Some(let value) => .Some(transform(value)),
+            .Some(value) => .Some(transform(value)),
             .None => .None
         }
     }
 
     public func flatMap[U](transform: (T) -> Optional[U]) -> Optional[U] {
         match self {
-            .Some(let value) => transform(value),
+            .Some(value) => transform(value),
             .None => .None
         }
     }
 
     public func filter(predicate: (T) -> Bool) -> Optional[T] {
         match self {
-            .Some(let value) => {
+            .Some(value) => {
                 if predicate(value) {
                     .Some(value)
                 } else {
@@ -91,23 +86,9 @@ public enum Optional[T]: ExpressibleByNilLiteral {
         }
     }
 
-    // Convert to Result
-    public func ok[E: Error](or error: E) -> Result[T, E] {
-        match self {
-            .Some(let value) => .Ok(value),
-            .None => .Err(error)
-        }
-    }
-
-    public func okOrElse[E: Error](errorFn: () -> E) -> Result[T, E] {
-        match self {
-            .Some(let value) => .Ok(value),
-            .None => .Err(errorFn())
-        }
-    }
-
-    // Logical operations
-    public func and[U](other: Optional[U]) -> Optional[U] {
+    // Combinator operations
+    // Note: 'and'/'or' are keywords, so we use 'andValue'/'orValue'
+    public func andValue[U](other: Optional[U]) -> Optional[U] {
         match self {
             .Some(_) => other,
             .None => .None
@@ -115,92 +96,108 @@ public enum Optional[T]: ExpressibleByNilLiteral {
     }
 
     public func andThen[U](transform: (T) -> Optional[U]) -> Optional[U] {
-        self.flatMap(transform)
+        match self {
+            .Some(value) => transform(value),
+            .None => .None
+        }
     }
 
-    public func or(other: Optional[T]) -> Optional[T] {
+    public func orValue(other: Optional[T]) -> Optional[T] {
         match self {
-            .Some(let value) => .Some(value),
+            .Some(value) => .Some(value),
             .None => other
         }
     }
 
     public func orElse(alternative: () -> Optional[T]) -> Optional[T] {
         match self {
-            .Some(let value) => .Some(value),
+            .Some(value) => .Some(value),
             .None => alternative()
         }
     }
 
     public func xor(other: Optional[T]) -> Optional[T] {
         match (self, other) {
-            (.Some(let value), .None) => .Some(value),
-            (.None, .Some(let value)) => .Some(value),
+            (.Some(value), .None) => .Some(value),
+            (.None, .Some(value)) => .Some(value),
             _ => .None
         }
     }
 
     // Take and replace
-    public func take() -> Optional[T] {
-        let result = self
-        self = .None
+    public mutating func take() -> Optional[T] {
+        let result = self;
+        self = .None;
         result
     }
 
-    public func replace(value: T) -> Optional[T] {
-        let old = self
-        self = .Some(value)
+    public mutating func replace(value: T) -> Optional[T] {
+        let old = self;
+        self = .Some(value);
         old
     }
 
     // Iteration
     public func iter() -> OptionalIterator[T] {
-        OptionalIterator(value: self)
+        OptionalIterator(self)
     }
 }
 
 // Equatable when T is Equatable
-extension Optional[T]: Equatable where T: Equatable {
+extend Optional[T]: Equatable where T: Equatable {
     public func equals(other: Optional[T]) -> Bool {
         match (self, other) {
-            (.Some(let a), .Some(let b)) => a == b,
+            (.Some(a), .Some(b)) => a == b,
             (.None, .None) => true,
             _ => false
         }
     }
 }
 
-// Functor implementation
-extension Optional[T]: Functor {
-    type Inner = T
-}
-
 // Tryable for Optional (try? semantics)
-extension Optional[T]: Tryable[T, Nil] {
-    public func tryExtract() -> Residual[T, Nil] {
+extend Optional[T]: Tryable {
+    type Output = T
+    type Early = ()
+
+    public func tryExtract() -> ControlFlow[T, ()] {
         match self {
-            .Some(let value) => .Output(value),
-            .None => .Early(nil)
+            .Some(value) => .Continue(value),
+            .None => .Break(())
         }
     }
 }
 
-// Optional iterator
-public struct OptionalIterator[T]: Iterator {
+// FromResidual for Optional - enables early return propagation
+extend Optional[T]: FromResidual[()] {
+    public static func fromResidual(residual: ()) -> Optional[T] {
+        .None
+    }
+}
+
+// Formattable when T is Formattable
+extend Optional[T]: Formattable where T: Formattable {
+    public func format() -> String {
+        match self {
+            .Some(value) => "Some(" + value.format() + ")",
+            .None => "None"
+        }
+    }
+}
+
+// Optional iterator - iterates 0 or 1 times
+// Note: Iterator conformance added via extension in iter/iterator.ks to avoid circular import
+public struct OptionalIterator[T] {
     type Item = T
 
     private var value: Optional[T]
 
     public init(value: Optional[T]) {
-        self.value = value
+        self.value = value;
     }
 
-    public func next() -> Optional[T] {
-        let result = self.value
-        self.value = .None
+    public mutating func next() -> Optional[T] {
+        let result = self.value;
+        self.value = .None;
         result
     }
 }
-
-// Type alias for sugar: T? is Optional[T]
-// This is handled by the compiler

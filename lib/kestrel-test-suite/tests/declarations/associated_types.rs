@@ -52,7 +52,7 @@ mod protocol_declaration {
             protocol Iterator {
                 type Item;
                 func next() -> Item
-                func hasNext() -> Bool
+                func hasNext() -> lang.i1
             }
         "#,
         )
@@ -142,7 +142,7 @@ mod associated_type_defaults {
         Test::new(
             r#"module Test
             protocol Parser {
-                type Output = String;
+                type Output = lang.str;
                 func parse() -> Output
             }
         "#,
@@ -197,8 +197,8 @@ mod struct_binding {
                 func next() -> Item
             }
             struct IntIterator: Iterator {
-                type Item = Int;
-                func next() -> Int { 0 }
+                type Item = lang.i64;
+                func next() -> lang.i64 { 0 }
             }
         "#,
         )
@@ -218,12 +218,12 @@ mod struct_binding {
             protocol Dictionary {
                 type Key;
                 type Value;
-                func get(key: Key) -> Value
+                func read(key: Key) -> Value
             }
             struct StringIntMap: Dictionary {
-                type Key = String;
-                type Value = Int;
-                func get(key: String) -> Int { 0 }
+                type Key = lang.str;
+                type Value = lang.i64;
+                func read(key: lang.str) -> lang.i64 { 0 }
             }
         "#,
         )
@@ -241,7 +241,7 @@ mod struct_binding {
                 func next() -> Item
             }
             struct BadIterator: Iterator {
-                func next() -> Int { 0 }
+                func next() -> lang.i64 { 0 }
             }
         "#,
         )
@@ -270,11 +270,11 @@ mod struct_binding {
         Test::new(
             r#"module Test
             protocol Parser {
-                type Output = String;
+                type Output = lang.str;
                 func parse() -> Output
             }
             struct SimpleParser: Parser {
-                func parse() -> String { "" }
+                func parse() -> lang.str { "" }
             }
         "#,
         )
@@ -291,12 +291,12 @@ mod struct_binding {
         Test::new(
             r#"module Test
             protocol Parser {
-                type Output = String;
+                type Output = lang.str;
                 func parse() -> Output
             }
             struct IntParser: Parser {
-                type Output = Int;
-                func parse() -> Int { 0 }
+                type Output = lang.i64;
+                func parse() -> lang.i64 { 0 }
             }
         "#,
         )
@@ -319,8 +319,8 @@ mod qualified_binding {
                 type Item;
             }
             struct Foo: Iterator, Container {
-                type Iterator.Item = Int;
-                type Container.Item = String;
+                type Iterator.Item = lang.i64;
+                type Container.Item = lang.str;
             }
         "#,
         )
@@ -343,7 +343,7 @@ mod qualified_binding {
                 type Item;
             }
             struct Foo: Iterator, Container {
-                type Item = Int;
+                type Item = lang.i64;
             }
         "#,
         )
@@ -358,9 +358,9 @@ mod qualified_binding {
                 type Output;
                 func add(right: Right) -> Output
             }
-            struct Int: Add[Int] {
-                type Add[Int].Output = Int;
-                func add(right: Int) -> Int { 0 }
+            struct Int: Add[lang.i64] {
+                type Add[lang.i64].Output = lang.i64;
+                func add(right: lang.i64) -> lang.i64 { 0 }
             }
         "#,
         )
@@ -374,9 +374,9 @@ mod qualified_binding {
             protocol Add[Right] {
                 type Output;
             }
-            struct Int: Add[Int], Add[Float] {
-                type Add[Int].Output = Int;
-                type Add[Float].Output = Float;
+            struct Int: Add[lang.i64], Add[lang.f64] {
+                type Add[lang.i64].Output = lang.i64;
+                type Add[lang.f64].Output = lang.f64;
             }
         "#,
         )
@@ -392,7 +392,7 @@ mod qualified_binding {
             }
             protocol Other { }
             struct Foo: Iterator, Other {
-                type Other.Item = Int;
+                type Other.Item = lang.i64;
             }
         "#,
         )
@@ -407,7 +407,7 @@ mod qualified_binding {
                 type Item;
             }
             struct Foo {
-                type Iterator.Item = Int;
+                type Iterator.Item = lang.i64;
             }
         "#,
         )
@@ -462,9 +462,9 @@ mod generic_struct_binding {
                 type Output;
                 func add(right: Right) -> Output
             }
-            struct Int: Add[Int] {
-                type Add[Int].Output = Int;
-                func add(right: Int) -> Int { 0 }
+            struct Int: Add[lang.i64] {
+                type Add[lang.i64].Output = lang.i64;
+                func add(right: lang.i64) -> lang.i64 { 0 }
             }
         "#,
         )
@@ -546,7 +546,7 @@ mod where_clause_equality {
             protocol Iterator {
                 type Item;
             }
-            func intOnly[T](iter: T) where T: Iterator, T.Item = Int { }
+            func intOnly[T](iter: T) where T: Iterator, T.Item = lang.i64 { }
         "#,
         )
         .expect(Compiles);
@@ -598,12 +598,12 @@ mod type_resolution {
                 func next() -> Item
             }
             struct IntIterator: Iterator {
-                type Item = Int;
-                func next() -> Int { 0 }
+                type Item = lang.i64;
+                func next() -> lang.i64 { 0 }
             }
             func test() {
                 let iter = IntIterator();
-                let x: Int = iter.next();
+                let x: lang.i64 = iter.next();
             }
         "#,
         )
@@ -619,8 +619,8 @@ mod type_resolution {
                 func add(item: Item)
             }
             struct IntContainer: Container {
-                type Item = Int;
-                func add(item: Int) { }
+                type Item = lang.i64;
+                func add(item: lang.i64) { }
             }
             func test() {
                 let c = IntContainer();
@@ -636,20 +636,20 @@ mod type_resolution {
         Test::new(
             r#"module Test
             protocol Equatable {
-                func eq(other: Self) -> Bool
+                func eq(other: Self) -> lang.i1
             }
             protocol Iterator {
                 type Item;
                 func next() -> Item
             }
             struct MyInt: Equatable {
-                func eq(other: MyInt) -> Bool { true }
+                func eq(other: MyInt) -> lang.i1 { true }
             }
             struct IntIterator: Iterator {
                 type Item = MyInt;
                 func next() -> MyInt { MyInt() }
             }
-            func contains[T](iter: T, value: T.Item) -> Bool where T: Iterator, T.Item: Equatable {
+            func contains[T](iter: T, value: T.Item) -> lang.i1 where T: Iterator, T.Item: Equatable {
                 true
             }
         "#,
@@ -685,7 +685,7 @@ mod errors {
         Test::new(
             r#"module Test
             protocol Equatable { }
-            type Foo: Equatable = Int;
+            type Foo: Equatable = lang.i64;
         "#,
         )
         .expect(HasError("type alias cannot have bounds"));
@@ -706,7 +706,7 @@ mod errors {
         Test::new(
             r#"module Test
             struct Foo {
-                type Item = Int;
+                type Item = lang.i64;
             }
         "#,
         )
@@ -766,7 +766,7 @@ mod nested_associated_types {
             protocol Container {
                 type Iter: Iterator;
             }
-            func intContainer[C](c: C) where C: Container, C.Iter.Item = Int { }
+            func intContainer[C](c: C) where C: Container, C.Iter.Item = lang.i64 { }
         "#,
         )
         .expect(Compiles);
@@ -887,9 +887,9 @@ mod protocol_inheritance {
                 func prev() -> Item
             }
             struct IntBiIterator: Iterator, BidirectionalIterator {
-                type Item = Int;
-                func next() -> Int { 0 }
-                func prev() -> Int { 0 }
+                type Item = lang.i64;
+                func next() -> lang.i64 { 0 }
+                func prev() -> lang.i64 { 0 }
             }
         "#,
         )

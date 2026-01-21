@@ -143,6 +143,7 @@ pub fn code_block_parser<'tokens>()
             items,
             rbrace,
         })
+        .boxed()
 }
 
 /// Check if an expression variant is "statement-like" (doesn't require semicolon)
@@ -153,6 +154,7 @@ fn is_statement_like_expr(expr: &ExprVariant) -> bool {
             | ExprVariant::While { .. }
             | ExprVariant::WhileLet { .. }
             | ExprVariant::Loop { .. }
+            | ExprVariant::Match { .. }
     )
 }
 
@@ -239,6 +241,7 @@ fn guard_let_else_items_parser<'tokens>()
             }
             items
         })
+        .boxed()
 }
 
 /// Parser for the items inside a code block
@@ -431,6 +434,7 @@ fn code_block_items_parser<'tokens>()
             }
             items
         })
+        .boxed()
 }
 
 /// Emit events for a code block
@@ -442,7 +446,7 @@ pub fn emit_code_block(sink: &mut EventSink, data: &CodeBlockData) {
         match item {
             BlockItem::Statement(stmt) => {
                 emit_stmt_variant(sink, stmt);
-            }
+            },
             BlockItem::StatementExpr(expr) => {
                 // Statement-like expressions are wrapped in Statement node
                 // but don't have a semicolon
@@ -451,13 +455,13 @@ pub fn emit_code_block(sink: &mut EventSink, data: &CodeBlockData) {
                 emit_expr_variant(sink, expr);
                 sink.finish_node(); // ExpressionStatement
                 sink.finish_node(); // Statement
-            }
+            },
             BlockItem::TrailingExpression(expr) => {
                 emit_expr_variant(sink, expr);
-            }
+            },
             BlockItem::GuardLet(guard_data) => {
                 emit_guard_let(sink, guard_data);
-            }
+            },
         }
     }
 
@@ -485,17 +489,17 @@ fn emit_guard_let(sink: &mut EventSink, data: &GuardLetData) {
         match item {
             ElseBlockItem::Statement(stmt) => {
                 emit_stmt_variant(sink, stmt);
-            }
+            },
             ElseBlockItem::StatementExpr(expr) => {
                 sink.start_node(SyntaxKind::Statement);
                 sink.start_node(SyntaxKind::ExpressionStatement);
                 emit_expr_variant(sink, expr);
                 sink.finish_node();
                 sink.finish_node();
-            }
+            },
             ElseBlockItem::TrailingExpression(expr) => {
                 emit_expr_variant(sink, expr);
-            }
+            },
         }
     }
     sink.add_token(SyntaxKind::RBrace, data.else_rbrace.clone());
@@ -516,13 +520,13 @@ where
     match code_block_parser().parse(input).into_result() {
         Ok(data) => {
             emit_code_block(sink, &data);
-        }
+        },
         Err(errors) => {
             for error in errors {
                 let span = error.span();
-                sink.error_at(format!("Parse error: {:?}", error), to_kestrel_span(*span));
+                sink.error_at(format!("Parse error: {:?}", error), *span);
             }
-        }
+        },
     }
 }
 
@@ -537,13 +541,13 @@ mod tests {
             .map(|spanned| (spanned.value, spanned.span))
             .collect();
 
-        let mut sink = EventSink::new();
+        let mut sink = EventSink::new(0);
         parse_code_block(source, tokens.into_iter(), &mut sink);
 
         let tree = TreeBuilder::new(source, sink.into_events()).build();
         CodeBlock {
             syntax: tree,
-            span: Span::from(0..source.len()),
+            span: Span::new(0, 0..source.len()),
         }
     }
 

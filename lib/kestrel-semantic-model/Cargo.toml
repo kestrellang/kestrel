@@ -3,6 +3,9 @@ name = "kestrel-semantic-model"
 version.workspace = true
 edition.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
 kestrel-prelude = { path = "../kestrel-prelude" }
 kestrel-semantic-tree = { path = "../kestrel-semantic-tree" }

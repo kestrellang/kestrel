@@ -4,7 +4,7 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode, SyntaxToken};
 
 use crate::common::module_path_parser_internal;
 use crate::event::{EventSink, TreeBuilder};
-use crate::input::{create_input, prepare_tokens, to_kestrel_span};
+use crate::input::{create_input, prepare_tokens};
 
 /// Represents a module path like A.B.C
 ///
@@ -26,7 +26,7 @@ impl ModulePath {
     /// Create a new ModulePath from segments, building the syntax tree
     /// This is a convenience function that emits events and builds the tree
     pub fn new(source: &str, segments: Vec<Span>) -> Self {
-        let mut sink = EventSink::new();
+        let mut sink = EventSink::new(0);
         crate::common::emit_module_path(&mut sink, &segments);
         Self::from_events(source, sink.into_events())
     }
@@ -55,7 +55,7 @@ impl ModulePath {
                 let range = tok.text_range();
                 let start: usize = range.start().into();
                 let end: usize = range.end().into();
-                (tok.text().to_string(), Span::from(start..end))
+                (tok.text().to_string(), Span::new(0, start..end))
             })
             .collect()
     }
@@ -65,7 +65,7 @@ impl ModulePath {
         let range = self.syntax.text_range();
         let start: usize = range.start().into();
         let end: usize = range.end().into();
-        Span::from(start..end)
+        Span::new(0, start..end)
     }
 
     /// Get the number of segments in the path
@@ -88,14 +88,14 @@ where
     match module_path_parser_internal().parse(input).into_result() {
         Ok(segments) => {
             crate::common::emit_module_path(sink, &segments);
-        }
+        },
         Err(errors) => {
             // Emit error events for each parse error
             for error in errors {
                 // Chumsky errors have span information
                 let span = error.span();
-                sink.error_at(format!("Parse error: {:?}", error), to_kestrel_span(*span));
+                sink.error_at(format!("Parse error: {:?}", error), *span);
             }
-        }
+        },
     }
 }

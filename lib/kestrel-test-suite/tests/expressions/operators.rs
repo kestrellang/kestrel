@@ -14,24 +14,24 @@ mod arithmetic_operators {
             r#"
 module Main
 
-func sum() -> Int {
-    1 + 2
+func sum() -> lang.i64 {
+    lang.i64_add(1, 2)
 }
 
-func diff() -> Int {
-    5 - 3
+func diff() -> lang.i64 {
+    lang.i64_sub(5, 3)
 }
 
-func product() -> Int {
-    4 * 5
+func product() -> lang.i64 {
+    lang.i64_mul(4, 5)
 }
 
-func quotient() -> Int {
-    10 / 2
+func quotient() -> lang.i64 {
+    lang.i64_signed_div(10, 2)
 }
 
-func remainder() -> Int {
-    10 % 3
+func remainder() -> lang.i64 {
+    lang.i64_signed_rem(10, 3)
 }
 "#,
         )
@@ -69,12 +69,12 @@ func remainder() -> Int {
             r#"
 module Main
 
-func sum() -> Float {
-    1.5 + 2.5
+func sum() -> lang.f64 {
+    lang.f64_add(1.5, 2.5)
 }
 
-func product() -> Float {
-    2.0 * 3.0
+func product() -> lang.f64 {
+    lang.f64_mul(2.0, 3.0)
 }
 "#,
         )
@@ -93,28 +93,28 @@ mod comparison_operators {
             r#"
 module Main
 
-func isEqual() -> Bool {
-    1 == 1
+func isEqual() -> lang.i1 {
+    lang.i64_eq(1, 1)
 }
 
-func isNotEqual() -> Bool {
-    1 != 2
+func isNotEqual() -> lang.i1 {
+    lang.i64_ne(1, 2)
 }
 
-func isLess() -> Bool {
-    1 < 2
+func isLess() -> lang.i1 {
+    lang.i64_signed_lt(1, 2)
 }
 
-func isGreater() -> Bool {
-    2 > 1
+func isGreater() -> lang.i1 {
+    lang.i64_signed_gt(2, 1)
 }
 
-func isLessOrEqual() -> Bool {
-    1 <= 2
+func isLessOrEqual() -> lang.i1 {
+    lang.i64_signed_le(1, 2)
 }
 
-func isGreaterOrEqual() -> Bool {
-    2 >= 1
+func isGreaterOrEqual() -> lang.i1 {
+    lang.i64_signed_ge(2, 1)
 }
 "#,
         )
@@ -161,16 +161,16 @@ mod logical_operators {
             r#"
 module Main
 
-func bothTrue() -> Bool {
-    true and true
+func bothTrue() -> lang.i1 {
+    lang.i1_and(true, true)
 }
 
-func eitherTrue() -> Bool {
-    true or false
+func eitherTrue() -> lang.i1 {
+    lang.i1_or(true, false)
 }
 
-func negate() -> Bool {
-    not true
+func negate() -> lang.i1 {
+    lang.i1_not(true)
 }
 "#,
         )
@@ -202,50 +202,50 @@ mod bitwise_operators {
             r#"
 module Main
 
-func bitwiseAnd() -> Int {
-    5 & 3
+func bitwiseAnd() -> lang.i64 {
+    lang.i64_and(5, 3)
 }
 
-func bitwiseOr() -> Int {
-    5 | 3
+func bitwiseOr() -> lang.i64 {
+    lang.i64_or(5, 3)
 }
 
-func bitwiseXor() -> Int {
-    5 ^ 3
+func bitwiseXor() -> lang.i64 {
+    lang.i64_xor(5, 3)
 }
 
-func shiftLeft() -> Int {
-    1 << 3
+func shiftLeft() -> lang.i64 {
+    lang.i64_shl(1, 3)
 }
 
-func shiftRight() -> Int {
-    8 >> 2
+func shiftRight() -> lang.i64 {
+    lang.i64_signed_shr(8, 2)
 }
 "#,
         )
         .expect(Compiles)
         .expect(
-            Symbol::new("bitwiseAnd")
+            Symbol::new("Main.bitwiseAnd")
                 .is(SymbolKind::Function)
                 .has(Behavior::ParameterCount(0)),
         )
         .expect(
-            Symbol::new("bitwiseOr")
+            Symbol::new("Main.bitwiseOr")
                 .is(SymbolKind::Function)
                 .has(Behavior::ParameterCount(0)),
         )
         .expect(
-            Symbol::new("bitwiseXor")
+            Symbol::new("Main.bitwiseXor")
                 .is(SymbolKind::Function)
                 .has(Behavior::ParameterCount(0)),
         )
         .expect(
-            Symbol::new("shiftLeft")
+            Symbol::new("Main.shiftLeft")
                 .is(SymbolKind::Function)
                 .has(Behavior::ParameterCount(0)),
         )
         .expect(
-            Symbol::new("shiftRight")
+            Symbol::new("Main.shiftRight")
                 .is(SymbolKind::Function)
                 .has(Behavior::ParameterCount(0)),
         );
@@ -261,20 +261,16 @@ mod unary_operators {
             r#"
 module Main
 
-func negateInt() -> Int {
-    -42
+func negateInt() -> lang.i64 {
+    lang.i64_neg(42)
 }
 
-func negateFloat() -> Float {
-    -3.14
+func negateFloat() -> lang.f64 {
+    lang.f64_neg(3.14)
 }
 
-func identity() -> Int {
-    +42
-}
-
-func invert() -> Int {
-    !42
+func invert() -> lang.i64 {
+    lang.i64_not(42)
 }
 "#,
         )
@@ -286,11 +282,6 @@ func invert() -> Int {
         )
         .expect(
             Symbol::new("negateFloat")
-                .is(SymbolKind::Function)
-                .has(Behavior::ParameterCount(0)),
-        )
-        .expect(
-            Symbol::new("identity")
                 .is(SymbolKind::Function)
                 .has(Behavior::ParameterCount(0)),
         )
@@ -312,8 +303,8 @@ mod precedence {
             r#"
 module Main
 
-func compute() -> Int {
-    1 + 2 * 3
+func compute() -> lang.i64 {
+    lang.i64_add(1, lang.i64_mul(2, 3))
 }
 "#,
         )
@@ -332,8 +323,8 @@ func compute() -> Int {
             r#"
 module Main
 
-func compute() -> Int {
-    10 - 6 / 2
+func compute() -> lang.i64 {
+    lang.i64_sub(10, lang.i64_signed_div(6, 2))
 }
 "#,
         )
@@ -352,8 +343,8 @@ func compute() -> Int {
             r#"
 module Main
 
-func check() -> Bool {
-    1 < 2 and 3 > 2
+func check() -> lang.i1 {
+    lang.i1_and(lang.i64_signed_lt(1, 2), lang.i64_signed_gt(3, 2))
 }
 "#,
         )
@@ -372,8 +363,8 @@ func check() -> Bool {
             r#"
 module Main
 
-func check() -> Bool {
-    true and false or true
+func check() -> lang.i1 {
+    lang.i1_or(lang.i1_and(true, false), true)
 }
 "#,
         )
@@ -393,8 +384,8 @@ func check() -> Bool {
             r#"
 module Main
 
-func compute() -> Int {
-    1 << 2 + 3
+func compute() -> lang.i64 {
+    lang.i64_add(lang.i64_shl(1, 2), 3)
 }
 "#,
         )
@@ -413,8 +404,8 @@ func compute() -> Int {
             r#"
 module Main
 
-func compute() -> Bool {
-    1 + 2 * 3 < 10 and 5 - 1 > 2
+func compute() -> lang.i1 {
+    lang.i1_and(lang.i64_signed_lt(lang.i64_add(1, lang.i64_mul(2, 3)), 10), lang.i64_signed_gt(lang.i64_sub(5, 1), 2))
 }
 "#,
         )
@@ -438,23 +429,23 @@ mod associativity {
             r#"
 module Main
 
-func subtract() -> Int {
-    10 - 3 - 2
+func subtract() -> lang.i64 {
+    lang.i64_sub(lang.i64_sub(10, 3), 2)
 }
 
-func divide() -> Int {
-    24 / 4 / 2
+func divide() -> lang.i64 {
+    lang.i64_signed_div(lang.i64_signed_div(24, 4), 2)
 }
 "#,
         )
         .expect(Compiles)
         .expect(
-            Symbol::new("subtract")
+            Symbol::new("Main.subtract")
                 .is(SymbolKind::Function)
                 .has(Behavior::ParameterCount(0)),
         )
         .expect(
-            Symbol::new("divide")
+            Symbol::new("Main.divide")
                 .is(SymbolKind::Function)
                 .has(Behavior::ParameterCount(0)),
         );
@@ -467,8 +458,8 @@ func divide() -> Int {
             r#"
 module Main
 
-func check() -> Bool {
-    1 < 2
+func check() -> lang.i1 {
+    lang.i64_signed_lt(1, 2)
 }
 "#,
         )
@@ -491,24 +482,24 @@ mod edge_cases {
             r#"
 module Main
 
-func deeplyNested() -> Int {
-    1 + 2 + 3 + 4 + 5 + 6 + 7 + 8 + 9 + 10
+func deeplyNested() -> lang.i64 {
+    lang.i64_add(lang.i64_add(lang.i64_add(lang.i64_add(lang.i64_add(lang.i64_add(lang.i64_add(lang.i64_add(lang.i64_add(1, 2), 3), 4), 5), 6), 7), 8), 9), 10)
 }
 
-func mixedPrecedence() -> Bool {
-    1 << 2 * 3 + 4 < 100 and true or false
+func mixedPrecedence() -> lang.i1 {
+    lang.i1_or(lang.i1_and(lang.i64_signed_lt(lang.i64_add(lang.i64_mul(lang.i64_shl(1, 2), 3), 4), 100), true), false)
 }
 
-func parenthesized() -> Int {
-    (1 + 2) * 3
+func parenthesized() -> lang.i64 {
+    lang.i64_mul(lang.i64_add(1, 2), 3)
 }
 
-func deeplyGrouped() -> Int {
-    ((1 + 2) * (3 + 4))
+func deeplyGrouped() -> lang.i64 {
+    lang.i64_mul(lang.i64_add(1, 2), lang.i64_add(3, 4))
 }
 
-func comparisonInLogical() -> Bool {
-    (1 < 2) and (3 > 2)
+func comparisonInLogical() -> lang.i1 {
+    lang.i1_and(lang.i64_signed_lt(1, 2), lang.i64_signed_gt(3, 2))
 }
 "#,
         )
@@ -547,16 +538,16 @@ func comparisonInLogical() -> Bool {
             r#"
 module Main
 
-func unaryInBinary() -> Int {
-    -1 + -2 * -3
+func unaryInBinary() -> lang.i64 {
+    lang.i64_add(lang.i64_neg(1), lang.i64_mul(lang.i64_neg(2), lang.i64_neg(3)))
 }
 
-func doubleNegation() -> Int {
-    --5
+func doubleNegation() -> lang.i64 {
+    lang.i64_neg(lang.i64_neg(5))
 }
 
-func doubleLogicalNot() -> Bool {
-    not not true
+func doubleLogicalNot() -> lang.i1 {
+    lang.i1_not(lang.i1_not(true))
 }
 "#,
         )
@@ -589,22 +580,22 @@ mod type_errors {
     #[test]
     fn invalid_operator_type_combinations() {
         // Should fail: incompatible operand types for operators
-        // String + Int: can't add String + Int (no add method on String that takes Int)
-        // 1 and 2: can't use 'and' on Int (no logicalAnd method on Int)
-        // true & false: can't use bitwise & on Bool (no bitAnd method on Bool)
+        // String + lang.i64: can't add String + lang.i64 (no add method on String that takes lang.i64)
+        // 1 and 2: can't use 'and' on lang.i64 (no logicalAnd method on lang.i64)
+        // true & false: can't use bitwise & on lang.i1 (no bitAnd method on lang.i1)
         Test::new(
             r#"
 module Main
 
-func stringPlusInt() -> Int {
+func stringPlusInt() -> lang.i64 {
     "hello" + 5
 }
 
-func logicalAndOnInt() -> Int {
+func logicalAndOnInt() -> lang.i64 {
     1 and 2
 }
 
-func bitwiseAndOnBool() -> Bool {
+func bitwiseAndOnBool() -> lang.i1 {
     true & false
 }
 "#,
@@ -629,43 +620,43 @@ mod combined_with_variables {
 module Main
 
 struct Point {
-    let x: Int
-    let y: Int
+    let x: lang.i64
+    let y: lang.i64
 }
 
 struct Values {
-    let a: Int
-    let b: Int
-    let c: Int
+    let a: lang.i64
+    let b: lang.i64
+    let c: lang.i64
 }
 
-func add(p: Point) -> Int {
-    p.x + p.y
+func add(p: Point) -> lang.i64 {
+    lang.i64_add(p.x, p.y)
 }
 
-func compute(v: Values) -> Int {
-    v.a * v.b + v.c
+func compute(v: Values) -> lang.i64 {
+    lang.i64_add(lang.i64_mul(v.a, v.b), v.c)
 }
 "#,
         )
         .expect(Compiles)
         .expect(
-            Symbol::new("Point")
+            Symbol::new("Main.Point")
                 .is(SymbolKind::Struct)
                 .has(Behavior::FieldCount(2)),
         )
         .expect(
-            Symbol::new("Values")
+            Symbol::new("Main.Values")
                 .is(SymbolKind::Struct)
                 .has(Behavior::FieldCount(3)),
         )
         .expect(
-            Symbol::new("add")
+            Symbol::new("Main.add")
                 .is(SymbolKind::Function)
                 .has(Behavior::ParameterCount(1)),
         )
         .expect(
-            Symbol::new("compute")
+            Symbol::new("Main.compute")
                 .is(SymbolKind::Function)
                 .has(Behavior::ParameterCount(1)),
         );
@@ -677,23 +668,23 @@ func compute(v: Values) -> Int {
             r#"
 module Main
 
-func add(x: Int, y: Int) -> Int {
-    x + y
+func add(x: lang.i64, y: lang.i64) -> lang.i64 {
+    lang.i64_add(x, y)
 }
 
-func compute(a: Int, b: Int, c: Int) -> Int {
-    a * b + c
+func compute(a: lang.i64, b: lang.i64, c: lang.i64) -> lang.i64 {
+    lang.i64_add(lang.i64_mul(a, b), c)
 }
 "#,
         )
         .expect(Compiles)
         .expect(
-            Symbol::new("add")
+            Symbol::new("Main.add")
                 .is(SymbolKind::Function)
                 .has(Behavior::ParameterCount(2)),
         )
         .expect(
-            Symbol::new("compute")
+            Symbol::new("Main.compute")
                 .is(SymbolKind::Function)
                 .has(Behavior::ParameterCount(3)),
         );

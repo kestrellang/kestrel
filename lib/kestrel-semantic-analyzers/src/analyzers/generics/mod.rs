@@ -142,12 +142,12 @@ fn validate_constraint(
             for bound in bounds {
                 validate_bound_type(bound, ctx);
             }
-        }
+        },
         Constraint::InheritedAssociatedTypeBound { bounds, .. } => {
             for bound in bounds {
                 validate_bound_type(bound, ctx);
             }
-        }
+        },
         Constraint::NegativeBound {
             param,
             param_name,
@@ -168,42 +168,48 @@ fn validate_constraint(
             }
             // Validate the negative bound is a valid protocol
             validate_bound_type(bound, ctx);
-        }
-        Constraint::TypeEquality { .. } => { /* validated elsewhere */ }
+        },
+        Constraint::TypeEquality { .. } => { /* validated elsewhere */ },
+        Constraint::SelfBound { bounds, .. } => {
+            // SelfBound is for protocol extensions - Self is always valid, just validate bounds
+            for bound in bounds {
+                validate_bound_type(bound, ctx);
+            }
+        },
     }
 }
 
 fn validate_bound_type(bound: &kestrel_semantic_tree::ty::Ty, ctx: &mut AnalysisContext) {
     match bound.kind() {
-        TyKind::Protocol { .. } => {}
-        TyKind::Error => {}
+        TyKind::Protocol { .. } => {},
+        TyKind::Error => {},
         TyKind::Struct { symbol, .. } => {
             ctx.report(NonProtocolBoundError {
                 type_name: symbol.metadata().name().value.clone(),
                 type_kind: "struct".to_string(),
                 span: bound.span().clone(),
             });
-        }
+        },
         TyKind::TypeAlias { symbol, .. } => {
             ctx.report(NonProtocolBoundError {
                 type_name: symbol.metadata().name().value.clone(),
                 type_kind: "type alias".to_string(),
                 span: bound.span().clone(),
             });
-        }
+        },
         TyKind::TypeParameter(param) => {
             ctx.report(NonProtocolBoundError {
                 type_name: param.metadata().name().value.clone(),
                 type_kind: "type parameter".to_string(),
                 span: bound.span().clone(),
             });
-        }
+        },
         _ => {
             ctx.report(NonProtocolBoundError {
                 type_name: format!("{:?}", bound.kind()),
                 type_kind: "invalid type".to_string(),
                 span: bound.span().clone(),
             });
-        }
+        },
     }
 }

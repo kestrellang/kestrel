@@ -257,7 +257,7 @@ fn compile_matrix(matrix: &PatternMatrix, ctx: &CompileContext) -> DecisionTree 
 /// Compile a leaf node (matrix width is 0).
 fn compile_leaf(rows: &[PatternRow], ctx: &CompileContext) -> DecisionTree {
     // Find the first row without a guard, or the first row with a guard
-    for row in rows {
+    if let Some(row) = rows.iter().next() {
         // Collect bindings from the ORIGINAL pattern for this arm, not the (possibly empty) row patterns.
         // The row patterns may have been stripped during matrix operations, but the original
         // pattern contains all the binding information we need.
@@ -341,7 +341,7 @@ fn collect_bindings_from_pattern(
                 ty: pattern.ty.clone(),
                 path: path.clone(),
             });
-        }
+        },
 
         PatternKind::At {
             name,
@@ -359,7 +359,7 @@ fn collect_bindings_from_pattern(
             });
             // Also process subpattern bindings
             collect_bindings_from_pattern(subpattern, path, bindings);
-        }
+        },
 
         PatternKind::Tuple { prefix, suffix, .. } => {
             for (i, elem) in prefix.iter().enumerate() {
@@ -375,7 +375,7 @@ fn collect_bindings_from_pattern(
                 elem_path.push(PathElement::Index(prefix_len + i));
                 collect_bindings_from_pattern(elem, &elem_path, bindings);
             }
-        }
+        },
 
         PatternKind::EnumVariant {
             case_name,
@@ -389,7 +389,7 @@ fn collect_bindings_from_pattern(
                 field_path.push(PathElement::Index(i));
                 collect_bindings_from_pattern(&binding.pattern, &field_path, bindings);
             }
-        }
+        },
 
         PatternKind::Struct { fields, .. } => {
             for field in fields {
@@ -397,7 +397,7 @@ fn collect_bindings_from_pattern(
                 field_path.push(PathElement::Field(field.field_name.clone()));
                 collect_bindings_from_pattern(&field.pattern, &field_path, bindings);
             }
-        }
+        },
 
         PatternKind::Array {
             prefix,
@@ -426,7 +426,7 @@ fn collect_bindings_from_pattern(
                 elem_path.push(PathElement::Index(prefix.len() + i));
                 collect_bindings_from_pattern(elem, &elem_path, bindings);
             }
-        }
+        },
 
         PatternKind::Or { alternatives } => {
             // For or-patterns, we need consistent bindings across all alternatives
@@ -434,7 +434,7 @@ fn collect_bindings_from_pattern(
             if let Some(first) = alternatives.first() {
                 collect_bindings_from_pattern(first, path, bindings);
             }
-        }
+        },
 
         PatternKind::Wildcard
         | PatternKind::Literal { .. }
@@ -442,7 +442,7 @@ fn collect_bindings_from_pattern(
         | PatternKind::Rest
         | PatternKind::Error => {
             // No bindings
-        }
+        },
     }
 }
 
@@ -498,21 +498,21 @@ fn specialize_matrix_and_context(
             Constructor::Variant { name, .. } => {
                 field_path.push(PathElement::Downcast(name.clone()));
                 field_path.push(PathElement::Index(i));
-            }
+            },
             Constructor::Tuple { .. } => {
                 field_path.push(PathElement::Index(i));
-            }
+            },
             Constructor::Struct { .. } => {
                 // For structs, we'd ideally use field names, but we don't have them here
                 // This is handled specially during lowering
                 field_path.push(PathElement::Index(i));
-            }
+            },
             Constructor::Array { .. } => {
                 field_path.push(PathElement::Index(i));
-            }
+            },
             _ => {
                 // Literals, booleans, etc. have no sub-fields
-            }
+            },
         }
         new_paths.push(field_path);
     }
@@ -568,7 +568,7 @@ fn get_constructor_field_types(ctor: &Constructor, ty: &Ty) -> Vec<Ty> {
             } else {
                 vec![ty.clone(); *arity]
             }
-        }
+        },
 
         (
             Constructor::Variant { name, arity },
@@ -581,17 +581,16 @@ fn get_constructor_field_types(ctor: &Constructor, ty: &Ty) -> Vec<Ty> {
                 .cases()
                 .iter()
                 .find(|c| c.metadata().name().value == *name)
+                && let Some(cb) = case.callable_behavior()
             {
-                if let Some(cb) = case.callable_behavior() {
-                    return cb
-                        .parameters()
-                        .iter()
-                        .map(|p| substitutions.apply(&p.ty))
-                        .collect();
-                }
+                return cb
+                    .parameters()
+                    .iter()
+                    .map(|p| substitutions.apply(&p.ty))
+                    .collect();
             }
             vec![ty.clone(); *arity]
-        }
+        },
 
         (
             Constructor::Struct { arity, .. },
@@ -628,7 +627,7 @@ fn get_constructor_field_types(ctor: &Constructor, ty: &Ty) -> Vec<Ty> {
             } else {
                 vec![ty.clone(); *arity]
             }
-        }
+        },
 
         (
             Constructor::Array {
@@ -645,7 +644,7 @@ fn get_constructor_field_types(ctor: &Constructor, ty: &Ty) -> Vec<Ty> {
             }
             types.extend(vec![elem_ty; *suffix_len]);
             types
-        }
+        },
 
         _ => vec![ty.clone(); ctor.arity()],
     }
@@ -777,15 +776,15 @@ impl PatternMatrix {
         let mut result = PatternMatrix::new(new_column_types);
 
         for row in &self.rows {
-            if let Some(pattern) = row.patterns.get(col) {
-                if is_wildcard_like(pattern) {
-                    let mut new_patterns = Vec::with_capacity(row.patterns.len() - 1);
-                    new_patterns.extend(row.patterns[..col].iter().cloned());
-                    if col + 1 < row.patterns.len() {
-                        new_patterns.extend(row.patterns[col + 1..].iter().cloned());
-                    }
-                    result.push(PatternRow::new(new_patterns, row.arm_index, row.has_guard));
+            if let Some(pattern) = row.patterns.get(col)
+                && is_wildcard_like(pattern)
+            {
+                let mut new_patterns = Vec::with_capacity(row.patterns.len() - 1);
+                new_patterns.extend(row.patterns[..col].iter().cloned());
+                if col + 1 < row.patterns.len() {
+                    new_patterns.extend(row.patterns[col + 1..].iter().cloned());
                 }
+                result.push(PatternRow::new(new_patterns, row.arm_index, row.has_guard));
             }
         }
 
@@ -821,10 +820,10 @@ fn constructors_compatible(pattern_ctor: &Constructor, target_ctor: &Constructor
             Constructor::IntRange { start: s2, end: e2 },
         ) => {
             s1 <= e2 && s2 <= e1 // Overlapping ranges
-        }
+        },
         (Constructor::IntLiteral(v), Constructor::IntRange { start, end }) => {
             *v >= *start && *v <= *end
-        }
+        },
         (
             Constructor::Array {
                 prefix_len: p1,
@@ -845,7 +844,7 @@ fn constructors_compatible(pattern_ctor: &Constructor, target_ctor: &Constructor
                 (false, true) => min2 <= min1,
                 (false, false) => min1 == min2,
             }
-        }
+        },
         _ => false,
     }
 }
@@ -881,17 +880,17 @@ fn extract_pattern_children(
             } else {
                 prefix.clone()
             }
-        }
+        },
 
         PatternKind::EnumVariant { bindings, .. } => {
             bindings.iter().map(|b| (*b.pattern).clone()).collect()
-        }
+        },
 
         PatternKind::Struct { fields, .. } => {
             // Return patterns for each field in order
             // Missing fields are wildcards
             fields.iter().map(|f| f.pattern.clone()).collect()
-        }
+        },
 
         PatternKind::Array {
             prefix,
@@ -904,7 +903,7 @@ fn extract_pattern_children(
             }
             result.extend(suffix.clone());
             result
-        }
+        },
 
         _ => vec![], // Literals, wildcards, etc. have no children
     }
@@ -917,7 +916,7 @@ mod tests {
     use kestrel_span::Span;
 
     fn test_span() -> Span {
-        Span::from(0..1)
+        Span::new(0, 0..1)
     }
 
     fn bool_ty() -> Ty {
@@ -944,7 +943,7 @@ mod tests {
             } => {
                 assert_eq!(arm_index, 0);
                 assert!(bindings.is_empty());
-            }
+            },
             DecisionTree::Switch { cases, default, .. } => {
                 // Should have no specific cases (no literals matched)
                 assert!(cases.is_empty());
@@ -956,10 +955,10 @@ mod tests {
                     }) => {
                         assert_eq!(*arm_index, 0);
                         assert!(bindings.is_empty());
-                    }
+                    },
                     _ => panic!("Expected default to be Success, got {:?}", default),
                 }
-            }
+            },
             _ => panic!("Expected Success or Switch, got {:?}", tree),
         }
     }
@@ -986,7 +985,7 @@ mod tests {
             DecisionTree::Switch { cases, default, .. } => {
                 assert_eq!(cases.len(), 2);
                 assert!(default.is_none()); // Should be complete
-            }
+            },
             _ => panic!("Expected Switch, got {:?}", tree),
         }
     }
@@ -1009,7 +1008,7 @@ mod tests {
             DecisionTree::Switch { cases, default, .. } => {
                 assert_eq!(cases.len(), 1);
                 assert!(default.is_some()); // Should have default for remaining ints
-            }
+            },
             _ => panic!("Expected Switch, got {:?}", tree),
         }
     }

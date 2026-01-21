@@ -3,6 +3,9 @@ name = "kestrel-test-suite"
 version.workspace = true
 edition.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
 kestrel-span = { path = "../kestrel-span" }
 kestrel-lexer = { path = "../kestrel-lexer" }
@@ -17,5 +20,6 @@ kestrel-execution-graph = { path = "../kestrel-execution-graph" }
 kestrel-execution-graph-lowering = { path = "../kestrel-execution-graph-lowering" }
 kestrel-codegen = { path = "../kestrel-codegen" }
 kestrel-codegen-cranelift = { path = "../kestrel-codegen-cranelift" }
+kestrel-compiler = { path = "../kestrel-compiler" }
 semantic-tree = { path = "../semantic-tree" }
 downcast-rs = { workspace = true }

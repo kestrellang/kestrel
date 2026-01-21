@@ -162,7 +162,7 @@ mod associated_values {
         Test::new(
             r#"module Test
             enum Shape {
-                case Circle(radius: Float)
+                case Circle(radius: lang.f64)
                 case Point
             }
         "#,
@@ -176,8 +176,8 @@ mod associated_values {
         Test::new(
             r#"module Test
             enum Shape {
-                case Rectangle(width: Float, height: Float)
-                case Circle(radius: Float)
+                case Rectangle(width: lang.f64, height: lang.f64)
+                case Circle(radius: lang.f64)
             }
         "#,
         )
@@ -190,9 +190,9 @@ mod associated_values {
         Test::new(
             r#"module Test
             enum Data {
-                case Number(value: Int)
-                case Text(value: String)
-                case Flag(value: Bool)
+                case Number(value: lang.i64)
+                case Text(value: lang.str)
+                case Flag(value: lang.i1)
             }
         "#,
         )
@@ -206,9 +206,9 @@ mod associated_values {
             r#"module Test
             enum Status {
                 case Pending
-                case InProgress(percentage: Int)
+                case InProgress(percentage: lang.i64)
                 case Completed
-                case Failed(reason: String)
+                case Failed(reason: lang.str)
             }
         "#,
         )
@@ -301,7 +301,7 @@ mod generic_enums {
     fn generic_with_type_parameter_defaults() {
         Test::new(
             r#"module Test
-            enum Result[T, E = String] {
+            enum Result[T, E = lang.str] {
                 case Ok(value: T)
                 case Error(error: E)
             }
@@ -363,7 +363,7 @@ mod recursive_enums {
         Test::new(
             r#"module Test
             enum Tree {
-                case Leaf(value: Int)
+                case Leaf(value: lang.i64)
                 case Node(left: Tree, right: Tree)
             }
         "#,
@@ -390,7 +390,7 @@ mod recursive_enums {
             r#"module Test
             enum Simple {
                 case A
-                case B(value: Int)
+                case B(value: lang.i64)
             }
         "#,
         )
@@ -426,7 +426,7 @@ mod future_features {
                 case Node(value: T, next: LinkedList[T])
                 case Empty
 
-                func length() -> Int { return 0; }
+                func length() -> lang.i64 { return 0; }
                 static func createEmpty() -> LinkedList[T] { return .Empty; }
             }
         "#,
@@ -439,12 +439,12 @@ mod future_features {
         Test::new(
             r#"module Test
             protocol Named {
-                func name() -> String
+                func name() -> lang.str
             }
             enum State: Named {
                 case Active
                 case Inactive
-                func name() -> String { return "State"; }
+                func name() -> lang.str { return "State"; }
             }
         "#,
         )
@@ -480,8 +480,8 @@ mod instantiation {
         Test::new(
             r#"module Test
             enum Shape {
-                case Circle(radius: Float)
-                case Rectangle(width: Float, height: Float)
+                case Circle(radius: lang.f64)
+                case Rectangle(width: lang.f64, height: lang.f64)
             }
 
             func getShape() -> Shape {
@@ -502,7 +502,7 @@ mod instantiation {
                 case None
             }
 
-            func getSome() -> Option[Int] {
+            func getSome() -> Option[lang.i64] {
                 Option.Some(value: 42)
             }
         "#,
@@ -539,8 +539,8 @@ mod instantiation {
         Test::new(
             r#"module Test
             enum Shape {
-                case Circle(radius: Float)
-                case Rectangle(width: Float, height: Float)
+                case Circle(radius: lang.f64)
+                case Rectangle(width: lang.f64, height: lang.f64)
             }
 
             func test() {
@@ -618,8 +618,8 @@ mod instantiation {
         Test::new(
             r#"module Test
             enum Event {
-                case Click(x: Int, y: Int)
-                case Scroll(delta: Float)
+                case Click(x: lang.i64, y: lang.i64)
+                case Scroll(delta: lang.f64)
             }
 
             func createEvent() -> Event {
@@ -641,7 +641,7 @@ mod instantiation {
             }
 
             func test() {
-                let x = Option[Int].None;
+                let x = Option[lang.i64].None;
             }
         "#,
         )
@@ -715,7 +715,7 @@ mod error_missing_wrong_label {
         Test::new(
             r#"module Test
             enum Shape {
-                case Circle(radius: Float)
+                case Circle(radius: lang.f64)
             }
 
             func test() -> Shape {
@@ -731,7 +731,7 @@ mod error_missing_wrong_label {
         Test::new(
             r#"module Test
             enum Shape {
-                case Circle(radius: Float)
+                case Circle(radius: lang.f64)
             }
 
             func test() -> Shape {
@@ -747,7 +747,7 @@ mod error_missing_wrong_label {
         Test::new(
             r#"module Test
             enum Shape {
-                case Rectangle(width: Float, height: Float)
+                case Rectangle(width: lang.f64, height: lang.f64)
             }
 
             func test() -> Shape {
@@ -763,7 +763,7 @@ mod error_missing_wrong_label {
         Test::new(
             r#"module Test
             enum Shape {
-                case Rectangle(width: Float, height: Float)
+                case Rectangle(width: lang.f64, height: lang.f64)
             }
 
             func test() -> Shape {
@@ -779,7 +779,7 @@ mod error_missing_wrong_label {
         Test::new(
             r#"module Test
             enum Shape {
-                case Circle(radius: Float)
+                case Circle(radius: lang.f64)
             }
 
             func draw(shape: Shape) { }
@@ -839,7 +839,7 @@ mod error_cannot_infer_shorthand {
         Test::new(
             r#"module Test
             enum Shape {
-                case Circle(radius: Float)
+                case Circle(radius: lang.f64)
             }
 
             func test() {
@@ -859,7 +859,7 @@ mod error_type_mismatch {
         Test::new(
             r#"module Test
             enum Shape {
-                case Circle(radius: Float)
+                case Circle(radius: lang.f64)
             }
 
             func test() -> Shape {
@@ -867,7 +867,7 @@ mod error_type_mismatch {
             }
         "#,
         )
-        .expect(HasError("type mismatch"));
+        .expect(HasError("does not conform to protocol"));
     }
 
     #[test]
@@ -875,7 +875,7 @@ mod error_type_mismatch {
         Test::new(
             r#"module Test
             enum Event {
-                case Click(x: Int, y: Int)
+                case Click(x: lang.i64, y: lang.i64)
             }
 
             func test() -> Event {
@@ -883,7 +883,7 @@ mod error_type_mismatch {
             }
         "#,
         )
-        .expect(HasError("type mismatch"));
+        .expect(HasError("does not conform to protocol"));
     }
 
     #[test]
@@ -895,12 +895,12 @@ mod error_type_mismatch {
                 case None
             }
 
-            func test() -> Option[Int] {
+            func test() -> Option[lang.i64] {
                 Option.Some(value: "hello")
             }
         "#,
         )
-        .expect(HasError("type mismatch"));
+        .expect(HasError("does not conform to protocol"));
     }
 }
 
@@ -912,7 +912,7 @@ mod error_wrong_arity {
         Test::new(
             r#"module Test
             enum Shape {
-                case Rectangle(width: Float, height: Float)
+                case Rectangle(width: lang.f64, height: lang.f64)
             }
 
             func test() -> Shape {
@@ -928,7 +928,7 @@ mod error_wrong_arity {
         Test::new(
             r#"module Test
             enum Shape {
-                case Circle(radius: Float)
+                case Circle(radius: lang.f64)
             }
 
             func test() -> Shape {
@@ -961,7 +961,7 @@ mod error_wrong_arity {
         Test::new(
             r#"module Test
             enum Point {
-                case Location(x: Int, y: Int)
+                case Location(x: lang.i64, y: lang.i64)
             }
 
             func test() -> Point {
@@ -994,8 +994,8 @@ mod error_duplicate_case_name {
         Test::new(
             r#"module Test
             enum Shape {
-                case Circle(radius: Float)
-                case Circle(diameter: Float)
+                case Circle(radius: lang.f64)
+                case Circle(diameter: lang.f64)
             }
         "#,
         )
@@ -1008,7 +1008,7 @@ mod error_duplicate_case_name {
             r#"module Test
             enum Status {
                 case Active
-                case Active(reason: String)
+                case Active(reason: lang.str)
             }
         "#,
         )
@@ -1024,7 +1024,7 @@ mod error_duplicate_label {
         Test::new(
             r#"module Test
             enum Bad {
-                case Foo(x: Int, x: String)
+                case Foo(x: lang.i64, x: lang.str)
             }
         "#,
         )
@@ -1036,7 +1036,7 @@ mod error_duplicate_label {
         Test::new(
             r#"module Test
             enum Point {
-                case Location(x: Int, x: Int)
+                case Location(x: lang.i64, x: lang.i64)
             }
         "#,
         )
@@ -1048,7 +1048,7 @@ mod error_duplicate_label {
         Test::new(
             r#"module Test
             enum Bad {
-                case Triple(a: Int, b: String, a: Bool)
+                case Triple(a: lang.i64, b: lang.str, a: lang.i1)
             }
         "#,
         )
@@ -1167,11 +1167,363 @@ mod edge_cases {
     fn case_keyword_not_valid_as_identifier() {
         Test::new(
             r#"module Test
-            func case() -> Int {
+            func case() -> lang.i64 {
                 42
             }
         "#,
         )
         .expect(Fails);
+    }
+}
+
+mod regression {
+    use super::*;
+
+    /// Regression test for: Inline tuple in `.Some()` fails type inference with generic functions
+    /// Issue: When passing `.Some((tuple))` to a generic function like `func[T](opt: Option[T])`,
+    /// the compiler failed to infer that T should be the tuple type. This happened because:
+    /// 1. The `infer_from_type` function didn't have a case for `TyKind::Enum` to match enum type arguments
+    /// 2. Type parameters that couldn't be inferred weren't getting Infer substitutions, leaving TypeParameter types
+    #[test]
+    fn implicit_member_with_tuple_in_generic_function() {
+        Test::new(
+            r#"module Test
+            public enum Option[T] {
+                case Some(T)
+                case None
+            }
+
+            // Generic function that takes Option[T]
+            public func process[T](opt: Option[T]) -> lang.i64 {
+                match opt {
+                    .Some(_) => 1,
+                    .None => 0
+                }
+            }
+
+            // Test: inline tuple in .Some() with generic function
+            public func test1() -> lang.i64 {
+                process(.Some((5, 10)))
+            }
+
+            // Test: identity function with implicit member
+            public func identity[T](x: Option[T]) -> Option[T] {
+                x
+            }
+
+            public func test2() -> Option[(lang.i64, lang.i64)] {
+                identity(.Some((5, 10)))
+            }
+
+            // Test: with more complex tuple types
+            public func test3() -> lang.i64 {
+                process(.Some((1, 2, 3)))
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    /// Regression test for: Enum cases inherit parent enum's visibility
+    /// Issue: Enum cases were hardcoded to have Internal visibility, making public enum cases
+    /// inaccessible when imported from another module. This caused name resolution errors like
+    /// "'Equal' is not a type" or "undefined name 'Equal'" when trying to use enum cases.
+    /// Root cause: EnumCaseBuilder hardcoded visibility to Internal instead of inheriting from parent.
+    /// Fix: Enum cases now get their visibility from the parent enum's VisibilityBehavior.
+    #[test]
+    fn enum_cases_inherit_parent_visibility() {
+        // Verify enum cases have same visibility as parent in single module
+        Test::new(
+            r#"module Test
+            public enum PublicEnum {
+                case PublicCase
+            }
+
+            private enum PrivateEnum {
+                case PrivateCase
+            }
+
+            internal enum InternalEnum {
+                case InternalCase
+            }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(
+            Symbol::new("PublicEnum")
+                .is(SymbolKind::Enum)
+                .has(Behavior::Visibility(Visibility::Public)),
+        )
+        .expect(
+            Symbol::new("PublicEnum.PublicCase")
+                .is(SymbolKind::EnumCase)
+                .has(Behavior::Visibility(Visibility::Public)),
+        )
+        .expect(
+            Symbol::new("PrivateEnum")
+                .is(SymbolKind::Enum)
+                .has(Behavior::Visibility(Visibility::Private)),
+        )
+        .expect(
+            Symbol::new("PrivateEnum.PrivateCase")
+                .is(SymbolKind::EnumCase)
+                .has(Behavior::Visibility(Visibility::Private)),
+        )
+        .expect(
+            Symbol::new("InternalEnum")
+                .is(SymbolKind::Enum)
+                .has(Behavior::Visibility(Visibility::Internal)),
+        )
+        .expect(
+            Symbol::new("InternalEnum.InternalCase")
+                .is(SymbolKind::EnumCase)
+                .has(Behavior::Visibility(Visibility::Internal)),
+        );
+    }
+
+    /// Regression test for: Public enum cases accessible across modules
+    /// This is part of the same fix - ensures that public enum cases can be imported and used
+    /// in other modules, which was the original symptom of the bug.
+    #[test]
+    fn public_enum_cases_accessible_across_modules() {
+        Test::with_files(&[
+            (
+                "ordering.ks",
+                r#"module Ordering
+                public enum Ordering {
+                    case Less
+                    case Equal
+                    case Greater
+                }
+            "#,
+            ),
+            (
+                "consumer.ks",
+                r#"module Consumer
+                import Ordering.(Ordering)
+
+                public func compare(a: lang.i64, b: lang.i64) -> Ordering {
+                    if lang.i64_signed_lt(a, b) {
+                        Ordering.Less
+                    } else if lang.i64_signed_gt(a, b) {
+                        Ordering.Greater
+                    } else {
+                        Ordering.Equal
+                    }
+                }
+            "#,
+            ),
+        ])
+        .expect(Compiles);
+    }
+}
+
+/// Tests for enum cases without labels (positional parameters).
+/// The feature allows cases like `case Some(T)` instead of `case Some(value: T)`.
+/// Synthetic parameter names `_0`, `_1`, etc. are generated internally.
+mod unlabeled_cases {
+    use super::*;
+
+    #[test]
+    fn single_unlabeled_parameter() {
+        Test::new(
+            r#"module Test
+            enum Option[T] {
+                case Some(T)
+                case None
+            }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("Option").is(SymbolKind::Enum));
+    }
+
+    #[test]
+    fn multiple_unlabeled_parameters() {
+        Test::new(
+            r#"module Test
+            enum Pair[A, B] {
+                case Value(A, B)
+                case Empty
+            }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("Pair").is(SymbolKind::Enum));
+    }
+
+    #[test]
+    fn mixed_labeled_and_unlabeled_cases() {
+        Test::new(
+            r#"module Test
+            enum Message {
+                case Text(lang.str)
+                case Number(value: lang.i64)
+                case Pair(lang.str, lang.i64)
+            }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("Message").is(SymbolKind::Enum));
+    }
+
+    #[test]
+    fn unlabeled_case_construction() {
+        Test::new(
+            r#"module Test
+            enum Option[T] {
+                case Some(T)
+                case None
+            }
+            func wrap(value: lang.i64) -> Option[lang.i64] {
+                Option.Some(value)
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn unlabeled_case_pattern_matching() {
+        Test::new(
+            r#"module Test
+            enum Option[T] {
+                case Some(T)
+                case None
+            }
+            func unwrap(opt: Option[lang.i64]) -> lang.i64 {
+                match opt {
+                    .Some(v) => v,
+                    .None => 0
+                }
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn multiple_unlabeled_pattern_matching() {
+        Test::new(
+            r#"module Test
+            enum Pair[A, B] {
+                case Value(A, B)
+                case Empty
+            }
+            func first(p: Pair[lang.i64, lang.str]) -> lang.i64 {
+                match p {
+                    .Value(a, _b) => a,
+                    .Empty => 0
+                }
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn result_enum_unlabeled() {
+        Test::new(
+            r#"module Test
+            enum Result[T, E] {
+                case Ok(T)
+                case Err(E)
+            }
+            func getValue(r: Result[lang.i64, lang.str]) -> lang.i64 {
+                match r {
+                    .Ok(v) => v,
+                    .Err(_e) => 0
+                }
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn either_enum_unlabeled() {
+        Test::new(
+            r#"module Test
+            enum Either[L, R] {
+                case Left(L)
+                case Right(R)
+            }
+            func fold[L, R, Out](
+                either: Either[L, R],
+                onLeft: (L) -> Out,
+                onRight: (R) -> Out
+            ) -> Out {
+                match either {
+                    .Left(l) => onLeft(l),
+                    .Right(r) => onRight(r)
+                }
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn three_unlabeled_parameters() {
+        Test::new(
+            r#"module Test
+            enum Triple[A, B, C] {
+                case Value(A, B, C)
+                case Empty
+            }
+            func get_middle(t: Triple[lang.i64, lang.str, lang.i1]) -> lang.str {
+                match t {
+                    .Value(_a, b, _c) => b,
+                    .Empty => ""
+                }
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn recursive_enum_unlabeled() {
+        Test::new(
+            r#"module Test
+            indirect enum List[T] {
+                case Cons(T, List[T])
+                case Nil
+            }
+            func head(list: List[lang.i64]) -> lang.i64 {
+                match list {
+                    .Cons(h, _t) => h,
+                    .Nil => 0
+                }
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn nested_unlabeled_enums() {
+        Test::new(
+            r#"module Test
+            enum Inner[T] {
+                case Value(T)
+                case None
+            }
+            enum Outer[T] {
+                case Wrapped(Inner[T])
+                case Empty
+            }
+            func unwrap_nested(o: Outer[lang.i64]) -> lang.i64 {
+                match o {
+                    .Wrapped(inner) => match inner {
+                        .Value(v) => v,
+                        .None => 0
+                    },
+                    .Empty => 0
+                }
+            }
+        "#,
+        )
+        .expect(Compiles);
     }
 }

@@ -20,9 +20,9 @@ mod while_basic {
 module Main
 
 func test() {
-    var x: Int = 0;
-    while x < 10 {
-        x = x + 1;
+    var x: lang.i64 = 0;
+    while lang.i64_signed_lt(x, 10) {
+        x = lang.i64_add(x, 1);
     }
 }
 "#,
@@ -38,10 +38,10 @@ func test() {
             r#"
 module Main
 
-func test() -> Int {
-    var x: Int = 0;
-    while x < 5 {
-        x = x + 1;
+func test() -> lang.i64 {
+    var x: lang.i64 = 0;
+    while lang.i64_signed_lt(x, 5) {
+        x = lang.i64_add(x, 1);
     }
     x
 }
@@ -57,13 +57,13 @@ func test() -> Int {
             r#"
 module Main
 
-func test() -> Int {
-    var x: Int = 0;
-    while x < 5 {
-        x = x + 1;
+func test() -> lang.i64 {
+    var x: lang.i64 = 0;
+    while lang.i64_signed_lt(x, 5) {
+        x = lang.i64_add(x, 1);
     }
-    while x < 10 {
-        x = x + 1;
+    while lang.i64_signed_lt(x, 10) {
+        x = lang.i64_add(x, 1);
     }
     x
 }
@@ -79,8 +79,8 @@ func test() -> Int {
             r#"
 module Main
 
-func test(a: Bool, b: Bool) {
-    while a and b {
+func test(a: lang.i1, b: lang.i1) {
+    while lang.i1_and(a, b) {
         ()
     }
 }
@@ -97,14 +97,14 @@ func test(a: Bool, b: Bool) {
 module Main
 
 func test() {
-    var i: Int = 0;
-    var j: Int = 0;
-    while i < 10 {
+    var i: lang.i64 = 0;
+    var j: lang.i64 = 0;
+    while lang.i64_signed_lt(i, 10) {
         j = 0;
-        while j < 10 {
-            j = j + 1;
+        while lang.i64_signed_lt(j, 10) {
+            j = lang.i64_add(j, 1);
         }
-        i = i + 1;
+        i = lang.i64_add(i, 1);
     }
 }
 "#,
@@ -140,11 +140,11 @@ func test() {
             r#"
 module Main
 
-func test() -> Int {
-    var x: Int = 0;
+func test() -> lang.i64 {
+    var x: lang.i64 = 0;
     loop {
-        x = x + 1;
-        if x > 5 {
+        x = lang.i64_add(x, 1);
+        if lang.i64_signed_gt(x, 5) {
             break;
         }
     }
@@ -204,9 +204,9 @@ func test() {
 module Main
 
 func test() {
-    var x: Int = 0;
-    while x < 10 {
-        x = x + 1;
+    var x: lang.i64 = 0;
+    while lang.i64_signed_lt(x, 10) {
+        x = lang.i64_add(x, 1);
         continue;
     }
 }
@@ -240,10 +240,10 @@ func test() {
 module Main
 
 func test() {
-    var x: Int = 0;
+    var x: lang.i64 = 0;
     loop {
-        x = x + 1;
-        if x > 10 {
+        x = lang.i64_add(x, 1);
+        if lang.i64_signed_gt(x, 10) {
             break;
         }
         continue;
@@ -351,9 +351,9 @@ func test() {
 module Main
 
 func test() {
-    var x: Int = 0;
-    outer: while x < 100 {
-        x = x + 1;
+    var x: lang.i64 = 0;
+    outer: while lang.i64_signed_lt(x, 100) {
+        x = lang.i64_add(x, 1);
         while true {
             continue outer;
         }
@@ -431,7 +431,7 @@ module Main
 
 func test() {
     while true {
-        let x: Int = 42;
+        let x: lang.i64 = 42;
         break;
     }
     x
@@ -450,7 +450,7 @@ module Main
 
 func test() {
     loop {
-        let y: Int = 10;
+        let y: lang.i64 = 10;
         break;
     }
     y
@@ -468,8 +468,8 @@ func test() {
 module Main
 
 func test() {
-    let outer: Int = 10;
-    while outer > 0 {
+    let outer: lang.i64 = 10;
+    while lang.i64_signed_gt(outer, 0) {
         break;
     }
 }
@@ -490,24 +490,24 @@ mod edge_cases {
 module Main
 
 func test() {
-    var a: Int = 0;
-    while a < 10 {
-        var b: Int = 0;
-        while b < 10 {
-            var c: Int = 0;
-            while c < 10 {
-                var d: Int = 0;
+    var a: lang.i64 = 0;
+    while lang.i64_signed_lt(a, 10) {
+        var b: lang.i64 = 0;
+        while lang.i64_signed_lt(b, 10) {
+            var c: lang.i64 = 0;
+            while lang.i64_signed_lt(c, 10) {
+                var d: lang.i64 = 0;
                 loop {
-                    d = d + 1;
-                    if d > 5 {
+                    d = lang.i64_add(d, 1);
+                    if lang.i64_signed_gt(d, 5) {
                         break;
                     }
                 }
-                c = c + 1;
+                c = lang.i64_add(c, 1);
             }
-            b = b + 1;
+            b = lang.i64_add(b, 1);
         }
-        a = a + 1;
+        a = lang.i64_add(a, 1);
     }
 }
 "#,
@@ -523,14 +523,14 @@ func test() {
 module Main
 
 func test() {
-    var x: Int = 0;
-    while x < 10 {
-        if x < 5 {
+    var x: lang.i64 = 0;
+    while lang.i64_signed_lt(x, 10) {
+        if lang.i64_signed_lt(x, 5) {
             loop {
                 break;
             }
         }
-        x = x + 1;
+        x = lang.i64_add(x, 1);
     }
 }
 "#,
@@ -546,13 +546,13 @@ func test() {
 module Main
 
 func test() {
-    var x: Int = 0;
+    var x: lang.i64 = 0;
     if true {
-        while x < 10 {
-            if x == 5 {
+        while lang.i64_signed_lt(x, 10) {
+            if lang.i64_eq(x, 5) {
                 break;
             }
-            x = x + 1;
+            x = lang.i64_add(x, 1);
         }
     }
 }
@@ -569,8 +569,8 @@ func test() {
 module Main
 
 func test() {
-    var x: Int = 0;
-    while x < 0 {
+    var x: lang.i64 = 0;
+    while lang.i64_signed_lt(x, 0) {
     }
 }
 "#,
@@ -603,9 +603,9 @@ func test() {
 module Main
 
 func test() {
-    var counter: Int = 0;
-    while counter < 10 {
-        counter = counter + 1;
+    var counter: lang.i64 = 0;
+    while lang.i64_signed_lt(counter, 10) {
+        counter = lang.i64_add(counter, 1);
     }
 }
 "#,
@@ -620,7 +620,7 @@ func test() {
             r#"
 module Main
 
-func shouldContinue() -> Bool {
+func shouldContinue() -> lang.i1 {
     false
 }
 
@@ -641,12 +641,12 @@ func test() {
             r#"
 module Main
 
-func getValue() -> Int {
+func getValue() -> lang.i64 {
     5
 }
 
-func isValid(x: Int) -> Bool {
-    x > 0
+func isValid(x: lang.i64) -> lang.i1 {
+    lang.i64_signed_gt(x, 0)
 }
 
 func test() {
@@ -666,7 +666,7 @@ func test() {
             r#"
 module Main
 
-func check() -> Bool {
+func check() -> lang.i1 {
     true
 }
 
@@ -688,9 +688,9 @@ func test() {
 module Main
 
 func test() {
-    var x: Int = 0;
+    var x: lang.i64 = 0;
     while true {
-        x = x + 1;
+        x = lang.i64_add(x, 1);
         break
     }
 }
@@ -707,9 +707,9 @@ func test() {
 module Main
 
 func test() {
-    var x: Int = 0;
-    while x < 10 {
-        x = x + 1;
+    var x: lang.i64 = 0;
+    while lang.i64_signed_lt(x, 10) {
+        x = lang.i64_add(x, 1);
         continue
     }
 }
@@ -726,13 +726,13 @@ func test() {
 module Main
 
 func test() {
-    var x: Int = 0;
+    var x: lang.i64 = 0;
     loop {
-        x = x + 1;
-        if x == 5 {
+        x = lang.i64_add(x, 1);
+        if lang.i64_eq(x, 5) {
             break;
         }
-        if x == 10 {
+        if lang.i64_eq(x, 10) {
             break;
         }
     }
@@ -750,13 +750,13 @@ func test() {
 module Main
 
 func test() {
-    var x: Int = 0;
-    while x < 20 {
-        x = x + 1;
-        if x == 5 {
+    var x: lang.i64 = 0;
+    while lang.i64_signed_lt(x, 20) {
+        x = lang.i64_add(x, 1);
+        if lang.i64_eq(x, 5) {
             continue;
         }
-        if x == 10 {
+        if lang.i64_eq(x, 10) {
             continue;
         }
     }
@@ -774,13 +774,13 @@ func test() {
 module Main
 
 func test() {
-    var x: Int = 0;
-    while x < 20 {
-        x = x + 1;
-        if x == 5 {
+    var x: lang.i64 = 0;
+    while lang.i64_signed_lt(x, 20) {
+        x = lang.i64_add(x, 1);
+        if lang.i64_eq(x, 5) {
             continue;
         }
-        if x == 15 {
+        if lang.i64_eq(x, 15) {
             break;
         }
     }
@@ -845,9 +845,9 @@ mod error_cases {
 module Main
 
 func test() {
-    let x: Int = 1;
+    let x: lang.i64 = 1;
     break;
-    let y: Int = 2;
+    let y: lang.i64 = 2;
 }
 "#,
         )
@@ -862,9 +862,9 @@ func test() {
 module Main
 
 func test() {
-    let x: Int = 1;
+    let x: lang.i64 = 1;
     continue;
-    let y: Int = 2;
+    let y: lang.i64 = 2;
 }
 "#,
         )
@@ -938,12 +938,12 @@ func test() {
 module Main
 
 func test() {
-    var x: Int = 0;
-    sibling: while x < 10 {
-        x = x + 1;
+    var x: lang.i64 = 0;
+    sibling: while lang.i64_signed_lt(x, 10) {
+        x = lang.i64_add(x, 1);
     }
-    while x < 20 {
-        x = x + 1;
+    while lang.i64_signed_lt(x, 20) {
+        x = lang.i64_add(x, 1);
         continue sibling;
     }
 }
@@ -998,9 +998,9 @@ func test() {
 module Main
 
 func test() {
-    var x: Int = 0;
-    myloop: while x < 10 {
-        x = x + 1;
+    var x: lang.i64 = 0;
+    myloop: while lang.i64_signed_lt(x, 10) {
+        x = lang.i64_add(x, 1);
         continue myloooop;
     }
 }
@@ -1016,9 +1016,9 @@ func test() {
             r#"
 module Main
 
-func test() -> Int {
+func test() -> lang.i64 {
     while true {
-        let counter: Int = 0;
+        let counter: lang.i64 = 0;
         break;
     }
     counter
@@ -1035,10 +1035,10 @@ func test() -> Int {
             r#"
 module Main
 
-func test() -> Int {
+func test() -> lang.i64 {
     while true {
         loop {
-            let inner: Int = 42;
+            let inner: lang.i64 = 42;
             break;
         }
         inner
@@ -1056,10 +1056,10 @@ func test() -> Int {
             r#"
 module Main
 
-func test() -> Int {
-    let x: Int = 1;
+func test() -> lang.i64 {
+    let x: lang.i64 = 1;
     while true {
-        let x: Int = 2;
+        let x: lang.i64 = 2;
         break;
     }
     x
@@ -1081,14 +1081,14 @@ mod complex_control_flow {
 module Main
 
 func test() {
-    var x: Int = 0;
-    while x < 100 {
-        if x < 10 {
-            x = x + 1;
-        } else if x < 50 {
-            x = x + 5;
+    var x: lang.i64 = 0;
+    while lang.i64_signed_lt(x, 100) {
+        if lang.i64_signed_lt(x, 10) {
+            x = lang.i64_add(x, 1);
+        } else if lang.i64_signed_lt(x, 50) {
+            x = lang.i64_add(x, 5);
         } else {
-            x = x + 10;
+            x = lang.i64_add(x, 10);
         }
     }
 }
@@ -1105,26 +1105,26 @@ func test() {
 module Main
 
 func test() {
-    var x: Int = 0;
-    outer: while x < 100 {
-        var y: Int = 0;
+    var x: lang.i64 = 0;
+    outer: while lang.i64_signed_lt(x, 100) {
+        var y: lang.i64 = 0;
         middle: loop {
-            var z: Int = 0;
-            inner: while z < 10 {
-                z = z + 1;
-                if z == 5 {
+            var z: lang.i64 = 0;
+            inner: while lang.i64_signed_lt(z, 10) {
+                z = lang.i64_add(z, 1);
+                if lang.i64_eq(z, 5) {
                     break inner;
                 }
-                if z == 7 {
+                if lang.i64_eq(z, 7) {
                     break middle;
                 }
             }
-            y = y + 1;
-            if y > 3 {
+            y = lang.i64_add(y, 1);
+            if lang.i64_signed_gt(y, 3) {
                 break outer;
             }
         }
-        x = x + 1;
+        x = lang.i64_add(x, 1);
     }
 }
 "#,
@@ -1140,20 +1140,20 @@ func test() {
 module Main
 
 func test() {
-    var i: Int = 0;
+    var i: lang.i64 = 0;
     outer: loop {
-        i = i + 1;
-        var j: Int = 0;
-        while j < i {
-            j = j + 1;
-            if j == 3 {
+        i = lang.i64_add(i, 1);
+        var j: lang.i64 = 0;
+        while lang.i64_signed_lt(j, i) {
+            j = lang.i64_add(j, 1);
+            if lang.i64_eq(j, 3) {
                 continue;
             }
-            if j == 5 {
+            if lang.i64_eq(j, 5) {
                 continue outer;
             }
         }
-        if i > 10 {
+        if lang.i64_signed_gt(i, 10) {
             break outer;
         }
     }
@@ -1194,19 +1194,19 @@ func test() {
 module Main
 
 func test() {
-    var x: Int = 0;
-    while x < 5 {
+    var x: lang.i64 = 0;
+    while lang.i64_signed_lt(x, 5) {
         loop {
-            var y: Int = 0;
-            while y < 3 {
+            var y: lang.i64 = 0;
+            while lang.i64_signed_lt(y, 3) {
                 loop {
                     break;
                 }
-                y = y + 1;
+                y = lang.i64_add(y, 1);
             }
             break;
         }
-        x = x + 1;
+        x = lang.i64_add(x, 1);
     }
 }
 "#,
@@ -1226,12 +1226,12 @@ mod statements_after_loops {
 module Main
 
 func test() {
-    var x: Int = 0;
-    while x < 10 {
-        while x < 5 {
-            x = x + 1;
+    var x: lang.i64 = 0;
+    while lang.i64_signed_lt(x, 10) {
+        while lang.i64_signed_lt(x, 5) {
+            x = lang.i64_add(x, 1);
         }
-        x = x + 1;
+        x = lang.i64_add(x, 1);
     }
 }
 "#,
@@ -1247,12 +1247,12 @@ func test() {
 module Main
 
 func test() {
-    var x: Int = 0;
-    while x < 10 {
+    var x: lang.i64 = 0;
+    while lang.i64_signed_lt(x, 10) {
         loop {
             break;
         }
-        x = x + 1;
+        x = lang.i64_add(x, 1);
     }
 }
 "#,
@@ -1268,12 +1268,12 @@ func test() {
 module Main
 
 func test() {
-    var x: Int = 0;
-    while x < 10 {
-        if x < 5 {
-            x = x + 2;
+    var x: lang.i64 = 0;
+    while lang.i64_signed_lt(x, 10) {
+        if lang.i64_signed_lt(x, 5) {
+            x = lang.i64_add(x, 2);
         }
-        x = x + 1;
+        x = lang.i64_add(x, 1);
     }
 }
 "#,
@@ -1289,22 +1289,22 @@ func test() {
 module Main
 
 func test() {
-    var x: Int = 0;
-    while x < 100 {
-        if x < 10 {
-            x = x + 1;
+    var x: lang.i64 = 0;
+    while lang.i64_signed_lt(x, 100) {
+        if lang.i64_signed_lt(x, 10) {
+            x = lang.i64_add(x, 1);
         }
-        while x < 20 {
-            x = x + 1;
+        while lang.i64_signed_lt(x, 20) {
+            x = lang.i64_add(x, 1);
         }
         loop {
-            x = x + 1;
+            x = lang.i64_add(x, 1);
             break;
         }
-        if x > 50 {
+        if lang.i64_signed_gt(x, 50) {
             break;
         }
-        x = x + 1;
+        x = lang.i64_add(x, 1);
     }
 }
 "#,
@@ -1320,13 +1320,13 @@ func test() {
 module Main
 
 func test() {
-    var x: Int = 0;
+    var x: lang.i64 = 0;
     loop {
-        while x < 5 {
-            x = x + 1;
+        while lang.i64_signed_lt(x, 5) {
+            x = lang.i64_add(x, 1);
         }
-        x = x + 1;
-        if x > 10 {
+        x = lang.i64_add(x, 1);
+        if lang.i64_signed_gt(x, 10) {
             break;
         }
     }
@@ -1344,23 +1344,64 @@ func test() {
 module Main
 
 func test() {
-    var x: Int = 0;
-    while x < 100 {
+    var x: lang.i64 = 0;
+    while lang.i64_signed_lt(x, 100) {
         if true {
-            while x < 10 {
+            while lang.i64_signed_lt(x, 10) {
                 loop {
                     break;
                 }
-                x = x + 1;
+                x = lang.i64_add(x, 1);
             }
-            x = x + 1;
+            x = lang.i64_add(x, 1);
         }
-        x = x + 1;
+        x = lang.i64_add(x, 1);
     }
 }
 "#,
         )
         .expect(Compiles)
         .expect(Symbol::new("test").is(SymbolKind::Function));
+    }
+}
+
+mod regression {
+    use super::*;
+
+    #[test]
+    fn implicit_member_after_while_not_parsed_as_member_access() {
+        // Regression test for: `while true` with unreachable code after loop causes issues
+        // Previously, `.None` on a newline after a while expression would be parsed
+        // as a member access on the while expression (which returns unit), causing
+        // "undefined name 'None'" error.
+        // Fixed by not skipping trivia before the dot in postfix member access,
+        // requiring the dot to be on the same line as the receiver.
+        Test::new(
+            r#"
+module Main
+
+enum Option[T] {
+    case Some(T)
+    case None
+}
+
+func find(limit: lang.i64) -> Option[lang.i64] {
+    var x: lang.i64 = 0;
+
+    while true {
+        if lang.i64_signed_gt(x, limit) {
+            return .Some(x)
+        }
+        x = lang.i64_add(x, 1);
+    }
+
+    // This is unreachable code (after an infinite loop),
+    // but should not cause a parse/binding error
+    .None
+}
+"#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("find").is(SymbolKind::Function));
     }
 }

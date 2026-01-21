@@ -1,6 +1,6 @@
 //! Statement lowering - converts semantic statements to MIR.
 
-use kestrel_execution_graph::{Immediate, Place, Rvalue, StatementKind as MirStatementKind, Value};
+use kestrel_execution_graph::{Immediate, Place, Rvalue, Value};
 use kestrel_semantic_tree::behavior::executable::CodeBlock;
 use kestrel_semantic_tree::expr::{Expression, IfCondition};
 use kestrel_semantic_tree::pattern::PatternKind;
@@ -9,7 +9,7 @@ use kestrel_semantic_tree::stmt::{Statement, StatementKind};
 use crate::context::LoweringContext;
 use crate::expr::lower_expression;
 use crate::pattern::lower_pattern;
-use crate::ty::lower_type;
+use crate::ty::{lower_type, make_int_immediate};
 
 /// Lower a statement to MIR.
 ///
@@ -61,7 +61,7 @@ pub fn lower_statement(ctx: &mut LoweringContext, stmt: &Statement) {
 
             // Emit deinits for temporaries created during this statement
             ctx.emit_temp_deinits();
-        }
+        },
 
         StatementKind::Expr(expr) => {
             // Lower the expression for its side effects
@@ -70,7 +70,7 @@ pub fn lower_statement(ctx: &mut LoweringContext, stmt: &Statement) {
 
             // Emit deinits for temporaries created during this statement
             ctx.emit_temp_deinits();
-        }
+        },
 
         StatementKind::GuardLet {
             conditions,
@@ -78,7 +78,7 @@ pub fn lower_statement(ctx: &mut LoweringContext, stmt: &Statement) {
         } => {
             lower_guard_let(ctx, conditions, else_block);
             // Note: temp deinits are handled within guard_let due to control flow
-        }
+        },
 
         StatementKind::Deinit { local_id, .. } => {
             // Deinit statement explicitly runs the destructor for a variable.
@@ -97,7 +97,7 @@ pub fn lower_statement(ctx: &mut LoweringContext, stmt: &Statement) {
 
             // Emit deinits for temporaries (though unlikely for `deinit x;`)
             ctx.emit_temp_deinits();
-        }
+        },
     }
 }
 
@@ -151,10 +151,10 @@ fn lower_guard_let(ctx: &mut LoweringContext, conditions: &[IfCondition], else_b
 
     // If there's a yield expression in the else block, lower it
     // (though for guard-let this should be rare since else must diverge)
-    if !ctx.is_block_terminated() {
-        if let Some(yield_expr) = &else_block.yield_expr {
-            let _value = lower_expression(ctx, yield_expr);
-        }
+    if !ctx.is_block_terminated()
+        && let Some(yield_expr) = &else_block.yield_expr
+    {
+        let _value = lower_expression(ctx, yield_expr);
     }
 
     // The else block should have diverged, but if it didn't (which would be
@@ -205,7 +205,7 @@ fn lower_guard_condition_chain(
                 ctx.set_current_block(next_block);
                 lower_guard_condition_chain(ctx, conditions, index + 1, success_block, else_block);
             }
-        }
+        },
 
         IfCondition::Let { pattern, value, .. } => {
             // Guard-let condition: use pattern matching
@@ -218,7 +218,7 @@ fn lower_guard_condition_chain(
                 success_block,
                 else_block,
             );
-        }
+        },
     }
 }
 
@@ -247,7 +247,11 @@ fn lower_guard_let_condition(
             let place = Place::local(scrutinee_local);
             ctx.emit_assign(place.clone(), Rvalue::Use(imm));
             place
-        }
+        },
+        Value::Unreachable => {
+            // Scrutinee diverged, rest of statement is unreachable
+            return;
+        },
     };
 
     // Compile the pattern into a decision tree
@@ -290,7 +294,7 @@ fn emit_guard_let_decision_tree(
 
             // Continue with the rest of the condition chain
             lower_guard_condition_chain(ctx, conditions, index + 1, success_block, else_block);
-        }
+        },
 
         DecisionTree::Switch {
             path,
@@ -310,17 +314,17 @@ fn emit_guard_let_decision_tree(
                 success_block,
                 else_block,
             );
-        }
+        },
 
         DecisionTree::Guard { .. } => {
             // Guards shouldn't appear in guard-let patterns
             ctx.emit_jump(else_block);
-        }
+        },
 
         DecisionTree::Failure => {
             // Pattern didn't match, go to else block
             ctx.emit_jump(else_block);
-        }
+        },
     }
 }
 
@@ -358,7 +362,7 @@ fn emit_guard_let_switch(
                 success_block,
                 else_block,
             );
-        }
+        },
 
         TyKind::Enum { .. } => {
             emit_guard_let_enum_switch(
@@ -372,12 +376,13 @@ fn emit_guard_let_switch(
                 success_block,
                 else_block,
             );
-        }
+        },
 
-        TyKind::Int(_) => {
+        TyKind::Int(int_bits) => {
             emit_guard_let_int_switch(
                 ctx,
                 &switch_place,
+                *int_bits,
                 cases,
                 default,
                 scrutinee,
@@ -386,7 +391,7 @@ fn emit_guard_let_switch(
                 success_block,
                 else_block,
             );
-        }
+        },
 
         TyKind::String => {
             emit_guard_let_string_switch(
@@ -400,7 +405,7 @@ fn emit_guard_let_switch(
                 success_block,
                 else_block,
             );
-        }
+        },
 
         TyKind::Tuple(_) | TyKind::Struct { .. } => {
             // Single constructor types - just recurse into the case
@@ -427,7 +432,7 @@ fn emit_guard_let_switch(
             } else {
                 ctx.emit_jump(else_block);
             }
-        }
+        },
 
         _ => {
             // For other types, try the default or first case
@@ -454,7 +459,7 @@ fn emit_guard_let_switch(
             } else {
                 ctx.emit_jump(else_block);
             }
-        }
+        },
     }
 }
 
@@ -616,6 +621,7 @@ fn emit_guard_let_enum_switch(
 fn emit_guard_let_int_switch(
     ctx: &mut LoweringContext,
     switch_place: &Place,
+    int_bits: kestrel_semantic_tree::ty::IntBits,
     cases: &[(
         kestrel_semantic_pattern_matching::Constructor,
         kestrel_semantic_pattern_matching::DecisionTree,
@@ -664,7 +670,7 @@ fn emit_guard_let_int_switch(
                     Rvalue::BinaryOp {
                         op: BinOp::Eq,
                         lhs: Value::Place(switch_place.clone()),
-                        rhs: Value::Immediate(Immediate::i64(*value)),
+                        rhs: Value::Immediate(make_int_immediate(int_bits, *value)),
                     },
                 );
 
@@ -684,7 +690,7 @@ fn emit_guard_let_int_switch(
 
                 // Continue with next comparison
                 ctx.set_current_block(next_block);
-            }
+            },
 
             Constructor::IntRange { start, end } => {
                 let match_block = ctx.create_block();
@@ -698,7 +704,7 @@ fn emit_guard_let_int_switch(
                     cmp1_place.clone(),
                     Rvalue::BinaryOp {
                         op: BinOp::LeSigned,
-                        lhs: Value::Immediate(Immediate::i64(*start)),
+                        lhs: Value::Immediate(make_int_immediate(int_bits, *start)),
                         rhs: Value::Place(switch_place.clone()),
                     },
                 );
@@ -711,7 +717,7 @@ fn emit_guard_let_int_switch(
                     Rvalue::BinaryOp {
                         op: BinOp::LeSigned,
                         lhs: Value::Place(switch_place.clone()),
-                        rhs: Value::Immediate(Immediate::i64(*end)),
+                        rhs: Value::Immediate(make_int_immediate(int_bits, *end)),
                     },
                 );
 
@@ -741,12 +747,12 @@ fn emit_guard_let_int_switch(
                 );
 
                 ctx.set_current_block(next_block);
-            }
+            },
 
             _ => {
                 // Skip unsupported constructors
                 continue;
-            }
+            },
         }
     }
 

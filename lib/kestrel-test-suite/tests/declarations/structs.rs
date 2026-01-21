@@ -105,7 +105,7 @@ mod nested {
         Test::new(
             r#"module Test
             struct Container {
-                var nested: Int
+                var nested: lang.i64
                 struct Nested {}
             }
         "#,
@@ -129,10 +129,10 @@ mod initializers {
         Test::new(
             r#"module Test
             struct Point {
-                var x: Int
-                var y: Int
+                var x: lang.i64
+                var y: lang.i64
 
-                init(x: Int, y: Int) {
+                init(x: lang.i64, y: lang.i64) {
                     self.x = x;
                     self.y = y;
                 }
@@ -147,7 +147,7 @@ mod initializers {
         Test::new(
             r#"module Test
             struct Counter {
-                var count: Int
+                var count: lang.i64
 
                 init() {
                     self.count = 0;
@@ -163,10 +163,10 @@ mod initializers {
         Test::new(
             r#"module Test
             struct Point {
-                var x: Int
-                var y: Int
+                var x: lang.i64
+                var y: lang.i64
 
-                init(x: Int, y: Int) {
+                init(x: lang.i64, y: lang.i64) {
                     self.x = x;
                     self.y = y;
                 }
@@ -186,9 +186,9 @@ mod initializers {
         Test::new(
             r#"module Test
             struct Point {
-                var x: Int
+                var x: lang.i64
 
-                public init(x: Int) {
+                public init(x: lang.i64) {
                     self.x = x;
                 }
             }
@@ -202,10 +202,10 @@ mod initializers {
         Test::new(
             r#"module Test
             struct Point {
-                var x: Int
-                var y: Int
+                var x: lang.i64
+                var y: lang.i64
 
-                init(atX x: Int, atY y: Int) {
+                init(atX x: lang.i64, atY y: lang.i64) {
                     self.x = x;
                     self.y = y;
                 }
@@ -240,8 +240,8 @@ mod instantiation {
         Test::new(
             r#"module Test
             struct Point {
-                var x: Int
-                var y: Int
+                var x: lang.i64
+                var y: lang.i64
             }
 
             func makePoint() -> Point {
@@ -262,10 +262,10 @@ mod instantiation {
         Test::new(
             r#"module Test
             struct Point {
-                var x: Int
-                var y: Int
+                var x: lang.i64
+                var y: lang.i64
 
-                init(x: Int, y: Int) {
+                init(x x: lang.i64, y y: lang.i64) {
                     self.x = x;
                     self.y = y;
                 }
@@ -284,10 +284,10 @@ mod instantiation {
         Test::new(
             r#"module Test
             struct Point {
-                var x: Int
-                var y: Int
+                var x: lang.i64
+                var y: lang.i64
 
-                init(atX x: Int, atY y: Int) {
+                init(atX x: lang.i64, atY y: lang.i64) {
                     self.x = x;
                     self.y = y;
                 }
@@ -306,10 +306,10 @@ mod instantiation {
         Test::new(
             r#"module Test
             struct Point {
-                var x: Int
-                var y: Int
+                var x: lang.i64
+                var y: lang.i64
 
-                init(x: Int, y: Int) {
+                init(x: lang.i64, y: lang.i64) {
                     self.x = x;
                     self.y = y;
                 }
@@ -319,16 +319,16 @@ mod instantiation {
                     self.y = 0;
                 }
 
-                init(value: Int) {
+                init(value: lang.i64) {
                     self.x = value;
                     self.y = value;
                 }
             }
 
             func test() {
-                let p1 = Point(x: 1, y: 2);
+                let p1 = Point(1, 2);
                 let p2 = Point();
-                let p3 = Point(value: 5);
+                let p3 = Point(5);
             }
         "#,
         )
@@ -340,15 +340,15 @@ mod instantiation {
         Test::new(
             r#"module Test
             struct Single {
-                var value: Int
+                var value: lang.i64
             }
 
             struct Many {
-                var a: Int
-                var b: Int
-                var c: Int
-                var d: Int
-                var e: Int
+                var a: lang.i64
+                var b: lang.i64
+                var c: lang.i64
+                var d: lang.i64
+                var e: lang.i64
             }
 
             func makeSingle() -> Single {
@@ -378,7 +378,7 @@ mod instantiation {
         Test::new(
             r#"module Test
             struct Inner {
-                var value: Int
+                var value: lang.i64
             }
 
             struct Outer {
@@ -405,7 +405,7 @@ mod instantiation {
 
     #[test]
     fn instantiation_in_variable_binding() {
-        Test::new("module Test\nstruct Point { var x: Int\n var y: Int }\nfunc makePoint() -> Point { Point(x: 1, y: 2) }")
+        Test::new("module Test\nstruct Point { var x: lang.i64\n var y: lang.i64 }\nfunc makePoint() -> Point { Point(x: 1, y: 2) }")
         .expect(Compiles)
         .expect(Symbol::new("Point").is(SymbolKind::Struct).has(Behavior::FieldCount(2)));
     }
@@ -415,15 +415,15 @@ mod instantiation {
         Test::new(
             r#"module Test
             struct Point {
-                var x: Int
-                var y: Int
+                var x: lang.i64
+                var y: lang.i64
             }
 
-            func takePoint(p: Point) -> Int {
+            func takePoint(p: Point) -> lang.i64 {
                 42
             }
 
-            func test() -> Int {
+            func test() -> lang.i64 {
                 takePoint(Point(x: 1, y: 2))
             }
         "#,
@@ -446,13 +446,13 @@ mod instantiation {
         Test::new(
             r#"module Test
             struct Immutable {
-                let x: Int
-                let y: Int
+                let x: lang.i64
+                let y: lang.i64
             }
 
             struct Mixed {
-                let id: Int
-                var value: Int
+                let id: lang.i64
+                var value: lang.i64
             }
 
             func makeImmutable() -> Immutable {
@@ -485,11 +485,11 @@ mod instantiation_errors {
     fn calling_function_with_wrong_labels() {
         Test::new(
             r#"module Test
-            func notAStruct() -> Int {
+            func notAStruct() -> lang.i64 {
                 42
             }
 
-            func test() -> Int {
+            func test() -> lang.i64 {
                 notAStruct(x: 1)
             }
         "#,
@@ -502,8 +502,8 @@ mod instantiation_errors {
         Test::new(
             r#"module Test
             struct Point {
-                var x: Int
-                var y: Int
+                var x: lang.i64
+                var y: lang.i64
             }
 
             func test() -> Point {
@@ -519,8 +519,8 @@ mod instantiation_errors {
         Test::new(
             r#"module Test
             struct Point {
-                var x: Int
-                var y: Int
+                var x: lang.i64
+                var y: lang.i64
             }
 
             func test() -> Point {
@@ -536,8 +536,8 @@ mod instantiation_errors {
         Test::new(
             r#"module Test
             struct Point {
-                var x: Int
-                var y: Int
+                var x: lang.i64
+                var y: lang.i64
             }
 
             func test() -> Point {
@@ -554,8 +554,8 @@ mod instantiation_errors {
         Test::new(
             r#"module Test
             struct Point {
-                var x: Int
-                var y: Int
+                var x: lang.i64
+                var y: lang.i64
             }
 
             func test() -> Point {
@@ -577,10 +577,10 @@ mod instantiation_errors {
         Test::new(
             r#"module Test
             struct Point {
-                var x: Int
-                var y: Int
+                var x: lang.i64
+                var y: lang.i64
 
-                init(x: Int, y: Int) {
+                init(x x: lang.i64, y y: lang.i64) {
                     self.x = x;
                     self.y = y;
                 }
@@ -603,10 +603,10 @@ mod initializer_edge_cases {
         Test::new(
             r#"module Test
             struct Point {
-                var x: Int
-                var y: Int
+                var x: lang.i64
+                var y: lang.i64
 
-                init(x: Int, y: Int) {
+                init(x: lang.i64, y: lang.i64) {
                     self.x = x;
                     self.y = y;
                 }
@@ -622,17 +622,17 @@ mod initializer_edge_cases {
         Test::new(
             r#"module Test
             struct Point {
-                var x: Int
-                var y: Int
+                var x: lang.i64
+                var y: lang.i64
 
-                init(xVal: Int, yVal: Int) {
+                init(xVal: lang.i64, yVal: lang.i64) {
                     self.x = xVal;
                     self.y = yVal;
                 }
             }
 
             func test() -> Point {
-                Point(xVal: 1, yVal: 2)
+                Point(1, 2)
             }
         "#,
         )
@@ -644,21 +644,21 @@ mod initializer_edge_cases {
         Test::new(
             r#"module Test
             struct Point {
-                var x: Int
-                var y: Int
+                var x: lang.i64
+                var y: lang.i64
 
-                init(x: Int, y: Int) {
+                init(x: lang.i64, y: lang.i64) {
                     self.x = x;
                     self.y = y;
                 }
             }
 
-            func getInt() -> Int {
+            func getInt() -> lang.i64 {
                 42
             }
 
             func test() -> Point {
-                Point(x: getInt(), y: getInt())
+                Point(getInt(), getInt())
             }
         "#,
         )
@@ -670,11 +670,11 @@ mod initializer_edge_cases {
         Test::new(
             r#"module Test
             struct Point {
-                var x: Int
-                var y: Int
+                var x: lang.i64
+                var y: lang.i64
 
-                init(value: Int) {
-                    let doubled: Int = value;
+                init(value: lang.i64) {
+                    let doubled: lang.i64 = value;
                     self.x = doubled;
                     self.y = doubled;
                 }
@@ -689,19 +689,19 @@ mod initializer_edge_cases {
         Test::new(
             r#"module Test
             struct Point {
-                var x: Int
-                var y: Int
+                var x: lang.i64
+                var y: lang.i64
 
-                init(x: Int, y: Int) {
+                init(x: lang.i64, y: lang.i64) {
                     self.x = x;
                     self.y = y;
                 }
 
-                func sum() -> Int {
+                func sum() -> lang.i64 {
                     self.x
                 }
 
-                func product() -> Int {
+                func product() -> lang.i64 {
                     self.y
                 }
             }

@@ -11,7 +11,8 @@ public class Test {}
 "#;
     let compilation = Compilation::builder()
         .add_source("no_module.ks", no_module_source)
-        .build();
+        .build()
+        .expect("failed to build compilation");
 
     if compilation.has_errors() {
         println!("✓ Error detected as expected!");
@@ -29,7 +30,8 @@ module MyModule
 "#;
     let compilation2 = Compilation::builder()
         .add_source("module_not_first.ks", module_not_first)
-        .build();
+        .build()
+        .expect("failed to build compilation");
 
     if compilation2.has_errors() {
         println!("✓ Error detected as expected!");
@@ -48,7 +50,8 @@ module Third
 "#;
     let compilation3 = Compilation::builder()
         .add_source("multiple_modules.ks", multiple_modules)
-        .build();
+        .build()
+        .expect("failed to build compilation");
 
     if compilation3.has_errors() {
         println!("✓ Error detected as expected!");

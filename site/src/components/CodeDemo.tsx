@@ -1,103 +1,108 @@
-import { FastForward, Play, RotateCcw, X } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { FileCode, Play } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 
 interface CodeExample {
   title: string;
   filename: string;
+  description: string;
   code: string;
   output: string[];
 }
 
 const codeExamples: CodeExample[] = [
   {
-    title: "Sanctuary",
-    filename: "sanctuary.ks",
-    code: `// Code should read like a thought process.
+    title: "Protocols",
+    filename: "json.ks",
+    description: "Define behavior, not inheritance",
+    code: `// Define behavior, not inheritance
 
-let sanctuary = Sanctuary(
-    location: "Highlands",
-    capacity: 50.birds
-)
-
-// The compiler ensures the flock is safe before moving.
-// No nulls. No accidents.
-if sanctuary.isReady {
-    flock.migrate(to: sanctuary, speed: .gliding)
+protocol Serializable {
+    func toJson() -> String
 }
-
-// When the scope ends, resources are quietly released.
-// No garbage collector pauses. Just silence.`,
-    output: ["> Flock migrated safely to Highlands ✓"],
-  },
-  {
-    title: "Self-Documenting",
-    filename: "game.ks",
-    code: `// No more mystery parameters
-let player = Player(
-    named: "Kestrel",
-    at: Position(x: 100, y: 200),
-    withHealth: 100
-)
-
-// Compare to: Player("Kestrel", Position(100, 200), 100)
-// Which one would you rather read at 2am?
-
-player.move(to: Position(x: 150, y: 200), speed: 5.0)
-player.takeDamage(amount: 25, from: "goblin")
-
-print(player.name, "has", player.health, "HP")`,
-    output: ["> Kestrel has 75 HP"],
-  },
-  {
-    title: "Fearless Refactoring",
-    filename: "api.ks",
-    code: `// The compiler catches your mistakes
 
 struct User {
-    let id: Int
+    let name: String
     let email: String
-    let role: Role
 }
 
-enum Role {
-    case admin
-    case member
-    case guest
-}
-
-func permissions(for user: User) -> [Permission] {
-    match user.role {
-        .admin  => Permission.all(),
-        .member => [.read, .write],
-        .guest  => [.read]
-        // Forgot a case? Compiler says no.
+extend User: Serializable {
+    func toJson() -> String {
+        "{ \\"name\\": \\"\(self.name)\\", \\"email\\": \\"\(self.email)\\" }"
     }
-}`,
-    output: ["> Compiled successfully ✓"],
+}
+
+let user = User(name: "Alice", email: "alice@example.com")
+print(user.toJson())`,
+    output: ['{ "name": "Alice", "email": "alice@example.com" }'],
   },
   {
-    title: "No Null. Ever.",
-    filename: "safe.ks",
-    code: `// Optional forces you to handle the absence
+    title: "Pattern Matching",
+    filename: "result.ks",
+    description: "Exhaustive matching, no forgotten cases",
+    code: `// Exhaustive matching, no forgotten cases
 
-func findUser(byId id: Int) -> User? {
-    database.users.find { $0.id == id }
+enum Result[T, E] {
+    case Ok(T)
+    case Err(E)
 }
 
-let user = findUser(byId: 42)
-
-// This won't compile:
-// print(user.name)  // Error: user might be nil
-
-// This will:
-match user {
-    .some(u) => print("Found:", u.name),
-    .none    => print("User not found")
+func divide(a: Int, b: Int) -> Result[Int, String] {
+    if b == 0 {
+        return .Err("division by zero")
+    }
+    .Ok(a / b)
 }
 
-// Or use the ? operator for ergonomics
-let name = user?.name ?? "Anonymous"`,
-    output: ["> Found: Alice"],
+match divide(a: 10, b: 2) {
+    .Ok(value)  => print("Result: \(value)"),
+    .Err(msg)   => print("Error: \(msg)")
+}`,
+    output: ["Result: 5"],
+  },
+  {
+    title: "Generics",
+    filename: "stack.ks",
+    description: "Full parametric polymorphism",
+    code: `// Full parametric polymorphism
+
+struct Stack[T] {
+    var items: Array[T]
+
+    mutating func push(item: T) {
+        self.items.append(item)
+    }
+
+    mutating func pop() -> Option[T] {
+        self.items.pop()
+    }
+}
+
+var stack = Stack[Int](items: [])
+stack.push(item: 1)
+stack.push(item: 2)
+print(stack.pop())  // Some(2)`,
+    output: ["Some(2)"],
+  },
+  {
+    title: "Closures",
+    filename: "filter.ks",
+    description: "First-class functions",
+    code: `// First-class functions with trailing closure syntax
+
+let numbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+
+let evens = numbers
+    .filter { it % 2 == 0 }
+    .map { it * it }
+
+// Equivalent to:
+// .filter { (it) in it % 2 == 0 }
+// .map { (it) in it * it }
+
+for n in evens {
+    print(n)
+}`,
+    output: ["4", "16", "36", "64", "100"],
   },
 ];
 
@@ -114,6 +119,7 @@ function tokenize(code: string): React.ReactNode[] {
     "if",
     "else",
     "for",
+    "in",
     "while",
     "return",
     "import",
@@ -125,6 +131,8 @@ function tokenize(code: string): React.ReactNode[] {
     "false",
     "public",
     "match",
+    "extend",
+    "it",
   ];
   const types = [
     "Int",
@@ -132,12 +140,13 @@ function tokenize(code: string): React.ReactNode[] {
     "String",
     "Bool",
     "Array",
-    "Optional",
+    "Option",
+    "Result",
     "User",
-    "Role",
-    "Permission",
-    "Player",
-    "Position",
+    "Stack",
+    "Serializable",
+    "T",
+    "E",
   ];
 
   const tokens: React.ReactNode[] = [];
@@ -277,12 +286,9 @@ function tokenize(code: string): React.ReactNode[] {
 
 export default function CodeDemo() {
   const [currentExample, setCurrentExample] = useState(0);
-  const [displayedCode, setDisplayedCode] = useState("");
   const [showOutput, setShowOutput] = useState(false);
-  const [isTyping, setIsTyping] = useState(false);
   const [isVisible, setIsVisible] = useState(false);
   const sectionRef = useRef<HTMLElement>(null);
-  const typingRef = useRef<number | null>(null);
 
   useEffect(() => {
     const observer = new IntersectionObserver(
@@ -301,65 +307,23 @@ export default function CodeDemo() {
     return () => observer.disconnect();
   }, [isVisible]);
 
-  const typeCode = useCallback((code: string) => {
-    setIsTyping(true);
-    setShowOutput(false);
-    setDisplayedCode("");
-
-    let index = 0;
-    const typeChar = () => {
-      if (index < code.length) {
-        setDisplayedCode(code.slice(0, index + 1));
-        index++;
-        // Variable speed - faster for whitespace
-        const delay = /\s/.test(code[index - 1]) ? 8 : 18;
-        typingRef.current = window.setTimeout(typeChar, delay);
-      } else {
-        setIsTyping(false);
-        // Show output after a pause
-        typingRef.current = window.setTimeout(() => setShowOutput(true), 500);
-      }
-    };
-
-    typeChar();
-  }, []);
-
-  useEffect(() => {
-    if (isVisible) {
-      typeCode(codeExamples[currentExample].code);
-    }
-
-    return () => {
-      if (typingRef.current) {
-        clearTimeout(typingRef.current);
-      }
-    };
-  }, [currentExample, isVisible, typeCode]);
-
   const handleExampleChange = (index: number) => {
-    if (typingRef.current) {
-      clearTimeout(typingRef.current);
-    }
     setCurrentExample(index);
+    setShowOutput(false);
   };
 
   const example = codeExamples[currentExample];
 
-  const skipTyping = useCallback(() => {
-    if (typingRef.current) {
-      clearTimeout(typingRef.current);
-    }
-    setDisplayedCode(example.code);
-    setIsTyping(false);
-    setTimeout(() => setShowOutput(true), 300);
-  }, [example.code]);
+  const runCode = () => {
+    setShowOutput(true);
+  };
 
   return (
     <section
       ref={sectionRef}
-      className="scroll-section relative bg-[var(--color-slate)] overflow-hidden">
+      className="scroll-section bg-[var(--color-slate)]">
       {/* Subtle pattern */}
-      <div className="absolute inset-0 opacity-[0.05]">
+      <div className="absolute inset-0 opacity-[0.15]">
         <div
           className="absolute inset-0"
           style={{
@@ -383,117 +347,102 @@ export default function CodeDemo() {
             See It In Action
           </span>
           <h2 className="font-serif text-5xl md:text-6xl lg:text-7xl font-black text-white mt-4 tracking-tight">
-            Code That <span className="text-[var(--color-gold)]">Speaks.</span>
+            Expressive <span className="text-[var(--color-gold)]">by Default.</span>
           </h2>
           <p className="mt-4 text-xl text-white/60 font-mono">
-            Watch Kestrel come to life.
+            Clean syntax that reveals intent.
           </p>
         </div>
 
-        {/* Code editor */}
+        {/* IDE-style editor */}
         <div
-          className={`bg-[#1a2a3a] rounded-xl shadow-2xl overflow-hidden transition-all duration-1000 delay-200 max-w-4xl ${
+          className={`bg-[#1a2a3a] rounded-2xl shadow-2xl overflow-hidden transition-all duration-1000 delay-200 max-w-5xl border border-[#0d1a24] ${
             isVisible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-10"
           }`}>
-          {/* Window controls and tabs bar */}
-          <div className="flex items-center bg-[#0d1a24] border-b border-white/5">
-            {/* Window controls */}
-            <div className="flex gap-2 px-4 py-3">
-              <div className="w-3 h-3 rounded-full bg-[var(--color-rust)]" />
-              <div className="w-3 h-3 rounded-full bg-[var(--color-gold)]" />
-              <div className="w-3 h-3 rounded-full bg-[var(--color-forest)]" />
-            </div>
-
-            {/* IDE-style tabs */}
-            <div className="flex-1 flex items-end overflow-x-auto">
-              {codeExamples.map((ex, i) => (
-                <button
-                  key={i}
-                  onClick={() => handleExampleChange(i)}
-                  className={`relative flex items-center gap-2 px-4 py-2 font-mono text-xs transition-all border-r border-white/5 whitespace-nowrap ${
-                    i === currentExample
-                      ? "bg-[#1a2a3a] text-white/90"
-                      : "bg-[#0d1a24] text-white/40 hover:text-white/60 hover:bg-white/5"
-                  }`}>
-                  <span
-                    className={`w-2 h-2 rounded-full flex-shrink-0 ${
-                      i === currentExample
-                        ? "bg-[var(--color-gold)]"
-                        : "bg-white/20"
-                    }`}
-                  />
-                  {ex.filename}
-                  {i === currentExample && (
-                    <X className="w-3 h-3 text-white/30 hover:text-white/60 ml-1 flex-shrink-0" />
-                  )}
-                  {/* Active tab indicator */}
-                  {i === currentExample && (
-                    <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-[var(--color-gold)]" />
-                  )}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Code content */}
-          <div className="p-6 font-mono text-sm leading-relaxed min-h-[400px] overflow-x-auto">
-            <pre className="text-gray-300 whitespace-pre-wrap">
-              {tokenize(displayedCode)}
-              {isTyping && (
-                <span className="cursor-blink text-[var(--color-rust)]">▌</span>
-              )}
-            </pre>
-          </div>
-
-          {/* Console output */}
-          <div
-            className={`border-t border-white/10 transition-all duration-500 ${
-              showOutput ? "opacity-100 max-h-40" : "opacity-0 max-h-0"
-            } overflow-hidden`}>
-            <div className="p-4 bg-black/20">
-              <div className="flex items-center gap-2 mb-2">
-                <Play className="w-3 h-3 text-[var(--color-forest)] fill-[var(--color-forest)]" />
-                <span className="text-[var(--color-forest)] font-mono text-xs">
-                  Output
-                </span>
-              </div>
-              {example.output.map((line, i) => (
-                <div
-                  key={i}
-                  className="font-mono text-sm text-[var(--color-gold)]"
-                  style={{
-                    animation: showOutput
-                      ? `fadeIn 0.3s ease-out ${i * 0.1}s forwards`
-                      : "none",
-                    opacity: 0,
-                  }}>
-                  {line}
+          <div className="flex flex-col">
+            {/* Tab bar */}
+            <div className="flex items-center justify-between pl-4 pr-3 py-2">
+              <div className="flex items-center gap-2">
+                {/* Traffic lights */}
+                <div className="flex gap-2 mr-3">
+                  <div className="w-3.5 h-3.5 rounded-full bg-[#ff5f57] hover:bg-[#ff3b30] transition-colors cursor-pointer" />
+                  <div className="w-3.5 h-3.5 rounded-full bg-[#febc2e] hover:bg-[#f5a623] transition-colors cursor-pointer" />
+                  <div className="w-3.5 h-3.5 rounded-full bg-[#28c840] hover:bg-[#1db954] transition-colors cursor-pointer" />
                 </div>
-              ))}
+                {/* Tabs */}
+                {codeExamples.map((ex, i) => (
+                  <button
+                    key={i}
+                    onClick={() => handleExampleChange(i)}
+                    className={`flex items-center gap-2 px-3.5 py-2 rounded-lg font-mono text-xs transition-colors ${
+                      i === currentExample
+                        ? "bg-[#0d1a24] text-white"
+                        : "text-white/50 hover:text-white/80"
+                    }`}>
+                    <FileCode className="w-4 h-4 flex-shrink-0" />
+                    <span>{ex.filename}</span>
+                  </button>
+                ))}
+              </div>
+              {/* Run button */}
+              <button
+                onClick={runCode}
+                className="p-2.5 rounded-full text-white/80 hover:text-white hover:bg-[#0d1a24] transition-colors"
+                title="Run">
+                <Play className="w-4 h-4 fill-current" />
+              </button>
+            </div>
+
+            {/* Code area */}
+            <div className="flex-1 flex flex-col min-w-0">
+              {/* Code content */}
+              <div className="flex-1 p-6 font-mono text-sm leading-relaxed min-h-[380px] overflow-x-auto">
+                <pre className="text-gray-300 whitespace-pre-wrap">
+                  {tokenize(example.code)}
+                </pre>
+              </div>
+
+              {/* Output */}
+              <div className="px-2 pb-2">
+                <div className="bg-[#0d1a24] rounded-xl p-3 min-h-[80px] font-mono text-white">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-white/50 text-[10px] font-semibold uppercase tracking-wider">Output</span>
+                  </div>
+                  {showOutput && (
+                    <div className="mt-2">
+                      {example.output.map((line, i) => (
+                        <div
+                          key={i}
+                          className="text-sm"
+                          style={{
+                            animation: `fadeIn 0.3s ease-out ${i * 0.1}s forwards`,
+                            opacity: 0,
+                          }}>
+                          {line}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
           </div>
-        </div>
 
-        {/* Controls */}
-        <div
-          className={`mt-6 flex gap-4 transition-all duration-1000 delay-400 ${
-            isVisible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-10"
-          }`}>
-          {isTyping ? (
-            <button
-              onClick={skipTyping}
-              className="inline-flex items-center gap-2 px-4 py-2 text-white/70 font-mono text-sm hover:text-[var(--color-gold)] transition-all">
-              <FastForward className="w-4 h-4" />
-              Skip
-            </button>
-          ) : (
-            <button
-              onClick={() => typeCode(example.code)}
-              className="inline-flex items-center gap-2 px-4 py-2 text-white/70 font-mono text-sm hover:text-[var(--color-gold)] transition-all">
-              <RotateCcw className="w-4 h-4" />
-              Replay
-            </button>
-          )}
+          {/* Mobile file selector */}
+          <div className="md:hidden border-t border-white/10 p-2 flex gap-2 overflow-x-auto bg-[#0d1a24]">
+            {codeExamples.map((ex, i) => (
+              <button
+                key={i}
+                onClick={() => handleExampleChange(i)}
+                className={`px-3 py-1.5 rounded-lg font-mono text-xs whitespace-nowrap transition-colors ${
+                  i === currentExample
+                    ? "bg-[var(--color-gold)] text-[var(--color-slate)]"
+                    : "bg-white/10 text-white/50"
+                }`}>
+                {ex.title}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 

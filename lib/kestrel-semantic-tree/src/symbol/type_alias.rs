@@ -115,7 +115,7 @@ impl TypeAliasSymbol {
         self.metadata
             .get_behavior::<GenericsBehavior>()
             .map(|g| g.where_clause().clone())
-            .unwrap_or_else(WhereClause::new)
+            .unwrap_or_default()
     }
 }
 

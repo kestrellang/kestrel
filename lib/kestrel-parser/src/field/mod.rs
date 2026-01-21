@@ -8,7 +8,7 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use crate::common::{emit_field_declaration, field_declaration_parser_internal};
 use crate::event::{EventSink, TreeBuilder};
-use crate::input::{create_input, prepare_tokens, to_kestrel_span};
+use crate::input::{create_input, prepare_tokens};
 
 /// Represents a field declaration: (visibility)? (static)? let/var name: Type
 ///
@@ -82,6 +82,39 @@ impl FieldDeclaration {
             .children()
             .find(|child| child.kind() == SyntaxKind::Ty)
     }
+
+    /// Check if this is a computed property (has a getter body or accessor clause)
+    pub fn is_computed(&self) -> bool {
+        self.syntax
+            .children()
+            .any(|child| child.kind() == SyntaxKind::PropertyAccessors)
+    }
+
+    /// Get the property accessors node if this is a computed property
+    pub fn property_accessors(&self) -> Option<SyntaxNode> {
+        self.syntax
+            .children()
+            .find(|child| child.kind() == SyntaxKind::PropertyAccessors)
+    }
+
+    /// Get the getter clause if present (for explicit getter syntax)
+    pub fn getter_clause(&self) -> Option<SyntaxNode> {
+        self.property_accessors()?
+            .children()
+            .find(|child| child.kind() == SyntaxKind::GetterClause)
+    }
+
+    /// Get the setter clause if present
+    pub fn setter_clause(&self) -> Option<SyntaxNode> {
+        self.property_accessors()?
+            .children()
+            .find(|child| child.kind() == SyntaxKind::SetterClause)
+    }
+
+    /// Check if this computed property is getter-only (no setter)
+    pub fn is_getter_only(&self) -> bool {
+        self.is_computed() && self.setter_clause().is_none()
+    }
 }
 
 /// Parse a field declaration and emit events
@@ -102,13 +135,13 @@ where
     {
         Ok(data) => {
             emit_field_declaration(sink, data);
-        }
+        },
         Err(errors) => {
             for error in errors {
                 let span = error.span();
-                sink.error_at(format!("Parse error: {:?}", error), to_kestrel_span(*span));
+                sink.error_at(format!("Parse error: {:?}", error), *span);
             }
-        }
+        },
     }
 }
 
@@ -125,13 +158,13 @@ mod tests {
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
 
-        let mut sink = EventSink::new();
+        let mut sink = EventSink::new(0);
         parse_field_declaration(source, tokens.into_iter(), &mut sink);
 
         let tree = TreeBuilder::new(source, sink.into_events()).build();
         let decl = FieldDeclaration {
             syntax: tree,
-            span: Span::from(0..source.len()),
+            span: Span::new(0, 0..source.len()),
         };
 
         assert_eq!(decl.name(), Some("x".to_string()));
@@ -148,13 +181,13 @@ mod tests {
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
 
-        let mut sink = EventSink::new();
+        let mut sink = EventSink::new(0);
         parse_field_declaration(source, tokens.into_iter(), &mut sink);
 
         let tree = TreeBuilder::new(source, sink.into_events()).build();
         let decl = FieldDeclaration {
             syntax: tree,
-            span: Span::from(0..source.len()),
+            span: Span::new(0, 0..source.len()),
         };
 
         assert_eq!(decl.name(), Some("count".to_string()));
@@ -169,13 +202,13 @@ mod tests {
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
 
-        let mut sink = EventSink::new();
+        let mut sink = EventSink::new(0);
         parse_field_declaration(source, tokens.into_iter(), &mut sink);
 
         let tree = TreeBuilder::new(source, sink.into_events()).build();
         let decl = FieldDeclaration {
             syntax: tree,
-            span: Span::from(0..source.len()),
+            span: Span::new(0, 0..source.len()),
         };
 
         assert_eq!(decl.name(), Some("instance".to_string()));
@@ -191,13 +224,13 @@ mod tests {
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
 
-        let mut sink = EventSink::new();
+        let mut sink = EventSink::new(0);
         parse_field_declaration(source, tokens.into_iter(), &mut sink);
 
         let tree = TreeBuilder::new(source, sink.into_events()).build();
         let decl = FieldDeclaration {
             syntax: tree,
-            span: Span::from(0..source.len()),
+            span: Span::new(0, 0..source.len()),
         };
 
         assert_eq!(decl.name(), Some("name".to_string()));
@@ -212,13 +245,13 @@ mod tests {
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
 
-        let mut sink = EventSink::new();
+        let mut sink = EventSink::new(0);
         parse_field_declaration(source, tokens.into_iter(), &mut sink);
 
         let tree = TreeBuilder::new(source, sink.into_events()).build();
         let decl = FieldDeclaration {
             syntax: tree,
-            span: Span::from(0..source.len()),
+            span: Span::new(0, 0..source.len()),
         };
 
         assert_eq!(decl.name(), Some("counter".to_string()));

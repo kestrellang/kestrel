@@ -195,7 +195,7 @@ fn is_wildcard_useful(matrix: &PatternMatrix, query: &PatternRow, ty: &Ty) -> Us
             }
 
             UsefulnessResult::not_useful()
-        }
+        },
         None => {
             // Infinite constructor set: first check if missing_constructors can determine exhaustiveness
             // This handles arrays with rest patterns specially
@@ -229,7 +229,7 @@ fn is_wildcard_useful(matrix: &PatternMatrix, query: &PatternRow, ty: &Ty) -> Us
             } else {
                 is_useful_impl(&default, &default_query)
             }
-        }
+        },
     }
 }
 
@@ -277,7 +277,7 @@ fn specialize_query(query: &PatternRow, ctor: &Constructor, ty: &Ty) -> PatternR
                 .iter()
                 .map(|field_ty| Pattern::wildcard(field_ty.clone(), first.span.clone()))
                 .collect()
-        }
+        },
 
         kestrel_semantic_tree::pattern::PatternKind::Tuple {
             prefix,
@@ -302,11 +302,11 @@ fn specialize_query(query: &PatternRow, ctor: &Constructor, ty: &Ty) -> PatternR
             } else {
                 prefix.clone()
             }
-        }
+        },
 
         kestrel_semantic_tree::pattern::PatternKind::EnumVariant { bindings, .. } => {
             bindings.iter().map(|b| (*b.pattern).clone()).collect()
-        }
+        },
 
         kestrel_semantic_tree::pattern::PatternKind::Struct { fields, .. } => {
             // For struct patterns, we need to return patterns for ALL fields
@@ -354,7 +354,7 @@ fn specialize_query(query: &PatternRow, ctor: &Constructor, ty: &Ty) -> PatternR
                 // Fallback: just return the fields from the pattern
                 fields.iter().map(|f| f.pattern.clone()).collect()
             }
-        }
+        },
 
         kestrel_semantic_tree::pattern::PatternKind::Array {
             prefix,
@@ -464,7 +464,7 @@ fn specialize_query(query: &PatternRow, ctor: &Constructor, ty: &Ty) -> PatternR
                 result.extend(suffix.clone());
                 result
             }
-        }
+        },
 
         kestrel_semantic_tree::pattern::PatternKind::At { subpattern, .. } => {
             // Recurse into the subpattern
@@ -474,7 +474,7 @@ fn specialize_query(query: &PatternRow, ctor: &Constructor, ty: &Ty) -> PatternR
                 query.has_guard,
             );
             return specialize_query(&sub_query, ctor, ty);
-        }
+        },
 
         kestrel_semantic_tree::pattern::PatternKind::Or { alternatives } => {
             // Use first matching alternative
@@ -485,17 +485,17 @@ fn specialize_query(query: &PatternRow, ctor: &Constructor, ty: &Ty) -> PatternR
                 return specialize_query(&alt_query, ctor, ty);
             }
             vec![]
-        }
+        },
 
         kestrel_semantic_tree::pattern::PatternKind::Literal { .. }
         | kestrel_semantic_tree::pattern::PatternKind::Range { .. } => {
             // No sub-patterns for literals and ranges
             vec![]
-        }
+        },
 
         kestrel_semantic_tree::pattern::PatternKind::Error => {
             vec![]
-        }
+        },
     };
 
     // Combine sub-patterns with rest of query
@@ -516,7 +516,7 @@ fn get_constructor_field_types(ctor: &Constructor, ty: &Ty) -> Vec<Ty> {
             } else {
                 vec![ty.clone(); *arity]
             }
-        }
+        },
 
         (
             Constructor::Variant { name, arity },
@@ -529,18 +529,17 @@ fn get_constructor_field_types(ctor: &Constructor, ty: &Ty) -> Vec<Ty> {
                 .cases()
                 .iter()
                 .find(|c| c.metadata().name().value == *name)
+                && let Some(cb) = case.callable_behavior()
             {
-                if let Some(cb) = case.callable_behavior() {
-                    // Apply type substitutions to get concrete types
-                    return cb
-                        .parameters()
-                        .iter()
-                        .map(|p| substitutions.apply(&p.ty))
-                        .collect();
-                }
+                // Apply type substitutions to get concrete types
+                return cb
+                    .parameters()
+                    .iter()
+                    .map(|p| substitutions.apply(&p.ty))
+                    .collect();
             }
             vec![ty.clone(); *arity]
-        }
+        },
 
         (
             Constructor::Struct { arity, .. },
@@ -582,7 +581,7 @@ fn get_constructor_field_types(ctor: &Constructor, ty: &Ty) -> Vec<Ty> {
             } else {
                 vec![ty.clone(); *arity]
             }
-        }
+        },
 
         (
             Constructor::Array {
@@ -599,7 +598,7 @@ fn get_constructor_field_types(ctor: &Constructor, ty: &Ty) -> Vec<Ty> {
             }
             types.extend(vec![elem_ty; *suffix_len]);
             types
-        }
+        },
 
         _ => vec![ty.clone(); ctor.arity()],
     }
@@ -617,7 +616,7 @@ fn ctor_to_witness(ctor: &Constructor, _ty: &Ty) -> Witness {
                 let args = vec![Witness::any(); *arity];
                 Witness::enum_case_with_args(name, args)
             }
-        }
+        },
         Constructor::Tuple { arity } => Witness::tuple(vec![Witness::any(); *arity]),
         Constructor::Struct { name, .. } => Witness::EnumCase {
             name: name.clone(),
@@ -627,7 +626,7 @@ fn ctor_to_witness(ctor: &Constructor, _ty: &Ty) -> Witness {
         Constructor::IntRange { start, .. } => {
             // For ranges, pick the start value as witness
             Witness::integer(*start)
-        }
+        },
         Constructor::CharLiteral(c) => Witness::Literal(format!("'{}'", c)),
         Constructor::CharRange { start, .. } => Witness::Literal(format!("'{}'", start)),
         Constructor::StringLiteral(s) => Witness::string(s),
@@ -643,7 +642,7 @@ fn ctor_to_witness(ctor: &Constructor, _ty: &Ty) -> Witness {
                 elements.push(Witness::any()); // Simplified
             }
             Witness::Array(elements)
-        }
+        },
         Constructor::NonExhaustive | Constructor::Missing => Witness::any(),
     }
 }
@@ -665,7 +664,7 @@ fn wrap_witness_with_constructor(inner: Witness, ctor: &Constructor, _ty: &Ty) -
             } else {
                 Witness::enum_case_with_args(name, args)
             }
-        }
+        },
         Constructor::Tuple { .. } => {
             // Inner should already be the right shape
             match inner {
@@ -673,7 +672,7 @@ fn wrap_witness_with_constructor(inner: Witness, ctor: &Constructor, _ty: &Ty) -
                 Witness::Any => Witness::any(),
                 other => Witness::tuple(vec![other]),
             }
-        }
+        },
         Constructor::Struct { name, .. } => Witness::EnumCase {
             name: format!("{} {{ .. }}", name),
             args: vec![],
@@ -692,7 +691,7 @@ mod tests {
     use kestrel_span::Span;
 
     fn test_span() -> Span {
-        Span::from(0..1)
+        Span::new(0, 0..1)
     }
 
     fn int_ty() -> Ty {

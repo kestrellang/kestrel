@@ -26,8 +26,10 @@ pub struct WitnessDef {
     pub type_params: Vec<Id<TypeParam>>,
     /// Associated type bindings: name -> concrete type.
     pub type_bindings: HashMap<String, Id<Ty>>,
-    /// Method bindings: method name -> implementation function path.
-    pub method_bindings: HashMap<String, Id<QualifiedName>>,
+    /// Method bindings: method name -> (implementation function path, type arguments).
+    /// Type arguments are used when the implementation is a generic function that needs
+    /// to be instantiated (e.g., protocol extension methods with Self type parameter).
+    pub method_bindings: HashMap<String, (Id<QualifiedName>, Vec<Id<Ty>>)>,
 }
 
 impl WitnessDef {
@@ -49,8 +51,18 @@ impl WitnessDef {
     }
 
     /// Bind a method to its implementation.
-    pub fn bind_method(&mut self, name: impl Into<String>, implementation: Id<QualifiedName>) {
-        self.method_bindings.insert(name.into(), implementation);
+    ///
+    /// `type_args` are the type arguments to pass to the implementation function.
+    /// For direct implementations (method on the implementing type), this is empty.
+    /// For protocol extension methods, this typically includes `Self=implementing_type`.
+    pub fn bind_method(
+        &mut self,
+        name: impl Into<String>,
+        implementation: Id<QualifiedName>,
+        type_args: Vec<Id<Ty>>,
+    ) {
+        self.method_bindings
+            .insert(name.into(), (implementation, type_args));
     }
 
     /// Create a display wrapper for printing this witness.
@@ -84,8 +96,19 @@ impl fmt::Display for WitnessDefDisplay<'_> {
             )?;
         }
 
-        for (name, impl_path) in &self.def.method_bindings {
-            writeln!(f, "    func {} = {}", name, self.ctx.name(*impl_path))?;
+        for (name, (impl_path, type_args)) in &self.def.method_bindings {
+            write!(f, "    func {} = {}", name, self.ctx.name(*impl_path))?;
+            if !type_args.is_empty() {
+                write!(f, "[")?;
+                for (i, ty) in type_args.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", self.ctx.ty(*ty).display(self.ctx))?;
+                }
+                write!(f, "]")?;
+            }
+            writeln!(f)?;
         }
 
         write!(f, "}}")

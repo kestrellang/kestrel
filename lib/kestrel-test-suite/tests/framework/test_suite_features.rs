@@ -90,9 +90,9 @@ mod field_count_behavior {
         Test::new(
             r#"module Test
             struct Point {
-                let x: Int
-                let y: Int
-                var z: Float
+                let x: lang.i64
+                let y: lang.i64
+                var z: lang.f64
             }
         "#,
         )
@@ -109,7 +109,7 @@ mod function_behaviors {
         Test::new(
             r#"module Test
             struct Math {
-                static func add(a: Int, b: Int) -> Int { a + b }
+                static func add(a: lang.i64, b: lang.i64) -> lang.i64 { lang.i64_add(a, b) }
             }
         "#,
         )
@@ -129,8 +129,8 @@ mod function_behaviors {
         Test::new(
             r#"module Test
             struct Counter {
-                var value: Int
-                func getValue() -> Int { self.value }
+                var value: lang.i64
+                func getValue() -> lang.i64 { self.value }
             }
         "#,
         )
@@ -266,7 +266,7 @@ mod child_count_behavior {
         Test::new(
             r#"module Test
             struct Widget {
-                let id: Int
+                let id: lang.i64
                 func display() {}
             }
         "#,
@@ -288,7 +288,7 @@ mod prelude {
             import Prelude
 
             struct Handle: not Copyable {
-                var fd: Int
+                var fd: lang.i64
             }
         "#,
         )
@@ -310,7 +310,7 @@ mod prelude {
             import Prelude
 
             struct Handle: not Copyable {
-                var fd: Int
+                var fd: lang.i64
             }
         "#,
         )
@@ -326,7 +326,7 @@ mod prelude {
             import Prelude
 
             struct Data: Cloneable {
-                var value: Int
+                var value: lang.i64
 
                 func clone() -> Data {
                     Data(value: self.value)
@@ -351,7 +351,7 @@ mod prelude {
             protocol Copyable {}
 
             struct Handle: not Copyable {
-                var fd: Int
+                var fd: lang.i64
             }
         "#,
         )
@@ -368,12 +368,98 @@ mod prelude {
             import Prelude
 
             struct Handle: not Copyable {
-                var fd: Int
+                var fd: lang.i64
             }
         "#,
         )
         .with_prelude()
         .expect(Compiles)
         .expect(Symbol::new("Handle").has(Behavior::IsCopyable(false)));
+    }
+}
+
+mod run_expectations {
+    use super::*;
+
+    #[test]
+    fn exit_code_expectation() {
+        // Test that we can verify exit codes
+        Test::new(
+            r#"module Test
+
+            func main() -> lang.i64 {
+                42
+            }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(ExitCode(42));
+    }
+
+    #[test]
+    fn runs_expectation_with_zero_exit() {
+        // Runs expects exit code 0
+        Test::new(
+            r#"module Test
+
+            func main() -> lang.i64 {
+                0
+            }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(Runs);
+    }
+
+    #[test]
+    fn exit_code_from_expression() {
+        // Verify more complex exit codes
+        Test::new(
+            r#"module Test
+
+            func add(a: lang.i64, b: lang.i64) -> lang.i64 {
+                lang.i64_add(a, b)
+            }
+
+            func main() -> lang.i64 {
+                add(20, 22)
+            }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(ExitCode(42));
+    }
+}
+
+mod stdlib {
+    use super::*;
+
+    #[test]
+    fn with_stdlib_loads_stdlib_files() {
+        // Test that with_stdlib() makes stdlib available
+        // Note: This may fail if stdlib has compilation issues, but demonstrates the feature
+        Test::new(
+            r#"module Test
+
+            // Just test that stdlib compiles alongside user code
+            func main() -> lang.i64 {
+                0
+            }
+        "#,
+        )
+        .with_stdlib()
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn without_stdlib_is_default() {
+        // Verify that without_stdlib() is the default behavior
+        Test::new(
+            r#"module Test
+            struct Foo {}
+        "#,
+        )
+        .without_stdlib()
+        .expect(Compiles);
     }
 }

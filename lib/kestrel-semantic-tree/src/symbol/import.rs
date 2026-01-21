@@ -36,7 +36,7 @@ impl ImportSymbol {
 /// Import data behavior stores the parsed import information
 #[derive(Debug)]
 pub struct ImportDataBehavior {
-    /// The module path with spans (e.g., [("A", Span::from(0..1)), ("B", Span::from(2..3)), ("C", Span::from(4..5))])
+    /// The module path with spans (e.g., [("A", Span::new(0, 0..1)), ("B", Span::new(0, 2..3)), ("C", Span::new(0, 4..5))])
     module_path_segments: Vec<(String, Span)>,
     /// Span of the entire module path
     module_path_span: Span,

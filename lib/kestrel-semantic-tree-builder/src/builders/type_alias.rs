@@ -68,7 +68,7 @@ impl Builder for TypeAliasBuilder {
                 }
 
                 Some(symbol_arc_dyn)
-            }
+            },
             TypeAliasContext::Struct | TypeAliasContext::Module => {
                 let placeholder_type = Ty::error(full_span.clone());
                 let syntactic_typed_behavior =
@@ -105,7 +105,7 @@ impl Builder for TypeAliasBuilder {
                 }
 
                 Some(type_alias_arc_dyn)
-            }
+            },
         }
     }
 }
@@ -123,15 +123,15 @@ fn determine_context(parent: Option<&Arc<dyn Symbol<KestrelLanguage>>>) -> TypeA
 
 fn extract_type_alias_name(
     syntax: &SyntaxNode,
-    source: &str,
+    _source: &str,
     file_id: usize,
 ) -> Option<(String, kestrel_span::Span)> {
-    if let Some(target_node) = find_child(syntax, SyntaxKind::AssociatedTypeTarget) {
-        if let Some(name_node) = find_child(&target_node, SyntaxKind::Name) {
-            let name_str = extract_name_from_node(&name_node)?;
-            let name_span = get_node_span(&name_node, file_id);
-            return Some((name_str, name_span));
-        }
+    if let Some(target_node) = find_child(syntax, SyntaxKind::AssociatedTypeTarget)
+        && let Some(name_node) = find_child(&target_node, SyntaxKind::Name)
+    {
+        let name_str = extract_name_from_node(&name_node)?;
+        let name_span = get_node_span(&name_node, file_id);
+        return Some((name_str, name_span));
     }
 
     if let Some(name_node) = find_child(syntax, SyntaxKind::Name) {

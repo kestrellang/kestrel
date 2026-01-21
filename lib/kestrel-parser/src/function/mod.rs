@@ -9,7 +9,7 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use crate::common::{emit_function_declaration, function_declaration_parser_internal};
 use crate::event::{EventSink, TreeBuilder};
-use crate::input::{create_input, prepare_tokens, to_kestrel_span};
+use crate::input::{create_input, prepare_tokens};
 
 /// Represents a function declaration: (visibility)? (static)? fn name[T]?(params) (-> return_type)? (where ...)? { }
 ///
@@ -123,13 +123,13 @@ where
     {
         Ok(data) => {
             emit_function_declaration(sink, data);
-        }
+        },
         Err(errors) => {
             for error in errors {
                 let span = error.span();
-                sink.error_at(format!("Parse error: {:?}", error), to_kestrel_span(*span));
+                sink.error_at(format!("Parse error: {:?}", error), *span);
             }
-        }
+        },
     }
 }
 
@@ -146,13 +146,13 @@ mod tests {
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
 
-        let mut sink = EventSink::new();
+        let mut sink = EventSink::new(0);
         parse_function_declaration(source, tokens.into_iter(), &mut sink);
 
         let tree = TreeBuilder::new(source, sink.into_events()).build();
         let decl = FunctionDeclaration {
             syntax: tree,
-            span: Span::from(0..source.len()),
+            span: Span::new(0, 0..source.len()),
         };
 
         assert_eq!(decl.name(), Some("test".to_string()));
@@ -168,13 +168,13 @@ mod tests {
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
 
-        let mut sink = EventSink::new();
+        let mut sink = EventSink::new(0);
         parse_function_declaration(source, tokens.into_iter(), &mut sink);
 
         let tree = TreeBuilder::new(source, sink.into_events()).build();
         let decl = FunctionDeclaration {
             syntax: tree,
-            span: Span::from(0..source.len()),
+            span: Span::new(0, 0..source.len()),
         };
 
         assert_eq!(decl.name(), Some("greet".to_string()));
@@ -189,13 +189,13 @@ mod tests {
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
 
-        let mut sink = EventSink::new();
+        let mut sink = EventSink::new(0);
         parse_function_declaration(source, tokens.into_iter(), &mut sink);
 
         let tree = TreeBuilder::new(source, sink.into_events()).build();
         let decl = FunctionDeclaration {
             syntax: tree,
-            span: Span::from(0..source.len()),
+            span: Span::new(0, 0..source.len()),
         };
 
         assert_eq!(decl.name(), Some("create".to_string()));
@@ -210,13 +210,13 @@ mod tests {
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
 
-        let mut sink = EventSink::new();
+        let mut sink = EventSink::new(0);
         parse_function_declaration(source, tokens.into_iter(), &mut sink);
 
         let tree = TreeBuilder::new(source, sink.into_events()).build();
         let decl = FunctionDeclaration {
             syntax: tree,
-            span: Span::from(0..source.len()),
+            span: Span::new(0, 0..source.len()),
         };
 
         assert_eq!(decl.name(), Some("add".to_string()));
@@ -231,13 +231,13 @@ mod tests {
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
 
-        let mut sink = EventSink::new();
+        let mut sink = EventSink::new(0);
         parse_function_declaration(source, tokens.into_iter(), &mut sink);
 
         let tree = TreeBuilder::new(source, sink.into_events()).build();
         let decl = FunctionDeclaration {
             syntax: tree,
-            span: Span::from(0..source.len()),
+            span: Span::new(0, 0..source.len()),
         };
 
         assert_eq!(decl.name(), Some("greet".to_string()));
@@ -252,13 +252,13 @@ mod tests {
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
 
-        let mut sink = EventSink::new();
+        let mut sink = EventSink::new(0);
         parse_function_declaration(source, tokens.into_iter(), &mut sink);
 
         let tree = TreeBuilder::new(source, sink.into_events()).build();
         let decl = FunctionDeclaration {
             syntax: tree,
-            span: Span::from(0..source.len()),
+            span: Span::new(0, 0..source.len()),
         };
 
         assert_eq!(decl.name(), Some("multiply".to_string()));
@@ -273,13 +273,13 @@ mod tests {
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
 
-        let mut sink = EventSink::new();
+        let mut sink = EventSink::new(0);
         parse_function_declaration(source, tokens.into_iter(), &mut sink);
 
         let tree = TreeBuilder::new(source, sink.into_events()).build();
         let decl = FunctionDeclaration {
             syntax: tree,
-            span: Span::from(0..source.len()),
+            span: Span::new(0, 0..source.len()),
         };
 
         assert_eq!(decl.name(), Some("identity".to_string()));
@@ -294,13 +294,13 @@ mod tests {
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
 
-        let mut sink = EventSink::new();
+        let mut sink = EventSink::new(0);
         parse_function_declaration(source, tokens.into_iter(), &mut sink);
 
         let tree = TreeBuilder::new(source, sink.into_events()).build();
         let decl = FunctionDeclaration {
             syntax: tree,
-            span: Span::from(0..source.len()),
+            span: Span::new(0, 0..source.len()),
         };
 
         assert_eq!(decl.name(), Some("compare".to_string()));
@@ -316,13 +316,13 @@ mod tests {
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
 
-        let mut sink = EventSink::new();
+        let mut sink = EventSink::new(0);
         parse_function_declaration(source, tokens.into_iter(), &mut sink);
 
         let tree = TreeBuilder::new(source, sink.into_events()).build();
         let decl = FunctionDeclaration {
             syntax: tree,
-            span: Span::from(0..source.len()),
+            span: Span::new(0, 0..source.len()),
         };
 
         assert_eq!(decl.name(), Some("calculate".to_string()));
@@ -340,7 +340,7 @@ mod tests {
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
 
-        let mut sink = EventSink::new();
+        let mut sink = EventSink::new(0);
         parse_function_declaration(source, tokens.into_iter(), &mut sink);
 
         let events = sink.into_events();
@@ -359,7 +359,7 @@ mod tests {
         let tree = TreeBuilder::new(source, events).build();
         let decl = FunctionDeclaration {
             syntax: tree,
-            span: Span::from(0..source.len()),
+            span: Span::new(0, 0..source.len()),
         };
 
         assert_eq!(decl.name(), Some("example".to_string()));

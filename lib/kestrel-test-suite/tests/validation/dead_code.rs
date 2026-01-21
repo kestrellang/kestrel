@@ -16,9 +16,9 @@ mod after_return {
             r#"
 module Main
 
-func test() -> Int {
+func test() -> lang.i64 {
     return 42;
-    let x: Int = 1;
+    let x: lang.i64 = 1;
     x
 }
 "#,
@@ -33,8 +33,8 @@ func test() -> Int {
             r#"
 module Main
 
-func test() -> Int {
-    return 1 + 2;
+func test() -> lang.i64 {
+    return lang.i64_add(1, 2);
     return 3;
 }
 "#,
@@ -49,7 +49,7 @@ func test() -> Int {
             r#"
 module Main
 
-func test() -> Int {
+func test() -> lang.i64 {
     return 42
 }
 "#,
@@ -65,7 +65,7 @@ func test() -> Int {
             r#"
 module Main
 
-func test(cond: Bool) -> Int {
+func test(cond: lang.i1) -> lang.i64 {
     if cond {
         return 1;
     }
@@ -83,7 +83,7 @@ func test(cond: Bool) -> Int {
             r#"
 module Main
 
-func test(cond: Bool) -> Int {
+func test(cond: lang.i1) -> lang.i64 {
     if cond {
         return 1;
     } else {
@@ -110,7 +110,7 @@ module Main
 func test() {
     loop {
         break;
-        let x: Int = 1;
+        let x: lang.i64 = 1;
     }
 }
 "#,
@@ -126,11 +126,11 @@ func test() {
 module Main
 
 func test() {
-    var i: Int = 0;
-    while i < 10 {
-        i = i + 1;
+    var i: lang.i64 = 0;
+    while lang.i64_signed_lt(i, 10) {
+        i = lang.i64_add(i, 1);
         continue;
-        let x: Int = 1;
+        let x: lang.i64 = 1;
     }
 }
 "#,
@@ -147,7 +147,7 @@ module Main
 
 func test() {
     loop {
-        let x: Int = 1;
+        let x: lang.i64 = 1;
         break;
     }
 }
@@ -167,7 +167,7 @@ mod infinite_loop {
             r#"
 module Main
 
-func test() -> Int {
+func test() -> lang.i64 {
     loop {
         ()
     }
@@ -185,7 +185,7 @@ func test() -> Int {
             r#"
 module Main
 
-func test() -> Int {
+func test() -> lang.i64 {
     loop {
         break;
     }
@@ -203,7 +203,7 @@ func test() -> Int {
             r#"
 module Main
 
-func test(cond: Bool) -> Int {
+func test(cond: lang.i1) -> lang.i64 {
     loop {
         if cond {
             break;
@@ -223,7 +223,7 @@ func test(cond: Bool) -> Int {
             r#"
 module Main
 
-func test() -> Int {
+func test() -> lang.i64 {
     loop {
         return 1;
     }
@@ -245,13 +245,13 @@ mod nested_control_flow {
             r#"
 module Main
 
-func test() -> Int {
-    var i: Int = 0;
-    while i < 10 {
-        if i == 5 {
+func test() -> lang.i64 {
+    var i: lang.i64 = 0;
+    while lang.i64_signed_lt(i, 10) {
+        if lang.i64_eq(i, 5) {
             return i;
         }
-        i = i + 1;
+        i = lang.i64_add(i, 1);
     }
     0
 }
@@ -267,14 +267,14 @@ func test() -> Int {
             r#"
 module Main
 
-func test(a: Bool, b: Bool) -> Int {
+func test(a: lang.i1, b: lang.i1) -> lang.i64 {
     if a {
         if b {
             return 1;
         } else {
             return 2;
         }
-        let x: Int = 3;
+        let x: lang.i64 = 3;
     }
     0
 }

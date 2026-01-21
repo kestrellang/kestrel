@@ -8,6 +8,7 @@
 //! - Field access on structs
 //! - Control flow (if/else, while/loop, break/continue, return)
 //! - Closures and anonymous functions
+//! - Protocol-based operator overloading
 
 mod body_literals;
 mod calls;
@@ -17,4 +18,7 @@ mod field_access;
 mod loops;
 mod operators;
 mod paths;
+mod protocol_operators;
 mod returns;
+mod strings;
+mod try_operator;

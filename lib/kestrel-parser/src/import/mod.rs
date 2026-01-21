@@ -4,7 +4,7 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use crate::common::{emit_import_declaration, import_declaration_parser_internal};
 use crate::event::EventSink;
-use crate::input::{create_input, prepare_tokens, to_kestrel_span};
+use crate::input::{create_input, prepare_tokens};
 use crate::module::ModulePath;
 
 /// Represents an import declaration
@@ -98,15 +98,15 @@ where
     {
         Ok((import_span, path_segments, alias, items)) => {
             emit_import_declaration(sink, import_span, &path_segments, alias, items);
-        }
+        },
         Err(errors) => {
             // Emit error events for each parse error
             for error in errors {
                 // Chumsky errors have span information
                 let span = error.span();
-                sink.error_at(format!("Parse error: {:?}", error), to_kestrel_span(*span));
+                sink.error_at(format!("Parse error: {:?}", error), *span);
             }
-        }
+        },
     }
 }
 
@@ -124,13 +124,13 @@ mod tests {
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
 
-        let mut sink = EventSink::new();
+        let mut sink = EventSink::new(0);
         parse_import_declaration(source, tokens.into_iter(), &mut sink);
 
         let tree = TreeBuilder::new(source, sink.into_events()).build();
         let decl = ImportDeclaration {
             syntax: tree,
-            span: Span::from(0..source.len()),
+            span: Span::new(0, 0..source.len()),
         };
 
         assert_eq!(decl.path().segment_names(), vec!["A", "B", "C"]);
@@ -146,13 +146,13 @@ mod tests {
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
 
-        let mut sink = EventSink::new();
+        let mut sink = EventSink::new(0);
         parse_import_declaration(source, tokens.into_iter(), &mut sink);
 
         let tree = TreeBuilder::new(source, sink.into_events()).build();
         let decl = ImportDeclaration {
             syntax: tree,
-            span: Span::from(0..source.len()),
+            span: Span::new(0, 0..source.len()),
         };
 
         assert_eq!(decl.path().segment_names(), vec!["A", "B", "C"]);
@@ -168,13 +168,13 @@ mod tests {
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
 
-        let mut sink = EventSink::new();
+        let mut sink = EventSink::new(0);
         parse_import_declaration(source, tokens.into_iter(), &mut sink);
 
         let tree = TreeBuilder::new(source, sink.into_events()).build();
         let decl = ImportDeclaration {
             syntax: tree,
-            span: Span::from(0..source.len()),
+            span: Span::new(0, 0..source.len()),
         };
 
         assert_eq!(decl.path().segment_names(), vec!["A", "B", "C"]);
@@ -208,13 +208,13 @@ mod tests {
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
 
-        let mut sink = EventSink::new();
+        let mut sink = EventSink::new(0);
         parse_import_declaration(source, tokens.into_iter(), &mut sink);
 
         let tree = TreeBuilder::new(source, sink.into_events()).build();
         let decl = ImportDeclaration {
             syntax: tree,
-            span: Span::from(0..source.len()),
+            span: Span::new(0, 0..source.len()),
         };
 
         assert_eq!(decl.path().segment_names(), vec!["A", "B", "C"]);

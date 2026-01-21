@@ -50,7 +50,10 @@ pub struct LayoutCache<'a> {
     ctx: &'a MirContext,
     target: &'a TargetConfig,
     cache: HashMap<Id<Ty>, Layout>,
-    struct_layouts: HashMap<Id<Struct>, StructLayout>,
+    /// Cache for struct layouts, keyed by (struct_id, type_args) to handle generic instantiations.
+    struct_layouts: HashMap<(Id<Struct>, Vec<Id<Ty>>), StructLayout>,
+    /// Cache for enum layouts, keyed by (enum_id, type_args) to handle generic instantiations.
+    enum_layouts: HashMap<(Id<kestrel_execution_graph::Enum>, Vec<Id<Ty>>), Layout>,
 }
 
 /// Layout information for a struct including field offsets.
@@ -70,6 +73,7 @@ impl<'a> LayoutCache<'a> {
             target,
             cache: HashMap::new(),
             struct_layouts: HashMap::new(),
+            enum_layouts: HashMap::new(),
         }
     }
 
@@ -85,12 +89,16 @@ impl<'a> LayoutCache<'a> {
     }
 
     /// Get the layout of a struct with field offsets.
-    pub fn struct_layout(&mut self, struct_id: Id<Struct>) -> &StructLayout {
-        if !self.struct_layouts.contains_key(&struct_id) {
-            let layout = self.compute_struct_layout(struct_id);
-            self.struct_layouts.insert(struct_id, layout);
+    ///
+    /// `type_args` are the concrete type arguments for generic structs (e.g., `[Int]` for `Box[Int]`).
+    /// For non-generic structs, pass an empty slice.
+    pub fn struct_layout(&mut self, struct_id: Id<Struct>, type_args: &[Id<Ty>]) -> &StructLayout {
+        let key = (struct_id, type_args.to_vec());
+        if !self.struct_layouts.contains_key(&key) {
+            let layout = self.compute_struct_layout(struct_id, type_args);
+            self.struct_layouts.insert(key.clone(), layout);
         }
-        &self.struct_layouts[&struct_id]
+        &self.struct_layouts[&key]
     }
 
     /// Compute the layout of a type.
@@ -116,9 +124,6 @@ impl<'a> LayoutCache<'a> {
             // Pointers and references are pointer-sized
             MirTy::Pointer(_) | MirTy::Ref(_) | MirTy::RefMut(_) => Layout::new(ptr_size, ptr_size),
 
-            // Array is thin pointer (for now)
-            MirTy::Array(_) => Layout::new(ptr_size, ptr_size),
-
             // Tuple: lay out fields sequentially
             MirTy::Tuple(elems) => {
                 let elems = elems.clone();
@@ -128,16 +133,18 @@ impl<'a> LayoutCache<'a> {
                     (_, layout) = layout.append(field_layout);
                 }
                 layout.pad_to_align()
-            }
+            },
 
             // Named types need struct/enum lookup
-            MirTy::Named { name, type_args: _ } => {
+            MirTy::Named { name, type_args } => {
+                // Clone type_args to avoid borrowing issues
+                let type_args = type_args.clone();
                 // Look up struct by name
                 let name_data = self.ctx.name(*name);
                 for (id, def) in self.ctx.structs.iter() {
                     let def_name = self.ctx.name(def.name);
                     if def_name == name_data {
-                        let struct_layout = self.compute_struct_layout(id);
+                        let struct_layout = self.compute_struct_layout(id, &type_args);
                         return struct_layout.layout;
                     }
                 }
@@ -145,37 +152,68 @@ impl<'a> LayoutCache<'a> {
                 for (id, def) in self.ctx.enums.iter() {
                     let def_name = self.ctx.name(def.name);
                     if def_name == name_data {
-                        return self.compute_enum_layout(id);
+                        return self.compute_enum_layout(id, &type_args);
                     }
                 }
                 // Unknown named type - use pointer size as fallback
                 Layout::new(ptr_size, ptr_size)
-            }
+            },
 
-            // Type parameters are resolved at monomorphization
-            MirTy::TypeParam(_) => Layout::new(ptr_size, ptr_size),
+            // Type parameters should be substituted before layout computation
+            MirTy::TypeParam(tp) => {
+                panic!(
+                    "TypeParam {:?} reached layout computation without substitution - this is a bug",
+                    tp
+                )
+            },
 
             // Function pointers
             MirTy::FuncThin { .. } => Layout::new(ptr_size, ptr_size),
             // Thick callable: function pointer + environment pointer
             MirTy::FuncThick { .. } => Layout::new(ptr_size * 2, ptr_size),
 
-            // Self type - resolved at monomorphization
-            MirTy::SelfType => Layout::new(ptr_size, ptr_size),
+            // Self type should be substituted before layout computation
+            MirTy::SelfType => {
+                panic!("SelfType reached layout computation without substitution - this is a bug")
+            },
 
-            // Associated type projection - resolved at monomorphization
-            MirTy::AssociatedTypeProjection { .. } => Layout::new(ptr_size, ptr_size),
+            // Associated type projection should be resolved before layout computation
+            MirTy::AssociatedTypeProjection {
+                base,
+                protocol,
+                associated,
+            } => {
+                panic!(
+                    "AssociatedTypeProjection (base={:?}, protocol={:?}, associated={}) reached layout computation without resolution - this is a bug",
+                    base, protocol, associated
+                )
+            },
 
             // Error type
             MirTy::Error => Layout::zero(1),
         }
     }
 
-    /// Compute layout for a struct.
-    fn compute_struct_layout(&mut self, struct_id: Id<Struct>) -> StructLayout {
+    /// Compute layout for a struct with type argument substitution.
+    ///
+    /// For generic structs like `Box[T]`, the `type_args` (e.g., `[Int]`) are used to
+    /// substitute type parameters in field types before computing their layouts.
+    fn compute_struct_layout(
+        &mut self,
+        struct_id: Id<Struct>,
+        type_args: &[Id<Ty>],
+    ) -> StructLayout {
         let struct_def = self.ctx.struct_def(struct_id);
-        // Clone the field IDs to avoid borrowing issues
+        // Clone the field IDs and type_params to avoid borrowing issues
         let field_ids: Vec<_> = struct_def.fields.clone();
+        let type_params: Vec<_> = struct_def.type_params.clone();
+
+        // Build substitution map: type_param_id -> concrete_type
+        let subst: HashMap<_, _> = type_params
+            .iter()
+            .zip(type_args.iter())
+            .map(|(&tp, &ty)| (tp, ty))
+            .collect();
 
         let mut layout = Layout::zero(1);
         let mut field_offsets = HashMap::new();
@@ -183,7 +221,8 @@ impl<'a> LayoutCache<'a> {
         for field_id in field_ids {
             let field_def = &self.ctx.fields[field_id];
             let field_name = field_def.name.clone();
-            let field_layout = self.layout_of(field_def.ty);
+            // Compute field layout with substitution applied
+            let field_layout = self.layout_of_with_subst(field_def.ty, &subst);
             let offset;
             (offset, layout) = layout.append(field_layout);
             field_offsets.insert(field_name, offset);
@@ -195,8 +234,132 @@ impl<'a> LayoutCache<'a> {
         }
     }
 
-    /// Compute layout for an enum (tagged union).
-    fn compute_enum_layout(&mut self, enum_id: Id<kestrel_execution_graph::Enum>) -> Layout {
+    /// Compute layout for a type with substitution applied.
+    ///
+    /// This recursively computes layout while substituting type parameters with concrete types.
+    /// Unlike looking up substituted types (which might not be interned), this directly computes
+    /// the layout based on the structure of the type.
+    fn layout_of_with_subst(
+        &mut self,
+        ty: Id<Ty>,
+        subst: &HashMap<Id<kestrel_execution_graph::TypeParam>, Id<Ty>>,
+    ) -> Layout {
+        if subst.is_empty() {
+            return self.layout_of(ty);
+        }
+
+        let ptr_size = self.target.pointer_size();
+
+        match self.ctx.ty(ty) {
+            // Type parameter - look up in substitution and compute its layout
+            MirTy::TypeParam(tp) => {
+                if let Some(&concrete_ty) = subst.get(tp) {
+                    self.layout_of(concrete_ty)
+                } else {
+                    panic!(
+                        "TypeParam {:?} reached layout computation without substitution - this is a bug",
+                        tp
+                    )
+                }
+            },
+
+            // For Named types, recursively substitute type_args and compute layout
+            MirTy::Named { name, type_args } => {
+                // Substitute type_args
+                let new_args: Vec<_> = type_args
+                    .iter()
+                    .map(|&arg| self.substitute_type_for_layout(arg, subst))
+                    .collect();
+
+                // Look up the struct/enum by name and compute layout with substituted type_args
+                let name_data = self.ctx.name(*name);
+
+                // Try to find struct
+                for (id, def) in self.ctx.structs.iter() {
+                    let def_name = self.ctx.name(def.name);
+                    if def_name == name_data {
+                        return self.compute_struct_layout(id, &new_args).layout;
+                    }
+                }
+
+                // Try to find enum
+                for (id, def) in self.ctx.enums.iter() {
+                    let def_name = self.ctx.name(def.name);
+                    if def_name == name_data {
+                        return self.compute_enum_layout(id, &new_args);
+                    }
+                }
+
+                // Unknown named type - use pointer size as fallback
+                Layout::new(ptr_size, ptr_size)
+            },
+
+            // Pointer/Ref types - always pointer-sized
+            MirTy::Pointer(_) | MirTy::Ref(_) | MirTy::RefMut(_) => Layout::new(ptr_size, ptr_size),
+
+            // Tuple - substitute each element and compute layout
+            MirTy::Tuple(elems) => {
+                let elems = elems.clone();
+                let mut layout = Layout::zero(1);
+                for elem in elems {
+                    let elem_layout = self.layout_of_with_subst(elem, subst);
+                    (_, layout) = layout.append(elem_layout);
+                }
+                layout.pad_to_align()
+            },
+
+            // All other types - compute layout normally
+            _ => self.layout_of(ty),
+        }
+    }
+
+    /// Substitute type parameters in a type, returning the best available type ID.
+    /// Used only for computing type_args to pass to struct/enum layout computation.
+    fn substitute_type_for_layout(
+        &self,
+        ty: Id<Ty>,
+        subst: &HashMap<Id<kestrel_execution_graph::TypeParam>, Id<Ty>>,
+    ) -> Id<Ty> {
+        if subst.is_empty() {
+            return ty;
+        }
+
+        match self.ctx.ty(ty) {
+            // Type parameter - look up in substitution
+            MirTy::TypeParam(tp) => subst.get(tp).copied().unwrap_or(ty),
+
+            // For other types, we need to recursively substitute
+            // But for layout purposes, we can just return the original if the substituted
+            // version isn't interned - the layout computation will handle it
+            _ => ty,
+        }
+    }
+
+    /// Get the layout of an enum (tagged union).
+    ///
+    /// `type_args` are the concrete type arguments for generic enums (e.g., `[Int]` for `Option[Int]`).
+    /// For non-generic enums, pass an empty slice.
+    pub fn enum_layout(
+        &mut self,
+        enum_id: Id<kestrel_execution_graph::Enum>,
+        type_args: &[Id<Ty>],
+    ) -> Layout {
+        let key = (enum_id, type_args.to_vec());
+        if let Some(&layout) = self.enum_layouts.get(&key) {
+            return layout;
+        }
+
+        let layout = self.compute_enum_layout(enum_id, type_args);
+        self.enum_layouts.insert(key, layout);
+        layout
+    }
+
+    /// Compute layout for an enum (tagged union) with type argument substitution.
+    fn compute_enum_layout(
+        &mut self,
+        enum_id: Id<kestrel_execution_graph::Enum>,
+        type_args: &[Id<Ty>],
+    ) -> Layout {
         let enum_def = self.ctx.enum_def(enum_id);
         // Clone case IDs to avoid borrowing issues
         let case_ids: Vec<_> = enum_def.cases.clone();
@@ -211,7 +374,9 @@ impl<'a> LayoutCache<'a> {
             // Each case has an associated payload struct
             // First try the direct struct_def reference if available
             if let Some(struct_id) = case_def.struct_def {
-                let payload_layout = self.compute_struct_layout(struct_id).layout;
+                // Pass the enum's type_args to the payload struct layout
+                // The payload struct's type params correspond to the enum's type params
+                let payload_layout = self.compute_struct_layout(struct_id, type_args).layout;
                 if payload_layout.size > max_payload.size {
                     max_payload = payload_layout;
                 }
@@ -220,7 +385,7 @@ impl<'a> LayoutCache<'a> {
                 let case_name = self.ctx.name(case_def.struct_name);
                 for (id, def) in self.ctx.structs.iter() {
                     if self.ctx.name(def.name) == case_name {
-                        let payload_layout = self.compute_struct_layout(id).layout;
+                        let payload_layout = self.compute_struct_layout(id, type_args).layout;
                         if payload_layout.size > max_payload.size {
                             max_payload = payload_layout;
                         }

@@ -152,6 +152,7 @@ fn variable_declaration_parser<'tokens>()
                 }
             },
         )
+        .boxed()
 }
 
 /// Parser for expression statement
@@ -159,10 +160,12 @@ fn variable_declaration_parser<'tokens>()
 /// Syntax: expr ;
 fn expression_statement_parser<'tokens>()
 -> impl Parser<'tokens, ParserInput<'tokens>, (ExprVariant, Span), ParserExtra<'tokens>> + Clone {
-    expr_parser().then(
-        skip_trivia()
-            .ignore_then(just(Token::Semicolon).map_with(|_, e| to_kestrel_span(e.span()))),
-    )
+    expr_parser()
+        .then(
+            skip_trivia()
+                .ignore_then(just(Token::Semicolon).map_with(|_, e| to_kestrel_span(e.span()))),
+        )
+        .boxed()
 }
 
 /// Parser for deinit statement
@@ -187,6 +190,7 @@ fn deinit_statement_parser<'tokens>()
                 semicolon,
             },
         )
+        .boxed()
 }
 
 /// Parser for statements
@@ -208,7 +212,7 @@ pub fn stmt_parser<'tokens>()
         expression_statement_parser().map(|(expr, semi)| StmtVariant::Expression(expr, semi));
 
     // Try variable declaration first, then deinit statement, then expression statement
-    var_decl.or(deinit_stmt).or(expr_stmt)
+    var_decl.or(deinit_stmt).or(expr_stmt).boxed()
 }
 
 /// Emit events for any statement variant
@@ -216,13 +220,13 @@ pub fn emit_stmt_variant(sink: &mut EventSink, variant: &StmtVariant) {
     match variant {
         StmtVariant::VariableDeclaration(data) => {
             emit_variable_declaration(sink, data);
-        }
+        },
         StmtVariant::Expression(expr, semicolon) => {
             emit_expression_statement(sink, expr, semicolon.clone());
-        }
+        },
         StmtVariant::Deinit(data) => {
             emit_deinit_statement(sink, data);
-        }
+        },
     }
 }
 
@@ -296,13 +300,13 @@ where
     match stmt_parser().parse(input).into_result() {
         Ok(variant) => {
             emit_stmt_variant(sink, &variant);
-        }
+        },
         Err(errors) => {
             for error in errors {
                 let span = error.span();
-                sink.error_at(format!("Parse error: {:?}", error), to_kestrel_span(*span));
+                sink.error_at(format!("Parse error: {:?}", error), *span);
             }
-        }
+        },
     }
 }
 
@@ -317,13 +321,13 @@ mod tests {
             .map(|spanned| (spanned.value, spanned.span))
             .collect();
 
-        let mut sink = EventSink::new();
+        let mut sink = EventSink::new(0);
         parse_stmt(source, tokens.into_iter(), &mut sink);
 
         let tree = TreeBuilder::new(source, sink.into_events()).build();
         Statement {
             syntax: tree,
-            span: Span::from(0..source.len()),
+            span: Span::new(0, 0..source.len()),
         }
     }
 

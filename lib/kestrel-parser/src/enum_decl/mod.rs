@@ -13,7 +13,7 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use crate::common::{EnumDeclarationData, emit_enum_declaration};
 use crate::event::{EventSink, TreeBuilder};
-use crate::input::{ParserExtra, ParserInput, create_input, prepare_tokens, to_kestrel_span};
+use crate::input::{ParserExtra, ParserInput, create_input, prepare_tokens};
 use crate::type_decl::enum_declaration_parser_unified;
 
 use chumsky::prelude::*;
@@ -136,13 +136,13 @@ where
     {
         Ok(data) => {
             emit_enum_declaration(sink, data);
-        }
+        },
         Err(errors) => {
             for error in errors {
                 let span = error.span();
-                sink.error_at(format!("Parse error: {:?}", error), to_kestrel_span(*span));
+                sink.error_at(format!("Parse error: {:?}", error), *span);
             }
-        }
+        },
     }
 }
 
@@ -157,12 +157,12 @@ mod tests {
             .filter_map(|t| t.ok())
             .map(|spanned| (spanned.value, spanned.span))
             .collect();
-        let mut sink = EventSink::new();
+        let mut sink = EventSink::new(0);
         parse_enum_declaration(source, tokens.into_iter(), &mut sink);
         let tree = TreeBuilder::new(source, sink.into_events()).build();
         EnumDeclaration {
             syntax: tree,
-            span: Span::from(0..source.len()),
+            span: Span::new(0, 0..source.len()),
         }
     }
 
@@ -229,6 +229,48 @@ mod tests {
             .children()
             .any(|c| c.kind() == SyntaxKind::EnumCaseParameterList);
         assert!(has_param_list);
+    }
+
+    #[test]
+    fn test_enum_case_with_unnamed_parameter() {
+        // Unnamed parameter: just Type without label
+        let decl = parse("enum Option[T] { case Some(T) case None }");
+        let cases = decl.cases();
+        assert_eq!(cases.len(), 2);
+
+        // Check that Some has parameters
+        let some_case = &cases[0];
+        let has_param_list = some_case
+            .children()
+            .any(|c| c.kind() == SyntaxKind::EnumCaseParameterList);
+        assert!(has_param_list);
+
+        // Check that None has no parameters
+        let none_case = &cases[1];
+        let none_has_params = none_case
+            .children()
+            .any(|c| c.kind() == SyntaxKind::EnumCaseParameterList);
+        assert!(!none_has_params);
+    }
+
+    #[test]
+    fn test_enum_case_with_multiple_unnamed_parameters() {
+        let decl = parse("enum Pair[A, B] { case Both(A, B) }");
+        let cases = decl.cases();
+        assert_eq!(cases.len(), 1);
+
+        let case_node = &cases[0];
+        let param_list = case_node
+            .children()
+            .find(|c| c.kind() == SyntaxKind::EnumCaseParameterList);
+        assert!(param_list.is_some());
+
+        let param_count = param_list
+            .unwrap()
+            .children()
+            .filter(|c| c.kind() == SyntaxKind::EnumCaseParameter)
+            .count();
+        assert_eq!(param_count, 2);
     }
 
     #[test]
@@ -303,5 +345,48 @@ mod tests {
         assert_eq!(children.len(), 2);
         assert_eq!(children[0].kind(), SyntaxKind::EnumCaseDeclaration);
         assert_eq!(children[1].kind(), SyntaxKind::InitializerDeclaration);
+    }
+
+    #[test]
+    fn test_enum_with_computed_property() {
+        // Test multiline computed property in enum
+        let decl = parse(
+            "enum Optional[T] {
+                case Some(T)
+                case None
+                public var isSome: Bool {
+                    get {
+                        true
+                    }
+                }
+            }",
+        );
+        let children = decl.children();
+        assert_eq!(children.len(), 3);
+        assert_eq!(children[0].kind(), SyntaxKind::EnumCaseDeclaration);
+        assert_eq!(children[1].kind(), SyntaxKind::EnumCaseDeclaration);
+        assert_eq!(children[2].kind(), SyntaxKind::FieldDeclaration);
+    }
+
+    #[test]
+    fn test_enum_with_shorthand_computed_property() {
+        // Test shorthand computed property (just a block, no get/set)
+        let decl = parse(
+            "enum Optional[T] {
+                case Some(T)
+                case None
+                public var isSome: Bool {
+                    match self {
+                        .Some(_) => true,
+                        .None => false
+                    }
+                }
+            }",
+        );
+        let children = decl.children();
+        assert_eq!(children.len(), 3);
+        assert_eq!(children[0].kind(), SyntaxKind::EnumCaseDeclaration);
+        assert_eq!(children[1].kind(), SyntaxKind::EnumCaseDeclaration);
+        assert_eq!(children[2].kind(), SyntaxKind::FieldDeclaration);
     }
 }

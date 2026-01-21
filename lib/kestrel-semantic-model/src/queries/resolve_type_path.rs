@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use kestrel_prelude::primitives;
+use kestrel_prelude::lang;
 use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
 use kestrel_semantic_tree::behavior::extension_target::ExtensionTargetBehavior;
 use kestrel_semantic_tree::behavior::generics::GenericsBehavior;
@@ -23,7 +23,7 @@ use crate::resolution::{SymbolResolution, TypePathResolution};
 /// Resolve a type path to a Type.
 ///
 /// Handles:
-/// - Primitive types (Int, Bool, String, etc.)
+/// - Built-in lang scalar types (lang.i1, lang.i64, lang.f64, lang.str, etc.)
 /// - User-defined types via scope resolution
 /// - Type parameters
 /// - Associated types (including T.Item style)
@@ -43,12 +43,12 @@ impl Query for ResolveTypePath {
             };
         }
 
-        // Handle built-in primitive types
-        if self.path.len() == 1 {
-            let segment = &self.path[0];
-            if let Some(ty) = resolve_primitive_type(segment, Span::from(0..0)) {
-                return TypePathResolution::Resolved(ty);
-            }
+        // Handle built-in types that don't exist as real symbols.
+        //
+        // - `Self`
+        // - `lang.*` scalar types (i1/i8/.../f16/f32/f64/str)
+        if let Some(ty) = resolve_builtin_type_path(&self.path, Span::new(0, 0..0)) {
+            return TypePathResolution::Resolved(ty);
         }
 
         // First segment: use scope-aware name resolution
@@ -67,57 +67,55 @@ impl Query for ResolveTypePath {
                             segment: first.clone(),
                             index: 0,
                         };
-                    }
+                    },
                 }
-            }
+            },
             SymbolResolution::Found(ids) => {
                 return TypePathResolution::Ambiguous {
                     segment: first.clone(),
                     index: 0,
                     candidates: ids,
                 };
-            }
+            },
             SymbolResolution::Ambiguous(ids) => {
                 return TypePathResolution::Ambiguous {
                     segment: first.clone(),
                     index: 0,
                     candidates: ids,
                 };
-            }
+            },
             SymbolResolution::NotFound => {
                 return TypePathResolution::NotFound {
                     segment: first.clone(),
                     index: 0,
                 };
-            }
+            },
         };
 
         // Subsequent segments: search visible children
         for (index, segment) in self.path.iter().enumerate().skip(1) {
             // Special case: if current symbol is a TypeParameter, look up associated types
             // from its protocol bounds (e.g., T.Item where T: Iterator)
-            if current_symbol.metadata().kind() == KestrelSymbolKind::TypeParameter {
-                if let Some(symbol) = model.query(SymbolFor {
+            if current_symbol.metadata().kind() == KestrelSymbolKind::TypeParameter
+                && let Some(symbol) = model.query(SymbolFor {
                     id: current_symbol.metadata().id(),
-                }) {
-                    if let Ok(type_param_arc) = symbol
-                        .clone()
-                        .into_any_arc()
-                        .downcast::<TypeParameterSymbol>()
-                    {
-                        // Use context (the function/struct where this type is being resolved)
-                        // instead of type_param's parent, since the parent may not be set correctly
-                        if let Some(result) = resolve_associated_type_from_type_param_with_context(
-                            model,
-                            &type_param_arc,
-                            segment,
-                            &self.path[index..],
-                            index,
-                            self.context,
-                        ) {
-                            return result;
-                        }
-                    }
+                })
+                && let Ok(type_param_arc) = symbol
+                    .clone()
+                    .into_any_arc()
+                    .downcast::<TypeParameterSymbol>()
+            {
+                // Use context (the function/struct where this type is being resolved)
+                // instead of type_param's parent, since the parent may not be set correctly
+                if let Some(result) = resolve_associated_type_from_type_param_with_context(
+                    model,
+                    &type_param_arc,
+                    segment,
+                    &self.path[index..],
+                    index,
+                    self.context,
+                ) {
+                    return result;
                 }
             }
 
@@ -133,46 +131,42 @@ impl Query for ResolveTypePath {
                         segment: segment.clone(),
                         index,
                     };
-                }
+                },
                 1 => {
                     current_symbol = matches.into_iter().next().unwrap();
-                }
+                },
                 _ => {
                     return TypePathResolution::Ambiguous {
                         segment: segment.clone(),
                         index,
                         candidates: matches.iter().map(|s| s.metadata().id()).collect(),
                     };
-                }
+                },
             }
         }
 
         // Handle TypeParameterSymbol specially
-        if current_symbol.metadata().kind() == KestrelSymbolKind::TypeParameter {
-            if let Some(symbol) = model.query(SymbolFor {
+        if current_symbol.metadata().kind() == KestrelSymbolKind::TypeParameter
+            && let Some(symbol) = model.query(SymbolFor {
                 id: current_symbol.metadata().id(),
-            }) {
-                if let Ok(type_param_arc) = symbol.into_any_arc().downcast::<TypeParameterSymbol>()
-                {
-                    let span = type_param_arc.metadata().span().clone();
-                    let ty = Ty::type_parameter(type_param_arc, span);
-                    return TypePathResolution::Resolved(ty);
-                }
-            }
+            })
+            && let Ok(type_param_arc) = symbol.into_any_arc().downcast::<TypeParameterSymbol>()
+        {
+            let span = type_param_arc.metadata().span().clone();
+            let ty = Ty::type_parameter(type_param_arc, span);
+            return TypePathResolution::Resolved(ty);
         }
 
         // Handle AssociatedTypeSymbol specially
-        if current_symbol.metadata().kind() == KestrelSymbolKind::AssociatedType {
-            if let Some(symbol) = model.query(SymbolFor {
+        if current_symbol.metadata().kind() == KestrelSymbolKind::AssociatedType
+            && let Some(symbol) = model.query(SymbolFor {
                 id: current_symbol.metadata().id(),
-            }) {
-                if let Ok(assoc_type_arc) = symbol.into_any_arc().downcast::<AssociatedTypeSymbol>()
-                {
-                    let span = assoc_type_arc.metadata().span().clone();
-                    let ty = Ty::associated_type(assoc_type_arc, span);
-                    return TypePathResolution::Resolved(ty);
-                }
-            }
+            })
+            && let Ok(assoc_type_arc) = symbol.into_any_arc().downcast::<AssociatedTypeSymbol>()
+        {
+            let span = assoc_type_arc.metadata().span().clone();
+            let ty = Ty::associated_type(assoc_type_arc, span);
+            return TypePathResolution::Resolved(ty);
         }
 
         // Extract type from TypedBehavior
@@ -204,20 +198,37 @@ impl Query for ResolveTypePath {
     }
 }
 
-/// Resolve a primitive type name to its semantic type
-fn resolve_primitive_type(name: &str, span: Span) -> Option<Ty> {
+/// Resolve a built-in type path (that doesn't exist as a real symbol) to its semantic type.
+fn resolve_builtin_type_path(path: &[String], span: Span) -> Option<Ty> {
+    if path.len() == 1 && path[0] == "Self" {
+        return Some(Ty::self_type(span));
+    }
+
+    // Support `lang.i1`, `lang.i64`, `lang.f16`, `lang.str`, etc.
+    if path.len() == 2 && path[0] == lang::LANG {
+        return resolve_lang_scalar_type(&path[1], span);
+    }
+
+    None
+}
+
+fn resolve_lang_scalar_type(name: &str, span: Span) -> Option<Ty> {
     match name {
-        primitives::INT => Some(Ty::int(IntBits::I64, span)),
-        primitives::I8 => Some(Ty::int(IntBits::I8, span)),
-        primitives::I16 => Some(Ty::int(IntBits::I16, span)),
-        primitives::I32 => Some(Ty::int(IntBits::I32, span)),
-        primitives::I64 => Some(Ty::int(IntBits::I64, span)),
-        primitives::FLOAT => Some(Ty::float(FloatBits::F64, span)),
-        primitives::F32 => Some(Ty::float(FloatBits::F32, span)),
-        primitives::F64 => Some(Ty::float(FloatBits::F64, span)),
-        primitives::BOOL => Some(Ty::bool(span)),
-        primitives::STRING => Some(Ty::string(span)),
-        primitives::SELF_TYPE => Some(Ty::self_type(span)),
+        lang::I1 => Some(Ty::bool(span)),
+
+        lang::I8 => Some(Ty::int(IntBits::I8, span)),
+        lang::I16 => Some(Ty::int(IntBits::I16, span)),
+        lang::I32 => Some(Ty::int(IntBits::I32, span)),
+        lang::I64 => Some(Ty::int(IntBits::I64, span)),
+
+        // Note: unsigned scalar names exist in kestrel_prelude::lang, but Kestrel's semantic
+        // Ty currently models "IntBits" (signed) for built-in integers. We can add unsigned
+        // semantics later if/when the type system grows an unsigned integer kind.
+        lang::F16 => Some(Ty::float(FloatBits::F16, span)),
+        lang::F32 => Some(Ty::float(FloatBits::F32, span)),
+        lang::F64 => Some(Ty::float(FloatBits::F64, span)),
+
+        lang::STR => Some(Ty::string(span)),
         _ => None,
     }
 }
@@ -289,40 +300,37 @@ fn resolve_associated_type_from_type_param_with_context(
                     // Found it! Create a qualified associated type
                     if let Some(symbol) = model.query(SymbolFor {
                         id: child.metadata().id(),
-                    }) {
-                        if let Ok(assoc_type_arc) =
-                            symbol.into_any_arc().downcast::<AssociatedTypeSymbol>()
-                        {
-                            let span = type_param.metadata().span().clone();
-                            let container_ty = Ty::type_parameter(type_param.clone(), span.clone());
+                    }) && let Ok(assoc_type_arc) =
+                        symbol.into_any_arc().downcast::<AssociatedTypeSymbol>()
+                    {
+                        let span = type_param.metadata().span().clone();
+                        let container_ty = Ty::type_parameter(type_param.clone(), span.clone());
 
-                            // If there are more segments (e.g., T.Iter.Item), we need to handle
-                            // nested associated types - for now just handle one level
-                            if remaining_path.len() > 1 {
-                                // For nested paths like C.Iter.Item, we need to recursively resolve
-                                // First create T.Iter, then look up Item on that
-                                let first_assoc_ty = Ty::qualified_associated_type(
-                                    assoc_type_arc.clone(),
-                                    container_ty.clone(),
-                                    span.clone(),
-                                );
+                        // If there are more segments (e.g., T.Iter.Item), we need to handle
+                        // nested associated types - for now just handle one level
+                        if remaining_path.len() > 1 {
+                            // For nested paths like C.Iter.Item, we need to recursively resolve
+                            // First create T.Iter, then look up Item on that
+                            let first_assoc_ty = Ty::qualified_associated_type(
+                                assoc_type_arc.clone(),
+                                container_ty.clone(),
+                                span.clone(),
+                            );
 
-                                // Now we need to find "Item" in the bounds of "Iter"
-                                // Check if the associated type has bounds that are protocols
-                                if let Some(result) = resolve_nested_associated_type(
-                                    model,
-                                    &assoc_type_arc,
-                                    first_assoc_ty,
-                                    &remaining_path[1..],
-                                ) {
-                                    return Some(result);
-                                }
+                            // Now we need to find "Item" in the bounds of "Iter"
+                            // Check if the associated type has bounds that are protocols
+                            if let Some(result) = resolve_nested_associated_type(
+                                model,
+                                &assoc_type_arc,
+                                first_assoc_ty,
+                                &remaining_path[1..],
+                            ) {
+                                return Some(result);
                             }
-
-                            let ty =
-                                Ty::qualified_associated_type(assoc_type_arc, container_ty, span);
-                            return Some(TypePathResolution::Resolved(ty));
                         }
+
+                        let ty = Ty::qualified_associated_type(assoc_type_arc, container_ty, span);
+                        return Some(TypePathResolution::Resolved(ty));
                     }
                 }
             }
@@ -331,17 +339,13 @@ fn resolve_associated_type_from_type_param_with_context(
             if let Some(member_id) = model.query(InheritedProtocolMember {
                 protocol_id: protocol.metadata().id(),
                 name: segment.to_string(),
-            }) {
-                if let Some(symbol) = model.query(SymbolFor { id: member_id }) {
-                    if let Ok(assoc_type_arc) =
-                        symbol.into_any_arc().downcast::<AssociatedTypeSymbol>()
-                    {
-                        let span = type_param.metadata().span().clone();
-                        let container_ty = Ty::type_parameter(type_param.clone(), span.clone());
-                        let ty = Ty::qualified_associated_type(assoc_type_arc, container_ty, span);
-                        return Some(TypePathResolution::Resolved(ty));
-                    }
-                }
+            }) && let Some(symbol) = model.query(SymbolFor { id: member_id })
+                && let Ok(assoc_type_arc) = symbol.into_any_arc().downcast::<AssociatedTypeSymbol>()
+            {
+                let span = type_param.metadata().span().clone();
+                let container_ty = Ty::type_parameter(type_param.clone(), span.clone());
+                let ty = Ty::qualified_associated_type(assoc_type_arc, container_ty, span);
+                return Some(TypePathResolution::Resolved(ty));
             }
         }
     }
@@ -380,35 +384,31 @@ fn resolve_nested_associated_type(
             for child in protocol_dyn.metadata().children() {
                 if child.metadata().kind() == KestrelSymbolKind::AssociatedType
                     && child.metadata().name().value == *segment
-                {
-                    if let Some(symbol) = model.query(SymbolFor {
+                    && let Some(symbol) = model.query(SymbolFor {
                         id: child.metadata().id(),
-                    }) {
-                        if let Ok(inner_assoc_arc) =
-                            symbol.into_any_arc().downcast::<AssociatedTypeSymbol>()
-                        {
-                            let span = container_ty.span().clone();
+                    })
+                    && let Ok(inner_assoc_arc) =
+                        symbol.into_any_arc().downcast::<AssociatedTypeSymbol>()
+                {
+                    let span = container_ty.span().clone();
 
-                            // If there are still more segments, recurse
-                            if remaining_path.len() > 1 {
-                                let nested_container = Ty::qualified_associated_type(
-                                    inner_assoc_arc.clone(),
-                                    container_ty,
-                                    span.clone(),
-                                );
-                                return resolve_nested_associated_type(
-                                    model,
-                                    &inner_assoc_arc,
-                                    nested_container,
-                                    &remaining_path[1..],
-                                );
-                            }
-
-                            let ty =
-                                Ty::qualified_associated_type(inner_assoc_arc, container_ty, span);
-                            return Some(TypePathResolution::Resolved(ty));
-                        }
+                    // If there are still more segments, recurse
+                    if remaining_path.len() > 1 {
+                        let nested_container = Ty::qualified_associated_type(
+                            inner_assoc_arc.clone(),
+                            container_ty,
+                            span.clone(),
+                        );
+                        return resolve_nested_associated_type(
+                            model,
+                            &inner_assoc_arc,
+                            nested_container,
+                            &remaining_path[1..],
+                        );
                     }
+
+                    let ty = Ty::qualified_associated_type(inner_assoc_arc, container_ty, span);
+                    return Some(TypePathResolution::Resolved(ty));
                 }
             }
 
@@ -416,16 +416,13 @@ fn resolve_nested_associated_type(
             if let Some(member_id) = model.query(InheritedProtocolMember {
                 protocol_id: protocol.metadata().id(),
                 name: segment.to_string(),
-            }) {
-                if let Some(symbol) = model.query(SymbolFor { id: member_id }) {
-                    if let Ok(inner_assoc_arc) =
-                        symbol.into_any_arc().downcast::<AssociatedTypeSymbol>()
-                    {
-                        let span = container_ty.span().clone();
-                        let ty = Ty::qualified_associated_type(inner_assoc_arc, container_ty, span);
-                        return Some(TypePathResolution::Resolved(ty));
-                    }
-                }
+            }) && let Some(symbol) = model.query(SymbolFor { id: member_id })
+                && let Ok(inner_assoc_arc) =
+                    symbol.into_any_arc().downcast::<AssociatedTypeSymbol>()
+            {
+                let span = container_ty.span().clone();
+                let ty = Ty::qualified_associated_type(inner_assoc_arc, container_ty, span);
+                return Some(TypePathResolution::Resolved(ty));
             }
         }
     }

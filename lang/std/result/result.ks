@@ -1,13 +1,18 @@
-// Result type
+// Result type - represents either success (Ok) or failure (Err)
 
-@throws(defaultError: any Error)
-public enum Result[T, E: Error]:
-    Tryable[T, E],
-    Throwable[E],
-    Returnable[T]
-{
+module std.result
+
+import std.core.(Equatable, Formattable, Bool, ControlFlow, Tryable, FromResidual, Returnable)
+import std.text.(String)
+import std.result.(Optional)
+
+public enum Result[T, E]: Tryable, Returnable[T] {
     case Ok(T)
     case Err(E)
+
+    // Tryable - associated types
+    type Output = T
+    type Early = E
 
     // Convenience constructors
     public static func ok(value: T) -> Result[T, E] {
@@ -18,15 +23,15 @@ public enum Result[T, E: Error]:
         .Err(error)
     }
 
-    // Properties
-    public var isOk: Bool {
+    // Properties - using functions due to computed property parsing issues in enums
+    public func isOk() -> Bool {
         match self {
             .Ok(_) => true,
             .Err(_) => false
         }
     }
 
-    public var isErr: Bool {
+    public func isErr() -> Bool {
         match self {
             .Ok(_) => false,
             .Err(_) => true
@@ -34,16 +39,11 @@ public enum Result[T, E: Error]:
     }
 
     // Tryable - enables `try`
-    public func tryExtract() -> Residual[T, E] {
+    public func tryExtract() -> ControlFlow[T, E] {
         match self {
-            .Ok(let value) => .Output(value),
-            .Err(let error) => .Early(error)
+            .Ok(value) => .Continue(value),
+            .Err(error) => .Break(error)
         }
-    }
-
-    // Throwable - enables `throw`
-    public static func fromEarly(value: E) -> Result[T, E] {
-        .Err(value)
     }
 
     // Returnable - enables `return value`
@@ -54,80 +54,65 @@ public enum Result[T, E: Error]:
     // Unwrapping
     public func unwrap() -> T {
         match self {
-            .Ok(let value) => value,
-            .Err(let error) => panic("called unwrap() on Err: " + error.description)
+            .Ok(value) => value,
+            .Err(_) => lang.panic("called unwrap() on Err")
         }
     }
 
-    public func unwrap(or default: T) -> T {
+    public func unwrapOr(default: T) -> T {
         match self {
-            .Ok(let value) => value,
+            .Ok(value) => value,
             .Err(_) => default
         }
     }
 
     public func unwrap(orElse defaultFn: (E) -> T) -> T {
         match self {
-            .Ok(let value) => value,
-            .Err(let error) => defaultFn(error)
+            .Ok(value) => value,
+            .Err(error) => defaultFn(error)
         }
     }
 
     public func unwrapErr() -> E {
         match self {
-            .Ok(let value) => panic("called unwrapErr() on Ok"),
-            .Err(let error) => error
-        }
-    }
-
-    // expect with custom message
-    public func expect(message: String) -> T {
-        match self {
-            .Ok(let value) => value,
-            .Err(let error) => panic(message + ": " + error.description)
-        }
-    }
-
-    public func expectErr(message: String) -> E {
-        match self {
-            .Ok(_) => panic(message),
-            .Err(let error) => error
+            .Ok(_) => lang.panic("called unwrapErr() on Ok"),
+            .Err(error) => error
         }
     }
 
     // Transformations
     public func map[U](transform: (T) -> U) -> Result[U, E] {
         match self {
-            .Ok(let value) => .Ok(transform(value)),
-            .Err(let error) => .Err(error)
+            .Ok(value) => .Ok(transform(value)),
+            .Err(error) => .Err(error)
         }
     }
 
-    public func mapErr[F: Error](transform: (E) -> F) -> Result[T, F] {
+    public func mapErr[F](transform: (E) -> F) -> Result[T, F] {
         match self {
-            .Ok(let value) => .Ok(value),
-            .Err(let error) => .Err(transform(error))
+            .Ok(value) => .Ok(value),
+            .Err(error) => .Err(transform(error))
         }
     }
 
     public func flatMap[U](transform: (T) -> Result[U, E]) -> Result[U, E] {
         match self {
-            .Ok(let value) => transform(value),
-            .Err(let error) => .Err(error)
+            .Ok(value) => transform(value),
+            .Err(error) => .Err(error)
         }
     }
 
-    public func flatMapErr[F: Error](transform: (E) -> Result[T, F]) -> Result[T, F] {
+    public func flatMapErr[F](transform: (E) -> Result[T, F]) -> Result[T, F] {
         match self {
-            .Ok(let value) => .Ok(value),
-            .Err(let error) => transform(error)
+            .Ok(value) => .Ok(value),
+            .Err(error) => transform(error)
         }
     }
 
     // Convert to Optional
     public func ok() -> Optional[T] {
         match self {
-            .Ok(let value) => .Some(value),
+            .Ok(value) => .Some(value),
             .Err(_) => .None
         }
     }
@@ -135,80 +120,87 @@ public enum Result[T, E: Error]:
     public func err() -> Optional[E] {
         match self {
             .Ok(_) => .None,
-            .Err(let error) => .Some(error)
+            .Err(error) => .Some(error)
         }
     }
 
-    // Logical operations
-    public func and[U](other: Result[U, E]) -> Result[U, E] {
+    // Combinator operations
+    // Note: 'and'/'or' are keywords, so we use 'andValue'/'orValue'
+    public func andValue[U](other: Result[U, E]) -> Result[U, E] {
         match self {
             .Ok(_) => other,
-            .Err(let error) => .Err(error)
+            .Err(error) => .Err(error)
         }
     }
 
     public func andThen[U](transform: (T) -> Result[U, E]) -> Result[U, E] {
-        self.flatMap(transform)
+        match self {
+            .Ok(value) => transform(value),
+            .Err(error) => .Err(error)
+        }
     }
 
-    public func or(other: Result[T, E]) -> Result[T, E] {
+    public func orValue(other: Result[T, E]) -> Result[T, E] {
         match self {
-            .Ok(let value) => .Ok(value),
+            .Ok(value) => .Ok(value),
             .Err(_) => other
         }
     }
 
-    public func orElse[F: Error](alternative: (E) -> Result[T, F]) -> Result[T, F] {
+    public func orElse[F](alternative: (E) -> Result[T, F]) -> Result[T, F] {
         match self {
-            .Ok(let value) => .Ok(value),
-            .Err(let error) => alternative(error)
-        }
-    }
-
-    // Transpose Optional inside Result
-    public func transpose() -> Optional[Result[T, E]] where T: Optional {
-        match self {
-            .Ok(.Some(let value)) => .Some(.Ok(value)),
-            .Ok(.None) => .None,
-            .Err(let error) => .Some(.Err(error))
+            .Ok(value) => .Ok(value),
+            .Err(error) => alternative(error)
         }
     }
 
     // Iteration
     public func iter() -> ResultIterator[T, E] {
-        ResultIterator(value: self)
+        ResultIterator(self)
+    }
+}
+
+// FromResidual conformance - enables early return propagation
+extend Result[T, E]: FromResidual[E] {
+    public static func fromResidual(residual: E) -> Result[T, E] {
+        .Err(residual)
     }
 }
 
 // Equatable when T and E are Equatable
-extension Result[T, E]: Equatable where T: Equatable, E: Equatable {
+extend Result[T, E]: Equatable where T: Equatable, E: Equatable {
     public func equals(other: Result[T, E]) -> Bool {
         match (self, other) {
-            (.Ok(let a), .Ok(let b)) => a == b,
-            (.Err(let a), .Err(let b)) => a == b,
+            (.Ok(a), .Ok(b)) => a == b,
+            (.Err(a), .Err(b)) => a == b,
             _ => false
         }
     }
 }
 
-// Functor implementation
-extension Result[T, E]: Functor {
-    type Inner = T
+// Formattable when T and E are Formattable
+extend Result[T, E]: Formattable where T: Formattable, E: Formattable {
+    public func format() -> String {
+        match self {
+            .Ok(value) => "Ok(" + value.format() + ")",
+            .Err(error) => "Err(" + error.format() + ")"
+        }
+    }
 }
 
-// Result iterator
-public struct ResultIterator[T, E]: Iterator {
+// Result iterator - iterates 0 or 1 times (only Ok values)
+public struct ResultIterator[T, E] {
     type Item = T
 
     private var value: Optional[T]
 
-    public init(value: Result[T, E]) {
-        self.value = value.ok()
+    public init(result: Result[T, E]) {
+        self.value = result.ok();
     }
 
-    public func next() -> Optional[T] {
-        let result = self.value
-        self.value = .None
+    public mutating func next() -> Optional[T] {
+        let result = self.value;
+        self.value = .None;
         result
     }
 }

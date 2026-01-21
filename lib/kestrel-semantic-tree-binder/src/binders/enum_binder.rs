@@ -4,7 +4,6 @@ use kestrel_semantic_tree::behavior::attributes::AttributesBehavior;
 use kestrel_semantic_tree::behavior::callable::CallableBehavior;
 use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
 use kestrel_semantic_tree::behavior::copy_semantics::CopySemanticsBehavior;
-use kestrel_semantic_tree::behavior::typed::TypedBehavior;
 use kestrel_semantic_tree::builtins::BuiltinKind;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
@@ -46,6 +45,7 @@ impl DeclarationBinder for EnumBinder {
         let attributes_behavior = crate::binders::utils::attributes::resolve_attributes(
             syntax,
             &source,
+            file_id,
             context.diagnostics,
         );
         symbol.metadata().add_behavior(attributes_behavior.clone());
@@ -131,7 +131,7 @@ impl EnumBinder {
                     .add_behavior(CopySemanticsBehavior::copyable());
                 CycleDetector::exit_ref(context.copy_semantics_cycle_detector);
                 return;
-            }
+            },
         };
 
         // Get the conformances behavior for checking protocol conformances
@@ -220,20 +220,19 @@ impl EnumBinder {
                 .iter()
                 .filter(|child| child.metadata().kind() == KestrelSymbolKind::EnumCase)
             {
-                if let Some(callable) = case.metadata().get_behavior::<CallableBehavior>() {
-                    if let Some(param) = callable.parameters().iter().find(|p| p.ty.is_cloneable())
-                    {
-                        context
-                            .diagnostics
-                            .throw(CloneableFieldRequiresCloneableConformance {
-                                type_span: symbol.metadata().span().clone(),
-                                type_name: symbol.metadata().name().value.clone(),
-                                field_name: param.bind_name.value.clone(),
-                                field_span: case.metadata().span().clone(),
-                                type_kind: "enum",
-                            });
-                        break;
-                    }
+                if let Some(callable) = case.metadata().get_behavior::<CallableBehavior>()
+                    && let Some(param) = callable.parameters().iter().find(|p| p.ty.is_cloneable())
+                {
+                    context
+                        .diagnostics
+                        .throw(CloneableFieldRequiresCloneableConformance {
+                            type_span: symbol.metadata().span().clone(),
+                            type_name: symbol.metadata().name().value.clone(),
+                            field_name: param.bind_name.value.clone(),
+                            field_span: case.metadata().span().clone(),
+                            type_kind: "enum",
+                        });
+                    break;
                 }
             }
 

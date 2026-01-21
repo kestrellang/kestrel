@@ -17,6 +17,7 @@
 //! - More testable (can inspect events)
 //! - Follows proven rust-analyzer architecture
 
+use crate::input::ChumskySpan;
 use kestrel_span::Span;
 use kestrel_syntax_tree::{GreenNodeBuilder, SyntaxKind, SyntaxNode};
 
@@ -37,12 +38,21 @@ pub enum Event {
 #[derive(Debug, Clone)]
 pub struct EventSink {
     events: Vec<Event>,
+    file_id: usize,
 }
 
 impl EventSink {
-    /// Create a new empty event sink
-    pub fn new() -> Self {
-        Self { events: Vec::new() }
+    /// Create a new event sink for the given file
+    pub fn new(file_id: usize) -> Self {
+        Self {
+            events: Vec::new(),
+            file_id,
+        }
+    }
+
+    /// Get the file ID associated with this sink
+    pub fn file_id(&self) -> usize {
+        self.file_id
     }
 
     /// Start a new syntax node
@@ -65,8 +75,21 @@ impl EventSink {
         self.events.push(Event::Error { message, span });
     }
 
-    /// Record a parse error at a specific span
-    pub fn error_at(&mut self, message: String, span: Span) {
+    /// Record a parse error at a chumsky span (uses stored file_id)
+    ///
+    /// This is the primary method for recording errors from chumsky parsers,
+    /// which use SimpleSpan without file ID information.
+    pub fn error_at(&mut self, message: String, span: ChumskySpan) {
+        self.events.push(Event::Error {
+            message,
+            span: Some(Span::new(self.file_id, span.start..span.end)),
+        });
+    }
+
+    /// Record a parse error with a pre-built Span (uses span's file_id)
+    ///
+    /// Use this when you already have a complete Span with the correct file_id.
+    pub fn error_at_span(&mut self, message: String, span: Span) {
         self.events.push(Event::Error {
             message,
             span: Some(span),
@@ -89,12 +112,6 @@ impl EventSink {
     /// Consume the sink and return the events
     pub fn into_events(self) -> Vec<Event> {
         self.events
-    }
-}
-
-impl Default for EventSink {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -148,7 +165,7 @@ impl<'src> TreeBuilder<'src> {
                 Event::StartNode(kind) => {
                     builder.start_node((*kind).into());
                     self.pos += 1;
-                }
+                },
                 Event::AddToken(kind, span) => {
                     // Extract values before modifying self
                     let kind = *kind;
@@ -163,16 +180,16 @@ impl<'src> TreeBuilder<'src> {
                     builder.token(kind.into(), text);
                     self.source_pos = span_end;
                     self.pos += 1;
-                }
+                },
                 Event::FinishNode => {
                     builder.finish_node();
                     self.pos += 1;
-                }
+                },
                 Event::Error { .. } => {
                     // Skip error events when building the tree
                     // Errors can be extracted from the event list separately
                     self.pos += 1;
-                }
+                },
             }
         }
     }
@@ -184,9 +201,9 @@ mod tests {
 
     #[test]
     fn test_event_sink() {
-        let mut sink = EventSink::new();
+        let mut sink = EventSink::new(0);
         sink.start_node(SyntaxKind::ModulePath);
-        sink.add_token(SyntaxKind::Identifier, Span::from(0..1));
+        sink.add_token(SyntaxKind::Identifier, Span::new(0, 0..1));
         sink.finish_node();
 
         let events = sink.events();
@@ -194,18 +211,24 @@ mod tests {
         assert_eq!(events[0], Event::StartNode(SyntaxKind::ModulePath));
         assert_eq!(
             events[1],
-            Event::AddToken(SyntaxKind::Identifier, Span::from(0..1))
+            Event::AddToken(SyntaxKind::Identifier, Span::new(0, 0..1))
         );
         assert_eq!(events[2], Event::FinishNode);
     }
 
     #[test]
+    fn test_event_sink_file_id() {
+        let sink = EventSink::new(42);
+        assert_eq!(sink.file_id(), 42);
+    }
+
+    #[test]
     fn test_tree_builder_simple() {
         let source = "A";
-        let mut sink = EventSink::new();
+        let mut sink = EventSink::new(0);
 
         sink.start_node(SyntaxKind::ModulePath);
-        sink.add_token(SyntaxKind::Identifier, Span::from(0..1));
+        sink.add_token(SyntaxKind::Identifier, Span::new(0, 0..1));
         sink.finish_node();
 
         let builder = TreeBuilder::new(source, sink.into_events());
@@ -218,12 +241,12 @@ mod tests {
     #[test]
     fn test_tree_builder_nested() {
         let source = "A.B";
-        let mut sink = EventSink::new();
+        let mut sink = EventSink::new(0);
 
         sink.start_node(SyntaxKind::ModulePath);
-        sink.add_token(SyntaxKind::Identifier, Span::from(0..1));
-        sink.add_token(SyntaxKind::Dot, Span::from(1..2));
-        sink.add_token(SyntaxKind::Identifier, Span::from(2..3));
+        sink.add_token(SyntaxKind::Identifier, Span::new(0, 0..1));
+        sink.add_token(SyntaxKind::Dot, Span::new(0, 1..2));
+        sink.add_token(SyntaxKind::Identifier, Span::new(0, 2..3));
         sink.finish_node();
 
         let builder = TreeBuilder::new(source, sink.into_events());
@@ -236,15 +259,15 @@ mod tests {
     #[test]
     fn test_tree_builder_with_child_nodes() {
         let source = "module A";
-        let mut sink = EventSink::new();
+        let mut sink = EventSink::new(0);
 
         // ModuleDeclaration
         sink.start_node(SyntaxKind::ModuleDeclaration);
-        sink.add_token(SyntaxKind::Module, Span::from(0..6));
+        sink.add_token(SyntaxKind::Module, Span::new(0, 0..6));
 
         // ModulePath (child node)
         sink.start_node(SyntaxKind::ModulePath);
-        sink.add_token(SyntaxKind::Identifier, Span::from(7..8));
+        sink.add_token(SyntaxKind::Identifier, Span::new(0, 7..8));
         sink.finish_node();
 
         sink.finish_node();

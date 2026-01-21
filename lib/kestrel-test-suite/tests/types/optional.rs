@@ -7,7 +7,7 @@ fn null_assignable_to_optional_type() {
         r#"
         module Main
         func test() {
-            let x: Int? = null;
+            let x: lang.i64? = null;
         }
         "#,
     )
@@ -22,7 +22,7 @@ fn non_optional_type_cannot_be_null() {
         r#"
         module Main
         func test() {
-            let x: Int = null;
+            let x: lang.i64 = null;
         }
         "#,
     )

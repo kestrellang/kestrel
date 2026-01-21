@@ -123,7 +123,7 @@ impl MoveTracker {
                     MoveState::Moved {
                         moved_at: moved_at.clone(),
                     }
-                }
+                },
 
                 // One moved, one not (or valid) → maybe moved
                 (Some(MoveState::Moved { moved_at }), Some(MoveState::Valid))

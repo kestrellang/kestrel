@@ -101,12 +101,12 @@ fn compile_source(source: &str, temp_dir: &PathBuf, include_prelude: bool) -> Ru
             .map(|spanned| (spanned.value, spanned.span))
             .collect();
 
-        let result = Parser::parse(content, tokens.into_iter(), parse_source_file);
+        let result = Parser::parse(content, tokens.into_iter(), parse_source_file, file_id);
 
         if !result.errors.is_empty() {
             // Add parse errors to diagnostics
             for error in &result.errors {
-                let span = error.span.clone().unwrap_or(Span::from(0..1));
+                let span = error.span.clone().unwrap_or(Span::new(0, 0..1));
                 let diagnostic = kestrel_reporting::Diagnostic::error()
                     .with_message(&error.message)
                     .with_labels(vec![kestrel_reporting::Label::primary(

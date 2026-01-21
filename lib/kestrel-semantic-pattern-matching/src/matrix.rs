@@ -288,15 +288,13 @@ impl PatternMatrix {
                 if let Some(case) = symbol.cases().iter().find(|c| {
                     use semantic_tree::symbol::Symbol;
                     c.metadata().name().value == *name
-                }) {
-                    if let Some(cb) = case.callable_behavior() {
-                        if let Some(param) = cb.parameters().get(index) {
-                            return param.ty.clone();
-                        }
-                    }
+                }) && let Some(cb) = case.callable_behavior()
+                    && let Some(param) = cb.parameters().get(index)
+                {
+                    return param.ty.clone();
                 }
                 parent_ty.clone()
-            }
+            },
             (
                 TyKind::Struct {
                     symbol,
@@ -328,7 +326,7 @@ impl PatternMatrix {
                 } else {
                     parent_ty.clone()
                 }
-            }
+            },
             _ => parent_ty.clone(),
         }
     }
@@ -370,10 +368,10 @@ impl PatternMatrix {
                     // No rest pattern - just return prefix (suffix should be empty)
                     prefix.clone()
                 }
-            }
+            },
             PatternKind::EnumVariant { bindings, .. } => {
                 bindings.iter().map(|b| (*b.pattern).clone()).collect()
-            }
+            },
             PatternKind::Struct {
                 fields,
                 has_rest: _,
@@ -427,7 +425,7 @@ impl PatternMatrix {
                     // Fallback: just return the fields from the pattern
                     fields.iter().map(|f| f.pattern.clone()).collect()
                 }
-            }
+            },
             PatternKind::Array {
                 prefix,
                 rest,
@@ -561,7 +559,7 @@ impl PatternMatrix {
                     children.extend(suffix.clone());
                     children
                 }
-            }
+            },
             _ => vec![], // Literals, wildcards, etc. have no children
         }
     }
@@ -604,7 +602,7 @@ impl PatternMatrix {
             PatternKind::Or { alternatives } => {
                 // Or-pattern is wildcard-like if any alternative is
                 alternatives.iter().any(|a| self.is_wildcard_like(a))
-            }
+            },
             _ => false,
         }
     }
@@ -627,19 +625,19 @@ fn constructors_match(pattern_ctor: &Constructor, target_ctor: &Constructor) -> 
         (Constructor::IntLiteral(v1), Constructor::IntLiteral(v2)) => v1 == v2,
         (Constructor::IntLiteral(v), Constructor::IntRange { start, end }) => {
             *v >= *start && *v <= *end
-        }
+        },
         (
             Constructor::IntRange { start: s1, end: e1 },
             Constructor::IntRange { start: s2, end: e2 },
         ) => {
             // Ranges match if they overlap
             s1 <= e2 && s2 <= e1
-        }
+        },
 
         (Constructor::CharLiteral(v1), Constructor::CharLiteral(v2)) => v1 == v2,
         (Constructor::CharLiteral(v), Constructor::CharRange { start, end }) => {
             *v >= *start && *v <= *end
-        }
+        },
         (
             Constructor::CharRange { start: s1, end: e1 },
             Constructor::CharRange { start: s2, end: e2 },
@@ -670,23 +668,23 @@ fn constructors_match(pattern_ctor: &Constructor, target_ctor: &Constructor) -> 
                     // Both have rest: compatible if their length ranges overlap
                     // Pattern with rest can match >= min_len, so they always overlap
                     true
-                }
+                },
                 (true, false) => {
                     // Pattern 1 has rest, pattern 2 is exact length
                     // Pattern 1 can match min_len_2 only if min_len_1 <= min_len_2
                     min_len_1 <= min_len_2
-                }
+                },
                 (false, true) => {
                     // Pattern 2 has rest, pattern 1 is exact length
                     // Pattern 2 can match min_len_1 only if min_len_2 <= min_len_1
                     min_len_2 <= min_len_1
-                }
+                },
                 (false, false) => {
                     // Both are fixed length: must match exactly
                     min_len_1 == min_len_2
-                }
+                },
             }
-        }
+        },
 
         _ => false,
     }
@@ -702,7 +700,7 @@ mod tests {
     use kestrel_span::Span;
 
     fn test_span() -> Span {
-        Span::from(0..1)
+        Span::new(0, 0..1)
     }
 
     fn int_ty() -> Ty {

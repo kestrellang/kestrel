@@ -9,7 +9,7 @@ use crate::terminator::compile_terminator;
 
 use kestrel_execution_graph::{Block, FunctionDef, Id, Local, Place, StatementKind};
 
-use cranelift_codegen::ir::InstBuilder;
+use cranelift_codegen::ir::{InstBuilder, Value as CraneliftValue};
 use cranelift_frontend::{FunctionBuilder, Variable};
 
 use std::collections::HashMap;
@@ -20,30 +20,57 @@ pub fn compile_block(
     func_def: &FunctionDef,
     subst: &Substitution,
     block_id: Id<Block>,
+    next_block_id: Option<Id<Block>>,
     builder: &mut FunctionBuilder<'_>,
     block_map: &HashMap<Id<Block>, cranelift_codegen::ir::Block>,
     local_map: &HashMap<Id<Local>, Variable>,
+    stack_locals: &std::collections::HashSet<Id<Local>>,
     is_main: bool,
+    sret_ptr: Option<CraneliftValue>,
 ) -> Result<(), CodegenError> {
     let block = ctx.mir.block(block_id);
 
     // Compile each statement
     for &stmt_id in &block.statements {
         let stmt = ctx.mir.statement(stmt_id);
-        compile_statement(ctx, func_def, subst, &stmt.kind, builder, local_map)?;
+        compile_statement(
+            ctx,
+            func_def,
+            subst,
+            &stmt.kind,
+            builder,
+            local_map,
+            stack_locals,
+        )?;
     }
 
     // Compile the terminator
     if let Some(ref terminator) = block.terminator {
         compile_terminator(
-            ctx, func_def, subst, terminator, builder, block_map, local_map, is_main,
+            ctx,
+            func_def,
+            subst,
+            terminator,
+            builder,
+            block_map,
+            local_map,
+            stack_locals,
+            is_main,
+            sret_ptr,
         )?;
+    } else if let Some(next_block) = next_block_id {
+        // Fall through to the next block in the list
+        let target_cl = block_map
+            .get(&next_block)
+            .ok_or_else(|| CodegenError::Unsupported("unknown fall-through target".to_string()))?;
+        builder.ins().jump(*target_cl, &[]);
     } else {
-        // Block has no terminator - this is dead code (unreachable)
-        // Emit a trap to satisfy Cranelift's requirement that all blocks have terminators
+        // Last block in the function has no terminator - this is dead code (unreachable)
+        // or an implicit return that was missed.
+        // Emit a trap to satisfy Cranelift's requirement that all blocks have terminators.
         builder
             .ins()
-            .trap(cranelift_codegen::ir::TrapCode::unwrap_user(1));
+            .trap(cranelift_codegen::ir::TrapCode::unwrap_user(4));
     }
 
     Ok(())
@@ -57,17 +84,43 @@ fn compile_statement(
     stmt: &StatementKind,
     builder: &mut FunctionBuilder<'_>,
     local_map: &HashMap<Id<Local>, Variable>,
+    stack_locals: &std::collections::HashSet<Id<Local>>,
 ) -> Result<(), CodegenError> {
     match stmt {
         StatementKind::Assign { dest, rvalue } => {
-            let value = compile_rvalue(ctx, func_def, subst, rvalue, builder, local_map)?;
-            crate::place::compile_place_write(ctx, dest, value, builder, local_map, subst)?;
-        }
+            let value = compile_rvalue(
+                ctx,
+                func_def,
+                subst,
+                rvalue,
+                builder,
+                local_map,
+                stack_locals,
+            )?;
+            crate::place::compile_place_write(
+                ctx,
+                dest,
+                value,
+                builder,
+                local_map,
+                subst,
+                stack_locals,
+            )?;
+        },
 
         StatementKind::Call { callee, args } => {
             // Call without using the result - we just discard the return value
-            let _ = compile_call(ctx, func_def, subst, callee, args, builder, local_map)?;
-        }
+            let _ = compile_call(
+                ctx,
+                func_def,
+                subst,
+                callee,
+                args,
+                builder,
+                local_map,
+                stack_locals,
+            )?;
+        },
 
         StatementKind::Deinit { place: _ } => {
             // NOTE: During MIR lowering, deinit is expanded into explicit:
@@ -81,7 +134,7 @@ fn compile_statement(
             // If we need to support "raw" Deinit statements in the future (e.g., for
             // types where we don't have semantic info), we would need to look up the
             // deinit method from the MIR type and emit a call here.
-        }
+        },
 
         StatementKind::DeinitIf { place: _, flag } => {
             // Conditional deinit: check flag, call destructor if true.
@@ -97,9 +150,15 @@ fn compile_statement(
             // We still need to "use" the flag to avoid unused variable warnings in the
             // generated code, but since we don't actually emit anything for deinit,
             // we can just read the flag value without acting on it.
-            let _flag_value =
-                compile_place_read(ctx, &Place::local(*flag), builder, local_map, subst)?;
-        }
+            let _flag_value = compile_place_read(
+                ctx,
+                &Place::local(*flag),
+                builder,
+                local_map,
+                subst,
+                stack_locals,
+            )?;
+        },
 
         StatementKind::SetDeinitFlag { flag, value } => {
             // Set a deinit flag to true (needs deinit) or false (was moved, no deinit needed).
@@ -113,7 +172,7 @@ fn compile_statement(
                 CodegenError::Unsupported("unknown deinit flag local".to_string())
             })?;
             builder.def_var(*var, bool_value);
-        }
+        },
     }
 
     Ok(())

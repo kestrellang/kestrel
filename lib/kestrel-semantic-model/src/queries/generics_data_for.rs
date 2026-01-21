@@ -41,7 +41,7 @@ impl Query for GenericsDataFor {
                         type_params: s.type_parameters(),
                         where_clause: s.where_clause(),
                     })
-            }
+            },
             KestrelSymbolKind::Function => {
                 symbol
                     .downcast_arc::<FunctionSymbol>()
@@ -50,7 +50,7 @@ impl Query for GenericsDataFor {
                         type_params: s.type_parameters(),
                         where_clause: s.where_clause(),
                     })
-            }
+            },
             KestrelSymbolKind::Protocol => {
                 symbol
                     .downcast_arc::<ProtocolSymbol>()
@@ -59,7 +59,7 @@ impl Query for GenericsDataFor {
                         type_params: s.type_parameters(),
                         where_clause: s.where_clause(),
                     })
-            }
+            },
             KestrelSymbolKind::TypeAlias => {
                 symbol
                     .downcast_arc::<TypeAliasSymbol>()
@@ -68,7 +68,7 @@ impl Query for GenericsDataFor {
                         type_params: s.type_parameters(),
                         where_clause: s.where_clause(),
                     })
-            }
+            },
             _ => None,
         }
     }

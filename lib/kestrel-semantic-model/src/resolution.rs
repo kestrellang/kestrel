@@ -93,6 +93,19 @@ pub enum ValuePathResolution {
         /// The type parameter symbol ID
         symbol_id: SymbolId,
     },
+    /// Resolved to an enum case value, but there are more path segments.
+    /// The remaining segments should be handled as member accesses by the caller.
+    /// This handles cases like `Player.player1.description()` where `player1` is an enum case
+    /// and `description` is a method on the enum type.
+    EnumCaseValue {
+        /// The enum case symbol ID
+        symbol_id: SymbolId,
+        /// The type of the enum case value (the enum type)
+        ty: Ty,
+        /// The index in the path where the enum case was found
+        /// (segments after this should be member accesses)
+        resolved_index: usize,
+    },
     /// A segment in the path was not found
     NotFound {
         /// The segment that wasn't found
@@ -124,6 +137,7 @@ impl ValuePathResolution {
             ValuePathResolution::Symbol { .. }
                 | ValuePathResolution::Overloaded { .. }
                 | ValuePathResolution::TypeParameter { .. }
+                | ValuePathResolution::EnumCaseValue { .. }
         )
     }
 

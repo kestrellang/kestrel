@@ -71,7 +71,7 @@ pub fn is_irrefutable(pattern: &Pattern) -> bool {
         // Tuple is irrefutable if ALL elements (prefix + suffix) are irrefutable
         PatternKind::Tuple { prefix, suffix, .. } => {
             prefix.iter().chain(suffix.iter()).all(is_irrefutable)
-        }
+        },
 
         // Literal patterns are REFUTABLE - they only match one specific value
         // e.g., `42` doesn't match `43`
@@ -121,7 +121,7 @@ mod tests {
     use kestrel_span::Span;
 
     fn test_span() -> Span {
-        Span::from(0..1)
+        Span::new(0, 0..1)
     }
 
     fn int_ty() -> Ty {

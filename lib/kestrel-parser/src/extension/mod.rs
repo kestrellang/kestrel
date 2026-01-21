@@ -12,11 +12,13 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use crate::common::{
     ConformanceListData, ExtensionBodyItem, ExtensionDeclarationData, emit_extension_declaration,
-    function_declaration_parser_internal, initializer_declaration_parser_internal, token,
+    function_declaration_parser_internal, initializer_declaration_parser_internal,
+    subscript_declaration_parser_internal, token,
 };
 use crate::event::{EventSink, TreeBuilder};
-use crate::input::{ParserExtra, ParserInput, create_input, prepare_tokens, to_kestrel_span};
+use crate::input::{ParserExtra, ParserInput, create_input, prepare_tokens};
 use crate::ty::ty_parser;
+use crate::type_alias::type_alias_declaration_parser_internal;
 use crate::type_param::{conformance_list_parser, where_clause_parser};
 
 /// Represents an extension declaration: extend Type: Protocol { ... }
@@ -60,7 +62,7 @@ impl ExtensionDeclaration {
             .map(|tok| tok.text().to_string())
     }
 
-    /// Get child declaration items (functions, initializers)
+    /// Get child declaration items (functions, initializers, type aliases)
     pub fn children(&self) -> Vec<SyntaxNode> {
         self.syntax
             .children()
@@ -70,7 +72,10 @@ impl ExtensionDeclaration {
                     .filter(|child| {
                         matches!(
                             child.kind(),
-                            SyntaxKind::FunctionDeclaration | SyntaxKind::InitializerDeclaration
+                            SyntaxKind::FunctionDeclaration
+                                | SyntaxKind::SubscriptDeclaration
+                                | SyntaxKind::InitializerDeclaration
+                                | SyntaxKind::TypeAliasDeclaration
                         )
                     })
                     .collect()
@@ -81,7 +86,7 @@ impl ExtensionDeclaration {
 
 /// Internal parser for extension body items
 ///
-/// Extension bodies can contain: functions and initializers
+/// Extension bodies can contain: functions, subscripts, initializers, and associated types
 fn extension_body_item_parser_internal<'tokens>()
 -> impl Parser<'tokens, ParserInput<'tokens>, ExtensionBodyItem, ParserExtra<'tokens>> + Clone {
     let initializer_parser =
@@ -89,7 +94,17 @@ fn extension_body_item_parser_internal<'tokens>()
 
     let function_parser = function_declaration_parser_internal().map(ExtensionBodyItem::Function);
 
-    initializer_parser.or(function_parser)
+    let subscript_parser =
+        subscript_declaration_parser_internal().map(ExtensionBodyItem::Subscript);
+
+    let type_alias_parser =
+        type_alias_declaration_parser_internal().map(ExtensionBodyItem::TypeAlias);
+
+    type_alias_parser
+        .or(initializer_parser)
+        .or(function_parser)
+        .or(subscript_parser)
+        .boxed()
 }
 
 /// Internal Chumsky parser for extension declaration
@@ -125,6 +140,7 @@ pub fn extension_declaration_parser_internal<'tokens>()
                 }
             },
         )
+        .boxed()
 }
 
 /// Parse an extension declaration and emit events
@@ -145,13 +161,13 @@ where
     {
         Ok(data) => {
             emit_extension_declaration(sink, data);
-        }
+        },
         Err(errors) => {
             for error in errors {
                 let span = error.span();
-                sink.error_at(format!("Parse error: {:?}", error), to_kestrel_span(*span));
+                sink.error_at(format!("Parse error: {:?}", error), *span);
             }
-        }
+        },
     }
 }
 
@@ -166,12 +182,12 @@ mod tests {
             .filter_map(|t| t.ok())
             .map(|spanned| (spanned.value, spanned.span))
             .collect();
-        let mut sink = EventSink::new();
+        let mut sink = EventSink::new(0);
         parse_extension_declaration(source, tokens.into_iter(), &mut sink);
         let tree = TreeBuilder::new(source, sink.into_events()).build();
         ExtensionDeclaration {
             syntax: tree,
-            span: Span::from(0..source.len()),
+            span: Span::new(0, 0..source.len()),
         }
     }
 

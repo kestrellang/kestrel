@@ -31,9 +31,10 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 pub fn resolve_attributes(
     syntax: &SyntaxNode,
     source: &str,
+    file_id: usize,
     diagnostics: &mut DiagnosticContext,
 ) -> AttributesBehavior {
-    let attributes = extract_attributes(syntax, source);
+    let attributes = extract_attributes(syntax, source, file_id);
 
     // Emit warnings for unknown attributes
     for attr in &attributes {
@@ -51,7 +52,7 @@ pub fn resolve_attributes(
 /// Extract attributes from a syntax node.
 ///
 /// Looks for an AttributeList child and extracts all Attribute nodes from it.
-fn extract_attributes(syntax: &SyntaxNode, source: &str) -> Vec<Attribute> {
+fn extract_attributes(syntax: &SyntaxNode, source: &str, file_id: usize) -> Vec<Attribute> {
     let mut attributes = Vec::new();
 
     // Find the AttributeList child
@@ -67,7 +68,7 @@ fn extract_attributes(syntax: &SyntaxNode, source: &str) -> Vec<Attribute> {
         .children()
         .filter(|c| c.kind() == SyntaxKind::Attribute)
     {
-        if let Some(attr) = extract_single_attribute(&attr_node, source) {
+        if let Some(attr) = extract_single_attribute(&attr_node, source, file_id) {
             attributes.push(attr);
         }
     }
@@ -76,7 +77,7 @@ fn extract_attributes(syntax: &SyntaxNode, source: &str) -> Vec<Attribute> {
 }
 
 /// Extract a single attribute from an Attribute syntax node.
-fn extract_single_attribute(node: &SyntaxNode, source: &str) -> Option<Attribute> {
+fn extract_single_attribute(node: &SyntaxNode, source: &str, file_id: usize) -> Option<Attribute> {
     // Find the @ token and the identifier (name)
     let mut name: Option<String> = None;
     let mut at_span: Option<Span> = None;
@@ -85,7 +86,8 @@ fn extract_single_attribute(node: &SyntaxNode, source: &str) -> Option<Attribute
     for child in node.children_with_tokens() {
         if let Some(tok) = child.into_token() {
             if tok.kind() == SyntaxKind::At {
-                at_span = Some(Span::from(
+                at_span = Some(Span::new(
+                    file_id,
                     tok.text_range().start().into()..tok.text_range().end().into(),
                 ));
             } else if tok.kind() == SyntaxKind::Identifier && name.is_none() {
@@ -95,15 +97,11 @@ fn extract_single_attribute(node: &SyntaxNode, source: &str) -> Option<Attribute
         }
     }
 
-    let Some(attr_name) = name else {
-        return None;
-    };
-    let Some(start_span) = at_span else {
-        return None;
-    };
+    let attr_name = name?;
+    let start_span = at_span?;
 
     // Extract arguments if present
-    let args = extract_attribute_args(node, source);
+    let args = extract_attribute_args(node, source, file_id);
 
     // Calculate the full span (from @ to end of args or end of name)
     let attr_end = if let Some(args_node) = node
@@ -115,13 +113,17 @@ fn extract_single_attribute(node: &SyntaxNode, source: &str) -> Option<Attribute
         name_end
     };
 
-    let full_span = Span::from(start_span.start..attr_end);
+    let full_span = Span::new(start_span.file_id, start_span.start..attr_end);
 
     Some(Attribute::new(attr_name, args, full_span))
 }
 
 /// Extract arguments from an AttributeArgs node.
-fn extract_attribute_args(attr_node: &SyntaxNode, source: &str) -> Vec<AttributeArg> {
+fn extract_attribute_args(
+    attr_node: &SyntaxNode,
+    source: &str,
+    file_id: usize,
+) -> Vec<AttributeArg> {
     let mut args = Vec::new();
 
     let Some(args_node) = attr_node
@@ -136,7 +138,7 @@ fn extract_attribute_args(attr_node: &SyntaxNode, source: &str) -> Vec<Attribute
         .children()
         .filter(|c| c.kind() == SyntaxKind::AttributeArg)
     {
-        if let Some(arg) = extract_single_arg(&arg_node, source) {
+        if let Some(arg) = extract_single_arg(&arg_node, source, file_id) {
             args.push(arg);
         }
     }
@@ -145,7 +147,7 @@ fn extract_attribute_args(attr_node: &SyntaxNode, source: &str) -> Vec<Attribute
 }
 
 /// Extract a single argument from an AttributeArg node.
-fn extract_single_arg(node: &SyntaxNode, _source: &str) -> Option<AttributeArg> {
+fn extract_single_arg(node: &SyntaxNode, _source: &str, file_id: usize) -> Option<AttributeArg> {
     let mut label: Option<String> = None;
     let mut has_colon = false;
     let mut value_span: Option<Span> = None;
@@ -159,33 +161,35 @@ fn extract_single_arg(node: &SyntaxNode, _source: &str) -> Option<AttributeArg> 
                     // This could be a label or a path value
                     // We'll treat it as a label if followed by colon
                     label = Some(tok.text().to_string());
-                }
+                },
                 SyntaxKind::Colon => {
                     has_colon = true;
-                }
+                },
                 SyntaxKind::Identifier if has_colon => {
                     // This is a value identifier (after colon)
-                    value_span = Some(Span::from(
+                    value_span = Some(Span::new(
+                        file_id,
                         tok.text_range().start().into()..tok.text_range().end().into(),
                     ));
-                }
+                },
                 SyntaxKind::String
                 | SyntaxKind::Integer
                 | SyntaxKind::Float
                 | SyntaxKind::Boolean => {
-                    value_span = Some(Span::from(
+                    value_span = Some(Span::new(
+                        file_id,
                         tok.text_range().start().into()..tok.text_range().end().into(),
                     ));
-                }
+                },
                 SyntaxKind::Dot => {
                     // Part of implicit member access - skip
-                }
-                _ => {}
+                },
+                _ => {},
             }
         }
     }
 
-    let full_span = Span::from(arg_start..arg_end);
+    let full_span = Span::new(file_id, arg_start..arg_end);
 
     // Determine if this is a labeled or unlabeled argument
     if has_colon {
@@ -198,12 +202,8 @@ fn extract_single_arg(node: &SyntaxNode, _source: &str) -> Option<AttributeArg> 
         // Unlabeled path value (identifier was stored in label)
         // The value_span is the whole arg span since it's just an identifier
         Some(AttributeArg::unlabeled(full_span))
-    } else if let Some(val) = value_span {
-        // Unlabeled literal value
-        Some(AttributeArg::unlabeled(val))
     } else {
-        // Unable to extract meaningful data
-        None
+        value_span.map(AttributeArg::unlabeled)
     }
 }
 
@@ -283,7 +283,7 @@ pub fn parse_builtin_attribute(
                 name: feature_name.to_string(),
             });
             BuiltinParseResult::Error
-        }
+        },
     }
 }
 
@@ -364,7 +364,7 @@ pub fn parse_extern_attribute(
                 name: conv_name.to_string(),
             });
             return ExternParseResult::Error;
-        }
+        },
     };
 
     // Check for optional mangleName parameter
