@@ -335,7 +335,7 @@ mod function_declarations {
         )
         .expect(Compiles)
         .expect(
-            Symbol::new("add")
+            Symbol::new("Test.add")
                 .has(Behavior::ParameterCount(2))
                 .has(Behavior::HasAttribute("dummy")),
         );

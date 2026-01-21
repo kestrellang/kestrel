@@ -320,7 +320,7 @@ func test() {
 }
 "#,
         )
-        .expect(HasError("type mismatch"));
+        .expect(HasError("does not conform to protocol"));
     }
 
     #[test]
@@ -335,7 +335,7 @@ func test() -> lang.str {
 }
 "#,
         )
-        .expect(HasError("type mismatch"));
+        .expect(HasError("does not conform to protocol"));
     }
 
     #[test]
@@ -367,7 +367,7 @@ func test() {
 }
 "#,
         )
-        .expect(HasError("type mismatch"));
+        .expect(HasError("does not conform to protocol"));
     }
 }
 
@@ -438,7 +438,7 @@ func test() {
 }
 "#,
         )
-        .expect(HasError("type mismatch"));
+        .expect(HasError("does not conform to protocol"));
     }
 }
 

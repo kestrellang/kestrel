@@ -498,18 +498,84 @@ See [docs/memory-model/implementation-plan.md](docs/memory-model/implementation-
 - [ ] Executable Output
   - [ ] Binary or interpreted execution
 
-## Phase 13: Standard Library & Syntactic Sugar
+## Phase 13: Standard Library & Language Features ✅ COMPLETE
 
-- [ ] Standard Library
-  - [ ] Option[T], Result[T, E] (as regular enums)
-  - [ ] Collections (Array, Map, Set)
-  - [ ] String utilities
-  - [ ] I/O primitives
-- [ ] Syntactic Sugar
-  - [ ] `T?` for `Option[T]`
-  - [ ] `?` operator for error/option propagation
-  - [ ] Optional chaining `x?.foo`
-  - [ ] For loops (desugars to iterator protocol)
+### Computed Properties & Subscripts
+- [x] Computed properties with getter/setter
+- [x] Shorthand syntax: `var x: Int { expr }`
+- [x] Explicit accessors: `var x: Int { get { expr } set { expr } }`
+- [x] Protocol requirements: `{ get }` or `{ get set }`
+- [x] Subscripts with `subscript[T]?(params) -> Type { body }`
+- [x] `ExprKind::SubscriptCall` for `receiver[args]` expressions
+
+### Protocol Extensions & Operators
+- [x] Protocol extensions with default implementations
+- [x] `extend Protocol { ... }` syntax
+- [x] `Constraint::SelfBound` for conditional extensions
+- [x] Protocol operators (58 operator protocols)
+- [x] Operators desugar to protocol method calls
+
+### Try Operator & Error Handling
+- [x] `try expr` syntax with high precedence
+- [x] Desugars to match on `tryExtract()` method
+- [x] `Tryable` and `FromResidual` protocols
+- [x] `ControlFlowEnum` with `Continue` and `Break` variants
+
+### Literal Protocols
+- [x] `ExpressibleByIntegerLiteral`, `ExpressibleByFloatLiteral`, `ExpressibleByStringLiteral`, `ExpressibleByBoolLiteral`
+- [x] `ExpressibleByNilLiteral`, `ExpressibleByArrayLiteral`, `ExpressibleByDictionaryLiteral`
+- [x] Default literal type system via `@builtin` annotations
+- [x] Array literals with `_ExpressibleByArrayLiteral` protocol
+
+### Pattern Matching & Protocols
+- [x] `Matchable` protocol with `matches(self, other: Self) -> Bool`
+- [x] `BooleanConditional` protocol for custom boolean conditions
+- [x] `Formattable` protocol with `format() -> String` method
+
+### Type System Enhancements
+- [x] Init where clauses: `init[T](params) where T: Protocol`
+- [x] Associated types in extensions
+- [x] Default generic substitution
+- [x] Self type improvements in method return types and parameters
+
+### Language Intrinsics
+- [x] Cast intrinsics: `lang.cast_<from>_<to>(value)`
+- [x] Integer intrinsics: Add, Sub, Mul, Eq, Ne, And, Or, Xor, Shl, Div, Rem, Shr
+- [x] Float intrinsics: Add, Sub, Mul, Div, comparisons, Neg, Floor, Ceil, Round, Trunc, Sqrt
+- [x] Pointer intrinsics: `ptr.null`, `ptr.read`, `ptr.write`, `sizeof[T]`, `alignof[T]`
+- [x] Atomic intrinsics: `atomic.add`, `atomic.sub`
+- [x] Builtins system with `lang` namespace
+
+### Syntax Improvements
+- [x] Enum cases without labels: `case Some(T)`
+- [x] Delegating initializers: `self.init(...)`
+- [x] String escape codes: `\n`, `\r`, `\t`, `\xNN`, `\u{NNNN}`, raw strings
+- [x] Multi-file spans for accurate error locations
+- [x] Optional semicolons in type aliases
+
+### Compiler Infrastructure
+- [x] Standard library integration with `--std` and `--no-std` flags
+- [x] Optimization levels: `-O` / `--opt-level` (0-2)
+- [x] Multi-file compilation
+- [x] Aggregate return ABI (SRET)
+
+### Standard Library
+- [x] Build standard library
+- [x] Build IO
+- [x] Build pong
+- [x] String escape codes
+- [x] Cleanup
+- [x] Remove old STD
+- [x] Move IO into standard library
+- [x] Build with std by default, add --no-std flag
+- [x] Fix matches on non-primitive types
+- [x] Add Formattable protocol
+- [x] Remove deinit + copyable warning
+- [x] Error for try
+- [x] Fix test suite
+- [ ] Reference counting
+- [ ] Add tests for features
+- [ ] Add tests for STD
 
 ---
 

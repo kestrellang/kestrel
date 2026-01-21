@@ -34,7 +34,7 @@ mod basic {
         )
         .expect(Compiles)
         .expect(
-            Symbol::new("add")
+            Symbol::new("Test.add")
                 .is(SymbolKind::Function)
                 .has(Behavior::ParameterCount(2))
                 .has(Behavior::HasBody(true)),

@@ -867,7 +867,7 @@ mod error_type_mismatch {
             }
         "#,
         )
-        .expect(HasError("type mismatch"));
+        .expect(HasError("does not conform to protocol"));
     }
 
     #[test]
@@ -883,7 +883,7 @@ mod error_type_mismatch {
             }
         "#,
         )
-        .expect(HasError("type mismatch"));
+        .expect(HasError("does not conform to protocol"));
     }
 
     #[test]
@@ -900,7 +900,7 @@ mod error_type_mismatch {
             }
         "#,
         )
-        .expect(HasError("type mismatch"));
+        .expect(HasError("does not conform to protocol"));
     }
 }
 
@@ -1393,7 +1393,7 @@ mod unlabeled_cases {
             }
             func unwrap(opt: Option[lang.i64]) -> lang.i64 {
                 match opt {
-                    .Some(let v) => v
+                    .Some(v) => v,
                     .None => 0
                 }
             }
@@ -1412,7 +1412,7 @@ mod unlabeled_cases {
             }
             func first(p: Pair[lang.i64, lang.str]) -> lang.i64 {
                 match p {
-                    .Value(let a, let _b) => a
+                    .Value(a, _b) => a,
                     .Empty => 0
                 }
             }
@@ -1431,8 +1431,8 @@ mod unlabeled_cases {
             }
             func getValue(r: Result[lang.i64, lang.str]) -> lang.i64 {
                 match r {
-                    .Ok(let v) => v
-                    .Err(let _e) => 0
+                    .Ok(v) => v,
+                    .Err(_e) => 0
                 }
             }
         "#,
@@ -1454,8 +1454,8 @@ mod unlabeled_cases {
                 onRight: (R) -> Out
             ) -> Out {
                 match either {
-                    .Left(let l) => onLeft(l)
-                    .Right(let r) => onRight(r)
+                    .Left(l) => onLeft(l),
+                    .Right(r) => onRight(r)
                 }
             }
         "#,
@@ -1473,7 +1473,7 @@ mod unlabeled_cases {
             }
             func get_middle(t: Triple[lang.i64, lang.str, lang.i1]) -> lang.str {
                 match t {
-                    .Value(let _a, let b, let _c) => b
+                    .Value(_a, b, _c) => b,
                     .Empty => ""
                 }
             }
@@ -1492,7 +1492,7 @@ mod unlabeled_cases {
             }
             func head(list: List[lang.i64]) -> lang.i64 {
                 match list {
-                    .Cons(let h, let _t) => h
+                    .Cons(h, _t) => h,
                     .Nil => 0
                 }
             }
@@ -1515,10 +1515,10 @@ mod unlabeled_cases {
             }
             func unwrap_nested(o: Outer[lang.i64]) -> lang.i64 {
                 match o {
-                    .Wrapped(let inner) => match inner {
-                        .Value(let v) => v
+                    .Wrapped(inner) => match inner {
+                        .Value(v) => v,
                         .None => 0
-                    }
+                    },
                     .Empty => 0
                 }
             }

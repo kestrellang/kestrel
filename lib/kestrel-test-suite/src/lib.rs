@@ -155,7 +155,7 @@ public protocol DivideOperatorProtocol {
 @builtin(.ModuloOperatorProtocol)
 public protocol ModuloOperatorProtocol {
     @builtin(.ModuloOperatorMethod)
-    func remainder(rhs: Self) -> Self
+    func modulo(rhs: Self) -> Self
 }
 
 @builtin(.NegateOperatorProtocol)
@@ -192,13 +192,13 @@ public protocol GreaterThanOperatorProtocol {
 @builtin(.LessOrEqualOperatorProtocol)
 public protocol LessOrEqualOperatorProtocol {
     @builtin(.LessOrEqualOperatorMethod)
-    func lessThanOrEquals(rhs: Self) -> lang.i1
+    func lessThanOrEqual(rhs: Self) -> lang.i1
 }
 
 @builtin(.GreaterOrEqualOperatorProtocol)
 public protocol GreaterOrEqualOperatorProtocol {
     @builtin(.GreaterOrEqualOperatorMethod)
-    func greaterThanOrEquals(rhs: Self) -> lang.i1
+    func greaterThanOrEqual(rhs: Self) -> lang.i1
 }
 
 // Bitwise operator protocols
@@ -1079,10 +1079,35 @@ impl Symbol {
 
 impl Expectable for Symbol {
     fn check(&self, ctx: &TestContext) -> Result<(), String> {
-        let root = ctx.semantic_model.root();
-        let symbol = self
-            .find_symbol(root)
-            .ok_or_else(|| format!("Symbol '{}' not found", self.path))?;
+        // If kind is specified AND path is a simple name (no dots), use registry
+        // for precise lookup to avoid finding wrong symbols
+        // (e.g., type parameters from prelude's ControlFlow[C, B])
+        let symbol = if let Some(expected_kind) = &self.kind {
+            if !self.path.contains('.') {
+                // Simple name - use registry for O(1) lookup by kind
+                let matches = ctx
+                    .semantic_model
+                    .registry()
+                    .find_by_kind_and_name(*expected_kind, &self.path);
+                if matches.is_empty() {
+                    return Err(format!(
+                        "Symbol '{}' with kind {:?} not found",
+                        self.path, expected_kind
+                    ));
+                }
+                matches.into_iter().next().unwrap()
+            } else {
+                // Path-based lookup - use tree search
+                let root = ctx.semantic_model.root();
+                self.find_symbol(root)
+                    .ok_or_else(|| format!("Symbol '{}' not found", self.path))?
+            }
+        } else {
+            // No kind specified - fall back to tree search
+            let root = ctx.semantic_model.root();
+            self.find_symbol(root)
+                .ok_or_else(|| format!("Symbol '{}' not found", self.path))?
+        };
 
         // Check kind if specified
         if let Some(expected_kind) = &self.kind {

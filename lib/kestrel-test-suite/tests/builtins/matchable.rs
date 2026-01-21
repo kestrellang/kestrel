@@ -169,7 +169,7 @@ mod fallback_behavior {
             }
             func getX(p: Point) -> lang.i64 {
                 match p {
-                    Point(x: let xVal, y: _) => xVal
+                    Point { x: xVal, y: _ } => xVal
                 }
             }
         "#,

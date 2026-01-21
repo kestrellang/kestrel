@@ -190,11 +190,11 @@ mod multiple_initializers {
             struct Store {
                 var data: lang.i64
 
-                init[R](reader: R) where R: Readable {
+                init[R](reader reader: R) where R: Readable {
                     self.data = reader.read()
                 }
 
-                init(value: lang.i64) {
+                init(value value: lang.i64) {
                     self.data = value
                 }
             }
@@ -210,11 +210,11 @@ mod multiple_initializers {
             struct Wrapper {
                 var value: lang.i64
 
-                init[T](items: [T]) {
+                init[T](items items: [T]) {
                     self.value = 0
                 }
 
-                init[K, V](pairs: [(K, V)]) {
+                init[K, V](pairs pairs: [(K, V)]) {
                     self.value = 0
                 }
             }

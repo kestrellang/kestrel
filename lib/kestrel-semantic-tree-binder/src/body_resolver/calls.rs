@@ -17,6 +17,7 @@ use kestrel_semantic_tree::symbol::enum_case::EnumCaseSymbol;
 use kestrel_semantic_tree::symbol::enum_symbol::EnumSymbol;
 use kestrel_semantic_tree::symbol::field::FieldSymbol;
 use kestrel_semantic_tree::symbol::function::FunctionSymbol;
+use kestrel_semantic_tree::symbol::initializer::InitializerSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::symbol::protocol::ProtocolSymbol;
 use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
@@ -1267,9 +1268,66 @@ fn resolve_explicit_init_call(
             _ => Substitutions::new(),
         };
 
-        // Build the function type for the initializer, applying struct substitutions
-        // to parameter types so that Slice.init(pointer: Pointer[T], ...) becomes
-        // Slice.init(pointer: Pointer[Infer], ...) when T is an inference placeholder.
+        // Check if the initializer has its own type parameters (e.g., init[From](from: From))
+        // If so, we need to infer them from argument types and validate constraints.
+        let init_subs = if let Some(init_symbol) =
+            init_sym.as_any().downcast_ref::<InitializerSymbol>()
+        {
+            let init_type_params = init_symbol.type_parameters();
+
+            if !init_type_params.is_empty() {
+                // Collect argument types for inference
+                let arg_types: Vec<Ty> = arguments.iter().map(|a| a.value.ty.clone()).collect();
+
+                // Infer type arguments from argument types
+                let mut init_substitutions =
+                    infer_type_arguments(&init_type_params, callable, &arg_types);
+
+                // Build inferred type args, using Infer for parameters that couldn't be determined
+                let inferred_args: Vec<Ty> = init_type_params
+                    .iter()
+                    .map(|tp| {
+                        let tp_id = tp.metadata().id();
+                        if let Some(inferred_ty) = init_substitutions.get(tp_id) {
+                            inferred_ty.clone()
+                        } else {
+                            // Create fresh inference variable for this type parameter
+                            let infer_ty = Ty::infer(span.clone());
+                            init_substitutions.insert(tp_id, infer_ty.clone());
+                            infer_ty
+                        }
+                    })
+                    .collect();
+
+                // Verify where clause constraints are satisfied
+                let where_clause = init_symbol.where_clause();
+                verify_type_argument_constraints(
+                    &init_type_params,
+                    &inferred_args,
+                    &where_clause,
+                    span.clone(),
+                    ctx.model,
+                    ctx.diagnostics,
+                );
+
+                init_substitutions
+            } else {
+                Substitutions::new()
+            }
+        } else {
+            Substitutions::new()
+        };
+
+        // Combine struct substitutions and initializer substitutions
+        let mut combined_subs = struct_subs.clone();
+        for (key, ty) in init_subs.iter() {
+            combined_subs.insert(*key, ty.clone());
+        }
+
+        // Build the function type for the initializer, applying combined substitutions
+        // to parameter types so that:
+        // - Slice.init(pointer: Pointer[T], ...) becomes Slice.init(pointer: Pointer[Infer], ...)
+        // - init[From](from: From) becomes init(from: ConcreteType)
         //
         // We also need to replace any type parameters that aren't in the substitution
         // map with inference placeholders - this handles cases where the callable's
@@ -1281,7 +1339,7 @@ fn resolve_explicit_init_call(
         //
         // Collect the IDs of type parameters that are substitution values - these should
         // be preserved (not replaced with Infer) after substitution.
-        let preserved_type_params: std::collections::HashSet<SymbolId> = struct_subs
+        let preserved_type_params: std::collections::HashSet<SymbolId> = combined_subs
             .iter()
             .filter_map(|(_, ty)| {
                 if let TyKind::TypeParameter(tp) = ty.kind() {
@@ -1296,7 +1354,7 @@ fn resolve_explicit_init_call(
             .parameters()
             .iter()
             .map(|p| {
-                let ty = p.ty.apply_substitutions(&struct_subs);
+                let ty = p.ty.apply_substitutions(&combined_subs);
                 // Replace unsubstituted type params with Infer, but preserve type params
                 // that came from substitution values (they're valid in the caller's scope)
                 replace_type_params_except(&ty, &preserved_type_params, &span)
@@ -1305,12 +1363,12 @@ fn resolve_explicit_init_call(
         let init_fn_ty = Ty::function(param_tys, struct_ty.clone(), span.clone());
 
         let init_ref = Expression::symbol_ref(init_id, init_fn_ty, false, span.clone());
-        // Use generic_call to store the struct substitutions so that CallableParamTypesForCall
+        // Use generic_call to store the combined substitutions so that CallableParamTypesForCall
         // can apply them when type-checking arguments
         return Expression::generic_call(
             init_ref,
             arguments,
-            struct_subs,
+            combined_subs,
             struct_ty,
             span,
         );

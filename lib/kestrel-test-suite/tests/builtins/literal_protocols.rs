@@ -282,7 +282,7 @@ mod expressible_by_nil_literal {
                 }
             }
             func test() -> Optional[lang.i64] {
-                nil
+                null
             }
         "#,
         )
@@ -373,7 +373,7 @@ mod type_inference {
                 }
             }
             func increment(c: Counter) -> Counter {
-                Counter(count: lang.i64_add(c.count, 1))
+                Counter(intLiteral: lang.i64_add(c.count, 1))
             }
             func test() -> Counter {
                 increment(0)
@@ -417,7 +417,7 @@ mod errors {
             }
         "#,
         )
-        .expect(HasError("type mismatch"));
+        .expect(HasError("does not conform to protocol"));
     }
 
     #[test]
@@ -436,7 +436,7 @@ mod errors {
             }
         "#,
         )
-        .expect(HasError("type mismatch"));
+        .expect(HasError("does not conform to protocol"));
     }
 }
 

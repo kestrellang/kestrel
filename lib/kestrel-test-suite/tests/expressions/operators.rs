@@ -225,27 +225,27 @@ func shiftRight() -> lang.i64 {
         )
         .expect(Compiles)
         .expect(
-            Symbol::new("bitwiseAnd")
+            Symbol::new("Main.bitwiseAnd")
                 .is(SymbolKind::Function)
                 .has(Behavior::ParameterCount(0)),
         )
         .expect(
-            Symbol::new("bitwiseOr")
+            Symbol::new("Main.bitwiseOr")
                 .is(SymbolKind::Function)
                 .has(Behavior::ParameterCount(0)),
         )
         .expect(
-            Symbol::new("bitwiseXor")
+            Symbol::new("Main.bitwiseXor")
                 .is(SymbolKind::Function)
                 .has(Behavior::ParameterCount(0)),
         )
         .expect(
-            Symbol::new("shiftLeft")
+            Symbol::new("Main.shiftLeft")
                 .is(SymbolKind::Function)
                 .has(Behavior::ParameterCount(0)),
         )
         .expect(
-            Symbol::new("shiftRight")
+            Symbol::new("Main.shiftRight")
                 .is(SymbolKind::Function)
                 .has(Behavior::ParameterCount(0)),
         );
@@ -440,12 +440,12 @@ func divide() -> lang.i64 {
         )
         .expect(Compiles)
         .expect(
-            Symbol::new("subtract")
+            Symbol::new("Main.subtract")
                 .is(SymbolKind::Function)
                 .has(Behavior::ParameterCount(0)),
         )
         .expect(
-            Symbol::new("divide")
+            Symbol::new("Main.divide")
                 .is(SymbolKind::Function)
                 .has(Behavior::ParameterCount(0)),
         );
@@ -641,22 +641,22 @@ func compute(v: Values) -> lang.i64 {
         )
         .expect(Compiles)
         .expect(
-            Symbol::new("Point")
+            Symbol::new("Main.Point")
                 .is(SymbolKind::Struct)
                 .has(Behavior::FieldCount(2)),
         )
         .expect(
-            Symbol::new("Values")
+            Symbol::new("Main.Values")
                 .is(SymbolKind::Struct)
                 .has(Behavior::FieldCount(3)),
         )
         .expect(
-            Symbol::new("add")
+            Symbol::new("Main.add")
                 .is(SymbolKind::Function)
                 .has(Behavior::ParameterCount(1)),
         )
         .expect(
-            Symbol::new("compute")
+            Symbol::new("Main.compute")
                 .is(SymbolKind::Function)
                 .has(Behavior::ParameterCount(1)),
         );
@@ -679,12 +679,12 @@ func compute(a: lang.i64, b: lang.i64, c: lang.i64) -> lang.i64 {
         )
         .expect(Compiles)
         .expect(
-            Symbol::new("add")
+            Symbol::new("Main.add")
                 .is(SymbolKind::Function)
                 .has(Behavior::ParameterCount(2)),
         )
         .expect(
-            Symbol::new("compute")
+            Symbol::new("Main.compute")
                 .is(SymbolKind::Function)
                 .has(Behavior::ParameterCount(3)),
         );

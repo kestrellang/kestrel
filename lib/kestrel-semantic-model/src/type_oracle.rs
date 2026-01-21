@@ -14,6 +14,7 @@ use kestrel_semantic_tree::builtins::{BuiltinKind, LanguageFeature};
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::extension::ExtensionSymbol;
 use kestrel_semantic_tree::symbol::function::FunctionSymbol;
+use kestrel_semantic_tree::symbol::initializer::InitializerSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::symbol::protocol::ProtocolSymbol;
 use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
@@ -349,6 +350,11 @@ impl TypeOracle for SemanticModel {
 
         // Handle error types - treat as conforming to suppress cascading errors
         if matches!(ty.kind(), TyKind::Error) {
+            return true;
+        }
+
+        // Handle never type - the bottom type conforms to any protocol
+        if matches!(ty.kind(), TyKind::Never) {
             return true;
         }
 
@@ -1474,11 +1480,15 @@ fn resolve_all_associated_types_impl(
 
 /// Get the where clause from a symbol that can have one.
 ///
-/// Supports FunctionSymbol, StructSymbol, ProtocolSymbol, and ExtensionSymbol.
+/// Supports FunctionSymbol, InitializerSymbol, StructSymbol, ProtocolSymbol, and ExtensionSymbol.
 fn get_where_clause_from_symbol(symbol: &dyn Symbol<KestrelLanguage>) -> Option<WhereClause> {
     // Try FunctionSymbol
     if let Some(func) = symbol.as_any().downcast_ref::<FunctionSymbol>() {
         return Some(func.where_clause());
+    }
+    // Try InitializerSymbol
+    if let Some(init) = symbol.as_any().downcast_ref::<InitializerSymbol>() {
+        return Some(init.where_clause());
     }
     // Try StructSymbol
     if let Some(struc) = symbol.as_any().downcast_ref::<StructSymbol>() {

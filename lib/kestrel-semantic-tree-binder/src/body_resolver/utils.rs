@@ -16,6 +16,7 @@ use kestrel_semantic_tree::behavior::typed::TypedBehavior;
 use kestrel_semantic_tree::expr::{ExprKind, Expression};
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::function::FunctionSymbol;
+use kestrel_semantic_tree::symbol::initializer::InitializerSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::symbol::protocol::ProtocolSymbol;
 use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
@@ -361,7 +362,7 @@ pub fn get_type_container(
     }
 }
 
-/// Get the where clause from a symbol that can have one (Function, Struct, Protocol).
+/// Get the where clause from a symbol that can have one (Function, Initializer, Struct, Protocol).
 ///
 /// Returns None if the symbol doesn't have a where clause or can't be downcast.
 /// Note: Returns a cloned WhereClause since FunctionSymbol now uses RwLock.
@@ -369,6 +370,10 @@ pub fn get_where_clause(symbol: &dyn Symbol<KestrelLanguage>) -> Option<WhereCla
     // Try FunctionSymbol
     if let Some(func) = symbol.as_any().downcast_ref::<FunctionSymbol>() {
         return Some(func.where_clause());
+    }
+    // Try InitializerSymbol
+    if let Some(init) = symbol.as_any().downcast_ref::<InitializerSymbol>() {
+        return Some(init.where_clause());
     }
     // Try StructSymbol
     if let Some(struc) = symbol.as_any().downcast_ref::<StructSymbol>() {

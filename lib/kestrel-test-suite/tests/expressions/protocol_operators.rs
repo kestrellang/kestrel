@@ -104,7 +104,7 @@ mod arithmetic_protocols {
             struct Number: Prelude.ModuloOperatorProtocol {
                 var value: lang.i64
 
-                func remainder(rhs: Number) -> Number {
+                func modulo(rhs: Number) -> Number {
                     Number(value: lang.i64_signed_rem(self.value, rhs.value))
                 }
             }
@@ -213,7 +213,7 @@ mod comparison_protocols {
             struct Number: Prelude.LessOrEqualOperatorProtocol {
                 var value: lang.i64
 
-                func lessThanOrEquals(rhs: Number) -> lang.i1 {
+                func lessThanOrEqual(rhs: Number) -> lang.i1 {
                     lang.i64_signed_le(self.value, rhs.value)
                 }
             }
@@ -234,7 +234,7 @@ mod comparison_protocols {
             struct Number: Prelude.GreaterOrEqualOperatorProtocol {
                 var value: lang.i64
 
-                func greaterThanOrEquals(rhs: Number) -> lang.i1 {
+                func greaterThanOrEqual(rhs: Number) -> lang.i1 {
                     lang.i64_signed_ge(self.value, rhs.value)
                 }
             }

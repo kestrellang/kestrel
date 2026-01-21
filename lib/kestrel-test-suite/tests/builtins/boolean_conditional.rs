@@ -86,8 +86,8 @@ mod in_if_statements {
 
                 func asBool() -> lang.i1 {
                     match self {
-                        case .Some(_) => true
-                        case .None => false
+                        .Some(_) => true,
+                        .None => false
                     }
                 }
             }
@@ -183,8 +183,8 @@ mod with_result {
 
                 func asBool() -> lang.i1 {
                     match self {
-                        case .Ok(_) => true
-                        case .Err(_) => false
+                        .Ok(_) => true,
+                        .Err(_) => false
                     }
                 }
             }

@@ -1,4 +1,27 @@
 - [ ]
+- [x] Computed properties with getter/setter
+- [x] Subscripts
+- [x] Protocol extensions & default implementations
+- [x] Protocol operators (58 operator protocols)
+- [x] Try operator
+- [x] Literal protocols
+- [x] Array literals
+- [x] Matchable protocol
+- [x] Init where clauses
+- [x] Associated types in extensions
+- [x] Default generic substitution
+- [x] Self type improvements
+- [x] Cast intrinsics
+- [x] Integer & float intrinsics
+- [x] Pointer & atomic intrinsics
+- [x] Builtins system (lang namespace)
+- [x] Enum cases without labels
+- [x] Delegating initializers
+- [x] Multi-file spans
+- [x] Optimization levels
+- [x] Multi-file compilation
+- [x] Aggregate return ABI (SRET)
+- [x] BooleanConditional protocol
 - [x] Build standard library 
 - [x] Build IO
 - [x] Build pong
@@ -11,10 +34,10 @@
 - [x] Add Formattable protocol
 - [x] Remove deinit + copyable warning
 - [x] Error for try
-- [ ] Fix test suite
+- [x] Fix test suite
 - [ ] Reference counting
-- [ ] Web server
-- [ ] Add tests
+- [ ] Add tests for features
+- [ ] Add tests for STD
 
 ## Phase 14
 
@@ -29,3 +52,4 @@
 - [ ] Null Coalescing
 - [ ] and && or cut off
 - [ ] String interpolation
+- [ ] Web server

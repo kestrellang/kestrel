@@ -440,7 +440,7 @@ mod enum_struct_payloads {
                 .has_case("Rectangle")
                 .has_case_count(2),
         )
-        .expect(Mir::struct_count(4)); // Point, Size, and 2 enum case structs
+        .expect(Mir::struct_count(6)); // Point, Size, 2 enum case structs, and 2 Prelude.ControlFlow case structs
     }
 
     #[test]

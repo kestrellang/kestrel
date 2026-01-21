@@ -82,7 +82,7 @@ func test() -> lang.i64 {
         )
         .expect(Compiles)
         .expect(
-            Symbol::new("add")
+            Symbol::new("Main.add")
                 .is(SymbolKind::Function)
                 .has(Behavior::ParameterCount(2)),
         );
@@ -234,12 +234,12 @@ func test() -> lang.i64 {
         )
         .expect(Compiles)
         .expect(
-            Symbol::new("add")
+            Symbol::new("Main.add")
                 .is(SymbolKind::Function)
                 .has(Behavior::ParameterCount(2)),
         )
         .expect(
-            Symbol::new("double")
+            Symbol::new("Main.double")
                 .is(SymbolKind::Function)
                 .has(Behavior::ParameterCount(1)),
         );

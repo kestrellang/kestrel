@@ -280,7 +280,7 @@ mod field_access {
         )
         .expect(Compiles)
         .expect(Mir::compiles())
-        .expect(Mir::struct_count(4))
+        .expect(Mir::struct_count(6))
         .expect(
             Mir::mir_function("Main.getValue")
                 .returns(MirTy::I64)
