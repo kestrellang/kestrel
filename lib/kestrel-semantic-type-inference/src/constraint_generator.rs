@@ -513,6 +513,36 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
             }
         },
 
+        ExprKind::DeferredStaticCall {
+            target_ty,
+            method_name,
+            arguments,
+        } => {
+            // Generate constraints for arguments
+            for arg in arguments {
+                generate_expression_constraints(ctx, &arg.value);
+            }
+
+            // Collect argument type IDs for constraint generation
+            let arg_ty_ids: Vec<_> = arguments.iter().map(|a| a.value.ty.id()).collect();
+
+            // Register target type and result type
+            ctx.register_type(target_ty);
+            ctx.register_type(&expr.ty);
+
+            // Generate a member access constraint for the static method
+            // is_static = true indicates this is a static method lookup
+            ctx.member_access(
+                target_ty.id(),
+                method_name.clone(),
+                true, // is_static = true for static method call
+                arg_ty_ids,
+                expr.ty.id(),
+                expr.id,
+                expr.span.clone(),
+            );
+        },
+
         ExprKind::ImplicitStructInit { arguments, .. } => {
             for arg in arguments {
                 generate_expression_constraints(ctx, &arg.value);

@@ -435,32 +435,48 @@ fn bind_methods(
 ) {
     let protocol_id = protocol_symbol.metadata().id();
 
+    // Collect protocol method names for fallback matching
+    let protocol_method_names: std::collections::HashSet<String> = protocol_symbol
+        .metadata()
+        .children()
+        .into_iter()
+        .filter(|c| c.metadata().kind() == KestrelSymbolKind::Function)
+        .map(|c| c.metadata().name().value.clone())
+        .collect();
+
     for child in implementing_symbol.metadata().children() {
-        if child.metadata().kind() != KestrelSymbolKind::Function {
+        let child_kind = child.metadata().kind();
+        if child_kind != KestrelSymbolKind::Function {
             continue;
         }
 
-        // Check if this method implements a protocol method
+        let func_name = child.metadata().name().value.clone();
+
+        // First try: Check for ImplementsBehavior pointing to this protocol
         if let Some(implements) = child.metadata().get_behavior::<ImplementsBehavior>() {
-            if implements.protocol() != protocol_id {
+            if implements.protocol() == protocol_id {
+                // Get the protocol method name by looking up the symbol
+                let protocol_method_id = implements.protocol_method();
+                let method_name = if let Some(method_symbol) = ctx.model.query(SymbolFor {
+                    id: protocol_method_id,
+                }) {
+                    method_symbol.metadata().name().value.clone()
+                } else {
+                    func_name.clone()
+                };
+
+                let impl_name = qualified_name_for_symbol(ctx, &child);
+                ctx.mir.witnesses[witness_id].bind_method(method_name, impl_name, vec![]);
                 continue;
             }
+        }
 
-            // Get the protocol method name by looking up the symbol
-            let protocol_method_id = implements.protocol_method();
-            let method_name = if let Some(method_symbol) = ctx.model.query(SymbolFor {
-                id: protocol_method_id,
-            }) {
-                method_symbol.metadata().name().value.clone()
-            } else {
-                // Fallback to the implementing method's name
-                child.metadata().name().value.clone()
-            };
-
-            // Get the implementation function's qualified name
+        // Fallback: For extension methods implementing protocol requirements from the same
+        // extension's conformance, ImplementsBehavior may not be set (due to signature matching
+        // complexities with Self). If the method name matches a protocol method name, bind it.
+        if protocol_method_names.contains(&func_name) {
             let impl_name = qualified_name_for_symbol(ctx, &child);
-
-            ctx.mir.witnesses[witness_id].bind_method(method_name, impl_name, vec![]);
+            ctx.mir.witnesses[witness_id].bind_method(func_name, impl_name, vec![]);
         }
     }
 }

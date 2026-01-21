@@ -51,15 +51,6 @@ fn func_uses_self(mir: &MirContext, func_def: &FunctionDef) -> bool {
     }) || type_uses_self(mir, func_def.ret)
 }
 
-/// Check if a function has a self receiver (first parameter named "self").
-/// This is used to determine if a witness call needs a self_type for mangling.
-fn has_self_receiver(mir: &MirContext, func_def: &FunctionDef) -> bool {
-    func_def.params.first().is_some_and(|&param_id| {
-        let param = &mir.params[param_id];
-        param.name == "self"
-    })
-}
-
 fn is_main_function(ctx: &CodegenContext<'_>, func_def: &FunctionDef) -> bool {
     let name = ctx.mir.name(func_def.name);
     name.segments.last().map(|s| s.as_str()) == Some("main")
@@ -2193,20 +2184,11 @@ fn compile_immediate(
             };
             let ptr_size = if ctx.target.is_64bit() { 8 } else { 4 };
 
-            // Look up the function by name to get func_id for mangling
-            let func_lookup = ctx
-                .mir
-                .functions
-                .iter()
-                .find(|(_, def)| def.name == impl_name);
-
-            // For witness methods, check if the function has a self receiver to determine
-            // if we need to include self_type in the mangled name. This matches what the
-            // monomorphization collection phase does when creating FunctionInstantiation.
-            let self_type = match func_lookup {
-                Some((_, def)) if has_self_receiver(ctx.mir, def) => Some(concrete_for_type),
-                _ => None,
-            };
+            // For witness method references, ALWAYS use concrete_for_type as self_type.
+            // This matches what the monomorphization collection phase does - it uses
+            // FunctionInstantiation::with_self_type for ALL witness calls, not just
+            // those with self receivers.
+            let self_type = Some(concrete_for_type);
             let mangled_name = ctx.resolve_symbol_name(impl_name, &impl_type_args, self_type);
             let cl_func_id = ctx.func_ids_by_name.get(&mangled_name).ok_or_else(|| {
                 CodegenError::Unsupported(format!(
@@ -2740,13 +2722,13 @@ pub fn compile_call(
                 .iter()
                 .find(|(_, def)| def.name == impl_name);
             let callee_def = func_lookup.map(|(_, def)| def);
-            // For witness calls, always use concrete_for_type as self_type if the function
-            // has a self receiver (first param named "self"). This matches what the
-            // monomorphization collection phase does when creating FunctionInstantiation.
-            let self_type = match callee_def {
-                Some(def) if has_self_receiver(ctx.mir, def) => Some(concrete_for_type),
-                _ => None,
-            };
+            // For witness calls, ALWAYS use concrete_for_type as self_type.
+            // This matches what the monomorphization collection phase does - it uses
+            // FunctionInstantiation::with_self_type for ALL witness calls, not just
+            // those with self receivers. This is necessary for extension methods like
+            // `fromResidual` which are static but still need the self_type to distinguish
+            // between different instantiations.
+            let self_type = Some(concrete_for_type);
             let mangled_name = ctx.resolve_symbol_name(impl_name, &impl_type_args, self_type);
             let cl_func_id = ctx.func_ids_by_name.get(&mangled_name).ok_or_else(|| {
                 CodegenError::Unsupported(format!(

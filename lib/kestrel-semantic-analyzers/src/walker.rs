@@ -240,6 +240,15 @@ fn walk_expression(
                     }
                 }
             },
+            ExprKind::DeferredStaticCall { arguments, .. } => {
+                // Only walk arguments - target_ty is a type, not an expression
+                for arg in arguments {
+                    walk_expression(&arg.value, analyzers, model, ctx);
+                    if ctx.stopped {
+                        return;
+                    }
+                }
+            },
             ExprKind::ImplicitStructInit { arguments, .. } => {
                 for arg in arguments {
                     walk_expression(&arg.value, analyzers, model, ctx);

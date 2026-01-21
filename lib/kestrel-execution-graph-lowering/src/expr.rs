@@ -862,6 +862,15 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
             Value::Immediate(Immediate::error())
         },
 
+        ExprKind::DeferredStaticCall { method_name, .. } => {
+            // Should be resolved by type inference
+            ctx.emit_error(LoweringError::internal(
+                format!("unresolved deferred static call '.{}'", method_name),
+                Some(expr.span.clone()),
+            ));
+            Value::Immediate(Immediate::error())
+        },
+
         // === Language Intrinsics ===
         ExprKind::LangIntrinsic {
             intrinsic,
@@ -2563,8 +2572,12 @@ fn lower_call(
             // When inside a protocol extension, `self` has type `Protocol` which also needs witness dispatch
             let is_protocol_type_call = matches!(receiver.ty.kind(), TyKind::Protocol { .. });
 
+            // Check if this is a static call on a concrete type (Type.staticMethod())
+            // This happens when deferred static calls are resolved during type inference
+            let is_static_type_ref_call = matches!(receiver.kind, ExprKind::TypeRef(_));
+
             // Determine if this is an instance method call (has receiver value)
-            let is_instance = !(is_static_type_param_call || is_static_assoc_type_call);
+            let is_instance = !(is_static_type_param_call || is_static_assoc_type_call || is_static_type_ref_call);
 
             // For instance methods on type params, receiver becomes first argument
             // For static methods on type params/assoc types, there's no receiver value
@@ -5448,8 +5461,10 @@ fn find_protocol_for_extension_method(
         if let TyKind::Protocol { symbol, .. } = protocol_ty.kind() {
             // Check if this protocol has a method with the given name
             for child in symbol.metadata().children() {
-                if child.metadata().kind() == KestrelSymbolKind::Function
-                    && child.metadata().name().value == method_name
+                let child_name = child.metadata().name().value.clone();
+                let child_kind = child.metadata().kind();
+                if child_kind == KestrelSymbolKind::Function
+                    && child_name == method_name
                 {
                     return Some(symbol.clone() as std::sync::Arc<dyn Symbol<KestrelLanguage>>);
                 }

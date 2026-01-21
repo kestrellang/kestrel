@@ -107,6 +107,7 @@ fn validate_assignment_target(
         | ExprKind::PrimitiveMethodCall { .. }
         | ExprKind::PrimitiveMethodRef { .. }
         | ExprKind::DeferredMethodCall { .. }
+        | ExprKind::DeferredStaticCall { .. }
         | ExprKind::ImplicitStructInit { .. }
         | ExprKind::DelegatingInit { .. }
         | ExprKind::MethodRef { .. }

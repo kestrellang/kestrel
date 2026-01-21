@@ -14,8 +14,8 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use crate::diagnostics::{
     AsciiEscapeOutOfRangeError, BreakOutsideLoopError, ContinueOutsideLoopError,
     IncompleteEscapeSequenceError, InvalidEscapeSequenceError, InvalidUnicodeEscapeError,
-    TryExpressionNotSupportedError, TupleIndexOnNonTupleError, TupleIndexOutOfBoundsError,
-    UndeclaredLabelError, UnicodeEscapeErrorReason,
+    TupleIndexOnNonTupleError, TupleIndexOutOfBoundsError, UndeclaredLabelError,
+    UnicodeEscapeErrorReason,
 };
 use kestrel_syntax_tree::utils::get_node_span;
 
@@ -1218,21 +1218,9 @@ fn resolve_return_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext)
 ///     .Break(early) => return R.fromResidual(early)
 /// }
 /// ```
-// TODO: Remove the TryExpressionNotSupportedError and restore full implementation
-// when try expressions are fully supported
+/// where R is the enclosing function's return type.
 fn resolve_try_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> Expression {
-    let span = get_node_span(node, ctx.file_id);
-
-    // Emit error: try expressions are not yet supported
-    ctx.diagnostics
-        .throw(TryExpressionNotSupportedError { span: span.clone() });
-
-    Expression::error(span)
-}
-
-#[allow(dead_code)]
-fn resolve_try_expression_impl(node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> Expression {
-    use kestrel_semantic_tree::expr::MatchArm;
+    use kestrel_semantic_tree::expr::{CallArgument, MatchArm};
     use kestrel_semantic_tree::pattern::{EnumPatternBinding, Mutability, Pattern};
 
     let span = get_node_span(node, ctx.file_id);
@@ -1262,10 +1250,15 @@ fn resolve_try_expression_impl(node: &SyntaxNode, ctx: &mut BodyResolutionContex
     // Push scope for continue arm
     ctx.local_scope.push_scope();
 
+    // Create a single inference type for the value binding.
+    // This type will be shared between the local binding, pattern, and body reference
+    // so that type inference can connect them properly.
+    let value_ty = Ty::infer(span.clone());
+
     // Bind 'value' local for .Continue(value) pattern
     let value_local_id = ctx.local_scope.bind(
         "$try_value".to_string(), // Use synthetic name to avoid conflicts
-        Ty::infer(span.clone()),
+        value_ty.clone(),
         false,
         span.clone(),
     );
@@ -1275,7 +1268,7 @@ fn resolve_try_expression_impl(node: &SyntaxNode, ctx: &mut BodyResolutionContex
         value_local_id,
         Mutability::Immutable,
         "$try_value".to_string(),
-        Ty::infer(span.clone()),
+        value_ty.clone(),
         span.clone(),
     );
     let continue_binding = EnumPatternBinding::unlabeled(value_binding_pattern, span.clone());
@@ -1286,8 +1279,9 @@ fn resolve_try_expression_impl(node: &SyntaxNode, ctx: &mut BodyResolutionContex
     );
 
     // Body for continue arm: just reference the value
+    // Use the same type as the binding pattern so type inference connects them
     let continue_body =
-        Expression::local_ref(value_local_id, Ty::infer(span.clone()), false, span.clone());
+        Expression::local_ref(value_local_id, value_ty, false, span.clone());
     let continue_arm = MatchArm::new(continue_pattern, continue_body, span.clone());
 
     ctx.local_scope.pop_scope();
@@ -1295,10 +1289,15 @@ fn resolve_try_expression_impl(node: &SyntaxNode, ctx: &mut BodyResolutionContex
     // Push scope for break arm
     ctx.local_scope.push_scope();
 
+    // Create a single inference type for the early binding.
+    // This type will be shared between the local binding, pattern, and body reference
+    // so that type inference can connect them properly.
+    let early_ty = Ty::infer(span.clone());
+
     // Bind 'early' local for .Break(early) pattern
     let early_local_id = ctx.local_scope.bind(
         "$try_early".to_string(),
-        Ty::infer(span.clone()),
+        early_ty.clone(),
         false,
         span.clone(),
     );
@@ -1308,18 +1307,41 @@ fn resolve_try_expression_impl(node: &SyntaxNode, ctx: &mut BodyResolutionContex
         early_local_id,
         Mutability::Immutable,
         "$try_early".to_string(),
-        Ty::infer(span.clone()),
+        early_ty.clone(),
         span.clone(),
     );
     let break_binding = EnumPatternBinding::unlabeled(early_binding_pattern, span.clone());
     let break_pattern =
         Pattern::unresolved_enum_variant("Break".to_string(), vec![break_binding], span.clone());
 
-    // Body for break arm: return (error placeholder for now)
-    // TODO: Implement proper fromResidual call
-    // For now, just create an error expression that will produce a type error
-    // This allows parsing to work while we implement the full desugaring
-    let break_body = Expression::return_expr(Some(Expression::error(span.clone())), span.clone());
+    // Body for break arm: return R.fromResidual(early)
+    // R is the enclosing function's return type
+    let return_ty = ctx
+        .function_return_type()
+        .unwrap_or_else(|| Ty::error(span.clone()));
+
+    // Reference to the early local - use the same type as the binding pattern
+    let early_ref = Expression::local_ref(
+        early_local_id,
+        early_ty,
+        false,
+        span.clone(),
+    );
+
+    // Create argument: residual: early
+    let from_residual_arg = CallArgument::labeled("residual".to_string(), early_ref, span.clone());
+
+    // Create deferred static call: R.fromResidual(early)
+    // Type inference will resolve this to the actual static method
+    let from_residual_call = Expression::deferred_static_call(
+        return_ty.clone(),
+        "fromResidual".to_string(),
+        vec![from_residual_arg],
+        return_ty, // Result type is also R (Self)
+        span.clone(),
+    );
+
+    let break_body = Expression::return_expr(Some(from_residual_call), span.clone());
     let break_arm = MatchArm::new(break_pattern, break_body, span.clone());
 
     ctx.local_scope.pop_scope();
@@ -1624,6 +1646,10 @@ fn expression_references_local(
                     .iter()
                     .any(|arg| expression_references_local(&arg.value, local_id))
         },
+
+        ExprKind::DeferredStaticCall { arguments, .. } => arguments
+            .iter()
+            .any(|arg| expression_references_local(&arg.value, local_id)),
 
         ExprKind::ImplicitStructInit { arguments, .. } => arguments
             .iter()
@@ -2270,6 +2296,11 @@ where
             ..
         } => {
             collect_captures_from_expression(receiver, process);
+            for arg in arguments {
+                collect_captures_from_expression(&arg.value, process);
+            }
+        },
+        ExprKind::DeferredStaticCall { arguments, .. } => {
             for arg in arguments {
                 collect_captures_from_expression(&arg.value, process);
             }

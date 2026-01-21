@@ -11,6 +11,7 @@ use kestrel_semantic_tree::pattern::Pattern;
 use kestrel_semantic_tree::stmt::{Statement, StatementKind};
 use kestrel_semantic_tree::symbol::local::LocalContainer;
 use kestrel_semantic_tree::ty::{ParamInfo, Substitutions, Ty, TyKind};
+use semantic_tree::symbol::Symbol;
 
 use crate::solution::Solution;
 
@@ -248,6 +249,67 @@ fn apply_to_expression(expr: &Expression, solution: &Solution) -> Expression {
                 // No resolution found - keep as deferred (will error during lowering)
                 ExprKind::DeferredMethodCall {
                     receiver: Box::new(resolved_receiver),
+                    method_name: method_name.clone(),
+                    arguments: resolved_arguments,
+                }
+            }
+        },
+
+        ExprKind::DeferredStaticCall {
+            target_ty,
+            method_name,
+            arguments,
+        } => {
+            let resolved_target_ty = resolve_type(target_ty, solution);
+            let resolved_arguments: Vec<CallArgument> = arguments
+                .iter()
+                .map(|arg| apply_to_argument(arg, solution))
+                .collect();
+
+            // Check if we have a resolved symbol for this expression
+            if let Some(value_resolution) = solution.get_value(expr.id) {
+                // Get the type symbol for creating a TypeRef
+                let type_symbol_id_opt = match resolved_target_ty.kind() {
+                    TyKind::Struct { symbol, .. } => Some(symbol.metadata().id()),
+                    TyKind::Enum { symbol, .. } => Some(symbol.metadata().id()),
+                    _ => None,
+                };
+
+                if let Some(type_symbol_id) = type_symbol_id_opt {
+                    // Create a TypeRef expression for the target type
+                    let type_ref = Expression::type_ref(
+                        type_symbol_id,
+                        resolved_target_ty.clone(),
+                        expr.span.clone(),
+                    );
+
+                    // Create a MethodRef with the resolved static method symbol
+                    let method_ref = Expression::method_ref(
+                        type_ref,
+                        vec![value_resolution.symbol_id],
+                        method_name.clone(),
+                        expr.span.clone(),
+                    );
+
+                    // Create a Call expression with the method ref as callee
+                    ExprKind::Call {
+                        callee: Box::new(method_ref),
+                        arguments: resolved_arguments,
+                        substitutions: value_resolution.substitutions.clone(),
+                    }
+                } else {
+                    // Cannot resolve static call on non-struct/enum type
+                    // Keep as deferred (will error during lowering)
+                    ExprKind::DeferredStaticCall {
+                        target_ty: resolved_target_ty,
+                        method_name: method_name.clone(),
+                        arguments: resolved_arguments,
+                    }
+                }
+            } else {
+                // No resolution found - keep as deferred (will error during lowering)
+                ExprKind::DeferredStaticCall {
+                    target_ty: resolved_target_ty,
                     method_name: method_name.clone(),
                     arguments: resolved_arguments,
                 }
