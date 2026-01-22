@@ -390,7 +390,6 @@ func main() -> lang.i64 {
     }
 
     #[test]
-    #[ignore = "Or-patterns with Char literals need investigation"]
     fn char_literal_pattern_or() {
         // Tests or-patterns with char literals
         Test::new(
@@ -647,7 +646,7 @@ func test(x: lang.i64) -> lang.str {
     }
 
     #[test]
-    #[ignore = "Char range patterns with Matchable not yet implemented"]
+    #[ignore = "Char range patterns with Matchable - LessOrEqual witness call needs investigation"]
     fn char_range_pattern() {
         // Tests char range patterns with Char struct
         Test::new(
@@ -694,7 +693,7 @@ func main() -> lang.i64 {
     }
 
     #[test]
-    #[ignore = "Char range patterns with Matchable not yet implemented"]
+    #[ignore = "Char range patterns with Matchable - LessOrEqual witness call needs investigation"]
     fn char_range_pattern_exclusive() {
         // Tests exclusive char range patterns
         Test::new(
@@ -771,7 +770,7 @@ func test(x: lang.i64) -> lang.str {
     }
 
     #[test]
-    #[ignore = "Char range patterns with Matchable not yet implemented"]
+    #[ignore = "Char range patterns with Matchable - LessOrEqual witness call needs investigation"]
     fn char_range_with_integer_scrutinee() {
         // Char literals can match against integer types since they're both numeric
         // The char pattern infers to i32 but can unify with i64

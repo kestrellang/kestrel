@@ -1510,17 +1510,145 @@ fn emit_matchable_switch(
             },
 
             Constructor::CharRange { start, end } => {
-                // Char ranges for Matchable types - create a temporary char for the low and high bounds
-                // and check if scrutinee is in range using Comparable
-                // For now, emit an error since this is complex
-                ctx.emit_error(LoweringError::internal(
-                    format!(
-                        "Matchable switch with char range '{}'..='{}' not yet fully implemented",
-                        start, end
-                    ),
-                    None,
-                ));
-                continue;
+                // Char ranges for Matchable types - create temporaries for the low and high bounds
+                // and check if scrutinee is in range using LessOrEqual.lessThanOrEqual
+                let match_block = ctx.create_block();
+                let check_hi_block = ctx.create_block(); // Block for checking upper bound
+                let next_block = ctx.create_block();
+
+                // Helper to create a char literal temp
+                let create_char_temp = |ctx: &mut LoweringContext, c: char, name: &str| -> Place {
+                    let char_local = ctx.create_temp(name, for_type);
+                    let char_place = Place::local(char_local);
+
+                    if let TyKind::Struct {
+                        symbol: struct_symbol,
+                        ..
+                    } = ty.kind()
+                    {
+                        // Find the init$charLiteral method
+                        let init_sym = struct_symbol
+                            .metadata()
+                            .children()
+                            .into_iter()
+                            .find(|child| {
+                                child.metadata().kind() == KestrelSymbolKind::Initializer
+                                    && child
+                                        .metadata()
+                                        .get_behavior::<CallableBehavior>()
+                                        .map(|c| {
+                                            c.parameters()
+                                                .first()
+                                                .and_then(|p| p.external_label())
+                                                == Some("charLiteral")
+                                        })
+                                        .unwrap_or(false)
+                            });
+
+                        if let Some(init_sym) = init_sym {
+                            let mut name_parts = Vec::new();
+                            collect_symbol_name_parts(
+                                &(struct_symbol.clone()
+                                    as std::sync::Arc<
+                                        dyn Symbol<kestrel_semantic_tree::language::KestrelLanguage>,
+                                    >),
+                                &mut name_parts,
+                            );
+
+                            let init_name_suffix = if let Some(callable) =
+                                init_sym.metadata().get_behavior::<CallableBehavior>()
+                            {
+                                let labels: Vec<&str> = callable
+                                    .parameters()
+                                    .iter()
+                                    .filter_map(|p| p.external_label())
+                                    .collect();
+                                if labels.is_empty() {
+                                    "init".to_string()
+                                } else {
+                                    format!("init${}", labels.join("$"))
+                                }
+                            } else {
+                                "init$charLiteral".to_string()
+                            };
+                            name_parts.push(init_name_suffix);
+
+                            let init_name = ctx.mir.intern_name(QualifiedNameData::new(name_parts));
+
+                            let ref_ty = ctx.mir.ty_ref_mut(for_type);
+                            let self_ref_local = ctx.create_temp("self_ref", ref_ty);
+                            let self_ref_place = Place::local(self_ref_local);
+
+                            ctx.emit_assign(
+                                self_ref_place.clone(),
+                                Rvalue::RefMut(char_place.clone()),
+                            );
+
+                            let call_args = vec![
+                                CallArg::mutating(Value::Place(self_ref_place)),
+                                CallArg::borrow(Value::Immediate(Immediate::i32(c as i32))),
+                            ];
+
+                            let unit_ty = ctx.mir.ty_unit();
+                            let unit_local = ctx.create_temp("init_ret", unit_ty);
+                            let unit_place = Place::local(unit_local);
+
+                            let mir_callee = Callee::direct(init_name);
+                            ctx.emit_call_with_modes(unit_place, mir_callee, call_args);
+                        }
+                    }
+
+                    char_place
+                };
+
+                // Create start and end char temps
+                let start_place = create_char_temp(ctx, *start, "range_start");
+                let end_place = create_char_temp(ctx, *end, "range_end");
+
+                // Get the LessOrEqual protocol for witness calls
+                let less_or_equal_protocol_name =
+                    ctx.mir.intern_name(QualifiedNameData::new(vec![
+                        "std".to_string(),
+                        "core".to_string(),
+                        "LessOrEqual".to_string(),
+                    ]));
+
+                // Check: start <= scrutinee (start.lessThanOrEqual(scrutinee))
+                let cmp1_local = ctx.create_temp("cmp_lo", bool_mir_ty);
+                let cmp1_place = Place::local(cmp1_local);
+
+                let callee1 = Callee::witness(less_or_equal_protocol_name, "lessThanOrEqual", for_type);
+                let call_args1 = vec![
+                    CallArg::borrow(Value::Place(start_place)),
+                    CallArg::borrow(Value::Place(switch_place.clone())),
+                ];
+                ctx.emit_call_with_modes(cmp1_place.clone(), callee1, call_args1);
+
+                // Branch: if start <= scrutinee, check upper bound; otherwise skip
+                ctx.emit_branch(Value::Place(cmp1_place), check_hi_block, next_block);
+
+                // In check_hi_block: Check scrutinee <= end
+                ctx.set_current_block(check_hi_block);
+
+                let cmp2_local = ctx.create_temp("cmp_hi", bool_mir_ty);
+                let cmp2_place = Place::local(cmp2_local);
+
+                let callee2 = Callee::witness(less_or_equal_protocol_name, "lessThanOrEqual", for_type);
+                let call_args2 = vec![
+                    CallArg::borrow(Value::Place(switch_place.clone())),
+                    CallArg::borrow(Value::Place(end_place)),
+                ];
+                ctx.emit_call_with_modes(cmp2_place.clone(), callee2, call_args2);
+
+                // Branch: if scrutinee <= end, go to match; otherwise skip
+                ctx.emit_branch(Value::Place(cmp2_place), match_block, next_block);
+
+                // Emit match body
+                ctx.set_current_block(match_block);
+                emit_decision_tree(ctx, tree, scrutinee, arms, result_place, join_block);
+
+                // Continue with next comparison
+                ctx.set_current_block(next_block);
             },
 
             _ => {
