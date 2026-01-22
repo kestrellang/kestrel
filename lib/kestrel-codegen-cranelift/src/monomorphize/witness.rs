@@ -346,11 +346,8 @@ pub fn resolve_associated_type(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
     fn test_match_pattern_primitives() {
-        let mir = MirContext::new();
 
         // We can't easily test primitives without interning,
         // so this is a placeholder for more comprehensive tests
