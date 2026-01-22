@@ -26,20 +26,15 @@ public struct CodePoint: Equatable, Comparable, ExpressibleByCharLiteral {
 
     // Character classification (ASCII subset)
     public func isAscii() -> Bool {
-        self._value < UInt32(intLiteral: 128)
+        self < '\u{80}'
     }
 
     public func isAlphabetic() -> Bool {
-        let v = self._value;
-        // A-Z: 65-90, a-z: 97-122
-        (v >= UInt32(intLiteral: 65) and v <= UInt32(intLiteral: 90)) or
-        (v >= UInt32(intLiteral: 97) and v <= UInt32(intLiteral: 122))
+        (self >= 'A' and self <= 'Z') or (self >= 'a' and self <= 'z')
     }
 
     public func isDigit() -> Bool {
-        let v = self._value;
-        // 0-9: 48-57
-        v >= UInt32(intLiteral: 48) and v <= UInt32(intLiteral: 57)
+        self >= '0' and self <= '9'
     }
 
     public func isAlphanumeric() -> Bool {
@@ -47,42 +42,36 @@ public struct CodePoint: Equatable, Comparable, ExpressibleByCharLiteral {
     }
 
     public func isWhitespace() -> Bool {
-        let v = self._value;
-        v == UInt32(intLiteral: 32) or   // space
-        v == UInt32(intLiteral: 9) or    // tab
-        v == UInt32(intLiteral: 10) or   // newline
-        v == UInt32(intLiteral: 13) or   // carriage return
-        v == UInt32(intLiteral: 12)      // form feed
+        self == ' ' or self == '\t' or self == '\n' or self == '\r' or self == '\x0C'
     }
 
     public func isControl() -> Bool {
-        let v = self._value;
-        v < UInt32(intLiteral: 32) or v == UInt32(intLiteral: 127)
+        self < ' ' or self == '\x7F'
     }
 
     public func isUppercase() -> Bool {
-        let v = self._value;
-        v >= UInt32(intLiteral: 65) and v <= UInt32(intLiteral: 90)
+        self >= 'A' and self <= 'Z'
     }
 
     public func isLowercase() -> Bool {
-        let v = self._value;
-        v >= UInt32(intLiteral: 97) and v <= UInt32(intLiteral: 122)
+        self >= 'a' and self <= 'z'
     }
 
     public func toUppercase() -> CodePoint {
         if self.isLowercase() {
-            CodePoint(self._value - UInt32(intLiteral: 32))
+            // 'a' - 'A' = 32
+            CodePoint(self.value() - UInt32(intLiteral: 32))
         } else {
-            CodePoint(self._value)
+            self
         }
     }
 
     public func toLowercase() -> CodePoint {
         if self.isUppercase() {
-            CodePoint(self._value + UInt32(intLiteral: 32))
+            // 'a' - 'A' = 32
+            CodePoint(self.value() + UInt32(intLiteral: 32))
         } else {
-            CodePoint(self._value)
+            self
         }
     }
 
@@ -98,7 +87,8 @@ public struct CodePoint: Equatable, Comparable, ExpressibleByCharLiteral {
     // ASCII digit value (0-9), or None if not a digit
     public func digitValue() -> Optional[UInt32] {
         if self.isDigit() {
-            .Some(self._value - UInt32(intLiteral: 48))
+            let zero: CodePoint = '0';
+            .Some(self.value() - zero.value())
         } else {
             .None
         }
@@ -107,7 +97,8 @@ public struct CodePoint: Equatable, Comparable, ExpressibleByCharLiteral {
     // Create from ASCII digit (0-9)
     public static func fromDigit(d: UInt32) -> Optional[CodePoint] {
         if d <= UInt32(intLiteral: 9) {
-            .Some(CodePoint(d + UInt32(intLiteral: 48)))
+            let zero: CodePoint = '0';
+            .Some(CodePoint(d + zero.value()))
         } else {
             .None
         }
@@ -190,19 +181,19 @@ public struct Char: Equatable {
 
 // Common ASCII code points as constants
 public struct AsciiChars {
-    public static func space() -> CodePoint { CodePoint(UInt32(intLiteral: 32)) }
-    public static func newline() -> CodePoint { CodePoint(UInt32(intLiteral: 10)) }
-    public static func carriageReturn() -> CodePoint { CodePoint(UInt32(intLiteral: 13)) }
-    public static func tab() -> CodePoint { CodePoint(UInt32(intLiteral: 9)) }
-    public static func nul() -> CodePoint { CodePoint(UInt32(intLiteral: 0)) }
-    public static func slash() -> CodePoint { CodePoint(UInt32(intLiteral: 47)) }
-    public static func backslash() -> CodePoint { CodePoint(UInt32(intLiteral: 92)) }
-    public static func dot() -> CodePoint { CodePoint(UInt32(intLiteral: 46)) }
-    public static func comma() -> CodePoint { CodePoint(UInt32(intLiteral: 44)) }
-    public static func colon() -> CodePoint { CodePoint(UInt32(intLiteral: 58)) }
-    public static func semicolon() -> CodePoint { CodePoint(UInt32(intLiteral: 59)) }
-    public static func quote() -> CodePoint { CodePoint(UInt32(intLiteral: 34)) }
-    public static func apostrophe() -> CodePoint { CodePoint(UInt32(intLiteral: 39)) }
+    public static func space() -> CodePoint { ' ' }
+    public static func newline() -> CodePoint { '\n' }
+    public static func carriageReturn() -> CodePoint { '\r' }
+    public static func tab() -> CodePoint { '\t' }
+    public static func nul() -> CodePoint { '\0' }
+    public static func slash() -> CodePoint { '/' }
+    public static func backslash() -> CodePoint { '\\' }
+    public static func dot() -> CodePoint { '.' }
+    public static func comma() -> CodePoint { ',' }
+    public static func colon() -> CodePoint { ':' }
+    public static func semicolon() -> CodePoint { ';' }
+    public static func quote() -> CodePoint { '"' }
+    public static func apostrophe() -> CodePoint { '\'' }
 }
 
 // UTF-8 decoding result
