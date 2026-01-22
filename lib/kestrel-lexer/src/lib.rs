@@ -282,6 +282,9 @@ pub enum Token {
     #[token("else")]
     Else,
 
+    #[token("for")]
+    For,
+
     #[token("if")]
     If,
 

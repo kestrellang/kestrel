@@ -54,15 +54,27 @@ impl IntoDiagnostic for InferenceErrorDiagnostic {
                 receiver,
                 member,
                 span,
-            } => Diagnostic::error()
-                .with_message(format!(
-                    "member not found: `{}` on type `{}`",
-                    member, receiver
-                ))
-                .with_labels(vec![
-                    Label::primary(span.file_id, span.range())
-                        .with_message(format!("`{}` has no member `{}`", receiver, member)),
-                ]),
+            } => {
+                // Special case for iter() method - provide better error for for-loops
+                let message = if member == "iter" {
+                    format!(
+                        "type `{}` does not conform to `Iterable` (missing method `iter`)",
+                        receiver
+                    )
+                } else {
+                    format!("member not found: `{}` on type `{}`", member, receiver)
+                };
+
+                let label_message = if member == "iter" {
+                    format!("`{}` does not implement `Iterable`", receiver)
+                } else {
+                    format!("`{}` has no member `{}`", receiver, member)
+                };
+
+                Diagnostic::error().with_message(message).with_labels(vec![
+                    Label::primary(span.file_id, span.range()).with_message(label_message),
+                ])
+            },
 
             InferenceError::AssociatedTypeNotFound {
                 container,

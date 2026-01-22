@@ -416,9 +416,25 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
             generate_expression_constraints(ctx, tuple);
         },
 
-        // Method reference: process receiver
-        ExprKind::MethodRef { receiver, .. } => {
+        // Method reference: process receiver and check for protocol conformance
+        ExprKind::MethodRef {
+            receiver,
+            candidates,
+            ..
+        } => {
             generate_expression_constraints(ctx, receiver);
+
+            // If any candidate is a protocol method, add a conformance constraint.
+            // Skip for type parameters - their conformance is verified at bind time,
+            // including local where clause constraints that we can't see here.
+            if !matches!(receiver.ty.kind(), TyKind::TypeParameter(_)) {
+                for candidate_id in candidates {
+                    if let Some(protocol_id) = ctx.oracle().protocol_for_method(*candidate_id) {
+                        let protocol_ref = ProtocolRef::new(protocol_id, expr.span.clone());
+                        ctx.conforms(receiver.ty.id(), protocol_ref);
+                    }
+                }
+            }
         },
 
         // Primitive method reference: this should only appear if the primitive method
@@ -508,12 +524,15 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
                 expr.span.clone(),
             );
 
-            // For zero-argument methods on literals (receiver type is Infer), speculatively
-            // equate receiver with result. This enables bidirectional type inference for
-            // Self-returning operators like negate(), bitwiseNot(), etc.
-            // When the expected result type is known (e.g., Int16), this constraint propagates
-            // that type back to the receiver (the literal), preventing default literal inference.
-            if arguments.is_empty() && matches!(receiver.ty.kind(), TyKind::Infer) {
+            // For zero-argument methods on literals, speculatively equate receiver with result.
+            // This enables bidirectional type inference for Self-returning operators like
+            // negate(), bitwiseNot(), etc. When the expected result type is known (e.g., Int16),
+            // this constraint propagates that type back to the receiver (the literal),
+            // preventing default literal inference.
+            // IMPORTANT: Only apply this to actual literals, not to local references or other
+            // expressions that happen to have Infer type. Otherwise, desugared for loops
+            // would incorrectly equate iterator types with Optional types.
+            if arguments.is_empty() && matches!(receiver.kind, ExprKind::Literal(_)) {
                 ctx.equate(receiver.ty.id(), expr.ty.id(), expr.span.clone());
             }
         },

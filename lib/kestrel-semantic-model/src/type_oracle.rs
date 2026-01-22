@@ -354,6 +354,21 @@ impl TypeOracle for SemanticModel {
             return true;
         }
 
+        // Handle type parameters - check if any bound matches the protocol
+        if let TyKind::TypeParameter(type_param) = ty.kind() {
+            let bounds = get_type_parameter_bounds(type_param);
+            for bound in bounds {
+                if let TyKind::Protocol { symbol, .. } = bound.kind() {
+                    // Check if this bound is exactly the protocol we're looking for
+                    if symbol.metadata().id() == protocol_id {
+                        return true;
+                    }
+                    // TODO: Could also check if bound inherits from protocol_id
+                }
+            }
+            return false;
+        }
+
         // Expand type aliases before checking conformance.
         // e.g., `Int` is a type alias for `Int64`, so we need to check `Int64`'s conformances.
         let ty = &ty.expand_aliases();
@@ -488,7 +503,7 @@ impl TypeOracle for SemanticModel {
         let applicable_extensions =
             filter_applicable_extensions_for_conformance(&extensions, &actual_subs);
 
-        for extension in applicable_extensions {
+        for extension in &applicable_extensions {
             let ext_conformances = self.query(ConformancesForSymbol {
                 symbol_id: extension.metadata().id(),
             });
@@ -500,6 +515,20 @@ impl TypeOracle for SemanticModel {
                     return true;
                 }
             }
+        }
+
+        // Check transitive conformance through protocol extensions.
+        // If ty conforms to protocol P, and there's "extend P: Q[...]", then ty conforms to Q[...].
+        //
+        // Example: Int64 conforms to Comparable, and there's "extend Comparable: Less[Self]"
+        // So Int64 transitively conforms to Less[Int64] (Self substituted with Int64)
+        if self.check_transitive_conformance(
+            ty,
+            protocol_id,
+            type_symbol_id,
+            &applicable_extensions,
+        ) {
+            return true;
         }
 
         false
@@ -632,6 +661,16 @@ impl TypeOracle for SemanticModel {
         self.builtin_registry().protocol(feature)
     }
 
+    fn protocol_for_method(&self, method_id: SymbolId) -> Option<SymbolId> {
+        let feature = self.builtin_registry().method_feature(method_id)?;
+        let definition = feature.definition();
+        if let BuiltinKind::ProtocolMethod { protocol_feature } = definition.kind {
+            self.builtin_registry().protocol(protocol_feature)
+        } else {
+            None
+        }
+    }
+
     fn default_integer_type(&self, span: kestrel_span::Span) -> Ty {
         use kestrel_semantic_tree::builtins::LanguageFeature;
         use kestrel_semantic_tree::ty::IntBits;
@@ -716,6 +755,29 @@ impl TypeOracle for SemanticModel {
     }
 }
 
+impl SemanticModel {
+    /// Check for transitive conformance through protocol extensions.
+    ///
+    /// This is a wrapper that initializes the visited set for cycle detection.
+    fn check_transitive_conformance(
+        &self,
+        concrete_ty: &Ty,
+        target_protocol_id: SymbolId,
+        type_symbol_id: SymbolId,
+        applicable_extensions: &[&Arc<ExtensionSymbol>],
+    ) -> bool {
+        let mut visited = std::collections::HashSet::new();
+        check_transitive_conformance_impl(
+            self,
+            concrete_ty,
+            target_protocol_id,
+            type_symbol_id,
+            applicable_extensions,
+            &mut visited,
+        )
+    }
+}
+
 // ============================================================================
 // ContextualOracle: Oracle with function context for extension bound lookup
 // ============================================================================
@@ -781,6 +843,10 @@ impl TypeOracle for ContextualOracle<'_> {
 
     fn builtin_protocol(&self, feature: LanguageFeature) -> Option<SymbolId> {
         self.model.builtin_protocol(feature)
+    }
+
+    fn protocol_for_method(&self, method_id: SymbolId) -> Option<SymbolId> {
+        self.model.protocol_for_method(method_id)
     }
 
     fn default_integer_type(&self, span: kestrel_span::Span) -> Ty {
@@ -1067,6 +1133,136 @@ fn combine_substitutions(outer: &Substitutions, inner: &Substitutions) -> Substi
         result.insert(*id, ty.clone());
     }
     result
+}
+
+/// Check for transitive conformance through protocol extensions.
+///
+/// If the concrete type conforms to protocol P, and there's "extend P: Q[...]",
+/// then the concrete type transitively conforms to Q (with appropriate substitutions).
+///
+/// Example: Int64 conforms to Comparable, and there's "extend Comparable: Less[Self]"
+/// So Int64 transitively conforms to Less[Int64] (Self substituted with Int64)
+fn check_transitive_conformance_impl(
+    model: &SemanticModel,
+    _concrete_ty: &Ty,
+    target_protocol_id: SymbolId,
+    type_symbol_id: SymbolId,
+    applicable_extensions: &[&Arc<ExtensionSymbol>],
+    visited: &mut std::collections::HashSet<SymbolId>,
+) -> bool {
+    // Collect all protocols that the type directly conforms to
+    // (from direct declarations + extensions on the type)
+    let mut all_conformances: Vec<Ty> = model.query(ConformancesForSymbol {
+        symbol_id: type_symbol_id,
+    });
+
+    // Add conformances from applicable extensions on the type
+    for extension in applicable_extensions {
+        let ext_conformances = model.query(ConformancesForSymbol {
+            symbol_id: extension.metadata().id(),
+        });
+        all_conformances.extend(ext_conformances);
+    }
+
+    // For each protocol the type conforms to, check if that protocol has
+    // an extension that adds conformance to our target protocol
+    for conformance in &all_conformances {
+        if let TyKind::Protocol {
+            symbol: conformed_protocol,
+            substitutions: _conf_subs,
+        } = conformance.kind()
+        {
+            let conformed_protocol_id = conformed_protocol.metadata().id();
+
+            // Prevent infinite loops
+            if !visited.insert(conformed_protocol_id) {
+                continue;
+            }
+
+            // Get extensions on the conformed protocol (e.g., extensions on Comparable)
+            let protocol_extensions = model.query(ExtensionsFor {
+                target_id: conformed_protocol_id,
+            });
+
+            for ext in &protocol_extensions {
+                let ext_conformances = model.query(ConformancesForSymbol {
+                    symbol_id: ext.metadata().id(),
+                });
+
+                for ext_conf in &ext_conformances {
+                    if let TyKind::Protocol {
+                        symbol: ext_protocol,
+                        substitutions: _ext_subs,
+                    } = ext_conf.kind()
+                        && ext_protocol.metadata().id() == target_protocol_id
+                    {
+                        // Found a match on the base protocol ID (e.g., Less)
+                        // The protocol extension conformance uses Self to refer
+                        // to the extended protocol, which we substitute with concrete_ty
+                        //
+                        // For "extend Comparable: Less[Self]":
+                        // - ext_subs maps Less's Rhs param to Self
+                        // - We substitute Self -> concrete_ty
+                        // - Result: Less[concrete_ty]
+                        //
+                        // Since Less[Self] means Less[Self] where Self is the concrete type,
+                        // and the protocol_id we're checking is just Less (not Less[SomeType]),
+                        // we've already matched by protocol_id - we just need to verify the
+                        // type arguments would work out correctly.
+                        //
+                        // For now, we do a simplified check: if the extension adds conformance
+                        // to the target protocol, we accept it. Full generic matching would
+                        // require comparing substitutions after Self resolution.
+                        return true;
+                    }
+                }
+            }
+
+            // Also check transitively: if the conformed protocol itself has protocol extensions
+            // that add conformance to other protocols, those might transitively lead to our target.
+            // This handles chains like A: B, B: C, C: D
+            for ext in &protocol_extensions {
+                let ext_conformances = model.query(ConformancesForSymbol {
+                    symbol_id: ext.metadata().id(),
+                });
+
+                for ext_conf in &ext_conformances {
+                    if let TyKind::Protocol {
+                        symbol: intermediate_protocol,
+                        ..
+                    } = ext_conf.kind()
+                    {
+                        let intermediate_id = intermediate_protocol.metadata().id();
+                        if intermediate_id != target_protocol_id
+                            && !visited.contains(&intermediate_id)
+                        {
+                            // Get extensions on this intermediate protocol and check recursively
+                            let intermediate_extensions = model.query(ExtensionsFor {
+                                target_id: intermediate_id,
+                            });
+
+                            // Check if this intermediate protocol has an extension to our target
+                            for int_ext in &intermediate_extensions {
+                                let int_ext_conformances = model.query(ConformancesForSymbol {
+                                    symbol_id: int_ext.metadata().id(),
+                                });
+
+                                for int_conf in &int_ext_conformances {
+                                    if let TyKind::Protocol { symbol, .. } = int_conf.kind()
+                                        && symbol.metadata().id() == target_protocol_id
+                                    {
+                                        return true;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    false
 }
 
 /// Get the substitutions from a type (struct or enum).

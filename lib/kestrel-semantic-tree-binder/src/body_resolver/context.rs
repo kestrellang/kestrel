@@ -356,7 +356,7 @@ fn can_be_yield_expression(expr_node: &SyntaxNode) -> bool {
                 // Match expressions are always exhaustive and can be yield expressions
                 return true;
             },
-            SyntaxKind::ExprLoop | SyntaxKind::ExprWhile => {
+            SyntaxKind::ExprLoop | SyntaxKind::ExprWhile | SyntaxKind::ExprFor => {
                 // Loops cannot be yield expressions - they return () or Never
                 return false;
             },

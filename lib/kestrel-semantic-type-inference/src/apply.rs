@@ -387,6 +387,7 @@ fn apply_to_expression(expr: &Expression, solution: &Solution) -> Expression {
             label,
             conditions,
             body,
+            from_for_loop,
         } => ExprKind::WhileLet {
             loop_id: *loop_id,
             label: label.clone(),
@@ -398,6 +399,7 @@ fn apply_to_expression(expr: &Expression, solution: &Solution) -> Expression {
                 .iter()
                 .map(|s| apply_to_statement(s, solution))
                 .collect(),
+            from_for_loop: *from_for_loop,
         },
 
         ExprKind::Loop {

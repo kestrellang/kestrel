@@ -1128,6 +1128,9 @@ pub enum ExprKind {
         conditions: Vec<IfCondition>,
         /// Statements in the loop body
         body: Vec<crate::stmt::Statement>,
+        /// True if this while-let was desugared from a for-loop.
+        /// For-loops require the user's pattern to be irrefutable.
+        from_for_loop: bool,
     },
 
     /// Infinite loop expression: `label: loop { body }`
@@ -2436,6 +2439,32 @@ impl Expression {
                 label,
                 conditions,
                 body,
+                from_for_loop: false,
+            },
+            ty: Ty::unit(span.clone()),
+            span,
+            mutable: false,
+        }
+    }
+
+    /// Create a while-let loop expression that came from a for-loop desugaring.
+    ///
+    /// This is used to mark while-let loops that require irrefutable patterns.
+    pub fn while_let_from_for(
+        loop_id: LoopId,
+        label: Option<LabelInfo>,
+        conditions: Vec<IfCondition>,
+        body: Vec<crate::stmt::Statement>,
+        span: Span,
+    ) -> Self {
+        Expression {
+            id: ExprId::new(),
+            kind: ExprKind::WhileLet {
+                loop_id,
+                label,
+                conditions,
+                body,
+                from_for_loop: true,
             },
             ty: Ty::unit(span.clone()),
             span,

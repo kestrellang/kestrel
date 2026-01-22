@@ -18,7 +18,7 @@ pub fn default_analyzers() -> Vec<Box<dyn Analyzer>> {
         ConstraintCycleAnalyzer, DeadCodeAnalyzer, DefiniteAssignmentAnalyzer,
         DuplicateCallableAnalyzer, DuplicateCaseAnalyzer, DuplicateLabelAnalyzer,
         DuplicateSymbolAnalyzer, ExhaustiveReturnAnalyzer, ExhaustivenessAnalyzer,
-        ExtensionConflictAnalyzer, FunctionBodyAnalyzer, GenericsAnalyzer,
+        ExtensionConflictAnalyzer, ForLoopPatternAnalyzer, FunctionBodyAnalyzer, GenericsAnalyzer,
         GuardLetDivergenceAnalyzer, ImportAnalyzer, InitializerVerificationAnalyzer,
         IrrefutablePatternAnalyzer, ProtocolMethodAnalyzer, RecursiveEnumAnalyzer,
         RefutablePatternAnalyzer, StaticContextAnalyzer, StructCycleAnalyzer,
@@ -45,6 +45,7 @@ pub fn default_analyzers() -> Vec<Box<dyn Analyzer>> {
         Box::new(TypeInferenceAnalyzer::new()),
         // Pattern analyzers run after type inference so enum types are resolved
         Box::new(RefutablePatternAnalyzer::new()),
+        Box::new(ForLoopPatternAnalyzer::new()),
         Box::new(IrrefutablePatternAnalyzer::new()),
         Box::new(ExhaustivenessAnalyzer::new()),
         Box::new(TypeCheckAnalyzer::new()),

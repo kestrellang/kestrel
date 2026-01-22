@@ -9,7 +9,6 @@ use kestrel_reporting::IntoDiagnostic;
 use kestrel_semantic_model::SymbolFor;
 use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
 use kestrel_semantic_tree::behavior::callable::CallableBehavior;
-use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
 use kestrel_semantic_tree::behavior::extension_target::ExtensionTargetBehavior;
 use kestrel_semantic_tree::behavior::implements::ImplementsBehavior;
 use kestrel_semantic_tree::behavior::typed::TypedBehavior;
@@ -53,6 +52,7 @@ pub fn is_expression_kind(kind: SyntaxKind) -> bool {
             | SyntaxKind::ExprIf
             | SyntaxKind::ExprWhile
             | SyntaxKind::ExprLoop
+            | SyntaxKind::ExprFor
             | SyntaxKind::ExprBreak
             | SyntaxKind::ExprContinue
             | SyntaxKind::ExprReturn
@@ -415,31 +415,6 @@ fn filter_resolved_bounds(
         .collect()
 }
 
-/// Get the protocol bounds for a type parameter from the current resolution context.
-///
-/// This looks up the where clause from the current function (and its parent struct/protocol)
-/// to find all protocol bounds for the given type parameter.
-///
-/// Returns a list of protocol types that the type parameter is constrained to.
-pub fn get_type_parameter_bounds(type_param: &Arc<TypeParameterSymbol>) -> Vec<Ty> {
-    let param_id = type_param.metadata().id();
-    let mut bounds = Vec::new();
-
-    // Walk up from the type parameter's parent to find where clauses
-    // Note: The parent may be incorrectly set during symbol building,
-    // so we also try to get bounds directly from symbols that own this type parameter
-    let mut current: Option<Arc<dyn Symbol<KestrelLanguage>>> = type_param.metadata().parent();
-
-    while let Some(parent) = current {
-        if let Some(where_clause) = get_where_clause(parent.as_ref()) {
-            bounds.extend(extract_bounds_for_param(&where_clause, param_id));
-        }
-        current = parent.metadata().parent();
-    }
-
-    bounds
-}
-
 /// Get the protocol bounds for a type parameter from a specific context.
 ///
 /// This is used during body resolution where we know which function we're in.
@@ -793,14 +768,17 @@ pub fn verify_type_argument_constraints(
 
 /// Check if a type satisfies a protocol bound.
 ///
-/// This checks if a concrete type conforms to a protocol, either directly
-/// or transitively through other constraints.
+/// This checks if a concrete type conforms to a protocol, either directly,
+/// through extensions, or transitively through protocol extensions.
+///
+/// Uses the TypeOracle::conforms_to method which implements the full conformance
+/// checking logic including transitive conformance through protocol extensions.
 pub fn type_satisfies_bound(
     ty: &Ty,
     bound: &Ty,
     model: &kestrel_semantic_model::SemanticModel,
 ) -> bool {
-    use kestrel_semantic_model::ExtensionsFor;
+    use kestrel_semantic_type_inference::TypeOracle;
 
     // Get the protocol from the bound
     let TyKind::Protocol {
@@ -812,78 +790,18 @@ pub fn type_satisfies_bound(
         return false;
     };
 
-    match ty.kind() {
-        // Concrete struct - check if it conforms to the protocol
-        TyKind::Struct { symbol, .. } => {
-            // Check direct conformances
-            if let Some(conformances) = symbol.metadata().get_behavior::<ConformancesBehavior>() {
-                for conf in conformances.conformances() {
-                    if let TyKind::Protocol {
-                        symbol: conf_proto, ..
-                    } = conf.kind()
-                        && conf_proto.metadata().id() == required_proto.metadata().id()
-                    {
-                        return true;
-                    }
-                    // TODO: Check inherited protocols
-                }
-            }
-
-            // Also check extension conformances
-            let struct_id = symbol.metadata().id();
-            let extensions = model.query(ExtensionsFor {
-                target_id: struct_id,
-            });
-            for extension in extensions {
-                if let Some(conformances) =
-                    extension.metadata().get_behavior::<ConformancesBehavior>()
-                {
-                    for conf in conformances.conformances() {
-                        if let TyKind::Protocol {
-                            symbol: conf_proto, ..
-                        } = conf.kind()
-                            && conf_proto.metadata().id() == required_proto.metadata().id()
-                        {
-                            return true;
-                        }
-                        // TODO: Check inherited protocols
-                    }
-                }
-            }
-
-            false
-        },
-
-        // Type parameter - check if its bounds satisfy the required bound
-        TyKind::TypeParameter(param) => {
-            let param_bounds = get_type_parameter_bounds(param);
-            for pb in &param_bounds {
-                if let TyKind::Protocol {
-                    symbol: pb_proto, ..
-                } = pb.kind()
-                    && pb_proto.metadata().id() == required_proto.metadata().id()
-                {
-                    return true;
-                }
-                // TODO: Check protocol inheritance
-            }
-            false
-        },
-
-        // Primitive types - check for built-in protocol conformances
-        // Currently primitives don't conform to user-defined protocols
-        TyKind::Int(_) | TyKind::Float(_) | TyKind::Bool | TyKind::String => {
-            // TODO: Add built-in protocol conformances (Equatable, etc.)
-            false
-        },
-
-        // Inference placeholders - optimistically assume they will satisfy bounds
-        // once resolved. Type inference will catch actual violations later.
-        TyKind::Infer => true,
-
-        // Other types don't satisfy protocol bounds
-        _ => false,
+    // Inference placeholders - optimistically assume they will satisfy bounds
+    // once resolved. Type inference will catch actual violations later.
+    if matches!(ty.kind(), TyKind::Infer) {
+        return true;
     }
+
+    // Use the TypeOracle::conforms_to method which handles:
+    // - Direct conformances
+    // - Extension conformances
+    // - Transitive conformance through protocol extensions
+    // - Protocol inheritance
+    model.conforms_to(ty, required_proto.metadata().id())
 }
 
 /// Replace any remaining type parameters in a type with inference placeholders.

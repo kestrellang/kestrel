@@ -150,6 +150,9 @@ pub enum SyntaxKind {
     ElseClause,               // else { ... } or else if ...
     ExprWhile,                // while condition { body }
     WhileLetCondition,        // let pattern = expr (in while-let condition)
+    ExprFor,                  // for pattern in iterable { body }
+    ForPattern,               // pattern in `for pattern in ...`
+    ForIterable,              // iterable expression in `for ... in expression`
     ExprLoop,                 // loop { body }
     ExprBreak,                // break or break label
     ExprContinue,             // continue or continue label
@@ -209,6 +212,7 @@ pub enum SyntaxKind {
     Else,
     Enum,
     Extend,
+    For,
     Fileprivate,
     Func,
     If,
@@ -329,6 +333,7 @@ impl From<Token> for SyntaxKind {
             Token::Else => SyntaxKind::Else,
             Token::Enum => SyntaxKind::Enum,
             Token::Extend => SyntaxKind::Extend,
+            Token::For => SyntaxKind::For,
             Token::Fileprivate => SyntaxKind::Fileprivate,
             Token::Func => SyntaxKind::Func,
             Token::If => SyntaxKind::If,
@@ -507,6 +512,9 @@ impl Language for KestrelLanguage {
         const ELSE_CLAUSE: u16 = SyntaxKind::ElseClause as u16;
         const EXPR_WHILE: u16 = SyntaxKind::ExprWhile as u16;
         const WHILE_LET_CONDITION: u16 = SyntaxKind::WhileLetCondition as u16;
+        const EXPR_FOR: u16 = SyntaxKind::ExprFor as u16;
+        const FOR_PATTERN: u16 = SyntaxKind::ForPattern as u16;
+        const FOR_ITERABLE: u16 = SyntaxKind::ForIterable as u16;
         const EXPR_LOOP: u16 = SyntaxKind::ExprLoop as u16;
         const EXPR_BREAK: u16 = SyntaxKind::ExprBreak as u16;
         const EXPR_CONTINUE: u16 = SyntaxKind::ExprContinue as u16;
@@ -559,6 +567,7 @@ impl Language for KestrelLanguage {
         const ELSE: u16 = SyntaxKind::Else as u16;
         const ENUM: u16 = SyntaxKind::Enum as u16;
         const EXTEND: u16 = SyntaxKind::Extend as u16;
+        const FOR: u16 = SyntaxKind::For as u16;
         const FILEPRIVATE: u16 = SyntaxKind::Fileprivate as u16;
         const FUNC: u16 = SyntaxKind::Func as u16;
         const IF: u16 = SyntaxKind::If as u16;
@@ -731,6 +740,9 @@ impl Language for KestrelLanguage {
             ELSE_CLAUSE => SyntaxKind::ElseClause,
             EXPR_WHILE => SyntaxKind::ExprWhile,
             WHILE_LET_CONDITION => SyntaxKind::WhileLetCondition,
+            EXPR_FOR => SyntaxKind::ExprFor,
+            FOR_PATTERN => SyntaxKind::ForPattern,
+            FOR_ITERABLE => SyntaxKind::ForIterable,
             EXPR_LOOP => SyntaxKind::ExprLoop,
             EXPR_BREAK => SyntaxKind::ExprBreak,
             EXPR_CONTINUE => SyntaxKind::ExprContinue,
@@ -783,6 +795,7 @@ impl Language for KestrelLanguage {
             ELSE => SyntaxKind::Else,
             ENUM => SyntaxKind::Enum,
             EXTEND => SyntaxKind::Extend,
+            FOR => SyntaxKind::For,
             FILEPRIVATE => SyntaxKind::Fileprivate,
             FUNC => SyntaxKind::Func,
             IF => SyntaxKind::If,

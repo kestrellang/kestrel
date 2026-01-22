@@ -10,6 +10,7 @@ pub mod enum_validation;
 pub mod exhaustive_return;
 pub mod exhaustiveness;
 pub mod extension_conflict;
+pub mod for_loop_pattern;
 pub mod function_body;
 pub mod generics;
 pub mod guard_let_divergence;
@@ -39,6 +40,7 @@ pub use enum_validation::{DuplicateCaseAnalyzer, DuplicateLabelAnalyzer, Recursi
 pub use exhaustive_return::ExhaustiveReturnAnalyzer;
 pub use exhaustiveness::ExhaustivenessAnalyzer;
 pub use extension_conflict::ExtensionConflictAnalyzer;
+pub use for_loop_pattern::ForLoopPatternAnalyzer;
 pub use function_body::FunctionBodyAnalyzer;
 pub use generics::GenericsAnalyzer;
 pub use guard_let_divergence::GuardLetDivergenceAnalyzer;
