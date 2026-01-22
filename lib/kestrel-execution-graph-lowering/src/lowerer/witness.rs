@@ -453,22 +453,22 @@ fn bind_methods(
         let func_name = child.metadata().name().value.clone();
 
         // First try: Check for ImplementsBehavior pointing to this protocol
-        if let Some(implements) = child.metadata().get_behavior::<ImplementsBehavior>() {
-            if implements.protocol() == protocol_id {
-                // Get the protocol method name by looking up the symbol
-                let protocol_method_id = implements.protocol_method();
-                let method_name = if let Some(method_symbol) = ctx.model.query(SymbolFor {
-                    id: protocol_method_id,
-                }) {
-                    method_symbol.metadata().name().value.clone()
-                } else {
-                    func_name.clone()
-                };
+        if let Some(implements) = child.metadata().get_behavior::<ImplementsBehavior>()
+            && implements.protocol() == protocol_id
+        {
+            // Get the protocol method name by looking up the symbol
+            let protocol_method_id = implements.protocol_method();
+            let method_name = if let Some(method_symbol) = ctx.model.query(SymbolFor {
+                id: protocol_method_id,
+            }) {
+                method_symbol.metadata().name().value.clone()
+            } else {
+                func_name.clone()
+            };
 
-                let impl_name = qualified_name_for_symbol(ctx, &child);
-                ctx.mir.witnesses[witness_id].bind_method(method_name, impl_name, vec![]);
-                continue;
-            }
+            let impl_name = qualified_name_for_symbol(ctx, &child);
+            ctx.mir.witnesses[witness_id].bind_method(method_name, impl_name, vec![]);
+            continue;
         }
 
         // Fallback: For extension methods implementing protocol requirements from the same

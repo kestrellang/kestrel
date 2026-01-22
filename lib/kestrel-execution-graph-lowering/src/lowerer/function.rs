@@ -12,12 +12,12 @@ use kestrel_semantic_tree::behavior::executable::{CodeBlock, ResolvedExecutableB
 use kestrel_semantic_tree::behavior::extern_fn::{CallingConvention, ExternBehavior};
 use kestrel_semantic_tree::expr::{ElseBranch, ExprKind, Expression, IfCondition};
 use kestrel_semantic_tree::stmt::{Statement, StatementKind};
+use kestrel_semantic_tree::symbol::deinit::DeinitSymbol;
 use kestrel_semantic_tree::symbol::enum_symbol::EnumSymbol;
 use kestrel_semantic_tree::symbol::function::FunctionSymbol;
 use kestrel_semantic_tree::symbol::getter::GetterSymbol;
 use kestrel_semantic_tree::symbol::initializer::InitializerSymbol;
 use kestrel_semantic_tree::symbol::local::{LocalContainer, LocalId};
-use kestrel_semantic_tree::symbol::deinit::DeinitSymbol;
 use kestrel_semantic_tree::symbol::setter::SetterSymbol;
 use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
 use kestrel_semantic_tree::symbol::type_parameter::TypeParameterSymbol;

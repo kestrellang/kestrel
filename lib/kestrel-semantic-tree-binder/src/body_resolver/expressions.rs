@@ -1336,8 +1336,7 @@ fn resolve_try_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) ->
 
     // Body for continue arm: just reference the value
     // Use the same type as the binding pattern so type inference connects them
-    let continue_body =
-        Expression::local_ref(value_local_id, value_ty, false, span.clone());
+    let continue_body = Expression::local_ref(value_local_id, value_ty, false, span.clone());
     let continue_arm = MatchArm::new(continue_pattern, continue_body, span.clone());
 
     ctx.local_scope.pop_scope();
@@ -1377,12 +1376,7 @@ fn resolve_try_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) ->
         .unwrap_or_else(|| Ty::error(span.clone()));
 
     // Reference to the early local - use the same type as the binding pattern
-    let early_ref = Expression::local_ref(
-        early_local_id,
-        early_ty,
-        false,
-        span.clone(),
-    );
+    let early_ref = Expression::local_ref(early_local_id, early_ty, false, span.clone());
 
     // Create argument: residual: early
     let from_residual_arg = CallArgument::labeled("residual".to_string(), early_ref, span.clone());
@@ -2728,7 +2722,6 @@ fn resolve_match_arm_body(body_node: &SyntaxNode, ctx: &mut BodyResolutionContex
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kestrel_span::Span;
 
     #[test]
     fn test_parse_integer_literal() {

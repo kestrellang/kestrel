@@ -186,7 +186,9 @@ impl<'a> BodyResolutionContext<'a> {
     pub fn function_return_type(&self) -> Option<Ty> {
         use super::utils::get_callable_behavior;
 
-        let symbol = self.model.query(SymbolFor { id: self.function_id })?;
+        let symbol = self.model.query(SymbolFor {
+            id: self.function_id,
+        })?;
         let callable = get_callable_behavior(&symbol)?;
         Some(callable.return_type().clone())
     }

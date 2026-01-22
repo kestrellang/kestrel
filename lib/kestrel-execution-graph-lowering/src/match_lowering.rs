@@ -676,11 +676,7 @@ fn emit_comparison_chain_int(
             Constructor::CharLiteral(c) => {
                 // Char literals are just integers - treat as i32 comparison
                 let match_block = ctx.create_block();
-                let next_block = if is_last && default.is_none() {
-                    ctx.create_block()
-                } else {
-                    ctx.create_block()
-                };
+                let next_block = ctx.create_block();
 
                 // Compare: switch_place == char value
                 let cmp_ty = ctx.mir.ty_bool();
@@ -1380,11 +1376,7 @@ fn emit_matchable_switch(
             Constructor::CharLiteral(c) => {
                 // Create blocks for this case
                 let match_block = ctx.create_block();
-                let next_block = if is_last && default.is_none() {
-                    ctx.create_block()
-                } else {
-                    ctx.create_block()
-                };
+                let next_block = ctx.create_block();
 
                 // Create a temporary to hold the literal value
                 // The type must conform to ExpressibleByCharLiteral
@@ -1408,9 +1400,7 @@ fn emit_matchable_switch(
                                     .metadata()
                                     .get_behavior::<CallableBehavior>()
                                     .map(|c| {
-                                        c.parameters()
-                                            .first()
-                                            .and_then(|p| p.external_label())
+                                        c.parameters().first().and_then(|p| p.external_label())
                                             == Some("charLiteral")
                                     })
                                     .unwrap_or(false)
@@ -1421,7 +1411,9 @@ fn emit_matchable_switch(
                         let mut name_parts = Vec::new();
                         collect_symbol_name_parts(
                             &(struct_symbol.clone()
-                                as std::sync::Arc<dyn Symbol<kestrel_semantic_tree::language::KestrelLanguage>>),
+                                as std::sync::Arc<
+                                    dyn Symbol<kestrel_semantic_tree::language::KestrelLanguage>,
+                                >),
                             &mut name_parts,
                         );
 
@@ -1527,30 +1519,33 @@ fn emit_matchable_switch(
                     } = ty.kind()
                     {
                         // Find the init$charLiteral method
-                        let init_sym = struct_symbol
-                            .metadata()
-                            .children()
-                            .into_iter()
-                            .find(|child| {
-                                child.metadata().kind() == KestrelSymbolKind::Initializer
-                                    && child
-                                        .metadata()
-                                        .get_behavior::<CallableBehavior>()
-                                        .map(|c| {
-                                            c.parameters()
-                                                .first()
-                                                .and_then(|p| p.external_label())
-                                                == Some("charLiteral")
-                                        })
-                                        .unwrap_or(false)
-                            });
+                        let init_sym =
+                            struct_symbol
+                                .metadata()
+                                .children()
+                                .into_iter()
+                                .find(|child| {
+                                    child.metadata().kind() == KestrelSymbolKind::Initializer
+                                        && child
+                                            .metadata()
+                                            .get_behavior::<CallableBehavior>()
+                                            .map(|c| {
+                                                c.parameters()
+                                                    .first()
+                                                    .and_then(|p| p.external_label())
+                                                    == Some("charLiteral")
+                                            })
+                                            .unwrap_or(false)
+                                });
 
                         if let Some(init_sym) = init_sym {
                             let mut name_parts = Vec::new();
                             collect_symbol_name_parts(
                                 &(struct_symbol.clone()
                                     as std::sync::Arc<
-                                        dyn Symbol<kestrel_semantic_tree::language::KestrelLanguage>,
+                                        dyn Symbol<
+                                            kestrel_semantic_tree::language::KestrelLanguage,
+                                        >,
                                     >),
                                 &mut name_parts,
                             );
@@ -1617,7 +1612,8 @@ fn emit_matchable_switch(
                 let cmp1_local = ctx.create_temp("cmp_lo", bool_mir_ty);
                 let cmp1_place = Place::local(cmp1_local);
 
-                let callee1 = Callee::witness(less_or_equal_protocol_name, "lessThanOrEqual", for_type);
+                let callee1 =
+                    Callee::witness(less_or_equal_protocol_name, "lessThanOrEqual", for_type);
                 let call_args1 = vec![
                     CallArg::borrow(Value::Place(start_place)),
                     CallArg::borrow(Value::Place(switch_place.clone())),
@@ -1633,7 +1629,8 @@ fn emit_matchable_switch(
                 let cmp2_local = ctx.create_temp("cmp_hi", bool_mir_ty);
                 let cmp2_place = Place::local(cmp2_local);
 
-                let callee2 = Callee::witness(less_or_equal_protocol_name, "lessThanOrEqual", for_type);
+                let callee2 =
+                    Callee::witness(less_or_equal_protocol_name, "lessThanOrEqual", for_type);
                 let call_args2 = vec![
                     CallArg::borrow(Value::Place(switch_place.clone())),
                     CallArg::borrow(Value::Place(end_place)),

@@ -412,8 +412,7 @@ fn resolve_literal_pattern(
                     // Process char literal: strip quotes, process escapes, validate single codepoint
                     let text_range = token.text_range();
                     let token_start: usize = text_range.start().into();
-                    let token_span =
-                        Span::new(ctx.file_id, token_start..token_start + text.len());
+                    let token_span = Span::new(ctx.file_id, token_start..token_start + text.len());
 
                     let value = if text.len() >= 2 {
                         let inner = &text[1..text.len() - 1];

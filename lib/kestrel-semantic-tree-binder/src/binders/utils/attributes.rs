@@ -392,7 +392,6 @@ pub fn parse_extern_attribute(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
 
     // Tests would require constructing syntax nodes, which is complex.
     // The actual testing happens through the integration tests.

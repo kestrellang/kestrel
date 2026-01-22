@@ -503,7 +503,6 @@ impl OperatorRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kestrel_span::Span;
 
     #[test]
     fn test_precedence_mul_higher_than_add() {
