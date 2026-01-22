@@ -13,9 +13,9 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use crate::diagnostics::{
     AsciiEscapeOutOfRangeError, BreakOutsideLoopError, ContinueOutsideLoopError,
-    IncompleteEscapeSequenceError, InvalidEscapeSequenceError, InvalidUnicodeEscapeError,
-    TupleIndexOnNonTupleError, TupleIndexOutOfBoundsError, UndeclaredLabelError,
-    UnicodeEscapeErrorReason,
+    EmptyCharacterLiteralError, IncompleteEscapeSequenceError, InvalidEscapeSequenceError,
+    InvalidUnicodeEscapeError, MultipleCodepointsInCharLiteralError, TupleIndexOnNonTupleError,
+    TupleIndexOutOfBoundsError, UndeclaredLabelError, UnicodeEscapeErrorReason,
 };
 use kestrel_syntax_tree::utils::get_node_span;
 
@@ -67,6 +67,12 @@ pub fn resolve_expression(expr_node: &SyntaxNode, ctx: &mut BodyResolutionContex
             let value = extract_raw_string_value(expr_node);
             // Use inference type so literal protocols can be applied
             Expression::string_infer(value, span)
+        },
+
+        SyntaxKind::ExprChar => {
+            let value = extract_char_value(expr_node, ctx);
+            // Use inference type so literal protocols can be applied
+            Expression::char_infer(value, span)
         },
 
         SyntaxKind::ExprBool => {
@@ -194,6 +200,56 @@ fn extract_raw_string_value(node: &SyntaxNode) -> String {
             }
         })
         .unwrap_or_default()
+}
+
+/// Extract character value from an ExprChar node (strips quotes, processes escapes, validates single codepoint)
+fn extract_char_value(node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> u32 {
+    node.children_with_tokens()
+        .filter_map(|e| e.into_token())
+        .find(|t| t.kind() == SyntaxKind::Char)
+        .map(|t| {
+            let text = t.text();
+            let text_range = t.text_range();
+            let token_start: usize = text_range.start().into();
+            let token_span = Span::new(ctx.file_id, token_start..token_start + text.len());
+
+            // Strip surrounding single quotes
+            if text.len() >= 2 {
+                let inner = &text[1..text.len() - 1];
+
+                if inner.is_empty() {
+                    // Empty character literal ''
+                    let error = EmptyCharacterLiteralError { span: token_span };
+                    ctx.diagnostics.add_diagnostic(error.into_diagnostic());
+                    return 0;
+                }
+
+                // Process escape sequences, collecting code points
+                let unescaped = unescape_string(inner, ctx.file_id, token_start + 1, ctx);
+                let code_points: Vec<char> = unescaped.chars().collect();
+
+                if code_points.is_empty() {
+                    // After escape processing, still empty (shouldn't happen normally)
+                    let error = EmptyCharacterLiteralError { span: token_span };
+                    ctx.diagnostics.add_diagnostic(error.into_diagnostic());
+                    0
+                } else if code_points.len() > 1 {
+                    // Multiple code points
+                    let error = MultipleCodepointsInCharLiteralError {
+                        span: token_span,
+                        count: code_points.len(),
+                    };
+                    ctx.diagnostics.add_diagnostic(error.into_diagnostic());
+                    // Return the first code point as a fallback
+                    code_points[0] as u32
+                } else {
+                    code_points[0] as u32
+                }
+            } else {
+                0
+            }
+        })
+        .unwrap_or(0)
 }
 
 /// Process escape sequences in a string literal.

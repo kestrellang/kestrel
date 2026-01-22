@@ -1678,6 +1678,7 @@ fn lower_literal(ctx: &mut LoweringContext, lit: &LiteralValue, expr: &Expressio
             LiteralValue::Integer(n) => Value::Immediate(Immediate::i64(*n)),
             LiteralValue::Float(f) => Value::Immediate(Immediate::f64(*f)),
             LiteralValue::Bool(b) => Value::Immediate(Immediate::bool(*b)),
+            LiteralValue::Char(c) => Value::Immediate(Immediate::i32(*c as i32)),
             LiteralValue::String(s) => Value::Immediate(Immediate::string(s.clone())),
         },
 
@@ -1725,6 +1726,7 @@ fn lower_literal_init_call(
         LiteralValue::Integer(n) => ("intLiteral", Value::Immediate(Immediate::i64(*n))),
         LiteralValue::Float(f) => ("floatLiteral", Value::Immediate(Immediate::f64(*f))),
         LiteralValue::Bool(b) => ("boolLiteral", Value::Immediate(Immediate::bool(*b))),
+        LiteralValue::Char(c) => ("charLiteral", Value::Immediate(Immediate::i32(*c as i32))),
         LiteralValue::String(s) => (
             "stringLiteral",
             Value::Immediate(Immediate::string(s.clone())),
@@ -1759,6 +1761,7 @@ fn lower_literal_init_call(
             LiteralValue::Integer(n) => Value::Immediate(Immediate::i64(*n)),
             LiteralValue::Float(f) => Value::Immediate(Immediate::f64(*f)),
             LiteralValue::Bool(b) => Value::Immediate(Immediate::bool(*b)),
+            LiteralValue::Char(c) => Value::Immediate(Immediate::i32(*c as i32)),
             LiteralValue::String(s) => Value::Immediate(Immediate::string(s.clone())),
             LiteralValue::Unit => Value::Immediate(Immediate::unit()),
         };

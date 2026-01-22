@@ -194,6 +194,13 @@ fn describe_pattern(pattern: &Pattern) -> String {
                 LiteralValue::Integer(i) => i.to_string(),
                 LiteralValue::Float(f) => f.to_string(),
                 LiteralValue::String(s) => format!("\"{}\"", s),
+                LiteralValue::Char(c) => {
+                    if let Some(ch) = char::from_u32(*c) {
+                        format!("'{}'", ch)
+                    } else {
+                        format!("'\\u{{{:X}}}'", c)
+                    }
+                },
                 LiteralValue::Bool(b) => b.to_string(),
             }
         },

@@ -4,7 +4,7 @@ module std.core
 
 import std.num.(Int64, Float64)
 import std.memory.(LiteralSlice)
-import std.text.(String)
+import std.text.(String, CodePoint)
 import std.core.(Bool)
 
 @builtin(.ExpressibleByBoolLiteral)
@@ -25,6 +25,11 @@ public protocol ExpressibleByFloatLiteral {
 @builtin(.ExpressibleByStringLiteral)
 public protocol ExpressibleByStringLiteral {
     init(stringLiteral value: lang.str)
+}
+
+@builtin(.ExpressibleByCharLiteral)
+public protocol ExpressibleByCharLiteral {
+    init(charLiteral value: lang.i32)
 }
 
 @builtin(.ExpressibleByNilLiteral)
@@ -74,3 +79,6 @@ public type StringLiteralType = String
 
 @builtin(.DefaultBooleanLiteralType)
 public type BooleanLiteralType = Bool
+
+@builtin(.DefaultCharLiteralType)
+public type CharLiteralType = CodePoint

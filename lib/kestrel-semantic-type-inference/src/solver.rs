@@ -104,6 +104,7 @@ fn apply_default_literal_types(ctx: &mut InferenceContext<'_>) {
             LanguageFeature::ExpressibleByFloatLiteral => ctx.oracle().default_float_type(span),
             LanguageFeature::ExpressibleByStringLiteral => ctx.oracle().default_string_type(span),
             LanguageFeature::ExpressibleByBoolLiteral => ctx.oracle().default_boolean_type(span),
+            LanguageFeature::ExpressibleByCharLiteral => ctx.oracle().default_char_type(span),
             _ => continue,
         };
 
@@ -124,6 +125,7 @@ fn get_literal_feature_for_protocol(
         LanguageFeature::ExpressibleByFloatLiteral,
         LanguageFeature::ExpressibleByStringLiteral,
         LanguageFeature::ExpressibleByBoolLiteral,
+        LanguageFeature::ExpressibleByCharLiteral,
     ];
 
     for feature in features {

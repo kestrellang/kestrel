@@ -169,6 +169,7 @@ pub fn generate_pattern_constraints(ctx: &mut InferenceContext<'_>, pattern: &Pa
                 LiteralValue::Integer(_) => Some(LanguageFeature::ExpressibleByIntLiteral),
                 LiteralValue::Float(_) => Some(LanguageFeature::ExpressibleByFloatLiteral),
                 LiteralValue::String(_) => Some(LanguageFeature::ExpressibleByStringLiteral),
+                LiteralValue::Char(_) => Some(LanguageFeature::ExpressibleByCharLiteral),
                 LiteralValue::Bool(_) => Some(LanguageFeature::ExpressibleByBoolLiteral),
                 LiteralValue::Unit => None,
             };
@@ -331,6 +332,10 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
                 LiteralValue::String(_) => (
                     Some(LanguageFeature::ExpressibleByStringLiteral),
                     Some(Ty::string(expr.span.clone())),
+                ),
+                LiteralValue::Char(_) => (
+                    Some(LanguageFeature::ExpressibleByCharLiteral),
+                    Some(Ty::int(IntBits::I32, expr.span.clone())),
                 ),
                 LiteralValue::Bool(_) => (
                     Some(LanguageFeature::ExpressibleByBoolLiteral),

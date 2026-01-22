@@ -170,4 +170,14 @@ pub trait TypeOracle {
         // Implementations with access to stdlib can override to return the Bool struct.
         Ty::bool(span)
     }
+
+    /// Get the default type for character literals when type is ambiguous.
+    ///
+    /// Returns the `CodePoint` struct type if available in the stdlib,
+    /// otherwise falls back to i32.
+    fn default_char_type(&self, span: Span) -> Ty {
+        // Default implementation uses i32.
+        // Implementations with access to stdlib can override to return the CodePoint struct.
+        Ty::int(IntBits::I32, span)
+    }
 }
