@@ -182,6 +182,7 @@ pub enum LiteralPatternKind {
     Float(Span),
     String(Span),
     Bool(Span),
+    Char(Span),
 }
 
 /// Parser for patterns
@@ -212,21 +213,24 @@ pub fn pattern_parser<'tokens>()
             .ignore_then(select! { Token::Boolean = e => to_kestrel_span(e.span()) })
             .map(|span| PatternVariant::Literal(LiteralPatternKind::Bool(span)));
 
+        let char_literal = skip_trivia()
+            .ignore_then(select! { Token::Char = e => to_kestrel_span(e.span()) })
+            .map(|span| PatternVariant::Literal(LiteralPatternKind::Char(span)));
+
         // Range pattern: `0..=9` or `0..<10` or `'a'..='z'`
         // Must parse before standalone literals
         let range_start = skip_trivia()
             .ignore_then(select! { Token::Integer = e => LiteralPatternKind::Integer(to_kestrel_span(e.span())) })
-            .or(skip_trivia().ignore_then(select! { Token::String = e => {
-                // Check if it's a char literal (single char in quotes)
+            .or(skip_trivia().ignore_then(select! { Token::Char = e => {
                 let span = to_kestrel_span(e.span());
-                LiteralPatternKind::String(span)
+                LiteralPatternKind::Char(span)
             }}));
 
         let range_end = skip_trivia()
             .ignore_then(select! { Token::Integer = e => LiteralPatternKind::Integer(to_kestrel_span(e.span())) })
-            .or(skip_trivia().ignore_then(select! { Token::String = e => {
+            .or(skip_trivia().ignore_then(select! { Token::Char = e => {
                 let span = to_kestrel_span(e.span());
-                LiteralPatternKind::String(span)
+                LiteralPatternKind::Char(span)
             }}));
 
         let range_pattern = range_start
@@ -254,7 +258,8 @@ pub fn pattern_parser<'tokens>()
         let literal = float_literal
             .or(integer_literal)
             .or(string_literal)
-            .or(bool_literal);
+            .or(bool_literal)
+            .or(char_literal);
 
         // Rest pattern: `..` (used in tuples)
         let rest_pattern = skip_trivia()
@@ -627,6 +632,9 @@ pub fn emit_pattern_variant(sink: &mut EventSink, variant: &PatternVariant) {
                 LiteralPatternKind::Bool(span) => {
                     sink.add_token(SyntaxKind::Boolean, span.clone());
                 },
+                LiteralPatternKind::Char(span) => {
+                    sink.add_token(SyntaxKind::Char, span.clone());
+                },
             }
             sink.finish_node();
         },
@@ -651,6 +659,9 @@ pub fn emit_pattern_variant(sink: &mut EventSink, variant: &PatternVariant) {
                 LiteralPatternKind::Bool(span) => {
                     sink.add_token(SyntaxKind::Boolean, span.clone());
                 },
+                LiteralPatternKind::Char(span) => {
+                    sink.add_token(SyntaxKind::Char, span.clone());
+                },
             }
             // Emit range operator
             if *inclusive {
@@ -671,6 +682,9 @@ pub fn emit_pattern_variant(sink: &mut EventSink, variant: &PatternVariant) {
                 },
                 LiteralPatternKind::Bool(span) => {
                     sink.add_token(SyntaxKind::Boolean, span.clone());
+                },
+                LiteralPatternKind::Char(span) => {
+                    sink.add_token(SyntaxKind::Char, span.clone());
                 },
             }
             sink.finish_node();
@@ -857,6 +871,9 @@ fn emit_pattern_variant_inner(sink: &mut EventSink, variant: &PatternVariant) {
                 LiteralPatternKind::Bool(span) => {
                     sink.add_token(SyntaxKind::Boolean, span.clone());
                 },
+                LiteralPatternKind::Char(span) => {
+                    sink.add_token(SyntaxKind::Char, span.clone());
+                },
             }
             sink.finish_node();
         },
@@ -881,6 +898,9 @@ fn emit_pattern_variant_inner(sink: &mut EventSink, variant: &PatternVariant) {
                 LiteralPatternKind::Bool(span) => {
                     sink.add_token(SyntaxKind::Boolean, span.clone());
                 },
+                LiteralPatternKind::Char(span) => {
+                    sink.add_token(SyntaxKind::Char, span.clone());
+                },
             }
             // Emit range operator
             if *inclusive {
@@ -901,6 +921,9 @@ fn emit_pattern_variant_inner(sink: &mut EventSink, variant: &PatternVariant) {
                 },
                 LiteralPatternKind::Bool(span) => {
                     sink.add_token(SyntaxKind::Boolean, span.clone());
+                },
+                LiteralPatternKind::Char(span) => {
+                    sink.add_token(SyntaxKind::Char, span.clone());
                 },
             }
             sink.finish_node();

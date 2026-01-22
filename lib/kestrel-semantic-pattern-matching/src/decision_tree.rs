@@ -650,6 +650,33 @@ fn get_constructor_field_types(ctor: &Constructor, ty: &Ty) -> Vec<Ty> {
     }
 }
 
+/// Collect all constructors from a pattern, expanding or-patterns recursively.
+fn collect_constructors_from_pattern(
+    pattern: &Pattern,
+    seen: &mut std::collections::HashSet<Constructor>,
+    result: &mut Vec<Constructor>,
+) {
+    match &pattern.kind {
+        PatternKind::Or { alternatives } => {
+            // Recursively collect from all alternatives
+            for alt in alternatives {
+                collect_constructors_from_pattern(alt, seen, result);
+            }
+        },
+        PatternKind::At { subpattern, .. } => {
+            // For @-patterns, collect from the subpattern
+            collect_constructors_from_pattern(subpattern, seen, result);
+        },
+        _ => {
+            // For all other patterns, extract the constructor
+            let ctor = Constructor::from_pattern(pattern);
+            if !ctor.is_wildcard() && seen.insert(ctor.clone()) {
+                result.push(ctor);
+            }
+        },
+    }
+}
+
 // Extension methods for PatternMatrix to support multi-column operations
 impl PatternMatrix {
     /// Get unique constructors for a specific column.
@@ -658,10 +685,8 @@ impl PatternMatrix {
         let mut result = Vec::new();
         for row in &self.rows {
             if let Some(pattern) = row.patterns.get(col) {
-                let ctor = Constructor::from_pattern(pattern);
-                if !ctor.is_wildcard() && seen.insert(ctor.clone()) {
-                    result.push(ctor);
-                }
+                // Collect all constructors from this pattern, expanding or-patterns
+                collect_constructors_from_pattern(pattern, &mut seen, &mut result);
             }
         }
         result

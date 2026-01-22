@@ -42,7 +42,7 @@
 ## Phase 14
 
 - [ ] For loops
-- [ ] Character Literals
+- [x] Character Literals
 - [ ] Compound Assignment Operators
 - [x] Try Expressions
 - [ ] Array type syntax [Item]
@@ -52,5 +52,7 @@
 - [ ] Optional Chaining
 - [ ] Null Coalescing
 - [ ] and / or short-circuit
+- [ ] Refactor Matchable for range patterns
+- [ ] Irrefutable patterns in function parameters
 - [ ] String interpolation
 - [ ] Web server

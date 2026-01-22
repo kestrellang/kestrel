@@ -167,6 +167,10 @@ pub enum Token {
     #[regex(r#""([^"\\]|\\(.|\r|\n))*""#)]
     String,
 
+    // Character literals - single quotes with escape support
+    #[regex(r#"'([^'\\]|\\(.|\r|\n))*'"#)]
+    Char,
+
     // Raw string literals: """content""" or """"content"""" etc.
     // Must have higher priority than String to match first
     #[regex(r#"""""#, parse_raw_string, priority = 2)]
@@ -762,6 +766,49 @@ mod tests {
         assert_eq!(tokens[0].value, Token::In);
         assert_eq!(tokens[1].value, Token::Identifier); // inside
         assert_eq!(tokens[2].value, Token::Identifier); // inner
+    }
+
+    #[test]
+    fn test_char_literals() {
+        // Basic character literal
+        let source = "'a'";
+        let tokens = filter_trivia(lex(source, 0).collect());
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0].value, Token::Char);
+
+        // Character with escape sequence
+        let source = r"'\n' '\t' '\\'";
+        let tokens = filter_trivia(lex(source, 0).collect());
+        assert_eq!(tokens.len(), 3);
+        assert_eq!(tokens[0].value, Token::Char);
+        assert_eq!(tokens[1].value, Token::Char);
+        assert_eq!(tokens[2].value, Token::Char);
+
+        // Unicode character
+        let source = "'Ω' '日' '🦅'";
+        let tokens = filter_trivia(lex(source, 0).collect());
+        assert_eq!(tokens.len(), 3);
+        assert_eq!(tokens[0].value, Token::Char);
+        assert_eq!(tokens[1].value, Token::Char);
+        assert_eq!(tokens[2].value, Token::Char);
+
+        // Unicode escape
+        let source = r"'\u{1F600}'";
+        let tokens = filter_trivia(lex(source, 0).collect());
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0].value, Token::Char);
+
+        // Empty character literal (lexer accepts it, semantic layer validates)
+        let source = "''";
+        let tokens = filter_trivia(lex(source, 0).collect());
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0].value, Token::Char);
+
+        // Multiple characters (lexer accepts, semantic layer validates)
+        let source = "'ab'";
+        let tokens = filter_trivia(lex(source, 0).collect());
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0].value, Token::Char);
     }
 
     #[test]

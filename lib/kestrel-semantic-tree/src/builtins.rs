@@ -27,6 +27,7 @@ pub enum LanguageFeature {
     ExpressibleByIntLiteral,
     ExpressibleByFloatLiteral,
     ExpressibleByStringLiteral,
+    ExpressibleByCharLiteral,
     ExpressibleByBoolLiteral,
     ExpressibleByNilLiteral,
     ExpressibleByArrayLiteral,
@@ -42,6 +43,7 @@ pub enum LanguageFeature {
     DefaultFloatLiteralType,
     DefaultStringLiteralType,
     DefaultBooleanLiteralType,
+    DefaultCharLiteralType,
 
     // Operator protocols - arithmetic
     AddOperatorProtocol,
@@ -121,6 +123,7 @@ impl LanguageFeature {
             "ExpressibleByIntLiteral" => Some(Self::ExpressibleByIntLiteral),
             "ExpressibleByFloatLiteral" => Some(Self::ExpressibleByFloatLiteral),
             "ExpressibleByStringLiteral" => Some(Self::ExpressibleByStringLiteral),
+            "ExpressibleByCharLiteral" => Some(Self::ExpressibleByCharLiteral),
             "ExpressibleByBoolLiteral" => Some(Self::ExpressibleByBoolLiteral),
             "ExpressibleByNilLiteral" => Some(Self::ExpressibleByNilLiteral),
             "ExpressibleByArrayLiteral" => Some(Self::ExpressibleByArrayLiteral),
@@ -131,6 +134,7 @@ impl LanguageFeature {
             "DefaultFloatLiteralType" => Some(Self::DefaultFloatLiteralType),
             "DefaultStringLiteralType" => Some(Self::DefaultStringLiteralType),
             "DefaultBooleanLiteralType" => Some(Self::DefaultBooleanLiteralType),
+            "DefaultCharLiteralType" => Some(Self::DefaultCharLiteralType),
             // Operator protocols - arithmetic
             "AddOperatorProtocol" => Some(Self::AddOperatorProtocol),
             "AddOperatorMethod" => Some(Self::AddOperatorMethod),
@@ -204,6 +208,7 @@ impl LanguageFeature {
             Self::ExpressibleByIntLiteral => "ExpressibleByIntLiteral",
             Self::ExpressibleByFloatLiteral => "ExpressibleByFloatLiteral",
             Self::ExpressibleByStringLiteral => "ExpressibleByStringLiteral",
+            Self::ExpressibleByCharLiteral => "ExpressibleByCharLiteral",
             Self::ExpressibleByBoolLiteral => "ExpressibleByBoolLiteral",
             Self::ExpressibleByNilLiteral => "ExpressibleByNilLiteral",
             Self::ExpressibleByArrayLiteral => "ExpressibleByArrayLiteral",
@@ -214,6 +219,7 @@ impl LanguageFeature {
             Self::DefaultFloatLiteralType => "DefaultFloatLiteralType",
             Self::DefaultStringLiteralType => "DefaultStringLiteralType",
             Self::DefaultBooleanLiteralType => "DefaultBooleanLiteralType",
+            Self::DefaultCharLiteralType => "DefaultCharLiteralType",
             // Operator protocols - arithmetic
             Self::AddOperatorProtocol => "AddOperatorProtocol",
             Self::AddOperatorMethod => "AddOperatorMethod",
@@ -345,6 +351,16 @@ impl LanguageFeature {
                     disallow_enum_conformance: false,
                 },
             },
+            Self::ExpressibleByCharLiteral => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::Protocol {
+                    implicit_conformance: false,
+                    must_be_marker: false,
+                    tuple_conformance_propagation: false,
+                    requires_fields_conform: false,
+                    disallow_enum_conformance: false,
+                },
+            },
             Self::ExpressibleByBoolLiteral => BuiltinDefinition {
                 feature: *self,
                 kind: BuiltinKind::Protocol {
@@ -418,6 +434,10 @@ impl LanguageFeature {
                 kind: BuiltinKind::TypeAlias,
             },
             Self::DefaultBooleanLiteralType => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::TypeAlias,
+            },
+            Self::DefaultCharLiteralType => BuiltinDefinition {
                 feature: *self,
                 kind: BuiltinKind::TypeAlias,
             },

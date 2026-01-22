@@ -602,8 +602,13 @@ See [docs/memory-model/implementation-plan.md](docs/memory-model/implementation-
 - [ ] Null Coalescing Operator
 - [ ] Optional Chaining
 - [ ] Compound Assignment Operator
-- [ ] Character Literals
+- [x] Character Literals
 - [ ] String Interpolation
+
+### Core Features
+
+- [ ] Irrefutable patterns in function parameters
+- [ ] Refactor Matchable for range patterns
 
 ### Goals
 
