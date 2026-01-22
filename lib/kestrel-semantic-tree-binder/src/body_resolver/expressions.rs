@@ -2722,7 +2722,6 @@ fn resolve_match_arm_body(body_node: &SyntaxNode, ctx: &mut BodyResolutionContex
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kestrel_span::Span;
 
     #[test]
     fn test_parse_integer_literal() {

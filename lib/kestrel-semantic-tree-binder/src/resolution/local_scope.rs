@@ -204,7 +204,6 @@ mod tests {
         let name = Name::new("test".to_string(), Span::new(0, 0..4));
         let visibility =
             VisibilityBehavior::new(Some(Visibility::Internal), Span::new(0, 0..0), root);
-        let return_type = Ty::unit(Span::new(0, 0..2));
 
         Arc::new(FunctionSymbol::new(
             name,

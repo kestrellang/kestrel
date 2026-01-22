@@ -419,7 +419,6 @@ mod executable_behavior {
 }
 
 mod literal_value_equality {
-    use super::*;
     #[test]
     fn literal_values_equal() {
         use kestrel_semantic_tree::expr::LiteralValue;
@@ -723,7 +722,6 @@ mod nested_expressions {
 
 /// Integration tests that compile actual Kestrel code
 mod integration {
-    use super::*;
     use super::*;
 
     #[test]

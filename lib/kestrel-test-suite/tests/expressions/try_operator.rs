@@ -374,33 +374,6 @@ mod precedence {
 mod execution {
     use super::*;
 
-    /// Helper: Option type with Tryable and FromResidual implementations
-    /// NOTE: Option tests are compile-only (not execution) due to type inference
-    /// limitations with Option.None. See execution tests with Result for runtime tests.
-    const OPTION_PRELUDE: &str = r#"
-        enum Option[T] {
-            case Some(T)
-            case None
-        }
-        struct NoneEarly {}
-        extend Option[T]: Prelude.Tryable {
-            type Output = T
-            type Early = NoneEarly
-
-            func tryExtract() -> Prelude.ControlFlow[T, NoneEarly] {
-                match self {
-                    .Some(v) => Prelude.ControlFlow.Continue(v),
-                    .None => Prelude.ControlFlow.Break(NoneEarly())
-                }
-            }
-        }
-        extend Option[T]: Prelude.FromResidual[NoneEarly] {
-            static func fromResidual(residual: NoneEarly) -> Option[T] {
-                Option.None
-            }
-        }
-    "#;
-
     /// Helper: Result type with Tryable and FromResidual implementations
     const RESULT_PRELUDE: &str = r#"
         enum Result[T, E] {
