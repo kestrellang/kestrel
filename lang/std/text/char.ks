@@ -10,8 +10,8 @@ import std.collections.(Array)
 // Byte - alias for UInt8, represents a single UTF-8 byte
 public type Byte = UInt8
 
-// CodePoint - Unicode code point (single scalar value, 0 to 0x10FFFF)
-public struct CodePoint: Equatable, Comparable, ExpressibleByCharLiteral {
+// Char - Unicode code point (single scalar value, 0 to 0x10FFFF)
+public struct Char: Equatable, Comparable, ExpressibleByCharLiteral {
     private var _value: UInt32
 
     public init(value: UInt32) {
@@ -57,25 +57,25 @@ public struct CodePoint: Equatable, Comparable, ExpressibleByCharLiteral {
         self >= 'a' and self <= 'z'
     }
 
-    public func toUppercase() -> CodePoint {
+    public func toUppercase() -> Char {
         if self.isLowercase() {
             // 'a' - 'A' = 32
-            CodePoint(self.value() - UInt32(intLiteral: 32))
+            Char(self.value() - UInt32(intLiteral: 32))
         } else {
             self
         }
     }
 
-    public func toLowercase() -> CodePoint {
+    public func toLowercase() -> Char {
         if self.isUppercase() {
             // 'a' - 'A' = 32
-            CodePoint(self.value() + UInt32(intLiteral: 32))
+            Char(self.value() + UInt32(intLiteral: 32))
         } else {
             self
         }
     }
 
-    // UTF-8 encoding length for this code point
+    // UTF-8 encoding length for this char
     public func utf8Length() -> Int64 {
         let v = self._value;
         if v < UInt32(intLiteral: 128) { Int64(intLiteral: 1) }
@@ -87,7 +87,7 @@ public struct CodePoint: Equatable, Comparable, ExpressibleByCharLiteral {
     // ASCII digit value (0-9), or None if not a digit
     public func digitValue() -> Optional[UInt32] {
         if self.isDigit() {
-            let zero: CodePoint = '0';
+            let zero: Char = '0';
             .Some(self.value() - zero.value())
         } else {
             .None
@@ -95,54 +95,54 @@ public struct CodePoint: Equatable, Comparable, ExpressibleByCharLiteral {
     }
 
     // Create from ASCII digit (0-9)
-    public static func fromDigit(d: UInt32) -> Optional[CodePoint] {
+    public static func fromDigit(d: UInt32) -> Optional[Char] {
         if d <= UInt32(intLiteral: 9) {
-            let zero: CodePoint = '0';
-            .Some(CodePoint(d + zero.value()))
+            let zero: Char = '0';
+            .Some(Char(d + zero.value()))
         } else {
             .None
         }
     }
 
     // Equatable
-    public func equals(other: CodePoint) -> Bool {
+    public func equals(other: Char) -> Bool {
         self._value == other._value
     }
 
     // Comparable
-    public func compare(other: CodePoint) -> Ordering {
+    public func compare(other: Char) -> Ordering {
         self._value.compare(other._value)
     }
 }
 
-// Char - Extended grapheme cluster (user-perceived character)
-// May be multiple code points (e.g., "é" as e + combining accent, or emoji sequences)
-public struct Char: Equatable {
-    private var _codePoints: Array[CodePoint]
+// Grapheme - Extended grapheme cluster (user-perceived character)
+// May be multiple chars (e.g., "é" as e + combining accent, or emoji sequences)
+public struct Grapheme: Equatable {
+    private var _chars: Array[Char]
 
-    public init(codePoint codePoint: CodePoint) {
-        self._codePoints = Array();
-        self._codePoints.append(codePoint);
+    public init(char char: Char) {
+        self._chars = Array();
+        self._chars.append(char);
     }
 
-    public init(codePoints codePoints: Array[CodePoint]) {
-        self._codePoints = codePoints;
+    public init(chars chars: Array[Char]) {
+        self._chars = chars;
     }
 
-    public func codePoints() -> Array[CodePoint] { self._codePoints }
+    public func chars() -> Array[Char] { self._chars }
 
-    public func codePointCount() -> Int64 {
-        self._codePoints.count()
+    public func charCount() -> Int64 {
+        self._chars.count()
     }
 
-    public func firstCodePoint() -> Optional[CodePoint] {
-        self._codePoints.first()
+    public func firstChar() -> Optional[Char] {
+        self._chars.first()
     }
 
     public func isAscii() -> Bool {
-        let count = self._codePoints.count();
+        let count = self._chars.count();
         if count == Int64(intLiteral: 1) {
-            self._codePoints.getUnchecked(Int64(intLiteral: 0)).isAscii()
+            self._chars.getUnchecked(Int64(intLiteral: 0)).isAscii()
         } else {
             false
         }
@@ -152,25 +152,25 @@ public struct Char: Equatable {
     public func utf8Length() -> Int64 {
         var len: Int64 = Int64(intLiteral: 0);
         var i: Int64 = Int64(intLiteral: 0);
-        let count = self._codePoints.count();
+        let count = self._chars.count();
         while i < count {
-            len = len + self._codePoints.getUnchecked(i).utf8Length();
+            len = len + self._chars.getUnchecked(i).utf8Length();
             i = i + Int64(intLiteral: 1)
         }
         len
     }
 
     // Equatable
-    public func equals(other: Char) -> Bool {
-        let selfCount = self._codePoints.count();
-        let otherCount = other._codePoints.count();
+    public func equals(other: Grapheme) -> Bool {
+        let selfCount = self._chars.count();
+        let otherCount = other._chars.count();
         if selfCount != otherCount {
             return false
         }
         var i: Int64 = Int64(intLiteral: 0);
         var equal: Bool = true;
         while i < selfCount and equal {
-            if self._codePoints.getUnchecked(i).equals(other._codePoints.getUnchecked(i)) == false {
+            if self._chars.getUnchecked(i).equals(other._chars.getUnchecked(i)) == false {
                 equal = false
             }
             i = i + Int64(intLiteral: 1)
@@ -179,30 +179,30 @@ public struct Char: Equatable {
     }
 }
 
-// Common ASCII code points as constants
+// Common ASCII chars as constants
 public struct AsciiChars {
-    public static func space() -> CodePoint { ' ' }
-    public static func newline() -> CodePoint { '\n' }
-    public static func carriageReturn() -> CodePoint { '\r' }
-    public static func tab() -> CodePoint { '\t' }
-    public static func nul() -> CodePoint { '\0' }
-    public static func slash() -> CodePoint { '/' }
-    public static func backslash() -> CodePoint { '\\' }
-    public static func dot() -> CodePoint { '.' }
-    public static func comma() -> CodePoint { ',' }
-    public static func colon() -> CodePoint { ':' }
-    public static func semicolon() -> CodePoint { ';' }
-    public static func quote() -> CodePoint { '"' }
-    public static func apostrophe() -> CodePoint { '\'' }
+    public static func space() -> Char { ' ' }
+    public static func newline() -> Char { '\n' }
+    public static func carriageReturn() -> Char { '\r' }
+    public static func tab() -> Char { '\t' }
+    public static func nul() -> Char { '\0' }
+    public static func slash() -> Char { '/' }
+    public static func backslash() -> Char { '\\' }
+    public static func dot() -> Char { '.' }
+    public static func comma() -> Char { ',' }
+    public static func colon() -> Char { ':' }
+    public static func semicolon() -> Char { ';' }
+    public static func quote() -> Char { '"' }
+    public static func apostrophe() -> Char { '\'' }
 }
 
 // UTF-8 decoding result
 public struct Utf8DecodeResult {
-    public var codePoint: CodePoint
+    public var char: Char
     public var bytesConsumed: Int64
 
-    public init(codePoint codePoint: CodePoint, bytesConsumed bytesConsumed: Int64) {
-        self.codePoint = codePoint;
+    public init(char char: Char, bytesConsumed bytesConsumed: Int64) {
+        self.char = char;
         self.bytesConsumed = bytesConsumed;
     }
 }
@@ -223,7 +223,7 @@ func writeByteAt(ptr: lang.ptr[lang.i8], offset: Int64, byte: lang.i8) {
     lang.ptr_write(bytePtr, byte)
 }
 
-// Decode a single UTF-8 code point from raw bytes
+// Decode a single UTF-8 char from raw bytes
 // ptr: pointer to UTF-8 bytes, length: total byte count, index: starting position
 // Returns Utf8DecodeResult or None if invalid
 public func decodeUtf8(ptr: lang.ptr[lang.i8], length: Int64, at index: Int64) -> Optional[Utf8DecodeResult] {
@@ -235,8 +235,8 @@ public func decodeUtf8(ptr: lang.ptr[lang.i8], length: Int64, at index: Int64) -
 
     if lang.i32_unsigned_lt(firstU, 0x80) {
         // Single byte (ASCII): 0xxxxxxx
-        let cp = CodePoint(UInt32(raw: firstU));
-        return .Some(Utf8DecodeResult(codePoint: cp, bytesConsumed: Int64(intLiteral: 1)))
+        let c = Char(UInt32(raw: firstU));
+        return .Some(Utf8DecodeResult(char: c, bytesConsumed: Int64(intLiteral: 1)))
     } else if lang.i32_unsigned_lt(firstU, 0xC0) {
         // Continuation byte as start - invalid
         return .None
@@ -250,8 +250,8 @@ public func decodeUtf8(ptr: lang.ptr[lang.i8], length: Int64, at index: Int64) -
             lang.i32_shl(lang.i32_and(firstU, 0x1F), 6),
             lang.i32_and(second, 0x3F)
         );
-        let cp = CodePoint(UInt32(raw: v));
-        return .Some(Utf8DecodeResult(codePoint: cp, bytesConsumed: Int64(intLiteral: 2)))
+        let c = Char(UInt32(raw: v));
+        return .Some(Utf8DecodeResult(char: c, bytesConsumed: Int64(intLiteral: 2)))
     } else if lang.i32_unsigned_lt(firstU, 0xF0) {
         // Three bytes: 1110xxxx 10xxxxxx 10xxxxxx
         let idx1 = index + Int64(intLiteral: 1);
@@ -268,8 +268,8 @@ public func decodeUtf8(ptr: lang.ptr[lang.i8], length: Int64, at index: Int64) -
             ),
             lang.i32_and(third, 0x3F)
         );
-        let cp = CodePoint(UInt32(raw: v));
-        return .Some(Utf8DecodeResult(codePoint: cp, bytesConsumed: Int64(intLiteral: 3)))
+        let c = Char(UInt32(raw: v));
+        return .Some(Utf8DecodeResult(char: c, bytesConsumed: Int64(intLiteral: 3)))
     } else if lang.i32_unsigned_lt(firstU, 0xF8) {
         // Four bytes: 11110xxx 10xxxxxx 10xxxxxx 10xxxxxx
         let idx1 = index + Int64(intLiteral: 1);
@@ -292,18 +292,18 @@ public func decodeUtf8(ptr: lang.ptr[lang.i8], length: Int64, at index: Int64) -
             ),
             lang.i32_and(fourth, 0x3F)
         );
-        let cp = CodePoint(UInt32(raw: v));
-        return .Some(Utf8DecodeResult(codePoint: cp, bytesConsumed: Int64(intLiteral: 4)))
+        let c = Char(UInt32(raw: v));
+        return .Some(Utf8DecodeResult(char: c, bytesConsumed: Int64(intLiteral: 4)))
     } else {
         // Invalid start byte
         return .None
     }
 }
 
-// Encode a code point to UTF-8, writing to a buffer
+// Encode a char to UTF-8, writing to a buffer
 // Returns number of bytes written (1-4)
-public func encodeUtf8(cp: CodePoint, ptr: lang.ptr[lang.i8], at index: Int64) -> Int64 {
-    let v: lang.i32 = cp.value().raw;
+public func encodeUtf8(c: Char, ptr: lang.ptr[lang.i8], at index: Int64) -> Int64 {
+    let v: lang.i32 = c.value().raw;
 
     if lang.i32_unsigned_lt(v, 0x80) {
         // Single byte: 0xxxxxxx

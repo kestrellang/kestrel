@@ -567,13 +567,13 @@ mod chars {
         .expect(HasError("invalid Unicode escape"));
     }
 
-    // CodePoint integration tests
+    // Char integration tests
     #[test]
-    fn char_codepoint_explicit_type() {
-        // Char literal with explicit CodePoint type
+    fn char_explicit_type() {
+        // Char literal with explicit Char type
         Test::new(
             r#"module Test
-            func get_a() -> std.text.CodePoint { 'a' }
+            func get_a() -> std.text.Char { 'a' }
         "#,
         )
         .with_stdlib()
@@ -581,13 +581,13 @@ mod chars {
     }
 
     #[test]
-    fn char_codepoint_default_type() {
-        // Char literals default to CodePoint when stdlib is available
+    fn char_default_type() {
+        // Char literals default to Char when stdlib is available
         Test::new(
             r#"module Test
             func test() {
-                let cp = 'x';
-                let _: std.text.CodePoint = cp;
+                let c = 'x';
+                let _: std.text.Char = c;
             }
         "#,
         )
@@ -596,12 +596,12 @@ mod chars {
     }
 
     #[test]
-    fn char_codepoint_comparison() {
-        // CodePoint supports comparison since it's Equatable
+    fn char_comparison() {
+        // Char supports comparison since it's Equatable
         Test::new(
             r#"module Test
-            func is_space(cp: std.text.CodePoint) -> std.core.Bool {
-                cp == ' '
+            func is_space(c: std.text.Char) -> std.core.Bool {
+                c == ' '
             }
         "#,
         )
@@ -610,13 +610,13 @@ mod chars {
     }
 
     #[test]
-    fn char_codepoint_escapes() {
-        // Various escape sequences work with CodePoint
+    fn char_escapes() {
+        // Various escape sequences work with Char
         Test::new(
             r#"module Test
-            func newline() -> std.text.CodePoint { '\n' }
-            func tab() -> std.text.CodePoint { '\t' }
-            func nul() -> std.text.CodePoint { '\0' }
+            func newline() -> std.text.Char { '\n' }
+            func tab() -> std.text.Char { '\t' }
+            func nul() -> std.text.Char { '\0' }
         "#,
         )
         .with_stdlib()

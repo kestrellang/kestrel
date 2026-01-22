@@ -232,13 +232,13 @@ func test(s: lang.str) -> lang.i64 {
     }
 
     #[test]
-    #[ignore = "Char type not yet implemented"]
+    #[ignore = "Grapheme type not yet implemented"]
     fn char_literal_pattern() {
         Test::new(
             r#"
 module Main
 
-func test(c: Char) -> lang.i64 {
+func test(c: Grapheme) -> lang.i64 {
     match c {
         'a' => 1,
         'b' => 2,
@@ -467,13 +467,13 @@ func test(x: lang.i64) -> lang.str {
     }
 
     #[test]
-    #[ignore = "Char type not yet implemented"]
+    #[ignore = "Grapheme type not yet implemented"]
     fn char_range_pattern() {
         Test::new(
             r#"
 module Main
 
-func test(c: Char) -> lang.str {
+func test(c: Grapheme) -> lang.str {
     match c {
         'a'..='z' => "lowercase",
         'A'..='Z' => "uppercase",
@@ -526,7 +526,7 @@ func test(x: lang.i64) -> lang.str {
     }
 
     #[test]
-    #[ignore = "Char type not yet implemented"]
+    #[ignore = "Grapheme type not yet implemented"]
     fn range_type_mismatch_error() {
         Test::new(
             r#"

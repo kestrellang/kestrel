@@ -7,12 +7,12 @@ import std.num.(Int64, UInt8)
 import std.result.(Optional)
 import std.memory.(Layout, Pointer, RawPointer, SystemAllocator, RcBox)
 import std.iter.(Iterator, Iterable)
-import std.text.(CodePoint, decodeUtf8, encodeUtf8)
+import std.text.(Char, decodeUtf8, encodeUtf8)
 import std.ffi.(memcpy)
 
-// StringIterator - iterates over code points
+// StringIterator - iterates over chars
 public struct StringIterator: Iterator {
-    type Item = CodePoint
+    type Item = Char
 
     private var ptr: Pointer[UInt8]
     private var length: Int64
@@ -24,7 +24,7 @@ public struct StringIterator: Iterator {
         self.index = Int64(intLiteral: 0);
     }
 
-    public mutating func next() -> Optional[CodePoint] {
+    public mutating func next() -> Optional[Char] {
         if self.index >= self.length {
             return .None
         }
@@ -34,7 +34,7 @@ public struct StringIterator: Iterator {
         if result.isSome() {
             let decoded = result.unwrap();
             self.index = self.index + decoded.bytesConsumed;
-            .Some(decoded.codePoint)
+            .Some(decoded.char)
         } else {
             // Invalid UTF-8, skip one byte
             self.index = self.index + Int64(intLiteral: 1);
@@ -175,7 +175,7 @@ struct StringStorage: Cloneable {
 
 // String - UTF-8 encoded, dynamically sized string with COW semantics
 public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, Addable, ExpressibleByStringLiteral {
-    type Item = CodePoint
+    type Item = Char
     type Iter = StringIterator
     type Output = String
 
@@ -380,15 +380,15 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
         self.storage.setValue(s)
     }
 
-    // Append code point
-    public mutating func appendCodePoint(cp: CodePoint) {
-        let utf8Len = cp.utf8Length();
+    // Append char
+    public mutating func appendChar(c: Char) {
+        let utf8Len = c.utf8Length();
         self.grow(self.len() + utf8Len);
         self.makeUnique();
         var s = self.storage.getValue();
         // Encode to buffer
         let rawPtr: lang.ptr[lang.i8] = lang.cast_ptr[lang.i8](s.ptr.asRaw().raw);
-        let written = encodeUtf8(cp, rawPtr, at: s.len);
+        let written = encodeUtf8(c, rawPtr, at: s.len);
         s.len = s.len + written;
         self.storage.setValue(s)
     }

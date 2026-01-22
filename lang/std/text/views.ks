@@ -6,7 +6,7 @@ import std.core.(Bool, Equatable, Comparable, Ordering)
 import std.num.(Int64, UInt8, UInt32)
 import std.result.(Optional)
 import std.iter.(Iterator, Iterable)
-import std.text.(CodePoint, Char, Byte, decodeUtf8, String)
+import std.text.(Char, Grapheme, Byte, decodeUtf8, String)
 import std.collections.(Array)
 
 // BytesIterator must be defined before BytesView for Iterable conformance
@@ -76,9 +76,9 @@ public struct BytesView: Iterable {
     }
 }
 
-// CodePointsIterator must be defined before CodePointsView
-public struct CodePointsIterator: Iterator {
-    type Item = CodePoint
+// CharsIterator must be defined before CharsView
+public struct CharsIterator: Iterator {
+    type Item = Char
 
     private var ptr: lang.ptr[lang.i8]
     private var length: Int64
@@ -90,7 +90,7 @@ public struct CodePointsIterator: Iterator {
         self.byteIndex = byteIndex;
     }
 
-    public mutating func next() -> Optional[CodePoint] {
+    public mutating func next() -> Optional[Char] {
         if self.byteIndex >= self.length {
             return .None
         }
@@ -99,20 +99,20 @@ public struct CodePointsIterator: Iterator {
         if result.isSome() {
             let decoded = result.unwrap();
             self.byteIndex = self.byteIndex + decoded.bytesConsumed;
-            .Some(decoded.codePoint)
+            .Some(decoded.char)
         } else {
             // Invalid UTF-8 - skip byte and return replacement character
             self.byteIndex = self.byteIndex + Int64(intLiteral: 1);
             let replacementValue = UInt32(raw: 0xFFFD);
-            .Some(CodePoint(replacementValue))
+            .Some(Char(replacementValue))
         }
     }
 }
 
-// CodePointsView - Unicode code points (O(1) iteration, O(n) indexing)
-public struct CodePointsView: Iterable {
-    type Item = CodePoint
-    type Iter = CodePointsIterator
+// CharsView - Unicode chars (O(1) iteration, O(n) indexing)
+public struct CharsView: Iterable {
+    type Item = Char
+    type Iter = CharsIterator
 
     private var ptr: lang.ptr[lang.i8]
     private var length: Int64
@@ -122,11 +122,11 @@ public struct CodePointsView: Iterable {
         self.length = length;
     }
 
-    public func iter() -> CodePointsIterator {
-        CodePointsIterator(ptr: self.ptr, length: self.length, byteIndex: Int64(intLiteral: 0))
+    public func iter() -> CharsIterator {
+        CharsIterator(ptr: self.ptr, length: self.length, byteIndex: Int64(intLiteral: 0))
     }
 
-    // Count is O(n) - must decode all code points
+    // Count is O(n) - must decode all chars
     public func count() -> Int64 {
         var n: Int64 = Int64(intLiteral: 0);
         var i: Int64 = Int64(intLiteral: 0);
@@ -145,34 +145,34 @@ public struct CodePointsView: Iterable {
     }
 }
 
-// CharsIterator must be defined before CharsView
-public struct CharsIterator: Iterator {
-    type Item = Char
+// GraphemesIterator must be defined before GraphemesView
+public struct GraphemesIterator: Iterator {
+    type Item = Grapheme
 
-    private var codePointsIter: CodePointsIterator
+    private var charsIter: CharsIterator
 
-    public init(codePointsIter: CodePointsIterator) {
-        self.codePointsIter = codePointsIter;
+    public init(charsIter: CharsIterator) {
+        self.charsIter = charsIter;
     }
 
-    public mutating func next() -> Optional[Char] {
-        // Simplified: treat each code point as a character
+    public mutating func next() -> Optional[Grapheme] {
+        // Simplified: treat each char as a grapheme
         // Full implementation would need grapheme cluster segmentation
-        let maybeCP = self.codePointsIter.next();
-        if maybeCP.isSome() {
-            .Some(Char(codePoint: maybeCP.unwrap()))
+        let maybeChar = self.charsIter.next();
+        if maybeChar.isSome() {
+            .Some(Grapheme(char: maybeChar.unwrap()))
         } else {
             .None
         }
     }
 }
 
-// CharsView - Extended grapheme clusters (O(1) iteration, O(n) indexing)
+// GraphemesView - Extended grapheme clusters (O(1) iteration, O(n) indexing)
 // Note: Full grapheme cluster support requires Unicode segmentation tables
-// This is a simplified implementation that treats each code point as a char
-public struct CharsView: Iterable {
-    type Item = Char
-    type Iter = CharsIterator
+// This is a simplified implementation that treats each char as a grapheme
+public struct GraphemesView: Iterable {
+    type Item = Grapheme
+    type Iter = GraphemesIterator
 
     private var ptr: lang.ptr[lang.i8]
     private var length: Int64
@@ -182,13 +182,13 @@ public struct CharsView: Iterable {
         self.length = length;
     }
 
-    public func iter() -> CharsIterator {
-        CharsIterator(CodePointsIterator(ptr: self.ptr, length: self.length, byteIndex: Int64(intLiteral: 0)))
+    public func iter() -> GraphemesIterator {
+        GraphemesIterator(CharsIterator(ptr: self.ptr, length: self.length, byteIndex: Int64(intLiteral: 0)))
     }
 
     // Count is O(n) - must process all grapheme clusters
     public func count() -> Int64 {
-        // Simplified: same as code point count
+        // Simplified: same as char count
         var n: Int64 = Int64(intLiteral: 0);
         var i: Int64 = Int64(intLiteral: 0);
         while i < self.length {
@@ -333,18 +333,6 @@ public struct ByteIndex: Equatable, Comparable {
     }
 }
 
-public struct CodePointIndex: Equatable {
-    public var byteOffset: Int64
-
-    public init(byteOffset: Int64) {
-        self.byteOffset = byteOffset;
-    }
-
-    public func equals(other: CodePointIndex) -> Bool {
-        self.byteOffset == other.byteOffset
-    }
-}
-
 public struct CharIndex: Equatable {
     public var byteOffset: Int64
 
@@ -353,6 +341,18 @@ public struct CharIndex: Equatable {
     }
 
     public func equals(other: CharIndex) -> Bool {
+        self.byteOffset == other.byteOffset
+    }
+}
+
+public struct GraphemeIndex: Equatable {
+    public var byteOffset: Int64
+
+    public init(byteOffset: Int64) {
+        self.byteOffset = byteOffset;
+    }
+
+    public func equals(other: GraphemeIndex) -> Bool {
         self.byteOffset == other.byteOffset
     }
 }

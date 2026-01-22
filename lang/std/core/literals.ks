@@ -4,7 +4,7 @@ module std.core
 
 import std.num.(Int64, Float64)
 import std.memory.(LiteralSlice)
-import std.text.(String, CodePoint)
+import std.text.(String, Char)
 import std.core.(Bool)
 
 @builtin(.ExpressibleByBoolLiteral)
@@ -81,4 +81,4 @@ public type StringLiteralType = String
 public type BooleanLiteralType = Bool
 
 @builtin(.DefaultCharLiteralType)
-public type CharLiteralType = CodePoint
+public type CharLiteralType = Char
