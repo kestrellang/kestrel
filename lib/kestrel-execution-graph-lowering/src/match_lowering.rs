@@ -676,11 +676,7 @@ fn emit_comparison_chain_int(
             Constructor::CharLiteral(c) => {
                 // Char literals are just integers - treat as i32 comparison
                 let match_block = ctx.create_block();
-                let next_block = if is_last && default.is_none() {
-                    ctx.create_block()
-                } else {
-                    ctx.create_block()
-                };
+                let next_block = ctx.create_block();
 
                 // Compare: switch_place == char value
                 let cmp_ty = ctx.mir.ty_bool();
@@ -1380,11 +1376,7 @@ fn emit_matchable_switch(
             Constructor::CharLiteral(c) => {
                 // Create blocks for this case
                 let match_block = ctx.create_block();
-                let next_block = if is_last && default.is_none() {
-                    ctx.create_block()
-                } else {
-                    ctx.create_block()
-                };
+                let next_block = ctx.create_block();
 
                 // Create a temporary to hold the literal value
                 // The type must conform to ExpressibleByCharLiteral
