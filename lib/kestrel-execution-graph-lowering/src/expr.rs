@@ -2580,7 +2580,9 @@ fn lower_call(
             let is_static_type_ref_call = matches!(receiver.kind, ExprKind::TypeRef(_));
 
             // Determine if this is an instance method call (has receiver value)
-            let is_instance = !(is_static_type_param_call || is_static_assoc_type_call || is_static_type_ref_call);
+            let is_instance = !(is_static_type_param_call
+                || is_static_assoc_type_call
+                || is_static_type_ref_call);
 
             // For instance methods on type params, receiver becomes first argument
             // For static methods on type params/assoc types, there's no receiver value
@@ -5466,9 +5468,7 @@ fn find_protocol_for_extension_method(
             for child in symbol.metadata().children() {
                 let child_name = child.metadata().name().value.clone();
                 let child_kind = child.metadata().kind();
-                if child_kind == KestrelSymbolKind::Function
-                    && child_name == method_name
-                {
+                if child_kind == KestrelSymbolKind::Function && child_name == method_name {
                     return Some(symbol.clone() as std::sync::Arc<dyn Symbol<KestrelLanguage>>);
                 }
             }

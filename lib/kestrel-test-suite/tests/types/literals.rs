@@ -510,10 +510,8 @@ mod chars {
     #[test]
     fn char_error_flag_emoji() {
         // Flag emoji is two regional indicator symbols
-        Test::new(
-            "module Test\n            func flag() -> lang.i32 { '\u{1F1FA}\u{1F1F8}' }\n",
-        )
-        .expect(HasError("character literal may only contain one codepoint"));
+        Test::new("module Test\n            func flag() -> lang.i32 { '\u{1F1FA}\u{1F1F8}' }\n")
+            .expect(HasError("character literal may only contain one codepoint"));
     }
 
     #[test]
