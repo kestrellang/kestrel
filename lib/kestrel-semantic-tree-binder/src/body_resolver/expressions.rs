@@ -5,6 +5,7 @@
 //! like calls, operators, and paths.
 
 use kestrel_reporting::IntoDiagnostic;
+use kestrel_semantic_tree::builtins::LanguageFeature;
 use kestrel_semantic_tree::expr::{CallArgument, ElseBranch, Expression, IfCondition, LabelInfo};
 use kestrel_semantic_tree::stmt::Statement;
 use kestrel_semantic_tree::ty::Ty;
@@ -1205,14 +1206,27 @@ fn resolve_for_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) ->
         span.clone(),
     );
 
-    // Create the .iter() method call on the iterable
-    let iter_call = Expression::deferred_method_call(
-        iterable_expr,
-        "iter".to_string(),
-        vec![],
-        iter_ty.clone(),
-        span.clone(),
-    );
+    // Create the .iter() method call on the iterable using MethodRef pattern.
+    // This produces "does not conform to Iterable" errors instead of "no member iter".
+    let iter_method_id = ctx
+        .model
+        .builtin_registry()
+        .method(LanguageFeature::IterableIterMethod);
+    let iter_call = if let Some(method_id) = iter_method_id {
+        // Create MethodRef with the protocol method as candidate, then wrap in Call
+        let method_ref =
+            Expression::method_ref(iterable_expr, vec![method_id], "iter".to_string(), span.clone());
+        Expression::call(method_ref, vec![], iter_ty.clone(), span.clone())
+    } else {
+        // Fallback if builtin not registered (shouldn't happen in practice)
+        Expression::deferred_method_call(
+            iterable_expr,
+            "iter".to_string(),
+            vec![],
+            iter_ty.clone(),
+            span.clone(),
+        )
+    };
 
     // Create the binding pattern for the iterator
     let iter_pattern = Pattern::local(
@@ -1234,17 +1248,30 @@ fn resolve_for_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) ->
     // Push a new scope for pattern bindings in the loop body
     ctx.local_scope.push_scope();
 
-    // Create the .next() method call: iter.next()
+    // Create the .next() method call: iter.next() using MethodRef pattern.
+    // This produces "does not conform to Iterator" errors instead of "no member next".
     let item_ty = Ty::infer(span.clone());
     let optional_item_ty = Ty::infer(span.clone()); // Will be Optional[Item]
     let iter_ref = Expression::local_ref(iter_local_id, iter_ty, true, span.clone());
-    let next_call = Expression::deferred_method_call(
-        iter_ref,
-        "next".to_string(),
-        vec![],
-        optional_item_ty.clone(),
-        span.clone(),
-    );
+    let next_method_id = ctx
+        .model
+        .builtin_registry()
+        .method(LanguageFeature::IteratorNextMethod);
+    let next_call = if let Some(method_id) = next_method_id {
+        // Create MethodRef with the protocol method as candidate, then wrap in Call
+        let method_ref =
+            Expression::method_ref(iter_ref, vec![method_id], "next".to_string(), span.clone());
+        Expression::call(method_ref, vec![], optional_item_ty.clone(), span.clone())
+    } else {
+        // Fallback if builtin not registered (shouldn't happen in practice)
+        Expression::deferred_method_call(
+            iter_ref,
+            "next".to_string(),
+            vec![],
+            optional_item_ty.clone(),
+            span.clone(),
+        )
+    };
 
     // Resolve the user's pattern with the item type
     let user_pattern = pattern_node

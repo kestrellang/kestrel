@@ -49,11 +49,18 @@ use std::sync::Arc;
 /// Represents a semantic type with its kind and source location.
 /// Every type has a unique `TyId` assigned at construction for use
 /// in type inference constraint solving.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Ty {
     id: TyId,
     kind: TyKind,
     span: Span,
+}
+
+impl fmt::Debug for Ty {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Use Display for a clean representation
+        write!(f, "{}", self)
+    }
 }
 
 impl fmt::Display for Ty {

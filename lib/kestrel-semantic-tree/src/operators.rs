@@ -4,6 +4,7 @@
 //! used during semantic analysis to restructure flat binary expressions
 //! into properly nested trees and desugar them into method calls.
 
+use crate::builtins::LanguageFeature;
 use kestrel_syntax_tree::SyntaxKind;
 use std::collections::HashMap;
 
@@ -92,6 +93,34 @@ impl BinaryOp {
             BinaryOp::RangeInclusive => "..=",
             BinaryOp::RangeExclusive => "..<",
             BinaryOp::Coalesce => "??",
+        }
+    }
+
+    /// Get the language feature for the protocol method that implements this operator.
+    /// Returns `None` for operators like Coalesce that don't have protocol methods.
+    pub fn method_feature(&self) -> Option<LanguageFeature> {
+        match self {
+            BinaryOp::Add => Some(LanguageFeature::AddOperatorMethod),
+            BinaryOp::Sub => Some(LanguageFeature::SubtractOperatorMethod),
+            BinaryOp::Mul => Some(LanguageFeature::MultiplyOperatorMethod),
+            BinaryOp::Div => Some(LanguageFeature::DivideOperatorMethod),
+            BinaryOp::Rem => Some(LanguageFeature::ModuloOperatorMethod),
+            BinaryOp::BitAnd => Some(LanguageFeature::BitwiseAndOperatorMethod),
+            BinaryOp::BitOr => Some(LanguageFeature::BitwiseOrOperatorMethod),
+            BinaryOp::BitXor => Some(LanguageFeature::BitwiseXorOperatorMethod),
+            BinaryOp::Shl => Some(LanguageFeature::ShiftLeftOperatorMethod),
+            BinaryOp::Shr => Some(LanguageFeature::ShiftRightOperatorMethod),
+            BinaryOp::Eq => Some(LanguageFeature::EqualsOperatorMethod),
+            BinaryOp::Ne => Some(LanguageFeature::NotEqualsOperatorMethod),
+            BinaryOp::Lt => Some(LanguageFeature::LessThanOperatorMethod),
+            BinaryOp::Gt => Some(LanguageFeature::GreaterThanOperatorMethod),
+            BinaryOp::Le => Some(LanguageFeature::LessOrEqualOperatorMethod),
+            BinaryOp::Ge => Some(LanguageFeature::GreaterOrEqualOperatorMethod),
+            BinaryOp::And => Some(LanguageFeature::LogicalAndOperatorMethod),
+            BinaryOp::Or => Some(LanguageFeature::LogicalOrOperatorMethod),
+            BinaryOp::RangeInclusive => Some(LanguageFeature::InclusiveRangeOperatorMethod),
+            BinaryOp::RangeExclusive => Some(LanguageFeature::ExclusiveRangeOperatorMethod),
+            BinaryOp::Coalesce => None, // No protocol for coalesce
         }
     }
 }
@@ -191,6 +220,17 @@ impl UnaryOp {
             UnaryOp::BitNot => "!",
             UnaryOp::LogicalNot => "not",
             UnaryOp::Unwrap => "!",
+        }
+    }
+
+    /// Get the language feature for the protocol method that implements this operator.
+    /// Returns `None` for operators like Unwrap that don't have protocol methods.
+    pub fn method_feature(&self) -> Option<LanguageFeature> {
+        match self {
+            UnaryOp::Neg => Some(LanguageFeature::NegateOperatorMethod),
+            UnaryOp::BitNot => Some(LanguageFeature::BitwiseNotOperatorMethod),
+            UnaryOp::LogicalNot => Some(LanguageFeature::LogicalNotOperatorMethod),
+            UnaryOp::Unwrap => None, // No protocol for unwrap
         }
     }
 }

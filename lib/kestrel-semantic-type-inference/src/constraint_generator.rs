@@ -482,7 +482,30 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
                     ctx.equate(callee.ty.id(), expected_fn_ty.id(), expr.span.clone());
                 },
                 _ => {
-                    // Callee type is not a function - might be an error or inference needed
+                    // Check if callee is a MethodRef - if so, generate member_access constraint
+                    // for method resolution. This enables the MethodRef pattern for protocol
+                    // method calls (used by desugared for-loops for iter()/next()).
+                    if let ExprKind::MethodRef {
+                        receiver,
+                        method_name,
+                        ..
+                    } = &callee.kind
+                    {
+                        let arg_ty_ids: Vec<_> =
+                            arguments.iter().map(|a| a.value.ty.id()).collect();
+                        ctx.register_type(&receiver.ty);
+                        ctx.register_type(&expr.ty);
+                        ctx.member_access(
+                            receiver.ty.id(),
+                            method_name.clone(),
+                            false,      // instance method call
+                            arg_ty_ids, // argument types for parameter constraint generation
+                            expr.ty.id(),
+                            expr.id,
+                            expr.span.clone(),
+                        );
+                    }
+                    // Otherwise callee type is not a function - might be an error or inference needed
                 },
             }
         },

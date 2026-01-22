@@ -310,6 +310,8 @@ where
 }
 
 /// Desugar a binary operator into a method call: lhs.method_name(rhs)
+/// Uses the MethodRef pattern with builtin registry to produce proper
+/// "does not conform to X" errors instead of "no member Y".
 fn desugar_binary_op(
     op: BinaryOp,
     lhs: Expression,
@@ -335,13 +337,21 @@ fn desugar_binary_op(
     }
 
     let method_name = op.method_name();
-
-    // For non-primitive types, create a DeferredMethodCall.
-    // Type inference will resolve this to a concrete protocol method call.
-    // All operators use Infer - type inference will determine the actual return type
-    // from the resolved method (e.g., Bool for comparisons, Output associated type for arithmetic).
     let result_ty = Ty::infer(full_span.clone());
     let arg = CallArgument::unlabeled(rhs.clone(), rhs.span.clone());
+
+    // Try to use the MethodRef pattern with builtin registry for better error messages.
+    // This produces "does not conform to X" errors instead of "no member Y".
+    if let Some(feature) = op.method_feature() {
+        if let Some(method_id) = ctx.model.builtin_registry().method(feature) {
+            // Create MethodRef with the protocol method as candidate, then wrap in Call
+            let method_ref =
+                Expression::method_ref(lhs, vec![method_id], method_name.to_string(), full_span.clone());
+            return Expression::call(method_ref, vec![arg], result_ty, full_span);
+        }
+    }
+
+    // Fallback: use DeferredMethodCall if builtin not registered
     Expression::deferred_method_call(
         lhs,
         method_name.to_string(),
@@ -352,6 +362,8 @@ fn desugar_binary_op(
 }
 
 /// Desugar a unary operator into a method call: operand.method_name()
+/// Uses the MethodRef pattern with builtin registry to produce proper
+/// "does not conform to X" errors instead of "no member Y".
 fn desugar_unary_op(
     op: UnaryOp,
     operand: Expression,
@@ -377,11 +389,20 @@ fn desugar_unary_op(
     }
 
     let method_name = op.method_name();
-
-    // For non-primitive types, create a DeferredMethodCall.
-    // Type inference will resolve this to a concrete protocol method call.
-    // Use Infer so type inference determines the actual return type from the resolved method.
     let result_ty = Ty::infer(full_span.clone());
+
+    // Try to use the MethodRef pattern with builtin registry for better error messages.
+    // This produces "does not conform to X" errors instead of "no member Y".
+    if let Some(feature) = op.method_feature() {
+        if let Some(method_id) = ctx.model.builtin_registry().method(feature) {
+            // Create MethodRef with the protocol method as candidate, then wrap in Call
+            let method_ref =
+                Expression::method_ref(operand, vec![method_id], method_name.to_string(), full_span.clone());
+            return Expression::call(method_ref, vec![], result_ty, full_span);
+        }
+    }
+
+    // Fallback: use DeferredMethodCall if builtin not registered
     Expression::deferred_method_call(
         operand,
         method_name.to_string(),

@@ -50,7 +50,7 @@ pub enum ParamInfo {
 
 /// Represents the kind of a semantic type
 /// These are resolved types after semantic analysis
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub enum TyKind {
     /// Unit type: ()
     Unit,
@@ -155,4 +155,125 @@ pub enum TyKind {
         /// The return type (may itself be an inference variable)
         return_type: Box<Ty>,
     },
+}
+
+impl std::fmt::Debug for TyKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use semantic_tree::symbol::Symbol;
+
+        match self {
+            TyKind::Unit => write!(f, "Unit"),
+            TyKind::Never => write!(f, "Never"),
+            TyKind::Int(bits) => write!(f, "Int({:?})", bits),
+            TyKind::Float(bits) => write!(f, "Float({:?})", bits),
+            TyKind::Bool => write!(f, "Bool"),
+            TyKind::String => write!(f, "String"),
+            TyKind::Tuple(elems) => {
+                write!(f, "Tuple[")?;
+                for (i, e) in elems.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", e)?;
+                }
+                write!(f, "]")
+            },
+            TyKind::Array(elem) => write!(f, "Array[{}]", elem),
+            TyKind::Pointer(elem) => write!(f, "Pointer[{}]", elem),
+            TyKind::Function { params, return_type } => {
+                write!(f, "Function((")?;
+                for (i, p) in params.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", p)?;
+                }
+                write!(f, ") -> {})", return_type)
+            },
+            TyKind::Error => write!(f, "Error"),
+            TyKind::SelfType => write!(f, "SelfType"),
+            TyKind::Infer => write!(f, "Infer"),
+            TyKind::TypeParameter(sym) => {
+                write!(f, "TypeParameter({})", sym.metadata().name().value)
+            },
+            TyKind::Protocol { symbol, substitutions } => {
+                write!(f, "Protocol({}", symbol.metadata().name().value)?;
+                if !substitutions.is_empty() {
+                    write!(f, "[")?;
+                    let type_params = symbol.type_parameters();
+                    for (i, tp) in type_params.iter().enumerate() {
+                        if i > 0 {
+                            write!(f, ", ")?;
+                        }
+                        if let Some(ty) = substitutions.get(tp.metadata().id()) {
+                            write!(f, "{}", ty)?;
+                        }
+                    }
+                    write!(f, "]")?;
+                }
+                write!(f, ")")
+            },
+            TyKind::Struct { symbol, substitutions } => {
+                write!(f, "Struct({}", symbol.metadata().name().value)?;
+                if !substitutions.is_empty() {
+                    write!(f, "[")?;
+                    let type_params = symbol.type_parameters();
+                    for (i, tp) in type_params.iter().enumerate() {
+                        if i > 0 {
+                            write!(f, ", ")?;
+                        }
+                        if let Some(ty) = substitutions.get(tp.metadata().id()) {
+                            write!(f, "{}", ty)?;
+                        }
+                    }
+                    write!(f, "]")?;
+                }
+                write!(f, ")")
+            },
+            TyKind::Enum { symbol, substitutions } => {
+                write!(f, "Enum({}", symbol.metadata().name().value)?;
+                if !substitutions.is_empty() {
+                    write!(f, "[")?;
+                    let type_params = symbol.type_parameters();
+                    for (i, tp) in type_params.iter().enumerate() {
+                        if i > 0 {
+                            write!(f, ", ")?;
+                        }
+                        if let Some(ty) = substitutions.get(tp.metadata().id()) {
+                            write!(f, "{}", ty)?;
+                        }
+                    }
+                    write!(f, "]")?;
+                }
+                write!(f, ")")
+            },
+            TyKind::TypeAlias { symbol, substitutions } => {
+                write!(f, "TypeAlias({}", symbol.metadata().name().value)?;
+                if !substitutions.is_empty() {
+                    write!(f, "[")?;
+                    let type_params = symbol.type_parameters();
+                    for (i, tp) in type_params.iter().enumerate() {
+                        if i > 0 {
+                            write!(f, ", ")?;
+                        }
+                        if let Some(ty) = substitutions.get(tp.metadata().id()) {
+                            write!(f, "{}", ty)?;
+                        }
+                    }
+                    write!(f, "]")?;
+                }
+                write!(f, ")")
+            },
+            TyKind::AssociatedType { symbol, container } => {
+                if let Some(c) = container {
+                    write!(f, "AssociatedType({}.{})", c, symbol.metadata().name().value)
+                } else {
+                    write!(f, "AssociatedType({})", symbol.metadata().name().value)
+                }
+            },
+            TyKind::UnresolvedFunction { param_info, return_type } => {
+                write!(f, "UnresolvedFunction({:?} -> {})", param_info, return_type)
+            },
+        }
+    }
 }

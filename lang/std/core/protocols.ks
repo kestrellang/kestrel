@@ -16,9 +16,14 @@ public protocol Matchable {
     func matches(other: Self) -> Bool
 }
 
-// Default operator implementation for Equatable (provides ==)
-extend Equatable: Equal[Self] {
+// Default operator implementation for Equatable (provides == and !=)
+extend Equatable: Equal[Self], NotEqual[Self] {
     type Equal.Output = Bool
+    type NotEqual.Output = Bool
+
+    public func notEquals(other: Self) -> Bool {
+        if self.equals(other) { false } else { true }
+    }
 }
 
 // Comparable - types that have a total ordering
