@@ -41,7 +41,7 @@
 
 ## Phase 14
 
-- [ ] For loops
+- [x] For loops
 - [x] Character Literals
 - [ ] Compound Assignment Operators
 - [x] Try Expressions

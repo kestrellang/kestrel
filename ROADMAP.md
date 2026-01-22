@@ -597,13 +597,14 @@ See [docs/memory-model/implementation-plan.md](docs/memory-model/implementation-
 ### Expressions
 
 - [x] Try Operator
-- [ ] For Loops
+- [x] For Loops
 - [ ] And / Or Short Circuiting
 - [ ] Null Coalescing Operator
 - [ ] Optional Chaining
 - [ ] Compound Assignment Operator
 - [x] Character Literals
 - [ ] String Interpolation
+- [ ] Null Literals
 
 ### Core Features
 
