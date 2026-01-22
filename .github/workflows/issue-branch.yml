@@ -10,6 +10,7 @@ jobs:
     permissions:
       contents: write
       issues: write
+      pull-requests: write
 
     steps:
       - name: Checkout nightly
@@ -34,7 +35,8 @@ jobs:
           # Sanitize title for branch name
           TITLE="${{ github.event.issue.title }}"
           SANITIZED=$(echo "$TITLE" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/--*/-/g' | sed 's/^-//' | sed 's/-$//' | cut -c1-50)
-          BRANCH="${{ steps.prefix.outputs.prefix }}/${{ github.event.issue.number }}-${SANITIZED}"
+          ISSUE_NUM=$(printf "%04d" "${{ github.event.issue.number }}")
+          BRANCH="${{ steps.prefix.outputs.prefix }}/${ISSUE_NUM}-${SANITIZED}"
           echo "name=$BRANCH" >> $GITHUB_OUTPUT
 
       - name: Configure git
