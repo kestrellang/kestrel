@@ -370,12 +370,21 @@ pub enum Token {
     #[token("..")]
     DotDot,
 
+    // Compound assignment operators (3-char, must come before 2-char shift operators)
+    #[token("<<=")]
+    LessLessEquals,
+
+    #[token(">>=")]
+    GreaterGreaterEquals,
+
+    // Shift operators (2-char)
     #[token("<<")]
     LessLess,
 
     #[token(">>")]
     GreaterGreater,
 
+    // Comparison operators (2-char)
     #[token("<=")]
     LessEquals,
 
@@ -396,6 +405,31 @@ pub enum Token {
 
     #[token("=>")]
     FatArrow,
+
+    // Compound assignment operators (2-char, must come before single-char operators)
+    #[token("+=")]
+    PlusEquals,
+
+    #[token("-=")]
+    MinusEquals,
+
+    #[token("*=")]
+    StarEquals,
+
+    #[token("/=")]
+    SlashEquals,
+
+    #[token("%=")]
+    PercentEquals,
+
+    #[token("&=")]
+    AmpersandEquals,
+
+    #[token("|=")]
+    PipeEquals,
+
+    #[token("^=")]
+    CaretEquals,
 
     // Single-character operators
     #[token("=")]

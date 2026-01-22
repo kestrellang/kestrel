@@ -8,7 +8,9 @@ import std.core.(
     Equatable, Comparable, Ordering, Bool, Matchable, Formattable,
     Addable, Subtractable, Multipliable, Divisible, Modulo, Negatable,
     BitwiseAnd, BitwiseOr, BitwiseXor, BitwiseNot, LeftShift, RightShift,
-    ExpressibleByIntLiteral, Convertible
+    ExpressibleByIntLiteral, Convertible,
+    AddAssign, SubtractAssign, MultiplyAssign, DivideAssign, ModuloAssign,
+    BitwiseAndAssign, BitwiseOrAssign, BitwiseXorAssign, LeftShiftAssign, RightShiftAssign
 )
 import std.text.(String)
 
@@ -31,9 +33,19 @@ public struct Int64:
     BitwiseNot,
     LeftShift,
     RightShift,
+    AddAssign,
+    SubtractAssign,
+    MultiplyAssign,
+    DivideAssign,
+    ModuloAssign,
+    BitwiseAndAssign,
+    BitwiseOrAssign,
+    BitwiseXorAssign,
+    LeftShiftAssign[lang.i64],
+    RightShiftAssign[lang.i64],
     ExpressibleByIntLiteral,
     FFISafe,
-        Convertible[Int8],
+    Convertible[Int8],
     Convertible[Int16],
     Convertible[Int32],
     Convertible[UInt8],
@@ -109,6 +121,18 @@ public struct Int64:
     public func bitwiseNot() -> Int64 { Int64(raw: lang.i64_not(self.raw)) }
     public func shiftLeft(by count: lang.i64) -> Int64 { Int64(raw: lang.i64_shl(self.raw, count)) }
     public func shiftRight(by count: lang.i64) -> Int64 { Int64(raw: lang.i64_signed_shr(self.raw, count)) }
+
+    // Compound assignment operators
+    public mutating func addAssign(other: Int64) { self = self.add(other) }
+    public mutating func subtractAssign(other: Int64) { self = self.subtract(other) }
+    public mutating func multiplyAssign(other: Int64) { self = self.multiply(other) }
+    public mutating func divideAssign(other: Int64) { self = self.divide(other) }
+    public mutating func modAssign(other: Int64) { self = self.modulo(other) }
+    public mutating func bitwiseAndAssign(other: Int64) { self = self.bitwiseAnd(other) }
+    public mutating func bitwiseOrAssign(other: Int64) { self = self.bitwiseOr(other) }
+    public mutating func bitwiseXorAssign(other: Int64) { self = self.bitwiseXor(other) }
+    public mutating func shiftLeftAssign(by count: lang.i64) { self = self.shiftLeft(by: count) }
+    public mutating func shiftRightAssign(by count: lang.i64) { self = self.shiftRight(by: count) }
 
     // Formattable
     public func format() -> String {

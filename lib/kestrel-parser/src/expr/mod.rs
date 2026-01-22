@@ -275,6 +275,13 @@ pub enum ExprVariant {
         equals: Span,
         rhs: Box<ExprVariant>,
     },
+    /// Compound assignment expression: lhs += rhs, lhs -= rhs, etc.
+    CompoundAssignment {
+        lhs: Box<ExprVariant>,
+        operator: Token,
+        operator_span: Span,
+        rhs: Box<ExprVariant>,
+    },
     /// If expression: if condition { then } else { else }
     /// Also supports if-let: if let pattern = expr { then } else { else }
     /// And if-let chains: if let .Some(x) = a, let .Some(y) = b { ... }
@@ -1888,19 +1895,45 @@ pub fn expr_parser<'tokens>()
             })
             .boxed();
 
-        // Assignment expression
+        // Compound assignment operators
+        let compound_assign_op = choice((
+            just(Token::PlusEquals).map_with(|t, e| (t, to_kestrel_span(e.span()))),
+            just(Token::MinusEquals).map_with(|t, e| (t, to_kestrel_span(e.span()))),
+            just(Token::StarEquals).map_with(|t, e| (t, to_kestrel_span(e.span()))),
+            just(Token::SlashEquals).map_with(|t, e| (t, to_kestrel_span(e.span()))),
+            just(Token::PercentEquals).map_with(|t, e| (t, to_kestrel_span(e.span()))),
+            just(Token::AmpersandEquals).map_with(|t, e| (t, to_kestrel_span(e.span()))),
+            just(Token::PipeEquals).map_with(|t, e| (t, to_kestrel_span(e.span()))),
+            just(Token::CaretEquals).map_with(|t, e| (t, to_kestrel_span(e.span()))),
+            just(Token::LessLessEquals).map_with(|t, e| (t, to_kestrel_span(e.span()))),
+            just(Token::GreaterGreaterEquals).map_with(|t, e| (t, to_kestrel_span(e.span()))),
+        ));
+
+        // Assignment or compound assignment expression
         binary
             .clone()
             .then(
                 skip_trivia()
-                    .ignore_then(just(Token::Equals).map_with(|_, e| to_kestrel_span(e.span())))
+                    .ignore_then(
+                        // Regular assignment: =
+                        just(Token::Equals)
+                            .map_with(|_, e| (None, to_kestrel_span(e.span())))
+                            // Compound assignment: +=, -=, etc.
+                            .or(compound_assign_op.map(|(tok, span)| (Some(tok), span))),
+                    )
                     .then(expr.clone())
                     .or_not(),
             )
             .map(|(lhs, rhs_opt)| match rhs_opt {
-                Some((equals, rhs)) => ExprVariant::Assignment {
+                Some(((None, equals), rhs)) => ExprVariant::Assignment {
                     lhs: Box::new(lhs),
                     equals,
+                    rhs: Box::new(rhs),
+                },
+                Some(((Some(op_token), op_span), rhs)) => ExprVariant::CompoundAssignment {
+                    lhs: Box::new(lhs),
+                    operator: op_token,
+                    operator_span: op_span,
                     rhs: Box::new(rhs),
                 },
                 None => lhs,
@@ -1981,6 +2014,14 @@ pub fn emit_expr_variant(sink: &mut EventSink, variant: &ExprVariant) {
         },
         ExprVariant::Assignment { lhs, equals, rhs } => {
             emit_assignment_expr(sink, lhs, equals.clone(), rhs);
+        },
+        ExprVariant::CompoundAssignment {
+            lhs,
+            operator,
+            operator_span,
+            rhs,
+        } => {
+            emit_compound_assignment_expr(sink, lhs, operator.clone(), operator_span.clone(), rhs);
         },
         ExprVariant::Postfix {
             operand,
@@ -2359,6 +2400,22 @@ fn emit_assignment_expr(sink: &mut EventSink, lhs: &ExprVariant, equals: Span, r
     sink.start_node(SyntaxKind::ExprAssignment);
     emit_expr_variant(sink, lhs);
     sink.add_token(SyntaxKind::Equals, equals);
+    emit_expr_variant(sink, rhs);
+    sink.finish_node();
+    sink.finish_node();
+}
+
+fn emit_compound_assignment_expr(
+    sink: &mut EventSink,
+    lhs: &ExprVariant,
+    operator: Token,
+    operator_span: Span,
+    rhs: &ExprVariant,
+) {
+    sink.start_node(SyntaxKind::Expression);
+    sink.start_node(SyntaxKind::ExprCompoundAssignment);
+    emit_expr_variant(sink, lhs);
+    sink.add_token(SyntaxKind::from(operator), operator_span);
     emit_expr_variant(sink, rhs);
     sink.finish_node();
     sink.finish_node();

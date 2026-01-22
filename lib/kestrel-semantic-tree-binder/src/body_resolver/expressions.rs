@@ -5,7 +5,7 @@
 //! like calls, operators, and paths.
 
 use kestrel_reporting::IntoDiagnostic;
-use kestrel_semantic_tree::expr::{ElseBranch, Expression, IfCondition, LabelInfo};
+use kestrel_semantic_tree::expr::{CallArgument, ElseBranch, Expression, IfCondition, LabelInfo};
 use kestrel_semantic_tree::stmt::Statement;
 use kestrel_semantic_tree::ty::Ty;
 use kestrel_span::Span;
@@ -103,6 +103,8 @@ pub fn resolve_expression(expr_node: &SyntaxNode, ctx: &mut BodyResolutionContex
         SyntaxKind::ExprCall => resolve_call_expression(expr_node, ctx),
 
         SyntaxKind::ExprAssignment => resolve_assignment_expression(expr_node, ctx),
+
+        SyntaxKind::ExprCompoundAssignment => resolve_compound_assignment_expression(expr_node, ctx),
 
         SyntaxKind::ExprIf => resolve_if_expression(expr_node, ctx),
 
@@ -554,6 +556,69 @@ fn resolve_assignment_expression(node: &SyntaxNode, ctx: &mut BodyResolutionCont
     // TODO: Type check that value type is compatible with target type
 
     Expression::assignment(target, value, span)
+}
+
+/// Resolve a compound assignment expression: target += value, target -= value, etc.
+/// Desugars to a method call: target.addAssign(value), etc.
+fn resolve_compound_assignment_expression(
+    node: &SyntaxNode,
+    ctx: &mut BodyResolutionContext,
+) -> Expression {
+    use kestrel_semantic_tree::operators::CompoundOp;
+
+    let span = get_node_span(node, ctx.file_id);
+
+    // Find the operator token to determine which compound operator this is
+    let op_token = node
+        .children_with_tokens()
+        .filter_map(|e| e.into_token())
+        .find(|t| CompoundOp::from_syntax_kind(t.kind()).is_some());
+
+    let Some(op_token) = op_token else {
+        return Expression::error(span);
+    };
+
+    let Some(op) = CompoundOp::from_syntax_kind(op_token.kind()) else {
+        return Expression::error(span);
+    };
+
+    // Find the LHS and RHS expressions
+    // ExprCompoundAssignment contains: Expression, operator token, Expression
+    let mut expr_children = node
+        .children()
+        .filter(|c| c.kind() == SyntaxKind::Expression || is_expression_kind(c.kind()));
+
+    let lhs_node = match expr_children.next() {
+        Some(n) => n,
+        None => return Expression::error(span),
+    };
+
+    let rhs_node = match expr_children.next() {
+        Some(n) => n,
+        None => return Expression::error(span),
+    };
+
+    // Resolve both sides
+    let target = resolve_expression(&lhs_node, ctx);
+    let value = resolve_expression(&rhs_node, ctx);
+
+    // If either operand has a poison type, propagate error without cascading diagnostics.
+    if target.ty.is_poison() || value.ty.is_poison() {
+        return Expression::error(span);
+    }
+
+    // Desugar to method call: target.{method_name}(value)
+    // The method returns (), so the compound assignment expression has type ()
+    let method_name = op.method_name();
+    let arg = CallArgument::unlabeled(value.clone(), value.span.clone());
+
+    Expression::deferred_method_call(
+        target,
+        method_name.to_string(),
+        vec![arg],
+        Ty::unit(span.clone()), // Compound assignment returns ()
+        span,
+    )
 }
 
 /// Resolve an if expression: if condition { then } else { else }

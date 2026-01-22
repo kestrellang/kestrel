@@ -96,6 +96,72 @@ impl BinaryOp {
     }
 }
 
+/// Compound assignment operators (+=, -=, etc.)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum CompoundOp {
+    Add,      // +=
+    Sub,      // -=
+    Mul,      // *=
+    Div,      // /=
+    Rem,      // %=
+    BitAnd,   // &=
+    BitOr,    // |=
+    BitXor,   // ^=
+    Shl,      // <<=
+    Shr,      // >>=
+}
+
+impl CompoundOp {
+    /// Get the method name that this compound operator desugars to.
+    pub fn method_name(&self) -> &'static str {
+        match self {
+            CompoundOp::Add => "addAssign",
+            CompoundOp::Sub => "subtractAssign",
+            CompoundOp::Mul => "multiplyAssign",
+            CompoundOp::Div => "divideAssign",
+            CompoundOp::Rem => "modAssign",
+            CompoundOp::BitAnd => "bitwiseAndAssign",
+            CompoundOp::BitOr => "bitwiseOrAssign",
+            CompoundOp::BitXor => "bitwiseXorAssign",
+            CompoundOp::Shl => "shiftLeftAssign",
+            CompoundOp::Shr => "shiftRightAssign",
+        }
+    }
+
+    /// Get the symbol representation of this operator for error messages.
+    pub fn symbol(&self) -> &'static str {
+        match self {
+            CompoundOp::Add => "+=",
+            CompoundOp::Sub => "-=",
+            CompoundOp::Mul => "*=",
+            CompoundOp::Div => "/=",
+            CompoundOp::Rem => "%=",
+            CompoundOp::BitAnd => "&=",
+            CompoundOp::BitOr => "|=",
+            CompoundOp::BitXor => "^=",
+            CompoundOp::Shl => "<<=",
+            CompoundOp::Shr => ">>=",
+        }
+    }
+
+    /// Convert from a SyntaxKind token to a CompoundOp.
+    pub fn from_syntax_kind(kind: SyntaxKind) -> Option<CompoundOp> {
+        match kind {
+            SyntaxKind::PlusEquals => Some(CompoundOp::Add),
+            SyntaxKind::MinusEquals => Some(CompoundOp::Sub),
+            SyntaxKind::StarEquals => Some(CompoundOp::Mul),
+            SyntaxKind::SlashEquals => Some(CompoundOp::Div),
+            SyntaxKind::PercentEquals => Some(CompoundOp::Rem),
+            SyntaxKind::AmpersandEquals => Some(CompoundOp::BitAnd),
+            SyntaxKind::PipeEquals => Some(CompoundOp::BitOr),
+            SyntaxKind::CaretEquals => Some(CompoundOp::BitXor),
+            SyntaxKind::LessLessEquals => Some(CompoundOp::Shl),
+            SyntaxKind::GreaterGreaterEquals => Some(CompoundOp::Shr),
+            _ => None,
+        }
+    }
+}
+
 /// Unary operators (both prefix and postfix).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum UnaryOp {
