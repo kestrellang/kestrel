@@ -160,6 +160,10 @@ Report progress to user. Continue only if tests pass.
 
 !`cat .claude/partials/common-pitfalls.md`
 
+If you run into issues, consult `docs/common-issues.md` for solutions to common problems.
+
+For common implementation patterns, refer to `docs/contributing/patterns.md`.
+
 ---
 
 ## Phase 5: Documentation

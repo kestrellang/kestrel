@@ -113,6 +113,10 @@ cargo test
 
 All tests must pass before proceeding to documentation.
 
+If you run into issues, consult `docs/common-issues.md` for solutions to common problems.
+
+For common implementation patterns, refer to `docs/contributing/patterns.md`.
+
 ---
 
 ## Step 7: Update Documentation

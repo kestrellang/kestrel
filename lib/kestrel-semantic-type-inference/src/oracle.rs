@@ -137,6 +137,18 @@ pub trait TypeOracle {
     /// The protocol's symbol ID, or None if not registered.
     fn builtin_protocol(&self, feature: LanguageFeature) -> Option<SymbolId>;
 
+    /// Get the protocol that a method belongs to, if any.
+    ///
+    /// Used to generate conformance constraints when calling protocol methods.
+    /// Returns None if the method is not a builtin protocol method.
+    fn protocol_for_method(&self, method_id: SymbolId) -> Option<SymbolId> {
+        // Default implementation returns None.
+        // Implementations with access to the builtin registry can check if the method
+        // is a builtin protocol method and return the associated protocol.
+        let _ = method_id;
+        None
+    }
+
     /// Get the default type for integer literals when type is ambiguous.
     ///
     /// Returns Int64 by default.

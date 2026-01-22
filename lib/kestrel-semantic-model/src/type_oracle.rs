@@ -354,6 +354,21 @@ impl TypeOracle for SemanticModel {
             return true;
         }
 
+        // Handle type parameters - check if any bound matches the protocol
+        if let TyKind::TypeParameter(type_param) = ty.kind() {
+            let bounds = get_type_parameter_bounds(type_param);
+            for bound in bounds {
+                if let TyKind::Protocol { symbol, .. } = bound.kind() {
+                    // Check if this bound is exactly the protocol we're looking for
+                    if symbol.metadata().id() == protocol_id {
+                        return true;
+                    }
+                    // TODO: Could also check if bound inherits from protocol_id
+                }
+            }
+            return false;
+        }
+
         // Expand type aliases before checking conformance.
         // e.g., `Int` is a type alias for `Int64`, so we need to check `Int64`'s conformances.
         let ty = &ty.expand_aliases();
@@ -632,6 +647,16 @@ impl TypeOracle for SemanticModel {
         self.builtin_registry().protocol(feature)
     }
 
+    fn protocol_for_method(&self, method_id: SymbolId) -> Option<SymbolId> {
+        let feature = self.builtin_registry().method_feature(method_id)?;
+        let definition = feature.definition();
+        if let BuiltinKind::ProtocolMethod { protocol_feature } = definition.kind {
+            self.builtin_registry().protocol(protocol_feature)
+        } else {
+            None
+        }
+    }
+
     fn default_integer_type(&self, span: kestrel_span::Span) -> Ty {
         use kestrel_semantic_tree::builtins::LanguageFeature;
         use kestrel_semantic_tree::ty::IntBits;
@@ -781,6 +806,10 @@ impl TypeOracle for ContextualOracle<'_> {
 
     fn builtin_protocol(&self, feature: LanguageFeature) -> Option<SymbolId> {
         self.model.builtin_protocol(feature)
+    }
+
+    fn protocol_for_method(&self, method_id: SymbolId) -> Option<SymbolId> {
+        self.model.protocol_for_method(method_id)
     }
 
     fn default_integer_type(&self, span: kestrel_span::Span) -> Ty {

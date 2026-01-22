@@ -309,6 +309,15 @@ pub enum ExprVariant {
         loop_span: Span,
         body: CodeBlockData,
     },
+    /// For expression: label: for pattern in iterable { body }
+    For {
+        label: Option<LabelData>,
+        for_span: Span,
+        pattern: crate::pattern::PatternVariant,
+        in_span: Span,
+        iterable: Box<ExprVariant>,
+        body: CodeBlockData,
+    },
     /// Break expression: break or break label
     Break {
         break_span: Span,
@@ -504,6 +513,7 @@ fn is_inline_statement_like(expr: &ExprVariant) -> bool {
             | ExprVariant::While { .. }
             | ExprVariant::WhileLet { .. }
             | ExprVariant::Loop { .. }
+            | ExprVariant::For { .. }
             | ExprVariant::Match { .. }
             | ExprVariant::Return { .. }
             | ExprVariant::Try { .. }
@@ -1010,8 +1020,7 @@ pub fn expr_parser<'tokens>()
                                     just(Token::Semicolon)
                                         .map_with(|_, e| to_kestrel_span(e.span())),
                                 )
-                                .map(Some)
-                                .or(empty().to(None)),
+                                .or_not(),
                         )
                         .try_map(|(e, maybe_semi), _extra| {
                             if let Some(semi) = maybe_semi {
@@ -1317,6 +1326,7 @@ pub fn expr_parser<'tokens>()
 
         // Loop expression with optional label
         let labeled_loop = label_parser
+            .clone()
             .then(
                 skip_trivia()
                     .ignore_then(just(Token::Loop).map_with(|_, e| to_kestrel_span(e.span()))),
@@ -1338,6 +1348,52 @@ pub fn expr_parser<'tokens>()
             });
 
         let loop_expr = labeled_loop.or(unlabeled_loop).boxed();
+
+        // For expression with optional label: label: for pattern in iterable { body }
+        let labeled_for = label_parser
+            .clone()
+            .then(
+                skip_trivia()
+                    .ignore_then(just(Token::For).map_with(|_, e| to_kestrel_span(e.span()))),
+            )
+            .then(crate::pattern::pattern_parser())
+            .then(
+                skip_trivia()
+                    .ignore_then(just(Token::In).map_with(|_, e| to_kestrel_span(e.span()))),
+            )
+            .then(condition_binary.clone())
+            .then(inline_code_block.clone())
+            .map(
+                |(((((label, for_span), pattern), in_span), iterable), body)| ExprVariant::For {
+                    label: Some(label),
+                    for_span,
+                    pattern,
+                    in_span,
+                    iterable: Box::new(iterable),
+                    body,
+                },
+            );
+
+        let unlabeled_for = skip_trivia()
+            .ignore_then(just(Token::For).map_with(|_, e| to_kestrel_span(e.span())))
+            .then(crate::pattern::pattern_parser())
+            .then(
+                skip_trivia()
+                    .ignore_then(just(Token::In).map_with(|_, e| to_kestrel_span(e.span()))),
+            )
+            .then(condition_binary.clone())
+            .then(inline_code_block.clone())
+            .map(
+                |((((for_span, pattern), in_span), iterable), body)| ExprVariant::For {
+                    label: None,
+                    for_span,
+                    pattern,
+                    in_span,
+                    iterable: Box::new(iterable),
+                    body,
+                },
+            );
+        let for_expr = labeled_for.or(unlabeled_for).boxed();
 
         // Break expression
         let break_expr = skip_trivia()
@@ -1735,6 +1791,7 @@ pub fn expr_parser<'tokens>()
             .or(if_expr)
             .or(while_expr)
             .or(loop_expr)
+            .or(for_expr)
             .or(break_expr)
             .or(continue_expr)
             .or(return_expr)
@@ -1976,6 +2033,24 @@ pub fn emit_expr_variant(sink: &mut EventSink, variant: &ExprVariant) {
             body,
         } => {
             emit_loop_expr(sink, label.as_ref(), loop_span.clone(), body);
+        },
+        ExprVariant::For {
+            label,
+            for_span,
+            pattern,
+            in_span,
+            iterable,
+            body,
+        } => {
+            emit_for_expr(
+                sink,
+                label.as_ref(),
+                for_span.clone(),
+                pattern,
+                in_span.clone(),
+                iterable,
+                body,
+            );
         },
         ExprVariant::Break { break_span, label } => {
             emit_break_expr(sink, break_span.clone(), label.as_ref());
@@ -2479,6 +2554,38 @@ fn emit_loop_expr(
         sink.finish_node();
     }
     sink.add_token(SyntaxKind::Loop, loop_span);
+    emit_code_block(sink, body);
+    sink.finish_node();
+    sink.finish_node();
+}
+
+fn emit_for_expr(
+    sink: &mut EventSink,
+    label: Option<&LabelData>,
+    for_span: Span,
+    pattern: &crate::pattern::PatternVariant,
+    in_span: Span,
+    iterable: &ExprVariant,
+    body: &CodeBlockData,
+) {
+    sink.start_node(SyntaxKind::Expression);
+    sink.start_node(SyntaxKind::ExprFor);
+    if let Some(label_data) = label {
+        sink.start_node(SyntaxKind::LoopLabel);
+        sink.add_token(SyntaxKind::Identifier, label_data.name.clone());
+        sink.add_token(SyntaxKind::Colon, label_data.colon.clone());
+        sink.finish_node();
+    }
+    sink.add_token(SyntaxKind::For, for_span);
+    // Emit pattern wrapped in ForPattern node
+    sink.start_node(SyntaxKind::ForPattern);
+    crate::pattern::emit_pattern_variant(sink, pattern);
+    sink.finish_node();
+    sink.add_token(SyntaxKind::In, in_span);
+    // Emit iterable wrapped in ForIterable node
+    sink.start_node(SyntaxKind::ForIterable);
+    emit_expr_variant(sink, iterable);
+    sink.finish_node();
     emit_code_block(sink, body);
     sink.finish_node();
     sink.finish_node();

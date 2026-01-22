@@ -250,3 +250,27 @@ impl IntoDiagnostic for ArraySuffixPatternError {
             ])
     }
 }
+
+/// Error when a refutable pattern is used in a for-loop
+pub struct RefutableForLoopPatternError {
+    pub span: Span,
+    pub pattern_description: String,
+}
+
+impl IntoDiagnostic for RefutableForLoopPatternError {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
+        Diagnostic::error()
+            .with_message(format!(
+                "refutable pattern `{}` in for loop",
+                self.pattern_description
+            ))
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message("pattern must be irrefutable"),
+            ])
+            .with_notes(vec![
+                "for-loop patterns must match all items from the iterator".to_string(),
+                "consider using `while let` if you want to match a refutable pattern".to_string(),
+            ])
+    }
+}

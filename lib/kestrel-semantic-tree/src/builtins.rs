@@ -110,6 +110,19 @@ pub enum LanguageFeature {
     TryExtractMethod,
     FromResidualProtocol,
     FromResidualMethod,
+
+    // Iterator protocol
+    IteratorProtocol,
+    IteratorNextMethod,
+
+    // Iterable protocol
+    IterableProtocol,
+    IterableIterMethod,
+
+    // Optional enum
+    OptionalEnum,
+    OptionalSomeCase,
+    OptionalNoneCase,
 }
 
 impl LanguageFeature {
@@ -194,6 +207,16 @@ impl LanguageFeature {
             "TryExtractMethod" => Some(Self::TryExtractMethod),
             "FromResidualProtocol" => Some(Self::FromResidualProtocol),
             "FromResidualMethod" => Some(Self::FromResidualMethod),
+            // Iterator protocol
+            "IteratorProtocol" => Some(Self::IteratorProtocol),
+            "IteratorNextMethod" => Some(Self::IteratorNextMethod),
+            // Iterable protocol
+            "IterableProtocol" => Some(Self::IterableProtocol),
+            "IterableIterMethod" => Some(Self::IterableIterMethod),
+            // Optional enum
+            "OptionalEnum" => Some(Self::OptionalEnum),
+            "OptionalSomeCase" => Some(Self::OptionalSomeCase),
+            "OptionalNoneCase" => Some(Self::OptionalNoneCase),
             _ => None,
         }
     }
@@ -279,6 +302,16 @@ impl LanguageFeature {
             Self::TryExtractMethod => "TryExtractMethod",
             Self::FromResidualProtocol => "FromResidualProtocol",
             Self::FromResidualMethod => "FromResidualMethod",
+            // Iterator protocol
+            Self::IteratorProtocol => "IteratorProtocol",
+            Self::IteratorNextMethod => "IteratorNextMethod",
+            // Iterable protocol
+            Self::IterableProtocol => "IterableProtocol",
+            Self::IterableIterMethod => "IterableIterMethod",
+            // Optional enum
+            Self::OptionalEnum => "OptionalEnum",
+            Self::OptionalSomeCase => "OptionalSomeCase",
+            Self::OptionalNoneCase => "OptionalNoneCase",
         }
     }
 
@@ -650,6 +683,57 @@ impl LanguageFeature {
                     protocol_feature: LanguageFeature::FromResidualProtocol,
                 },
             },
+            // Iterator protocol
+            Self::IteratorProtocol => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::Protocol {
+                    implicit_conformance: false,
+                    must_be_marker: false,
+                    tuple_conformance_propagation: false,
+                    requires_fields_conform: false,
+                    disallow_enum_conformance: false,
+                },
+            },
+            Self::IteratorNextMethod => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::ProtocolMethod {
+                    protocol_feature: LanguageFeature::IteratorProtocol,
+                },
+            },
+            // Iterable protocol
+            Self::IterableProtocol => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::Protocol {
+                    implicit_conformance: false,
+                    must_be_marker: false,
+                    tuple_conformance_propagation: false,
+                    requires_fields_conform: false,
+                    disallow_enum_conformance: false,
+                },
+            },
+            Self::IterableIterMethod => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::ProtocolMethod {
+                    protocol_feature: LanguageFeature::IterableProtocol,
+                },
+            },
+            // Optional enum
+            Self::OptionalEnum => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::Enum,
+            },
+            Self::OptionalSomeCase => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::EnumCase {
+                    enum_feature: LanguageFeature::OptionalEnum,
+                },
+            },
+            Self::OptionalNoneCase => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::EnumCase {
+                    enum_feature: LanguageFeature::OptionalEnum,
+                },
+            },
         }
     }
 }
@@ -679,6 +763,11 @@ pub enum BuiltinKind {
     Struct,
     /// A builtin enum (e.g., Ordering, Optional).
     Enum,
+    /// A builtin enum case.
+    EnumCase {
+        /// The enum feature this case belongs to.
+        enum_feature: LanguageFeature,
+    },
     /// A builtin function (e.g., sizeof, alignof).
     Function,
     /// A builtin variable/constant.
@@ -708,6 +797,11 @@ impl BuiltinKind {
         matches!(self, Self::Enum)
     }
 
+    /// Check if this kind is for an enum case.
+    pub fn is_enum_case(&self) -> bool {
+        matches!(self, Self::EnumCase { .. })
+    }
+
     /// Check if this kind is for a function.
     pub fn is_function(&self) -> bool {
         matches!(self, Self::Function)
@@ -730,6 +824,7 @@ impl BuiltinKind {
             Self::ProtocolMethod { .. } => "protocol method",
             Self::Struct => "struct",
             Self::Enum => "enum",
+            Self::EnumCase { .. } => "enum case",
             Self::Function => "function",
             Self::Variable => "variable",
             Self::TypeAlias => "type alias",
@@ -763,6 +858,10 @@ pub struct BuiltinRegistry {
     // Enum builtins
     enums: RwLock<HashMap<LanguageFeature, SymbolId>>,
     enum_features: RwLock<HashMap<SymbolId, LanguageFeature>>,
+
+    // Enum case builtins
+    enum_cases: RwLock<HashMap<LanguageFeature, SymbolId>>,
+    enum_case_features: RwLock<HashMap<SymbolId, LanguageFeature>>,
 
     // Function builtins
     functions: RwLock<HashMap<LanguageFeature, SymbolId>>,
@@ -893,6 +992,37 @@ impl BuiltinRegistry {
     /// Get the feature for a builtin enum.
     pub fn enum_feature(&self, id: SymbolId) -> Option<LanguageFeature> {
         self.enum_features.read().get(&id).copied()
+    }
+
+    // =========================================================================
+    // Enum case methods
+    // =========================================================================
+
+    /// Register an enum case as a builtin. Returns true if successful,
+    /// false if the feature was already registered.
+    pub fn register_enum_case(&self, feature: LanguageFeature, id: SymbolId) -> bool {
+        let mut enum_cases = self.enum_cases.write();
+        if enum_cases.contains_key(&feature) {
+            return false;
+        }
+        enum_cases.insert(feature, id);
+        self.enum_case_features.write().insert(id, feature);
+        true
+    }
+
+    /// Get the symbol ID for a builtin enum case.
+    pub fn enum_case(&self, feature: LanguageFeature) -> Option<SymbolId> {
+        self.enum_cases.read().get(&feature).copied()
+    }
+
+    /// Check if a symbol is a builtin enum case.
+    pub fn is_builtin_enum_case(&self, id: SymbolId) -> bool {
+        self.enum_case_features.read().contains_key(&id)
+    }
+
+    /// Get the feature for a builtin enum case.
+    pub fn enum_case_feature(&self, id: SymbolId) -> Option<LanguageFeature> {
+        self.enum_case_features.read().get(&id).copied()
     }
 
     // =========================================================================
@@ -1033,6 +1163,7 @@ impl BuiltinRegistry {
         self.protocols.read().contains_key(&feature)
             || self.structs.read().contains_key(&feature)
             || self.enums.read().contains_key(&feature)
+            || self.enum_cases.read().contains_key(&feature)
             || self.functions.read().contains_key(&feature)
             || self.variables.read().contains_key(&feature)
             || self.methods.read().contains_key(&feature)

@@ -8,8 +8,11 @@ import std.text.(String)
 // import std.iter.(Iterator)
 
 // Optional[T] - either Some(value) or None
+@builtin(.OptionalEnum)
 public enum Optional[T] {
+    @builtin(.OptionalSomeCase)
     case Some(T)
+    @builtin(.OptionalNoneCase)
     case None
 
     // Convenience constructors

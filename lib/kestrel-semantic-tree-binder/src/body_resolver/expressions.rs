@@ -110,6 +110,8 @@ pub fn resolve_expression(expr_node: &SyntaxNode, ctx: &mut BodyResolutionContex
 
         SyntaxKind::ExprLoop => resolve_loop_expression(expr_node, ctx),
 
+        SyntaxKind::ExprFor => resolve_for_expression(expr_node, ctx),
+
         SyntaxKind::ExprBreak => resolve_break_expression(expr_node, ctx),
 
         SyntaxKind::ExprContinue => resolve_continue_expression(expr_node, ctx),
@@ -869,7 +871,7 @@ fn can_be_trailing_expression(expr_node: &SyntaxNode) -> bool {
                 // Match expressions are always exhaustive and can be trailing expressions
                 return true;
             },
-            SyntaxKind::ExprLoop | SyntaxKind::ExprWhile => {
+            SyntaxKind::ExprLoop | SyntaxKind::ExprWhile | SyntaxKind::ExprFor => {
                 // Loops cannot be trailing expressions - they return () or Never
                 return false;
             },
@@ -1071,6 +1073,166 @@ fn resolve_while_let_expression(
     ctx.move_tracker.merge(&pre_loop_moves);
 
     Expression::while_let(loop_id, label_info, conditions, body, span)
+}
+
+/// Resolve a for expression by desugaring to while-let:
+/// ```
+/// for pattern in iterable { body }
+/// ```
+/// becomes:
+/// ```
+/// {
+///     var iter = iterable.iter()
+///     while let .Some(pattern) = iter.next() {
+///         body
+///     }
+/// }
+/// ```
+fn resolve_for_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> Expression {
+    use kestrel_semantic_tree::expr::IfCondition;
+    use kestrel_semantic_tree::pattern::{EnumPatternBinding, Mutability, Pattern};
+    use kestrel_semantic_tree::stmt::Statement;
+
+    let span = get_node_span(node, ctx.file_id);
+
+    // Extract label if present (use the same function as while/loop)
+    let label_info = extract_loop_label(node, ctx.file_id);
+
+    // Find the ForPattern node
+    let pattern_node = node
+        .children()
+        .find(|c| c.kind() == SyntaxKind::ForPattern)
+        .and_then(|fp| {
+            fp.children()
+                .find(|c| super::patterns::is_pattern_kind(c.kind()))
+        });
+
+    // Find the ForIterable node
+    let iterable_node = node
+        .children()
+        .find(|c| c.kind() == SyntaxKind::ForIterable)
+        .and_then(|fi| {
+            fi.children()
+                .find(|c| c.kind() == SyntaxKind::Expression || is_expression_kind(c.kind()))
+        });
+
+    // Find the body (CodeBlock)
+    let body_node = node
+        .children()
+        .find(|c| c.kind() == SyntaxKind::CodeBlock);
+
+    // Resolve the iterable expression
+    let iterable_expr = iterable_node
+        .as_ref()
+        .map(|n| resolve_expression(n, ctx))
+        .unwrap_or_else(|| Expression::error(span.clone()));
+
+    // Snapshot move state before the loop
+    let pre_loop_moves = ctx.move_tracker.snapshot();
+
+    // Push a new scope for the iterator variable and loop body
+    ctx.local_scope.push_scope();
+
+    // Create a synthetic iterator variable: var iter = iterable.iter()
+    let iter_ty = Ty::infer(span.clone());
+    let iter_local_id = ctx.local_scope.bind(
+        "$for_iter".to_string(),
+        iter_ty.clone(),
+        true, // mutable
+        span.clone(),
+    );
+
+    // Create the .iter() method call on the iterable
+    let iter_call = Expression::deferred_method_call(
+        iterable_expr,
+        "iter".to_string(),
+        vec![],
+        iter_ty.clone(),
+        span.clone(),
+    );
+
+    // Create the binding pattern for the iterator
+    let iter_pattern = Pattern::local(
+        iter_local_id,
+        Mutability::Mutable,
+        "$for_iter".to_string(),
+        iter_ty.clone(),
+        span.clone(),
+    );
+
+    // Create the binding statement: var iter = iterable.iter()
+    let iter_binding = Statement::binding(iter_pattern, Some(iter_call), span.clone());
+
+    // Enter the loop context with the label
+    let label_name = label_info.as_ref().map(|l| l.name.clone());
+    let label_span = label_info.as_ref().map(|l| l.span.clone());
+    let loop_id = ctx.enter_loop(label_name, label_span);
+
+    // Push a new scope for pattern bindings in the loop body
+    ctx.local_scope.push_scope();
+
+    // Create the .next() method call: iter.next()
+    let item_ty = Ty::infer(span.clone());
+    let optional_item_ty = Ty::infer(span.clone()); // Will be Optional[Item]
+    let iter_ref = Expression::local_ref(iter_local_id, iter_ty, true, span.clone());
+    let next_call = Expression::deferred_method_call(
+        iter_ref,
+        "next".to_string(),
+        vec![],
+        optional_item_ty.clone(),
+        span.clone(),
+    );
+
+    // Resolve the user's pattern with the item type
+    let user_pattern = pattern_node
+        .as_ref()
+        .map(|n| super::patterns::resolve_pattern(n, ctx, Some(&item_ty)))
+        .unwrap_or_else(|| Pattern::error(span.clone()));
+
+    // Create the .Some(pattern) enum pattern
+    // Use the same type as next_call (optional_item_ty) so type inference connects them
+    let some_binding = EnumPatternBinding::unlabeled(user_pattern, span.clone());
+    let some_pattern = Pattern::enum_variant(
+        None,
+        "Some".to_string(),
+        vec![some_binding],
+        optional_item_ty.clone(),
+        span.clone(),
+    );
+
+    // Create the while-let condition: let .Some(pattern) = iter.next()
+    let condition = IfCondition::Let {
+        pattern: some_pattern,
+        value: next_call,
+        span: span.clone(),
+    };
+
+    // Resolve the body
+    let body = body_node
+        .as_ref()
+        .map(|c| resolve_while_let_body(c, ctx))
+        .unwrap_or_default();
+
+    // Pop the pattern scope
+    ctx.local_scope.pop_scope();
+
+    // Exit the loop context
+    ctx.exit_loop();
+
+    // For for loops: the body might not execute (iterator might be empty).
+    // So any move inside the body is "maybe moved" after the loop.
+    let after_body_moves = ctx.move_tracker.snapshot();
+    ctx.move_tracker.restore(after_body_moves);
+    ctx.move_tracker.merge(&pre_loop_moves);
+
+    // Create the while-let expression (marked as from_for_loop for pattern checking)
+    let while_let = Expression::while_let_from_for(loop_id, label_info, vec![condition], body, span.clone());
+
+    // Pop the iterator scope
+    ctx.local_scope.pop_scope();
+
+    // Create the block expression: { var iter = ...; while let ... }
+    Expression::block(vec![iter_binding], Some(while_let), Ty::unit(span.clone()), span)
 }
 
 /// Resolve a single while-let condition: let pattern = expr

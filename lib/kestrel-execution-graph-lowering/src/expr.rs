@@ -618,9 +618,9 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
 
         ExprKind::WhileLet {
             loop_id,
-            label: _,
             conditions,
             body,
+            ..
         } => lower_while_let(ctx, *loop_id, conditions, body),
 
         ExprKind::Break { loop_id, label: _ } => {
