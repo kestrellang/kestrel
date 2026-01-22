@@ -1196,24 +1196,24 @@ fn check_transitive_conformance_impl(
                     } = ext_conf.kind()
                         && ext_protocol.metadata().id() == target_protocol_id
                     {
-                            // Found a match on the base protocol ID (e.g., Less)
-                            // The protocol extension conformance uses Self to refer
-                            // to the extended protocol, which we substitute with concrete_ty
-                            //
-                            // For "extend Comparable: Less[Self]":
-                            // - ext_subs maps Less's Rhs param to Self
-                            // - We substitute Self -> concrete_ty
-                            // - Result: Less[concrete_ty]
-                            //
-                            // Since Less[Self] means Less[Self] where Self is the concrete type,
-                            // and the protocol_id we're checking is just Less (not Less[SomeType]),
-                            // we've already matched by protocol_id - we just need to verify the
-                            // type arguments would work out correctly.
-                            //
-                            // For now, we do a simplified check: if the extension adds conformance
-                            // to the target protocol, we accept it. Full generic matching would
-                            // require comparing substitutions after Self resolution.
-                            return true;
+                        // Found a match on the base protocol ID (e.g., Less)
+                        // The protocol extension conformance uses Self to refer
+                        // to the extended protocol, which we substitute with concrete_ty
+                        //
+                        // For "extend Comparable: Less[Self]":
+                        // - ext_subs maps Less's Rhs param to Self
+                        // - We substitute Self -> concrete_ty
+                        // - Result: Less[concrete_ty]
+                        //
+                        // Since Less[Self] means Less[Self] where Self is the concrete type,
+                        // and the protocol_id we're checking is just Less (not Less[SomeType]),
+                        // we've already matched by protocol_id - we just need to verify the
+                        // type arguments would work out correctly.
+                        //
+                        // For now, we do a simplified check: if the extension adds conformance
+                        // to the target protocol, we accept it. Full generic matching would
+                        // require comparing substitutions after Self resolution.
+                        return true;
                     }
                 }
             }
