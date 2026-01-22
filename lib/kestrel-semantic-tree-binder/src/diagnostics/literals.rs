@@ -124,3 +124,39 @@ impl IntoDiagnostic for IncompleteEscapeSequenceError {
             ])
     }
 }
+
+/// Error for an empty character literal ''
+pub struct EmptyCharacterLiteralError {
+    pub span: Span,
+}
+
+impl IntoDiagnostic for EmptyCharacterLiteralError {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
+        Diagnostic::error()
+            .with_message("empty character literal")
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message("character literal must contain exactly one codepoint"),
+            ])
+    }
+}
+
+/// Error for a character literal containing multiple codepoints
+pub struct MultipleCodepointsInCharLiteralError {
+    pub span: Span,
+    pub count: usize,
+}
+
+impl IntoDiagnostic for MultipleCodepointsInCharLiteralError {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
+        Diagnostic::error()
+            .with_message("character literal may only contain one codepoint")
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message(format!("found {} codepoints", self.count)),
+            ])
+            .with_notes(vec![
+                "use a string literal for multiple characters".to_string(),
+            ])
+    }
+}

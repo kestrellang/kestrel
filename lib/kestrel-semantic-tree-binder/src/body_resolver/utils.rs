@@ -38,6 +38,7 @@ pub fn is_expression_kind(kind: SyntaxKind) -> bool {
             | SyntaxKind::ExprInteger
             | SyntaxKind::ExprFloat
             | SyntaxKind::ExprString
+            | SyntaxKind::ExprChar
             | SyntaxKind::ExprBool
             | SyntaxKind::ExprArray
             | SyntaxKind::ExprTuple

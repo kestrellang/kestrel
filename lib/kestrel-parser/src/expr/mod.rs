@@ -214,6 +214,8 @@ pub enum ExprVariant {
     String(Span),
     /// Raw string literal: """hello"""
     RawString(Span),
+    /// Character literal: 'a', '\n', '\u{1F600}'
+    Char(Span),
     /// Boolean literal: true, false
     Bool(Span),
     /// Null literal: null
@@ -575,6 +577,10 @@ pub fn expr_parser<'tokens>()
         let raw_string = skip_trivia()
             .ignore_then(select! { Token::RawString = e => to_kestrel_span(e.span()) })
             .map(ExprVariant::RawString);
+
+        let char_literal = skip_trivia()
+            .ignore_then(select! { Token::Char = e => to_kestrel_span(e.span()) })
+            .map(ExprVariant::Char);
 
         let boolean = skip_trivia()
             .ignore_then(select! { Token::Boolean = e => to_kestrel_span(e.span()) })
@@ -1217,8 +1223,7 @@ pub fn expr_parser<'tokens>()
             })
             .boxed();
 
-        // Label parser: identifier: (for loop labels like outer: while ...)
-        // Only parses when we see "identifier :" followed by while/loop
+        // Label parser: name: (for loop labels like outer: while ...)
         let label_parser = skip_trivia()
             .ignore_then(select! { Token::Identifier = e => to_kestrel_span(e.span()) })
             .then(
@@ -1721,6 +1726,7 @@ pub fn expr_parser<'tokens>()
         let primary = float
             .or(integer)
             .or(raw_string)
+            .or(char_literal)
             .or(string)
             .or(boolean)
             .or(null)
@@ -1864,6 +1870,9 @@ pub fn emit_expr_variant(sink: &mut EventSink, variant: &ExprVariant) {
         },
         ExprVariant::RawString(span) => {
             emit_raw_string_expr(sink, span.clone());
+        },
+        ExprVariant::Char(span) => {
+            emit_char_expr(sink, span.clone());
         },
         ExprVariant::Bool(span) => {
             emit_bool_expr(sink, span.clone());
@@ -2048,6 +2057,14 @@ fn emit_string_expr(sink: &mut EventSink, span: Span) {
     sink.start_node(SyntaxKind::Expression);
     sink.start_node(SyntaxKind::ExprString);
     sink.add_token(SyntaxKind::String, span);
+    sink.finish_node();
+    sink.finish_node();
+}
+
+fn emit_char_expr(sink: &mut EventSink, span: Span) {
+    sink.start_node(SyntaxKind::Expression);
+    sink.start_node(SyntaxKind::ExprChar);
+    sink.add_token(SyntaxKind::Char, span);
     sink.finish_node();
     sink.finish_node();
 }

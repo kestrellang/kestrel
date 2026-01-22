@@ -27,6 +27,7 @@ pub enum LanguageFeature {
     ExpressibleByIntLiteral,
     ExpressibleByFloatLiteral,
     ExpressibleByStringLiteral,
+    ExpressibleByCharLiteral,
     ExpressibleByBoolLiteral,
     ExpressibleByNilLiteral,
     ExpressibleByArrayLiteral,
@@ -121,6 +122,7 @@ impl LanguageFeature {
             "ExpressibleByIntLiteral" => Some(Self::ExpressibleByIntLiteral),
             "ExpressibleByFloatLiteral" => Some(Self::ExpressibleByFloatLiteral),
             "ExpressibleByStringLiteral" => Some(Self::ExpressibleByStringLiteral),
+            "ExpressibleByCharLiteral" => Some(Self::ExpressibleByCharLiteral),
             "ExpressibleByBoolLiteral" => Some(Self::ExpressibleByBoolLiteral),
             "ExpressibleByNilLiteral" => Some(Self::ExpressibleByNilLiteral),
             "ExpressibleByArrayLiteral" => Some(Self::ExpressibleByArrayLiteral),
@@ -204,6 +206,7 @@ impl LanguageFeature {
             Self::ExpressibleByIntLiteral => "ExpressibleByIntLiteral",
             Self::ExpressibleByFloatLiteral => "ExpressibleByFloatLiteral",
             Self::ExpressibleByStringLiteral => "ExpressibleByStringLiteral",
+            Self::ExpressibleByCharLiteral => "ExpressibleByCharLiteral",
             Self::ExpressibleByBoolLiteral => "ExpressibleByBoolLiteral",
             Self::ExpressibleByNilLiteral => "ExpressibleByNilLiteral",
             Self::ExpressibleByArrayLiteral => "ExpressibleByArrayLiteral",
@@ -336,6 +339,16 @@ impl LanguageFeature {
                 },
             },
             Self::ExpressibleByStringLiteral => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::Protocol {
+                    implicit_conformance: false,
+                    must_be_marker: false,
+                    tuple_conformance_propagation: false,
+                    requires_fields_conform: false,
+                    disallow_enum_conformance: false,
+                },
+            },
+            Self::ExpressibleByCharLiteral => BuiltinDefinition {
                 feature: *self,
                 kind: BuiltinKind::Protocol {
                     implicit_conformance: false,

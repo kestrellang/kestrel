@@ -373,6 +373,8 @@ pub enum LiteralValue {
     Float(f64),
     /// String literal: `"hello"`
     String(String),
+    /// Character literal: `'a'`, `'\n'`, `'\u{1F600}'`
+    Char(u32),
     /// Boolean literal: `true`, `false`
     Bool(bool),
 }
@@ -1454,6 +1456,13 @@ impl Expression {
                 LiteralValue::Integer(n) => n.to_string(),
                 LiteralValue::Float(f) => f.to_string(),
                 LiteralValue::String(s) => format!("\"{}\"", s),
+                LiteralValue::Char(c) => {
+                    if let Some(ch) = char::from_u32(*c) {
+                        format!("'{}'", ch)
+                    } else {
+                        format!("'\\u{{{:X}}}'", c)
+                    }
+                },
                 LiteralValue::Bool(b) => b.to_string(),
             },
             ExprKind::Array(elements) => {
@@ -1809,6 +1818,20 @@ impl Expression {
         Expression {
             id: ExprId::new(),
             kind: ExprKind::Literal(LiteralValue::String(value)),
+            ty: Ty::infer(span.clone()),
+            span,
+            mutable: false,
+        }
+    }
+
+    /// Create a character literal expression with an inferred type.
+    ///
+    /// During type inference, an ExpressibleByCharLiteral constraint will be added
+    /// and the type will be resolved based on context (defaulting to i32 if ambiguous).
+    pub fn char_infer(value: u32, span: Span) -> Self {
+        Expression {
+            id: ExprId::new(),
+            kind: ExprKind::Literal(LiteralValue::Char(value)),
             ty: Ty::infer(span.clone()),
             span,
             mutable: false,

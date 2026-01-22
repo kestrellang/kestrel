@@ -125,6 +125,9 @@ impl Constructor {
                 LiteralValue::Bool(true) => Constructor::True,
                 LiteralValue::Bool(false) => Constructor::False,
                 LiteralValue::Integer(n) => Constructor::IntLiteral(*n),
+                LiteralValue::Char(c) => {
+                    Constructor::CharLiteral(char::from_u32(*c).unwrap_or('\0'))
+                },
                 LiteralValue::String(s) => Constructor::StringLiteral(s.clone()),
                 LiteralValue::Float(_) => Constructor::NonExhaustive, // Floats can't be exhaustively matched
                 LiteralValue::Unit => Constructor::Unit,

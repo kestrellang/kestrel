@@ -133,6 +133,7 @@ pub enum SyntaxKind {
     ExprFloat,                // 3.14, 1.0e10
     ExprString,               // "hello"
     ExprRawString,            // """hello""" (raw/multi-line string)
+    ExprChar,                 // 'a', '\n', '\u{1F600}'
     ExprBool,                 // true, false
     ExprArray,                // [1, 2, 3]
     ExprTuple,                // (1, 2, 3)
@@ -192,6 +193,7 @@ pub enum SyntaxKind {
     Identifier,
     String,
     RawString, // """...""" raw string literal
+    Char,      // 'a' character literal
     Integer,
     Float,
     Boolean,
@@ -312,6 +314,7 @@ impl From<Token> for SyntaxKind {
             Token::Identifier => SyntaxKind::Identifier,
             Token::String => SyntaxKind::String,
             Token::RawString => SyntaxKind::RawString,
+            Token::Char => SyntaxKind::Char,
             Token::Integer => SyntaxKind::Integer,
             Token::Float => SyntaxKind::Float,
             Token::Boolean => SyntaxKind::Boolean,
@@ -487,6 +490,7 @@ impl Language for KestrelLanguage {
         const EXPR_INTEGER: u16 = SyntaxKind::ExprInteger as u16;
         const EXPR_FLOAT: u16 = SyntaxKind::ExprFloat as u16;
         const EXPR_STRING: u16 = SyntaxKind::ExprString as u16;
+        const EXPR_CHAR: u16 = SyntaxKind::ExprChar as u16;
         const EXPR_BOOL: u16 = SyntaxKind::ExprBool as u16;
         const EXPR_ARRAY: u16 = SyntaxKind::ExprArray as u16;
         const EXPR_TUPLE: u16 = SyntaxKind::ExprTuple as u16;
@@ -541,6 +545,7 @@ impl Language for KestrelLanguage {
         const ERROR_PATTERN: u16 = SyntaxKind::ErrorPattern as u16;
         const IDENTIFIER: u16 = SyntaxKind::Identifier as u16;
         const STRING: u16 = SyntaxKind::String as u16;
+        const CHAR: u16 = SyntaxKind::Char as u16;
         const INTEGER: u16 = SyntaxKind::Integer as u16;
         const FLOAT: u16 = SyntaxKind::Float as u16;
         const BOOLEAN: u16 = SyntaxKind::Boolean as u16;
@@ -709,6 +714,7 @@ impl Language for KestrelLanguage {
             EXPR_INTEGER => SyntaxKind::ExprInteger,
             EXPR_FLOAT => SyntaxKind::ExprFloat,
             EXPR_STRING => SyntaxKind::ExprString,
+            EXPR_CHAR => SyntaxKind::ExprChar,
             EXPR_BOOL => SyntaxKind::ExprBool,
             EXPR_ARRAY => SyntaxKind::ExprArray,
             EXPR_TUPLE => SyntaxKind::ExprTuple,
@@ -763,6 +769,7 @@ impl Language for KestrelLanguage {
             ERROR_PATTERN => SyntaxKind::ErrorPattern,
             IDENTIFIER => SyntaxKind::Identifier,
             STRING => SyntaxKind::String,
+            CHAR => SyntaxKind::Char,
             INTEGER => SyntaxKind::Integer,
             FLOAT => SyntaxKind::Float,
             BOOLEAN => SyntaxKind::Boolean,
