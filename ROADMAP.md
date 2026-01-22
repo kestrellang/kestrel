@@ -605,6 +605,10 @@ See [docs/memory-model/implementation-plan.md](docs/memory-model/implementation-
 - [ ] Character Literals
 - [ ] String Interpolation
 
+### Core Features
+
+- [ ] Irrefutable patterns in function parameters
+
 ### Goals
 
 - [ ] Web Server

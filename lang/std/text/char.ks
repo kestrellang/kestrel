@@ -2,7 +2,7 @@
 
 module std.text
 
-import std.core.(Equatable, Comparable, Ordering, Bool, ExpressibleByCharLiteral)
+import std.core.(Equatable, Comparable, Ordering, Bool, Matchable, ExpressibleByCharLiteral)
 import std.num.(Int64, UInt8, UInt32)
 import std.result.(Optional)
 import std.collections.(Array)
@@ -11,7 +11,7 @@ import std.collections.(Array)
 public type Byte = UInt8
 
 // Char - Unicode code point (single scalar value, 0 to 0x10FFFF)
-public struct Char: Equatable, Comparable, ExpressibleByCharLiteral {
+public struct Char: Equatable, Comparable, Matchable, ExpressibleByCharLiteral {
     private var _value: UInt32
 
     public init(value: UInt32) {
@@ -106,6 +106,11 @@ public struct Char: Equatable, Comparable, ExpressibleByCharLiteral {
 
     // Equatable
     public func equals(other: Char) -> Bool {
+        self._value == other._value
+    }
+
+    // Matchable
+    public func matches(other: Char) -> Bool {
         self._value == other._value
     }
 

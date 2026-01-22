@@ -52,5 +52,6 @@
 - [ ] Optional Chaining
 - [ ] Null Coalescing
 - [ ] and / or short-circuit
+- [ ] Irrefutable patterns in function parameters
 - [ ] String interpolation
 - [ ] Web server

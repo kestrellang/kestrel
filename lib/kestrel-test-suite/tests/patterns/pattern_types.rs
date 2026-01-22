@@ -232,22 +232,202 @@ func test(s: lang.str) -> lang.i64 {
     }
 
     #[test]
-    #[ignore = "Grapheme type not yet implemented"]
     fn char_literal_pattern() {
+        // Tests char literal patterns with Char struct
         Test::new(
             r#"
-module Main
+module Test
 
-func test(c: Grapheme) -> lang.i64 {
+import std.text.Char
+import std.num.Int64
+
+func classify(c: Char) -> Int64 {
     match c {
         'a' => 1,
         'b' => 2,
+        'c' => 3,
         _ => 0
     }
 }
+
+func main() -> lang.i64 {
+    let a: Char = 'a';
+    let b: Char = 'b';
+    let c: Char = 'c';
+    let d: Char = 'd';
+
+    if classify(a) != 1 { return 1 }
+    if classify(b) != 2 { return 2 }
+    if classify(c) != 3 { return 3 }
+    if classify(d) != 0 { return 4 }
+    0
+}
 "#,
         )
-        .expect(Compiles);
+        .with_stdlib()
+        .expect(Compiles)
+        .expect(Runs);
+    }
+
+    #[test]
+    fn char_literal_pattern_escape_sequences() {
+        // Tests escape sequences in char literal patterns
+        Test::new(
+            r#"
+module Test
+
+import std.text.Char
+import std.num.Int64
+
+func classify(c: Char) -> Int64 {
+    match c {
+        '\n' => 1,
+        '\t' => 2,
+        '\\' => 3,
+        '\'' => 4,
+        '\0' => 5,
+        _ => 0
+    }
+}
+
+func main() -> lang.i64 {
+    let newline: Char = '\n';
+    let tab: Char = '\t';
+    let backslash: Char = '\\';
+    let quote: Char = '\'';
+    let nul: Char = '\0';
+    let other: Char = 'x';
+
+    if classify(newline) != 1 { return 1 }
+    if classify(tab) != 2 { return 2 }
+    if classify(backslash) != 3 { return 3 }
+    if classify(quote) != 4 { return 4 }
+    if classify(nul) != 5 { return 5 }
+    if classify(other) != 0 { return 6 }
+    0
+}
+"#,
+        )
+        .with_stdlib()
+        .expect(Compiles)
+        .expect(Runs);
+    }
+
+    #[test]
+    fn char_literal_pattern_unicode() {
+        // Tests unicode char literal patterns
+        Test::new(
+            r#"
+module Test
+
+import std.text.Char
+import std.num.Int64
+
+func classify(c: Char) -> Int64 {
+    match c {
+        'Ω' => 1,
+        '日' => 2,
+        '本' => 3,
+        _ => 0
+    }
+}
+
+func main() -> lang.i64 {
+    let omega: Char = 'Ω';
+    let sun: Char = '日';
+    let book: Char = '本';
+    let ascii: Char = 'a';
+
+    if classify(omega) != 1 { return 1 }
+    if classify(sun) != 2 { return 2 }
+    if classify(book) != 3 { return 3 }
+    if classify(ascii) != 0 { return 4 }
+    0
+}
+"#,
+        )
+        .with_stdlib()
+        .expect(Compiles)
+        .expect(Runs);
+    }
+
+    #[test]
+    fn char_literal_pattern_unicode_escape() {
+        // Tests unicode escape sequences in char literal patterns
+        Test::new(
+            r#"
+module Test
+
+import std.text.Char
+import std.num.Int64
+
+func isEmoji(c: Char) -> Int64 {
+    match c {
+        '\u{1F600}' => 1,
+        '\u{1F601}' => 2,
+        '\u{1F602}' => 3,
+        _ => 0
+    }
+}
+
+func main() -> lang.i64 {
+    let grinning: Char = '\u{1F600}';
+    let beaming: Char = '\u{1F601}';
+    let joy: Char = '\u{1F602}';
+    let letter: Char = 'a';
+
+    if isEmoji(grinning) != 1 { return 1 }
+    if isEmoji(beaming) != 2 { return 2 }
+    if isEmoji(joy) != 3 { return 3 }
+    if isEmoji(letter) != 0 { return 4 }
+    0
+}
+"#,
+        )
+        .with_stdlib()
+        .expect(Compiles)
+        .expect(Runs);
+    }
+
+    #[test]
+    #[ignore = "Or-patterns with Char literals need investigation"]
+    fn char_literal_pattern_or() {
+        // Tests or-patterns with char literals
+        Test::new(
+            r#"
+module Test
+
+import std.text.Char
+import std.num.Int64
+
+func classifyCaseInsensitive(c: Char) -> Int64 {
+    match c {
+        'a' or 'A' => 1,
+        'b' or 'B' => 2,
+        'c' or 'C' => 3,
+        _ => 0
+    }
+}
+
+func main() -> lang.i64 {
+    let lowerA: Char = 'a';
+    let upperA: Char = 'A';
+    let lowerB: Char = 'b';
+    let upperB: Char = 'B';
+    let other: Char = 'x';
+
+    if classifyCaseInsensitive(lowerA) != 1 { return 1 }
+    if classifyCaseInsensitive(upperA) != 1 { return 2 }
+    if classifyCaseInsensitive(lowerB) != 2 { return 3 }
+    if classifyCaseInsensitive(upperB) != 2 { return 4 }
+    if classifyCaseInsensitive(other) != 0 { return 5 }
+    0
+}
+"#,
+        )
+        .with_stdlib()
+        .expect(Compiles)
+        .expect(Runs);
     }
 
     #[test]
@@ -467,23 +647,88 @@ func test(x: lang.i64) -> lang.str {
     }
 
     #[test]
-    #[ignore = "Grapheme type not yet implemented"]
+    #[ignore = "Char range patterns with Matchable not yet implemented"]
     fn char_range_pattern() {
+        // Tests char range patterns with Char struct
         Test::new(
             r#"
-module Main
+module Test
 
-func test(c: Grapheme) -> lang.str {
+import std.text.Char
+import std.num.Int64
+
+func classify(c: Char) -> Int64 {
     match c {
-        'a'..='z' => "lowercase",
-        'A'..='Z' => "uppercase",
-        '0'..='9' => "digit",
-        _ => "other"
+        'a'..='z' => 1,
+        'A'..='Z' => 2,
+        '0'..='9' => 3,
+        _ => 0
     }
+}
+
+func main() -> lang.i64 {
+    let lowerA: Char = 'a';
+    let lowerZ: Char = 'z';
+    let lowerM: Char = 'm';
+    let upperA: Char = 'A';
+    let upperZ: Char = 'Z';
+    let digit0: Char = '0';
+    let digit9: Char = '9';
+    let space: Char = ' ';
+
+    if classify(lowerA) != 1 { return 1 }
+    if classify(lowerZ) != 1 { return 2 }
+    if classify(lowerM) != 1 { return 3 }
+    if classify(upperA) != 2 { return 4 }
+    if classify(upperZ) != 2 { return 5 }
+    if classify(digit0) != 3 { return 6 }
+    if classify(digit9) != 3 { return 7 }
+    if classify(space) != 0 { return 8 }
+    0
 }
 "#,
         )
-        .expect(Compiles);
+        .with_stdlib()
+        .expect(Compiles)
+        .expect(Runs);
+    }
+
+    #[test]
+    #[ignore = "Char range patterns with Matchable not yet implemented"]
+    fn char_range_pattern_exclusive() {
+        // Tests exclusive char range patterns
+        Test::new(
+            r#"
+module Test
+
+import std.text.Char
+import std.num.Int64
+
+func classify(c: Char) -> Int64 {
+    match c {
+        'a'..<'z' => 1,
+        'z' => 2,
+        _ => 0
+    }
+}
+
+func main() -> lang.i64 {
+    let lowerA: Char = 'a';
+    let lowerY: Char = 'y';
+    let lowerZ: Char = 'z';
+    let other: Char = '!';
+
+    if classify(lowerA) != 1 { return 1 }
+    if classify(lowerY) != 1 { return 2 }
+    if classify(lowerZ) != 2 { return 3 }
+    if classify(other) != 0 { return 4 }
+    0
+}
+"#,
+        )
+        .with_stdlib()
+        .expect(Compiles)
+        .expect(Runs);
     }
 
     #[test]
@@ -526,22 +771,37 @@ func test(x: lang.i64) -> lang.str {
     }
 
     #[test]
-    #[ignore = "Grapheme type not yet implemented"]
-    fn range_type_mismatch_error() {
+    #[ignore = "Char range patterns with Matchable not yet implemented"]
+    fn char_range_with_integer_scrutinee() {
+        // Char literals can match against integer types since they're both numeric
+        // The char pattern infers to i32 but can unify with i64
         Test::new(
             r#"
-module Main
+module Test
 
-func test(x: lang.i64) -> lang.str {
+import std.num.Int64
+
+func classify(x: Int64) -> Int64 {
     match x {
-        'a'..='z' => "letter",
-        _ => "other"
+        'a'..='z' => 1,
+        _ => 0
     }
+}
+
+func main() -> lang.i64 {
+    // 'a' = 97, 'z' = 122
+    if classify(97) != 1 { return 1 }
+    if classify(122) != 1 { return 2 }
+    if classify(110) != 1 { return 3 }
+    if classify(96) != 0 { return 4 }
+    if classify(123) != 0 { return 5 }
+    0
 }
 "#,
         )
-        .expect(Fails)
-        .expect(HasError("type"));
+        .with_stdlib()
+        .expect(Compiles)
+        .expect(Runs);
     }
 }
 

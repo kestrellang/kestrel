@@ -673,6 +673,94 @@ fn emit_comparison_chain_int(
                 ctx.set_current_block(next_block);
             },
 
+            Constructor::CharLiteral(c) => {
+                // Char literals are just integers - treat as i32 comparison
+                let match_block = ctx.create_block();
+                let next_block = if is_last && default.is_none() {
+                    ctx.create_block()
+                } else {
+                    ctx.create_block()
+                };
+
+                // Compare: switch_place == char value
+                let cmp_ty = ctx.mir.ty_bool();
+                let cmp_local = ctx.create_temp("cmp", cmp_ty);
+                let cmp_place = Place::local(cmp_local);
+                ctx.emit_assign(
+                    cmp_place.clone(),
+                    Rvalue::BinaryOp {
+                        op: BinOp::Eq,
+                        lhs: Value::Place(switch_place.clone()),
+                        rhs: Value::Immediate(make_int_immediate(int_bits, *c as i64)),
+                    },
+                );
+
+                // Branch
+                ctx.emit_branch(Value::Place(cmp_place), match_block, next_block);
+
+                // Emit match body
+                ctx.set_current_block(match_block);
+                emit_decision_tree(ctx, tree, scrutinee, arms, result_place, join_block);
+
+                // Continue with next comparison
+                ctx.set_current_block(next_block);
+            },
+
+            Constructor::CharRange { start, end } => {
+                // Char range check: start <= switch_place && switch_place <= end
+                let match_block = ctx.create_block();
+                let next_block = ctx.create_block();
+
+                // start <= value
+                let cmp1_ty = ctx.mir.ty_bool();
+                let cmp1_local = ctx.create_temp("cmp_lo", cmp1_ty);
+                let cmp1_place = Place::local(cmp1_local);
+                ctx.emit_assign(
+                    cmp1_place.clone(),
+                    Rvalue::BinaryOp {
+                        op: BinOp::LeSigned,
+                        lhs: Value::Immediate(make_int_immediate(int_bits, *start as i64)),
+                        rhs: Value::Place(switch_place.clone()),
+                    },
+                );
+
+                // value <= end
+                let cmp2_ty = ctx.mir.ty_bool();
+                let cmp2_local = ctx.create_temp("cmp_hi", cmp2_ty);
+                let cmp2_place = Place::local(cmp2_local);
+                ctx.emit_assign(
+                    cmp2_place.clone(),
+                    Rvalue::BinaryOp {
+                        op: BinOp::LeSigned,
+                        lhs: Value::Place(switch_place.clone()),
+                        rhs: Value::Immediate(make_int_immediate(int_bits, *end as i64)),
+                    },
+                );
+
+                // cmp1 && cmp2
+                let cmp_ty = ctx.mir.ty_bool();
+                let cmp_local = ctx.create_temp("cmp_range", cmp_ty);
+                let cmp_place = Place::local(cmp_local);
+                ctx.emit_assign(
+                    cmp_place.clone(),
+                    Rvalue::BinaryOp {
+                        op: BinOp::BoolAnd,
+                        lhs: Value::Place(cmp1_place),
+                        rhs: Value::Place(cmp2_place),
+                    },
+                );
+
+                // Branch
+                ctx.emit_branch(Value::Place(cmp_place), match_block, next_block);
+
+                // Emit match body
+                ctx.set_current_block(match_block);
+                emit_decision_tree(ctx, tree, scrutinee, arms, result_place, join_block);
+
+                // Continue with next comparison
+                ctx.set_current_block(next_block);
+            },
+
             _ => {
                 // Unsupported constructor for int switch
                 ctx.emit_error(LoweringError::internal(
@@ -1283,6 +1371,152 @@ fn emit_matchable_switch(
                     format!(
                         "Matchable switch with string literal '{}' not yet fully implemented",
                         value
+                    ),
+                    None,
+                ));
+                continue;
+            },
+
+            Constructor::CharLiteral(c) => {
+                // Create blocks for this case
+                let match_block = ctx.create_block();
+                let next_block = if is_last && default.is_none() {
+                    ctx.create_block()
+                } else {
+                    ctx.create_block()
+                };
+
+                // Create a temporary to hold the literal value
+                // The type must conform to ExpressibleByCharLiteral
+                let literal_local = ctx.create_temp("literal", for_type);
+                let literal_place = Place::local(literal_local);
+
+                // Initialize the struct from the literal using the ExpressibleByCharLiteral init
+                if let TyKind::Struct {
+                    symbol: struct_symbol,
+                    ..
+                } = ty.kind()
+                {
+                    // Find the init$charLiteral method
+                    let init_sym = struct_symbol
+                        .metadata()
+                        .children()
+                        .into_iter()
+                        .find(|child| {
+                            child.metadata().kind() == KestrelSymbolKind::Initializer
+                                && child
+                                    .metadata()
+                                    .get_behavior::<CallableBehavior>()
+                                    .map(|c| {
+                                        c.parameters()
+                                            .first()
+                                            .and_then(|p| p.external_label())
+                                            == Some("charLiteral")
+                                    })
+                                    .unwrap_or(false)
+                        });
+
+                    if let Some(init_sym) = init_sym {
+                        // Build the qualified name for the init function
+                        let mut name_parts = Vec::new();
+                        collect_symbol_name_parts(
+                            &(struct_symbol.clone()
+                                as std::sync::Arc<dyn Symbol<kestrel_semantic_tree::language::KestrelLanguage>>),
+                            &mut name_parts,
+                        );
+
+                        // Get all labels from the found init symbol
+                        let init_name_suffix = if let Some(callable) =
+                            init_sym.metadata().get_behavior::<CallableBehavior>()
+                        {
+                            let labels: Vec<&str> = callable
+                                .parameters()
+                                .iter()
+                                .filter_map(|p| p.external_label())
+                                .collect();
+                            if labels.is_empty() {
+                                "init".to_string()
+                            } else {
+                                format!("init${}", labels.join("$"))
+                            }
+                        } else {
+                            "init$charLiteral".to_string()
+                        };
+                        name_parts.push(init_name_suffix);
+
+                        let init_name = ctx.mir.intern_name(QualifiedNameData::new(name_parts));
+
+                        // Create a mutable reference to the result place
+                        let ref_ty = ctx.mir.ty_ref_mut(for_type);
+                        let self_ref_local = ctx.create_temp("self_ref", ref_ty);
+                        let self_ref_place = Place::local(self_ref_local);
+
+                        // Emit: %self_ref = ref var %literal
+                        ctx.emit_assign(
+                            self_ref_place.clone(),
+                            Rvalue::RefMut(literal_place.clone()),
+                        );
+
+                        // Build call args: self_ref first (MutRef), then the i32 char literal value (Borrow)
+                        let call_args = vec![
+                            CallArg::mutating(Value::Place(self_ref_place)),
+                            CallArg::borrow(Value::Immediate(Immediate::i32(*c as i32))),
+                        ];
+
+                        // Create a temp for the unit return value of init
+                        let unit_ty = ctx.mir.ty_unit();
+                        let unit_local = ctx.create_temp("init_ret", unit_ty);
+                        let unit_place = Place::local(unit_local);
+
+                        // Call the init function
+                        let mir_callee = Callee::direct(init_name);
+                        ctx.emit_call_with_modes(unit_place, mir_callee, call_args);
+                    } else {
+                        // No init found - fall back to direct assignment (shouldn't happen for Matchable types)
+                        ctx.emit_assign(
+                            literal_place.clone(),
+                            Rvalue::Use(Immediate::i32(*c as i32)),
+                        );
+                    }
+                } else {
+                    // Not a struct type - fall back to direct assignment
+                    ctx.emit_assign(
+                        literal_place.clone(),
+                        Rvalue::Use(Immediate::i32(*c as i32)),
+                    );
+                }
+
+                // Call Matchable.matches(switch_place, literal_place)
+                let result_local = ctx.create_temp("matches_result", bool_mir_ty);
+                let result_place_local = Place::local(result_local);
+
+                let callee = Callee::witness(protocol_name, "matches", for_type);
+                let call_args = vec![
+                    CallArg::borrow(Value::Place(switch_place.clone())),
+                    CallArg::borrow(Value::Place(literal_place)),
+                ];
+
+                ctx.emit_call_with_modes(result_place_local.clone(), callee, call_args);
+
+                // Branch based on the bool result
+                ctx.emit_branch(Value::Place(result_place_local), match_block, next_block);
+
+                // Emit match body
+                ctx.set_current_block(match_block);
+                emit_decision_tree(ctx, tree, scrutinee, arms, result_place, join_block);
+
+                // Continue with next comparison
+                ctx.set_current_block(next_block);
+            },
+
+            Constructor::CharRange { start, end } => {
+                // Char ranges for Matchable types - create a temporary char for the low and high bounds
+                // and check if scrutinee is in range using Comparable
+                // For now, emit an error since this is complex
+                ctx.emit_error(LoweringError::internal(
+                    format!(
+                        "Matchable switch with char range '{}'..='{}' not yet fully implemented",
+                        start, end
                     ),
                     None,
                 ));

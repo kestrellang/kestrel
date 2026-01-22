@@ -408,6 +408,58 @@ fn resolve_literal_pattern(
                     let ty = Ty::infer(span.clone());
                     return Pattern::literal(LiteralValue::Bool(value), ty, span);
                 },
+                SyntaxKind::Char => {
+                    // Process char literal: strip quotes, process escapes, validate single codepoint
+                    let text_range = token.text_range();
+                    let token_start: usize = text_range.start().into();
+                    let token_span =
+                        Span::new(ctx.file_id, token_start..token_start + text.len());
+
+                    let value = if text.len() >= 2 {
+                        let inner = &text[1..text.len() - 1];
+
+                        if inner.is_empty() {
+                            // Empty character literal ''
+                            use crate::diagnostics::EmptyCharacterLiteralError;
+                            let error = EmptyCharacterLiteralError { span: token_span };
+                            ctx.diagnostics.add_diagnostic(error.into_diagnostic());
+                            0
+                        } else {
+                            // Process escape sequences
+                            let unescaped = super::expressions::unescape_string(
+                                inner,
+                                ctx.file_id,
+                                token_start + 1,
+                                ctx,
+                            );
+                            let code_points: Vec<char> = unescaped.chars().collect();
+
+                            if code_points.is_empty() {
+                                use crate::diagnostics::EmptyCharacterLiteralError;
+                                let error = EmptyCharacterLiteralError { span: token_span };
+                                ctx.diagnostics.add_diagnostic(error.into_diagnostic());
+                                0
+                            } else if code_points.len() > 1 {
+                                use crate::diagnostics::MultipleCodepointsInCharLiteralError;
+                                let error = MultipleCodepointsInCharLiteralError {
+                                    span: token_span,
+                                    count: code_points.len(),
+                                };
+                                ctx.diagnostics.add_diagnostic(error.into_diagnostic());
+                                code_points[0] as u32
+                            } else {
+                                code_points[0] as u32
+                            }
+                        }
+                    } else {
+                        0
+                    };
+
+                    // Use infer type so type inference can unify with scrutinee type
+                    // based on the scrutinee type and ExpressibleByCharLiteral conformance
+                    let ty = Ty::infer(span.clone());
+                    return Pattern::literal(LiteralValue::Char(value), ty, span);
+                },
                 _ => {},
             }
         }
@@ -727,17 +779,29 @@ fn resolve_range_pattern(
                     end_bound = Some(bound);
                 }
             },
-            SyntaxKind::String => {
-                // Handle char literals (single-char strings like 'a')
+            SyntaxKind::Char => {
+                // Handle char literals like 'a', '\n', '\u{1F600}'
                 let text = token.text();
-                // Remove quotes and handle escape sequences
-                let inner = text.trim_matches('"').trim_matches('\'');
-                if let Some(c) = inner.chars().next() {
-                    let bound = RangeBound::Char(c);
-                    if !found_operator {
-                        start_bound = Some(bound);
-                    } else {
-                        end_bound = Some(bound);
+                let text_range = token.text_range();
+                let token_start: usize = text_range.start().into();
+
+                if text.len() >= 2 {
+                    let inner = &text[1..text.len() - 1];
+                    // Process escape sequences
+                    let unescaped = super::expressions::unescape_string(
+                        inner,
+                        ctx.file_id,
+                        token_start + 1,
+                        ctx,
+                    );
+
+                    if let Some(c) = unescaped.chars().next() {
+                        let bound = RangeBound::Char(c);
+                        if !found_operator {
+                            start_bound = Some(bound);
+                        } else {
+                            end_bound = Some(bound);
+                        }
                     }
                 }
             },
