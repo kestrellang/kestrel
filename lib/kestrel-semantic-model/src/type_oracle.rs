@@ -697,6 +697,23 @@ impl TypeOracle for SemanticModel {
         // Fall back to primitive bool type
         Ty::bool(span)
     }
+
+    fn default_char_type(&self, span: kestrel_span::Span) -> Ty {
+        use kestrel_semantic_tree::builtins::LanguageFeature;
+        use kestrel_semantic_tree::ty::IntBits;
+
+        // Try to look up the DefaultCharLiteralType type alias
+        if let Some(type_alias_id) = self
+            .builtin_registry()
+            .type_alias(LanguageFeature::DefaultCharLiteralType)
+            && let Some(resolved) = self.query(ResolvedAliasedType { type_alias_id })
+        {
+            return resolved;
+        }
+
+        // Fall back to i32
+        Ty::int(IntBits::I32, span)
+    }
 }
 
 // ============================================================================

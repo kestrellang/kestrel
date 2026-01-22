@@ -566,4 +566,60 @@ mod chars {
         )
         .expect(HasError("invalid Unicode escape"));
     }
+
+    // CodePoint integration tests
+    #[test]
+    fn char_codepoint_explicit_type() {
+        // Char literal with explicit CodePoint type
+        Test::new(
+            r#"module Test
+            func get_a() -> std.text.CodePoint { 'a' }
+        "#,
+        )
+        .with_stdlib()
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn char_codepoint_default_type() {
+        // Char literals default to CodePoint when stdlib is available
+        Test::new(
+            r#"module Test
+            func test() {
+                let cp = 'x';
+                let _: std.text.CodePoint = cp;
+            }
+        "#,
+        )
+        .with_stdlib()
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn char_codepoint_comparison() {
+        // CodePoint supports comparison since it's Equatable
+        Test::new(
+            r#"module Test
+            func is_space(cp: std.text.CodePoint) -> std.core.Bool {
+                cp == ' '
+            }
+        "#,
+        )
+        .with_stdlib()
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn char_codepoint_escapes() {
+        // Various escape sequences work with CodePoint
+        Test::new(
+            r#"module Test
+            func newline() -> std.text.CodePoint { '\n' }
+            func tab() -> std.text.CodePoint { '\t' }
+            func nul() -> std.text.CodePoint { '\0' }
+        "#,
+        )
+        .with_stdlib()
+        .expect(Compiles);
+    }
 }
