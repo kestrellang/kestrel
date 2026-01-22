@@ -9,11 +9,11 @@ use kestrel_reporting::IntoDiagnostic;
 use kestrel_semantic_model::SymbolFor;
 use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
 use kestrel_semantic_tree::behavior::callable::CallableBehavior;
-use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
 use kestrel_semantic_tree::behavior::extension_target::ExtensionTargetBehavior;
 use kestrel_semantic_tree::behavior::implements::ImplementsBehavior;
 use kestrel_semantic_tree::behavior::typed::TypedBehavior;
-use kestrel_semantic_tree::expr::{ExprKind, Expression};
+use kestrel_semantic_tree::builtins::LanguageFeature;
+use kestrel_semantic_tree::expr::{CallArgument, ExprKind, Expression};
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::function::FunctionSymbol;
 use kestrel_semantic_tree::symbol::initializer::InitializerSymbol;
@@ -794,14 +794,17 @@ pub fn verify_type_argument_constraints(
 
 /// Check if a type satisfies a protocol bound.
 ///
-/// This checks if a concrete type conforms to a protocol, either directly
-/// or transitively through other constraints.
+/// This checks if a concrete type conforms to a protocol, either directly,
+/// through extensions, or transitively through protocol extensions.
+///
+/// Uses the TypeOracle::conforms_to method which implements the full conformance
+/// checking logic including transitive conformance through protocol extensions.
 pub fn type_satisfies_bound(
     ty: &Ty,
     bound: &Ty,
     model: &kestrel_semantic_model::SemanticModel,
 ) -> bool {
-    use kestrel_semantic_model::ExtensionsFor;
+    use kestrel_semantic_type_inference::TypeOracle;
 
     // Get the protocol from the bound
     let TyKind::Protocol {
@@ -813,78 +816,18 @@ pub fn type_satisfies_bound(
         return false;
     };
 
-    match ty.kind() {
-        // Concrete struct - check if it conforms to the protocol
-        TyKind::Struct { symbol, .. } => {
-            // Check direct conformances
-            if let Some(conformances) = symbol.metadata().get_behavior::<ConformancesBehavior>() {
-                for conf in conformances.conformances() {
-                    if let TyKind::Protocol {
-                        symbol: conf_proto, ..
-                    } = conf.kind()
-                        && conf_proto.metadata().id() == required_proto.metadata().id()
-                    {
-                        return true;
-                    }
-                    // TODO: Check inherited protocols
-                }
-            }
-
-            // Also check extension conformances
-            let struct_id = symbol.metadata().id();
-            let extensions = model.query(ExtensionsFor {
-                target_id: struct_id,
-            });
-            for extension in extensions {
-                if let Some(conformances) =
-                    extension.metadata().get_behavior::<ConformancesBehavior>()
-                {
-                    for conf in conformances.conformances() {
-                        if let TyKind::Protocol {
-                            symbol: conf_proto, ..
-                        } = conf.kind()
-                            && conf_proto.metadata().id() == required_proto.metadata().id()
-                        {
-                            return true;
-                        }
-                        // TODO: Check inherited protocols
-                    }
-                }
-            }
-
-            false
-        },
-
-        // Type parameter - check if its bounds satisfy the required bound
-        TyKind::TypeParameter(param) => {
-            let param_bounds = get_type_parameter_bounds(param);
-            for pb in &param_bounds {
-                if let TyKind::Protocol {
-                    symbol: pb_proto, ..
-                } = pb.kind()
-                    && pb_proto.metadata().id() == required_proto.metadata().id()
-                {
-                    return true;
-                }
-                // TODO: Check protocol inheritance
-            }
-            false
-        },
-
-        // Primitive types - check for built-in protocol conformances
-        // Currently primitives don't conform to user-defined protocols
-        TyKind::Int(_) | TyKind::Float(_) | TyKind::Bool | TyKind::String => {
-            // TODO: Add built-in protocol conformances (Equatable, etc.)
-            false
-        },
-
-        // Inference placeholders - optimistically assume they will satisfy bounds
-        // once resolved. Type inference will catch actual violations later.
-        TyKind::Infer => true,
-
-        // Other types don't satisfy protocol bounds
-        _ => false,
+    // Inference placeholders - optimistically assume they will satisfy bounds
+    // once resolved. Type inference will catch actual violations later.
+    if matches!(ty.kind(), TyKind::Infer) {
+        return true;
     }
+
+    // Use the TypeOracle::conforms_to method which handles:
+    // - Direct conformances
+    // - Extension conformances
+    // - Transitive conformance through protocol extensions
+    // - Protocol inheritance
+    model.conforms_to(ty, required_proto.metadata().id())
 }
 
 /// Replace any remaining type parameters in a type with inference placeholders.
@@ -1173,5 +1116,53 @@ pub fn find_type_directed_match(
         Some(matches[0])
     } else {
         None // Either no matches (fall back to first) or ambiguous (should error)
+    }
+}
+
+// =============================================================================
+// Protocol Method Call Helper
+// =============================================================================
+
+/// Create a protocol method call expression using the MethodRef + Call pattern.
+///
+/// This produces proper "does not conform to X" errors instead of "no member Y"
+/// because the MethodRef's candidate is the protocol method's SymbolId.
+///
+/// # Arguments
+/// * `receiver` - The receiver expression to call the method on
+/// * `method_feature` - The LanguageFeature for the protocol method (e.g., AddOperatorMethod)
+/// * `method_name` - The method name (e.g., "add")
+/// * `arguments` - The arguments to pass to the method
+/// * `result_ty` - The expected result type (typically Ty::infer)
+/// * `span` - The span for the expression
+/// * `ctx` - The body resolution context
+///
+/// # Returns
+/// A Call expression wrapping a MethodRef with the protocol method as the candidate.
+pub fn protocol_method_call(
+    receiver: Expression,
+    method_feature: LanguageFeature,
+    method_name: &str,
+    arguments: Vec<CallArgument>,
+    result_ty: Ty,
+    span: Span,
+    ctx: &BodyResolutionContext,
+) -> Expression {
+    // Look up the protocol method's SymbolId from the builtin registry
+    if let Some(method_id) = ctx.model.builtin_registry().method(method_feature) {
+        // Create a MethodRef with the protocol method as the single candidate
+        let method_ref = Expression::method_ref(
+            receiver,
+            vec![method_id],
+            method_name.to_string(),
+            span.clone(),
+        );
+
+        // Wrap in a Call expression
+        Expression::call(method_ref, arguments, result_ty, span)
+    } else {
+        // Fallback: if the builtin isn't registered, use deferred method call
+        // This shouldn't happen in practice if std is loaded, but provides graceful degradation
+        Expression::deferred_method_call(receiver, method_name.to_string(), arguments, result_ty, span)
     }
 }
