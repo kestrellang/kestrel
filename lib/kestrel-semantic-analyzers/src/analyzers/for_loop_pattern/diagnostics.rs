@@ -17,11 +17,10 @@ impl IntoDiagnostic for RefutableForLoopPatternError {
                 "refutable pattern `{}` in for loop",
                 self.pattern_description
             ))
-            .with_labels(vec![Label::primary(
-                self.pattern_span.file_id,
-                self.pattern_span.range(),
-            )
-            .with_message("pattern must be irrefutable")])
+            .with_labels(vec![
+                Label::primary(self.pattern_span.file_id, self.pattern_span.range())
+                    .with_message("pattern must be irrefutable"),
+            ])
             .with_notes(vec![
                 "for-loop patterns must match all items from the iterator".to_string(),
                 "consider using `while let` if you want to match a refutable pattern".to_string(),

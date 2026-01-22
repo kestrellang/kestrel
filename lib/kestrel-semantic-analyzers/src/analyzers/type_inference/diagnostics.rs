@@ -62,10 +62,7 @@ impl IntoDiagnostic for InferenceErrorDiagnostic {
                         receiver
                     )
                 } else {
-                    format!(
-                        "member not found: `{}` on type `{}`",
-                        member, receiver
-                    )
+                    format!("member not found: `{}` on type `{}`", member, receiver)
                 };
 
                 let label_message = if member == "iter" {
@@ -74,13 +71,10 @@ impl IntoDiagnostic for InferenceErrorDiagnostic {
                     format!("`{}` has no member `{}`", receiver, member)
                 };
 
-                Diagnostic::error()
-                    .with_message(message)
-                    .with_labels(vec![
-                        Label::primary(span.file_id, span.range())
-                            .with_message(label_message),
-                    ])
-            }
+                Diagnostic::error().with_message(message).with_labels(vec![
+                    Label::primary(span.file_id, span.range()).with_message(label_message),
+                ])
+            },
 
             InferenceError::AssociatedTypeNotFound {
                 container,

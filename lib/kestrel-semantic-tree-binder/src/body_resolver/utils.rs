@@ -12,8 +12,7 @@ use kestrel_semantic_tree::behavior::callable::CallableBehavior;
 use kestrel_semantic_tree::behavior::extension_target::ExtensionTargetBehavior;
 use kestrel_semantic_tree::behavior::implements::ImplementsBehavior;
 use kestrel_semantic_tree::behavior::typed::TypedBehavior;
-use kestrel_semantic_tree::builtins::LanguageFeature;
-use kestrel_semantic_tree::expr::{CallArgument, ExprKind, Expression};
+use kestrel_semantic_tree::expr::{ExprKind, Expression};
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::function::FunctionSymbol;
 use kestrel_semantic_tree::symbol::initializer::InitializerSymbol;
@@ -414,31 +413,6 @@ fn filter_resolved_bounds(
         .into_iter()
         .filter(|ty| matches!(ty.kind(), TyKind::Protocol { .. }))
         .collect()
-}
-
-/// Get the protocol bounds for a type parameter from the current resolution context.
-///
-/// This looks up the where clause from the current function (and its parent struct/protocol)
-/// to find all protocol bounds for the given type parameter.
-///
-/// Returns a list of protocol types that the type parameter is constrained to.
-pub fn get_type_parameter_bounds(type_param: &Arc<TypeParameterSymbol>) -> Vec<Ty> {
-    let param_id = type_param.metadata().id();
-    let mut bounds = Vec::new();
-
-    // Walk up from the type parameter's parent to find where clauses
-    // Note: The parent may be incorrectly set during symbol building,
-    // so we also try to get bounds directly from symbols that own this type parameter
-    let mut current: Option<Arc<dyn Symbol<KestrelLanguage>>> = type_param.metadata().parent();
-
-    while let Some(parent) = current {
-        if let Some(where_clause) = get_where_clause(parent.as_ref()) {
-            bounds.extend(extract_bounds_for_param(&where_clause, param_id));
-        }
-        current = parent.metadata().parent();
-    }
-
-    bounds
 }
 
 /// Get the protocol bounds for a type parameter from a specific context.
@@ -1119,50 +1093,3 @@ pub fn find_type_directed_match(
     }
 }
 
-// =============================================================================
-// Protocol Method Call Helper
-// =============================================================================
-
-/// Create a protocol method call expression using the MethodRef + Call pattern.
-///
-/// This produces proper "does not conform to X" errors instead of "no member Y"
-/// because the MethodRef's candidate is the protocol method's SymbolId.
-///
-/// # Arguments
-/// * `receiver` - The receiver expression to call the method on
-/// * `method_feature` - The LanguageFeature for the protocol method (e.g., AddOperatorMethod)
-/// * `method_name` - The method name (e.g., "add")
-/// * `arguments` - The arguments to pass to the method
-/// * `result_ty` - The expected result type (typically Ty::infer)
-/// * `span` - The span for the expression
-/// * `ctx` - The body resolution context
-///
-/// # Returns
-/// A Call expression wrapping a MethodRef with the protocol method as the candidate.
-pub fn protocol_method_call(
-    receiver: Expression,
-    method_feature: LanguageFeature,
-    method_name: &str,
-    arguments: Vec<CallArgument>,
-    result_ty: Ty,
-    span: Span,
-    ctx: &BodyResolutionContext,
-) -> Expression {
-    // Look up the protocol method's SymbolId from the builtin registry
-    if let Some(method_id) = ctx.model.builtin_registry().method(method_feature) {
-        // Create a MethodRef with the protocol method as the single candidate
-        let method_ref = Expression::method_ref(
-            receiver,
-            vec![method_id],
-            method_name.to_string(),
-            span.clone(),
-        );
-
-        // Wrap in a Call expression
-        Expression::call(method_ref, arguments, result_ty, span)
-    } else {
-        // Fallback: if the builtin isn't registered, use deferred method call
-        // This shouldn't happen in practice if std is loaded, but provides graceful degradation
-        Expression::deferred_method_call(receiver, method_name.to_string(), arguments, result_ty, span)
-    }
-}

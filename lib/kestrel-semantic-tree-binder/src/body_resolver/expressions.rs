@@ -1076,11 +1076,11 @@ fn resolve_while_let_expression(
 }
 
 /// Resolve a for expression by desugaring to while-let:
-/// ```
+/// ```text
 /// for pattern in iterable { body }
 /// ```
 /// becomes:
-/// ```
+/// ```text
 /// {
 ///     var iter = iterable.iter()
 ///     while let .Some(pattern) = iter.next() {
@@ -1117,9 +1117,7 @@ fn resolve_for_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) ->
         });
 
     // Find the body (CodeBlock)
-    let body_node = node
-        .children()
-        .find(|c| c.kind() == SyntaxKind::CodeBlock);
+    let body_node = node.children().find(|c| c.kind() == SyntaxKind::CodeBlock);
 
     // Resolve the iterable expression
     let iterable_expr = iterable_node
@@ -1226,13 +1224,19 @@ fn resolve_for_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) ->
     ctx.move_tracker.merge(&pre_loop_moves);
 
     // Create the while-let expression (marked as from_for_loop for pattern checking)
-    let while_let = Expression::while_let_from_for(loop_id, label_info, vec![condition], body, span.clone());
+    let while_let =
+        Expression::while_let_from_for(loop_id, label_info, vec![condition], body, span.clone());
 
     // Pop the iterator scope
     ctx.local_scope.pop_scope();
 
     // Create the block expression: { var iter = ...; while let ... }
-    Expression::block(vec![iter_binding], Some(while_let), Ty::unit(span.clone()), span)
+    Expression::block(
+        vec![iter_binding],
+        Some(while_let),
+        Ty::unit(span.clone()),
+        span,
+    )
 }
 
 /// Resolve a single while-let condition: let pattern = expr

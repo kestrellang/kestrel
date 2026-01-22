@@ -111,7 +111,7 @@ fn is_pattern_irrefutable(pattern: &Pattern) -> bool {
             }
             // Multi-case enum or unresolved type - refutable
             false
-        }
+        },
 
         // Range patterns are REFUTABLE - they don't cover all values
         PatternKind::Range { .. } => false,
@@ -119,7 +119,7 @@ fn is_pattern_irrefutable(pattern: &Pattern) -> bool {
         // Struct patterns are irrefutable if all field patterns are irrefutable
         PatternKind::Struct { fields, .. } => {
             fields.iter().all(|f| is_pattern_irrefutable(&f.pattern))
-        }
+        },
 
         // Array patterns are REFUTABLE - they check array length
         PatternKind::Array { .. } => false,
@@ -156,7 +156,7 @@ fn describe_pattern(pattern: &Pattern) -> String {
             }
             parts.extend(suffix.iter().map(describe_pattern));
             format!("({})", parts.join(", "))
-        }
+        },
         PatternKind::Literal { value } => match value {
             LiteralValue::Unit => "()".to_string(),
             LiteralValue::Integer(i) => i.to_string(),
@@ -168,7 +168,7 @@ fn describe_pattern(pattern: &Pattern) -> String {
                 } else {
                     format!("'\\u{{{:X}}}'", c)
                 }
-            }
+            },
             LiteralValue::Bool(b) => b.to_string(),
         },
         PatternKind::EnumVariant {
@@ -191,7 +191,7 @@ fn describe_pattern(pattern: &Pattern) -> String {
                     .collect();
                 format!(".{}({})", case_name, inner.join(", "))
             }
-        }
+        },
         PatternKind::Range {
             start,
             end,
@@ -208,7 +208,7 @@ fn describe_pattern(pattern: &Pattern) -> String {
             };
             let op = if *inclusive { "..=" } else { "..<" };
             format!("{}{}{}", start_str, op, end_str)
-        }
+        },
         PatternKind::Struct {
             struct_name,
             fields,
@@ -219,7 +219,7 @@ fn describe_pattern(pattern: &Pattern) -> String {
                 .map(|f| format!("{}: {}", f.field_name, describe_pattern(&f.pattern)))
                 .collect();
             format!("{} {{ {} }}", struct_name, inner.join(", "))
-        }
+        },
         PatternKind::Array {
             prefix,
             rest,
@@ -231,16 +231,16 @@ fn describe_pattern(pattern: &Pattern) -> String {
             }
             parts.extend(suffix.iter().map(describe_pattern));
             format!("[{}]", parts.join(", "))
-        }
+        },
         PatternKind::Or { alternatives } => {
             let parts: Vec<String> = alternatives.iter().map(describe_pattern).collect();
             parts.join(" | ")
-        }
+        },
         PatternKind::At {
             name, subpattern, ..
         } => {
             format!("{} @ {}", name, describe_pattern(subpattern))
-        }
+        },
         PatternKind::Rest => "..".to_string(),
         PatternKind::Error => "<error>".to_string(),
     }

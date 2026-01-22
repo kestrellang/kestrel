@@ -522,8 +522,12 @@ impl TypeOracle for SemanticModel {
         //
         // Example: Int64 conforms to Comparable, and there's "extend Comparable: Less[Self]"
         // So Int64 transitively conforms to Less[Int64] (Self substituted with Int64)
-        if self.check_transitive_conformance(ty, protocol_id, type_symbol_id, &applicable_extensions)
-        {
+        if self.check_transitive_conformance(
+            ty,
+            protocol_id,
+            type_symbol_id,
+            &applicable_extensions,
+        ) {
             return true;
         }
 
@@ -1190,8 +1194,8 @@ fn check_transitive_conformance_impl(
                         symbol: ext_protocol,
                         substitutions: _ext_subs,
                     } = ext_conf.kind()
+                        && ext_protocol.metadata().id() == target_protocol_id
                     {
-                        if ext_protocol.metadata().id() == target_protocol_id {
                             // Found a match on the base protocol ID (e.g., Less)
                             // The protocol extension conformance uses Self to refer
                             // to the extended protocol, which we substitute with concrete_ty
@@ -1210,7 +1214,6 @@ fn check_transitive_conformance_impl(
                             // to the target protocol, we accept it. Full generic matching would
                             // require comparing substitutions after Self resolution.
                             return true;
-                        }
                     }
                 }
             }
