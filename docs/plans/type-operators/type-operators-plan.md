@@ -308,25 +308,23 @@ This PR implements Phases 0-6:
 - The built-in `TyKind::Array` remains but is not used by the new syntax
 - A follow-up PR will remove `TyKind::Array` entirely
 
-## BLOCKER: Type Alias Normalization Required
+## Implementation Status
 
-**Status: Implementation is blocked by missing type alias normalization.**
+**Type alias normalization has been implemented.** The following type operators now work:
 
-The current implementation successfully:
-- Parses type operator syntax (`T?`, `[T]`, `[K: V]`, `T throws E`)
-- Resolves them to the corresponding builtin type aliases
-- Applies type arguments to create `OptionalTypeOperator[Int64]`, etc.
+| Operator | Status | Notes |
+|----------|--------|-------|
+| `T?` | Working | Desugars to `Optional[T]` via `OptionalTypeOperator` |
+| `[K: V]` | Working | Desugars to `Dictionary[K, V]` via `DictionaryTypeOperator` |
+| `T throws E` | Working | Desugars to `Result[T, E]` via `ResultTypeOperator` |
+| `[T]` | Deferred | Still uses built-in `TyKind::Array` (see below) |
 
-However, type aliases are NOT being normalized/expanded to their underlying types:
-- `OptionalTypeOperator[Int64]` stays as-is instead of becoming `Optional[Int64]`
-- `ArrayTypeOperator[Int64]` stays as-is instead of becoming `Array[Int64]`
+### Array Type Operator Deferred
 
-This causes:
-- Enum cases (`.Some`, `.None`) not found on `OptionalTypeOperator`
-- Methods defined on `Array` not accessible on `ArrayTypeOperator`
-- Type mismatches when assigning `Array[Int64]` to `[Int64]` variables
+The `[T]` syntax currently uses the built-in `TyKind::Array` type instead of `ArrayTypeOperator[T]`.
+This is because `TyKind::Array` is deeply integrated into:
+- Array pattern matching (`[first, ..rest]`)
+- Array literal type inference (`[1, 2, 3]`)
+- Other array-specific compiler features
 
-**Required follow-up work:**
-1. Implement type alias normalization in the type system
-2. When a type is `TyKind::TypeAlias`, expand it to the underlying type with substitutions applied
-3. This should happen during type checking and method lookup
+Switching to `ArrayTypeOperator` requires the full Phase 7 work (removing `TyKind::Array` from the type system).

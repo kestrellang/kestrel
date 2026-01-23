@@ -128,8 +128,9 @@ impl<'a> TypeResolver<'a> {
             return Ty::tuple(element_types, ty_span);
         }
 
-        // Try TyArray - [T] currently uses built-in array type
-        // TODO: Once type alias normalization is implemented, change this to use ArrayTypeOperator
+        // Try TyArray - [T] uses built-in array type
+        // NOTE: ArrayTypeOperator exists but switching to it requires Phase 7 work
+        // (removing TyKind::Array) since array patterns and inference rely on the built-in type
         if let Some(array_node) = ty_node
             .children()
             .find(|child| child.kind() == SyntaxKind::TyArray)

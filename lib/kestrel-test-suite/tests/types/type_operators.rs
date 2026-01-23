@@ -6,11 +6,11 @@
 //! - `[K: V]` → `Dictionary[K, V]`
 //! - `T throws E` → `Result[T, E]`
 //!
-//! NOTE: These tests are currently ignored because type alias normalization
-//! is not yet implemented. Type operators resolve to type aliases like
-//! `OptionalTypeOperator[T]`, but these aren't being expanded to their
-//! underlying types (`Optional[T]`), causing method lookup and enum case
-//! resolution to fail.
+//! Type alias normalization is implemented for basic cases. The remaining
+//! ignored tests are blocked on:
+//! - Array operators still using built-in TyKind::Array instead of ArrayTypeOperator
+//! - Nested type operators (e.g., `Int64??`) requiring parser/syntax changes
+//! - Complex compositions involving arrays
 //!
 //! See: docs/plans/type-operators/type-operators-plan.md for details.
 
@@ -20,7 +20,6 @@ mod optional_operator {
     use super::*;
 
     #[test]
-    #[ignore = "blocked on type alias normalization"]
     fn optional_type_basic() {
         Test::new(
             r#"module Test
@@ -39,7 +38,6 @@ mod optional_operator {
     }
 
     #[test]
-    #[ignore = "blocked on type alias normalization"]
     fn optional_none() {
         Test::new(
             r#"module Test
@@ -77,7 +75,6 @@ mod optional_operator {
     }
 
     #[test]
-    #[ignore = "blocked on type alias normalization"]
     fn optional_interchangeable_with_explicit() {
         Test::new(
             r#"module Test
@@ -223,7 +220,6 @@ mod dictionary_operator {
     use super::*;
 
     #[test]
-    #[ignore = "blocked on type alias normalization"]
     fn dictionary_type_basic() {
         Test::new(
             r#"module Test
@@ -244,7 +240,6 @@ mod dictionary_operator {
     }
 
     #[test]
-    #[ignore = "blocked on type alias normalization"]
     fn dictionary_get_value() {
         Test::new(
             r#"module Test
@@ -264,7 +259,6 @@ mod dictionary_operator {
     }
 
     #[test]
-    #[ignore = "blocked on type alias normalization"]
     fn dictionary_interchangeable_with_explicit() {
         Test::new(
             r#"module Test
@@ -313,7 +307,6 @@ mod result_operator {
     use super::*;
 
     #[test]
-    #[ignore = "blocked on type alias normalization"]
     fn result_type_basic() {
         Test::new(
             r#"module Test
@@ -334,7 +327,6 @@ mod result_operator {
     }
 
     #[test]
-    #[ignore = "blocked on type alias normalization"]
     fn result_err_case() {
         Test::new(
             r#"module Test
@@ -356,7 +348,6 @@ mod result_operator {
     }
 
     #[test]
-    #[ignore = "blocked on type alias normalization"]
     fn result_as_function_return() {
         Test::new(
             r#"module Test
@@ -387,7 +378,6 @@ mod result_operator {
     }
 
     #[test]
-    #[ignore = "blocked on type alias normalization"]
     fn result_interchangeable_with_explicit() {
         Test::new(
             r#"module Test

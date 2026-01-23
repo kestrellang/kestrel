@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use kestrel_semantic_tree::symbol::EnumSymbol;
 use kestrel_semantic_tree::symbol::function::FunctionSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::symbol::protocol::ProtocolSymbol;
@@ -69,6 +70,13 @@ impl Query for GenericsDataFor {
                         where_clause: s.where_clause(),
                     })
             },
+            KestrelSymbolKind::Enum => symbol
+                .downcast_arc::<EnumSymbol>()
+                .map(|s| GenericsData {
+                    type_params: s.type_parameters(),
+                    where_clause: s.where_clause(),
+                })
+                .ok(),
             _ => None,
         }
     }

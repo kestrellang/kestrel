@@ -1563,6 +1563,9 @@ pub fn resolve_method_call(
                 },
                 _ => resolve_self_type_to_concrete(&receiver.ty, ctx), // Instance method
             };
+            // Expand type aliases to get the underlying type with substitutions
+            // e.g., OptionalTypeOperator[Int] -> Optional[Int]
+            let resolved_receiver_ty = resolved_receiver_ty.expand_aliases();
 
             // Get return type, substituting Self with the resolved receiver type
             let mut return_ty = substitute_self(callable.return_type(), &resolved_receiver_ty);

@@ -798,6 +798,9 @@ pub fn resolve_member_call(
         // e.g., for Box[Int].get() where get returns T, substitute T with Int
         // or for Option[Int].Some where Some returns Option[T], substitute T with Int
         let resolved_base_ty = resolve_self_type_to_concrete(base_ty, ctx);
+        // Expand type aliases to get the underlying type with substitutions
+        // e.g., OptionalTypeOperator[Int] -> Optional[Int]
+        let resolved_base_ty = resolved_base_ty.expand_aliases();
         if let Some((_, substitutions)) = resolved_base_ty.as_struct_with_subs() {
             return_ty = return_ty.apply_substitutions(substitutions);
         } else if let Some((enum_sym, substitutions)) = resolved_base_ty.as_enum_with_subs() {
@@ -830,7 +833,7 @@ pub fn resolve_member_call(
         // 2. Method's own type parameter substitutions (e.g., U from map[U])
         let mut call_subs = Substitutions::new();
 
-        // Add base type substitutions
+        // Add base type substitutions (using already expanded resolved_base_ty)
         if let Some((_, base_subs)) = resolved_base_ty.as_struct_with_subs() {
             for (key, ty) in base_subs.iter() {
                 call_subs.insert(*key, ty.clone());

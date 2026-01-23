@@ -1042,6 +1042,9 @@ fn resolve_implicit_member(
 
     let resolved_ty = resolve_type(ctx, expr_ty);
 
+    // Expand type aliases to get underlying type (e.g., OptionalTypeOperator -> Optional)
+    let resolved_ty = resolved_ty.expand_aliases();
+
     // If still Infer, defer until expected type is known
     if matches!(resolved_ty.kind(), TyKind::Infer) {
         return Ok(SolveResult::Deferred);
@@ -1183,6 +1186,9 @@ fn resolve_enum_pattern_binding(
     use semantic_tree::symbol::Symbol;
 
     let resolved_ty = resolve_type(ctx, enum_ty);
+
+    // Expand type aliases to get underlying type (e.g., OptionalTypeOperator -> Optional)
+    let resolved_ty = resolved_ty.expand_aliases();
 
     // If still Infer, defer until the enum type is known
     if matches!(resolved_ty.kind(), TyKind::Infer) {
