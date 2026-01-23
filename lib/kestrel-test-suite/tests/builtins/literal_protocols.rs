@@ -345,6 +345,52 @@ mod expressible_by_array_literal {
         .with_stdlib()
         .expect(Compiles);
     }
+
+    #[test]
+    fn custom_type_with_array_literal() {
+        // Tests that the lowering correctly uses bind_name (not label) for parameter lookup
+        // The init uses single-name syntax where _ is external label and _arrayLiteralPointer is bind_name
+        Test::new(
+            r#"module Test
+            import std.num.Int64
+            import std.core._ExpressibleByArrayLiteral
+
+            struct MyList: _ExpressibleByArrayLiteral {
+                type Element = Int64
+                var count: Int64
+
+                init(_arrayLiteralPointer: lang.ptr[Int64], _arrayLiteralCount: lang.i64) {
+                    self.count = Int64(intLiteral: _arrayLiteralCount)
+                }
+            }
+
+            func main() -> lang.i64 {
+                let list: MyList = [1, 2, 3];
+                list.count.raw
+            }
+        "#,
+        )
+        .with_stdlib()
+        .expect(ExitCode(3));
+    }
+
+    #[test]
+    fn array_literal_with_type_alias_syntax() {
+        // Tests that type alias expansion works for array literals
+        // [Int64] is a type alias that expands to Array[Int64]
+        // The lowering must call expand_aliases() to find the init
+        Test::new(
+            r#"module Test
+            import std.num.Int64
+
+            func test() -> [Int64] {
+                [10, 20, 30]
+            }
+        "#,
+        )
+        .with_stdlib()
+        .expect(Compiles);
+    }
 }
 
 mod multiple_protocols {

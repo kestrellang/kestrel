@@ -3,6 +3,8 @@
 
 module Tui
 
+import std.core.Range
+
 // ============================================
 // Style Options
 // ============================================
@@ -85,24 +87,16 @@ public struct Style: ExpressibleByArrayLiteral, _ExpressibleByArrayLiteral {
     // ExpressibleByArrayLiteral
     public init(arrayLiteral elements: LiteralSlice[StyleOption]) {
         self.options = Array[StyleOption]();
-        var iter = elements.iter();
-        var done = false;
-        while done == false {
-            let item = iter.next();
-            match item {
-                .Some(opt) => self.options.append(opt),
-                .None => { done = true; }
-            }
+        for opt in elements {
+            self.options.append(opt);
         }
     }
 
     // Build the ANSI prefix codes
     func codes() -> String {
         var result = "";
-        var i: Int64 = 0;
-        while i < self.options.count() {
-            result = result + self.options.getUnchecked(i).toAnsi();
-            i = i + 1;
+        for option in self.options {
+            result = result + option.toAnsi();
         }
         result
     }
@@ -174,27 +168,21 @@ public struct Box {
     public func render() {
         // Top edge
         print(moveTo(x: self.x, y: self.y) + self.style("╔"));
-        var i: Int64 = 0;
-        while i < self.width - 2 {
+        for _ in Range[Int64](0, self.width - 2) {
             print(self.style("═"));
-            i = i + 1;
         }
         print(self.style("╗"));
 
         // Side edges
-        var row: Int64 = 1;
-        while row < self.height - 1 {
+        for row in Range[Int64](1, self.height - 1) {
             print(moveTo(x: self.x, y: self.y + row) + self.style("║"));
             print(moveTo(x: self.x + self.width - 1, y: self.y + row) + self.style("║"));
-            row = row + 1;
         }
 
         // Bottom edge
         print(moveTo(x: self.x, y: self.y + self.height - 1) + self.style("╚"));
-        i = 0;
-        while i < self.width - 2 {
+        for _ in Range[Int64](0, self.width - 2) {
             print(self.style("═"));
-            i = i + 1;
         }
         print(self.style("╝"));
     }
@@ -203,19 +191,15 @@ public struct Box {
     public func renderOpen() {
         // Top edge
         print(moveTo(x: self.x, y: self.y) + self.style("╔"));
-        var i: Int64 = 0;
-        while i < self.width - 2 {
+        for _ in Range[Int64](0, self.width - 2) {
             print(self.style("═"));
-            i = i + 1;
         }
         print(self.style("╗"));
 
         // Side edges only (no bottom)
-        var row: Int64 = 1;
-        while row < self.height {
+        for row in Range[Int64](1, self.height) {
             print(moveTo(x: self.x, y: self.y + row) + self.style("║"));
             print(moveTo(x: self.x + self.width - 1, y: self.y + row) + self.style("║"));
-            row = row + 1;
         }
     }
 
@@ -223,19 +207,15 @@ public struct Box {
     public func renderPartial(rows rows: Int64) {
         // Top edge
         print(moveTo(x: self.x, y: self.y) + self.style("╔"));
-        var i: Int64 = 0;
-        while i < self.width - 2 {
+        for _ in Range[Int64](0, self.width - 2) {
             print(self.style("═"));
-            i = i + 1;
         }
         print(self.style("╗"));
 
         // Side edges for specified rows
-        var row: Int64 = 1;
-        while row <= rows {
+        for row in Range[Int64](1, rows + 1) {
             print(moveTo(x: self.x, y: self.y + row) + self.style("║"));
             print(moveTo(x: self.x + self.width - 1, y: self.y + row) + self.style("║"));
-            row = row + 1;
         }
     }
 }
@@ -246,10 +226,8 @@ public struct Box {
 
 public func repeatStr(s s: String, count count: Int64) -> String {
     var result = "";
-    var i: Int64 = 0;
-    while i < count {
+    for _ in Range[Int64](0, count) {
         result = result + s;
-        i = i + 1;
     }
     result
 }
