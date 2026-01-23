@@ -1040,6 +1040,9 @@ pub enum ExprKind {
         method_name: String,
         /// Arguments to the method call
         arguments: Vec<CallArgument>,
+        /// Protocol method candidates for conformance checking.
+        /// If present, generates "does not conform to X" errors instead of "no member Y".
+        protocol_candidates: Vec<SymbolId>,
     },
 
     /// Implicit struct initialization: `Point(x: 1, y: 2)` when no explicit init exists.
@@ -1599,6 +1602,7 @@ impl Expression {
                     target_ty,
                     method_name,
                     arguments,
+                    ..
                 } => {
                     let args: Vec<String> = arguments.iter().map(|a| format_expr(&a.value)).collect();
                     format!("{}.{}({})", target_ty, method_name, args.join(", "))
@@ -2268,10 +2272,15 @@ impl Expression {
     /// Create a deferred static method call expression.
     /// Used for `try` expressions where we call `R.fromResidual(early)` and R is
     /// the function's return type (which may have inference variables).
+    ///
+    /// If `protocol_candidates` is non-empty, the constraint generator will emit
+    /// conformance constraints for better error messages ("does not conform to X"
+    /// instead of "no member Y").
     pub fn deferred_static_call(
         target_ty: Ty,
         method_name: String,
         arguments: Vec<CallArgument>,
+        protocol_candidates: Vec<SymbolId>,
         result_ty: Ty,
         span: Span,
     ) -> Self {
@@ -2281,6 +2290,7 @@ impl Expression {
                 target_ty,
                 method_name,
                 arguments,
+                protocol_candidates,
             },
             ty: result_ty,
             span,

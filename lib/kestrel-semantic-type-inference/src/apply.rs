@@ -297,6 +297,7 @@ fn apply_to_expression(expr: &Expression, solution: &Solution) -> Expression {
             target_ty,
             method_name,
             arguments,
+            protocol_candidates,
         } => {
             let resolved_target_ty = resolve_type(target_ty, solution);
             let resolved_arguments: Vec<CallArgument> = arguments
@@ -342,6 +343,7 @@ fn apply_to_expression(expr: &Expression, solution: &Solution) -> Expression {
                         target_ty: resolved_target_ty,
                         method_name: method_name.clone(),
                         arguments: resolved_arguments,
+                        protocol_candidates: protocol_candidates.clone(),
                     }
                 }
             } else {
@@ -350,6 +352,7 @@ fn apply_to_expression(expr: &Expression, solution: &Solution) -> Expression {
                     target_ty: resolved_target_ty,
                     method_name: method_name.clone(),
                     arguments: resolved_arguments,
+                    protocol_candidates: protocol_candidates.clone(),
                 }
             }
         },

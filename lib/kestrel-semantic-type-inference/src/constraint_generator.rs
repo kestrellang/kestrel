@@ -564,6 +564,7 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
             target_ty,
             method_name,
             arguments,
+            protocol_candidates,
         } => {
             // Generate constraints for arguments
             for arg in arguments {
@@ -576,6 +577,15 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
             // Register target type and result type
             ctx.register_type(target_ty);
             ctx.register_type(&expr.ty);
+
+            // If protocol candidates are provided, emit conformance constraints.
+            // This produces better error messages ("does not conform to X" instead of "no member Y").
+            for candidate_id in protocol_candidates {
+                if let Some(protocol_id) = ctx.oracle().protocol_for_method(*candidate_id) {
+                    let protocol_ref = ProtocolRef::new(protocol_id, expr.span.clone());
+                    ctx.conforms(target_ty.id(), protocol_ref);
+                }
+            }
 
             // Generate a member access constraint for the static method
             // is_static = true indicates this is a static method lookup

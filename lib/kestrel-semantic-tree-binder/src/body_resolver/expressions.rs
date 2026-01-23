@@ -1657,12 +1657,21 @@ fn resolve_try_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) ->
     // Create argument: residual: early
     let from_residual_arg = CallArgument::labeled("residual".to_string(), early_ref, span.clone());
 
+    // Get the FromResidualMethod for better error messages
+    let protocol_candidates: Vec<_> = ctx
+        .model
+        .builtin_registry()
+        .method(LanguageFeature::FromResidualMethod)
+        .into_iter()
+        .collect();
+
     // Create deferred static call: R.fromResidual(early)
     // Type inference will resolve this to the actual static method
     let from_residual_call = Expression::deferred_static_call(
         return_ty.clone(),
         "fromResidual".to_string(),
         vec![from_residual_arg],
+        protocol_candidates,
         return_ty, // Result type is also R (Self)
         span.clone(),
     );
