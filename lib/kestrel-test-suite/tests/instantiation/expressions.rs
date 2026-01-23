@@ -766,6 +766,7 @@ mod integration {
             func complex() -> [(lang.i64, lang.i64)] { [(1, 2), (3, 4)] }
         "#,
         )
+        .with_stdlib()
         .expect(Compiles)
         .expect(Symbol::new("pair").is(SymbolKind::Function))
         .expect(Symbol::new("numbers").is(SymbolKind::Function))

@@ -131,6 +131,7 @@ impl Constructor {
                 LiteralValue::String(s) => Constructor::StringLiteral(s.clone()),
                 LiteralValue::Float(_) => Constructor::NonExhaustive, // Floats can't be exhaustively matched
                 LiteralValue::Unit => Constructor::Unit,
+                LiteralValue::Null => Constructor::NonExhaustive, // Null literals handled via Optional pattern matching
             },
 
             PatternKind::EnumVariant {

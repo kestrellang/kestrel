@@ -267,9 +267,10 @@ mod self_type {
             }
         "#,
         )
+        .with_stdlib()
         .expect(Compiles)
         .expect(
-            Symbol::new("Item.getAll")
+            Symbol::new("Test.Item.getAll")
                 .is(SymbolKind::Function)
                 .has(Behavior::ImplementsProtocol("Collection", "getAll")),
         );
@@ -337,6 +338,7 @@ mod associated_types {
             }
         "#,
         )
+        .with_stdlib()
         .expect(Compiles)
         .expect(
             Symbol::new("IntArray.getAll")

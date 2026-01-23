@@ -130,6 +130,7 @@ func test() -> lang.i64 {
 }
 "#,
         )
+        .with_stdlib()
         .expect(HasError("type mismatch"));
     }
 
@@ -317,6 +318,7 @@ func test() {
 }
 "#,
         )
+        .with_stdlib()
         .expect(HasError("type mismatch"));
     }
 
@@ -884,7 +886,7 @@ func test() {
 }
 "#,
         )
-        .expect(HasError("does not conform to protocol"));
+        .expect(HasError("array element type mismatch"));
     }
 
     #[test]
@@ -898,7 +900,7 @@ func test() {
 }
 "#,
         )
-        .expect(HasError("does not conform to protocol"));
+        .expect(HasError("array element type mismatch"));
     }
 
     #[test]
@@ -912,7 +914,7 @@ func test() {
 }
 "#,
         )
-        .expect(HasError("does not conform to protocol"));
+        .expect(HasError("array element type mismatch"));
     }
 
     #[test]
@@ -928,6 +930,7 @@ func test() {
 }
 "#,
         )
+        .with_stdlib()
         .expect(Compiles);
     }
 
@@ -942,6 +945,7 @@ func test() {
 }
 "#,
         )
+        .with_stdlib()
         .expect(Compiles);
     }
 
@@ -957,7 +961,7 @@ func test() {
 }
 "#,
         )
-        .expect(HasError("does not conform to protocol"));
+        .expect(HasError("array element type mismatch"));
     }
 }
 

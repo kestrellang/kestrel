@@ -2010,6 +2010,7 @@ mod constraint_enforcement {
             }
         "#,
         )
+        .with_stdlib()
         .expect(Compiles);
     }
 

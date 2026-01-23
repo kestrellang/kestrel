@@ -137,15 +137,16 @@ mod arrays {
     fn array_basic_forms() {
         Test::new(
             r#"module Test
-            func empty() -> [lang.i64] { [] }
-            func single() -> [lang.i64] { [1] }
-            func multiple() -> [lang.i64] { [1, 2, 3] }
+            func empty_test() -> [lang.i64] { [] }
+            func single_test() -> [lang.i64] { [1] }
+            func multiple_test() -> [lang.i64] { [1, 2, 3] }
         "#,
         )
+        .with_stdlib()
         .expect(Compiles)
-        .expect(Symbol::new("empty").is(SymbolKind::Function))
-        .expect(Symbol::new("single").is(SymbolKind::Function))
-        .expect(Symbol::new("multiple").is(SymbolKind::Function));
+        .expect(Symbol::new("empty_test").is(SymbolKind::Function))
+        .expect(Symbol::new("single_test").is(SymbolKind::Function))
+        .expect(Symbol::new("multiple_test").is(SymbolKind::Function));
     }
 
     #[test]
@@ -156,6 +157,7 @@ mod arrays {
             func nested() -> [[lang.i64]] { [[1, 2], [3, 4]] }
         "#,
         )
+        .with_stdlib()
         .expect(Compiles)
         .expect(Symbol::new("trailing").is(SymbolKind::Function))
         .expect(Symbol::new("nested").is(SymbolKind::Function));
@@ -170,6 +172,7 @@ mod arrays {
             func of_booleans() -> [lang.i1] { [true, false, true] }
         "#,
         )
+        .with_stdlib()
         .expect(Compiles)
         .expect(Symbol::new("of_strings").is(SymbolKind::Function))
         .expect(Symbol::new("of_booleans").is(SymbolKind::Function));
@@ -227,6 +230,7 @@ mod tuples {
             func of_arrays() -> ([lang.i64], [lang.i64]) { ([1, 2], [3, 4]) }
         "#,
         )
+        .with_stdlib()
         .expect(Compiles)
         .expect(Symbol::new("mixed_types").is(SymbolKind::Function))
         .expect(Symbol::new("of_arrays").is(SymbolKind::Function));
@@ -246,6 +250,7 @@ mod grouping {
             func array() -> [lang.i64] { ([1, 2, 3]) }
         "#,
         )
+        .with_stdlib()
         .expect(Compiles)
         .expect(Symbol::new("integer").is(SymbolKind::Function))
         .expect(Symbol::new("string").is(SymbolKind::Function))
@@ -291,6 +296,7 @@ mod complex {
             func deeply_nested() -> [[(lang.i64,)]] { [[(1,)]] }
         "#,
         )
+        .with_stdlib()
         .expect(Compiles)
         .expect(Symbol::new("array_of_tuples").is(SymbolKind::Function))
         .expect(Symbol::new("deeply_nested").is(SymbolKind::Function));
@@ -303,12 +309,13 @@ mod complex {
             r#"module Test
             func integer() -> lang.i64 { 42 }
             func floating() -> lang.f64 { 3.14 }
-            func text() -> lang.str { "hello" }
+            func string() -> lang.str { "hello" }
             func boolean() -> lang.i1 { true }
             func sequence() -> [lang.i64] { [1, 2, 3] }
             func pair() -> (lang.i64, lang.i64) { (1, 2) }
         "#,
         )
+        .with_stdlib()
         .expect(Compiles)
         .expect(
             Symbol::new("integer")
@@ -321,7 +328,7 @@ mod complex {
                 .has(Behavior::ParameterCount(0)),
         )
         .expect(
-            Symbol::new("text")
+            Symbol::new("string")
                 .is(SymbolKind::Function)
                 .has(Behavior::ParameterCount(0)),
         )

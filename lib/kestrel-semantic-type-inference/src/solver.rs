@@ -105,6 +105,9 @@ fn apply_default_literal_types(ctx: &mut InferenceContext<'_>) {
             LanguageFeature::ExpressibleByStringLiteral => ctx.oracle().default_string_type(span),
             LanguageFeature::ExpressibleByBoolLiteral => ctx.oracle().default_boolean_type(span),
             LanguageFeature::ExpressibleByCharLiteral => ctx.oracle().default_char_type(span),
+            // Null literal default is generic (NullLiteralType[T] = Optional[T]),
+            // so we can't apply a concrete default - type must be inferred from context
+            LanguageFeature::ExpressibleByNullLiteral => continue,
             _ => continue,
         };
 
@@ -126,6 +129,7 @@ fn get_literal_feature_for_protocol(
         LanguageFeature::ExpressibleByStringLiteral,
         LanguageFeature::ExpressibleByBoolLiteral,
         LanguageFeature::ExpressibleByCharLiteral,
+        LanguageFeature::ExpressibleByNullLiteral,
     ];
 
     for feature in features {

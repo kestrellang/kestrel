@@ -377,6 +377,8 @@ pub enum LiteralValue {
     Char(u32),
     /// Boolean literal: `true`, `false`
     Bool(bool),
+    /// Null literal: `null`
+    Null,
 }
 
 /// Primitive types available in the `lang` namespace.
@@ -1526,6 +1528,7 @@ impl Expression {
                         }
                     },
                     LiteralValue::Bool(b) => b.to_string(),
+                    LiteralValue::Null => format!("null: {}", expr.ty),
                 },
                 ExprKind::Array(elements) => {
                     let items: Vec<_> = elements.iter().map(format_expr).collect();
@@ -1928,6 +1931,20 @@ impl Expression {
         Expression {
             id: ExprId::new(),
             kind: ExprKind::Literal(LiteralValue::Bool(value)),
+            ty: Ty::infer(span.clone()),
+            span,
+            mutable: false,
+        }
+    }
+
+    /// Create a null literal expression.
+    ///
+    /// During type inference, an ExpressibleByNullLiteral constraint will be added
+    /// and the type will be resolved based on context (defaulting to Optional[T] if ambiguous).
+    pub fn null_literal(span: Span) -> Self {
+        Expression {
+            id: ExprId::new(),
+            kind: ExprKind::Literal(LiteralValue::Null),
             ty: Ty::infer(span.clone()),
             span,
             mutable: false,

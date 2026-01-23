@@ -2,7 +2,7 @@ use kestrel_test_suite::*;
 
 #[test]
 fn null_assignable_to_optional_type() {
-    // null desugars to .None, so stdlib is required for Optional enum
+    // null uses ExpressibleByNullLiteral protocol, stdlib provides Optional implementation
     Test::new(
         r#"
         module Main
@@ -17,9 +17,8 @@ fn null_assignable_to_optional_type() {
 }
 
 #[test]
-#[ignore]
 fn non_optional_type_cannot_be_null() {
-    // TODO: Handle null properly with optional types
+    // lang.i64 does not conform to ExpressibleByNullLiteral
     Test::new(
         r#"
         module Main
@@ -28,5 +27,6 @@ fn non_optional_type_cannot_be_null() {
         }
         "#,
     )
-    .expect(HasError("cannot assign null to non-optional type"));
+    .with_stdlib()
+    .expect(HasError("does not conform"));
 }

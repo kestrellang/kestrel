@@ -41,6 +41,7 @@ mod path_expressions {
         Test::new(
             "module Test\nfunc test(foo: lang.i64, bar: lang.i64) -> lang.i64 {\n[foo, bar];\n(foo, bar);\n(foo)\n}",
         )
+        .with_stdlib()
         .expect(Compiles)
         .expect(
             Symbol::new("Test.test")
@@ -79,7 +80,13 @@ mod variable_declarations {
         let_with_complex_type,
         r#"let x: (lang.i64, lang.str) = (1, "hello");"#
     );
-    compiles!(let_with_array_type, "let x: [lang.i64] = [1, 2, 3];");
+    #[test]
+    fn let_with_array_type() {
+        Test::new("module Test\nfunc test() {\nlet x: [lang.i64] = [1, 2, 3];\n}")
+            .with_stdlib()
+            .expect(Compiles)
+            .expect(Symbol::new("Test.test").is(SymbolKind::Function));
+    }
 }
 
 mod variable_shadowing {
@@ -142,6 +149,7 @@ mod complex_expressions {
     #[test]
     fn nested_containers() {
         Test::new("module Test\nfunc test() {\n[[1, 2], [3, 4]];\n((1, 2), (3, 4));\n[(1, 2), (3, 4)];\n([1, 2], [3, 4]);\n}")
+            .with_stdlib()
             .expect(Compiles)
             .expect(Symbol::new("Test.test").is(SymbolKind::Function));
     }
@@ -159,6 +167,7 @@ mod complex_expressions {
     #[test]
     fn complex_type_declarations() {
         Test::new("module Test\nfunc test() {\nlet x: [[lang.i64]] = [[1, 2], [3, 4]];\nlet pair: (lang.i64, lang.i64) = (1, 2);\n}")
+            .with_stdlib()
             .expect(Compiles)
             .expect(Symbol::new("Test.test").is(SymbolKind::Function));
     }
@@ -187,6 +196,7 @@ mod edge_cases {
     #[test]
     fn trailing_commas() {
         Test::new("module Test\nfunc test() {\n[1, 2, 3,];\n(1, 2, 3,);\n}")
+            .with_stdlib()
             .expect(Compiles)
             .expect(Symbol::new("Test.test").is(SymbolKind::Function));
     }
@@ -212,6 +222,7 @@ mod edge_cases {
     #[test]
     fn unary_in_containers() {
         Test::new("module Test\nfunc test() {\n[lang.i64_neg(1), lang.i64_neg(2), lang.i64_neg(3)];\n(lang.i64_neg(1), lang.i64_neg(2));\n[([(lang.i64_neg(1),)],)];\n}")
+            .with_stdlib()
             .expect(Compiles)
             .expect(Symbol::new("Test.test").is(SymbolKind::Function));
     }
@@ -242,6 +253,7 @@ mod edge_cases {
     #[test]
     fn whitespace_handling() {
         Test::new("module Test\nfunc test() {\n[   1   ,   2   ,   3   ];\n[\n    1,\n    2,\n    3\n];\n}")
+            .with_stdlib()
             .expect(Compiles)
             .expect(Symbol::new("Test.test").is(SymbolKind::Function));
     }
@@ -273,6 +285,7 @@ mod edge_cases {
     #[test]
     fn deeply_nested_structures() {
         Test::new("module Test\nfunc test() {\n[[[1]]];\n((((((1,),),),),),);\nlet x: [[[lang.i64]]] = [[[1]]];\n}")
+            .with_stdlib()
             .expect(Compiles)
             .expect(Symbol::new("Test.test").is(SymbolKind::Function));
     }
@@ -280,6 +293,7 @@ mod edge_cases {
     #[test]
     fn complex_function_types() {
         Test::new("module Test\nfunc test(foo: (lang.i64) -> (lang.i64) -> lang.i64) {\nlet f: (lang.i64) -> (lang.i64) -> lang.i64 = foo;\nlet fs: [(lang.i64) -> lang.i64] = [];\n}")
+            .with_stdlib()
             .expect(Compiles)
             .expect(Symbol::new("Test.test").is(SymbolKind::Function).has(Behavior::ParameterCount(1)));
     }
@@ -298,24 +312,9 @@ mod edge_cases {
     );
 
     #[test]
-    fn null_literals() {
-        Test::new(
-            r#"
-        module Test
-        func test() {
-        null;
-        [null, null, null];
-        (null, 42, null);
-        [null, 1, null, 2, null, 3];
-        }"#,
-        )
-        .expect(Compiles)
-        .expect(Symbol::new("Test.test").is(SymbolKind::Function));
-    }
-
-    #[test]
     fn declarations_with_unary_initializers() {
         Test::new("module Test\nfunc test(foo: lang.i64) {\nlet x: lang.i64 = lang.i64_neg(foo);\nlet y: (lang.i64, lang.i64) = (lang.i64_neg(1), lang.i64_neg(2));\nlet z: [lang.i64] = [lang.i64_neg(1), lang.i64_neg(2), lang.i64_neg(3)];\nlet w: (lang.i64, lang.i1, lang.i64) = (lang.i64_neg(1), lang.i1_not(true), lang.i64_neg(lang.i64_neg(2)));\n}")
+            .with_stdlib()
             .expect(Compiles)
             .expect(Symbol::new("Test.test").is(SymbolKind::Function).has(Behavior::ParameterCount(1)));
     }
@@ -323,6 +322,7 @@ mod edge_cases {
     #[test]
     fn many_variable_declarations() {
         Test::new("module Test\nfunc test() {\nlet a: lang.i64 = 1;\nlet b: lang.f64 = 2.0;\nlet c: lang.str = \"hello\";\nlet d: lang.i1 = true;\nlet e: [lang.i64] = [1, 2, 3];\nlet f: (lang.i64, lang.i64) = (1, 2);\nlet g: () = ();\n}")
+            .with_stdlib()
             .expect(Compiles)
             .expect(Symbol::new("Test.test").is(SymbolKind::Function));
     }
@@ -357,6 +357,7 @@ mod edge_cases {
     #[test]
     fn comments_in_code() {
         Test::new("module Test\nfunc test() -> lang.i64 {\n// This is a comment\n42;\n[1, /* comment */ 2, 3];\n/* outer /* inner */ still outer */\n42\n}")
+            .with_stdlib()
             .expect(Compiles)
             .expect(Symbol::new("Test.test").is(SymbolKind::Function));
     }

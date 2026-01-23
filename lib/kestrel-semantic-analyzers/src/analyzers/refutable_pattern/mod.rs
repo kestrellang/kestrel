@@ -135,6 +135,7 @@ fn format_literal_value(value: &LiteralValue) -> String {
             }
         },
         LiteralValue::Bool(b) => b.to_string(),
+        LiteralValue::Null => "null".to_string(),
     }
 }
 

@@ -2,7 +2,7 @@
 
 module std.result
 
-import std.core.(Equatable, Formattable, Bool, ControlFlow, Tryable, FromResidual)
+import std.core.(Equatable, Formattable, Bool, ControlFlow, Tryable, FromResidual, ExpressibleByNullLiteral)
 import std.text.(String)
 // Note: Iterator import creates circular dependency - Iterator imports Optional
 // import std.iter.(Iterator)
@@ -184,6 +184,13 @@ extend Optional[T]: Formattable where T: Formattable {
             .Some(value) => "Some(" + value.format() + ")",
             .None => "None"
         }
+    }
+}
+
+// ExpressibleByNullLiteral - allows `null` to create Optional.None
+extend Optional[T]: ExpressibleByNullLiteral {
+    public init() {
+        self = .None
     }
 }
 

@@ -75,6 +75,7 @@ func test() -> [lang.i64] {
 }
 "#,
         )
+        .with_stdlib()
         .expect(Compiles)
         .expect(
             Symbol::new("test")
@@ -173,6 +174,7 @@ func test() -> lang.i64 {
 }
 "#,
         )
+        .with_stdlib()
         .expect(Compiles)
         .expect(
             Symbol::new("test")

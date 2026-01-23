@@ -252,16 +252,16 @@ mod expressible_by_bool_literal {
     }
 }
 
-mod expressible_by_nil_literal {
+mod expressible_by_null_literal {
     use super::*;
 
     #[test]
     fn protocol_definition() {
         Test::new(
             r#"module Test
-            @builtin(.ExpressibleByNilLiteral)
-            protocol ExpressibleByNilLiteral {
-                init(nilLiteral value: ())
+            @builtin(.ExpressibleByNullLiteral)
+            protocol ExpressibleByNullLiteral {
+                init()
             }
         "#,
         )
@@ -270,14 +270,14 @@ mod expressible_by_nil_literal {
     }
 
     #[test]
-    fn optional_from_nil() {
+    fn optional_from_null() {
         Test::new(
             r#"module Test
-            enum Optional[T]: Prelude.ExpressibleByNilLiteral {
+            enum Optional[T]: Prelude.ExpressibleByNullLiteral {
                 case Some(T)
                 case None
 
-                init(nilLiteral value: ()) {
+                init() {
                     self = Optional.None
                 }
             }
@@ -286,6 +286,20 @@ mod expressible_by_nil_literal {
             }
         "#,
         )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn null_with_stdlib_optional() {
+        Test::new(
+            r#"module Test
+            import std.num.Int64
+            func test() -> Int64? {
+                null
+            }
+        "#,
+        )
+        .with_stdlib()
         .expect(Compiles);
     }
 }
@@ -302,6 +316,7 @@ mod expressible_by_array_literal {
             }
         "#,
         )
+        .with_stdlib()
         .expect(Compiles);
     }
 
@@ -314,6 +329,7 @@ mod expressible_by_array_literal {
             }
         "#,
         )
+        .with_stdlib()
         .expect(Compiles);
     }
 
@@ -326,6 +342,7 @@ mod expressible_by_array_literal {
             }
         "#,
         )
+        .with_stdlib()
         .expect(Compiles);
     }
 }

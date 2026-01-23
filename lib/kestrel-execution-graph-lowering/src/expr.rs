@@ -1663,6 +1663,9 @@ fn lower_literal(ctx: &mut LoweringContext, lit: &LiteralValue, expr: &Expressio
         // Struct types - generate init call
         TyKind::Struct { symbol, .. } => lower_literal_init_call(ctx, lit, expr, symbol),
 
+        // Enum types - generate init call for null literals (Optional)
+        TyKind::Enum { symbol, .. } => lower_enum_literal_init_call(ctx, lit, expr, symbol),
+
         // For inference variables or error types, fall back to immediate
         TyKind::Infer | TyKind::Error => match lit {
             LiteralValue::Unit => Value::Immediate(Immediate::unit()),
@@ -1671,6 +1674,7 @@ fn lower_literal(ctx: &mut LoweringContext, lit: &LiteralValue, expr: &Expressio
             LiteralValue::Bool(b) => Value::Immediate(Immediate::bool(*b)),
             LiteralValue::Char(c) => Value::Immediate(Immediate::i32(*c as i32)),
             LiteralValue::String(s) => Value::Immediate(Immediate::string(s.clone())),
+            LiteralValue::Null => Value::Immediate(Immediate::error()), // Null requires concrete type
         },
 
         // Other types - this shouldn't happen for literals
@@ -1713,19 +1717,24 @@ fn lower_literal_init_call(
     use semantic_tree::symbol::Symbol;
 
     // Determine the init parameter label and primitive value based on literal type
+    // Null literals use init() with no parameters, handled specially below
     let (init_label, primitive_value) = match lit {
-        LiteralValue::Integer(n) => ("intLiteral", Value::Immediate(Immediate::i64(*n))),
-        LiteralValue::Float(f) => ("floatLiteral", Value::Immediate(Immediate::f64(*f))),
-        LiteralValue::Bool(b) => ("boolLiteral", Value::Immediate(Immediate::bool(*b))),
-        LiteralValue::Char(c) => ("charLiteral", Value::Immediate(Immediate::i32(*c as i32))),
+        LiteralValue::Integer(n) => (Some("intLiteral"), Value::Immediate(Immediate::i64(*n))),
+        LiteralValue::Float(f) => (Some("floatLiteral"), Value::Immediate(Immediate::f64(*f))),
+        LiteralValue::Bool(b) => (Some("boolLiteral"), Value::Immediate(Immediate::bool(*b))),
+        LiteralValue::Char(c) => (
+            Some("charLiteral"),
+            Value::Immediate(Immediate::i32(*c as i32)),
+        ),
         LiteralValue::String(s) => (
-            "stringLiteral",
+            Some("stringLiteral"),
             Value::Immediate(Immediate::string(s.clone())),
         ),
         LiteralValue::Unit => return Value::Immediate(Immediate::unit()),
+        LiteralValue::Null => (None, Value::Immediate(Immediate::unit())), // No parameter for null
     };
 
-    // Find the init with the matching parameter label
+    // Find the init with the matching parameter label (or no parameters for null)
     let init_symbol = struct_symbol
         .metadata()
         .children()
@@ -1734,12 +1743,21 @@ fn lower_literal_init_call(
             if child.metadata().kind() != KestrelSymbolKind::Initializer {
                 return false;
             }
-            // Check if this init has a parameter with the right label
+            // Check if this init has the right parameters
             if let Some(callable) = child.metadata().get_behavior::<CallableBehavior>() {
-                callable
-                    .parameters()
-                    .first()
-                    .is_some_and(|p| p.label.as_ref().is_some_and(|l| l.value == init_label))
+                match init_label {
+                    Some(label) => {
+                        // Match init with specific parameter label
+                        callable
+                            .parameters()
+                            .first()
+                            .is_some_and(|p| p.label.as_ref().is_some_and(|l| l.value == label))
+                    },
+                    None => {
+                        // Match init with no parameters (for null literals)
+                        callable.parameters().is_empty()
+                    },
+                }
             } else {
                 false
             }
@@ -1755,6 +1773,7 @@ fn lower_literal_init_call(
             LiteralValue::Char(c) => Value::Immediate(Immediate::i32(*c as i32)),
             LiteralValue::String(s) => Value::Immediate(Immediate::string(s.clone())),
             LiteralValue::Unit => Value::Immediate(Immediate::unit()),
+            LiteralValue::Null => Value::Immediate(Immediate::error()), // Null requires init
         };
     };
 
@@ -1773,18 +1792,20 @@ fn lower_literal_init_call(
     let init_name_suffix =
         if let Some(callable) = init_sym.metadata().get_behavior::<CallableBehavior>() {
             // Use external labels if present, otherwise fall back to internal names
-            let name_parts: Vec<&str> = callable
+            let label_parts: Vec<&str> = callable
                 .parameters()
                 .iter()
                 .map(|p| p.external_label().unwrap_or_else(|| p.internal_name()))
                 .collect();
-            if name_parts.is_empty() {
+            if label_parts.is_empty() {
                 "init".to_string()
             } else {
-                format!("init${}", name_parts.join("$"))
+                format!("init${}", label_parts.join("$"))
             }
+        } else if let Some(label) = init_label {
+            format!("init${}", label)
         } else {
-            format!("init${}", init_label)
+            "init".to_string()
         };
     name_parts.push(init_name_suffix);
 
@@ -1807,6 +1828,7 @@ fn lower_literal_init_call(
 
     // Build call args: self_ref first (MutRef), then the primitive value(s)
     // String literals are special: they need both ptr and length as separate args
+    // Null literals have no parameters (just self)
     let call_args = match lit {
         LiteralValue::String(s) => {
             // String.init(stringLiteral ptr: lang.ptr[lang.i8], length: lang.i64)
@@ -1819,8 +1841,12 @@ fn lower_literal_init_call(
                 CallArg::borrow(len_value),
             ]
         },
+        LiteralValue::Null => {
+            // ExpressibleByNullLiteral.init() - no parameters, just self
+            vec![CallArg::mutating(Value::Place(self_ref_place))]
+        },
         _ => {
-            // All literal init methods take the primitive by reference (borrow)
+            // All other literal init methods take the primitive by reference (borrow)
             vec![
                 CallArg::mutating(Value::Place(self_ref_place)),
                 CallArg::borrow(primitive_value),
@@ -1838,6 +1864,110 @@ fn lower_literal_init_call(
     ctx.emit_call_with_modes(unit_place, mir_callee, call_args);
 
     // Return the initialized struct
+    Value::Place(result_place)
+}
+
+/// Lower a literal to an init call for enum types that conform to ExpressibleBy* protocols.
+///
+/// Currently only supports null literals with Optional types that implement
+/// ExpressibleByNullLiteral with init().
+fn lower_enum_literal_init_call(
+    ctx: &mut LoweringContext,
+    lit: &LiteralValue,
+    expr: &Expression,
+    enum_symbol: &std::sync::Arc<kestrel_semantic_tree::symbol::enum_symbol::EnumSymbol>,
+) -> Value {
+    use semantic_tree::symbol::Symbol;
+
+    // Only null literals are supported for enum types currently
+    if !matches!(lit, LiteralValue::Null) {
+        ctx.emit_error(LoweringError::internal(
+            "non-null literal with enum type".to_string(),
+            Some(expr.span.clone()),
+        ));
+        return Value::Immediate(Immediate::error());
+    }
+
+    // Find init() with no parameters (from ExpressibleByNullLiteral)
+    let init_symbol: Option<
+        std::sync::Arc<dyn semantic_tree::symbol::Symbol<kestrel_semantic_tree::language::KestrelLanguage>>,
+    > = enum_symbol
+        .metadata()
+        .children()
+        .into_iter()
+        .find(|child| {
+            if child.metadata().kind() != KestrelSymbolKind::Initializer {
+                return false;
+            }
+            if let Some(callable) = child.metadata().get_behavior::<CallableBehavior>() {
+                callable.parameters().is_empty()
+            } else {
+                false
+            }
+        });
+
+    let Some(_init_sym) = init_symbol else {
+        ctx.emit_error(LoweringError::internal(
+            "no init() found for null literal".to_string(),
+            Some(expr.span.clone()),
+        ));
+        return Value::Immediate(Immediate::error());
+    };
+
+    // Build the qualified name for the init function
+    let mut name_parts = Vec::new();
+    collect_symbol_name_parts(
+        &(enum_symbol.clone()
+            as std::sync::Arc<
+                dyn semantic_tree::symbol::Symbol<kestrel_semantic_tree::language::KestrelLanguage>,
+            >),
+        &mut name_parts,
+    );
+    name_parts.push("init".to_string());
+
+    // Get type arguments from the enum type
+    let type_args: Vec<_> = match expr.ty.kind() {
+        TyKind::Enum { substitutions, .. } => substitutions
+            .iter()
+            .map(|(_, ty)| lower_type(ctx, ty))
+            .collect(),
+        _ => Vec::new(),
+    };
+
+    let init_name = ctx.mir.intern_name(QualifiedNameData::new(name_parts));
+
+    // Lower the result type
+    let result_ty = lower_type(ctx, &expr.ty);
+
+    // Allocate space for the result
+    let result_local = ctx.create_temp("literal", result_ty);
+    let result_place = Place::local(result_local);
+
+    // Create a mutable reference to the result place
+    let ref_ty = ctx.mir.ty_ref_mut(result_ty);
+    let self_ref_local = ctx.create_temp("self_ref", ref_ty);
+    let self_ref_place = Place::local(self_ref_local);
+
+    // Emit: %self_ref = ref var %result
+    ctx.emit_assign(self_ref_place.clone(), Rvalue::RefMut(result_place.clone()));
+
+    // Build call args: just self_ref (no other parameters for null literal)
+    let call_args = vec![CallArg::mutating(Value::Place(self_ref_place))];
+
+    // Create a temp for the unit return value of init (we discard it)
+    let unit_ty = ctx.mir.ty_unit();
+    let unit_local = ctx.create_temp("init_ret", unit_ty);
+    let unit_place = Place::local(unit_local);
+
+    // Call the init function
+    let mir_callee = if type_args.is_empty() {
+        Callee::direct(init_name)
+    } else {
+        Callee::direct_generic(init_name, type_args)
+    };
+    ctx.emit_call_with_modes(unit_place, mir_callee, call_args);
+
+    // Return the initialized enum
     Value::Place(result_place)
 }
 

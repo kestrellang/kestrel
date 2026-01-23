@@ -29,7 +29,7 @@ pub enum LanguageFeature {
     ExpressibleByStringLiteral,
     ExpressibleByCharLiteral,
     ExpressibleByBoolLiteral,
-    ExpressibleByNilLiteral,
+    ExpressibleByNullLiteral,
     ExpressibleByArrayLiteral,
     #[allow(non_camel_case_types)]
     _ExpressibleByArrayLiteral,
@@ -44,6 +44,7 @@ pub enum LanguageFeature {
     DefaultStringLiteralType,
     DefaultBooleanLiteralType,
     DefaultCharLiteralType,
+    DefaultNullLiteralType,
 
     // Operator protocols - arithmetic
     AddOperatorProtocol,
@@ -169,7 +170,7 @@ impl LanguageFeature {
             "ExpressibleByStringLiteral" => Some(Self::ExpressibleByStringLiteral),
             "ExpressibleByCharLiteral" => Some(Self::ExpressibleByCharLiteral),
             "ExpressibleByBoolLiteral" => Some(Self::ExpressibleByBoolLiteral),
-            "ExpressibleByNilLiteral" => Some(Self::ExpressibleByNilLiteral),
+            "ExpressibleByNullLiteral" => Some(Self::ExpressibleByNullLiteral),
             "ExpressibleByArrayLiteral" => Some(Self::ExpressibleByArrayLiteral),
             "_ExpressibleByArrayLiteral" => Some(Self::_ExpressibleByArrayLiteral),
             "ExpressibleByDictionaryLiteral" => Some(Self::ExpressibleByDictionaryLiteral),
@@ -179,6 +180,7 @@ impl LanguageFeature {
             "DefaultStringLiteralType" => Some(Self::DefaultStringLiteralType),
             "DefaultBooleanLiteralType" => Some(Self::DefaultBooleanLiteralType),
             "DefaultCharLiteralType" => Some(Self::DefaultCharLiteralType),
+            "DefaultNullLiteralType" => Some(Self::DefaultNullLiteralType),
             // Operator protocols - arithmetic
             "AddOperatorProtocol" => Some(Self::AddOperatorProtocol),
             "AddOperatorMethod" => Some(Self::AddOperatorMethod),
@@ -292,7 +294,7 @@ impl LanguageFeature {
             Self::ExpressibleByStringLiteral => "ExpressibleByStringLiteral",
             Self::ExpressibleByCharLiteral => "ExpressibleByCharLiteral",
             Self::ExpressibleByBoolLiteral => "ExpressibleByBoolLiteral",
-            Self::ExpressibleByNilLiteral => "ExpressibleByNilLiteral",
+            Self::ExpressibleByNullLiteral => "ExpressibleByNullLiteral",
             Self::ExpressibleByArrayLiteral => "ExpressibleByArrayLiteral",
             Self::_ExpressibleByArrayLiteral => "_ExpressibleByArrayLiteral",
             Self::ExpressibleByDictionaryLiteral => "ExpressibleByDictionaryLiteral",
@@ -302,6 +304,7 @@ impl LanguageFeature {
             Self::DefaultStringLiteralType => "DefaultStringLiteralType",
             Self::DefaultBooleanLiteralType => "DefaultBooleanLiteralType",
             Self::DefaultCharLiteralType => "DefaultCharLiteralType",
+            Self::DefaultNullLiteralType => "DefaultNullLiteralType",
             // Operator protocols - arithmetic
             Self::AddOperatorProtocol => "AddOperatorProtocol",
             Self::AddOperatorMethod => "AddOperatorMethod",
@@ -491,7 +494,7 @@ impl LanguageFeature {
                     disallow_enum_conformance: false,
                 },
             },
-            Self::ExpressibleByNilLiteral => BuiltinDefinition {
+            Self::ExpressibleByNullLiteral => BuiltinDefinition {
                 feature: *self,
                 kind: BuiltinKind::Protocol {
                     implicit_conformance: false,
@@ -558,6 +561,10 @@ impl LanguageFeature {
                 kind: BuiltinKind::TypeAlias,
             },
             Self::DefaultCharLiteralType => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::TypeAlias,
+            },
+            Self::DefaultNullLiteralType => BuiltinDefinition {
                 feature: *self,
                 kind: BuiltinKind::TypeAlias,
             },

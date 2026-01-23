@@ -202,6 +202,7 @@ fn describe_pattern(pattern: &Pattern) -> String {
                     }
                 },
                 LiteralValue::Bool(b) => b.to_string(),
+                LiteralValue::Null => "null".to_string(),
             }
         },
         PatternKind::EnumVariant {

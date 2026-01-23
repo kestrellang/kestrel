@@ -266,9 +266,9 @@ public protocol ExpressibleByBoolLiteral {
     init(boolLiteral value: lang.i1)
 }
 
-@builtin(.ExpressibleByNilLiteral)
-public protocol ExpressibleByNilLiteral {
-    init(nilLiteral value: ())
+@builtin(.ExpressibleByNullLiteral)
+public protocol ExpressibleByNullLiteral {
+    init()
 }
 "#,
 );

@@ -32,8 +32,8 @@ public protocol ExpressibleByCharLiteral {
     init(charLiteral value: lang.i32)
 }
 
-@builtin(.ExpressibleByNilLiteral)
-public protocol ExpressibleByNilLiteral {
+@builtin(.ExpressibleByNullLiteral)
+public protocol ExpressibleByNullLiteral {
     init()
 }
 
@@ -81,5 +81,8 @@ public type BooleanLiteralType = Bool
 
 @builtin(.DefaultCharLiteralType)
 public type CharLiteralType = Char
+
+@builtin(.DefaultNullLiteralType)
+public type NullLiteralType[T] = std.result.Optional[T]
 
 public type ArrayLiteralType[T] = std.collections.Array[T]

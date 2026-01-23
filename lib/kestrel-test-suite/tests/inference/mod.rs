@@ -423,6 +423,7 @@ func test() {
 }
 "#,
         )
+        .with_stdlib()
         .expect(Compiles);
     }
 
@@ -438,6 +439,7 @@ func test() {
 }
 "#,
         )
+        .with_stdlib()
         .expect(HasError("does not conform to protocol"));
     }
 }

@@ -101,8 +101,8 @@ pub fn resolve_expression(expr_node: &SyntaxNode, ctx: &mut BodyResolutionContex
         SyntaxKind::ExprBinary => resolve_binary_expression(expr_node, ctx),
 
         SyntaxKind::ExprNull => {
-            // `null` desugars to `.None` - an implicit member access to Optional.None
-            Expression::implicit_member_access("None".to_string(), None, span)
+            // Create a null literal - type inference will resolve via ExpressibleByNullLiteral
+            Expression::null_literal(span)
         },
 
         SyntaxKind::ExprCall => resolve_call_expression(expr_node, ctx),
