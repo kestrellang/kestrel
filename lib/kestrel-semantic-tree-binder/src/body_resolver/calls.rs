@@ -2300,7 +2300,7 @@ fn compose_substitutions(outer: &Substitutions, inner: &Substitutions) -> Substi
 
 /// Result of classifying an expression's mutability for access mode validation.
 #[derive(Debug)]
-enum MutabilityClassification {
+pub(crate) enum MutabilityClassification {
     /// Expression is a mutable lvalue (var binding or mutable field chain)
     Mutable,
     /// Expression is an immutable local binding (let)
@@ -2325,7 +2325,7 @@ enum MutabilityClassification {
 /// This walks the expression tree to determine:
 /// - Whether it's an lvalue (can be assigned to)
 /// - If so, whether it's mutable throughout the entire access chain
-fn classify_mutability(expr: &Expression, ctx: &BodyResolutionContext) -> MutabilityClassification {
+pub(crate) fn classify_mutability(expr: &Expression, ctx: &BodyResolutionContext) -> MutabilityClassification {
     match &expr.kind {
         // Local variable reference
         ExprKind::LocalRef(local_id) => {

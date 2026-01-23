@@ -13,14 +13,18 @@ use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use crate::diagnostics::{
-    AsciiEscapeOutOfRangeError, BreakOutsideLoopError, ContinueOutsideLoopError,
-    EmptyCharacterLiteralError, IncompleteEscapeSequenceError, InvalidEscapeSequenceError,
-    InvalidUnicodeEscapeError, MultipleCodepointsInCharLiteralError, TupleIndexOnNonTupleError,
-    TupleIndexOutOfBoundsError, UndeclaredLabelError, UnicodeEscapeErrorReason,
+    AsciiEscapeOutOfRangeError, BreakOutsideLoopError, CannotAssignThroughImmutableBindingError,
+    CannotAssignToImmutableFieldError, CannotAssignToLetError, CannotAssignToTemporaryError,
+    ContinueOutsideLoopError, EmptyCharacterLiteralError, IncompleteEscapeSequenceError,
+    InvalidEscapeSequenceError, InvalidUnicodeEscapeError, MultipleCodepointsInCharLiteralError,
+    TupleIndexOnNonTupleError, TupleIndexOutOfBoundsError, UndeclaredLabelError,
+    UnicodeEscapeErrorReason,
 };
 use kestrel_syntax_tree::utils::get_node_span;
 
-use super::calls::{resolve_argument_list, resolve_call_expression};
+use super::calls::{
+    classify_mutability, resolve_argument_list, resolve_call_expression, MutabilityClassification,
+};
 use super::context::BodyResolutionContext;
 use super::operators::{
     resolve_binary_expression, resolve_postfix_expression, resolve_unary_expression,
@@ -553,7 +557,9 @@ fn resolve_assignment_expression(node: &SyntaxNode, ctx: &mut BodyResolutionCont
     let target = resolve_expression(&lhs_node, ctx);
     let value = resolve_expression(&rhs_node, ctx);
 
-    // TODO: Validate that target is assignable (var, not let; field on mutable receiver)
+    // Validate that target is assignable (var, not let; field on mutable receiver)
+    validate_assignment_target(&target, &span, ctx);
+
     // TODO: Type check that value type is compatible with target type
 
     Expression::assignment(target, value, span)
@@ -607,6 +613,9 @@ fn resolve_compound_assignment_expression(
     if target.ty.is_poison() || value.ty.is_poison() {
         return Expression::error(span);
     }
+
+    // Validate that target is assignable (var, not let; field on mutable receiver)
+    validate_assignment_target(&target, &span, ctx);
 
     // Desugar to method call: target.{method_name}(value)
     // The method returns (), so the compound assignment expression has type ()
@@ -3002,6 +3011,107 @@ fn resolve_match_arm_body(body_node: &SyntaxNode, ctx: &mut BodyResolutionContex
     // For all other cases (non-block, or closure with explicit params),
     // resolve normally using the exact same code path as before
     resolve_expression(body_node, ctx)
+}
+
+/// Check if the target is a field access on `self`.
+///
+/// This is used to allow assignment to `let` fields in initializers.
+fn is_field_access_on_self(target: &Expression, ctx: &BodyResolutionContext) -> bool {
+    use kestrel_semantic_tree::expr::ExprKind;
+
+    match &target.kind {
+        ExprKind::FieldAccess { object, .. } => {
+            // Check if the object is `self`
+            if let ExprKind::LocalRef(local_id) = &object.kind {
+                if let Some(local) = ctx.local_scope.get_local(*local_id) {
+                    return local.name() == "self";
+                }
+            }
+            false
+        }
+        _ => false,
+    }
+}
+
+/// Validate that the target of an assignment is mutable.
+///
+/// This checks that the target is:
+/// - A `var` binding (not `let`)
+/// - A mutable field chain (all fields in the path must be `var`, and root must be `var`)
+///
+/// Exception: In initializers, assignment to `let` fields on `self` is allowed
+/// since this is the initial assignment.
+///
+/// Emits appropriate diagnostics if the target is not mutable.
+fn validate_assignment_target(
+    target: &Expression,
+    assignment_span: &Span,
+    ctx: &mut BodyResolutionContext,
+) {
+    match classify_mutability(target, ctx) {
+        MutabilityClassification::Mutable => {
+            // Target is mutable, assignment is allowed
+        }
+        MutabilityClassification::ImmutableLocal { name, span } => {
+            ctx.diagnostics.add_diagnostic(
+                CannotAssignToLetError {
+                    assignment_span: assignment_span.clone(),
+                    target_span: target.span.clone(),
+                    binding_name: name,
+                    binding_span: span,
+                }
+                .into_diagnostic(),
+            );
+        }
+        MutabilityClassification::ImmutableField {
+            field_name,
+            field_span,
+        } => {
+            // In initializers, assignment to `let` fields on `self` is allowed
+            if ctx.is_initializer_context() && is_field_access_on_self(target, ctx) {
+                return;
+            }
+            ctx.diagnostics.add_diagnostic(
+                CannotAssignToImmutableFieldError {
+                    assignment_span: assignment_span.clone(),
+                    target_span: target.span.clone(),
+                    field_name,
+                    field_span,
+                }
+                .into_diagnostic(),
+            );
+        }
+        MutabilityClassification::ImmutableThroughBinding {
+            binding_name,
+            binding_span,
+            field_path,
+        } => {
+            // In initializers, assignment to fields on `self` is allowed even if `self` is
+            // technically immutable (since initializers use special receiver semantics)
+            if ctx.is_initializer_context() && is_field_access_on_self(target, ctx) {
+                return;
+            }
+            ctx.diagnostics.add_diagnostic(
+                CannotAssignThroughImmutableBindingError {
+                    assignment_span: assignment_span.clone(),
+                    target_span: target.span.clone(),
+                    binding_name,
+                    binding_span,
+                    field_path,
+                }
+                .into_diagnostic(),
+            );
+        }
+        MutabilityClassification::Temporary => {
+            ctx.diagnostics.add_diagnostic(
+                CannotAssignToTemporaryError {
+                    assignment_span: assignment_span.clone(),
+                    target_span: target.span.clone(),
+                }
+                .into_diagnostic(),
+            );
+        }
+    }
 }
 
 #[cfg(test)]

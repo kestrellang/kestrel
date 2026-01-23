@@ -4,6 +4,7 @@
 //! organized by category:
 //!
 //! - `access_mode` - Parameter access mode validation errors (mutating/consuming)
+//! - `assignment` - Assignment to immutable target errors
 //! - `module` - Module declaration errors
 //! - `type_resolution` - Type lookup and generic instantiation errors
 //! - `protocol` - Protocol binding and associated type errors
@@ -19,6 +20,7 @@
 //! - `literals` - String escape sequence and literal parsing errors
 
 mod access_mode;
+mod assignment;
 mod attributes;
 mod builtins;
 mod call;
@@ -38,6 +40,7 @@ mod struct_init;
 mod type_resolution;
 
 pub use access_mode::*;
+pub use assignment::*;
 pub use attributes::*;
 pub use builtins::*;
 pub use call::*;
