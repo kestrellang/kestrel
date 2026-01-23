@@ -589,10 +589,10 @@ See [docs/memory-model/implementation-plan.md](docs/memory-model/implementation-
 
 ### Types
 
-- [ ] Array Type Syntax
-- [ ] Dictionary Type Syntax
-- [ ] Optional Type Syntax
-- [ ] Result Type Syntax
+- [x] Array Type Syntax
+- [x] Dictionary Type Syntax
+- [x] Optional Type Syntax
+- [x] Result Type Syntax
 
 ### Expressions
 
@@ -604,12 +604,12 @@ See [docs/memory-model/implementation-plan.md](docs/memory-model/implementation-
 - [x] Compound Assignment Operators
 - [x] Character Literals
 - [ ] String Interpolation
-- [ ] Null Literals
+- [x] Null Literals
 
 ### Core Features
 
 - [ ] Irrefutable patterns in function parameters
-- [ ] Refactor Matchable for range patterns
+- [ ] Refactor Matchable for range patterns and array patterns
 
 ### Goals
 

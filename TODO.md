@@ -45,10 +45,11 @@
 - [x] Character Literals
 - [x] Compound Assignment Operators
 - [x] Try Expressions
-- [ ] Array type syntax [Item]
-- [ ] Dictionary type syntax [Key: Value]
-- [ ] Optional type syntax Type?
-- [ ] Result type syntax Type throws Error
+- [x] Array type syntax [Item]
+- [x] Dictionary type syntax [Key: Value]
+- [x] Optional type syntax Type?
+- [x] Result type syntax Type throws Error
+- [ ] Null Literals
 - [ ] Optional Chaining
 - [ ] Null Coalescing
 - [ ] and / or short-circuit
