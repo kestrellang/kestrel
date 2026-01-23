@@ -3092,12 +3092,19 @@ fn lower_subscript_call(
             // Get the qualified name of the getter
             let func_name = qualified_name_for_symbol(ctx, &sym);
 
-            // Build type arguments from receiver's substitutions (for generic subscripts)
-            let type_args =
+            // Build type arguments from receiver's substitutions (for generic containing types)
+            let mut type_args =
                 match get_type_args_for_receiver(ctx, &receiver.ty, Some(expr.span.clone())) {
                     Some(args) => args,
                     None => return Value::Immediate(Immediate::error()),
                 };
+
+            // Add type arguments from subscript's own type parameters (inferred from argument types)
+            // The argument types directly become the type arguments for the subscript's generic parameters
+            for arg in arguments {
+                let arg_mir_ty = lower_type(ctx, &arg.value.ty);
+                type_args.push(arg_mir_ty);
+            }
 
             // Create the callee
             let mir_callee = if type_args.is_empty() {

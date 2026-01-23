@@ -526,9 +526,20 @@ pub fn lower_getter(ctx: &mut LoweringContext, getter_symbol: &Arc<GetterSymbol>
     // Create the function
     let func_id = ctx.mir.add_function(name, placeholder_ret).id();
 
-    // Register parent type parameters (getter is nested: Type -> Field -> Getter)
+    // Register parent type parameters (getter is nested: Type -> Field/Subscript -> Getter)
     let parent_type_params = get_getter_parent_type_parameters(getter_symbol);
     for tp in &parent_type_params {
+        let tp_name = tp.metadata().name().value.clone();
+        let tp_def =
+            kestrel_execution_graph::TypeParamDef::new(tp_name, TypeParamOwner::Function(func_id));
+        let tp_id = ctx.mir.type_params.alloc(tp_def);
+        ctx.mir.function_mut(func_id).type_params.push(tp_id);
+        ctx.map_type_param(tp.metadata().id(), tp_id);
+    }
+
+    // Register subscript's own type parameters (for subscript getters)
+    let subscript_type_params = get_subscript_type_parameters(getter_symbol);
+    for tp in &subscript_type_params {
         let tp_name = tp.metadata().name().value.clone();
         let tp_def =
             kestrel_execution_graph::TypeParamDef::new(tp_name, TypeParamOwner::Function(func_id));
@@ -549,20 +560,31 @@ pub fn lower_getter(ctx: &mut LoweringContext, getter_symbol: &Arc<GetterSymbol>
         ctx.mir.function_builder(func_id).param("self", self_ty);
     }
 
+    // Add additional parameters (for subscript getters which have index/key parameters)
+    for param in callable.parameters() {
+        let param_name = param.internal_name().to_string();
+        let base_mir_ty = lower_type(ctx, &param.ty);
+        let mir_ty = match param.access_mode() {
+            ParameterAccessMode::Borrow => ctx.mir.ty_ref(base_mir_ty),
+            ParameterAccessMode::Mutating => ctx.mir.ty_ref_mut(base_mir_ty),
+            ParameterAccessMode::Consuming => base_mir_ty,
+        };
+        ctx.mir.function_builder(func_id).param(param_name, mir_ty);
+    }
+
     // Enter the function context
     ctx.enter_function(func_id);
 
-    // Map the self local if it exists (parameter 0)
+    // Map parameter locals
+    // The getter body references parameters via LocalId starting from 0.
+    // LocalId(0) is typically self, and additional parameters follow.
     let param_count = ctx.mir.function(func_id).params.len();
     let mir_locals = ctx.mir.function(func_id).locals.clone();
 
-    // Map parameter locals (just self for getters)
-    // The getter body references `self` via LocalId(0) from the temporary local scope
-    // created during binding. We map it to the MIR self parameter.
-    if param_count > 0 {
-        // Map LocalId(0) (self) to the first MIR local (the self parameter)
-        let mir_self_local = mir_locals[0];
-        ctx.map_local(LocalId(0), mir_self_local);
+    // Map all parameter locals to their MIR counterparts
+    for i in 0..param_count {
+        let mir_local = mir_locals[i];
+        ctx.map_local(LocalId(i), mir_local);
     }
 
     // Create entry block
@@ -643,9 +665,20 @@ pub fn lower_setter(ctx: &mut LoweringContext, setter_symbol: &Arc<SetterSymbol>
     // Create the function
     let func_id = ctx.mir.add_function(name, mir_ret_ty).id();
 
-    // Register parent type parameters (setter is nested: Type -> Field -> Setter)
+    // Register parent type parameters (setter is nested: Type -> Field/Subscript -> Setter)
     let parent_type_params = get_setter_parent_type_parameters(setter_symbol);
     for tp in &parent_type_params {
+        let tp_name = tp.metadata().name().value.clone();
+        let tp_def =
+            kestrel_execution_graph::TypeParamDef::new(tp_name, TypeParamOwner::Function(func_id));
+        let tp_id = ctx.mir.type_params.alloc(tp_def);
+        ctx.mir.function_mut(func_id).type_params.push(tp_id);
+        ctx.map_type_param(tp.metadata().id(), tp_id);
+    }
+
+    // Register subscript's own type parameters (for subscript setters)
+    let subscript_type_params = get_subscript_type_parameters_for_setter(setter_symbol);
+    for tp in &subscript_type_params {
         let tp_name = tp.metadata().name().value.clone();
         let tp_def =
             kestrel_execution_graph::TypeParamDef::new(tp_name, TypeParamOwner::Function(func_id));
@@ -725,56 +758,135 @@ fn get_getter_parent_type_parameters(
     getter_symbol: &Arc<GetterSymbol>,
 ) -> Vec<Arc<TypeParameterSymbol>> {
     use kestrel_semantic_tree::symbol::extension::ExtensionSymbol;
+    use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 
-    // Getter's parent is Field, Field's parent is the type
-    let Some(field) = getter_symbol.metadata().parent() else {
-        return vec![];
-    };
-    let Some(type_parent) = field.metadata().parent() else {
+    // Getter's parent is either Field or Subscript
+    let Some(parent) = getter_symbol.metadata().parent() else {
         return vec![];
     };
 
-    // Try to downcast to get type parameters
+    // Get to the containing type (struct/enum/extension)
+    let type_parent = if parent.metadata().kind() == KestrelSymbolKind::Subscript {
+        // Subscript's parent is the type
+        parent.metadata().parent()
+    } else {
+        // Field's parent is the type
+        parent.metadata().parent()
+    };
+
+    let Some(type_parent) = type_parent else {
+        return vec![];
+    };
+
+    // Get type parameters from containing struct/enum/extension only
     if let Ok(struct_symbol) = type_parent.clone().downcast_arc::<StructSymbol>() {
-        return struct_symbol.type_parameters();
+        struct_symbol.type_parameters()
+    } else if let Ok(enum_symbol) = type_parent.clone().downcast_arc::<EnumSymbol>() {
+        enum_symbol.type_parameters()
+    } else if let Ok(extension_symbol) = type_parent.downcast_arc::<ExtensionSymbol>() {
+        extension_symbol.referenced_type_parameters()
+    } else {
+        vec![]
     }
-    if let Ok(enum_symbol) = type_parent.clone().downcast_arc::<EnumSymbol>() {
-        return enum_symbol.type_parameters();
-    }
-    if let Ok(extension_symbol) = type_parent.downcast_arc::<ExtensionSymbol>() {
-        return extension_symbol.referenced_type_parameters();
+}
+
+/// Get type parameters from the subscript itself (for subscript getters/setters).
+fn get_subscript_type_parameters(
+    getter_symbol: &Arc<GetterSymbol>,
+) -> Vec<Arc<TypeParameterSymbol>> {
+    use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
+    use kestrel_semantic_tree::symbol::subscript::SubscriptSymbol;
+
+    // Getter's parent might be a Subscript
+    let Some(parent) = getter_symbol.metadata().parent() else {
+        return vec![];
+    };
+
+    if parent.metadata().kind() != KestrelSymbolKind::Subscript {
+        return vec![];
     }
 
-    vec![]
+    let Ok(subscript) = parent.downcast_arc::<SubscriptSymbol>() else {
+        return vec![];
+    };
+
+    // Get type parameters from subscript's children
+    subscript
+        .metadata()
+        .children()
+        .into_iter()
+        .filter(|child| child.metadata().kind() == KestrelSymbolKind::TypeParameter)
+        .filter_map(|child| child.downcast_arc::<TypeParameterSymbol>().ok())
+        .collect()
 }
 
 /// Get type parameters from the grandparent struct/enum/extension (for setters).
 /// Hierarchy: Struct/Enum/Extension -> Field -> Setter
+/// Or: Struct/Enum/Extension -> Subscript -> Setter
 fn get_setter_parent_type_parameters(
     setter_symbol: &Arc<SetterSymbol>,
 ) -> Vec<Arc<TypeParameterSymbol>> {
     use kestrel_semantic_tree::symbol::extension::ExtensionSymbol;
+    use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 
-    // Setter's parent is Field, Field's parent is the type
-    let Some(field) = setter_symbol.metadata().parent() else {
-        return vec![];
-    };
-    let Some(type_parent) = field.metadata().parent() else {
+    // Setter's parent is either Field or Subscript
+    let Some(parent) = setter_symbol.metadata().parent() else {
         return vec![];
     };
 
-    // Try to downcast to get type parameters
+    // Get to the containing type (struct/enum/extension)
+    let type_parent = if parent.metadata().kind() == KestrelSymbolKind::Subscript {
+        // Subscript's parent is the type
+        parent.metadata().parent()
+    } else {
+        // Field's parent is the type
+        parent.metadata().parent()
+    };
+
+    let Some(type_parent) = type_parent else {
+        return vec![];
+    };
+
+    // Get type parameters from containing struct/enum/extension only
     if let Ok(struct_symbol) = type_parent.clone().downcast_arc::<StructSymbol>() {
-        return struct_symbol.type_parameters();
+        struct_symbol.type_parameters()
+    } else if let Ok(enum_symbol) = type_parent.clone().downcast_arc::<EnumSymbol>() {
+        enum_symbol.type_parameters()
+    } else if let Ok(extension_symbol) = type_parent.downcast_arc::<ExtensionSymbol>() {
+        extension_symbol.referenced_type_parameters()
+    } else {
+        vec![]
     }
-    if let Ok(enum_symbol) = type_parent.clone().downcast_arc::<EnumSymbol>() {
-        return enum_symbol.type_parameters();
-    }
-    if let Ok(extension_symbol) = type_parent.downcast_arc::<ExtensionSymbol>() {
-        return extension_symbol.referenced_type_parameters();
+}
+
+/// Get type parameters from the subscript itself (for subscript setters).
+fn get_subscript_type_parameters_for_setter(
+    setter_symbol: &Arc<SetterSymbol>,
+) -> Vec<Arc<TypeParameterSymbol>> {
+    use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
+    use kestrel_semantic_tree::symbol::subscript::SubscriptSymbol;
+
+    // Setter's parent might be a Subscript
+    let Some(parent) = setter_symbol.metadata().parent() else {
+        return vec![];
+    };
+
+    if parent.metadata().kind() != KestrelSymbolKind::Subscript {
+        return vec![];
     }
 
-    vec![]
+    let Ok(subscript) = parent.downcast_arc::<SubscriptSymbol>() else {
+        return vec![];
+    };
+
+    // Get type parameters from subscript's children
+    subscript
+        .metadata()
+        .children()
+        .into_iter()
+        .filter(|child| child.metadata().kind() == KestrelSymbolKind::TypeParameter)
+        .filter_map(|child| child.downcast_arc::<TypeParameterSymbol>().ok())
+        .collect()
 }
 
 /// Compute the self parameter type for a getter.

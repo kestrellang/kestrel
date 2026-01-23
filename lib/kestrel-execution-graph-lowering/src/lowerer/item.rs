@@ -47,7 +47,7 @@ pub fn lower_item(ctx: &mut LoweringContext, symbol: &Arc<dyn Symbol<KestrelLang
             if let Ok(struct_symbol) = symbol.clone().downcast_arc::<StructSymbol>() {
                 lower_struct(ctx, &struct_symbol);
 
-                // Also lower methods, initializers, deinit, and computed properties within the struct
+                // Also lower methods, initializers, deinit, computed properties, and subscripts within the struct
                 for child in symbol.metadata().children() {
                     let child_kind = child.metadata().kind();
                     if child_kind == KestrelSymbolKind::Function
@@ -55,8 +55,10 @@ pub fn lower_item(ctx: &mut LoweringContext, symbol: &Arc<dyn Symbol<KestrelLang
                         || child_kind == KestrelSymbolKind::Deinit
                     {
                         lower_item(ctx, &child);
-                    } else if child_kind == KestrelSymbolKind::Field {
-                        // Lower getters and setters within fields (computed properties)
+                    } else if child_kind == KestrelSymbolKind::Field
+                        || child_kind == KestrelSymbolKind::Subscript
+                    {
+                        // Lower getters and setters within fields (computed properties) and subscripts
                         for field_child in child.metadata().children() {
                             let fc_kind = field_child.metadata().kind();
                             if fc_kind == KestrelSymbolKind::Getter
@@ -91,13 +93,15 @@ pub fn lower_item(ctx: &mut LoweringContext, symbol: &Arc<dyn Symbol<KestrelLang
             if let Ok(enum_symbol) = symbol.clone().downcast_arc::<EnumSymbol>() {
                 lower_enum(ctx, &enum_symbol);
 
-                // Also lower methods and computed properties within the enum
+                // Also lower methods, computed properties, and subscripts within the enum
                 for child in symbol.metadata().children() {
                     let child_kind = child.metadata().kind();
                     if child_kind == KestrelSymbolKind::Function {
                         lower_item(ctx, &child);
-                    } else if child_kind == KestrelSymbolKind::Field {
-                        // Lower getters and setters within fields (computed properties)
+                    } else if child_kind == KestrelSymbolKind::Field
+                        || child_kind == KestrelSymbolKind::Subscript
+                    {
+                        // Lower getters and setters within fields (computed properties) and subscripts
                         for field_child in child.metadata().children() {
                             let fc_kind = field_child.metadata().kind();
                             if fc_kind == KestrelSymbolKind::Getter
@@ -126,15 +130,17 @@ pub fn lower_item(ctx: &mut LoweringContext, symbol: &Arc<dyn Symbol<KestrelLang
             // qualified names based on the target type (e.g., Int.double for an extension
             // method on Int).
             //
-            // Lower all methods, initializers, and computed properties within the extension
+            // Lower all methods, initializers, computed properties, and subscripts within the extension
             for child in symbol.metadata().children() {
                 let child_kind = child.metadata().kind();
                 if child_kind == KestrelSymbolKind::Function
                     || child_kind == KestrelSymbolKind::Initializer
                 {
                     lower_item(ctx, &child);
-                } else if child_kind == KestrelSymbolKind::Field {
-                    // Lower getters and setters within fields (computed properties)
+                } else if child_kind == KestrelSymbolKind::Field
+                    || child_kind == KestrelSymbolKind::Subscript
+                {
+                    // Lower getters and setters within fields (computed properties) and subscripts
                     for field_child in child.metadata().children() {
                         let fc_kind = field_child.metadata().kind();
                         if fc_kind == KestrelSymbolKind::Getter
@@ -198,10 +204,8 @@ pub fn lower_item(ctx: &mut LoweringContext, symbol: &Arc<dyn Symbol<KestrelLang
         },
 
         KestrelSymbolKind::Subscript => {
-            // Subscripts are lowered on-demand when accessing via subscript syntax.
-            // They're children of struct/enum symbols and will be called during
-            // subscript call lowering. The getter and setter children are handled
-            // similarly to computed property accessors.
+            // Subscripts are handled when lowering their parent struct/enum/extension.
+            // The getter and setter children are lowered there, similar to computed properties.
         },
     }
 }
