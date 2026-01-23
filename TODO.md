@@ -41,9 +41,9 @@
 
 ## Phase 14
 
-- [ ] For loops
+- [x] For loops
 - [x] Character Literals
-- [ ] Compound Assignment Operators
+- [x] Compound Assignment Operators
 - [x] Try Expressions
 - [ ] Array type syntax [Item]
 - [ ] Dictionary type syntax [Key: Value]

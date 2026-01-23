@@ -4,6 +4,7 @@
 //! used during semantic analysis to restructure flat binary expressions
 //! into properly nested trees and desugar them into method calls.
 
+use crate::builtins::LanguageFeature;
 use kestrel_syntax_tree::SyntaxKind;
 use std::collections::HashMap;
 
@@ -94,6 +95,116 @@ impl BinaryOp {
             BinaryOp::Coalesce => "??",
         }
     }
+
+    /// Get the language feature for the protocol method that implements this operator.
+    /// Returns `None` for operators like Coalesce that don't have protocol methods.
+    pub fn method_feature(&self) -> Option<LanguageFeature> {
+        match self {
+            BinaryOp::Add => Some(LanguageFeature::AddOperatorMethod),
+            BinaryOp::Sub => Some(LanguageFeature::SubtractOperatorMethod),
+            BinaryOp::Mul => Some(LanguageFeature::MultiplyOperatorMethod),
+            BinaryOp::Div => Some(LanguageFeature::DivideOperatorMethod),
+            BinaryOp::Rem => Some(LanguageFeature::ModuloOperatorMethod),
+            BinaryOp::BitAnd => Some(LanguageFeature::BitwiseAndOperatorMethod),
+            BinaryOp::BitOr => Some(LanguageFeature::BitwiseOrOperatorMethod),
+            BinaryOp::BitXor => Some(LanguageFeature::BitwiseXorOperatorMethod),
+            BinaryOp::Shl => Some(LanguageFeature::ShiftLeftOperatorMethod),
+            BinaryOp::Shr => Some(LanguageFeature::ShiftRightOperatorMethod),
+            BinaryOp::Eq => Some(LanguageFeature::EqualsOperatorMethod),
+            BinaryOp::Ne => Some(LanguageFeature::NotEqualsOperatorMethod),
+            BinaryOp::Lt => Some(LanguageFeature::LessThanOperatorMethod),
+            BinaryOp::Gt => Some(LanguageFeature::GreaterThanOperatorMethod),
+            BinaryOp::Le => Some(LanguageFeature::LessOrEqualOperatorMethod),
+            BinaryOp::Ge => Some(LanguageFeature::GreaterOrEqualOperatorMethod),
+            BinaryOp::And => Some(LanguageFeature::LogicalAndOperatorMethod),
+            BinaryOp::Or => Some(LanguageFeature::LogicalOrOperatorMethod),
+            BinaryOp::RangeInclusive => Some(LanguageFeature::InclusiveRangeOperatorMethod),
+            BinaryOp::RangeExclusive => Some(LanguageFeature::ExclusiveRangeOperatorMethod),
+            BinaryOp::Coalesce => None, // No protocol for coalesce
+        }
+    }
+}
+
+/// Compound assignment operators (+=, -=, etc.)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum CompoundOp {
+    Add,      // +=
+    Sub,      // -=
+    Mul,      // *=
+    Div,      // /=
+    Rem,      // %=
+    BitAnd,   // &=
+    BitOr,    // |=
+    BitXor,   // ^=
+    Shl,      // <<=
+    Shr,      // >>=
+}
+
+impl CompoundOp {
+    /// Get the method name that this compound operator desugars to.
+    pub fn method_name(&self) -> &'static str {
+        match self {
+            CompoundOp::Add => "addAssign",
+            CompoundOp::Sub => "subtractAssign",
+            CompoundOp::Mul => "multiplyAssign",
+            CompoundOp::Div => "divideAssign",
+            CompoundOp::Rem => "modAssign",
+            CompoundOp::BitAnd => "bitwiseAndAssign",
+            CompoundOp::BitOr => "bitwiseOrAssign",
+            CompoundOp::BitXor => "bitwiseXorAssign",
+            CompoundOp::Shl => "shiftLeftAssign",
+            CompoundOp::Shr => "shiftRightAssign",
+        }
+    }
+
+    /// Get the symbol representation of this operator for error messages.
+    pub fn symbol(&self) -> &'static str {
+        match self {
+            CompoundOp::Add => "+=",
+            CompoundOp::Sub => "-=",
+            CompoundOp::Mul => "*=",
+            CompoundOp::Div => "/=",
+            CompoundOp::Rem => "%=",
+            CompoundOp::BitAnd => "&=",
+            CompoundOp::BitOr => "|=",
+            CompoundOp::BitXor => "^=",
+            CompoundOp::Shl => "<<=",
+            CompoundOp::Shr => ">>=",
+        }
+    }
+
+    /// Convert from a SyntaxKind token to a CompoundOp.
+    pub fn from_syntax_kind(kind: SyntaxKind) -> Option<CompoundOp> {
+        match kind {
+            SyntaxKind::PlusEquals => Some(CompoundOp::Add),
+            SyntaxKind::MinusEquals => Some(CompoundOp::Sub),
+            SyntaxKind::StarEquals => Some(CompoundOp::Mul),
+            SyntaxKind::SlashEquals => Some(CompoundOp::Div),
+            SyntaxKind::PercentEquals => Some(CompoundOp::Rem),
+            SyntaxKind::AmpersandEquals => Some(CompoundOp::BitAnd),
+            SyntaxKind::PipeEquals => Some(CompoundOp::BitOr),
+            SyntaxKind::CaretEquals => Some(CompoundOp::BitXor),
+            SyntaxKind::LessLessEquals => Some(CompoundOp::Shl),
+            SyntaxKind::GreaterGreaterEquals => Some(CompoundOp::Shr),
+            _ => None,
+        }
+    }
+
+    /// Get the language feature for this compound operator's method, if any.
+    pub fn method_feature(&self) -> LanguageFeature {
+        match self {
+            CompoundOp::Add => LanguageFeature::AddAssignMethod,
+            CompoundOp::Sub => LanguageFeature::SubtractAssignMethod,
+            CompoundOp::Mul => LanguageFeature::MultiplyAssignMethod,
+            CompoundOp::Div => LanguageFeature::DivideAssignMethod,
+            CompoundOp::Rem => LanguageFeature::ModuloAssignMethod,
+            CompoundOp::BitAnd => LanguageFeature::BitwiseAndAssignMethod,
+            CompoundOp::BitOr => LanguageFeature::BitwiseOrAssignMethod,
+            CompoundOp::BitXor => LanguageFeature::BitwiseXorAssignMethod,
+            CompoundOp::Shl => LanguageFeature::ShiftLeftAssignMethod,
+            CompoundOp::Shr => LanguageFeature::ShiftRightAssignMethod,
+        }
+    }
 }
 
 /// Unary operators (both prefix and postfix).
@@ -125,6 +236,17 @@ impl UnaryOp {
             UnaryOp::BitNot => "!",
             UnaryOp::LogicalNot => "not",
             UnaryOp::Unwrap => "!",
+        }
+    }
+
+    /// Get the language feature for the protocol method that implements this operator.
+    /// Returns `None` for operators like Unwrap that don't have protocol methods.
+    pub fn method_feature(&self) -> Option<LanguageFeature> {
+        match self {
+            UnaryOp::Neg => Some(LanguageFeature::NegateOperatorMethod),
+            UnaryOp::BitNot => Some(LanguageFeature::BitwiseNotOperatorMethod),
+            UnaryOp::LogicalNot => Some(LanguageFeature::LogicalNotOperatorMethod),
+            UnaryOp::Unwrap => None, // No protocol for unwrap
         }
     }
 }

@@ -186,13 +186,51 @@ fn apply_to_expression(expr: &Expression, solution: &Solution) -> Expression {
             callee,
             arguments,
             substitutions,
-        } => ExprKind::Call {
-            callee: Box::new(apply_to_expression(callee, solution)),
-            arguments: arguments
+        } => {
+            let resolved_callee = apply_to_expression(callee, solution);
+            let resolved_arguments: Vec<CallArgument> = arguments
                 .iter()
                 .map(|arg| apply_to_argument(arg, solution))
-                .collect(),
-            substitutions: resolve_substitutions(substitutions, solution),
+                .collect();
+
+            // Check if callee is a MethodRef and we have a value resolution for this Call.
+            // This handles the MethodRef pattern for protocol method calls (used by
+            // desugared for-loops for iter()/next()).
+            if let ExprKind::MethodRef {
+                receiver,
+                method_name,
+                ..
+            } = &resolved_callee.kind
+            {
+                if let Some(value_resolution) = solution.get_value(expr.id) {
+                    // Create a new MethodRef with the resolved method symbol
+                    let method_ref = Expression::method_ref(
+                        (**receiver).clone(),
+                        vec![value_resolution.symbol_id],
+                        method_name.clone(),
+                        resolved_callee.span.clone(),
+                    );
+                    ExprKind::Call {
+                        callee: Box::new(method_ref),
+                        arguments: resolved_arguments,
+                        substitutions: value_resolution.substitutions.clone(),
+                    }
+                } else {
+                    // No resolution found - pass through with original callee
+                    ExprKind::Call {
+                        callee: Box::new(resolved_callee),
+                        arguments: resolved_arguments,
+                        substitutions: resolve_substitutions(substitutions, solution),
+                    }
+                }
+            } else {
+                // Default: just pass through with resolved components
+                ExprKind::Call {
+                    callee: Box::new(resolved_callee),
+                    arguments: resolved_arguments,
+                    substitutions: resolve_substitutions(substitutions, solution),
+                }
+            }
         },
 
         ExprKind::PrimitiveMethodCall {
@@ -259,6 +297,7 @@ fn apply_to_expression(expr: &Expression, solution: &Solution) -> Expression {
             target_ty,
             method_name,
             arguments,
+            protocol_candidates,
         } => {
             let resolved_target_ty = resolve_type(target_ty, solution);
             let resolved_arguments: Vec<CallArgument> = arguments
@@ -304,6 +343,7 @@ fn apply_to_expression(expr: &Expression, solution: &Solution) -> Expression {
                         target_ty: resolved_target_ty,
                         method_name: method_name.clone(),
                         arguments: resolved_arguments,
+                        protocol_candidates: protocol_candidates.clone(),
                     }
                 }
             } else {
@@ -312,6 +352,7 @@ fn apply_to_expression(expr: &Expression, solution: &Solution) -> Expression {
                     target_ty: resolved_target_ty,
                     method_name: method_name.clone(),
                     arguments: resolved_arguments,
+                    protocol_candidates: protocol_candidates.clone(),
                 }
             }
         },

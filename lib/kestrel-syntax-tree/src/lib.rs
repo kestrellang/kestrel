@@ -145,6 +145,7 @@ pub enum SyntaxKind {
     ExprNull,                 // null
     ExprCall,                 // foo(1, 2) or expr(args)
     ExprAssignment,           // lhs = rhs
+    ExprCompoundAssignment,   // lhs += rhs, lhs -= rhs, etc.
     ExprIf,                   // if condition { then } else { else }
     IfLetCondition,           // let pattern = expr (in if-let condition)
     ElseClause,               // else { ... } or else if ...
@@ -269,6 +270,8 @@ pub enum SyntaxKind {
     DotDotEquals,
     DotDotLess,
     DotDot,
+    LessLessEquals,    // <<=
+    GreaterGreaterEquals, // >>=
     LessLess,
     GreaterGreater,
     LessEquals,
@@ -278,6 +281,15 @@ pub enum SyntaxKind {
     QuestionQuestion,
     Arrow,
     FatArrow,
+    // Compound assignment (2-char)
+    PlusEquals,        // +=
+    MinusEquals,       // -=
+    StarEquals,        // *=
+    SlashEquals,       // /=
+    PercentEquals,     // %=
+    AmpersandEquals,   // &=
+    PipeEquals,        // |=
+    CaretEquals,       // ^=
     // Single-character
     Equals,
     Plus,
@@ -385,6 +397,8 @@ impl From<Token> for SyntaxKind {
             Token::DotDotEquals => SyntaxKind::DotDotEquals,
             Token::DotDotLess => SyntaxKind::DotDotLess,
             Token::DotDot => SyntaxKind::DotDot,
+            Token::LessLessEquals => SyntaxKind::LessLessEquals,
+            Token::GreaterGreaterEquals => SyntaxKind::GreaterGreaterEquals,
             Token::LessLess => SyntaxKind::LessLess,
             Token::GreaterGreater => SyntaxKind::GreaterGreater,
             Token::LessEquals => SyntaxKind::LessEquals,
@@ -394,6 +408,14 @@ impl From<Token> for SyntaxKind {
             Token::QuestionQuestion => SyntaxKind::QuestionQuestion,
             Token::Arrow => SyntaxKind::Arrow,
             Token::FatArrow => SyntaxKind::FatArrow,
+            Token::PlusEquals => SyntaxKind::PlusEquals,
+            Token::MinusEquals => SyntaxKind::MinusEquals,
+            Token::StarEquals => SyntaxKind::StarEquals,
+            Token::SlashEquals => SyntaxKind::SlashEquals,
+            Token::PercentEquals => SyntaxKind::PercentEquals,
+            Token::AmpersandEquals => SyntaxKind::AmpersandEquals,
+            Token::PipeEquals => SyntaxKind::PipeEquals,
+            Token::CaretEquals => SyntaxKind::CaretEquals,
             Token::Equals => SyntaxKind::Equals,
             Token::Plus => SyntaxKind::Plus,
             Token::Minus => SyntaxKind::Minus,
@@ -507,6 +529,7 @@ impl Language for KestrelLanguage {
         const EXPR_NULL: u16 = SyntaxKind::ExprNull as u16;
         const EXPR_CALL: u16 = SyntaxKind::ExprCall as u16;
         const EXPR_ASSIGNMENT: u16 = SyntaxKind::ExprAssignment as u16;
+        const EXPR_COMPOUND_ASSIGNMENT: u16 = SyntaxKind::ExprCompoundAssignment as u16;
         const EXPR_IF: u16 = SyntaxKind::ExprIf as u16;
         const IF_LET_CONDITION: u16 = SyntaxKind::IfLetCondition as u16;
         const ELSE_CLAUSE: u16 = SyntaxKind::ElseClause as u16;
@@ -616,6 +639,8 @@ impl Language for KestrelLanguage {
         // Operators
         const DOT_DOT_EQUALS: u16 = SyntaxKind::DotDotEquals as u16;
         const DOT_DOT_LESS: u16 = SyntaxKind::DotDotLess as u16;
+        const LESS_LESS_EQUALS: u16 = SyntaxKind::LessLessEquals as u16;
+        const GREATER_GREATER_EQUALS: u16 = SyntaxKind::GreaterGreaterEquals as u16;
         const LESS_LESS: u16 = SyntaxKind::LessLess as u16;
         const GREATER_GREATER: u16 = SyntaxKind::GreaterGreater as u16;
         const LESS_EQUALS: u16 = SyntaxKind::LessEquals as u16;
@@ -625,6 +650,14 @@ impl Language for KestrelLanguage {
         const QUESTION_QUESTION: u16 = SyntaxKind::QuestionQuestion as u16;
         const ARROW: u16 = SyntaxKind::Arrow as u16;
         const FAT_ARROW: u16 = SyntaxKind::FatArrow as u16;
+        const PLUS_EQUALS: u16 = SyntaxKind::PlusEquals as u16;
+        const MINUS_EQUALS: u16 = SyntaxKind::MinusEquals as u16;
+        const STAR_EQUALS: u16 = SyntaxKind::StarEquals as u16;
+        const SLASH_EQUALS: u16 = SyntaxKind::SlashEquals as u16;
+        const PERCENT_EQUALS: u16 = SyntaxKind::PercentEquals as u16;
+        const AMPERSAND_EQUALS: u16 = SyntaxKind::AmpersandEquals as u16;
+        const PIPE_EQUALS: u16 = SyntaxKind::PipeEquals as u16;
+        const CARET_EQUALS: u16 = SyntaxKind::CaretEquals as u16;
         const EQUALS: u16 = SyntaxKind::Equals as u16;
         const PLUS: u16 = SyntaxKind::Plus as u16;
         const MINUS: u16 = SyntaxKind::Minus as u16;
@@ -735,6 +768,7 @@ impl Language for KestrelLanguage {
             EXPR_NULL => SyntaxKind::ExprNull,
             EXPR_CALL => SyntaxKind::ExprCall,
             EXPR_ASSIGNMENT => SyntaxKind::ExprAssignment,
+            EXPR_COMPOUND_ASSIGNMENT => SyntaxKind::ExprCompoundAssignment,
             EXPR_IF => SyntaxKind::ExprIf,
             IF_LET_CONDITION => SyntaxKind::IfLetCondition,
             ELSE_CLAUSE => SyntaxKind::ElseClause,
@@ -845,6 +879,8 @@ impl Language for KestrelLanguage {
             DOT_DOT_EQUALS => SyntaxKind::DotDotEquals,
             DOT_DOT_LESS => SyntaxKind::DotDotLess,
             DOT_DOT => SyntaxKind::DotDot,
+            LESS_LESS_EQUALS => SyntaxKind::LessLessEquals,
+            GREATER_GREATER_EQUALS => SyntaxKind::GreaterGreaterEquals,
             LESS_LESS => SyntaxKind::LessLess,
             GREATER_GREATER => SyntaxKind::GreaterGreater,
             LESS_EQUALS => SyntaxKind::LessEquals,
@@ -854,6 +890,14 @@ impl Language for KestrelLanguage {
             QUESTION_QUESTION => SyntaxKind::QuestionQuestion,
             ARROW => SyntaxKind::Arrow,
             FAT_ARROW => SyntaxKind::FatArrow,
+            PLUS_EQUALS => SyntaxKind::PlusEquals,
+            MINUS_EQUALS => SyntaxKind::MinusEquals,
+            STAR_EQUALS => SyntaxKind::StarEquals,
+            SLASH_EQUALS => SyntaxKind::SlashEquals,
+            PERCENT_EQUALS => SyntaxKind::PercentEquals,
+            AMPERSAND_EQUALS => SyntaxKind::AmpersandEquals,
+            PIPE_EQUALS => SyntaxKind::PipeEquals,
+            CARET_EQUALS => SyntaxKind::CaretEquals,
             EQUALS => SyntaxKind::Equals,
             PLUS => SyntaxKind::Plus,
             MINUS => SyntaxKind::Minus,

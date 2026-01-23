@@ -1040,6 +1040,9 @@ pub enum ExprKind {
         method_name: String,
         /// Arguments to the method call
         arguments: Vec<CallArgument>,
+        /// Protocol method candidates for conformance checking.
+        /// If present, generates "does not conform to X" errors instead of "no member Y".
+        protocol_candidates: Vec<SymbolId>,
     },
 
     /// Implicit struct initialization: `Point(x: 1, y: 2)` when no explicit init exists.
@@ -1453,286 +1456,349 @@ impl Expression {
 
     /// Return a compact debug representation of this expression.
     pub fn debug_compact(&self) -> String {
-        match &self.kind {
-            ExprKind::Literal(lit) => match lit {
-                LiteralValue::Unit => "()".to_string(),
-                LiteralValue::Integer(n) => n.to_string(),
-                LiteralValue::Float(f) => f.to_string(),
-                LiteralValue::String(s) => format!("\"{}\"", s),
-                LiteralValue::Char(c) => {
-                    if let Some(ch) = char::from_u32(*c) {
-                        format!("'{}'", ch)
+        /// Format a pattern compactly with type annotations.
+        fn format_pattern_with_type(pattern: &crate::pattern::Pattern) -> String {
+            use crate::pattern::PatternKind;
+            let inner = match &pattern.kind {
+                PatternKind::Local { name, .. } => name.clone(),
+                PatternKind::Wildcard => "_".to_string(),
+                PatternKind::Literal { value } => format!("{:?}", value),
+                PatternKind::Tuple { prefix, has_rest, suffix } => {
+                    let mut parts: Vec<String> = prefix.iter().map(format_pattern_with_type).collect();
+                    if *has_rest {
+                        parts.push("..".to_string());
+                    }
+                    parts.extend(suffix.iter().map(format_pattern_with_type));
+                    format!("({})", parts.join(", "))
+                },
+                PatternKind::EnumVariant { case_name, bindings, .. } => {
+                    if bindings.is_empty() {
+                        format!(".{}", case_name)
                     } else {
-                        format!("'\\u{{{:X}}}'", c)
+                        let bindings_str: Vec<String> = bindings
+                            .iter()
+                            .map(|b| format_pattern_with_type(&b.pattern))
+                            .collect();
+                        format!(".{}({})", case_name, bindings_str.join(", "))
                     }
                 },
-                LiteralValue::Bool(b) => b.to_string(),
-            },
-            ExprKind::Array(elements) => {
-                let items: Vec<_> = elements.iter().map(|e| e.debug_compact()).collect();
-                format!("[{}]", items.join(", "))
-            },
-            ExprKind::Tuple(elements) => {
-                let items: Vec<_> = elements.iter().map(|e| e.debug_compact()).collect();
-                format!("({})", items.join(", "))
-            },
-            ExprKind::Grouping(inner) => format!("({})", inner.debug_compact()),
-            ExprKind::LocalRef(id) => format!("local_{}", id.0),
-            ExprKind::SymbolRef(id) => format!("symbol_{:?}", id),
-            ExprKind::OverloadedRef(_) => "overloaded".to_string(),
-            ExprKind::TypeRef(id) => format!("type_{:?}", id),
-            ExprKind::TypeParameterRef(_) => "<type_param>".to_string(),
-            ExprKind::AssociatedTypeRef => "<assoc_type>".to_string(),
-            ExprKind::FieldAccess { object, field } => {
-                format!("{}.{}", object.debug_compact(), field)
-            },
-            ExprKind::TupleIndex { tuple, index } => {
-                format!("{}.{}", tuple.debug_compact(), index)
-            },
-            ExprKind::MethodRef {
-                receiver,
-                method_name,
-                ..
-            } => format!("{}.{}", receiver.debug_compact(), method_name),
-            ExprKind::Call {
-                callee, arguments, ..
-            } => {
-                let args: Vec<String> = arguments
-                    .iter()
-                    .map(|a| {
-                        if let Some(ref label) = a.label {
-                            format!("{}: {}", label, a.value.debug_compact())
+                PatternKind::At { name, subpattern, .. } => {
+                    format!("({}: {}) @ {}", name, pattern.ty, format_pattern_with_type(subpattern))
+                },
+                PatternKind::Range { .. } => "<range>".to_string(),
+                PatternKind::Struct { struct_name, .. } => format!("{} {{ .. }}", struct_name),
+                PatternKind::Array { .. } => "[..]".to_string(),
+                PatternKind::Or { alternatives } => {
+                    let alts: Vec<String> = alternatives.iter().map(format_pattern_with_type).collect();
+                    alts.join(" or ")
+                },
+                PatternKind::Rest => "..".to_string(),
+                PatternKind::Error => "<error>".to_string(),
+            };
+            // Add type annotation for bindings
+            match &pattern.kind {
+                PatternKind::Local { .. } | PatternKind::Wildcard => {
+                    format!("({}: {})", inner, pattern.ty)
+                },
+                _ => inner,
+            }
+        }
+
+        /// Format an expression with its type shown only for key expressions
+        fn format_expr(expr: &Expression) -> String {
+            // Helper to wrap with type annotation
+            fn with_type(s: String, ty: &Ty) -> String {
+                format!("({}): {}", s, ty)
+            }
+
+            match &expr.kind {
+                // Literals - show type only for non-obvious ones
+                ExprKind::Literal(lit) => match lit {
+                    LiteralValue::Unit => "()".to_string(),
+                    LiteralValue::Integer(n) => format!("{}: {}", n, expr.ty),
+                    LiteralValue::Float(f) => format!("{}: {}", f, expr.ty),
+                    LiteralValue::String(s) => format!("\"{}\"", s),
+                    LiteralValue::Char(c) => {
+                        if let Some(ch) = char::from_u32(*c) {
+                            format!("'{}'", ch)
                         } else {
-                            a.value.debug_compact()
+                            format!("'\\u{{{:X}}}'", c)
                         }
-                    })
-                    .collect();
-                format!("{}({})", callee.debug_compact(), args.join(", "))
-            },
-            ExprKind::PrimitiveMethodCall {
-                receiver,
-                method,
-                arguments,
-            } => {
-                let args: Vec<String> = arguments.iter().map(|a| a.value.debug_compact()).collect();
-                format!(
-                    "{}.{}({})",
-                    receiver.debug_compact(),
-                    method.name(),
-                    args.join(", ")
-                )
-            },
-            ExprKind::PrimitiveMethodRef { receiver, method } => {
-                format!("{}.{}", receiver.debug_compact(), method.name())
-            },
-            ExprKind::DeferredMethodCall {
-                receiver,
-                method_name,
-                arguments,
-            } => {
-                let args: Vec<String> = arguments.iter().map(|a| a.value.debug_compact()).collect();
-                format!(
-                    "{}.{}({})",
-                    receiver.debug_compact(),
-                    method_name,
-                    args.join(", ")
-                )
-            },
-            ExprKind::DeferredStaticCall {
-                target_ty,
-                method_name,
-                arguments,
-            } => {
-                let args: Vec<String> = arguments.iter().map(|a| a.value.debug_compact()).collect();
-                format!("{}.{}({})", target_ty, method_name, args.join(", "))
-            },
-            ExprKind::ImplicitStructInit {
-                struct_type,
-                arguments,
-            } => {
-                let args: Vec<String> = arguments
-                    .iter()
-                    .map(|a| {
-                        if let Some(ref label) = a.label {
-                            format!("{}: {}", label, a.value.debug_compact())
-                        } else {
-                            a.value.debug_compact()
-                        }
-                    })
-                    .collect();
-                format!("{}({})", struct_type, args.join(", "))
-            },
-            ExprKind::DelegatingInit { arguments, .. } => {
-                let args: Vec<String> = arguments
-                    .iter()
-                    .map(|a| {
-                        if let Some(ref label) = a.label {
-                            format!("{}: {}", label, a.value.debug_compact())
-                        } else {
-                            a.value.debug_compact()
-                        }
-                    })
-                    .collect();
-                format!("self.init({})", args.join(", "))
-            },
-            ExprKind::Assignment { target, value } => {
-                format!("{} = {}", target.debug_compact(), value.debug_compact())
-            },
-            ExprKind::If {
-                conditions,
-                then_value,
-                else_branch,
-                ..
-            } => {
-                let cond_strs: Vec<String> = conditions
-                    .iter()
-                    .map(|c| match c {
-                        IfCondition::Expr(e) => e.debug_compact(),
-                        IfCondition::Let { pattern, value, .. } => {
-                            format!("let {:?} = {}", pattern, value.debug_compact())
-                        },
-                    })
-                    .collect();
-                let cond_str = cond_strs.join(", ");
-                let then_str = if let Some(v) = then_value {
-                    v.debug_compact()
-                } else {
-                    "...".to_string()
-                };
-                let else_str = if let Some(else_b) = else_branch {
-                    match else_b {
-                        ElseBranch::Block { value, .. } => {
-                            if let Some(v) = value {
-                                format!(" else {{ {} }}", v.debug_compact())
-                            } else {
-                                " else { ... }".to_string()
-                            }
-                        },
-                        ElseBranch::ElseIf(_) => " else if ...".to_string(),
-                    }
-                } else {
-                    String::new()
-                };
-                format!("if {} {{ {} }}{}", cond_str, then_str, else_str)
-            },
-            ExprKind::While { condition, .. } => {
-                format!("while {} {{ ... }}", condition.debug_compact())
-            },
-            ExprKind::WhileLet { conditions, .. } => {
-                let conds: Vec<_> = conditions
-                    .iter()
-                    .map(|c| match c {
-                        IfCondition::Let { pattern, value, .. } => {
-                            format!("let {:?} = {}", pattern, value.debug_compact())
-                        },
-                        IfCondition::Expr(e) => e.debug_compact(),
-                    })
-                    .collect();
-                format!("while {} {{ ... }}", conds.join(", "))
-            },
-            ExprKind::Loop { .. } => "loop { ... }".to_string(),
-            ExprKind::Break { label, .. } => {
-                if let Some(l) = label {
-                    format!("break {}", l.name)
-                } else {
-                    "break".to_string()
-                }
-            },
-            ExprKind::Continue { label, .. } => {
-                if let Some(l) = label {
-                    format!("continue {}", l.name)
-                } else {
-                    "continue".to_string()
-                }
-            },
-            ExprKind::Return { value } => {
-                if let Some(v) = value {
-                    format!("return {}", v.debug_compact())
-                } else {
-                    "return".to_string()
-                }
-            },
-            ExprKind::Closure {
-                params,
-                tail_expr,
-                uses_it: _,
-                ..
-            } => {
-                let params_str = match params {
-                    Some(ps) => {
-                        let p: Vec<_> = ps.iter().map(|p| p.name.clone()).collect();
-                        format!("({}) in ", p.join(", "))
                     },
-                    None => String::new(), // No explicit params (may use `it` implicitly)
-                };
-                let body_str = tail_expr
-                    .as_ref()
-                    .map(|e| e.debug_compact())
-                    .unwrap_or_else(|| "...".to_string());
-                format!("{{ {}{} }}", params_str, body_str)
-            },
-            ExprKind::EnumCase { case_id } => format!("case_{:?}", case_id),
-            ExprKind::ImplicitMemberAccess {
-                member_name,
-                arguments,
-            } => {
-                if let Some(args) = arguments {
-                    let args_str: Vec<String> = args
+                    LiteralValue::Bool(b) => b.to_string(),
+                },
+                ExprKind::Array(elements) => {
+                    let items: Vec<_> = elements.iter().map(format_expr).collect();
+                    with_type(format!("[{}]", items.join(", ")), &expr.ty)
+                },
+                ExprKind::Tuple(elements) => {
+                    let items: Vec<_> = elements.iter().map(format_expr).collect();
+                    format!("({})", items.join(", "))
+                },
+                ExprKind::Grouping(inner) => format!("({})", format_expr(inner)),
+                // Local refs - always show type
+                ExprKind::LocalRef(id) => format!("local_{}: {}", id.0, expr.ty),
+                ExprKind::SymbolRef(id) => format!("symbol_{:?}", id),
+                ExprKind::OverloadedRef(_) => "overloaded".to_string(),
+                ExprKind::TypeRef(id) => format!("type_{:?}", id),
+                ExprKind::TypeParameterRef(_) => "<type_param>".to_string(),
+                ExprKind::AssociatedTypeRef => "<assoc_type>".to_string(),
+                ExprKind::FieldAccess { object, field } => {
+                    format!("{}.{}", format_expr(object), field)
+                },
+                ExprKind::TupleIndex { tuple, index } => {
+                    format!("{}.{}", format_expr(tuple), index)
+                },
+                ExprKind::MethodRef {
+                    receiver,
+                    method_name,
+                    ..
+                } => format!("{}.{}", format_expr(receiver), method_name),
+                ExprKind::Call {
+                    callee, arguments, ..
+                } => {
+                    let args: Vec<String> = arguments
                         .iter()
                         .map(|a| {
                             if let Some(ref label) = a.label {
-                                format!("{}: {}", label, a.value.debug_compact())
+                                format!("{}: {}", label, format_expr(&a.value))
                             } else {
-                                a.value.debug_compact()
+                                format_expr(&a.value)
                             }
                         })
                         .collect();
-                    format!(".{}({})", member_name, args_str.join(", "))
-                } else {
-                    format!(".{}", member_name)
-                }
-            },
-            ExprKind::Match { scrutinee, arms } => {
-                format!(
-                    "match {} {{ {} arms }}",
-                    scrutinee.debug_compact(),
-                    arms.len()
-                )
-            },
-            ExprKind::Block { value, .. } => {
-                let body_str = value
-                    .as_ref()
-                    .map(|e| e.debug_compact())
-                    .unwrap_or_else(|| "...".to_string());
-                format!("{{ {} }}", body_str)
-            },
-            ExprKind::Error => "<error>".to_string(),
-            ExprKind::LangIntrinsic {
-                intrinsic,
-                arguments,
-            } => {
-                let args: Vec<String> = arguments.iter().map(|a| a.value.debug_compact()).collect();
-                format!("{}({})", intrinsic.name(), args.join(", "))
-            },
-            ExprKind::LangIntrinsicRef(intrinsic) => intrinsic.name(),
-            ExprKind::SubscriptCall {
-                receiver,
-                getter: _,
-                arguments,
-            } => {
-                let args: Vec<String> = arguments
-                    .iter()
-                    .map(|a| {
-                        if let Some(ref label) = a.label {
-                            format!("{}: {}", label, a.value.debug_compact())
-                        } else {
-                            a.value.debug_compact()
+                    with_type(format!("{}({})", format_expr(callee), args.join(", ")), &expr.ty)
+                },
+                ExprKind::PrimitiveMethodCall {
+                    receiver,
+                    method,
+                    arguments,
+                } => {
+                    let args: Vec<String> = arguments.iter().map(|a| format_expr(&a.value)).collect();
+                    format!(
+                        "{}.{}({})",
+                        format_expr(receiver),
+                        method.name(),
+                        args.join(", ")
+                    )
+                },
+                ExprKind::PrimitiveMethodRef { receiver, method } => {
+                    format!("{}.{}", format_expr(receiver), method.name())
+                },
+                ExprKind::DeferredMethodCall {
+                    receiver,
+                    method_name,
+                    arguments,
+                } => {
+                    let args: Vec<String> = arguments.iter().map(|a| format_expr(&a.value)).collect();
+                    format!(
+                        "{}.{}({})",
+                        format_expr(receiver),
+                        method_name,
+                        args.join(", ")
+                    )
+                },
+                ExprKind::DeferredStaticCall {
+                    target_ty,
+                    method_name,
+                    arguments,
+                    ..
+                } => {
+                    let args: Vec<String> = arguments.iter().map(|a| format_expr(&a.value)).collect();
+                    format!("{}.{}({})", target_ty, method_name, args.join(", "))
+                },
+                ExprKind::ImplicitStructInit {
+                    struct_type,
+                    arguments,
+                } => {
+                    let args: Vec<String> = arguments
+                        .iter()
+                        .map(|a| {
+                            if let Some(ref label) = a.label {
+                                format!("{}: {}", label, format_expr(&a.value))
+                            } else {
+                                format_expr(&a.value)
+                            }
+                        })
+                        .collect();
+                    format!("{}({})", struct_type, args.join(", "))
+                },
+                ExprKind::DelegatingInit { arguments, .. } => {
+                    let args: Vec<String> = arguments
+                        .iter()
+                        .map(|a| {
+                            if let Some(ref label) = a.label {
+                                format!("{}: {}", label, format_expr(&a.value))
+                            } else {
+                                format_expr(&a.value)
+                            }
+                        })
+                        .collect();
+                    format!("self.init({})", args.join(", "))
+                },
+                ExprKind::Assignment { target, value } => {
+                    format!("{} = {}", format_expr(target), format_expr(value))
+                },
+                ExprKind::If {
+                    conditions,
+                    then_value,
+                    else_branch,
+                    ..
+                } => {
+                    let cond_strs: Vec<String> = conditions
+                        .iter()
+                        .map(|c| match c {
+                            IfCondition::Expr(e) => format_expr(e),
+                            IfCondition::Let { pattern, value, .. } => {
+                                format!("let {} = {}", format_pattern_with_type(pattern), format_expr(value))
+                            },
+                        })
+                        .collect();
+                    let cond_str = cond_strs.join(", ");
+                    let then_str = if let Some(v) = then_value {
+                        format_expr(v)
+                    } else {
+                        "...".to_string()
+                    };
+                    let else_str = if let Some(else_b) = else_branch {
+                        match else_b {
+                            ElseBranch::Block { value, .. } => {
+                                if let Some(v) = value {
+                                    format!(" else {{ {} }}", format_expr(v))
+                                } else {
+                                    " else { ... }".to_string()
+                                }
+                            },
+                            ElseBranch::ElseIf(_) => " else if ...".to_string(),
                         }
-                    })
-                    .collect();
-                format!("{}({})", receiver.debug_compact(), args.join(", "))
-            },
+                    } else {
+                        String::new()
+                    };
+                    with_type(format!("if {} {{ {} }}{}", cond_str, then_str, else_str), &expr.ty)
+                },
+                ExprKind::While { condition, .. } => {
+                    format!("while {} {{ ... }}", format_expr(condition))
+                },
+                ExprKind::WhileLet { conditions, .. } => {
+                    let conds: Vec<_> = conditions
+                        .iter()
+                        .map(|c| match c {
+                            IfCondition::Let { pattern, value, .. } => {
+                                format!("let {} = {}", format_pattern_with_type(pattern), format_expr(value))
+                            },
+                            IfCondition::Expr(e) => format_expr(e),
+                        })
+                        .collect();
+                    format!("while {} {{ ... }}", conds.join(", "))
+                },
+                ExprKind::Loop { .. } => "loop { ... }".to_string(),
+                ExprKind::Break { label, .. } => {
+                    if let Some(l) = label {
+                        format!("break {}", l.name)
+                    } else {
+                        "break".to_string()
+                    }
+                },
+                ExprKind::Continue { label, .. } => {
+                    if let Some(l) = label {
+                        format!("continue {}", l.name)
+                    } else {
+                        "continue".to_string()
+                    }
+                },
+                ExprKind::Return { value } => {
+                    if let Some(v) = value {
+                        format!("return {}", format_expr(v))
+                    } else {
+                        "return".to_string()
+                    }
+                },
+                ExprKind::Closure {
+                    params,
+                    tail_expr,
+                    ..
+                } => {
+                    let params_str = match params {
+                        Some(ps) => {
+                            let p: Vec<_> = ps.iter().map(|p| format!("{}: {}", p.name, p.ty)).collect();
+                            format!("({}) in ", p.join(", "))
+                        },
+                        None => String::new(),
+                    };
+                    let body_str = tail_expr
+                        .as_ref()
+                        .map(|e| format_expr(e))
+                        .unwrap_or_else(|| "...".to_string());
+                    format!("{{ {}{} }}", params_str, body_str)
+                },
+                ExprKind::EnumCase { case_id } => format!("case_{:?}", case_id),
+                ExprKind::ImplicitMemberAccess {
+                    member_name,
+                    arguments,
+                } => {
+                    if let Some(args) = arguments {
+                        let args_str: Vec<String> = args
+                            .iter()
+                            .map(|a| {
+                                if let Some(ref label) = a.label {
+                                    format!("{}: {}", label, format_expr(&a.value))
+                                } else {
+                                    format_expr(&a.value)
+                                }
+                            })
+                            .collect();
+                        format!(".{}({})", member_name, args_str.join(", "))
+                    } else {
+                        format!(".{}", member_name)
+                    }
+                },
+                ExprKind::Match { scrutinee, arms } => {
+                    with_type(
+                        format!(
+                            "match {} {{ {} arms }}",
+                            format_expr(scrutinee),
+                            arms.len()
+                        ),
+                        &expr.ty
+                    )
+                },
+                ExprKind::Block { value, .. } => {
+                    let body_str = value
+                        .as_ref()
+                        .map(|e| format_expr(e))
+                        .unwrap_or_else(|| "...".to_string());
+                    with_type(format!("{{ {} }}", body_str), &expr.ty)
+                },
+                ExprKind::Error => "<error>".to_string(),
+                ExprKind::LangIntrinsic {
+                    intrinsic,
+                    arguments,
+                } => {
+                    let args: Vec<String> = arguments.iter().map(|a| format_expr(&a.value)).collect();
+                    format!("{}({})", intrinsic.name(), args.join(", "))
+                },
+                ExprKind::LangIntrinsicRef(intrinsic) => intrinsic.name(),
+                ExprKind::SubscriptCall {
+                    receiver,
+                    arguments,
+                    ..
+                } => {
+                    let args: Vec<String> = arguments
+                        .iter()
+                        .map(|a| {
+                            if let Some(ref label) = a.label {
+                                format!("{}: {}", label, format_expr(&a.value))
+                            } else {
+                                format_expr(&a.value)
+                            }
+                        })
+                        .collect();
+                    with_type(format!("{}[{}]", format_expr(receiver), args.join(", ")), &expr.ty)
+                },
+            }
         }
+
+        format_expr(self)
     }
 
     /// Create a unit literal expression.
@@ -2026,7 +2092,8 @@ impl Expression {
     }
 
     /// Create a method reference expression.
-    /// Type is inferred later when call resolution happens.
+    /// Uses unit type as placeholder since the actual result type comes from
+    /// the Call expression that wraps this MethodRef.
     /// Method references are not mutable lvalues.
     pub fn method_ref(
         receiver: Expression,
@@ -2034,6 +2101,9 @@ impl Expression {
         method_name: String,
         span: Span,
     ) -> Self {
+        // Use unit type as placeholder since MethodRef's type is not used directly.
+        // The actual result type comes from the Call expression that wraps this MethodRef.
+        // Using Ty::infer would create an unresolved inference variable.
         Expression {
             id: ExprId::new(),
             kind: ExprKind::MethodRef {
@@ -2041,7 +2111,7 @@ impl Expression {
                 candidates,
                 method_name,
             },
-            ty: Ty::infer(span.clone()),
+            ty: Ty::unit(span.clone()),
             span,
             mutable: false,
         }
@@ -2202,10 +2272,15 @@ impl Expression {
     /// Create a deferred static method call expression.
     /// Used for `try` expressions where we call `R.fromResidual(early)` and R is
     /// the function's return type (which may have inference variables).
+    ///
+    /// If `protocol_candidates` is non-empty, the constraint generator will emit
+    /// conformance constraints for better error messages ("does not conform to X"
+    /// instead of "no member Y").
     pub fn deferred_static_call(
         target_ty: Ty,
         method_name: String,
         arguments: Vec<CallArgument>,
+        protocol_candidates: Vec<SymbolId>,
         result_ty: Ty,
         span: Span,
     ) -> Self {
@@ -2215,6 +2290,7 @@ impl Expression {
                 target_ty,
                 method_name,
                 arguments,
+                protocol_candidates,
             },
             ty: result_ty,
             span,

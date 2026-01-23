@@ -326,9 +326,9 @@ impl SemanticModel {
                 use kestrel_semantic_tree::pattern::{Mutability, PatternKind};
                 use kestrel_semantic_tree::stmt::{Statement, StatementKind};
 
-                /// Format an expression as (value: type)
+                /// Format an expression with types shown
                 fn format_expr_with_type(expr: &Expression) -> String {
-                    format!("({}: {})", expr.debug_compact(), expr.ty)
+                    expr.debug_compact()
                 }
 
                 /// Format a statement with types shown

@@ -123,6 +123,28 @@ pub enum LanguageFeature {
     OptionalEnum,
     OptionalSomeCase,
     OptionalNoneCase,
+
+    // Compound assignment protocols
+    AddAssignProtocol,
+    AddAssignMethod,
+    SubtractAssignProtocol,
+    SubtractAssignMethod,
+    MultiplyAssignProtocol,
+    MultiplyAssignMethod,
+    DivideAssignProtocol,
+    DivideAssignMethod,
+    ModuloAssignProtocol,
+    ModuloAssignMethod,
+    BitwiseAndAssignProtocol,
+    BitwiseAndAssignMethod,
+    BitwiseOrAssignProtocol,
+    BitwiseOrAssignMethod,
+    BitwiseXorAssignProtocol,
+    BitwiseXorAssignMethod,
+    ShiftLeftAssignProtocol,
+    ShiftLeftAssignMethod,
+    ShiftRightAssignProtocol,
+    ShiftRightAssignMethod,
 }
 
 impl LanguageFeature {
@@ -217,6 +239,27 @@ impl LanguageFeature {
             "OptionalEnum" => Some(Self::OptionalEnum),
             "OptionalSomeCase" => Some(Self::OptionalSomeCase),
             "OptionalNoneCase" => Some(Self::OptionalNoneCase),
+            // Compound assignment protocols
+            "AddAssignProtocol" => Some(Self::AddAssignProtocol),
+            "AddAssignMethod" => Some(Self::AddAssignMethod),
+            "SubtractAssignProtocol" => Some(Self::SubtractAssignProtocol),
+            "SubtractAssignMethod" => Some(Self::SubtractAssignMethod),
+            "MultiplyAssignProtocol" => Some(Self::MultiplyAssignProtocol),
+            "MultiplyAssignMethod" => Some(Self::MultiplyAssignMethod),
+            "DivideAssignProtocol" => Some(Self::DivideAssignProtocol),
+            "DivideAssignMethod" => Some(Self::DivideAssignMethod),
+            "ModuloAssignProtocol" => Some(Self::ModuloAssignProtocol),
+            "ModuloAssignMethod" => Some(Self::ModuloAssignMethod),
+            "BitwiseAndAssignProtocol" => Some(Self::BitwiseAndAssignProtocol),
+            "BitwiseAndAssignMethod" => Some(Self::BitwiseAndAssignMethod),
+            "BitwiseOrAssignProtocol" => Some(Self::BitwiseOrAssignProtocol),
+            "BitwiseOrAssignMethod" => Some(Self::BitwiseOrAssignMethod),
+            "BitwiseXorAssignProtocol" => Some(Self::BitwiseXorAssignProtocol),
+            "BitwiseXorAssignMethod" => Some(Self::BitwiseXorAssignMethod),
+            "ShiftLeftAssignProtocol" => Some(Self::ShiftLeftAssignProtocol),
+            "ShiftLeftAssignMethod" => Some(Self::ShiftLeftAssignMethod),
+            "ShiftRightAssignProtocol" => Some(Self::ShiftRightAssignProtocol),
+            "ShiftRightAssignMethod" => Some(Self::ShiftRightAssignMethod),
             _ => None,
         }
     }
@@ -312,6 +355,27 @@ impl LanguageFeature {
             Self::OptionalEnum => "OptionalEnum",
             Self::OptionalSomeCase => "OptionalSomeCase",
             Self::OptionalNoneCase => "OptionalNoneCase",
+            // Compound assignment protocols
+            Self::AddAssignProtocol => "AddAssignProtocol",
+            Self::AddAssignMethod => "AddAssignMethod",
+            Self::SubtractAssignProtocol => "SubtractAssignProtocol",
+            Self::SubtractAssignMethod => "SubtractAssignMethod",
+            Self::MultiplyAssignProtocol => "MultiplyAssignProtocol",
+            Self::MultiplyAssignMethod => "MultiplyAssignMethod",
+            Self::DivideAssignProtocol => "DivideAssignProtocol",
+            Self::DivideAssignMethod => "DivideAssignMethod",
+            Self::ModuloAssignProtocol => "ModuloAssignProtocol",
+            Self::ModuloAssignMethod => "ModuloAssignMethod",
+            Self::BitwiseAndAssignProtocol => "BitwiseAndAssignProtocol",
+            Self::BitwiseAndAssignMethod => "BitwiseAndAssignMethod",
+            Self::BitwiseOrAssignProtocol => "BitwiseOrAssignProtocol",
+            Self::BitwiseOrAssignMethod => "BitwiseOrAssignMethod",
+            Self::BitwiseXorAssignProtocol => "BitwiseXorAssignProtocol",
+            Self::BitwiseXorAssignMethod => "BitwiseXorAssignMethod",
+            Self::ShiftLeftAssignProtocol => "ShiftLeftAssignProtocol",
+            Self::ShiftLeftAssignMethod => "ShiftLeftAssignMethod",
+            Self::ShiftRightAssignProtocol => "ShiftRightAssignProtocol",
+            Self::ShiftRightAssignMethod => "ShiftRightAssignMethod",
         }
     }
 
@@ -732,6 +796,87 @@ impl LanguageFeature {
                 feature: *self,
                 kind: BuiltinKind::EnumCase {
                     enum_feature: LanguageFeature::OptionalEnum,
+                },
+            },
+            // Compound assignment protocols
+            Self::AddAssignProtocol
+            | Self::SubtractAssignProtocol
+            | Self::MultiplyAssignProtocol
+            | Self::DivideAssignProtocol
+            | Self::ModuloAssignProtocol
+            | Self::BitwiseAndAssignProtocol
+            | Self::BitwiseOrAssignProtocol
+            | Self::BitwiseXorAssignProtocol
+            | Self::ShiftLeftAssignProtocol
+            | Self::ShiftRightAssignProtocol => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::Protocol {
+                    implicit_conformance: false,
+                    must_be_marker: false,
+                    tuple_conformance_propagation: false,
+                    requires_fields_conform: false,
+                    disallow_enum_conformance: false,
+                },
+            },
+            // Compound assignment methods
+            Self::AddAssignMethod => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::ProtocolMethod {
+                    protocol_feature: LanguageFeature::AddAssignProtocol,
+                },
+            },
+            Self::SubtractAssignMethod => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::ProtocolMethod {
+                    protocol_feature: LanguageFeature::SubtractAssignProtocol,
+                },
+            },
+            Self::MultiplyAssignMethod => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::ProtocolMethod {
+                    protocol_feature: LanguageFeature::MultiplyAssignProtocol,
+                },
+            },
+            Self::DivideAssignMethod => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::ProtocolMethod {
+                    protocol_feature: LanguageFeature::DivideAssignProtocol,
+                },
+            },
+            Self::ModuloAssignMethod => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::ProtocolMethod {
+                    protocol_feature: LanguageFeature::ModuloAssignProtocol,
+                },
+            },
+            Self::BitwiseAndAssignMethod => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::ProtocolMethod {
+                    protocol_feature: LanguageFeature::BitwiseAndAssignProtocol,
+                },
+            },
+            Self::BitwiseOrAssignMethod => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::ProtocolMethod {
+                    protocol_feature: LanguageFeature::BitwiseOrAssignProtocol,
+                },
+            },
+            Self::BitwiseXorAssignMethod => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::ProtocolMethod {
+                    protocol_feature: LanguageFeature::BitwiseXorAssignProtocol,
+                },
+            },
+            Self::ShiftLeftAssignMethod => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::ProtocolMethod {
+                    protocol_feature: LanguageFeature::ShiftLeftAssignProtocol,
+                },
+            },
+            Self::ShiftRightAssignMethod => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::ProtocolMethod {
+                    protocol_feature: LanguageFeature::ShiftRightAssignProtocol,
                 },
             },
         }

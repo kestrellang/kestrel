@@ -482,7 +482,30 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
                     ctx.equate(callee.ty.id(), expected_fn_ty.id(), expr.span.clone());
                 },
                 _ => {
-                    // Callee type is not a function - might be an error or inference needed
+                    // Check if callee is a MethodRef - if so, generate member_access constraint
+                    // for method resolution. This enables the MethodRef pattern for protocol
+                    // method calls (used by desugared for-loops for iter()/next()).
+                    if let ExprKind::MethodRef {
+                        receiver,
+                        method_name,
+                        ..
+                    } = &callee.kind
+                    {
+                        let arg_ty_ids: Vec<_> =
+                            arguments.iter().map(|a| a.value.ty.id()).collect();
+                        ctx.register_type(&receiver.ty);
+                        ctx.register_type(&expr.ty);
+                        ctx.member_access(
+                            receiver.ty.id(),
+                            method_name.clone(),
+                            false,      // instance method call
+                            arg_ty_ids, // argument types for parameter constraint generation
+                            expr.ty.id(),
+                            expr.id,
+                            expr.span.clone(),
+                        );
+                    }
+                    // Otherwise callee type is not a function - might be an error or inference needed
                 },
             }
         },
@@ -541,6 +564,7 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
             target_ty,
             method_name,
             arguments,
+            protocol_candidates,
         } => {
             // Generate constraints for arguments
             for arg in arguments {
@@ -553,6 +577,15 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
             // Register target type and result type
             ctx.register_type(target_ty);
             ctx.register_type(&expr.ty);
+
+            // If protocol candidates are provided, emit conformance constraints.
+            // This produces better error messages ("does not conform to X" instead of "no member Y").
+            for candidate_id in protocol_candidates {
+                if let Some(protocol_id) = ctx.oracle().protocol_for_method(*candidate_id) {
+                    let protocol_ref = ProtocolRef::new(protocol_id, expr.span.clone());
+                    ctx.conforms(target_ty.id(), protocol_ref);
+                }
+            }
 
             // Generate a member access constraint for the static method
             // is_static = true indicates this is a static method lookup

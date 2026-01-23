@@ -2,136 +2,74 @@
 
 module std.core
 
-// TODO: Add builtin support
-//@builtin(.AddAssignOperatorProtocol)
+@builtin(.AddAssignProtocol)
 public protocol AddAssign[Rhs = Self] {
-    //@builtin(.AddAssignOperatorMethod)
+    @builtin(.AddAssignMethod)
     mutating func addAssign(other: Rhs)
 }
 
-// TODO: Add builtin support
-//@builtin(.SubtractAssignOperatorProtocol)
+@builtin(.SubtractAssignProtocol)
 public protocol SubtractAssign[Rhs = Self] {
-    //@builtin(.SubtractAssignOperatorMethod)
+    @builtin(.SubtractAssignMethod)
     mutating func subtractAssign(other: Rhs)
 }
 
-// TODO: Add builtin support
-//@builtin(.MultiplyAssignOperatorProtocol)
+@builtin(.MultiplyAssignProtocol)
 public protocol MultiplyAssign[Rhs = Self] {
-    //@builtin(.MultiplyAssignOperatorMethod)
+    @builtin(.MultiplyAssignMethod)
     mutating func multiplyAssign(other: Rhs)
 }
 
-// TODO: Add builtin support
-//@builtin(.DivideAssignOperatorProtocol)
+@builtin(.DivideAssignProtocol)
 public protocol DivideAssign[Rhs = Self] {
-    //@builtin(.DivideAssignOperatorMethod)
+    @builtin(.DivideAssignMethod)
     mutating func divideAssign(other: Rhs)
 }
 
-// TODO: Add builtin support
-//@builtin(.ModuloAssignOperatorProtocol)
+@builtin(.ModuloAssignProtocol)
 public protocol ModuloAssign[Rhs = Self] {
-    //@builtin(.ModuloAssignOperatorMethod)
+    @builtin(.ModuloAssignMethod)
     mutating func modAssign(other: Rhs)
 }
 
-// TODO: Add builtin support
-//@builtin(.BitwiseAndAssignOperatorProtocol)
+@builtin(.BitwiseAndAssignProtocol)
 public protocol BitwiseAndAssign[Rhs = Self] {
-    //@builtin(.BitwiseAndAssignOperatorMethod)
+    @builtin(.BitwiseAndAssignMethod)
     mutating func bitwiseAndAssign(other: Rhs)
 }
 
-// TODO: Add builtin support
-//@builtin(.BitwiseOrAssignOperatorProtocol)
+@builtin(.BitwiseOrAssignProtocol)
 public protocol BitwiseOrAssign[Rhs = Self] {
-    //@builtin(.BitwiseOrAssignOperatorMethod)
+    @builtin(.BitwiseOrAssignMethod)
     mutating func bitwiseOrAssign(other: Rhs)
 }
 
-// TODO: Add builtin support
-//@builtin(.BitwiseXorAssignOperatorProtocol)
+@builtin(.BitwiseXorAssignProtocol)
 public protocol BitwiseXorAssign[Rhs = Self] {
-    //@builtin(.BitwiseXorAssignOperatorMethod)
+    @builtin(.BitwiseXorAssignMethod)
     mutating func bitwiseXorAssign(other: Rhs)
 }
 
-// TODO: Add builtin support
-//@builtin(.LeftShiftAssignOperatorProtocol)
+@builtin(.ShiftLeftAssignProtocol)
 public protocol LeftShiftAssign[Rhs] {
-    //@builtin(.LeftShiftAssignOperatorMethod)
+    @builtin(.ShiftLeftAssignMethod)
     mutating func shiftLeftAssign(by count: Rhs)
 }
 
-// TODO: Add builtin support
-//@builtin(.RightShiftAssignOperatorProtocol)
+@builtin(.ShiftRightAssignProtocol)
 public protocol RightShiftAssign[Rhs] {
-    //@builtin(.RightShiftAssignOperatorMethod)
+    @builtin(.ShiftRightAssignMethod)
     mutating func shiftRightAssign(by count: Rhs)
 }
 
-// TODO: Protocol extensions with `where Output = Self` don't work yet.
-// The compiler sees Self as the protocol type rather than the implementing type.
-// Default implementations from base operators:
+// TODO: Default implementations for types that implement the corresponding binary operator
+// with Output = Self. These are commented out because the where clause syntax
+// `where Protocol[Param].Output = Self` is not yet supported.
 //
-// extend Addable[Rhs]: AddAssign[Rhs] where Output = Self {
+// extend Addable[Rhs]: AddAssign[Rhs] where Addable[Rhs].Output = Self {
 //     public mutating func addAssign(other: Rhs) {
 //         self = self.add(other)
 //     }
 // }
 //
-// extend Subtractable[Rhs]: SubtractAssign[Rhs] where Output = Self {
-//     public mutating func subtractAssign(other: Rhs) {
-//         self = self.subtract(other)
-//     }
-// }
-//
-// extend Multipliable[Rhs]: MultiplyAssign[Rhs] where Output = Self {
-//     public mutating func multiplyAssign(other: Rhs) {
-//         self = self.multiply(other)
-//     }
-// }
-//
-// extend Divisible[Rhs]: DivideAssign[Rhs] where Output = Self {
-//     public mutating func divideAssign(other: Rhs) {
-//         self = self.divide(other)
-//     }
-// }
-//
-// extend Modulo[Rhs]: ModuloAssign[Rhs] where Output = Self {
-//     public mutating func modAssign(other: Rhs) {
-//         self = self.modulo(other)
-//     }
-// }
-//
-// extend BitwiseAnd[Rhs]: BitwiseAndAssign[Rhs] where Output = Self {
-//     public mutating func bitwiseAndAssign(other: Rhs) {
-//         self = self.bitwiseAnd(other)
-//     }
-// }
-//
-// extend BitwiseOr[Rhs]: BitwiseOrAssign[Rhs] where Output = Self {
-//     public mutating func bitwiseOrAssign(other: Rhs) {
-//         self = self.bitwiseOr(other)
-//     }
-// }
-//
-// extend BitwiseXor[Rhs]: BitwiseXorAssign[Rhs] where Output = Self {
-//     public mutating func bitwiseXorAssign(other: Rhs) {
-//         self = self.bitwiseXor(other)
-//     }
-// }
-//
-// extend LeftShift[Rhs]: LeftShiftAssign[Rhs] where Output = Self {
-//     public mutating func shiftLeftAssign(by count: Rhs) {
-//         self = self.shiftLeft(by: count)
-//     }
-// }
-//
-// extend RightShift[Rhs]: RightShiftAssign[Rhs] where Output = Self {
-//     public mutating func shiftRightAssign(by count: Rhs) {
-//         self = self.shiftRight(by: count)
-//     }
-// }
+// ... etc for other protocols

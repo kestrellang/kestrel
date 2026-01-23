@@ -5,21 +5,26 @@
 //! like calls, operators, and paths.
 
 use kestrel_reporting::IntoDiagnostic;
-use kestrel_semantic_tree::expr::{ElseBranch, Expression, IfCondition, LabelInfo};
+use kestrel_semantic_tree::builtins::LanguageFeature;
+use kestrel_semantic_tree::expr::{CallArgument, ElseBranch, Expression, IfCondition, LabelInfo};
 use kestrel_semantic_tree::stmt::Statement;
 use kestrel_semantic_tree::ty::Ty;
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use crate::diagnostics::{
-    AsciiEscapeOutOfRangeError, BreakOutsideLoopError, ContinueOutsideLoopError,
-    EmptyCharacterLiteralError, IncompleteEscapeSequenceError, InvalidEscapeSequenceError,
-    InvalidUnicodeEscapeError, MultipleCodepointsInCharLiteralError, TupleIndexOnNonTupleError,
-    TupleIndexOutOfBoundsError, UndeclaredLabelError, UnicodeEscapeErrorReason,
+    AsciiEscapeOutOfRangeError, BreakOutsideLoopError, CannotAssignThroughImmutableBindingError,
+    CannotAssignToImmutableFieldError, CannotAssignToLetError, CannotAssignToTemporaryError,
+    ContinueOutsideLoopError, EmptyCharacterLiteralError, IncompleteEscapeSequenceError,
+    InvalidEscapeSequenceError, InvalidUnicodeEscapeError, MultipleCodepointsInCharLiteralError,
+    TupleIndexOnNonTupleError, TupleIndexOutOfBoundsError, UndeclaredLabelError,
+    UnicodeEscapeErrorReason,
 };
 use kestrel_syntax_tree::utils::get_node_span;
 
-use super::calls::{resolve_argument_list, resolve_call_expression};
+use super::calls::{
+    classify_mutability, resolve_argument_list, resolve_call_expression, MutabilityClassification,
+};
 use super::context::BodyResolutionContext;
 use super::operators::{
     resolve_binary_expression, resolve_postfix_expression, resolve_unary_expression,
@@ -103,6 +108,8 @@ pub fn resolve_expression(expr_node: &SyntaxNode, ctx: &mut BodyResolutionContex
         SyntaxKind::ExprCall => resolve_call_expression(expr_node, ctx),
 
         SyntaxKind::ExprAssignment => resolve_assignment_expression(expr_node, ctx),
+
+        SyntaxKind::ExprCompoundAssignment => resolve_compound_assignment_expression(expr_node, ctx),
 
         SyntaxKind::ExprIf => resolve_if_expression(expr_node, ctx),
 
@@ -550,10 +557,81 @@ fn resolve_assignment_expression(node: &SyntaxNode, ctx: &mut BodyResolutionCont
     let target = resolve_expression(&lhs_node, ctx);
     let value = resolve_expression(&rhs_node, ctx);
 
-    // TODO: Validate that target is assignable (var, not let; field on mutable receiver)
+    // Validate that target is assignable (var, not let; field on mutable receiver)
+    validate_assignment_target(&target, &span, ctx);
+
     // TODO: Type check that value type is compatible with target type
 
     Expression::assignment(target, value, span)
+}
+
+/// Resolve a compound assignment expression: target += value, target -= value, etc.
+/// Desugars to a method call: target.addAssign(value), etc.
+fn resolve_compound_assignment_expression(
+    node: &SyntaxNode,
+    ctx: &mut BodyResolutionContext,
+) -> Expression {
+    use kestrel_semantic_tree::operators::CompoundOp;
+
+    let span = get_node_span(node, ctx.file_id);
+
+    // Find the operator token to determine which compound operator this is
+    let op_token = node
+        .children_with_tokens()
+        .filter_map(|e| e.into_token())
+        .find(|t| CompoundOp::from_syntax_kind(t.kind()).is_some());
+
+    let Some(op_token) = op_token else {
+        return Expression::error(span);
+    };
+
+    let Some(op) = CompoundOp::from_syntax_kind(op_token.kind()) else {
+        return Expression::error(span);
+    };
+
+    // Find the LHS and RHS expressions
+    // ExprCompoundAssignment contains: Expression, operator token, Expression
+    let mut expr_children = node
+        .children()
+        .filter(|c| c.kind() == SyntaxKind::Expression || is_expression_kind(c.kind()));
+
+    let lhs_node = match expr_children.next() {
+        Some(n) => n,
+        None => return Expression::error(span),
+    };
+
+    let rhs_node = match expr_children.next() {
+        Some(n) => n,
+        None => return Expression::error(span),
+    };
+
+    // Resolve both sides
+    let target = resolve_expression(&lhs_node, ctx);
+    let value = resolve_expression(&rhs_node, ctx);
+
+    // If either operand has a poison type, propagate error without cascading diagnostics.
+    if target.ty.is_poison() || value.ty.is_poison() {
+        return Expression::error(span);
+    }
+
+    // Validate that target is assignable (var, not let; field on mutable receiver)
+    validate_assignment_target(&target, &span, ctx);
+
+    // Desugar to method call: target.{method_name}(value)
+    // The method returns (), so the compound assignment expression has type ()
+    let method_name = op.method_name();
+    let arg = CallArgument::unlabeled(value.clone(), value.span.clone());
+    let result_ty = Ty::unit(span.clone());
+
+    // Try to use MethodRef pattern with builtin registry for better error messages
+    if let Some(method_id) = ctx.model.builtin_registry().method(op.method_feature()) {
+        let method_ref =
+            Expression::method_ref(target, vec![method_id], method_name.to_string(), span.clone());
+        return Expression::call(method_ref, vec![arg], result_ty, span);
+    }
+
+    // Fallback: use DeferredMethodCall if builtin not registered
+    Expression::deferred_method_call(target, method_name.to_string(), vec![arg], result_ty, span)
 }
 
 /// Resolve an if expression: if condition { then } else { else }
@@ -1140,14 +1218,27 @@ fn resolve_for_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) ->
         span.clone(),
     );
 
-    // Create the .iter() method call on the iterable
-    let iter_call = Expression::deferred_method_call(
-        iterable_expr,
-        "iter".to_string(),
-        vec![],
-        iter_ty.clone(),
-        span.clone(),
-    );
+    // Create the .iter() method call on the iterable using MethodRef pattern.
+    // This produces "does not conform to Iterable" errors instead of "no member iter".
+    let iter_method_id = ctx
+        .model
+        .builtin_registry()
+        .method(LanguageFeature::IterableIterMethod);
+    let iter_call = if let Some(method_id) = iter_method_id {
+        // Create MethodRef with the protocol method as candidate, then wrap in Call
+        let method_ref =
+            Expression::method_ref(iterable_expr, vec![method_id], "iter".to_string(), span.clone());
+        Expression::call(method_ref, vec![], iter_ty.clone(), span.clone())
+    } else {
+        // Fallback if builtin not registered (shouldn't happen in practice)
+        Expression::deferred_method_call(
+            iterable_expr,
+            "iter".to_string(),
+            vec![],
+            iter_ty.clone(),
+            span.clone(),
+        )
+    };
 
     // Create the binding pattern for the iterator
     let iter_pattern = Pattern::local(
@@ -1169,17 +1260,30 @@ fn resolve_for_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) ->
     // Push a new scope for pattern bindings in the loop body
     ctx.local_scope.push_scope();
 
-    // Create the .next() method call: iter.next()
+    // Create the .next() method call: iter.next() using MethodRef pattern.
+    // This produces "does not conform to Iterator" errors instead of "no member next".
     let item_ty = Ty::infer(span.clone());
     let optional_item_ty = Ty::infer(span.clone()); // Will be Optional[Item]
     let iter_ref = Expression::local_ref(iter_local_id, iter_ty, true, span.clone());
-    let next_call = Expression::deferred_method_call(
-        iter_ref,
-        "next".to_string(),
-        vec![],
-        optional_item_ty.clone(),
-        span.clone(),
-    );
+    let next_method_id = ctx
+        .model
+        .builtin_registry()
+        .method(LanguageFeature::IteratorNextMethod);
+    let next_call = if let Some(method_id) = next_method_id {
+        // Create MethodRef with the protocol method as candidate, then wrap in Call
+        let method_ref =
+            Expression::method_ref(iter_ref, vec![method_id], "next".to_string(), span.clone());
+        Expression::call(method_ref, vec![], optional_item_ty.clone(), span.clone())
+    } else {
+        // Fallback if builtin not registered (shouldn't happen in practice)
+        Expression::deferred_method_call(
+            iter_ref,
+            "next".to_string(),
+            vec![],
+            optional_item_ty.clone(),
+            span.clone(),
+        )
+    };
 
     // Resolve the user's pattern with the item type
     let user_pattern = pattern_node
@@ -1459,14 +1563,29 @@ fn resolve_try_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) ->
     let operand = resolve_expression(&operand_node, ctx);
 
     // Create method call: operand.tryExtract()
-    // This is a deferred method call that will be resolved during type inference
-    let try_extract_call = Expression::deferred_method_call(
-        operand,
-        "tryExtract".to_string(),
-        vec![],
-        Ty::infer(span.clone()), // ControlFlow[Output, Early]
-        span.clone(),
-    );
+    // Try to use MethodRef pattern with builtin registry for better error messages
+    let try_extract_call = if let Some(method_id) = ctx
+        .model
+        .builtin_registry()
+        .method(LanguageFeature::TryExtractMethod)
+    {
+        let method_ref = Expression::method_ref(
+            operand,
+            vec![method_id],
+            "tryExtract".to_string(),
+            span.clone(),
+        );
+        Expression::call(method_ref, vec![], Ty::infer(span.clone()), span.clone())
+    } else {
+        // Fallback: use DeferredMethodCall if builtin not registered
+        Expression::deferred_method_call(
+            operand,
+            "tryExtract".to_string(),
+            vec![],
+            Ty::infer(span.clone()), // ControlFlow[Output, Early]
+            span.clone(),
+        )
+    };
 
     // Create locals for the bound variables in each arm
     // Push scope for continue arm
@@ -1547,12 +1666,21 @@ fn resolve_try_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) ->
     // Create argument: residual: early
     let from_residual_arg = CallArgument::labeled("residual".to_string(), early_ref, span.clone());
 
+    // Get the FromResidualMethod for better error messages
+    let protocol_candidates: Vec<_> = ctx
+        .model
+        .builtin_registry()
+        .method(LanguageFeature::FromResidualMethod)
+        .into_iter()
+        .collect();
+
     // Create deferred static call: R.fromResidual(early)
     // Type inference will resolve this to the actual static method
     let from_residual_call = Expression::deferred_static_call(
         return_ty.clone(),
         "fromResidual".to_string(),
         vec![from_residual_arg],
+        protocol_candidates,
         return_ty, // Result type is also R (Self)
         span.clone(),
     );
@@ -2883,6 +3011,107 @@ fn resolve_match_arm_body(body_node: &SyntaxNode, ctx: &mut BodyResolutionContex
     // For all other cases (non-block, or closure with explicit params),
     // resolve normally using the exact same code path as before
     resolve_expression(body_node, ctx)
+}
+
+/// Check if the target is a field access on `self`.
+///
+/// This is used to allow assignment to `let` fields in initializers.
+fn is_field_access_on_self(target: &Expression, ctx: &BodyResolutionContext) -> bool {
+    use kestrel_semantic_tree::expr::ExprKind;
+
+    match &target.kind {
+        ExprKind::FieldAccess { object, .. } => {
+            // Check if the object is `self`
+            if let ExprKind::LocalRef(local_id) = &object.kind {
+                if let Some(local) = ctx.local_scope.get_local(*local_id) {
+                    return local.name() == "self";
+                }
+            }
+            false
+        }
+        _ => false,
+    }
+}
+
+/// Validate that the target of an assignment is mutable.
+///
+/// This checks that the target is:
+/// - A `var` binding (not `let`)
+/// - A mutable field chain (all fields in the path must be `var`, and root must be `var`)
+///
+/// Exception: In initializers, assignment to `let` fields on `self` is allowed
+/// since this is the initial assignment.
+///
+/// Emits appropriate diagnostics if the target is not mutable.
+fn validate_assignment_target(
+    target: &Expression,
+    assignment_span: &Span,
+    ctx: &mut BodyResolutionContext,
+) {
+    match classify_mutability(target, ctx) {
+        MutabilityClassification::Mutable => {
+            // Target is mutable, assignment is allowed
+        }
+        MutabilityClassification::ImmutableLocal { name, span } => {
+            ctx.diagnostics.add_diagnostic(
+                CannotAssignToLetError {
+                    assignment_span: assignment_span.clone(),
+                    target_span: target.span.clone(),
+                    binding_name: name,
+                    binding_span: span,
+                }
+                .into_diagnostic(),
+            );
+        }
+        MutabilityClassification::ImmutableField {
+            field_name,
+            field_span,
+        } => {
+            // In initializers, assignment to `let` fields on `self` is allowed
+            if ctx.is_initializer_context() && is_field_access_on_self(target, ctx) {
+                return;
+            }
+            ctx.diagnostics.add_diagnostic(
+                CannotAssignToImmutableFieldError {
+                    assignment_span: assignment_span.clone(),
+                    target_span: target.span.clone(),
+                    field_name,
+                    field_span,
+                }
+                .into_diagnostic(),
+            );
+        }
+        MutabilityClassification::ImmutableThroughBinding {
+            binding_name,
+            binding_span,
+            field_path,
+        } => {
+            // In initializers, assignment to fields on `self` is allowed even if `self` is
+            // technically immutable (since initializers use special receiver semantics)
+            if ctx.is_initializer_context() && is_field_access_on_self(target, ctx) {
+                return;
+            }
+            ctx.diagnostics.add_diagnostic(
+                CannotAssignThroughImmutableBindingError {
+                    assignment_span: assignment_span.clone(),
+                    target_span: target.span.clone(),
+                    binding_name,
+                    binding_span,
+                    field_path,
+                }
+                .into_diagnostic(),
+            );
+        }
+        MutabilityClassification::Temporary => {
+            ctx.diagnostics.add_diagnostic(
+                CannotAssignToTemporaryError {
+                    assignment_span: assignment_span.clone(),
+                    target_span: target.span.clone(),
+                }
+                .into_diagnostic(),
+            );
+        }
+    }
 }
 
 #[cfg(test)]

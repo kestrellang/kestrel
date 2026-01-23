@@ -192,6 +192,21 @@ impl<'a> BodyResolutionContext<'a> {
         let callable = get_callable_behavior(&symbol)?;
         Some(callable.return_type().clone())
     }
+
+    /// Check if we're currently in an initializer context.
+    ///
+    /// In initializers, assignment to `let` fields on `self` is allowed
+    /// since this is when they are being initialized.
+    pub fn is_initializer_context(&self) -> bool {
+        use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
+
+        if let Some(symbol) = self.model.query(SymbolFor {
+            id: self.function_id,
+        }) {
+            return symbol.metadata().kind() == KestrelSymbolKind::Initializer;
+        }
+        false
+    }
 }
 
 /// Resolve a function body syntax node into a CodeBlock
