@@ -110,10 +110,7 @@ impl Substitutions {
                 Ty::tuple(new_elements, ty.span().clone())
             },
 
-            TyKind::Array(element_type) => {
-                let new_element = self.apply_with_visited(element_type, visited);
-                Ty::array(new_element, ty.span().clone())
-            },
+            // Note: Array[T] struct types are handled by the Struct case above
 
             TyKind::Pointer(element_type) => {
                 let new_element = self.apply_with_visited(element_type, visited);

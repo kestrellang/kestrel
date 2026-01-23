@@ -276,6 +276,13 @@ impl Constructor {
             }]),
 
             TyKind::Struct { symbol, .. } => {
+                // Check for Array[T] struct - arrays have variable length
+                if symbol.metadata().name().value == "Array"
+                    && symbol.type_parameters().len() == 1
+                {
+                    return None;
+                }
+
                 // Check if this struct conforms to ExpressibleByBoolLiteral
                 // If so, use True/False constructors for exhaustiveness checking
                 use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
@@ -305,9 +312,6 @@ impl Constructor {
 
             // Infinite constructor spaces
             TyKind::Int(_) | TyKind::Float(_) | TyKind::String => None,
-
-            // Arrays have variable length
-            TyKind::Array(_) => None,
 
             // Unknown/error types - be conservative
             _ => None,
@@ -350,8 +354,16 @@ impl Constructor {
             },
             None => {
                 // Infinite constructors case
-                // For arrays, check if patterns cover all possible lengths
-                if matches!(ty.kind(), TyKind::Array(_)) {
+                // For arrays (both TyKind::Array and Array[T] struct), check if patterns cover all possible lengths
+                let is_array = match ty.kind() {
+                    TyKind::Struct { symbol, .. } => {
+                        symbol.metadata().name().value == "Array"
+                            && symbol.type_parameters().len() == 1
+                    },
+                    _ => false,
+                };
+
+                if is_array {
                     return Self::missing_array_constructors(covered);
                 }
 

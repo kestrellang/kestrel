@@ -187,7 +187,6 @@ fn collect_type_param_refs_recursive(ty: &Ty, refs: &mut Vec<SymbolId>) {
                 collect_type_param_refs_recursive(e, refs);
             }
         },
-        TyKind::Array(elem) => collect_type_param_refs_recursive(elem, refs),
         TyKind::Function {
             params,
             return_type,

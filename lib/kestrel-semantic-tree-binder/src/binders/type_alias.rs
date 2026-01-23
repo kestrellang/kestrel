@@ -337,7 +337,7 @@ fn get_type_display_name(ty: &Ty) -> String {
         TyKind::Bool => "lang.i1".to_string(),
         TyKind::String => "lang.str".to_string(),
         TyKind::Tuple(_) => "tuple".to_string(),
-        TyKind::Array(_) => "lang.array[*]".to_string(),
+        // Note: Array[T] types are TyKind::Struct now
         TyKind::Pointer(_) => "pointer".to_string(),
         TyKind::Function { .. } => "function".to_string(),
         TyKind::Error => "error".to_string(),

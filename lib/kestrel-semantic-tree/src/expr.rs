@@ -1934,9 +1934,8 @@ impl Expression {
         }
     }
 
-    /// Create an array literal expression.
-    pub fn array(elements: Vec<Expression>, element_ty: Ty, span: Span) -> Self {
-        let ty = Ty::array(element_ty, span.clone());
+    /// Create an array literal expression with an explicit type.
+    pub fn array(elements: Vec<Expression>, ty: Ty, span: Span) -> Self {
         Expression {
             id: ExprId::new(),
             kind: ExprKind::Array(elements),

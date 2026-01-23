@@ -781,10 +781,7 @@ fn resolve_type(ty: &Ty, solution: &Solution) -> Ty {
                 elements.iter().map(|e| resolve_type(e, solution)).collect();
             Ty::tuple(resolved_elements, ty.span().clone())
         },
-        TyKind::Array(elem) => {
-            let resolved_elem = resolve_type(elem, solution);
-            Ty::array(resolved_elem, ty.span().clone())
-        },
+        // Note: Array[T] struct types are handled by the Struct case above
         TyKind::Function {
             params,
             return_type,

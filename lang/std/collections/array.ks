@@ -81,6 +81,7 @@ struct ArrayStorage[T]: Cloneable {
 }
 
 // Array[T] - dynamic array with COW semantics using RcBox
+@builtin(.ArrayStruct)
 public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArrayLiteral {
     type Item = T
     type Iter = ArrayIterator[T]

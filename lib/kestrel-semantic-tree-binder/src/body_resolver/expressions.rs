@@ -501,7 +501,17 @@ fn resolve_array_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) 
         .map(|e| e.ty.clone())
         .unwrap_or_else(|| Ty::infer(span.clone()));
 
-    Expression::array(elements, element_ty, span)
+    // Create Array[element_ty] struct type using the builtin Array struct
+    let array_ty = ctx
+        .model
+        .make_array_type(element_ty.clone(), span.clone())
+        .unwrap_or_else(|| {
+            // Fallback to infer type if Array struct not available
+            // This should only happen if stdlib is not loaded
+            Ty::infer(span.clone())
+        });
+
+    Expression::array(elements, array_ty, span)
 }
 
 /// Resolve a tuple expression: (1, 2, 3)

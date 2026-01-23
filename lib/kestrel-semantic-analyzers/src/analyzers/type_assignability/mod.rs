@@ -137,17 +137,6 @@ fn normalize_type(ty: &Ty, equalities: &[(&Ty, &Ty)]) -> Ty {
                     }
                 }
             },
-            TyKind::Array(element) => {
-                let normalized = normalize_type(&element, equalities);
-                if normalized.to_string() != element.to_string() {
-                    current = Ty::array(normalized, current.span().clone());
-                    let current_str = current.to_string();
-                    if !seen.contains(&current_str) {
-                        seen.insert(current_str);
-                        changed = true;
-                    }
-                }
-            },
             TyKind::Function {
                 params,
                 return_type,
@@ -216,7 +205,7 @@ fn type_score(ty: &Ty) -> i32 {
         TyKind::Protocol { .. } => 3,
         TyKind::Struct { .. } => 4,
         TyKind::Int(_) | TyKind::Float(_) | TyKind::Bool | TyKind::String | TyKind::Unit => 5,
-        TyKind::Tuple(_) | TyKind::Array(_) | TyKind::Function { .. } => 4, // Complex but concrete-ish
+        TyKind::Tuple(_) | TyKind::Function { .. } => 4, // Complex but concrete-ish
         _ => -1,
     }
 }

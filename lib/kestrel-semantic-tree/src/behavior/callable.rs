@@ -225,9 +225,7 @@ impl SignatureType {
             TyKind::Tuple(elements) => {
                 SignatureType::Tuple(elements.iter().map(SignatureType::from_ty).collect())
             },
-            TyKind::Array(element_type) => {
-                SignatureType::Array(Box::new(SignatureType::from_ty(element_type)))
-            },
+            // Note: Array[T] struct types are handled by the Struct case above
             TyKind::Pointer(_) => {
                 // Pointer types are represented as a named type for signature matching
                 SignatureType::Named(vec!["lang".to_string(), "ptr".to_string()])

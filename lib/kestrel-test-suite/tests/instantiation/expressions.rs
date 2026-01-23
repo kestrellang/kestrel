@@ -48,11 +48,11 @@ mod expression_types {
             Expression::integer(2, Span::new(0, 4..5)),
             Expression::integer(3, Span::new(0, 7..8)),
         ];
+        // Use element type as placeholder - real array types are Array[T] struct types
         let element_ty = Ty::int(IntBits::I64, Span::new(0, 0..0));
         let array_expr = Expression::array(elements, element_ty, Span::new(0, 0..10));
 
         assert!(matches!(array_expr.kind, ExprKind::Array(_)));
-        assert!(array_expr.ty.is_array());
     }
 
     #[test]
@@ -647,17 +647,17 @@ mod nested_expressions {
             Expression::integer(4, Span::new(0, 3..4)),
         ];
 
+        // Use element type as placeholder - real array types are Array[T] struct types
         let element_ty = Ty::int(IntBits::I64, Span::new(0, 0..0));
         let array1 = Expression::array(inner1, element_ty.clone(), Span::new(0, 0..5));
         let array2 = Expression::array(inner2, element_ty.clone(), Span::new(0, 7..12));
 
-        assert!(array1.ty.is_array());
-        assert!(array2.ty.is_array());
+        assert!(matches!(array1.kind, ExprKind::Array(_)));
+        assert!(matches!(array2.kind, ExprKind::Array(_)));
 
-        let outer_element_ty = Ty::array(element_ty, Span::new(0, 0..0));
-        let outer = Expression::array(vec![array1, array2], outer_element_ty, Span::new(0, 0..13));
+        // Use infer type for outer array - real types are constructed via semantic model
+        let outer = Expression::array(vec![array1, array2], Ty::infer(Span::new(0, 0..0)), Span::new(0, 0..13));
 
-        assert!(outer.ty.is_array());
         assert!(matches!(outer.kind, ExprKind::Array(_)));
         assert_eq!(outer.span, Span::new(0, 0..13));
     }
@@ -687,10 +687,10 @@ mod nested_expressions {
         assert_eq!(tuple1.span, Span::new(0, 0..8));
         assert_eq!(tuple2.span, Span::new(0, 10..18));
 
+        // Use tuple type as placeholder - real array types are Array[T] struct types
         let element_ty = tuple1.ty.clone();
         let array = Expression::array(vec![tuple1, tuple2], element_ty, Span::new(0, 0..20));
 
-        assert!(array.ty.is_array());
         assert!(matches!(array.kind, ExprKind::Array(_)));
         assert_eq!(array.span, Span::new(0, 0..20));
     }

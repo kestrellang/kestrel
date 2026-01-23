@@ -73,8 +73,8 @@ pub enum TyKind {
     /// Tuple type: (T1, T2, ...)
     Tuple(Vec<Ty>),
 
-    /// Array type: [T]
-    Array(Box<Ty>),
+    // REMOVED: Array type is now represented as Array[T] struct
+    // Array(Box<Ty>),
 
     /// Raw pointer type: lang.ptr[T]
     Pointer(Box<Ty>),
@@ -178,7 +178,6 @@ impl std::fmt::Debug for TyKind {
                 }
                 write!(f, "]")
             },
-            TyKind::Array(elem) => write!(f, "Array[{}]", elem),
             TyKind::Pointer(elem) => write!(f, "Pointer[{}]", elem),
             TyKind::Function { params, return_type } => {
                 write!(f, "Function((")?;

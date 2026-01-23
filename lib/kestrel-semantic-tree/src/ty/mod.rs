@@ -35,6 +35,7 @@ impl Default for TyId {
 }
 
 use crate::behavior::copy_semantics::CopySemanticsBehavior;
+use crate::builtins::{BuiltinRegistry, LanguageFeature};
 use crate::language::KestrelLanguage;
 use crate::symbol::associated_type::AssociatedTypeSymbol;
 use crate::symbol::enum_symbol::EnumSymbol;
@@ -97,7 +98,6 @@ impl fmt::Display for Ty {
                 }
                 f.write_char(')')
             },
-            TyKind::Array(elem) => write!(f, "lang.array[{}]", elem),
             TyKind::Pointer(elem) => write!(f, "lang.ptr[{}]", elem),
             TyKind::Function {
                 params,
@@ -314,10 +314,8 @@ impl Ty {
         Self::new(TyKind::Tuple(elements), span)
     }
 
-    /// Create an array type: [T]
-    pub fn array(element_type: Ty, span: Span) -> Self {
-        Self::new(TyKind::Array(Box::new(element_type)), span)
-    }
+    // REMOVED: array() - Use SemanticModel::make_array_type() instead
+    // Array types are now represented as Array[T] struct
 
     /// Create a raw pointer type: lang.ptr[T]
     pub fn pointer(element_type: Ty, span: Span) -> Self {
@@ -587,11 +585,6 @@ impl Ty {
                 Ty::tuple(new_elements, self.span.clone())
             },
 
-            TyKind::Array(element_type) => {
-                let new_element = element_type.substitute_self(replacement);
-                Ty::array(new_element, self.span.clone())
-            },
-
             TyKind::Pointer(element_type) => {
                 let new_element = element_type.substitute_self(replacement);
                 Ty::pointer(new_element, self.span.clone())
@@ -723,9 +716,6 @@ impl Ty {
                         .all(|(a, b)| a.is_specialization_of(b))
             },
 
-            // Arrays
-            (TyKind::Array(a_elem), TyKind::Array(b_elem)) => a_elem.is_specialization_of(b_elem),
-
             // Pointers
             (TyKind::Pointer(a_elem), TyKind::Pointer(b_elem)) => {
                 a_elem.is_specialization_of(b_elem)
@@ -829,9 +819,6 @@ impl Ty {
                         .zip(b_elems.iter())
                         .all(|(a, b)| a.overlaps_with(b))
             },
-
-            // Arrays
-            (TyKind::Array(a_elem), TyKind::Array(b_elem)) => a_elem.overlaps_with(b_elem),
 
             // Pointers
             (TyKind::Pointer(a_elem), TyKind::Pointer(b_elem)) => a_elem.overlaps_with(b_elem),
@@ -958,9 +945,6 @@ impl Ty {
                         .zip(b_elems.iter())
                         .all(|(a, b)| a.is_assignable_to(b))
             },
-
-            // Arrays - element type comparison
-            (TyKind::Array(a_elem), TyKind::Array(b_elem)) => a_elem.is_assignable_to(b_elem),
 
             // Pointers - element type comparison
             (TyKind::Pointer(a_elem), TyKind::Pointer(b_elem)) => a_elem.is_assignable_to(b_elem),
@@ -1093,8 +1077,7 @@ impl Ty {
         is_string => TyKind::String,
         /// Check if this is a tuple type
         is_tuple => TyKind::Tuple(_),
-        /// Check if this is an array type
-        is_array => TyKind::Array(_),
+        // REMOVED: is_array - use is_array_struct() with BuiltinRegistry instead
         /// Check if this is a raw pointer type
         is_pointer => TyKind::Pointer(_),
         /// Check if this is a function type
@@ -1154,12 +1137,38 @@ impl Ty {
         }
     }
 
-    /// Get array element type if this is an array type
-    pub fn as_array(&self) -> Option<&Ty> {
-        match &self.kind {
-            TyKind::Array(element_type) => Some(element_type),
-            _ => None,
+    // REMOVED: as_array() - use as_array_struct_element() with BuiltinRegistry instead
+
+    /// Check if this is the Array[T] struct type (using builtin registry)
+    pub fn is_array_struct(&self, builtins: &BuiltinRegistry) -> bool {
+        if let TyKind::Struct { symbol, .. } = &self.kind {
+            builtins.struct_feature(symbol.metadata().id())
+                == Some(LanguageFeature::ArrayStruct)
+        } else {
+            false
         }
+    }
+
+    /// Get element type if this is Array[T] struct (using builtin registry)
+    ///
+    /// Returns the T in Array[T] by looking up the type parameter substitution.
+    pub fn as_array_struct_element<'a>(&'a self, builtins: &BuiltinRegistry) -> Option<&'a Ty> {
+        if let TyKind::Struct {
+            symbol,
+            substitutions,
+        } = &self.kind
+        {
+            if builtins.struct_feature(symbol.metadata().id())
+                == Some(LanguageFeature::ArrayStruct)
+            {
+                // Array[T] has one type parameter T
+                let type_params = symbol.type_parameters();
+                if let Some(t_param) = type_params.first() {
+                    return substitutions.get(t_param.metadata().id());
+                }
+            }
+        }
+        None
     }
 
     /// Get pointer element type if this is a pointer type
@@ -1318,7 +1327,7 @@ impl Ty {
 
             // Composites: copyable if all parts are copyable
             TyKind::Tuple(elements) => elements.iter().all(|e| e.is_copyable()),
-            TyKind::Array(element) => element.is_copyable(),
+            // Note: Array[T] struct copyability is handled by the struct case below
 
             // Pointers are always copyable (they're just addresses)
             TyKind::Pointer(_) => true,
@@ -1384,7 +1393,7 @@ impl Ty {
 
             // Composites: cloneable if any part is cloneable
             TyKind::Tuple(elements) => elements.iter().any(|e| e.is_cloneable()),
-            TyKind::Array(element) => element.is_cloneable(),
+            // Note: Array[T] struct cloneability is handled by the struct case below
 
             // Pointers are copyable, not cloneable
             TyKind::Pointer(_) => false,
@@ -1718,22 +1727,8 @@ mod tests {
         assert!(!tuple1.is_assignable_to(&tuple4));
     }
 
-    #[test]
-    fn test_assignable_arrays() {
-        let arr1 = Ty::array(
-            Ty::int(IntBits::I64, Span::new(0, 0..3)),
-            Span::new(0, 0..5),
-        );
-        let arr2 = Ty::array(
-            Ty::int(IntBits::I64, Span::new(0, 6..9)),
-            Span::new(0, 6..11),
-        );
-        assert!(arr1.is_assignable_to(&arr2));
-
-        // Different element types
-        let arr3 = Ty::array(Ty::string(Span::new(0, 0..6)), Span::new(0, 0..8));
-        assert!(!arr1.is_assignable_to(&arr3));
-    }
+    // NOTE: test_assignable_arrays was removed - arrays are now struct types (Array[T])
+    // and array assignability is tested through the semantic model integration tests.
 
     #[test]
     fn test_assignable_functions() {

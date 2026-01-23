@@ -417,7 +417,7 @@ fn desugar_unary_op(
 fn is_lang_intrinsic_type(ty: &Ty) -> bool {
     matches!(
         ty.kind(),
-        TyKind::Int(_) | TyKind::Float(_) | TyKind::Bool | TyKind::Pointer(_) | TyKind::Array(_)
+        TyKind::Int(_) | TyKind::Float(_) | TyKind::Bool | TyKind::Pointer(_)
     )
 }
 
@@ -437,7 +437,6 @@ fn lang_intrinsic_type_name(ty: &Ty) -> String {
         },
         TyKind::Bool => "lang.i1".to_string(),
         TyKind::Pointer(elem) => format!("lang.ptr[{}]", elem),
-        TyKind::Array(elem) => format!("lang.array[{}]", elem),
         _ => format!("{}", ty),
     }
 }
@@ -458,7 +457,6 @@ fn suggested_binary_intrinsic(ty: &Ty, op: BinaryOp) -> String {
         },
         TyKind::Bool => "lang.i1",
         TyKind::Pointer(_) => "lang.ptr",
-        TyKind::Array(_) => "lang.array",
         _ => "lang",
     };
 

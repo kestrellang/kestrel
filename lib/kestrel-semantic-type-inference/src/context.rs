@@ -105,9 +105,10 @@ impl<'a> InferenceContext<'a> {
 
         // Recursively register nested types
         match ty.kind() {
-            TyKind::Array(elem_ty) | TyKind::Pointer(elem_ty) => {
+            TyKind::Pointer(elem_ty) => {
                 self.register_type(elem_ty);
             },
+            // Note: Array[T] struct types have their substitutions registered via the Struct case below
             TyKind::Tuple(elem_tys) => {
                 for elem_ty in elem_tys {
                     self.register_type(elem_ty);

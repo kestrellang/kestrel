@@ -130,6 +130,9 @@ pub enum LanguageFeature {
     DictionaryTypeOperator,
     ResultTypeOperator,
 
+    // Array struct builtin (for detecting Array[T] types)
+    ArrayStruct,
+
     // Compound assignment protocols
     AddAssignProtocol,
     AddAssignMethod,
@@ -250,6 +253,8 @@ impl LanguageFeature {
             "ArrayTypeOperator" => Some(Self::ArrayTypeOperator),
             "DictionaryTypeOperator" => Some(Self::DictionaryTypeOperator),
             "ResultTypeOperator" => Some(Self::ResultTypeOperator),
+            // Array struct builtin
+            "ArrayStruct" => Some(Self::ArrayStruct),
             // Compound assignment protocols
             "AddAssignProtocol" => Some(Self::AddAssignProtocol),
             "AddAssignMethod" => Some(Self::AddAssignMethod),
@@ -371,6 +376,8 @@ impl LanguageFeature {
             Self::ArrayTypeOperator => "ArrayTypeOperator",
             Self::DictionaryTypeOperator => "DictionaryTypeOperator",
             Self::ResultTypeOperator => "ResultTypeOperator",
+            // Array struct builtin
+            Self::ArrayStruct => "ArrayStruct",
             // Compound assignment protocols
             Self::AddAssignProtocol => "AddAssignProtocol",
             Self::AddAssignMethod => "AddAssignMethod",
@@ -821,6 +828,11 @@ impl LanguageFeature {
             | Self::ResultTypeOperator => BuiltinDefinition {
                 feature: *self,
                 kind: BuiltinKind::TypeAlias,
+            },
+            // Array struct builtin
+            Self::ArrayStruct => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::Struct,
             },
             // Compound assignment protocols
             Self::AddAssignProtocol

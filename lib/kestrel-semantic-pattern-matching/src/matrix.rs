@@ -451,13 +451,17 @@ impl PatternMatrix {
                     let target_arity =
                         target_prefix + target_suffix + if *target_has_rest { 1 } else { 0 };
 
-                    // Get element type from array type
-                    let elem_ty = if let kestrel_semantic_tree::ty::TyKind::Array(elem_ty) =
-                        pattern.ty.kind()
-                    {
-                        (**elem_ty).clone()
-                    } else {
-                        pattern.ty.clone()
+                    // Get element type from Array[T] struct
+                    let elem_ty = match pattern.ty.kind() {
+                        kestrel_semantic_tree::ty::TyKind::Struct { substitutions, .. } => {
+                            // Array[T] - get T from substitutions
+                            substitutions
+                                .iter()
+                                .next()
+                                .map(|(_, t)| t.clone())
+                                .unwrap_or_else(|| pattern.ty.clone())
+                        },
+                        _ => pattern.ty.clone(),
                     };
 
                     if rest.is_some() && !target_has_rest {

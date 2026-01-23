@@ -1003,12 +1003,18 @@ fn resolve_array_pattern(
 ) -> Pattern {
     let span = get_node_span(node, ctx.file_id);
 
-    // Get expected element type if we have an array type
-    let expected_element_ty: Option<&Ty> = expected_ty.and_then(|ty| {
-        if let kestrel_semantic_tree::ty::TyKind::Array(element_type) = ty.kind() {
-            Some(element_type.as_ref())
-        } else {
-            None
+    // Get expected element type if we have an array type (Array[T] struct)
+    let expected_element_ty: Option<Ty> = expected_ty.and_then(|ty| {
+        match ty.kind() {
+            kestrel_semantic_tree::ty::TyKind::Struct { substitutions, .. } => {
+                // Check if this is Array[T] by looking at substitutions
+                if ty.is_array_struct(ctx.model.builtin_registry()) {
+                    substitutions.iter().next().map(|(_, elem_ty)| elem_ty.clone())
+                } else {
+                    None
+                }
+            },
+            _ => None,
         }
     });
 
@@ -1025,7 +1031,7 @@ fn resolve_array_pattern(
             SyntaxKind::ArrayPatternElement => {
                 // Get the inner pattern
                 let pattern = if let Some(inner) = child.children().next() {
-                    resolve_pattern_with_mutability(&inner, ctx, expected_element_ty, force_mutable)
+                    resolve_pattern_with_mutability(&inner, ctx, expected_element_ty.as_ref(), force_mutable)
                 } else {
                     Pattern::error(get_node_span(&child, ctx.file_id))
                 };
@@ -1058,8 +1064,8 @@ fn resolve_array_pattern(
 
                     // The rest binding will be a slice/array of the element type
                     let rest_ty = expected_element_ty
-                        .cloned()
-                        .map(|elem_ty| Ty::array(elem_ty, span.clone()))
+                        .clone()
+                        .and_then(|elem_ty| ctx.model.make_array_type(elem_ty, span.clone()))
                         .unwrap_or_else(|| Ty::infer(span.clone()));
 
                     let is_mutable = force_mutable;
@@ -1089,13 +1095,14 @@ fn resolve_array_pattern(
         first.ty.clone()
     } else {
         expected_element_ty
-            .cloned()
+            .clone()
             .unwrap_or_else(|| Ty::infer(span.clone()))
     };
 
     let ty = expected_ty
         .cloned()
-        .unwrap_or_else(|| Ty::array(element_ty, span.clone()));
+        .or_else(|| ctx.model.make_array_type(element_ty, span.clone()))
+        .unwrap_or_else(|| Ty::infer(span.clone()));
 
     Pattern::array(prefix, rest, suffix, ty, span)
 }

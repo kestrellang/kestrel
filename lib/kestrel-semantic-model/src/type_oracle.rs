@@ -1607,10 +1607,7 @@ fn resolve_all_associated_types_impl(
             Ty::tuple(new_elements, ty.span().clone())
         },
 
-        TyKind::Array(element) => {
-            let new_element = resolve_all_associated_types_impl(oracle, element, visited);
-            Ty::array(new_element, ty.span().clone())
-        },
+        // Note: Array[T] struct types are handled by the Struct case below
 
         TyKind::Pointer(element) => {
             let new_element = resolve_all_associated_types_impl(oracle, element, visited);

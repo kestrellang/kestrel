@@ -128,9 +128,7 @@ impl<'a> TypeResolver<'a> {
             return Ty::tuple(element_types, ty_span);
         }
 
-        // Try TyArray - [T] uses built-in array type
-        // NOTE: ArrayTypeOperator exists but switching to it requires Phase 7 work
-        // (removing TyKind::Array) since array patterns and inference rely on the built-in type
+        // Try TyArray - [T] desugars to ArrayTypeOperator[T]
         if let Some(array_node) = ty_node
             .children()
             .find(|child| child.kind() == SyntaxKind::TyArray)
@@ -139,7 +137,12 @@ impl<'a> TypeResolver<'a> {
                 array_node.children().find(|c| c.kind() == SyntaxKind::Ty)
             {
                 let element_ty = self.resolve(&element_ty_node);
-                return Ty::array(element_ty, ty_span);
+                return self.resolve_type_operator(
+                    LanguageFeature::ArrayTypeOperator,
+                    vec![element_ty],
+                    ty_span,
+                    "Array type operator",
+                );
             }
             return Ty::error(ty_span);
         }

@@ -629,15 +629,21 @@ fn get_constructor_field_types(ctor: &Constructor, ty: &Ty) -> Vec<Ty> {
             }
         },
 
+        // Array[T] struct type
         (
             Constructor::Array {
                 prefix_len,
                 suffix_len,
                 has_rest,
             },
-            TyKind::Array(element_type),
+            TyKind::Struct { substitutions, .. },
         ) => {
-            let elem_ty = (**element_type).clone();
+            // Get element type from first substitution (T in Array[T])
+            let elem_ty = substitutions
+                .iter()
+                .next()
+                .map(|(_, t)| t.clone())
+                .unwrap_or_else(|| ty.clone());
             let mut types = vec![elem_ty.clone(); *prefix_len];
             if *has_rest {
                 types.push(ty.clone()); // Rest is an array/slice

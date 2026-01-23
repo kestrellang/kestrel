@@ -1594,11 +1594,11 @@ pub fn resolve_method_call(
                         }
                     },
                     TyKind::Struct { substitutions, .. } | TyKind::Enum { substitutions, .. } => {
+                        // Note: Array[T] types are handled here too
                         for (_, sub_ty) in substitutions.iter() {
                             collect_type_params_from_ty(sub_ty, params);
                         }
                     },
-                    TyKind::Array(elem) => collect_type_params_from_ty(elem, params),
                     TyKind::Tuple(elems) => {
                         for elem in elems {
                             collect_type_params_from_ty(elem, params);

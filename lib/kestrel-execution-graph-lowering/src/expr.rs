@@ -1396,19 +1396,20 @@ fn lower_array_literal(
     elements: &[Expression],
     expr: &Expression,
 ) -> Value {
-    // Get element type - either from the array type or from the first element
+    // Get element type from Array[T] struct type
     let element_sem_ty: Ty = match expr.ty.kind() {
-        TyKind::Array(elem_ty) => (**elem_ty).clone(),
-        TyKind::Struct { .. } => {
-            // For resolved struct types (like Array[Int, GlobalAllocator]),
-            // get element type from the first element
-            if let Some(first_elem) = elements.first() {
-                first_elem.ty.clone()
-            } else {
-                // Empty array - we can't determine element type from elements
-                // For now, use unit type as placeholder
-                Ty::unit(expr.span.clone())
-            }
+        TyKind::Struct { substitutions, .. } => {
+            // For Array[T] struct types, get T from substitutions
+            // This works for both Array[T] and Array[T, Allocator]
+            substitutions
+                .iter()
+                .next()
+                .map(|(_, t)| t.clone())
+                .or_else(|| elements.first().map(|e| e.ty.clone()))
+                .unwrap_or_else(|| {
+                    // Empty array with no type info - use unit type as placeholder
+                    Ty::unit(expr.span.clone())
+                })
         },
         _ => {
             ctx.emit_error(LoweringError::internal(
@@ -1504,16 +1505,6 @@ fn lower_array_literal(
         TyKind::Struct { symbol, .. } => {
             // Call the struct's array literal init
             lower_array_literal_init_call(ctx, expr, symbol, ptr_place, count_value)
-        },
-        TyKind::Array(_) => {
-            // Array type not resolved to concrete struct type
-            // This means type inference didn't give us a target type
-            // For now, emit an error - full implementation needs type inference changes
-            ctx.emit_error(LoweringError::unsupported_expr(
-                "array literal without concrete target type - use explicit type annotation",
-                expr.span.clone(),
-            ));
-            Value::Immediate(Immediate::error())
         },
         _ => {
             ctx.emit_error(LoweringError::internal(

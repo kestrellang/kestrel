@@ -494,9 +494,7 @@ pub fn substitute_type(ty: &Ty, substitutions: &Substitutions) -> Ty {
                 .cloned()
                 .unwrap_or_else(|| ty.clone())
         },
-        TyKind::Array(element) => {
-            Ty::array(substitute_type(element, substitutions), ty.span().clone())
-        },
+        // Note: Array[T] struct types are handled by the Struct case above
         TyKind::Tuple(elements) => {
             let new_elements: Vec<Ty> = elements
                 .iter()
@@ -622,12 +620,7 @@ fn infer_from_type(
             }
         },
 
-        // For array types, recurse into element type
-        TyKind::Array(elem_ty) => {
-            if let TyKind::Array(arg_elem) = arg_ty.kind() {
-                infer_from_type(elem_ty, arg_elem, type_params, substitutions);
-            }
-        },
+        // Note: Array[T] types are handled by the Struct case above (via substitutions)
 
         // For tuple types, recurse into each element
         TyKind::Tuple(elems) => {
@@ -825,11 +818,6 @@ pub fn replace_unsubstituted_type_params(ty: &Ty, span: &Span) -> Ty {
             Ty::tuple(new_elements, ty.span().clone())
         },
 
-        TyKind::Array(element) => {
-            let new_element = replace_unsubstituted_type_params(element, span);
-            Ty::array(new_element, ty.span().clone())
-        },
-
         TyKind::Pointer(element) => {
             let new_element = replace_unsubstituted_type_params(element, span);
             Ty::pointer(new_element, ty.span().clone())
@@ -912,11 +900,6 @@ pub fn replace_type_params_except(
                 .map(|e| replace_type_params_except(e, preserved, span))
                 .collect();
             Ty::tuple(new_elements, ty.span().clone())
-        },
-
-        TyKind::Array(element) => {
-            let new_element = replace_type_params_except(element, preserved, span);
-            Ty::array(new_element, ty.span().clone())
         },
 
         TyKind::Pointer(element) => {

@@ -359,11 +359,34 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
 
         // Arrays: all elements must have the same type
         ExprKind::Array(elements) => {
-            if let TyKind::Array(elem_ty) = expr.ty.kind() {
-                ctx.register_type(elem_ty);
+            // Get the element type from Array[T] struct
+            let elem_ty: Option<Ty> = match expr.ty.kind() {
+                TyKind::Struct { substitutions, .. } => {
+                    // Array[T] struct - get T from substitutions (first type parameter)
+                    substitutions.iter().next().map(|(_, ty)| ty.clone())
+                },
+                TyKind::Infer => {
+                    // Fallback: if array type is infer, use first element's type as element type
+                    // This happens when ArrayStruct builtin isn't available (e.g., in some tests)
+                    elements.first().map(|e| e.ty.clone())
+                },
+                _ => None,
+            };
+
+            if let Some(elem_ty) = elem_ty {
+                ctx.register_type(&elem_ty);
                 for elem in elements {
                     generate_expression_constraints(ctx, elem);
                     ctx.equate(elem.ty.id(), elem_ty.id(), elem.span.clone());
+                }
+            } else if !elements.is_empty() {
+                // Last resort fallback: at least process elements and equate them with each other
+                for elem in elements {
+                    generate_expression_constraints(ctx, elem);
+                }
+                let first_ty_id = elements[0].ty.id();
+                for elem in &elements[1..] {
+                    ctx.equate(elem.ty.id(), first_ty_id, elem.span.clone());
                 }
             }
         },

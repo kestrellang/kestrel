@@ -451,10 +451,7 @@ fn unify(
             Ok(SolveResult::Solved)
         },
 
-        (TyKind::Array(elem_a), TyKind::Array(elem_b)) => {
-            ctx.equate(elem_a.id(), elem_b.id(), span.clone());
-            Ok(SolveResult::Solved)
-        },
+        // Note: Array[T] struct types are unified via the Struct case above
 
         (TyKind::Pointer(elem_a), TyKind::Pointer(elem_b)) => {
             ctx.equate(elem_a.id(), elem_b.id(), span.clone());
@@ -1422,7 +1419,7 @@ fn occurs_check_inner(
         TyKind::Tuple(elements) => elements
             .iter()
             .any(|e| occurs_check_inner(var, e, ctx, visited)),
-        TyKind::Array(elem) => occurs_check_inner(var, elem, ctx, visited),
+        // Note: Array[T] struct types have their substitutions checked via the Struct case
         TyKind::Pointer(elem) => occurs_check_inner(var, elem, ctx, visited),
         TyKind::Function {
             params,
