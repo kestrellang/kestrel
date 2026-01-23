@@ -601,7 +601,7 @@ See [docs/memory-model/implementation-plan.md](docs/memory-model/implementation-
 - [ ] And / Or Short Circuiting
 - [ ] Null Coalescing Operator
 - [ ] Optional Chaining
-- [ ] Compound Assignment Operator
+- [x] Compound Assignment Operators
 - [x] Character Literals
 - [ ] String Interpolation
 - [ ] Null Literals
