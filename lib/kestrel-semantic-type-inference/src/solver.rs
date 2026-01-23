@@ -41,14 +41,21 @@ pub fn solve(mut ctx: InferenceContext<'_>) -> Solution {
         }
     }
 
-    // Apply default types for unresolved literal types
-    apply_default_literal_types(&mut ctx);
-
-    // Run another round to verify conformances after defaults are applied
+    // Apply default types for unresolved literal types.
+    // Loop until no more defaults can be applied - this handles nested structures
+    // like [[1, 2], [3, 4]] where inner arrays need defaults before outer arrays.
     loop {
-        let progress = solve_round(&mut ctx);
-        if !progress {
+        let defaults_applied = apply_default_literal_types(&mut ctx);
+        if !defaults_applied {
             break;
+        }
+
+        // Run solving rounds after each default application
+        loop {
+            let progress = solve_round(&mut ctx);
+            if !progress {
+                break;
+            }
         }
     }
 
@@ -66,10 +73,17 @@ pub fn solve(mut ctx: InferenceContext<'_>) -> Solution {
 /// - Float literals → Float64 (configurable via DefaultFloatLiteralType)
 /// - String literals → String
 /// - Bool literals → Bool
-fn apply_default_literal_types(ctx: &mut InferenceContext<'_>) {
+/// - Array literals → Array[ElementType] where ElementType is resolved from elements
+///
+/// Returns true if any defaults were applied, false otherwise.
+fn apply_default_literal_types(ctx: &mut InferenceContext<'_>) -> bool {
     // Collect literal constraints where the type is still Infer
     let constraints = ctx.take_constraints();
     let mut literals_to_default: Vec<(TyId, LanguageFeature, Span)> = Vec::new();
+
+    // Also collect Normalizes constraints for array element types
+    let mut array_element_types: std::collections::HashMap<TyId, TyId> =
+        std::collections::HashMap::new();
 
     for constraint in &constraints {
         if let Constraint::Conforms { ty, protocol } = constraint {
@@ -81,40 +95,95 @@ fn apply_default_literal_types(ctx: &mut InferenceContext<'_>) {
                 }
             }
         }
+        // Track array element type associations from Normalizes constraints
+        if let Constraint::Normalizes {
+            base,
+            assoc_name,
+            result,
+            ..
+        } = constraint
+        {
+            if assoc_name == "Element" {
+                array_element_types.insert(*base, *result);
+            }
+        }
     }
 
-    // Put constraints back (except for literal constraints that we're defaulting)
+    // Apply defaults and track which type IDs were defaulted
+    let mut defaulted_ty_ids: std::collections::HashSet<TyId> =
+        std::collections::HashSet::new();
+    let mut any_applied = false;
+
+    for (ty_id, feature, span) in literals_to_default {
+        let default_ty = match feature {
+            LanguageFeature::ExpressibleByIntLiteral => {
+                ctx.oracle().default_integer_type(span.clone())
+            },
+            LanguageFeature::ExpressibleByFloatLiteral => {
+                ctx.oracle().default_float_type(span.clone())
+            },
+            LanguageFeature::ExpressibleByStringLiteral => {
+                ctx.oracle().default_string_type(span.clone())
+            },
+            LanguageFeature::ExpressibleByBoolLiteral => {
+                ctx.oracle().default_boolean_type(span.clone())
+            },
+            LanguageFeature::ExpressibleByCharLiteral => {
+                ctx.oracle().default_char_type(span.clone())
+            },
+            // Null literal default is generic (NullLiteralType[T] = Optional[T]),
+            // so we can't apply a concrete default - type must be inferred from context
+            LanguageFeature::ExpressibleByNullLiteral => continue,
+            // Array literal default is Array[ElementType]
+            LanguageFeature::_ExpressibleByArrayLiteral => {
+                // Find the element type from the Normalizes constraint
+                if let Some(&elem_ty_id) = array_element_types.get(&ty_id) {
+                    let elem_ty = resolve_type(ctx, elem_ty_id);
+                    // If element type is still Infer, skip for now - inner elements
+                    // need to get defaults first (for nested arrays like [[1,2],[3,4]])
+                    if matches!(elem_ty.kind(), TyKind::Infer) {
+                        continue;
+                    }
+                    if let Some(array_ty) =
+                        ctx.oracle().default_array_type(elem_ty, span.clone())
+                    {
+                        array_ty
+                    } else {
+                        continue;
+                    }
+                } else {
+                    continue;
+                }
+            },
+            _ => continue,
+        };
+
+        // Register the default type and add an equality constraint.
+        // Using equate() instead of direct substitution ensures the default
+        // propagates through any existing unification chains (e.g., when an
+        // array literal is inside a tuple, the array's type may be equated
+        // with the tuple's element type slot).
+        ctx.register_type(&default_ty);
+        ctx.equate(ty_id, default_ty.id(), span);
+        defaulted_ty_ids.insert(ty_id);
+        any_applied = true;
+    }
+
+    // Put constraints back (except for literal constraints that we actually defaulted)
     for constraint in constraints {
         if let Constraint::Conforms { ty, protocol } = &constraint {
-            let resolved = resolve_type(ctx, *ty);
-            if matches!(resolved.kind(), TyKind::Infer)
+            // Only skip constraints for types we actually defaulted
+            if defaulted_ty_ids.contains(ty)
                 && get_literal_feature_for_protocol(ctx, protocol.symbol_id).is_some()
             {
-                // Skip this constraint - we're applying a default type
+                // Skip this constraint - we applied a default type
                 continue;
             }
         }
         ctx.push_constraint(constraint);
     }
 
-    // Apply defaults
-    for (ty_id, feature, span) in literals_to_default {
-        let default_ty = match feature {
-            LanguageFeature::ExpressibleByIntLiteral => ctx.oracle().default_integer_type(span),
-            LanguageFeature::ExpressibleByFloatLiteral => ctx.oracle().default_float_type(span),
-            LanguageFeature::ExpressibleByStringLiteral => ctx.oracle().default_string_type(span),
-            LanguageFeature::ExpressibleByBoolLiteral => ctx.oracle().default_boolean_type(span),
-            LanguageFeature::ExpressibleByCharLiteral => ctx.oracle().default_char_type(span),
-            // Null literal default is generic (NullLiteralType[T] = Optional[T]),
-            // so we can't apply a concrete default - type must be inferred from context
-            LanguageFeature::ExpressibleByNullLiteral => continue,
-            _ => continue,
-        };
-
-        // Register the default type and substitute
-        ctx.register_type(&default_ty);
-        ctx.substitutions_mut().insert(ty_id, default_ty);
-    }
+    any_applied
 }
 
 /// Check if a protocol symbol ID corresponds to a literal expression protocol.
@@ -130,6 +199,7 @@ fn get_literal_feature_for_protocol(
         LanguageFeature::ExpressibleByBoolLiteral,
         LanguageFeature::ExpressibleByCharLiteral,
         LanguageFeature::ExpressibleByNullLiteral,
+        LanguageFeature::_ExpressibleByArrayLiteral,
     ];
 
     for feature in features {
@@ -934,7 +1004,15 @@ fn normalize(
     result: TyId,
     span: &Span,
 ) -> Result<SolveResult, InferenceError> {
-    let base_ty = resolve_type(ctx, base);
+    let mut base_ty = resolve_type(ctx, base);
+
+    // Expand type aliases before associated type lookup.
+    // Type aliases (e.g., ArrayTypeOperator -> Array) need to be expanded to their
+    // underlying type so we can look up associated types on the actual struct.
+    while matches!(base_ty.kind(), TyKind::TypeAlias { .. }) {
+        base_ty = ctx.oracle().expand_type_alias(&base_ty);
+        ctx.register_type(&base_ty);
+    }
 
     // If the base type is still an inference placeholder, defer
     if matches!(base_ty.kind(), TyKind::Infer) {

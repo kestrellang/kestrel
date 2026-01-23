@@ -186,7 +186,7 @@ mod arrays {
             func mixed_types() { [1, "hello", true] }
         "#,
         )
-        .expect(HasError("array element type mismatch"));
+        .expect(HasError("type mismatch"));
     }
 }
 

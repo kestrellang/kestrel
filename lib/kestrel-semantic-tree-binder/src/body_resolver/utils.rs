@@ -443,7 +443,12 @@ pub fn get_type_parameter_bounds_by_id(
 ) -> Vec<Ty> {
     let mut bounds = Vec::new();
 
-    // Start from the current function
+    // First, check the context's where clause. This is important for subscripts
+    // where the where clause is attached to the subscript but the function_id
+    // points to the getter/setter (which don't have where clauses themselves).
+    bounds.extend(filter_resolved_bounds(ctx.where_clause(), param_id));
+
+    // Also check the function symbol and its parent for additional where clauses
     if let Some(function) = ctx.model.query(SymbolFor {
         id: ctx.function_id,
     }) {

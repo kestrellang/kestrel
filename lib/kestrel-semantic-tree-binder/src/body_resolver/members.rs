@@ -82,8 +82,17 @@ pub fn resolve_member_access(
     base.ty = resolve_self_type_to_concrete(&base.ty, ctx);
 
     let base_span = base.span.clone();
-    let base_ty = &base.ty;
     let full_span = Span::new(base_span.file_id, base_span.start..member_span.end);
+
+    // For Grouping expressions like `(x).format()`, we need to look through the
+    // grouping to get the actual inner expression's type. Otherwise, the grouping's
+    // Infer type prevents us from finding methods (like primitive methods) that
+    // are only available on concrete types.
+    let base_ty = if let ExprKind::Grouping(inner) = &base.kind {
+        &inner.ty
+    } else {
+        &base.ty
+    };
 
     // 0. Check if base is a TypeParameterRef (for static method access like T.create())
     if let ExprKind::TypeParameterRef(symbol_id) = &base.kind {

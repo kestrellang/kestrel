@@ -9,6 +9,7 @@ use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
 use kestrel_semantic_tree::behavior::callable::CallableBehavior;
 use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
 use kestrel_semantic_tree::behavior::extension_target::ExtensionTargetBehavior;
+use kestrel_semantic_tree::behavior::generics::GenericsBehavior;
 use kestrel_semantic_tree::behavior::member_access::MemberAccessBehavior;
 use kestrel_semantic_tree::builtins::{BuiltinKind, LanguageFeature};
 use kestrel_semantic_tree::language::KestrelLanguage;
@@ -753,6 +754,11 @@ impl TypeOracle for SemanticModel {
         // Fall back to i32
         Ty::int(IntBits::I32, span)
     }
+
+    fn default_array_type(&self, element_ty: Ty, span: kestrel_span::Span) -> Option<Ty> {
+        // Delegate to the existing make_array_type method on SemanticModel
+        self.make_array_type(element_ty, span)
+    }
 }
 
 impl SemanticModel {
@@ -863,6 +869,14 @@ impl TypeOracle for ContextualOracle<'_> {
 
     fn default_boolean_type(&self, span: kestrel_span::Span) -> Ty {
         self.model.default_boolean_type(span)
+    }
+
+    fn default_char_type(&self, span: kestrel_span::Span) -> Ty {
+        self.model.default_char_type(span)
+    }
+
+    fn default_array_type(&self, element_ty: Ty, span: kestrel_span::Span) -> Option<Ty> {
+        self.model.default_array_type(element_ty, span)
     }
 }
 
@@ -1058,8 +1072,21 @@ fn get_type_container_with_subs(
             symbol,
             substitutions,
         } => {
+            // Clone substitutions and populate any missing type parameter defaults.
+            // This is necessary for protocols like `Addable[Rhs = Self]` where the
+            // Rhs parameter has a default value that must be included in substitutions
+            // for method signature resolution to work correctly.
+            let mut subs_with_defaults = substitutions.clone();
+            for type_param in symbol.type_parameters() {
+                let param_id = type_param.metadata().id();
+                if !subs_with_defaults.contains(param_id) {
+                    if let Some(default_ty) = type_param.default() {
+                        subs_with_defaults.insert(param_id, default_ty.clone());
+                    }
+                }
+            }
             let dyn_symbol: Arc<dyn Symbol<KestrelLanguage>> = symbol.clone();
-            Some((dyn_symbol, substitutions.clone()))
+            Some((dyn_symbol, subs_with_defaults))
         },
         TyKind::SelfType => {
             // SelfType is handled in resolve_member() before this function is called.
@@ -1734,6 +1761,12 @@ fn get_where_clause_from_symbol(symbol: &dyn Symbol<KestrelLanguage>) -> Option<
     // Try ExtensionSymbol
     if let Some(ext) = symbol.as_any().downcast_ref::<ExtensionSymbol>() {
         return Some(ext.where_clause());
+    }
+    // Try SubscriptSymbol - get where clause from GenericsBehavior
+    if symbol.metadata().kind() == KestrelSymbolKind::Subscript {
+        if let Some(generics) = symbol.metadata().get_behavior::<GenericsBehavior>() {
+            return Some(generics.where_clause().clone());
+        }
     }
     None
 }

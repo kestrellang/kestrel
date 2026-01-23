@@ -675,22 +675,28 @@ fn extract_path_element_name_with_span(
 /// e.g., `obj.method().field` is parsed as ExprPath containing ExprCall
 fn find_nested_expression(node: &SyntaxNode) -> Option<SyntaxNode> {
     // We're looking inside an ExprPath node. Normally it contains only identifiers and dots.
-    // But when member access is on a call expression, the parser emits the call inside the ExprPath.
-    // We need to find such nested call expressions.
+    // But when member access is on a complex expression, the parser emits it inside the ExprPath.
+    // We need to find such nested expressions (calls, groupings, etc.).
 
     for child in node.children() {
         // Look for Expression wrapper containing a non-path expression
         if child.kind() == SyntaxKind::Expression {
-            // Check if this Expression contains an ExprCall or other complex (non-path) expression
+            // Check if this Expression contains a complex (non-path) expression
             for inner in child.children() {
-                // Only return if it's a complex expression type, not just another path
-                if inner.kind() == SyntaxKind::ExprCall {
+                // Return if it's a complex expression type, not just another path
+                if matches!(
+                    inner.kind(),
+                    SyntaxKind::ExprCall | SyntaxKind::ExprGrouping | SyntaxKind::ExprBinary
+                ) {
                     return Some(child);
                 }
             }
         }
-        // Also check for direct ExprCall nodes
-        if child.kind() == SyntaxKind::ExprCall {
+        // Also check for direct complex expression nodes
+        if matches!(
+            child.kind(),
+            SyntaxKind::ExprCall | SyntaxKind::ExprGrouping | SyntaxKind::ExprBinary
+        ) {
             return Some(child);
         }
     }

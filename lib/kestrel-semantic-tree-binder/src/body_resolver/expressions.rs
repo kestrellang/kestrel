@@ -486,6 +486,14 @@ fn extract_bool_value(node: &SyntaxNode) -> bool {
 }
 
 /// Resolve an array expression: [1, 2, 3]
+///
+/// Array literals use type inference similar to other literals (integer, string, etc.).
+/// The type is initially `Infer`, and the constraint generator adds:
+/// - A `Conforms` constraint to `_ExpressibleByArrayLiteral`
+/// - A `Normalizes` constraint linking the `Element` associated type to element types
+///
+/// This allows array literals to be assigned to custom types that conform to
+/// `ExpressibleByArrayLiteral`, not just the builtin `Array[T]` type.
 fn resolve_array_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> Expression {
     let span = get_node_span(node, ctx.file_id);
 
@@ -495,21 +503,9 @@ fn resolve_array_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) 
         .map(|c| resolve_expression(&c, ctx))
         .collect();
 
-    // Infer element type from first element, or use infer if empty
-    let element_ty = elements
-        .first()
-        .map(|e| e.ty.clone())
-        .unwrap_or_else(|| Ty::infer(span.clone()));
-
-    // Create Array[element_ty] struct type using the builtin Array struct
-    let array_ty = ctx
-        .model
-        .make_array_type(element_ty.clone(), span.clone())
-        .unwrap_or_else(|| {
-            // Fallback to infer type if Array struct not available
-            // This should only happen if stdlib is not loaded
-            Ty::infer(span.clone())
-        });
+    // Use inference type so ExpressibleByArrayLiteral protocol can be applied
+    // The constraint generator will add the necessary constraints
+    let array_ty = Ty::infer(span.clone());
 
     Expression::array(elements, array_ty, span)
 }

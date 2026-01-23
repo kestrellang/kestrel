@@ -192,4 +192,10 @@ pub trait TypeOracle {
         // Implementations with access to stdlib can override to return the CodePoint struct.
         Ty::int(IntBits::I32, span)
     }
+
+    /// Get the default type for array literals when type is ambiguous.
+    ///
+    /// Creates `Array[element_ty]` struct type. Returns None if the Array struct
+    /// is not available (e.g., stdlib not loaded).
+    fn default_array_type(&self, element_ty: Ty, span: Span) -> Option<Ty>;
 }

@@ -362,37 +362,38 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
             }
         },
 
-        // Arrays: all elements must have the same type
+        // Arrays: type conforms to _ExpressibleByArrayLiteral, elements have Element type
         ExprKind::Array(elements) => {
-            // Get the element type from Array[T] struct
-            let elem_ty: Option<Ty> = match expr.ty.kind() {
-                TyKind::Struct { substitutions, .. } => {
-                    // Array[T] struct - get T from substitutions (first type parameter)
-                    substitutions.iter().next().map(|(_, ty)| ty.clone())
-                },
-                TyKind::Infer => {
-                    // Fallback: if array type is infer, use first element's type as element type
-                    // This happens when ArrayStruct builtin isn't available (e.g., in some tests)
-                    elements.first().map(|e| e.ty.clone())
-                },
-                _ => None,
-            };
+            use kestrel_semantic_tree::builtins::LanguageFeature;
 
-            if let Some(elem_ty) = elem_ty {
-                ctx.register_type(&elem_ty);
-                for elem in elements {
-                    generate_expression_constraints(ctx, elem);
-                    ctx.equate(elem.ty.id(), elem_ty.id(), elem.span.clone());
-                }
-            } else if !elements.is_empty() {
-                // Last resort fallback: at least process elements and equate them with each other
-                for elem in elements {
-                    generate_expression_constraints(ctx, elem);
-                }
-                let first_ty_id = elements[0].ty.id();
-                for elem in &elements[1..] {
-                    ctx.equate(elem.ty.id(), first_ty_id, elem.span.clone());
-                }
+            // Add conformance constraint to _ExpressibleByArrayLiteral protocol
+            // This allows array literals to be assigned to custom types like Style
+            if let Some(protocol_id) =
+                ctx.oracle().builtin_protocol(LanguageFeature::_ExpressibleByArrayLiteral)
+            {
+                let protocol_ref = ProtocolRef::new(protocol_id, expr.span.clone());
+                ctx.conforms(expr.ty.id(), protocol_ref);
+            }
+
+            // Create an infer type for the element type
+            // This will be linked to the array type's Element associated type
+            let elem_ty = Ty::infer(expr.span.clone());
+            ctx.register_type(&elem_ty);
+
+            // Add normalizes constraint: array_type.Element = elem_ty
+            // This resolves the Element associated type from the expected type
+            // (e.g., Style.Element = StyleOption)
+            ctx.normalizes(
+                expr.ty.id(),
+                "Element".to_string(),
+                elem_ty.id(),
+                expr.span.clone(),
+            );
+
+            // All elements must have the same type (the Element type)
+            for elem in elements {
+                generate_expression_constraints(ctx, elem);
+                ctx.equate(elem.ty.id(), elem_ty.id(), elem.span.clone());
             }
         },
 
