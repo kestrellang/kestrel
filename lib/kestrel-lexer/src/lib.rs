@@ -300,6 +300,9 @@ pub enum Token {
     #[token("try")]
     Try,
 
+    #[token("throws")]
+    Throws,
+
     #[token("while")]
     While,
 

@@ -8,6 +8,8 @@ use std::sync::Arc;
 use kestrel_prelude::lang;
 use kestrel_reporting::DiagnosticContext;
 use kestrel_semantic_model::{ResolveTypePath, SemanticModel, TypePathResolution};
+use kestrel_semantic_tree::builtins::LanguageFeature;
+use kestrel_semantic_tree::symbol::type_alias::TypeAliasSymbol;
 use kestrel_semantic_tree::symbol::type_parameter::TypeParameterSymbol;
 use kestrel_semantic_tree::ty::{FloatBits, IntBits, Substitutions, Ty, TyKind};
 use kestrel_span::Span;
@@ -126,7 +128,8 @@ impl<'a> TypeResolver<'a> {
             return Ty::tuple(element_types, ty_span);
         }
 
-        // Try TyArray
+        // Try TyArray - [T] currently uses built-in array type
+        // TODO: Once type alias normalization is implemented, change this to use ArrayTypeOperator
         if let Some(array_node) = ty_node
             .children()
             .find(|child| child.kind() == SyntaxKind::TyArray)
@@ -136,6 +139,70 @@ impl<'a> TypeResolver<'a> {
             {
                 let element_ty = self.resolve(&element_ty_node);
                 return Ty::array(element_ty, ty_span);
+            }
+            return Ty::error(ty_span);
+        }
+
+        // Try TyDictionary - [K: V] desugars to DictionaryTypeOperator[K, V]
+        if let Some(dict_node) = ty_node
+            .children()
+            .find(|child| child.kind() == SyntaxKind::TyDictionary)
+        {
+            let ty_nodes: Vec<_> = dict_node
+                .children()
+                .filter(|c| c.kind() == SyntaxKind::Ty)
+                .collect();
+            if ty_nodes.len() >= 2 {
+                let key_ty = self.resolve(&ty_nodes[0]);
+                let value_ty = self.resolve(&ty_nodes[1]);
+                return self.resolve_type_operator(
+                    LanguageFeature::DictionaryTypeOperator,
+                    vec![key_ty, value_ty],
+                    ty_span,
+                    "Dictionary type operator",
+                );
+            }
+            return Ty::error(ty_span);
+        }
+
+        // Try TyOptional - T? desugars to OptionalTypeOperator[T]
+        if let Some(optional_node) = ty_node
+            .children()
+            .find(|child| child.kind() == SyntaxKind::TyOptional)
+        {
+            if let Some(base_ty_node) = optional_node
+                .children()
+                .find(|c| c.kind() == SyntaxKind::Ty)
+            {
+                let base_ty = self.resolve(&base_ty_node);
+                return self.resolve_type_operator(
+                    LanguageFeature::OptionalTypeOperator,
+                    vec![base_ty],
+                    ty_span,
+                    "Optional type operator",
+                );
+            }
+            return Ty::error(ty_span);
+        }
+
+        // Try TyResult - T throws E desugars to ResultTypeOperator[T, E]
+        if let Some(result_node) = ty_node
+            .children()
+            .find(|child| child.kind() == SyntaxKind::TyResult)
+        {
+            let ty_nodes: Vec<_> = result_node
+                .children()
+                .filter(|c| c.kind() == SyntaxKind::Ty)
+                .collect();
+            if ty_nodes.len() >= 2 {
+                let success_ty = self.resolve(&ty_nodes[0]);
+                let error_ty = self.resolve(&ty_nodes[1]);
+                return self.resolve_type_operator(
+                    LanguageFeature::ResultTypeOperator,
+                    vec![success_ty, error_ty],
+                    ty_span,
+                    "Result type operator",
+                );
             }
             return Ty::error(ty_span);
         }
@@ -158,6 +225,42 @@ impl<'a> TypeResolver<'a> {
             return self.resolve(&ty_node);
         }
         Ty::error(Span::new(self.file_id, 0..0))
+    }
+
+    /// Resolve a type operator by looking up the builtin type alias and applying type arguments.
+    ///
+    /// Type operators like `T?`, `[T]`, `[K: V]`, and `T throws E` desugar to type aliases
+    /// defined in the standard library with `@builtin` attributes.
+    fn resolve_type_operator(
+        &mut self,
+        feature: LanguageFeature,
+        type_args: Vec<Ty>,
+        span: Span,
+        _operator_name: &str,
+    ) -> Ty {
+        // Look up the builtin type alias
+        let builtin_registry = self.model.builtin_registry();
+        let Some(symbol_id) = builtin_registry.type_alias(feature) else {
+            // Type operator not defined - this means the stdlib is not properly imported
+            // For now, return error type (could add a diagnostic)
+            return Ty::error(span);
+        };
+
+        // Get the type alias symbol from the symbol registry
+        let Some(symbol) = self.model.registry().get(symbol_id) else {
+            return Ty::error(span);
+        };
+
+        // Downcast Arc<dyn Symbol> to Arc<TypeAliasSymbol>
+        let Ok(type_alias_arc) = symbol.into_any_arc().downcast::<TypeAliasSymbol>() else {
+            return Ty::error(span);
+        };
+
+        // Create the type with substitutions
+        let base_ty = Ty::type_alias(type_alias_arc, span.clone());
+
+        // Apply the type arguments
+        self.apply_type_arguments(&base_ty, type_args, span)
     }
 
     /// Apply type arguments to a generic type

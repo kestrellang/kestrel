@@ -124,6 +124,12 @@ pub enum LanguageFeature {
     OptionalSomeCase,
     OptionalNoneCase,
 
+    // Type operator type aliases
+    OptionalTypeOperator,
+    ArrayTypeOperator,
+    DictionaryTypeOperator,
+    ResultTypeOperator,
+
     // Compound assignment protocols
     AddAssignProtocol,
     AddAssignMethod,
@@ -239,6 +245,11 @@ impl LanguageFeature {
             "OptionalEnum" => Some(Self::OptionalEnum),
             "OptionalSomeCase" => Some(Self::OptionalSomeCase),
             "OptionalNoneCase" => Some(Self::OptionalNoneCase),
+            // Type operator type aliases
+            "OptionalTypeOperator" => Some(Self::OptionalTypeOperator),
+            "ArrayTypeOperator" => Some(Self::ArrayTypeOperator),
+            "DictionaryTypeOperator" => Some(Self::DictionaryTypeOperator),
+            "ResultTypeOperator" => Some(Self::ResultTypeOperator),
             // Compound assignment protocols
             "AddAssignProtocol" => Some(Self::AddAssignProtocol),
             "AddAssignMethod" => Some(Self::AddAssignMethod),
@@ -355,6 +366,11 @@ impl LanguageFeature {
             Self::OptionalEnum => "OptionalEnum",
             Self::OptionalSomeCase => "OptionalSomeCase",
             Self::OptionalNoneCase => "OptionalNoneCase",
+            // Type operator type aliases
+            Self::OptionalTypeOperator => "OptionalTypeOperator",
+            Self::ArrayTypeOperator => "ArrayTypeOperator",
+            Self::DictionaryTypeOperator => "DictionaryTypeOperator",
+            Self::ResultTypeOperator => "ResultTypeOperator",
             // Compound assignment protocols
             Self::AddAssignProtocol => "AddAssignProtocol",
             Self::AddAssignMethod => "AddAssignMethod",
@@ -797,6 +813,14 @@ impl LanguageFeature {
                 kind: BuiltinKind::EnumCase {
                     enum_feature: LanguageFeature::OptionalEnum,
                 },
+            },
+            // Type operator type aliases
+            Self::OptionalTypeOperator
+            | Self::ArrayTypeOperator
+            | Self::DictionaryTypeOperator
+            | Self::ResultTypeOperator => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::TypeAlias,
             },
             // Compound assignment protocols
             Self::AddAssignProtocol

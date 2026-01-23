@@ -218,29 +218,66 @@ pub(crate) fn ty_parser<'tokens>()
             .map(|(segments, args)| TyVariant::Path { segments, args })
             .boxed();
 
-        // Array type: [T]
-        let array = skip_trivia()
+        // Array type [T] or Dictionary type [K: V]
+        let array_or_dict = skip_trivia()
             .ignore_then(just(Token::LBracket).map_with(|_, e| to_kestrel_span(e.span())))
             .then(ty.clone())
+            .then(
+                // Check for colon - if present, this is a dictionary [K: V]
+                skip_trivia()
+                    .ignore_then(just(Token::Colon).map_with(|_, e| to_kestrel_span(e.span())))
+                    .then(ty.clone())
+                    .or_not(),
+            )
             .then(
                 skip_trivia()
                     .ignore_then(just(Token::RBracket).map_with(|_, e| to_kestrel_span(e.span()))),
             )
-            .map(|((lbracket, element_ty), rbracket)| {
-                TyVariant::Array(lbracket, Box::new(element_ty), rbracket)
+            .map(|(((lbracket, first_ty), maybe_colon_and_value), rbracket)| {
+                if let Some((colon_span, value_ty)) = maybe_colon_and_value {
+                    // Dictionary: [K: V]
+                    TyVariant::Dictionary(
+                        lbracket,
+                        Box::new(first_ty),
+                        colon_span,
+                        Box::new(value_ty),
+                        rbracket,
+                    )
+                } else {
+                    // Array: [T]
+                    TyVariant::Array(lbracket, Box::new(first_ty), rbracket)
+                }
             })
             .boxed();
 
-        // Try never first, then inferred, then paren types, then array, then path
+        // Try never first, then inferred, then paren types, then array/dict, then path
         let base_ty = never
             .or(inferred)
             .or(paren_types)
-            .or(array)
+            .or(array_or_dict)
             .or(path)
             .boxed();
 
-        // Optional modifier: T?
-        base_ty
+        // Result modifier: T throws E (binds tighter than ?)
+        let with_throws = base_ty
+            .then(
+                skip_trivia()
+                    .ignore_then(just(Token::Throws).map_with(|_, e| to_kestrel_span(e.span())))
+                    .then(ty.clone())
+                    .or_not(),
+            )
+            .map(|(base, throws_and_error)| {
+                if let Some((throws_span, error_ty)) = throws_and_error {
+                    TyVariant::Result(Box::new(base), throws_span, Box::new(error_ty))
+                } else {
+                    base
+                }
+            })
+            .boxed();
+
+        // Optional modifier: T? (binds looser than throws)
+        // So `Int throws Error?` = `Optional[Result[Int, Error]]`
+        with_throws
             .then(
                 skip_trivia()
                     .ignore_then(just(Token::Question).map_with(|_, e| to_kestrel_span(e.span())))
@@ -312,8 +349,21 @@ pub(crate) fn emit_ty_variant(sink: &mut EventSink, variant: &TyVariant) {
         TyVariant::Array(lbracket, element_ty, rbracket) => {
             emit_array_type(sink, lbracket.clone(), element_ty, rbracket.clone());
         },
+        TyVariant::Dictionary(lbracket, key_ty, colon, value_ty, rbracket) => {
+            emit_dictionary_type(
+                sink,
+                lbracket.clone(),
+                key_ty,
+                colon.clone(),
+                value_ty,
+                rbracket.clone(),
+            );
+        },
         TyVariant::Optional(base_ty, question_span) => {
             emit_optional_type(sink, base_ty, question_span.clone());
+        },
+        TyVariant::Result(success_ty, throws_span, error_ty) => {
+            emit_result_type(sink, success_ty, throws_span.clone(), error_ty);
         },
     }
 }
@@ -333,8 +383,12 @@ pub enum TyVariant {
     },
     /// Array type: [T]
     Array(Span, Box<TyVariant>, Span), // (lbracket, element_type, rbracket)
+    /// Dictionary type: [K: V]
+    Dictionary(Span, Box<TyVariant>, Span, Box<TyVariant>, Span), // (lbracket, key_type, colon, value_type, rbracket)
     /// Optional type: T?
     Optional(Box<TyVariant>, Span), // (base_type, question_span)
+    /// Result type: T throws E
+    Result(Box<TyVariant>, Span, Box<TyVariant>), // (success_type, throws_span, error_type)
 }
 
 /// Emit events for an inferred type: _
@@ -497,6 +551,46 @@ pub(crate) fn emit_optional_type(sink: &mut EventSink, base_ty: &TyVariant, ques
     sink.add_token(SyntaxKind::Question, question_span);
 
     sink.finish_node(); // Finish TyOptional
+    sink.finish_node(); // Finish Ty
+}
+
+/// Emit events for a dictionary type: [K: V]
+pub(crate) fn emit_dictionary_type(
+    sink: &mut EventSink,
+    lbracket: Span,
+    key_ty: &TyVariant,
+    colon: Span,
+    value_ty: &TyVariant,
+    rbracket: Span,
+) {
+    sink.start_node(SyntaxKind::Ty);
+    sink.start_node(SyntaxKind::TyDictionary);
+
+    sink.add_token(SyntaxKind::LBracket, lbracket);
+    emit_ty_variant(sink, key_ty);
+    sink.add_token(SyntaxKind::Colon, colon);
+    emit_ty_variant(sink, value_ty);
+    sink.add_token(SyntaxKind::RBracket, rbracket);
+
+    sink.finish_node(); // Finish TyDictionary
+    sink.finish_node(); // Finish Ty
+}
+
+/// Emit events for a result type: T throws E
+pub(crate) fn emit_result_type(
+    sink: &mut EventSink,
+    success_ty: &TyVariant,
+    throws_span: Span,
+    error_ty: &TyVariant,
+) {
+    sink.start_node(SyntaxKind::Ty);
+    sink.start_node(SyntaxKind::TyResult);
+
+    emit_ty_variant(sink, success_ty);
+    sink.add_token(SyntaxKind::Throws, throws_span);
+    emit_ty_variant(sink, error_ty);
+
+    sink.finish_node(); // Finish TyResult
     sink.finish_node(); // Finish Ty
 }
 

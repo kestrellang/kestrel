@@ -204,3 +204,7 @@ public struct ResultIterator[T, E] {
         result
     }
 }
+
+// Type operator alias: T throws E desugars to ResultTypeOperator[T, E] which is Result[T, E]
+@builtin(.ResultTypeOperator)
+public type ResultTypeOperator[T, E] = Result[T, E];

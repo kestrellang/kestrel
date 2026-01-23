@@ -590,3 +590,8 @@ extend Dictionary[K, V] where K: Equatable {
         ValuesView(entries: self.getEntries(), capacity: self.getCapacity())
     }
 }
+
+// Type operator alias: [K: V] desugars to DictionaryTypeOperator[K, V] which is Dictionary[K, V]
+// Note: The Equatable constraint on K comes from Dictionary itself
+@builtin(.DictionaryTypeOperator)
+public type DictionaryTypeOperator[K, V] = Dictionary[K, V];

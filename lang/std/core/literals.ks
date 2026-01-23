@@ -59,7 +59,6 @@ public protocol ExpressibleByArrayLiteral: _ExpressibleByArrayLiteral {
 //}
 
 // Dictionary literal protocol
-// Note: Requires tuple type [(Key, Value)] which may not be fully supported
 // @builtin(.ExpressibleByDictionaryLiteral)
 // public protocol ExpressibleByDictionaryLiteral {
 //     type Key
@@ -82,3 +81,5 @@ public type BooleanLiteralType = Bool
 
 @builtin(.DefaultCharLiteralType)
 public type CharLiteralType = Char
+
+public type ArrayLiteralType[T] = std.collections.Array[T]

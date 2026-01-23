@@ -398,3 +398,7 @@ extend Array[T]: Equatable where T: Equatable {
 
 // Cloneable conformance
 extend Array[T]: Cloneable {}
+
+// Type operator alias: [T] desugars to ArrayTypeOperator[T] which is Array[T]
+@builtin(.ArrayTypeOperator)
+public type ArrayTypeOperator[T] = Array[T];

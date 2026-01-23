@@ -204,3 +204,7 @@ public struct OptionalIterator[T] {
         result
     }
 }
+
+// Type operator alias: T? desugars to OptionalTypeOperator[T] which is Optional[T]
+@builtin(.OptionalTypeOperator)
+public type OptionalTypeOperator[T] = Optional[T];

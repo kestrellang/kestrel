@@ -108,10 +108,12 @@ pub enum SyntaxKind {
     TyTuple,
     TyFunction,
     TyPath,
-    TyArray,    // [T] - array/list type
-    TyOptional, // T? - optional type
+    TyArray,      // [T] - array/list type
+    TyDictionary, // [K: V] - dictionary/map type
+    TyOptional,   // T? - optional type
+    TyResult,     // T throws E - result type
     TyList,
-    TyInferred, // _ - inferred type placeholder
+    TyInferred,   // _ - inferred type placeholder
 
     // Path nodes (shared between types and other constructs)
     Path,
@@ -230,6 +232,7 @@ pub enum SyntaxKind {
     Public,
     Return,
     Try,
+    Throws,
     Static,
     Struct,
     Type,
@@ -362,6 +365,7 @@ impl From<Token> for SyntaxKind {
             Token::Public => SyntaxKind::Public,
             Token::Return => SyntaxKind::Return,
             Token::Try => SyntaxKind::Try,
+            Token::Throws => SyntaxKind::Throws,
             Token::Static => SyntaxKind::Static,
             Token::Struct => SyntaxKind::Struct,
             Token::Type => SyntaxKind::Type,
@@ -501,6 +505,8 @@ impl Language for KestrelLanguage {
         const TY_FUNCTION: u16 = SyntaxKind::TyFunction as u16;
         const TY_PATH: u16 = SyntaxKind::TyPath as u16;
         const TY_ARRAY: u16 = SyntaxKind::TyArray as u16;
+        const TY_DICTIONARY: u16 = SyntaxKind::TyDictionary as u16;
+        const TY_RESULT: u16 = SyntaxKind::TyResult as u16;
         const TY_LIST: u16 = SyntaxKind::TyList as u16;
         const TY_INFERRED: u16 = SyntaxKind::TyInferred as u16;
         const PATH: u16 = SyntaxKind::Path as u16;
@@ -607,6 +613,7 @@ impl Language for KestrelLanguage {
         const PUBLIC: u16 = SyntaxKind::Public as u16;
         const RETURN: u16 = SyntaxKind::Return as u16;
         const TRY: u16 = SyntaxKind::Try as u16;
+        const THROWS: u16 = SyntaxKind::Throws as u16;
         const STATIC: u16 = SyntaxKind::Static as u16;
         const STRUCT: u16 = SyntaxKind::Struct as u16;
         const TYPE: u16 = SyntaxKind::Type as u16;
@@ -739,6 +746,8 @@ impl Language for KestrelLanguage {
             TY_FUNCTION => SyntaxKind::TyFunction,
             TY_PATH => SyntaxKind::TyPath,
             TY_ARRAY => SyntaxKind::TyArray,
+            TY_DICTIONARY => SyntaxKind::TyDictionary,
+            TY_RESULT => SyntaxKind::TyResult,
             TY_LIST => SyntaxKind::TyList,
             TY_INFERRED => SyntaxKind::TyInferred,
             TY_OPTIONAL => SyntaxKind::TyOptional,
@@ -846,6 +855,7 @@ impl Language for KestrelLanguage {
             PUBLIC => SyntaxKind::Public,
             RETURN => SyntaxKind::Return,
             TRY => SyntaxKind::Try,
+            THROWS => SyntaxKind::Throws,
             STATIC => SyntaxKind::Static,
             STRUCT => SyntaxKind::Struct,
             TYPE => SyntaxKind::Type,
