@@ -1596,11 +1596,12 @@ fn lower_array_literal_init_call(
     // Emit: %self_ref = ref var %result
     ctx.emit_assign(self_ref_place.clone(), Rvalue::RefMut(result_place.clone()));
 
-    // Build call args: self_ref first (MutRef), then pointer and count
+    // Build call args: self_ref first (MutRef), then pointer and count (both borrowed)
+    // The function signature takes references: &p[T] and &i64
     let call_args = vec![
         CallArg::mutating(Value::Place(self_ref_place)),
-        CallArg::copy(Value::Place(ptr_place)),
-        CallArg::copy(count_value),
+        CallArg::borrow(Value::Place(ptr_place)),
+        CallArg::borrow(count_value),
     ];
 
     // Create a temp for the unit return value of init (we discard it)
