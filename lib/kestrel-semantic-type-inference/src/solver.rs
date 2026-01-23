@@ -871,11 +871,15 @@ fn unify(
         // Type aliases - expand and retry
         (TyKind::TypeAlias { .. }, _) => {
             let expanded = ctx.oracle().expand_type_alias(&ty_a);
+            // Register the expanded type so resolve_type can find it
+            ctx.register_type(&expanded);
             ctx.equate(expanded.id(), ty_b.id(), span.clone());
             Ok(SolveResult::Solved)
         },
         (_, TyKind::TypeAlias { .. }) => {
             let expanded = ctx.oracle().expand_type_alias(&ty_b);
+            // Register the expanded type so resolve_type can find it
+            ctx.register_type(&expanded);
             ctx.equate(ty_a.id(), expanded.id(), span.clone());
             Ok(SolveResult::Solved)
         },
@@ -1358,8 +1362,9 @@ fn resolve_struct_pattern_binding(
 
 /// Follow the substitution chain to get the current resolved type for an ID.
 fn resolve_type(ctx: &InferenceContext<'_>, id: TyId) -> Ty {
-    // Follow substitution chain
+    // Follow substitution chain, tracking the last concrete type found
     let mut current_id = id;
+    let mut last_subst: Option<Ty> = None;
     let mut visited = HashSet::new();
 
     loop {
@@ -1369,16 +1374,16 @@ fn resolve_type(ctx: &InferenceContext<'_>, id: TyId) -> Ty {
         }
 
         if let Some(subst) = ctx.substitutions().get(&current_id) {
+            last_subst = Some(subst.clone());
             current_id = subst.id();
         } else {
             break;
         }
     }
 
-    // Return the substituted type if available, otherwise look in registry
-    ctx.substitutions()
-        .get(&current_id)
-        .cloned()
+    // Return the last substitution found (which is the resolved type),
+    // or look in registry, or create inference placeholder
+    last_subst
         .or_else(|| ctx.type_registry().get(&current_id).cloned())
         .unwrap_or_else(|| {
             // If not found anywhere, create an inference placeholder
