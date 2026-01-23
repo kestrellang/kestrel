@@ -9,27 +9,27 @@ import Tui.(Style, StyleOption, Box, moveTo, home, clearScreen, hideCursor, show
 // Game Constants
 // ============================================
 
-let GAME_WIDTH: Int64 = 60
-let GAME_HEIGHT: Int64 = 24
-let PADDLE_WIDTH: Int64 = 8
-let BRICK_ROWS: Int64 = 5
-let BRICK_COLS: Int64 = 14
-let BRICK_WIDTH: Int64 = 4  // Each brick is 4 chars wide (2 "██")
-let INITIAL_LIVES: Int64 = 3
+func GAME_WIDTH() -> Int64 { 60 }
+func GAME_HEIGHT() -> Int64 { 24 }
+func PADDLE_WIDTH() -> Int64 { 8 }
+func BRICK_ROWS() -> Int64 { 5 }
+func BRICK_COLS() -> Int64 { 14 }
+func BRICK_WIDTH() -> Int64 { 4 }  // Each brick is 4 chars wide (2 "██")
+func INITIAL_LIVES() -> Int64 { 3 }
 
 // ============================================
 // Styles
 // ============================================
 
-let borderStyle: Style = [.White, .Dim]
-let paddleStyle: Style = [.White, .Bold]
-let ballStyle: Style = [.Yellow, .Bold]
-let labelStyle: Style = [.Gray]
-let valueStyle: Style = [.White, .Bold]
-let livesStyle: Style = [.Red, .Bold]
-let gameOverStyle: Style = [.Red, .Bold]
-let winStyle: Style = [.Green, .Bold]
-let promptStyle: Style = [.Yellow]
+func borderStyle() -> Style { [.White, .Dim] }
+func paddleStyle[F](f: F) -> String where F: Formattable { let style: Style = [.White, .Bold]; return style(f) }
+func ballStyle[F](f: F) -> String where F: Formattable { let style: Style = [.Yellow, .Bold]; return style(f) }
+func labelStyle[F](f: F) -> String where F: Formattable { let style: Style = [.Gray]; return style(f) }
+func valueStyle[F](f: F) -> String where F: Formattable { let style: Style = [.White, .Bold]; return style(f) }
+func livesStyle[F](f: F) -> String where F: Formattable { let style: Style = [.Red, .Bold]; return style(f) }
+func gameOverStyle[F](f: F) -> String where F: Formattable { let style: Style = [.Red, .Bold]; return style(f) }
+func winStyle[F](f: F) -> String where F: Formattable { let style: Style = [.Green, .Bold]; return style(f) }
+func promptStyle[F](f: F) -> String where F: Formattable { let style: Style = [.Yellow]; return style(f) }
 
 // Brick styles by row (top = most points, brightest colors)
 func getBrickStyle(row row: Int64) -> Style {
@@ -88,28 +88,28 @@ struct Breakout {
     var frameCount: Int64
 
     init() {
-        self.box = Box(x: 0, y: 1, width: GAME_WIDTH + 2, height: GAME_HEIGHT, style: borderStyle);
+        self.box = Box(x: 0, y: 1, width: GAME_WIDTH() + 2, height: GAME_HEIGHT(), style: borderStyle());
 
         // Initialize paddle in center
-        self.paddleX = (GAME_WIDTH - PADDLE_WIDTH) / 2;
+        self.paddleX = (GAME_WIDTH() - PADDLE_WIDTH()) / 2;
 
         // Initialize ball above paddle
-        self.ballX = GAME_WIDTH / 2;
-        self.ballY = GAME_HEIGHT - 4;
+        self.ballX = GAME_WIDTH() / 2;
+        self.ballY = GAME_HEIGHT() - 4;
         self.ballDX = 1;
         self.ballDY = -1;
 
         // Initialize bricks
         self.bricks = Array[Bool]();
         var i: Int64 = 0;
-        while i < BRICK_ROWS * BRICK_COLS {
+        while i < BRICK_ROWS() * BRICK_COLS() {
             self.bricks.append(true);
             i = i + 1;
         }
-        self.bricksRemaining = BRICK_ROWS * BRICK_COLS;
+        self.bricksRemaining = BRICK_ROWS() * BRICK_COLS();
 
         self.score = 0;
-        self.lives = INITIAL_LIVES;
+        self.lives = INITIAL_LIVES();
         self.gameOver = false;
         self.won = false;
 
@@ -120,16 +120,16 @@ struct Breakout {
 
     // Check if brick exists at row, col
     func hasBrick(row row: Int64, col col: Int64) -> Bool {
-        if row < 0 or row >= BRICK_ROWS or col < 0 or col >= BRICK_COLS {
+        if row < 0 or row >= BRICK_ROWS() or col < 0 or col >= BRICK_COLS() {
             return false
         }
-        self.bricks.getUnchecked(row * BRICK_COLS + col)
+        self.bricks.getUnchecked(row * BRICK_COLS() + col)
     }
 
     // Remove brick at row, col
     mutating func removeBrick(row row: Int64, col col: Int64) {
-        if row >= 0 and row < BRICK_ROWS and col >= 0 and col < BRICK_COLS {
-            let idx = row * BRICK_COLS + col;
+        if row >= 0 and row < BRICK_ROWS() and col >= 0 and col < BRICK_COLS() {
+            let idx = row * BRICK_COLS() + col;
             if self.bricks.getUnchecked(idx) {
                 self.bricks.setUnchecked(idx, false);
                 self.bricksRemaining = self.bricksRemaining - 1;
@@ -175,8 +175,8 @@ struct Breakout {
         if self.paddleX < 0 {
             self.paddleX = 0;
         }
-        if self.paddleX > GAME_WIDTH - PADDLE_WIDTH {
-            self.paddleX = GAME_WIDTH - PADDLE_WIDTH;
+        if self.paddleX > GAME_WIDTH() - PADDLE_WIDTH() {
+            self.paddleX = GAME_WIDTH() - PADDLE_WIDTH();
         }
     }
 
@@ -212,8 +212,8 @@ struct Breakout {
         if newX < 0 {
             self.ballX = 0;
             self.ballDX = 0 - self.ballDX;
-        } else if newX >= GAME_WIDTH {
-            self.ballX = GAME_WIDTH - 1;
+        } else if newX >= GAME_WIDTH() {
+            self.ballX = GAME_WIDTH() - 1;
             self.ballDX = 0 - self.ballDX;
         } else {
             self.ballX = newX;
@@ -223,7 +223,7 @@ struct Breakout {
         if newY < 0 {
             self.ballY = 0;
             self.ballDY = 0 - self.ballDY;
-        } else if newY >= GAME_HEIGHT - 1 {
+        } else if newY >= GAME_HEIGHT() - 1 {
             // Ball fell through bottom - lose life
             self.lives = self.lives - 1;
             if self.lives <= 0 {
@@ -238,14 +238,14 @@ struct Breakout {
         }
 
         // Paddle collision
-        let paddleY = GAME_HEIGHT - 2;
+        let paddleY = GAME_HEIGHT() - 2;
         if self.ballY == paddleY and self.ballDY > 0 {
-            if self.ballX >= self.paddleX and self.ballX < self.paddleX + PADDLE_WIDTH {
+            if self.ballX >= self.paddleX and self.ballX < self.paddleX + PADDLE_WIDTH() {
                 self.ballDY = 0 - self.ballDY;
 
                 // Angle based on where ball hits paddle
                 let hitPos = self.ballX - self.paddleX;
-                let center = PADDLE_WIDTH / 2;
+                let center = PADDLE_WIDTH() / 2;
                 if hitPos < center - 1 {
                     self.ballDX = -1;  // Hit left side - go left
                 } else if hitPos > center + 1 {
@@ -258,16 +258,16 @@ struct Breakout {
         // Brick collision
         // Bricks start at row 2 (after title row and top border padding)
         let brickAreaTop: Int64 = 1;
-        let brickAreaBottom = brickAreaTop + BRICK_ROWS;
+        let brickAreaBottom = brickAreaTop + BRICK_ROWS();
 
         if self.ballY >= brickAreaTop and self.ballY < brickAreaBottom {
             let brickRow = self.ballY - brickAreaTop;
             // Calculate which brick column based on ball X position
             // Bricks start with some padding from left wall
             let brickStartX: Int64 = 1;
-            let brickCol = (self.ballX - brickStartX) / BRICK_WIDTH;
+            let brickCol = (self.ballX - brickStartX) / BRICK_WIDTH();
 
-            if brickCol >= 0 and brickCol < BRICK_COLS {
+            if brickCol >= 0 and brickCol < BRICK_COLS() {
                 if self.hasBrick(row: brickRow, col: brickCol) {
                     self.removeBrick(row: brickRow, col: brickCol);
                     self.ballDY = 0 - self.ballDY;
@@ -284,11 +284,11 @@ struct Breakout {
 
     // Reset ball after losing a life
     mutating func resetBall() {
-        self.ballX = GAME_WIDTH / 2;
-        self.ballY = GAME_HEIGHT - 4;
+        self.ballX = GAME_WIDTH() / 2;
+        self.ballY = GAME_HEIGHT() - 4;
         self.ballDX = 1;
         self.ballDY = -1;
-        self.paddleX = (GAME_WIDTH - PADDLE_WIDTH) / 2;
+        self.paddleX = (GAME_WIDTH() - PADDLE_WIDTH()) / 2;
     }
 
     // Reset entire game
@@ -297,14 +297,14 @@ struct Breakout {
 
         // Reset bricks
         var i: Int64 = 0;
-        while i < BRICK_ROWS * BRICK_COLS {
+        while i < BRICK_ROWS() * BRICK_COLS() {
             self.bricks.setUnchecked(i, true);
             i = i + 1;
         }
-        self.bricksRemaining = BRICK_ROWS * BRICK_COLS;
+        self.bricksRemaining = BRICK_ROWS() * BRICK_COLS();
 
         self.score = 0;
-        self.lives = INITIAL_LIVES;
+        self.lives = INITIAL_LIVES();
         self.gameOver = false;
         self.won = false;
         self.lastDirection = 0;
@@ -333,12 +333,12 @@ struct Breakout {
 
         // Render bricks
         var row: Int64 = 0;
-        while row < BRICK_ROWS {
+        while row < BRICK_ROWS() {
             let style = getBrickStyle(row: row);
             var col: Int64 = 0;
-            while col < BRICK_COLS {
+            while col < BRICK_COLS() {
                 if self.hasBrick(row: row, col: col) {
-                    let brickX = 1 + col * BRICK_WIDTH;
+                    let brickX = 1 + col * BRICK_WIDTH();
                     let brickY = row + 1;
                     print(self.box.at(x: brickX, y: brickY) + style("████"));
                 }
@@ -348,9 +348,9 @@ struct Breakout {
         }
 
         // Clear the play area below bricks (to erase old ball/paddle positions)
-        var clearRow = BRICK_ROWS + 1;
-        while clearRow < GAME_HEIGHT - 1 {
-            print(self.box.at(x: 0, y: clearRow) + repeatStr(s: " ", count: GAME_WIDTH));
+        var clearRow = BRICK_ROWS() + 1;
+        while clearRow < GAME_HEIGHT() - 1 {
+            print(self.box.at(x: 0, y: clearRow) + repeatStr(s: " ", count: GAME_WIDTH()));
             clearRow = clearRow + 1;
         }
 
@@ -358,11 +358,11 @@ struct Breakout {
         print(self.box.at(x: self.ballX, y: self.ballY) + ballStyle("●"));
 
         // Render paddle
-        let paddleY = GAME_HEIGHT - 2;
-        print(self.box.at(x: self.paddleX, y: paddleY) + paddleStyle(repeatStr(s: "▄", count: PADDLE_WIDTH)));
+        let paddleY = GAME_HEIGHT() - 2;
+        print(self.box.at(x: self.paddleX, y: paddleY) + paddleStyle(repeatStr(s: "▄", count: PADDLE_WIDTH())));
 
         // Instructions
-        print(moveTo(x: 2, y: GAME_HEIGHT + 1));
+        print(moveTo(x: 2, y: GAME_HEIGHT() + 1));
         print(labelStyle("A/D or Arrow Keys to move | Ctrl+C to exit") + clearLine());
     }
 
@@ -378,26 +378,26 @@ struct Breakout {
         self.box.render();
 
         // Center message
-        let centerY = GAME_HEIGHT / 2;
+        let centerY = GAME_HEIGHT() / 2;
 
         if self.won {
             let msg = "YOU WIN!";
-            let msgX = (GAME_WIDTH - 8) / 2;
+            let msgX = (GAME_WIDTH() - 8) / 2;
             print(self.box.at(x: msgX, y: centerY) + winStyle(msg));
         } else {
             let msg = "GAME OVER";
-            let msgX = (GAME_WIDTH - 9) / 2;
+            let msgX = (GAME_WIDTH() - 9) / 2;
             print(self.box.at(x: msgX, y: centerY) + gameOverStyle(msg));
         }
 
         // Final score
         let scoreMsg = "Final Score: ";
-        let scoreMsgX = (GAME_WIDTH - 16) / 2;
+        let scoreMsgX = (GAME_WIDTH() - 16) / 2;
         print(self.box.at(x: scoreMsgX, y: centerY + 2) + valueStyle(scoreMsg) + valueStyle(self.score));
 
         // Prompt
         let promptMsg = "SPACE = Restart  Q = Quit";
-        let promptX = (GAME_WIDTH - 25) / 2;
+        let promptX = (GAME_WIDTH() - 25) / 2;
         print(self.box.at(x: promptX, y: centerY + 4) + promptStyle(promptMsg));
     }
 }
