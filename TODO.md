@@ -49,10 +49,10 @@
 - [x] Dictionary type syntax [Key: Value]
 - [x] Optional type syntax Type?
 - [x] Result type syntax Type throws Error
-- [ ] Null Literals
+- [x] Null Literals
+- [ ] and / or short-circuit
 - [ ] Optional Chaining
 - [ ] Null Coalescing
-- [ ] and / or short-circuit
 - [ ] Refactor Matchable for range patterns
 - [ ] Irrefutable patterns in function parameters
 - [ ] String interpolation
