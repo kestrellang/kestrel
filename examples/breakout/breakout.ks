@@ -431,7 +431,7 @@ func KEY_RIGHT() -> Int32 { 1003 }
 // Main
 // ============================================
 
-func main() -> Result[(), Error] {
+func main() -> () throws Error {
     initTerminal();
 
     // Hide cursor and clear screen

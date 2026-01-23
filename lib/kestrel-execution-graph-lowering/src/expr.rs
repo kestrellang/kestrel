@@ -1396,8 +1396,11 @@ fn lower_array_literal(
     elements: &[Expression],
     expr: &Expression,
 ) -> Value {
+    // Expand type aliases (e.g., [T] -> ArrayTypeOperator[T] -> Array[T])
+    let target_ty = expr.ty.expand_aliases();
+
     // Get element type from Array[T] struct type
-    let element_sem_ty: Ty = match expr.ty.kind() {
+    let element_sem_ty: Ty = match target_ty.kind() {
         TyKind::Struct { substitutions, .. } => {
             // For Array[T] struct types, get T from substitutions
             // This works for both Array[T] and Array[T, Allocator]
@@ -1501,10 +1504,11 @@ fn lower_array_literal(
 
     // Look up the init method with _arrayLiteralPointer and _arrayLiteralCount labels
     // For now, we need to find the target type's init method
-    match expr.ty.kind() {
+    // Use target_ty which has type aliases expanded
+    match target_ty.kind() {
         TyKind::Struct { symbol, .. } => {
             // Call the struct's array literal init
-            lower_array_literal_init_call(ctx, expr, symbol, ptr_place, count_value)
+            lower_array_literal_init_call(ctx, expr, &target_ty, symbol, ptr_place, count_value)
         },
         _ => {
             ctx.emit_error(LoweringError::internal(
@@ -1520,6 +1524,7 @@ fn lower_array_literal(
 fn lower_array_literal_init_call(
     ctx: &mut LoweringContext,
     expr: &Expression,
+    target_ty: &Ty,
     struct_symbol: &std::sync::Arc<kestrel_semantic_tree::symbol::r#struct::StructSymbol>,
     ptr_place: Place,
     count_value: Value,
@@ -1527,6 +1532,10 @@ fn lower_array_literal_init_call(
     use semantic_tree::symbol::Symbol;
 
     // Find the init with _arrayLiteralPointer and _arrayLiteralCount parameters
+    // Note: We check bind_name (internal name) not label (external label) because
+    // the protocol uses single-name syntax `_arrayLiteralPointer: Type` where the
+    // underscore prefix makes the external label `_` (no label) while the full name
+    // becomes the internal bind name.
     let init_symbol = struct_symbol
         .metadata()
         .children()
@@ -1535,18 +1544,16 @@ fn lower_array_literal_init_call(
             if child.metadata().kind() != KestrelSymbolKind::Initializer {
                 return false;
             }
-            // Check if this init has parameters with the right labels
+            // Check if this init has parameters with the right bind names
             if let Some(callable) = child.metadata().get_behavior::<CallableBehavior>() {
                 let params = callable.parameters();
                 params.len() >= 2
                     && params
                         .first()
-                        .and_then(|p| p.label.as_ref())
-                        .is_some_and(|l| l.value == "_arrayLiteralPointer")
+                        .is_some_and(|p| p.bind_name.value == "_arrayLiteralPointer")
                     && params
                         .get(1)
-                        .and_then(|p| p.label.as_ref())
-                        .is_some_and(|l| l.value == "_arrayLiteralCount")
+                        .is_some_and(|p| p.bind_name.value == "_arrayLiteralCount")
             } else {
                 false
             }
@@ -1574,8 +1581,8 @@ fn lower_array_literal_init_call(
 
     let init_name = ctx.mir.intern_name(QualifiedNameData::new(name_parts));
 
-    // Lower the result type
-    let result_ty = lower_type(ctx, &expr.ty);
+    // Lower the result type (use the expanded target type, not the original which may be a type alias)
+    let result_ty = lower_type(ctx, target_ty);
 
     // Allocate space for the result
     let result_local = ctx.create_temp("array_literal", result_ty);
