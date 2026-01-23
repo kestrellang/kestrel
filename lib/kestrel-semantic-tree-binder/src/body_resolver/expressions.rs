@@ -612,14 +612,17 @@ fn resolve_compound_assignment_expression(
     // The method returns (), so the compound assignment expression has type ()
     let method_name = op.method_name();
     let arg = CallArgument::unlabeled(value.clone(), value.span.clone());
+    let result_ty = Ty::unit(span.clone());
 
-    Expression::deferred_method_call(
-        target,
-        method_name.to_string(),
-        vec![arg],
-        Ty::unit(span.clone()), // Compound assignment returns ()
-        span,
-    )
+    // Try to use MethodRef pattern with builtin registry for better error messages
+    if let Some(method_id) = ctx.model.builtin_registry().method(op.method_feature()) {
+        let method_ref =
+            Expression::method_ref(target, vec![method_id], method_name.to_string(), span.clone());
+        return Expression::call(method_ref, vec![arg], result_ty, span);
+    }
+
+    // Fallback: use DeferredMethodCall if builtin not registered
+    Expression::deferred_method_call(target, method_name.to_string(), vec![arg], result_ty, span)
 }
 
 /// Resolve an if expression: if condition { then } else { else }
@@ -1551,14 +1554,29 @@ fn resolve_try_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) ->
     let operand = resolve_expression(&operand_node, ctx);
 
     // Create method call: operand.tryExtract()
-    // This is a deferred method call that will be resolved during type inference
-    let try_extract_call = Expression::deferred_method_call(
-        operand,
-        "tryExtract".to_string(),
-        vec![],
-        Ty::infer(span.clone()), // ControlFlow[Output, Early]
-        span.clone(),
-    );
+    // Try to use MethodRef pattern with builtin registry for better error messages
+    let try_extract_call = if let Some(method_id) = ctx
+        .model
+        .builtin_registry()
+        .method(LanguageFeature::TryExtractMethod)
+    {
+        let method_ref = Expression::method_ref(
+            operand,
+            vec![method_id],
+            "tryExtract".to_string(),
+            span.clone(),
+        );
+        Expression::call(method_ref, vec![], Ty::infer(span.clone()), span.clone())
+    } else {
+        // Fallback: use DeferredMethodCall if builtin not registered
+        Expression::deferred_method_call(
+            operand,
+            "tryExtract".to_string(),
+            vec![],
+            Ty::infer(span.clone()), // ControlFlow[Output, Early]
+            span.clone(),
+        )
+    };
 
     // Create locals for the bound variables in each arm
     // Push scope for continue arm

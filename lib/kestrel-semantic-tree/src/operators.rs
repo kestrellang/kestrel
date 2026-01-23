@@ -189,6 +189,22 @@ impl CompoundOp {
             _ => None,
         }
     }
+
+    /// Get the language feature for this compound operator's method, if any.
+    pub fn method_feature(&self) -> LanguageFeature {
+        match self {
+            CompoundOp::Add => LanguageFeature::AddAssignMethod,
+            CompoundOp::Sub => LanguageFeature::SubtractAssignMethod,
+            CompoundOp::Mul => LanguageFeature::MultiplyAssignMethod,
+            CompoundOp::Div => LanguageFeature::DivideAssignMethod,
+            CompoundOp::Rem => LanguageFeature::ModuloAssignMethod,
+            CompoundOp::BitAnd => LanguageFeature::BitwiseAndAssignMethod,
+            CompoundOp::BitOr => LanguageFeature::BitwiseOrAssignMethod,
+            CompoundOp::BitXor => LanguageFeature::BitwiseXorAssignMethod,
+            CompoundOp::Shl => LanguageFeature::ShiftLeftAssignMethod,
+            CompoundOp::Shr => LanguageFeature::ShiftRightAssignMethod,
+        }
+    }
 }
 
 /// Unary operators (both prefix and postfix).
