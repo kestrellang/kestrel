@@ -241,6 +241,9 @@ struct Game: Iterator {
     var framesSinceInput: Int64
     var input: InputManager
     var running: Bool
+    var prevBallX: Int64
+    var prevBallY: Int64
+    var prevPaddleX: Int64
 
     init() {
         self.state = .Playing;
@@ -254,6 +257,9 @@ struct Game: Iterator {
         self.framesSinceInput = 0;
         self.input = InputManager();
         self.running = true;
+        self.prevBallX = self.ball.x;
+        self.prevBallY = self.ball.y;
+        self.prevPaddleX = self.paddle.x;
 
         print(hideCursor() + clearScreen());
     }
@@ -288,10 +294,8 @@ struct Game: Iterator {
         }
 
         if self.running {
-            print("Some In");
             .Some(())
         } else {
-            print("None in");
             .None
         }
     }
@@ -436,15 +440,17 @@ struct Game: Iterator {
         self.lives = Config.initialLives;
         self.lastDirection = 0;
         self.framesSinceInput = 0;
+        self.prevBallX = self.ball.x;
+        self.prevBallY = self.ball.y;
+        self.prevPaddleX = self.paddle.x;
+        print(clearScreen());
     }
 
     // ----------------------------------------
     // Rendering
     // ----------------------------------------
 
-    func render() {
-        print(home());
-
+    mutating func render() {
         // Score and lives
         print(moveTo(x: 2, y: 0));
         print(Styles.label("Score: ") + Styles.value(self.score) + "    ");
@@ -457,9 +463,22 @@ struct Game: Iterator {
         // Game box
         self.box.renderOpen();
 
-        // Clear entire play area inside box (prevents ball trail artifacts)
-        for clearRow in Range[Int64](0, Config.gameHeight - 1) {
-            print(self.box.at(x: 0, y: clearRow) + repeatStr(s: " ", count: Config.gameWidth));
+        // Clear previous ball position (only if it moved)
+        if self.prevBallX != self.ball.x or self.prevBallY != self.ball.y {
+            print(self.box.at(x: self.prevBallX, y: self.prevBallY) + " ");
+        }
+
+        // Clear previous paddle position (only the parts that are no longer covered)
+        if self.prevPaddleX != self.paddle.x {
+            if self.prevPaddleX < self.paddle.x {
+                // Moved right, clear left edge
+                print(self.box.at(x: self.prevPaddleX, y: self.paddle.y) + repeatStr(s: " ", count: self.paddle.x - self.prevPaddleX));
+            } else {
+                // Moved left, clear right edge
+                let prevEnd = self.prevPaddleX + self.paddle.width;
+                let newEnd = self.paddle.x + self.paddle.width;
+                print(self.box.at(x: newEnd, y: self.paddle.y) + repeatStr(s: " ", count: prevEnd - newEnd));
+            }
         }
 
         // Bricks
@@ -470,6 +489,11 @@ struct Game: Iterator {
 
         // Paddle
         print(self.box.at(x: self.paddle.x, y: self.paddle.y) + Styles.paddle(repeatStr(s: "▄", count: self.paddle.width)));
+
+        // Update previous positions
+        self.prevBallX = self.ball.x;
+        self.prevBallY = self.ball.y;
+        self.prevPaddleX = self.paddle.x;
 
         // Instructions
         print(moveTo(x: 2, y: Config.gameHeight + 1));

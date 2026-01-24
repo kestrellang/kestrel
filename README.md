@@ -9,6 +9,7 @@ Games built with Kestrel:
 <p>
 <img src="public/pong.gif" alt="Pong game written in Kestrel" width="400">
 <img src="public/snake.gif" alt="Snake game written in Kestrel" width="400">
+<img src="public/breakout.gif" alt="Breakout game written in Kestrel" width="400">
 </p>
 
 ## Features
