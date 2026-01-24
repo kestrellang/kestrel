@@ -200,13 +200,13 @@ mod boolean {
                 let t: std.core.Bool = true;
                 let f: std.core.Bool = false;
 
-                // Test logicalAnd
-                if t.logicalAnd(t) == false { return 1 }
-                if t.logicalAnd(f) { return 2 }
+                // Test and (uses closure-based logicalAnd)
+                if (t and t) == false { return 1 }
+                if t and f { return 2 }
 
-                // Test logicalOr
-                if t.logicalOr(f) == false { return 3 }
-                if f.logicalOr(f) { return 4 }
+                // Test or (uses closure-based logicalOr)
+                if (t or f) == false { return 3 }
+                if f or f { return 4 }
 
                 // Test logicalNot
                 if t.logicalNot() { return 5 }

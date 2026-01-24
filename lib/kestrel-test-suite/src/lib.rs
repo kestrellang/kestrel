@@ -239,6 +239,18 @@ public protocol BitwiseNotOperatorProtocol {
 }
 
 // Logical operator protocols
+@builtin(.LogicalAndOperatorProtocol)
+public protocol LogicalAndOperatorProtocol {
+    @builtin(.LogicalAndOperatorMethod)
+    func logicalAnd(rhs: () -> lang.i1) -> lang.i1
+}
+
+@builtin(.LogicalOrOperatorProtocol)
+public protocol LogicalOrOperatorProtocol {
+    @builtin(.LogicalOrOperatorMethod)
+    func logicalOr(rhs: () -> lang.i1) -> lang.i1
+}
+
 @builtin(.LogicalNotOperatorProtocol)
 public protocol LogicalNotOperatorProtocol {
     @builtin(.LogicalNotOperatorMethod)

@@ -20,5 +20,6 @@ mod operators;
 mod paths;
 mod protocol_operators;
 mod returns;
+mod short_circuit;
 mod strings;
 mod try_operator;

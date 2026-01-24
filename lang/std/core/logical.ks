@@ -8,16 +8,20 @@ module std.core
 public protocol And[Rhs = Self] {
     type Output
 
+    // Takes a closure for short-circuit evaluation:
+    // The closure is only called if self is truthy
     @builtin(.LogicalAndOperatorMethod)
-    func logicalAnd(other: Rhs) -> Output
+    func logicalAnd(other: () -> Rhs) -> Output
 }
 
 @builtin(.LogicalOrOperatorProtocol)
 public protocol Or[Rhs = Self] {
     type Output
 
+    // Takes a closure for short-circuit evaluation:
+    // The closure is only called if self is falsy
     @builtin(.LogicalOrOperatorMethod)
-    func logicalOr(other: Rhs) -> Output
+    func logicalOr(other: () -> Rhs) -> Output
 }
 
 @builtin(.LogicalNotOperatorProtocol)

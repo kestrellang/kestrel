@@ -11,3 +11,4 @@ workflows.md
 
 - never change a test unless it uses invalid syntax. dont change a test to make it pass. Dont ignore one either
   NEVER throw away changes. always stash changes before checking out another branch.
+- When hitting a roadblock, stop and ask for guidance before reverting changes

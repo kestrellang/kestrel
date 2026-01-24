@@ -43,14 +43,14 @@ public struct Bool:
     type Or.Output = Bool
     type Not.Output = Bool
 
-    // And
-    public func logicalAnd(other: Bool) -> Bool {
-        Bool(boolLiteral: lang.i1_and(self.value, other.value))
+    // And - short-circuit: only evaluate other() if self is true
+    public func logicalAnd(other: () -> Bool) -> Bool {
+        if self.value { other() } else { Bool(boolLiteral: false) }
     }
 
-    // Or
-    public func logicalOr(other: Bool) -> Bool {
-        Bool(boolLiteral: lang.i1_or(self.value, other.value))
+    // Or - short-circuit: only evaluate other() if self is false
+    public func logicalOr(other: () -> Bool) -> Bool {
+        if self.value { Bool(boolLiteral: true) } else { other() }
     }
 
     // Not
