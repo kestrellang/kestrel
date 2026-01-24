@@ -598,7 +598,7 @@ See [docs/memory-model/implementation-plan.md](docs/memory-model/implementation-
 
 - [x] Try Operator
 - [x] For Loops
-- [ ] And / Or Short Circuiting
+- [x] And / Or Short Circuiting
 - [ ] Null Coalescing Operator
 - [ ] Optional Chaining
 - [x] Compound Assignment Operators

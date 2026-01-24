@@ -50,7 +50,7 @@
 - [x] Optional type syntax Type?
 - [x] Result type syntax Type throws Error
 - [x] Null Literals
-- [ ] and / or short-circuit
+- [x] and / or short-circuit
 - [ ] Optional Chaining
 - [ ] Null Coalescing
 - [ ] Refactor Matchable for range patterns
