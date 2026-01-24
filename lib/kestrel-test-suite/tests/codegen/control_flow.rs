@@ -342,7 +342,7 @@ fn test_bool_or_true() {
 func main() -> lang.i64 {
     let a: std.core.Bool = false;
     let b: std.core.Bool = true;
-    if a.logicalOr(b) {
+    if a or b {
         0
     } else {
         1
@@ -363,7 +363,7 @@ fn test_bool_or_false() {
 func main() -> lang.i64 {
     let a: std.core.Bool = false;
     let b: std.core.Bool = false;
-    if a.logicalOr(b) {
+    if a or b {
         1
     } else {
         0

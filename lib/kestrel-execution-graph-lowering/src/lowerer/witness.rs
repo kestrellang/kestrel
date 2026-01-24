@@ -364,10 +364,10 @@ fn generate_witness_for_protocol(
     protocol_ty: &Ty,
     type_param_ids: &[Id<TypeParam>],
 ) {
-    // Get the protocol symbol from the type
+    // Get the protocol symbol and substitutions from the type
     let TyKind::Protocol {
         symbol: protocol_symbol,
-        ..
+        substitutions,
     } = protocol_ty.kind()
     else {
         return;
@@ -381,6 +381,20 @@ fn generate_witness_for_protocol(
 
     // Store the type parameters on the witness so monomorphization can use them
     ctx.mir.witnesses[witness_id].type_params = type_param_ids.to_vec();
+
+    // Store protocol type arguments (e.g., Rhs -> Bool for And[Bool])
+    // This captures the type arguments used when conforming to a parameterized protocol.
+    let protocol_type_params = protocol_symbol.type_parameters();
+    for type_param in &protocol_type_params {
+        let param_name = type_param.metadata().name().value.clone();
+        let param_id = type_param.metadata().id();
+        if let Some(sub_ty) = substitutions.get(param_id) {
+            let mir_ty = lower_type(ctx, sub_ty);
+            ctx.mir.witnesses[witness_id]
+                .protocol_type_args
+                .insert(param_name, mir_ty);
+        }
+    }
 
     // Bind associated types
     bind_associated_types(ctx, witness_id, implementing_symbol, protocol_symbol);

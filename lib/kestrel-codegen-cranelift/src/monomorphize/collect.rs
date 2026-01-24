@@ -119,6 +119,7 @@ impl<'a> CollectionContext<'a> {
         let locals = func_def.locals.clone();
         let ret = func_def.ret;
 
+
         // Build substitution
         let mut subst = build_substitution(self.mir, &type_params, &inst.type_args);
 
@@ -321,30 +322,67 @@ impl<'a> CollectionContext<'a> {
             },
 
             Rvalue::ApplyPartial { func, captures } => {
-                // Non-generic function reference
+                // Function reference (closure or partial application)
                 if let Some(&func_id) = self.functions_by_name.get(func) {
+                    // Clone the data we need to avoid borrow conflicts
                     let func_def = &self.mir.functions[func_id];
-                    if !func_def.type_params.is_empty() {
-                        self.errors
-                            .push(MonomorphizeError::UnsupportedFunctionReference {
-                                name: *func,
-                                reason: "generic function requires type arguments".to_string(),
-                            });
-                        return;
-                    }
-                    let needs_self = func_def.params.iter().any(|&param_id| {
-                        let param = &self.mir.params[param_id];
-                        self.type_needs_self(self.mir.ty(param.ty))
-                    }) || self.type_needs_self(self.mir.ty(func_def.ret));
-                    if needs_self {
-                        self.errors
-                            .push(MonomorphizeError::UnsupportedFunctionReference {
-                                name: *func,
-                                reason: "function reference requires Self type".to_string(),
-                            });
-                        return;
-                    }
-                    let inst = FunctionInstantiation::non_generic(func_id);
+                    let type_params = func_def.type_params.clone();
+                    let params = func_def.params.clone();
+                    let ret = func_def.ret;
+
+                    // Closures inherit type parameters from their parent function.
+                    // When we see ApplyPartial for a closure inside a generic function,
+                    // the closure will have type_params matching the parent's.
+                    // We need to instantiate the closure with the same type args
+                    // that the parent was instantiated with (from the current substitution).
+                    let inst = if !type_params.is_empty() {
+                        // Get type args by applying current substitution to the closure's type params
+                        let type_args: Vec<_> = type_params
+                            .iter()
+                            .map(|&tp| {
+                                // The closure's type param should be the same MIR ID as the parent's.
+                                // Look it up in the substitution to get the concrete type.
+                                let tp_ty = self.mir.intern_type(MirTy::TypeParam(tp));
+                                subst.apply_ty(self.mir, tp_ty)
+                            })
+                            .collect();
+
+                        // Check if closure needs self_type
+                        let needs_self = params.iter().any(|&param_id| {
+                            let param = &self.mir.params[param_id];
+                            self.type_needs_self(self.mir.ty(param.ty))
+                        }) || self.type_needs_self(self.mir.ty(ret));
+
+                        if needs_self {
+                            if let Some(st) = subst.get_self_type() {
+                                FunctionInstantiation::with_self_type(func_id, type_args, st)
+                            } else {
+                                // Skip - will be processed later when called with concrete type
+                                for cap in captures {
+                                    self.scan_value(cap, subst);
+                                }
+                                return;
+                            }
+                        } else {
+                            FunctionInstantiation::new(func_id, type_args)
+                        }
+                    } else {
+                        // Non-generic function
+                        let needs_self = params.iter().any(|&param_id| {
+                            let param = &self.mir.params[param_id];
+                            self.type_needs_self(self.mir.ty(param.ty))
+                        }) || self.type_needs_self(self.mir.ty(ret));
+                        if needs_self {
+                            self.errors
+                                .push(MonomorphizeError::UnsupportedFunctionReference {
+                                    name: *func,
+                                    reason: "function reference requires Self type".to_string(),
+                                });
+                            return;
+                        }
+                        FunctionInstantiation::non_generic(func_id)
+                    };
+
                     if self.result.add_function(inst.clone()) {
                         self.pending.push_back(inst);
                     }

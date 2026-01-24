@@ -3256,23 +3256,48 @@ fn compile_apply_partial(
     // 1. Find the closure function and get its environment struct
     let (closure_func_id, env_struct_id) = find_closure_function_and_env(ctx, func)?;
     let closure_def = &ctx.mir.functions[closure_func_id];
-    if !closure_def.type_params.is_empty() {
-        return Err(CodegenError::Unsupported(format!(
-            "generic closure functions are not supported in apply partial: {}",
-            ctx.mir.name(func)
-        )));
+
+    // Closures inherit type parameters from their parent function.
+    // We need to apply the current substitution to get the concrete type args
+    // for this closure instantiation.
+    let mut closure_type_args = Vec::with_capacity(closure_def.type_params.len());
+    for &tp in &closure_def.type_params {
+        // Look up the type param in the substitution
+        if let Some(concrete_ty) = subst.get(tp) {
+            closure_type_args.push(concrete_ty);
+        } else {
+            // Type param not in substitution - this shouldn't happen for properly
+            // instantiated closures, but return an error if it does
+            return Err(CodegenError::Unsupported(format!(
+                "closure type param {:?} not in substitution for apply partial: {}",
+                tp,
+                ctx.mir.name(func)
+            )));
+        }
     }
-    if func_uses_self(ctx.mir, closure_def) {
-        return Err(CodegenError::Unsupported(format!(
-            "closure function uses Self type in apply partial: {}",
-            ctx.mir.name(func)
-        )));
+
+    // Check for any remaining type parameters or Self types after substitution
+    // (this would indicate incomplete monomorphization)
+    for &type_arg in &closure_type_args {
+        let ty = ctx.mir.ty(type_arg);
+        if matches!(ty, MirTy::TypeParam(_)) {
+            return Err(CodegenError::Unsupported(format!(
+                "closure has unsubstituted type parameter in apply partial: {}",
+                ctx.mir.name(func)
+            )));
+        }
+        if matches!(ty, MirTy::SelfType) {
+            return Err(CodegenError::Unsupported(format!(
+                "closure has unsubstituted Self type in apply partial: {}",
+                ctx.mir.name(func)
+            )));
+        }
     }
 
     // 2. Get the function pointer for the closure function
-    // The closure function is non-generic, so we use empty type args
-    // Use resolved symbol name with the func_id we already looked up
-    let mangled_name = ctx.symbol_name_for_function(closure_func_id, closure_def, &[], None);
+    // Use the instantiated type args derived from the parent function's substitution
+    let mangled_name =
+        ctx.symbol_name_for_function(closure_func_id, closure_def, &closure_type_args, None);
     let cl_func_id = ctx.func_ids_by_name.get(&mangled_name).ok_or_else(|| {
         CodegenError::Unsupported(format!(
             "closure function not found: {} (mangled: {})",

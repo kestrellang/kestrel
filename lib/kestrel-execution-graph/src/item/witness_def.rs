@@ -22,6 +22,10 @@ pub struct WitnessDef {
     pub implementing_type: Id<Ty>,
     /// The protocol being implemented.
     pub protocol: Id<QualifiedName>,
+    /// Protocol type argument bindings: param name -> concrete type.
+    /// For `Bool: And[Bool]`, this stores { "Rhs" -> Bool }.
+    /// This is separate from `type_bindings` which stores associated types.
+    pub protocol_type_args: HashMap<String, Id<Ty>>,
     /// Type parameters for this witness.
     pub type_params: Vec<Id<TypeParam>>,
     /// Associated type bindings: name -> concrete type.
@@ -39,6 +43,7 @@ impl WitnessDef {
             priors: Vec::new(),
             implementing_type,
             protocol,
+            protocol_type_args: HashMap::new(),
             type_params: Vec::new(),
             type_bindings: HashMap::new(),
             method_bindings: HashMap::new(),
@@ -84,6 +89,18 @@ impl fmt::Display for WitnessDefDisplay<'_> {
             self.ctx.ty(self.def.implementing_type).display(self.ctx),
             self.ctx.name(self.def.protocol)
         )?;
+
+        // Show protocol type arguments (e.g., And[Rhs = Bool])
+        if !self.def.protocol_type_args.is_empty() {
+            write!(f, "[")?;
+            for (i, (name, ty)) in self.def.protocol_type_args.iter().enumerate() {
+                if i > 0 {
+                    write!(f, ", ")?;
+                }
+                write!(f, "{} = {}", name, self.ctx.ty(*ty).display(self.ctx))?;
+            }
+            write!(f, "]")?;
+        }
 
         writeln!(f, " {{")?;
 

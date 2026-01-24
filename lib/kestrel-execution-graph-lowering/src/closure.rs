@@ -323,6 +323,15 @@ fn create_closure_function(
     let saved_closure_counter = ctx.get_closure_counter();
     let saved_temp_counter = ctx.get_temp_counter();
 
+    // Get the parent function's type parameters - closures inherit these so that
+    // type parameter references in the closure body can be properly substituted
+    // during monomorphization.
+    let parent_type_params = if let Some(parent_func) = saved_func {
+        ctx.mir.function(parent_func).type_params.clone()
+    } else {
+        vec![]
+    };
+
     // Pre-compute types for env parameter and regular parameters to avoid borrow issues
     // All closures get an env parameter for ABI consistency with thick calls.
     // For capturing closures, it's a reference to the env struct.
@@ -358,6 +367,11 @@ fn create_closure_function(
 
         func.id()
     };
+
+    // Inherit type parameters from the parent function.
+    // This ensures that when the closure is instantiated during monomorphization,
+    // the type args from the parent function instantiation are passed to the closure too.
+    ctx.mir.function_mut(func_id).type_params = parent_type_params;
 
     // Set Origin metadata for closure call function
     if let Some((env_struct_id, _)) = env_info {

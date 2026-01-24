@@ -52,7 +52,16 @@ pub fn find_witness(
         }
     }
 
-    Err(MonomorphizeError::WitnessNotFound { protocol, for_type })
+    // Get human-readable names for the error message
+    let protocol_name = Some(mir.name(protocol).to_string());
+    let type_name = Some(format!("{}", mir.ty(for_type).display(mir)));
+
+    Err(MonomorphizeError::WitnessNotFound {
+        protocol,
+        for_type,
+        protocol_name,
+        type_name,
+    })
 }
 
 /// Pattern match a witness type against a concrete type to extract type parameter bindings.
