@@ -1977,81 +1977,8 @@ pub fn resolve_delegating_init(
 /// Get all protocols that a concrete type conforms to (including through extensions).
 ///
 /// Returns a list of (protocol_symbol, protocol_type) pairs.
-fn get_type_conformances(ty: &Ty, ctx: &BodyResolutionContext) -> Vec<(Arc<ProtocolSymbol>, Ty)> {
-    let mut conformances = Vec::new();
-
-    match ty.kind() {
-        TyKind::Struct { symbol, .. } => {
-            // Direct conformances on the struct
-            if let Some(conf_behavior) = symbol.metadata().get_behavior::<ConformancesBehavior>() {
-                for conf_ty in conf_behavior.conformances() {
-                    if let TyKind::Protocol { symbol: proto, .. } = conf_ty.kind() {
-                        conformances.push((proto.clone(), conf_ty.clone()));
-                    }
-                }
-            }
-
-            // Conformances added via type extensions
-            let struct_id = symbol.metadata().id();
-            let extensions = ctx.model.query(ExtensionsFor {
-                target_id: struct_id,
-            });
-            for extension in extensions {
-                // Skip protocol extensions when collecting type conformances
-                if let Some(target) = extension
-                    .metadata()
-                    .get_behavior::<ExtensionTargetBehavior>()
-                    && target.is_protocol_extension()
-                {
-                    continue;
-                }
-                if let Some(conf_behavior) =
-                    extension.metadata().get_behavior::<ConformancesBehavior>()
-                {
-                    for conf_ty in conf_behavior.conformances() {
-                        if let TyKind::Protocol { symbol: proto, .. } = conf_ty.kind() {
-                            conformances.push((proto.clone(), conf_ty.clone()));
-                        }
-                    }
-                }
-            }
-        },
-        TyKind::Enum { symbol, .. } => {
-            // Direct conformances on the enum
-            if let Some(conf_behavior) = symbol.metadata().get_behavior::<ConformancesBehavior>() {
-                for conf_ty in conf_behavior.conformances() {
-                    if let TyKind::Protocol { symbol: proto, .. } = conf_ty.kind() {
-                        conformances.push((proto.clone(), conf_ty.clone()));
-                    }
-                }
-            }
-
-            // Conformances added via type extensions
-            let enum_id = symbol.metadata().id();
-            let extensions = ctx.model.query(ExtensionsFor { target_id: enum_id });
-            for extension in extensions {
-                if let Some(target) = extension
-                    .metadata()
-                    .get_behavior::<ExtensionTargetBehavior>()
-                    && target.is_protocol_extension()
-                {
-                    continue;
-                }
-                if let Some(conf_behavior) =
-                    extension.metadata().get_behavior::<ConformancesBehavior>()
-                {
-                    for conf_ty in conf_behavior.conformances() {
-                        if let TyKind::Protocol { symbol: proto, .. } = conf_ty.kind() {
-                            conformances.push((proto.clone(), conf_ty.clone()));
-                        }
-                    }
-                }
-            }
-        },
-        _ => {},
-    }
-
-    conformances
+fn get_type_conformances(ty: &Ty, ctx: &BodyResolutionContext) -> Vec<SymbolId> {
+    ctx.model.protocol_conformance_ids_for_type(ty)
 }
 
 /// Get all applicable protocol extensions for a concrete type.
@@ -2069,9 +1996,8 @@ fn get_applicable_protocol_extensions(
     let conformances = get_type_conformances(concrete_ty, ctx);
     let mut applicable = Vec::new();
 
-    for (protocol, _protocol_ty) in conformances {
+    for protocol_id in conformances {
         // Get all extensions for this protocol
-        let protocol_id = protocol.metadata().id();
         let extensions = ctx.model.query(ExtensionsFor {
             target_id: protocol_id,
         });

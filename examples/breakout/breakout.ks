@@ -229,7 +229,7 @@ enum GameAction {
 // Game
 // ============================================
 
-struct Game {
+struct Game: Iterator {
     var state: GameState
     var ball: Ball
     var paddle: Paddle
@@ -261,6 +261,8 @@ struct Game {
     // ----------------------------------------
     // Iterator
     // ----------------------------------------
+
+    type Item = ()
 
     mutating func next() -> ()? {
         if not self.running {

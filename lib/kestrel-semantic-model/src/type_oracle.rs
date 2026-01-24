@@ -3,6 +3,7 @@
 //! This module implements the `TypeOracle` trait from `kestrel-semantic-type-inference`,
 //! allowing the type inference solver to query type information from the semantic model.
 
+use std::collections::{HashSet, VecDeque};
 use std::sync::Arc;
 
 use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
@@ -197,29 +198,24 @@ impl TypeOracle for SemanticModel {
                         // Not found in direct extensions - check extensions on conforming protocols
                         // e.g., Int64 conforms to Comparable, and `extend Comparable: Less[Self]`
                         // provides `lessThan` method
-                        let conformances = self.query(ConformancesForSymbol {
-                            symbol_id: container_id,
-                        });
+                        let protocol_ids = self.protocol_conformance_ids_for_type(receiver_ty);
 
                         let mut found_member = None;
-                        for conformance in &conformances {
-                            if let TyKind::Protocol { symbol: proto, .. } = conformance.kind() {
-                                let proto_id = proto.metadata().id();
-                                let proto_extensions = self.query(ExtensionsFor {
-                                    target_id: proto_id,
-                                });
+                        for proto_id in protocol_ids {
+                            let proto_extensions = self.query(ExtensionsFor {
+                                target_id: proto_id,
+                            });
 
-                                // Search extensions on this protocol
-                                for ext in &proto_extensions {
-                                    for child in ext.metadata().children() {
-                                        if child.metadata().name().value == member {
-                                            found_member = Some(child);
-                                            break;
-                                        }
-                                    }
-                                    if found_member.is_some() {
+                            // Search extensions on this protocol
+                            for ext in &proto_extensions {
+                                for child in ext.metadata().children() {
+                                    if child.metadata().name().value == member {
+                                        found_member = Some(child);
                                         break;
                                     }
+                                }
+                                if found_member.is_some() {
+                                    break;
                                 }
                             }
                             if found_member.is_some() {
@@ -358,14 +354,21 @@ impl TypeOracle for SemanticModel {
         // Handle type parameters - check if any bound matches the protocol
         if let TyKind::TypeParameter(type_param) = ty.kind() {
             let bounds = get_type_parameter_bounds(type_param);
+            let mut seed_protocols = Vec::new();
             for bound in bounds {
                 if let TyKind::Protocol { symbol, .. } = bound.kind() {
+                    let bound_id = symbol.metadata().id();
                     // Check if this bound is exactly the protocol we're looking for
-                    if symbol.metadata().id() == protocol_id {
+                    if bound_id == protocol_id {
                         return true;
                     }
-                    // TODO: Could also check if bound inherits from protocol_id
+                    seed_protocols.push(bound_id);
                 }
+            }
+            // Check transitive conformance through protocol extensions on the bounds.
+            if !seed_protocols.is_empty() {
+                let reachable = collect_protocol_ids_via_extensions(self, seed_protocols);
+                return reachable.contains(&protocol_id);
             }
             return false;
         }
@@ -762,6 +765,12 @@ impl TypeOracle for SemanticModel {
 }
 
 impl SemanticModel {
+    /// Get all protocol conformances for a concrete type, including conformances
+    /// added via type extensions and transitive conformances from protocol extensions.
+    pub fn protocol_conformance_ids_for_type(&self, ty: &Ty) -> Vec<SymbolId> {
+        collect_protocol_conformance_ids_for_type(self, ty)
+    }
+
     /// Check for transitive conformance through protocol extensions.
     ///
     /// This is a wrapper that initializes the visited set for cycle detection.
@@ -1290,6 +1299,97 @@ fn check_transitive_conformance_impl(
     }
 
     false
+}
+
+/// Collect protocol IDs reachable via protocol extensions, starting from a seed set.
+///
+/// This follows chains like `extend A: B` and `extend B: C`, returning `[A, B, C]`.
+fn collect_protocol_ids_via_extensions<I>(
+    model: &SemanticModel,
+    seed_protocols: I,
+) -> Vec<SymbolId>
+where
+    I: IntoIterator<Item = SymbolId>,
+{
+    let mut ordered = Vec::new();
+    let mut seen: HashSet<SymbolId> = HashSet::new();
+    let mut queue: VecDeque<SymbolId> = VecDeque::new();
+
+    for id in seed_protocols {
+        if seen.insert(id) {
+            ordered.push(id);
+            queue.push_back(id);
+        }
+    }
+
+    while let Some(protocol_id) = queue.pop_front() {
+        let protocol_extensions = model.query(ExtensionsFor {
+            target_id: protocol_id,
+        });
+
+        for extension in &protocol_extensions {
+            let Some(conformances) = extension.metadata().get_behavior::<ConformancesBehavior>()
+            else {
+                continue;
+            };
+
+            for conf_ty in conformances.conformances() {
+                if let TyKind::Protocol { symbol, .. } = conf_ty.kind() {
+                    let next_id = symbol.metadata().id();
+                    if seen.insert(next_id) {
+                        ordered.push(next_id);
+                        queue.push_back(next_id);
+                    }
+                }
+            }
+        }
+    }
+
+    ordered
+}
+
+/// Collect protocol conformances for a concrete type, including:
+/// - Direct conformances on the type
+/// - Conformances from applicable type extensions
+/// - Transitive conformances added by protocol extensions
+fn collect_protocol_conformance_ids_for_type(model: &SemanticModel, ty: &Ty) -> Vec<SymbolId> {
+    // Expand type aliases to their underlying type before checking conformances.
+    let ty = ty.expand_aliases();
+
+    let type_symbol_id = match get_type_symbol_id(&ty) {
+        Some(id) => id,
+        None => return Vec::new(),
+    };
+
+    let mut seed_protocols: Vec<SymbolId> = Vec::new();
+
+    // Direct conformances on the type
+    let mut conformances = model.query(ConformancesForSymbol {
+        symbol_id: type_symbol_id,
+    });
+
+    // Conformances added via type extensions
+    let actual_subs = get_type_substitutions(&ty);
+    let extensions = model.query(ExtensionsFor {
+        target_id: type_symbol_id,
+    });
+    let applicable_extensions =
+        filter_applicable_extensions_for_conformance(&extensions, &actual_subs);
+
+    for extension in &applicable_extensions {
+        let ext_conformances = model.query(ConformancesForSymbol {
+            symbol_id: extension.metadata().id(),
+        });
+        conformances.extend(ext_conformances);
+    }
+
+    for conformance in &conformances {
+        if let TyKind::Protocol { symbol, .. } = conformance.kind() {
+            seed_protocols.push(symbol.metadata().id());
+        }
+    }
+
+    collect_protocol_ids_via_extensions(model, seed_protocols)
 }
 
 /// Get the substitutions from a type (struct or enum).
