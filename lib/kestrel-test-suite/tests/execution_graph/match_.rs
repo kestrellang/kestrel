@@ -233,6 +233,7 @@ mod if_let {
             }
         "#,
         )
+        .with_stdlib()
         .expect(Compiles)
         .expect(Mir::compiles())
         .expect(

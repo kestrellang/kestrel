@@ -217,8 +217,15 @@ fn lower_capturing_closure(
     return_ty: &SemanticTy,
     span: &Span,
 ) -> Value {
+    // Get parent function's type parameters - env struct inherits these
+    let parent_type_params = if let Some(parent_func) = ctx.current_function() {
+        ctx.mir.function(parent_func).type_params.clone()
+    } else {
+        vec![]
+    };
+
     // 1. Generate environment struct with captured variables
-    let env_struct_id = generate_env_struct(ctx, env_struct_name, captures, span);
+    let env_struct_id = generate_env_struct(ctx, env_struct_name, captures, &parent_type_params, span);
 
     // 2. Collect the captured values from current context BEFORE switching context
     let capture_values: Vec<Value> = captures
@@ -259,13 +266,22 @@ fn lower_capturing_closure(
 }
 
 /// Generate the environment struct for captured variables.
+///
+/// The env struct inherits type parameters from the parent function so that
+/// captured variables with generic types can be properly monomorphized.
 fn generate_env_struct(
     ctx: &mut LoweringContext,
     name: Id<QualifiedName>,
     captures: &[Capture],
+    parent_type_params: &[Id<kestrel_execution_graph::TypeParam>],
     span: &Span,
 ) -> Id<Struct> {
     let struct_id = ctx.mir.add_struct(name);
+
+    // Inherit type parameters from parent function.
+    // This allows captured variables with generic types (e.g., `K`) to be
+    // properly substituted during monomorphization.
+    ctx.mir.structs[struct_id].type_params = parent_type_params.to_vec();
 
     // Add fields for each capture
     for capture in captures {
@@ -338,7 +354,14 @@ fn create_closure_function(
     // For non-capturing closures, it's a raw pointer (unused but required for calling convention).
     let env_param_ty = match env_info.as_ref() {
         Some((_, env_struct_name)) => {
-            let env_struct_ty = ctx.mir.ty_named(*env_struct_name, vec![]);
+            // Build type args from parent's type params.
+            // The env struct is generic with the same type params as the closure,
+            // so we use TypeParam references as type args here.
+            let type_args: Vec<_> = parent_type_params
+                .iter()
+                .map(|&tp| ctx.mir.intern_type(MirTy::TypeParam(tp)))
+                .collect();
+            let env_struct_ty = ctx.mir.ty_named(*env_struct_name, type_args);
             ctx.mir.ty_ref(env_struct_ty)
         },
         None => {

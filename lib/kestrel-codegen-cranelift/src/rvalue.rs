@@ -3311,8 +3311,10 @@ fn compile_apply_partial(
 
     // 3. Allocate and populate the environment struct
     let env_ptr = if let Some(env_struct_id) = env_struct_id {
-        // Get the environment struct layout (env structs are non-generic, so empty type_args)
-        let env_layout = ctx.layouts.struct_layout(env_struct_id, &[]);
+        // Get the environment struct layout.
+        // Env structs inherit type params from their parent closure function,
+        // so we pass the same type args used for the closure instantiation.
+        let env_layout = ctx.layouts.struct_layout(env_struct_id, &closure_type_args);
         let layout = env_layout.layout;
         let field_offsets = env_layout.field_offsets.clone();
 

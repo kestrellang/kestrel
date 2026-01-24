@@ -407,6 +407,10 @@ mod tests {
         ) -> Option<SymbolId> {
             None
         }
+
+        fn default_array_type(&self, _element_ty: Ty, _span: Span) -> Option<Ty> {
+            None
+        }
     }
 
     #[test]
