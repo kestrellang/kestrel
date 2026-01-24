@@ -239,6 +239,8 @@ struct Game {
     var lives: Int64
     var lastDirection: Int64
     var framesSinceInput: Int64
+    var input: InputManager
+    var running: Bool
 
     init() {
         self.state = .Playing;
@@ -250,16 +252,58 @@ struct Game {
         self.lives = Config.initialLives;
         self.lastDirection = 0;
         self.framesSinceInput = 0;
+        self.input = InputManager();
+        self.running = true;
+
+        print(hideCursor() + clearScreen());
+    }
+
+    // ----------------------------------------
+    // Iterator
+    // ----------------------------------------
+
+    mutating func next() -> ()? {
+        if not self.running {
+            return null
+        }
+
+        match self.state {
+            .Playing => {
+                self.handlePlayingInput();
+                self.updateBall();
+                self.render();
+            },
+            _ => {
+                self.renderGameOver();
+                let action = self.handleGameOverInput();
+                match action {
+                    .Restart => self.reset(),
+                    .Quit => { self.running = false; },
+                    .Continue => {}
+                }
+            }
+        }
+
+        if self.running {
+            .Some(())
+        } else {
+            .None
+        }
+    }
+
+    deinit {
+        print(showCursor() + clearScreen() + home());
+        println("Thanks for playing Breakout!");
     }
 
     // ----------------------------------------
     // Input Handling
     // ----------------------------------------
 
-    mutating func handlePlayingInput(mutating input input: InputManager) {
+    mutating func handlePlayingInput() {
         var gotInput = false;
 
-        for key in input.drainAll() {
+        for key in self.input.drainAll() {
             match key {
                 .Left => {
                     self.lastDirection = -1;
@@ -288,8 +332,8 @@ struct Game {
         }
     }
 
-    mutating func handleGameOverInput(mutating input input: InputManager) -> GameAction {
-        for key in input.drainAll() {
+    mutating func handleGameOverInput() -> GameAction {
+        for key in self.input.drainAll() {
             match key {
                 .Space => return .Restart,
                 .Quit => return .Quit,
@@ -302,18 +346,6 @@ struct Game {
     // ----------------------------------------
     // Update Logic
     // ----------------------------------------
-
-    mutating func update(mutating input input: InputManager) -> GameAction {
-        match self.state {
-            .Playing => {
-                self.handlePlayingInput(input: input);
-                self.updateBall();
-                GameAction.Continue
-            },
-            .GameOver => self.handleGameOverInput(input: input),
-            .Won => self.handleGameOverInput(input: input),
-        }
-    }
 
     mutating func updateBall() {
         let newX = self.ball.x + self.ball.dx;
@@ -504,41 +536,11 @@ func usleep(usec: UInt32) -> Int32
 // ============================================
 
 func main() -> () throws Error {
-    var input = InputManager();
-
-    print(hideCursor() + clearScreen());
-
     var game = Game();
 
-    // Game loop
-    var running = true;
-    while running {
-        match game.state {
-            .Playing => {
-                let action = game.update(input: input);
-                game.render();
-                match action {
-                    .Quit => { running = false; },
-                    _ => {}
-                }
-            },
-            _ => {
-                game.renderGameOver();
-                let action = game.update(input: input);
-                match action {
-                    .Restart => game.reset(),
-                    .Quit => { running = false; },
-                    .Continue => {}
-                }
-            }
-        }
-
+    for _ in game {
         usleep(16667);  // ~60 FPS
     }
-
-    // Cleanup (input.deinit handles terminal restore)
-    print(showCursor() + clearScreen() + home());
-    println("Thanks for playing Breakout!");
 
     .Ok(())
 }

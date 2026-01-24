@@ -43,9 +43,20 @@ impl Query for ResolveTypePath {
             };
         }
 
+        // For "Self" paths, check if it resolves to a type parameter first.
+        // This handles protocol extensions where Self is a synthetic type parameter
+        // with the target protocol as a bound, allowing Self.Item to work.
+        if self.path[0] == "Self" {
+            if let Some(result) =
+                try_resolve_self_as_type_param(model, &self.path, self.context)
+            {
+                return result;
+            }
+        }
+
         // Handle built-in types that don't exist as real symbols.
         //
-        // - `Self`
+        // - `Self` (fallback if not a type parameter)
         // - `lang.*` scalar types (i1/i8/.../f16/f32/f64/str)
         if let Some(ty) = resolve_builtin_type_path(&self.path, Span::new(0, 0..0)) {
             return TypePathResolution::Resolved(ty);
@@ -428,4 +439,60 @@ fn resolve_nested_associated_type(
     }
 
     None
+}
+
+/// Try to resolve "Self" as a type parameter in the current context.
+///
+/// This handles protocol extensions where Self is a synthetic type parameter
+/// with the target protocol as a bound. Returns Some if Self is found as a
+/// type parameter, None otherwise to fall back to builtin SelfType.
+/// Try to resolve "Self.Item" style paths in protocol extensions by looking up
+/// the associated type from the target protocol.
+///
+/// For single-segment "Self", returns None to fall back to builtin SelfType.
+/// For multi-segment paths like "Self.Item", looks up the associated type
+/// from the protocol extension's target protocol.
+fn try_resolve_self_as_type_param(
+    model: &SemanticModel,
+    path: &[String],
+    context: SymbolId,
+) -> Option<TypePathResolution> {
+    // For single-segment "Self", fall back to builtin SelfType
+    if path.len() == 1 {
+        return None;
+    }
+
+    // For multi-segment paths like "Self.Item", try to find the associated type
+    // from the protocol extension's target protocol
+
+    // Use ResolveName to check if "Self" resolves to a synthetic type parameter
+    let resolution = model.query(ResolveName {
+        name: "Self".to_string(),
+        context,
+    });
+
+    match resolution {
+        SymbolResolution::Found(ids) if ids.len() == 1 => {
+            let symbol = model.query(SymbolFor { id: ids[0] })?;
+
+            // Only use this if it's a TypeParameter (our synthetic Self)
+            if symbol.metadata().kind() != KestrelSymbolKind::TypeParameter {
+                return None;
+            }
+
+            let type_param = symbol.into_any_arc().downcast::<TypeParameterSymbol>().ok()?;
+
+            // "Self.Item" style - use associated type resolution from type param bounds
+            let segment = &path[1];
+            resolve_associated_type_from_type_param_with_context(
+                model,
+                &type_param,
+                segment,
+                &path[1..],
+                1,
+                context,
+            )
+        }
+        _ => None,
+    }
 }

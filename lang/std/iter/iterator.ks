@@ -21,13 +21,12 @@ public protocol Iterable {
     func iter() -> Iter
 }
 
-// TODO: Make Iterator conform to Iterable (an iterator is itself iterable)
-// This extension requires better Self.Item support in protocol extensions
-// extend Iterator: Iterable {
-//     type Iterable.Item = Self.Item
-//     type Iterable.Iter = Self
-//     func iter() -> Self { self }
-// }
+// Make Iterator conform to Iterable (an iterator is itself iterable)
+extend Iterator: Iterable {
+    type Iterable.Item = Self.Item
+    type Iterable.Iter = Self
+    func iter() -> Self { self }
+}
 
 // Collectable - type that can be built from an iterator
 // Note: Generic inits with where clauses may not be fully supported yet

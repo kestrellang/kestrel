@@ -684,6 +684,12 @@ fn validate_type_satisfies_bounds(
                     // A more sophisticated implementation would check the type parameter's bounds
                     true
                 },
+                TyKind::SelfType => {
+                    // In protocol extensions, Self represents "any type conforming to the protocol"
+                    // so it should satisfy protocol bounds (the extension targets a protocol that
+                    // the conforming type will implement)
+                    true
+                },
                 TyKind::Error => {
                     // Don't report additional errors for error types
                     true

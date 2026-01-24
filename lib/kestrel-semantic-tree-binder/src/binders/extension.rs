@@ -14,7 +14,8 @@ use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::symbol::protocol::ProtocolSymbol;
 use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
 use kestrel_semantic_tree::symbol::type_parameter::TypeParameterSymbol;
-use kestrel_semantic_tree::ty::{Ty, TyKind, WhereClause};
+use kestrel_semantic_tree::ty::{Constraint, Ty, TyKind, WhereClause};
+use kestrel_span::Spanned;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
 
@@ -61,8 +62,25 @@ impl DeclarationBinder for ExtensionBinder {
             );
 
             // Combine inherited and extension constraints
-            let combined_where_clause =
+            let mut combined_where_clause =
                 combine_where_clauses(inherited_where_clause, extension_where_clause);
+
+            // For protocol extensions, add implicit Self: Protocol bound
+            if target_symbol.is_protocol() {
+                // Find the synthetic Self type parameter we created
+                if let Some(self_param) = referenced_params
+                    .iter()
+                    .find(|p| p.metadata().name().value == "Self")
+                {
+                    let self_constraint = Constraint::type_bound(
+                        self_param.metadata().id(),
+                        "Self".to_string(),
+                        self_param.metadata().span().clone(),
+                        vec![target_ty.clone()],
+                    );
+                    combined_where_clause.add_constraint(self_constraint);
+                }
+            }
 
             // Create and add ExtensionTargetBehavior
             let target_behavior = ExtensionTargetBehavior::new(
@@ -129,7 +147,6 @@ impl ExtendableSymbol {
         }
     }
 
-    #[allow(dead_code)]
     fn is_protocol(&self) -> bool {
         matches!(self, ExtendableSymbol::Protocol(_))
     }
@@ -209,7 +226,21 @@ fn resolve_extension_target(
     )?;
 
     // Collect referenced type parameters from the type arguments
-    let referenced_params = collect_referenced_type_params(&type_args);
+    let mut referenced_params = collect_referenced_type_params(&type_args);
+
+    // For protocol extensions, create a synthetic "Self" type parameter
+    // This allows Self and Self.Item to be resolved as type parameters with protocol bounds
+    if matches!(&target_symbol, ExtendableSymbol::Protocol(_)) {
+        let self_param = Arc::new(TypeParameterSymbol::new(
+            Spanned::new("Self".to_string(), ty_span.clone()),
+            ty_span.clone(),
+            None,
+        ));
+        // Register the synthetic Self with the symbol registry so SymbolFor can find it
+        ctx.model.registry().register(self_param.clone());
+
+        referenced_params.push(self_param);
+    }
 
     // Build the final type with substitutions
     // For generic extensions like `extend Pair[T, U]`, validate that type parameters
