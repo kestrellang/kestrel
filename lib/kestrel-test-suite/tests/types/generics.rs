@@ -130,14 +130,15 @@ mod defaults {
 
     #[test]
     fn use_default_type_argument() {
-        // Even with defaults, an explicit type argument list must provide full arity.
+        // Partial type argument lists are allowed when trailing parameters have defaults.
         Test::new(
             r#"module Test
             struct Map[K, V = lang.str] { }
             type IntMap = Map[lang.i64];
         "#,
         )
-        .expect(HasError("too few type arguments"));
+        .expect(Compiles)
+        .expect(Symbol::new("IntMap").is(SymbolKind::TypeAlias));
     }
 
     #[test]
@@ -156,11 +157,38 @@ mod defaults {
 
     #[test]
     fn multiple_defaults() {
+        // Can provide partial type arguments when trailing parameters have defaults.
         Test::new(
             r#"module Test
             struct Config[A, B = lang.i64, C = lang.str] { }
             type SimpleConfig = Config[lang.i1];
             type CustomConfig = Config[lang.i1, lang.f64];
+        "#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("SimpleConfig").is(SymbolKind::TypeAlias))
+        .expect(Symbol::new("CustomConfig").is(SymbolKind::TypeAlias));
+    }
+
+    #[test]
+    fn missing_required_type_argument() {
+        // Still an error if a required parameter (without default) is missing.
+        Test::new(
+            r#"module Test
+            struct Map[K, V] { }
+            type BadMap = Map[lang.i64];
+        "#,
+        )
+        .expect(HasError("too few type arguments"));
+    }
+
+    #[test]
+    fn missing_required_with_trailing_defaults() {
+        // Error if required parameters are missing, even if there are defaults for later params.
+        Test::new(
+            r#"module Test
+            struct Config[A, B, C = lang.str] { }
+            type BadConfig = Config[lang.i1];
         "#,
         )
         .expect(HasError("too few type arguments"));

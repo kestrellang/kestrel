@@ -285,6 +285,10 @@ impl SignatureType {
                     return_type: Box::new(SignatureType::from_ty(return_type)),
                 }
             },
+            TyKind::UnresolvedPath { segments } => {
+                // Unresolved path - use the path segments as the name
+                SignatureType::Named(segments.clone())
+            },
         }
     }
 }

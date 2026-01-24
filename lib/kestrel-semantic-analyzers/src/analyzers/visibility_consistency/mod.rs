@@ -241,7 +241,8 @@ fn find_less_visible_type(
         | TyKind::String
         | TyKind::Error
         | TyKind::SelfType
-        | TyKind::Infer => None,
+        | TyKind::Infer
+        | TyKind::UnresolvedPath { .. } => None,
     }
 }
 

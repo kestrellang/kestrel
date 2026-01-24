@@ -180,13 +180,15 @@ pub fn create_struct_type(struct_symbol: &Arc<dyn Symbol<KestrelLanguage>>, span
 /// * `struct_symbol` - The struct symbol
 /// * `type_args` - The explicit type arguments (already resolved in current scope by TypeResolver)
 /// * `span` - The span for the created type
-/// * `_ctx` - The body resolution context (unused but kept for API consistency)
+/// * `ctx` - The body resolution context (used for resolving default type arguments)
 pub fn create_struct_type_with_type_args(
     struct_symbol: &Arc<dyn Symbol<KestrelLanguage>>,
     type_args: &[Ty],
     span: Span,
-    _ctx: &super::context::BodyResolutionContext,
+    ctx: &super::context::BodyResolutionContext,
 ) -> Ty {
+    use kestrel_semantic_model::{ResolveTypePath, TypePathResolution};
+
     let sym_clone = Arc::clone(struct_symbol);
 
     match sym_clone.downcast_arc::<StructSymbol>() {
@@ -206,11 +208,28 @@ pub fn create_struct_type_with_type_args(
                 substitutions.insert(param.metadata().id(), arg_ty.clone());
             }
 
-            // Fill in any missing type parameters with inferred type
+            // Fill in any missing type parameters with defaults or inferred type
             for param in type_params {
                 let param_id = param.metadata().id();
                 if !substitutions.contains(param_id) {
-                    substitutions.insert(param_id, Ty::infer(span.clone()));
+                    // Try to use the parameter's default, resolving UnresolvedPath if needed
+                    let default_ty = if let Some(default) = param.default() {
+                        if let TyKind::UnresolvedPath { segments } = default.kind() {
+                            // Resolve the path using the struct's context
+                            match ctx.model.query(ResolveTypePath {
+                                path: segments.to_vec(),
+                                context: struct_arc.metadata().id(),
+                            }) {
+                                TypePathResolution::Resolved(resolved_ty) => resolved_ty,
+                                _ => Ty::infer(span.clone()), // Fallback to infer if resolution fails
+                            }
+                        } else {
+                            default.clone()
+                        }
+                    } else {
+                        Ty::infer(span.clone())
+                    };
+                    substitutions.insert(param_id, default_ty);
                 }
             }
 

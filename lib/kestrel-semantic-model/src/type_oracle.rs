@@ -1825,7 +1825,8 @@ fn resolve_all_associated_types_impl(
         | TyKind::Error
         | TyKind::SelfType
         | TyKind::Infer
-        | TyKind::TypeParameter(_) => ty.clone(),
+        | TyKind::TypeParameter(_)
+        | TyKind::UnresolvedPath { .. } => ty.clone(),
     };
 
     // Remove from visited after processing so we can visit the same type again

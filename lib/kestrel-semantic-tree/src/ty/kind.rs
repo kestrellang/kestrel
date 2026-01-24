@@ -154,6 +154,16 @@ pub enum TyKind {
         /// The return type (may itself be an inference variable)
         return_type: Box<Ty>,
     },
+
+    /// Unresolved path type (used during build phase for types that need later resolution).
+    ///
+    /// This is used for type parameter defaults that reference non-primitive types
+    /// which cannot be resolved until the bind phase. The path segments are stored
+    /// so they can be resolved in the proper context later.
+    UnresolvedPath {
+        /// The path segments (e.g., ["DefaultHasher"] or ["std", "collections", "HashMap"])
+        segments: Vec<String>,
+    },
 }
 
 impl std::fmt::Debug for TyKind {
@@ -294,6 +304,9 @@ impl std::fmt::Debug for TyKind {
                 return_type,
             } => {
                 write!(f, "UnresolvedFunction({:?} -> {})", param_info, return_type)
+            },
+            TyKind::UnresolvedPath { segments } => {
+                write!(f, "UnresolvedPath({})", segments.join("."))
             },
         }
     }

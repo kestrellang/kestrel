@@ -163,7 +163,8 @@ impl<'a> InferenceContext<'a> {
             | TyKind::Infer
             | TyKind::Error
             | TyKind::SelfType
-            | TyKind::TypeParameter(_) => {},
+            | TyKind::TypeParameter(_)
+            | TyKind::UnresolvedPath { .. } => {},
         }
     }
 

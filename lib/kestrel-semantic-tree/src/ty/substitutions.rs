@@ -202,7 +202,8 @@ impl Substitutions {
             | TyKind::String
             | TyKind::Error
             | TyKind::SelfType
-            | TyKind::Infer => ty.clone(),
+            | TyKind::Infer
+            | TyKind::UnresolvedPath { .. } => ty.clone(),
         }
     }
 

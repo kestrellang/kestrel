@@ -133,11 +133,11 @@ fn extract_ty_from_node(ty_node: &SyntaxNode, source: &str, file_id: usize) -> O
                     lang::F64 => Some(Ty::float(FloatBits::F64, span)),
                     lang::I1 => Some(Ty::bool(span)),
                     lang::STR => Some(Ty::string(span)),
-                    _ => Some(Ty::error(span)),
+                    _ => Some(Ty::unresolved_path(segments, span)),
                 }
             } else {
-                // Other path types can't be fully resolved at parse time
-                Some(Ty::error(span))
+                // Store path for later resolution during bind phase
+                Some(Ty::unresolved_path(segments, span))
             }
         },
         SyntaxKind::TyTuple => {

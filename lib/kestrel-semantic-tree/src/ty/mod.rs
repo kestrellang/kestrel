@@ -225,6 +225,9 @@ impl fmt::Display for Ty {
                     write!(f, ") -> {}", return_type)
                 },
             },
+            TyKind::UnresolvedPath { segments } => {
+                f.write_str(&segments.join("."))
+            },
         }
     }
 }
@@ -480,6 +483,14 @@ impl Ty {
             },
             span,
         )
+    }
+
+    /// Create an unresolved path type (for later resolution during binding).
+    ///
+    /// This is used for type parameter defaults that reference non-primitive types
+    /// which cannot be resolved until the bind phase.
+    pub fn unresolved_path(segments: Vec<String>, span: Span) -> Self {
+        Self::new(TyKind::UnresolvedPath { segments }, span)
     }
 
     // === Type joining (for Never propagation) ===
@@ -1368,6 +1379,9 @@ impl Ty {
 
             // Infer: type not yet known, will be resolved
             TyKind::Infer => true,
+
+            // UnresolvedPath: not yet resolved, return true for now
+            TyKind::UnresolvedPath { .. } => true,
         }
     }
 
@@ -1433,6 +1447,9 @@ impl Ty {
 
             // Infer: type not yet known, will be resolved
             TyKind::Infer => false,
+
+            // UnresolvedPath: not yet resolved, return false for now
+            TyKind::UnresolvedPath { .. } => false,
         }
     }
 

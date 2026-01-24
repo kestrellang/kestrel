@@ -240,6 +240,16 @@ pub fn lower_type(ctx: &mut LoweringContext, ty: &Ty) -> Id<MirTyMarker> {
             // Error types are poison values
             ctx.mir.ty_error()
         },
+
+        // === Unresolved Path Type ===
+        TyKind::UnresolvedPath { segments } => {
+            // Unresolved paths should have been resolved by this point
+            ctx.emit_error(LoweringError::unsupported_type(
+                &format!("unresolved type path: {}", segments.join(".")),
+                ty.span().clone(),
+            ));
+            ctx.mir.ty_error()
+        },
     }
 }
 

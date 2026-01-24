@@ -629,13 +629,18 @@ impl<'a> TypeResolver<'a> {
 
         // Check arity.
         //
-        // Language rule: if the user wrote a type argument list (including an empty list like `Foo[]`),
-        // they must provide the exact number of type arguments. Defaults do not allow partial lists.
-        if actual < max_args {
+        // Calculate minimum required args (parameters without defaults).
+        // Defaults must be at the end, so count parameters until we hit one with a default.
+        let min_args = type_params
+            .iter()
+            .take_while(|p| !p.has_default())
+            .count();
+
+        if actual < min_args {
             self.diagnostics.throw(TooFewTypeArgumentsError {
                 span: span.clone(),
                 type_name: type_name.to_string(),
-                min_expected: max_args,
+                min_expected: min_args,
                 got: actual,
             });
             return Ty::error(span);
@@ -650,9 +655,21 @@ impl<'a> TypeResolver<'a> {
             return Ty::error(span);
         }
 
-        // Build substitutions.
+        // Build substitutions, filling in defaults for missing trailing arguments.
         let mut substitutions = Substitutions::new();
-        for (param, arg) in type_params.iter().zip(type_args.into_iter()) {
+        for (i, param) in type_params.iter().enumerate() {
+            let arg = if i < type_args.len() {
+                type_args[i].clone()
+            } else {
+                // Use the default - we've already verified this exists via min_args check
+                let default_ty = param.default().expect("missing default for type parameter");
+                // Resolve UnresolvedPath types that couldn't be resolved at build time
+                if let TyKind::UnresolvedPath { segments } = default_ty.kind() {
+                    self.resolve_path(segments, default_ty.span().clone())
+                } else {
+                    default_ty.clone()
+                }
+            };
             substitutions.insert(param.metadata().id(), arg);
         }
 
