@@ -1,0 +1,59 @@
+// Write trait and utilities
+
+/// Protocol for types that can be written to as a sink for bytes.
+public protocol Write {
+    /// Writes bytes from the buffer, returning the number of bytes written.
+    func write(from buf: Slice[UInt8]) -> Result[Int64, Error];
+
+    /// Flushes any buffered data to the underlying destination.
+    func flush() -> Result[(), Error];
+}
+
+/// A writer that discards all bytes.
+/// Useful for testing or suppressing output.
+public struct Sink: Write {
+    /// Creates a sink writer.
+    public init();
+
+    /// Discards all bytes and returns Ok with the buffer length.
+    public func write(from buf: Slice[UInt8]) -> Result[Int64, Error];
+
+    /// No-op flush, always succeeds.
+    public func flush() -> Result[(), Error];
+}
+
+/// A writer that accumulates bytes in a growable array.
+public struct Buffer: Write {
+    /// Creates an empty buffer writer.
+    public init();
+
+    /// Creates a buffer writer with the specified initial capacity.
+    public init(capacity: Int64);
+
+    /// Appends bytes to the internal buffer.
+    public func write(from buf: Slice[UInt8]) -> Result[Int64, Error];
+
+    /// No-op flush, always succeeds.
+    public func flush() -> Result[(), Error];
+
+    /// Returns the number of bytes in the buffer.
+    public func count() -> Int64;
+
+    /// Clears all bytes from the buffer.
+    public mutating func clear();
+}
+
+// Helper functions
+
+/// Writes all bytes from a slice to a writer.
+/// Retries partial writes until all bytes are written or an error occurs.
+public func writeAll[W](writer: W, from buf: Slice[UInt8]) -> Result[(), Error] where W: Write;
+
+/// Writes a single byte to a writer.
+public func writeByte[W](writer: W, byte: UInt8) -> Result[(), Error] where W: Write;
+
+/// Writes a string as UTF-8 bytes to a writer.
+public func writeStr[W](writer: W, s: String) -> Result[(), Error] where W: Write;
+
+/// Writes a string followed by a newline to a writer.
+public func writeLine[W](writer: W, s: String) -> Result[(), Error] where W: Write;

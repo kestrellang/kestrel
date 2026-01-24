@@ -1,0 +1,60 @@
+// Int8 - 8-bit signed integer
+
+/// An 8-bit signed integer type.
+/// Supports arithmetic, bitwise, comparison, and formatting operations.
+public struct Int8:
+    SignedInteger,
+    Steppable,
+    Comparable,
+    Equatable,
+    Matchable,
+    Formattable,
+    Hash,
+    Addable,
+    Subtractable,
+    Multipliable,
+    Divisible,
+    Modulo,
+    Negatable,
+    BitwiseAnd,
+    BitwiseOr,
+    BitwiseXor,
+    BitwiseNot,
+    LeftShift,
+    RightShift,
+    ExpressibleByIntLiteral,
+    FFISafe
+{
+    public var raw: lang.i8
+
+    public static var zero: Int8;
+    public static var one: Int8;
+    public static var minValue: Int8;
+    public static var maxValue: Int8;
+
+    public init(intLiteral value: lang.i64);
+
+    public func equals(other: Int8) -> Bool;
+    public func matches(other: Int8) -> Bool;
+    public func compare(other: Int8) -> Ordering;
+    public func successor() -> Int8;
+    public func predecessor() -> Int8;
+    public func hash[H](mutating into hasher: H) where H: Hasher;
+
+    public func add(other: Int8) -> Int8;
+    public func subtract(other: Int8) -> Int8;
+    public func multiply(other: Int8) -> Int8;
+    public func divide(other: Int8) -> Int8;
+    public func modulo(other: Int8) -> Int8;
+    public func negate() -> Int8;
+    public func abs() -> Int8;
+
+    public func bitwiseAnd(other: Int8) -> Int8;
+    public func bitwiseOr(other: Int8) -> Int8;
+    public func bitwiseXor(other: Int8) -> Int8;
+    public func bitwiseNot() -> Int8;
+    public func shiftLeft(by count: lang.i64) -> Int8;
+    public func shiftRight(by count: lang.i64) -> Int8;
+
+    public func format() -> String;
+}

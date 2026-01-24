@@ -1,0 +1,19 @@
+// Copy semantics protocols
+
+/// Marker protocol for types that can be implicitly copied (bitwise copy).
+/// Types implicitly conform to Copyable unless opted out with `not Copyable`.
+/// Bitwise copy means the type's memory is directly duplicated without any special handling.
+@builtin(.Copyable)
+public protocol Copyable {}
+
+/// Protocol for types that can be copied via a clone() method.
+/// Unlike simple Copyable (bitwise copy), Cloneable types have custom copy behavior.
+/// When a Cloneable value is copied, clone() is called automatically.
+/// Cloneable extends Copyable, allowing cloneable types to be used where copyable is required.
+@builtin(.Cloneable)
+public protocol Cloneable: Copyable {
+    /// Creates and returns a copy of this value.
+    /// The implementation defines how deep the copy is.
+    @builtin(.Clone)
+    func clone() -> Self;
+}

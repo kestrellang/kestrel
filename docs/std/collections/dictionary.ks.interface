@@ -1,0 +1,118 @@
+// Dictionary[K, V] - hash map with COW (Copy-on-Write) semantics
+
+
+// DictionaryIterator must be defined before Dictionary for Iterable conformance
+public struct DictionaryIterator[K, V]: Iterator {
+    type Item = DictionaryEntry[K, V]
+
+
+    public init(entries entries: Pointer[DictionaryEntry[K, V]], capacity capacity: Int64);
+
+    public mutating func next() -> Optional[DictionaryEntry[K, V]];
+}
+
+// DictionaryStorage[K, V, H] - internal storage for Dictionary
+struct DictionaryStorage[K, V, H]: Cloneable where K: Hash, H: Hasher, H: Defaultable {
+
+    init(entries entries: Pointer[DictionaryEntry[K, V]], len len: Int64, cap cap: Int64, placeholderKey placeholderKey: K, placeholderValue placeholderValue: V);
+
+    func clone() -> DictionaryStorage[K, V, H];
+
+    deinit;
+}
+
+// Dictionary[K, V, H] - hash map with COW semantics using RcBox
+public struct Dictionary[K, V, H = DefaultHasher]: Iterable where K: Hash, H: Hasher, H: Defaultable {
+
+    public init(placeholderKey: K, placeholderValue: V);
+
+    // Create with initial capacity - requires a placeholder key/value for initialization
+    public init(capacity capacity: Int64, placeholderKey placeholderKey: K, placeholderValue placeholderValue: V);
+
+    // Properties
+    public func count() -> Int64;
+    public func getCapacity() -> Int64;
+    public func isEmpty() -> Bool;
+
+    // Get value for key
+    public func getValue(key: K) -> Optional[V];
+
+    // Check if key exists
+    public func contains(key: K) -> Bool;
+
+    // Insert or update value for key, returns old value if any
+    public mutating func insert(key: K, value: V) -> Optional[V];
+
+    // Remove key and return its value
+    public mutating func remove(key: K) -> Optional[V];
+
+    // Clear all entries
+    public mutating func clear();
+
+    // Iteration
+    public func iter() -> DictionaryIterator[K, V];
+
+    // Get internal data for views
+    public func getEntries() -> Pointer[DictionaryEntry[K, V]];
+
+    // Cloneable - shallow clone (COW)
+    public func clone() -> Dictionary[K, V, H];
+}
+
+// Equatable when K and V are Equatable
+extend Dictionary[K, V, H]: Equatable where K: Hash, V: Equatable, H: Hasher, H: Defaultable {
+    public func equals(other: Dictionary[K, V, H]) -> Bool;
+}
+
+// Cloneable conformance
+extend Dictionary[K, V, H]: Cloneable {}
+
+// KeysIterator must be defined before KeysView
+public struct KeysIterator[K, V]: Iterator where K: Hash {
+    type Item = K
+
+    public init(dictIter: DictionaryIterator[K, V]);
+
+    public mutating func next() -> Optional[K];
+}
+
+// KeysView - view of dictionary keys
+public struct KeysView[K, V]: Iterable where K: Hash {
+    type Item = K
+    type Iter = KeysIterator[K, V]
+
+    public init(entries entries: Pointer[DictionaryEntry[K, V]], capacity capacity: Int64);
+
+    public func iter() -> KeysIterator[K, V];
+}
+
+// ValuesIterator must be defined before ValuesView
+public struct ValuesIterator[K, V]: Iterator where K: Hash {
+    type Item = V
+
+    public init(dictIter: DictionaryIterator[K, V]);
+
+    public mutating func next() -> Optional[V];
+}
+
+// ValuesView - view of dictionary values
+public struct ValuesView[K, V]: Iterable where K: Hash {
+    type Item = V
+    type Iter = ValuesIterator[K, V]
+
+    public init(entries entries: Pointer[DictionaryEntry[K, V]], capacity capacity: Int64);
+
+    public func iter() -> ValuesIterator[K, V];
+}
+
+// Extension to add keys() and values() methods
+extend Dictionary[K, V, H] where K: Hash, H: Hasher, H: Defaultable {
+    public func keys() -> KeysView[K, V];
+
+    public func values() -> ValuesView[K, V];
+}
+
+// Type operator alias: [K: V] desugars to DictionaryTypeOperator[K, V] which is Dictionary[K, V]
+// Note: The Hash constraint on K comes from Dictionary itself
+@builtin(.DictionaryTypeOperator)
+public type DictionaryTypeOperator[K, V] = Dictionary[K, V, DefaultHasher];

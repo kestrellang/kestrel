@@ -1,0 +1,121 @@
+// String - UTF-8 encoded string with COW (Copy-on-Write) semantics
+
+/// Iterator over the Unicode code points (Char) in a string.
+public struct StringIterator: Iterator {
+    type Item = Char
+
+    public init(ptr ptr: Pointer[UInt8], length length: Int64);
+    public mutating func next() -> Optional[Char];
+}
+
+/// Iterator that splits a string on a separator.
+public struct SplitIterator: Iterator {
+    type Item = String
+
+    public init(ptr ptr: Pointer[UInt8], length length: Int64, sepPtr sepPtr: Pointer[UInt8], sepLen sepLen: Int64);
+    public mutating func next() -> Optional[String];
+}
+
+/// A UTF-8 encoded, dynamically sized string with copy-on-write semantics.
+/// Strings are immutable by default; mutations create a new copy if shared.
+public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, Addable, ExpressibleByStringLiteral, Hash {
+    type Item = Char
+    type Iter = StringIterator
+    type Output = String
+
+    /// Creates an empty string.
+    public init();
+
+    /// Creates an empty string with the specified capacity.
+    public init(capacity capacity: Int64);
+
+    /// Creates a string from a string literal.
+    public init(stringLiteral ptr: lang.ptr[lang.i8], length: lang.i64);
+
+    /// Returns the number of bytes (not characters).
+    public func byteCount() -> Int64;
+
+    /// Returns the allocated capacity in bytes.
+    public func capacity() -> Int64;
+
+    /// Returns true if the string is empty.
+    public func isEmpty() -> Bool;
+
+    /// Returns the number of Unicode code points.
+    public func count() -> Int64;
+
+    /// Returns the byte at the given index, or None if out of bounds.
+    public func byteAt(index: Int64) -> Optional[UInt8];
+
+    /// Returns the byte at the given index without bounds checking.
+    public func byteAtUnchecked(index: Int64) -> UInt8;
+
+    /// Appends another string to this one.
+    public mutating func append(other: String);
+
+    /// Appends a character to this string.
+    public mutating func appendChar(c: Char);
+
+    /// Appends a raw byte (caller must ensure valid UTF-8).
+    public mutating func appendByte(byte: UInt8);
+
+    /// Removes all characters from the string.
+    public mutating func clear();
+
+    /// Returns a substring by byte indices.
+    public func substringBytes(from start: Int64, to end: Int64) -> String;
+
+    /// Returns true if the string contains the substring.
+    public func contains(substring: String) -> Bool;
+
+    /// Returns the byte index of the first occurrence of substring, or None.
+    public func find(substring: String) -> Optional[Int64];
+
+    /// Returns true if the string starts with the prefix.
+    public func startsWith(prefix: String) -> Bool;
+
+    /// Returns true if the string ends with the suffix.
+    public func endsWith(suffix: String) -> Bool;
+
+    /// Returns a string with leading and trailing whitespace removed.
+    public func trim() -> String;
+
+    /// Returns a string with leading whitespace removed.
+    public func trimStart() -> String;
+
+    /// Returns a string with trailing whitespace removed.
+    public func trimEnd() -> String;
+
+    /// Returns a lowercase version of the string (ASCII only).
+    public func lowercase() -> String;
+
+    /// Returns an uppercase version of the string (ASCII only).
+    public func uppercase() -> String;
+
+    /// Returns a string with all occurrences of pattern replaced.
+    public func replace(pattern: String, with replacement: String) -> String;
+
+    /// Returns an iterator that splits the string on the separator.
+    public func split(separator: String) -> SplitIterator;
+
+    /// Returns an iterator over the Unicode code points.
+    public func iter() -> StringIterator;
+
+    /// Concatenates two strings.
+    public func add(other: String) -> String;
+
+    /// Compares two strings for equality.
+    public func equals(other: String) -> Bool;
+
+    /// Compares two strings lexicographically.
+    public func compare(other: String) -> Ordering;
+
+    /// Hashes the string's bytes.
+    public func hash[H](mutating into hasher: H) where H: Hasher;
+
+    /// Creates a shallow clone (COW - copy deferred until mutation).
+    public func clone() -> String;
+
+    /// Returns the string itself (for Formattable).
+    public func format() -> String;
+}

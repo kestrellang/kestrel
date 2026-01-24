@@ -1,0 +1,117 @@
+// Int64 - 64-bit signed integer
+
+/// A 64-bit signed integer type.
+/// Supports arithmetic, bitwise, comparison, and formatting operations.
+/// FFI-safe for interoperability with C code.
+public struct Int64:
+    SignedInteger,
+    Steppable,
+    Comparable,
+    Equatable,
+    Matchable,
+    Formattable,
+    Hash,
+    Addable,
+    Subtractable,
+    Multipliable,
+    Divisible,
+    Modulo,
+    Negatable,
+    BitwiseAnd,
+    BitwiseOr,
+    BitwiseXor,
+    BitwiseNot,
+    LeftShift,
+    RightShift,
+    AddAssign,
+    SubtractAssign,
+    MultiplyAssign,
+    DivideAssign,
+    ModuloAssign,
+    BitwiseAndAssign,
+    BitwiseOrAssign,
+    BitwiseXorAssign,
+    LeftShiftAssign[lang.i64],
+    RightShiftAssign[lang.i64],
+    ExpressibleByIntLiteral,
+    FFISafe,
+    Convertible[Int8],
+    Convertible[Int16],
+    Convertible[Int32],
+    Convertible[UInt8],
+    Convertible[UInt16],
+    Convertible[UInt32],
+    Convertible[UInt64]
+{
+    /// The underlying raw value.
+    public var raw: lang.i64
+
+    /// The zero value.
+    public static var zero: Int64;
+    /// The one value.
+    public static var one: Int64;
+    /// The minimum representable value (-2^63).
+    public static var minValue: Int64;
+    /// The maximum representable value (2^63 - 1).
+    public static var maxValue: Int64;
+
+    /// Creates an Int64 from an integer literal.
+    public init(intLiteral value: lang.i64);
+
+    /// Converts from other integer types.
+    public init(from other: Int8);
+    public init(from other: Int16);
+    public init(from other: Int32);
+    public init(from other: UInt8);
+    public init(from other: UInt16);
+    public init(from other: UInt32);
+    public init(from other: UInt64);
+
+    /// Compares for equality.
+    public func equals(other: Int64) -> Bool;
+    /// Matches in pattern matching contexts.
+    public func matches(other: Int64) -> Bool;
+    /// Compares ordering.
+    public func compare(other: Int64) -> Ordering;
+    /// Returns the next integer.
+    public func successor() -> Int64;
+    /// Returns the previous integer.
+    public func predecessor() -> Int64;
+    /// Hashes this integer.
+    public func hash[H](mutating into hasher: H) where H: Hasher;
+
+    // Arithmetic operations
+    public func add(other: Int64) -> Int64;
+    public func subtract(other: Int64) -> Int64;
+    public func multiply(other: Int64) -> Int64;
+    public func divide(other: Int64) -> Int64;
+    public func modulo(other: Int64) -> Int64;
+    public func negate() -> Int64;
+    public func abs() -> Int64;
+
+    // Bitwise operations
+    public func bitwiseAnd(other: Int64) -> Int64;
+    public func bitwiseOr(other: Int64) -> Int64;
+    public func bitwiseXor(other: Int64) -> Int64;
+    public func bitwiseNot() -> Int64;
+    public func shiftLeft(by count: lang.i64) -> Int64;
+    public func shiftRight(by count: lang.i64) -> Int64;
+
+    // Compound assignment operations
+    public mutating func addAssign(other: Int64);
+    public mutating func subtractAssign(other: Int64);
+    public mutating func multiplyAssign(other: Int64);
+    public mutating func divideAssign(other: Int64);
+    public mutating func modAssign(other: Int64);
+    public mutating func bitwiseAndAssign(other: Int64);
+    public mutating func bitwiseOrAssign(other: Int64);
+    public mutating func bitwiseXorAssign(other: Int64);
+    public mutating func shiftLeftAssign(by count: lang.i64);
+    public mutating func shiftRightAssign(by count: lang.i64);
+
+    /// Returns a string representation.
+    public func format() -> String;
+}
+
+/// Platform-sized signed integer (alias to Int64 on 64-bit platforms).
+public type Int = Int64;

@@ -1,0 +1,32 @@
+// Ordering enum for comparison results
+
+/// Represents the result of comparing two values.
+/// Used by the Comparable protocol to express total ordering.
+public enum Ordering: Equatable, Formattable {
+    /// The first value is less than the second.
+    case Less
+    /// The values are equal.
+    case Equal
+    /// The first value is greater than the second.
+    case Greater
+
+    /// Compares this ordering with another for equality.
+    public func equals(other: Ordering) -> Bool;
+
+    /// Compares this ordering with another for inequality.
+    public func notEquals(other: Ordering) -> Bool;
+
+    /// Reverses this ordering (Less becomes Greater and vice versa).
+    public func reverse() -> Ordering;
+
+    /// Returns this ordering if not Equal, otherwise returns the other ordering.
+    /// Useful for chaining comparisons by multiple fields.
+    public func then(other: Ordering) -> Ordering;
+
+    /// Returns this ordering if not Equal, otherwise evaluates and returns the comparison.
+    /// Lazy version of then() that only evaluates the closure if needed.
+    public func thenWith(compare: () -> Ordering) -> Ordering;
+
+    /// Formats this ordering as a string ("Less", "Equal", or "Greater").
+    public func format() -> String;
+}

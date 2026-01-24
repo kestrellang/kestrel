@@ -1,0 +1,29 @@
+// Memory layout types
+
+/// Describes the memory layout requirements for a type.
+/// Contains size and alignment information used for allocation.
+public struct Layout: Equatable {
+    /// The size in bytes.
+    public var size: Int64
+    /// The required alignment in bytes.
+    public var alignment: Int64
+
+    /// Creates a layout with the specified size and alignment.
+    public init(size size: Int64, alignment alignment: Int64);
+
+    /// Returns the layout for a single value of type T.
+    public static func of[T]() -> Layout;
+
+    /// Returns the layout for an array of count elements of type T.
+    public static func array[T](count: Int64) -> Layout;
+
+    /// Compares two layouts for equality.
+    public func equals(other: Layout) -> Bool;
+
+    /// Returns a layout with size padded to the alignment boundary.
+    public func padToAlign() -> Layout;
+
+    /// Extends this layout to include another layout for struct field layout.
+    /// Returns the combined layout and the offset where the other layout begins.
+    public func merge(with other: Layout) -> (Layout, Int64);
+}

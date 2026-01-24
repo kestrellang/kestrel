@@ -1,0 +1,59 @@
+// UInt16 - 16-bit unsigned integer
+
+/// A 16-bit unsigned integer type.
+/// Supports arithmetic, bitwise, comparison, and formatting operations.
+public struct UInt16:
+    UnsignedInteger,
+    Steppable,
+    Comparable,
+    Equatable,
+    Matchable,
+    Formattable,
+    Hash,
+    Addable,
+    Subtractable,
+    Multipliable,
+    Divisible,
+    Modulo,
+    BitwiseAnd,
+    BitwiseOr,
+    BitwiseXor,
+    BitwiseNot,
+    LeftShift,
+    RightShift,
+    ExpressibleByIntLiteral,
+    FFISafe
+{
+    public var raw: lang.i16
+
+    public static var zero: UInt16;
+    public static var one: UInt16;
+    public static var minValue: UInt16;
+    public static var maxValue: UInt16;
+
+    public init(intLiteral value: lang.i64);
+    public init(from other: Int8);
+    public init(from other: UInt8);
+
+    public func equals(other: UInt16) -> Bool;
+    public func matches(other: UInt16) -> Bool;
+    public func compare(other: UInt16) -> Ordering;
+    public func successor() -> UInt16;
+    public func predecessor() -> UInt16;
+    public func hash[H](mutating into hasher: H) where H: Hasher;
+
+    public func add(other: UInt16) -> UInt16;
+    public func subtract(other: UInt16) -> UInt16;
+    public func multiply(other: UInt16) -> UInt16;
+    public func divide(other: UInt16) -> UInt16;
+    public func modulo(other: UInt16) -> UInt16;
+
+    public func bitwiseAnd(other: UInt16) -> UInt16;
+    public func bitwiseOr(other: UInt16) -> UInt16;
+    public func bitwiseXor(other: UInt16) -> UInt16;
+    public func bitwiseNot() -> UInt16;
+    public func shiftLeft(by count: lang.i64) -> UInt16;
+    public func shiftRight(by count: lang.i64) -> UInt16;
+
+    public func format() -> String;
+}

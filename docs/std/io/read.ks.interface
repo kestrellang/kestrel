@@ -1,0 +1,52 @@
+// Read trait and utilities
+
+/// Protocol for types that can be read from as a source of bytes.
+public protocol Read {
+    /// Reads bytes into the buffer, returning the number of bytes read.
+    /// Returns 0 on EOF, error on failure.
+    mutating func read(into buf: Slice[UInt8]) -> Result[Int64, Error];
+}
+
+/// A reader that always returns EOF.
+/// Useful as a placeholder or for testing.
+public struct Empty: Read {
+    /// Creates an empty reader.
+    public init();
+
+    /// Always returns Ok(0), indicating EOF.
+    public mutating func read(into buf: Slice[UInt8]) -> Result[Int64, Error];
+}
+
+/// A reader that yields an infinite stream of a single byte value.
+public struct Repeat: Read {
+    /// Creates a reader that repeats the given byte infinitely.
+    public init(byte: UInt8);
+
+    /// Fills the buffer with the repeated byte and returns the buffer length.
+    public mutating func read(into buf: Slice[UInt8]) -> Result[Int64, Error];
+}
+
+/// A reader that reads from a byte array with a position cursor.
+public struct Cursor: Read {
+    /// Creates a cursor reading from the given byte array.
+    public init(data: Array[UInt8]);
+
+    /// Reads bytes from the current position into the buffer.
+    public mutating func read(into buf: Slice[UInt8]) -> Result[Int64, Error];
+
+    /// Returns the current read position.
+    public func position() -> Int64;
+
+    /// Sets the read position. Clamped to valid range [0, data.count()].
+    public mutating func setPosition(to pos: Int64);
+}
+
+// Helper functions
+
+/// Reads a single byte from a reader.
+/// Returns Ok(None) on EOF, Ok(Some(byte)) on success, Err on failure.
+public func readByte[R](reader: R) -> Result[Optional[UInt8], Error] where R: Read;
+
+/// Reads all bytes from a reader into an array.
+/// Returns the total number of bytes read.
+public func readAll[R](reader: R, into buf: Array[UInt8]) -> Result[Int64, Error] where R: Read;

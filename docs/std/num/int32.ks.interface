@@ -1,0 +1,64 @@
+// Int32 - 32-bit signed integer
+
+/// A 32-bit signed integer type.
+/// Supports arithmetic, bitwise, comparison, and formatting operations.
+public struct Int32:
+    SignedInteger,
+    Steppable,
+    Comparable,
+    Equatable,
+    Matchable,
+    Formattable,
+    Hash,
+    Addable,
+    Subtractable,
+    Multipliable,
+    Divisible,
+    Modulo,
+    Negatable,
+    BitwiseAnd,
+    BitwiseOr,
+    BitwiseXor,
+    BitwiseNot,
+    LeftShift,
+    RightShift,
+    ExpressibleByIntLiteral,
+    FFISafe
+{
+    public var raw: lang.i32
+
+    public static var zero: Int32;
+    public static var one: Int32;
+    public static var minValue: Int32;
+    public static var maxValue: Int32;
+
+    public init(intLiteral value: lang.i64);
+    public init(from other: Int8);
+    public init(from other: Int16);
+    public init(from other: UInt8);
+    public init(from other: UInt16);
+
+    public func equals(other: Int32) -> Bool;
+    public func matches(other: Int32) -> Bool;
+    public func compare(other: Int32) -> Ordering;
+    public func successor() -> Int32;
+    public func predecessor() -> Int32;
+    public func hash[H](mutating into hasher: H) where H: Hasher;
+
+    public func add(other: Int32) -> Int32;
+    public func subtract(other: Int32) -> Int32;
+    public func multiply(other: Int32) -> Int32;
+    public func divide(other: Int32) -> Int32;
+    public func modulo(other: Int32) -> Int32;
+    public func negate() -> Int32;
+    public func abs() -> Int32;
+
+    public func bitwiseAnd(other: Int32) -> Int32;
+    public func bitwiseOr(other: Int32) -> Int32;
+    public func bitwiseXor(other: Int32) -> Int32;
+    public func bitwiseNot() -> Int32;
+    public func shiftLeft(by count: lang.i64) -> Int32;
+    public func shiftRight(by count: lang.i64) -> Int32;
+
+    public func format() -> String;
+}

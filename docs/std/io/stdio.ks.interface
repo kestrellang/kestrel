@@ -1,0 +1,64 @@
+// Standard I/O streams
+
+/// Standard input stream.
+public struct Stdin: Read {
+    /// Creates a handle to standard input.
+    public init();
+
+    /// Reads bytes from standard input into the buffer.
+    public mutating func read(into buf: Slice[UInt8]) -> Result[Int64, Error];
+}
+
+/// Standard output stream.
+public struct Stdout: Write {
+    /// Creates a handle to standard output.
+    public init();
+
+    /// Writes bytes to standard output.
+    public func write(from buf: Slice[UInt8]) -> Result[Int64, Error];
+
+    /// Flushes standard output.
+    public func flush() -> Result[(), Error];
+}
+
+/// Standard error stream.
+public struct Stderr: Write {
+    /// Creates a handle to standard error.
+    public init();
+
+    /// Writes bytes to standard error.
+    public func write(from buf: Slice[UInt8]) -> Result[Int64, Error];
+
+    /// Flushes standard error.
+    public func flush() -> Result[(), Error];
+}
+
+/// Returns a handle to standard input.
+public func stdin() -> Stdin;
+
+/// Returns a handle to standard output.
+public func stdout() -> Stdout;
+
+/// Returns a handle to standard error.
+public func stderr() -> Stderr;
+
+/// Prints a formattable value to stdout without a trailing newline.
+public func print[F](value: F) -> Result[(), Error] where F: Formattable;
+
+/// Prints a formattable value to stdout with a trailing newline.
+public func println[F](value: F) -> Result[(), Error] where F: Formattable;
+
+/// Prints an empty line to stdout.
+public func printlnEmpty() -> Result[(), Error];
+
+/// Prints a formattable value to stderr without a trailing newline.
+public func eprint[F](value: F) -> Result[(), Error] where F: Formattable;
+
+/// Prints a formattable value to stderr with a trailing newline.
+public func eprintln[F](value: F) -> Result[(), Error] where F: Formattable;
+
+/// Reads a line from stdin, stripping the trailing newline.
+public func readLine() -> Result[String, Error];
+
+/// Prints a message and reads a line from stdin.
+public func prompt(message: String) -> Result[String, Error];

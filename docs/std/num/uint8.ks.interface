@@ -1,0 +1,58 @@
+// UInt8 - 8-bit unsigned integer
+
+/// An 8-bit unsigned integer type.
+/// Commonly used for byte-level operations and raw memory access.
+/// Supports arithmetic, bitwise, comparison, and formatting operations.
+public struct UInt8:
+    UnsignedInteger,
+    Steppable,
+    Comparable,
+    Equatable,
+    Matchable,
+    Formattable,
+    Hash,
+    Addable,
+    Subtractable,
+    Multipliable,
+    Divisible,
+    Modulo,
+    BitwiseAnd,
+    BitwiseOr,
+    BitwiseXor,
+    BitwiseNot,
+    LeftShift,
+    RightShift,
+    ExpressibleByIntLiteral,
+    FFISafe
+{
+    public var raw: lang.i8
+
+    public static var zero: UInt8;
+    public static var one: UInt8;
+    public static var minValue: UInt8;
+    public static var maxValue: UInt8;
+
+    public init(intLiteral value: lang.i64);
+
+    public func equals(other: UInt8) -> Bool;
+    public func matches(other: UInt8) -> Bool;
+    public func compare(other: UInt8) -> Ordering;
+    public func successor() -> UInt8;
+    public func predecessor() -> UInt8;
+    public func hash[H](mutating into hasher: H) where H: Hasher;
+
+    public func add(other: UInt8) -> UInt8;
+    public func subtract(other: UInt8) -> UInt8;
+    public func multiply(other: UInt8) -> UInt8;
+    public func divide(other: UInt8) -> UInt8;
+    public func modulo(other: UInt8) -> UInt8;
+
+    public func bitwiseAnd(other: UInt8) -> UInt8;
+    public func bitwiseOr(other: UInt8) -> UInt8;
+    public func bitwiseXor(other: UInt8) -> UInt8;
+    public func bitwiseNot() -> UInt8;
+    public func shiftLeft(by count: lang.i64) -> UInt8;
+    public func shiftRight(by count: lang.i64) -> UInt8;
+
+    public func format() -> String;
+}

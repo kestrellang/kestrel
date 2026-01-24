@@ -1,0 +1,40 @@
+// I/O Error types
+
+/// Represents an I/O error with an error code.
+/// Wraps POSIX errno values for consistent error handling.
+public struct Error {
+    /// Creates an error with the specified error code.
+    public init(code: Int32);
+
+    /// Creates an error from the current errno value.
+    public static func last() -> Error;
+
+    /// Returns a human-readable description of the error.
+    public func description() -> String;
+
+    /// Returns the underlying error code.
+    public func errno() -> Int32;
+}
+
+// Common error constructors
+
+/// Creates a "file not found" error (errno 2).
+public func notFound() -> Error;
+
+/// Creates a "permission denied" error (errno 13).
+public func permissionDenied() -> Error;
+
+/// Creates a "file already exists" error (errno 17).
+public func alreadyExists() -> Error;
+
+/// Creates an "invalid argument" error (errno 22).
+public func invalidInput() -> Error;
+
+/// Creates a "would block" error (errno 11).
+public func wouldBlock() -> Error;
+
+/// Creates an "interrupted" error (errno 4).
+public func interrupted() -> Error;
+
+/// Creates a "broken pipe" error (errno 32).
+public func brokenPipe() -> Error;

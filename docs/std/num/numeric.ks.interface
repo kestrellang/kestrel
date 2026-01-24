@@ -1,0 +1,22 @@
+// Numeric protocols
+
+/// Protocol for types that can be incremented and decremented.
+/// Used by ranges to iterate through values.
+public protocol Steppable {
+    /// Returns the next value in sequence.
+    func successor() -> Self;
+
+    /// Returns the previous value in sequence.
+    func predecessor() -> Self;
+}
+
+/// Marker protocol for signed integer types.
+/// Signed integers can represent negative values and support absolute value.
+public protocol SignedInteger {
+    /// Returns the absolute value.
+    func abs() -> Self;
+}
+
+/// Marker protocol for unsigned integer types.
+/// Unsigned integers can only represent non-negative values.
+public protocol UnsignedInteger {}

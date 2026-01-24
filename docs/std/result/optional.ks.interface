@@ -1,0 +1,118 @@
+// Optional type - represents a value that may or may not be present
+
+/// Represents an optional value: either Some(value) or None.
+/// Used for values that may be absent, avoiding null pointer errors.
+/// Supports the `null` literal and `?` type suffix syntax (T? = Optional[T]).
+@builtin(.OptionalEnum)
+public enum Optional[T] {
+    /// Contains a value.
+    @builtin(.OptionalSomeCase)
+    case Some(T)
+    /// Contains no value.
+    @builtin(.OptionalNoneCase)
+    case None
+
+    /// Creates a Some containing the value.
+    public static func some(value: T) -> Optional[T];
+
+    /// Creates a None.
+    public static func none() -> Optional[T];
+
+    /// Returns true if this is Some.
+    public func isSome() -> Bool;
+
+    /// Returns true if this is None.
+    public func isNone() -> Bool;
+
+    /// Returns the contained value, panicking if None.
+    public func unwrap() -> T;
+
+    /// Returns the contained value or the default if None.
+    public func unwrapOr(default: T) -> T;
+
+    /// Returns the contained value or calls the function if None.
+    public func unwrap(orElse defaultFn: () -> T) -> T;
+
+    /// Transforms the contained value using the function.
+    /// Returns None if this is None.
+    public func map[U](transform: (T) -> U) -> Optional[U];
+
+    /// Transforms the contained value, flattening the result.
+    /// Returns None if this is None or if transform returns None.
+    public func flatMap[U](transform: (T) -> Optional[U]) -> Optional[U];
+
+    /// Returns Some if predicate returns true, otherwise None.
+    public func filter(predicate: (T) -> Bool) -> Optional[T];
+
+    /// Returns other if this is Some, otherwise None.
+    public func andValue[U](other: Optional[U]) -> Optional[U];
+
+    /// Returns the result of transform if this is Some, otherwise None.
+    public func andThen[U](transform: (T) -> Optional[U]) -> Optional[U];
+
+    /// Returns this if Some, otherwise returns other.
+    public func orValue(other: Optional[T]) -> Optional[T];
+
+    /// Returns this if Some, otherwise calls alternative.
+    public func orElse(alternative: () -> Optional[T]) -> Optional[T];
+
+    /// Returns Some if exactly one of this or other is Some.
+    public func xor(other: Optional[T]) -> Optional[T];
+
+    /// Takes the value out, leaving None in its place.
+    public mutating func take() -> Optional[T];
+
+    /// Replaces the value with the given one, returning the old value.
+    public mutating func replace(value: T) -> Optional[T];
+
+    /// Returns an iterator over the contained value (0 or 1 elements).
+    public func iter() -> OptionalIterator[T];
+}
+
+/// Equatable extension for Optional when T is Equatable.
+extend Optional[T]: Equatable where T: Equatable {
+    public func equals(other: Optional[T]) -> Bool;
+}
+
+/// Tryable extension enabling `try` on Optional values.
+extend Optional[T]: Tryable {
+    type Output = T
+    type Early = ()
+
+    public func tryExtract() -> ControlFlow[T, ()];
+}
+
+/// FromResidual extension enabling early return propagation.
+extend Optional[T]: FromResidual[()] {
+    public static func fromResidual(residual: ()) -> Optional[T];
+}
+
+/// Formattable extension when T is Formattable.
+extend Optional[T]: Formattable where T: Formattable {
+    public func format() -> String;
+}
+
+/// ExpressibleByNullLiteral - allows `null` to create Optional.None.
+extend Optional[T]: ExpressibleByNullLiteral {
+    public init();
+}
+
+/// Coalesce extension enabling the ?? operator.
+extend Optional[T]: Coalesce[T] {
+    type Coalesce.Output = T
+
+    /// Returns the contained value or evaluates the default.
+    public func coalesce(default: () -> T) -> T;
+}
+
+/// Iterator for Optional that yields 0 or 1 elements.
+public struct OptionalIterator[T] {
+    type Item = T
+
+    public init(value: Optional[T]);
+    public mutating func next() -> Optional[T];
+}
+
+/// Type operator alias: T? desugars to Optional[T].
+@builtin(.OptionalTypeOperator)
+public type OptionalTypeOperator[T] = Optional[T];

@@ -1,0 +1,38 @@
+// Allocator protocol and implementations
+
+/// Protocol defining the memory allocation interface.
+/// Allocators manage raw memory allocation, deallocation, and reallocation.
+public protocol Allocator {
+    /// Allocates memory matching the given layout.
+    /// Returns None on allocation failure.
+    mutating func allocate(layout: Layout) -> Optional[RawPointer];
+
+    /// Deallocates memory previously allocated with this allocator.
+    /// The layout must match the layout used for allocation.
+    mutating func deallocate(ptr: RawPointer, layout: Layout);
+
+    /// Reallocates memory to a new size.
+    /// Returns None on reallocation failure (original memory unchanged).
+    mutating func reallocate(ptr: RawPointer, oldLayout: Layout, newLayout: Layout) -> Optional[RawPointer];
+}
+
+/// System allocator that wraps malloc/free from libc.
+/// This is the default allocator used throughout the standard library.
+public struct SystemAllocator: Allocator {
+    /// Creates a new system allocator instance.
+    public init();
+
+    /// Allocates memory using malloc.
+    /// Note: Alignment beyond natural alignment is not guaranteed.
+    public mutating func allocate(layout: Layout) -> Optional[RawPointer];
+
+    /// Deallocates memory using free.
+    public mutating func deallocate(ptr: RawPointer, layout: Layout);
+
+    /// Reallocates memory using realloc.
+    public mutating func reallocate(ptr: RawPointer, oldLayout: Layout, newLayout: Layout) -> Optional[RawPointer];
+}
+
+/// Type alias for the global allocator.
+/// Can be customized per project for different allocation strategies.
+public type GlobalAllocator = SystemAllocator;

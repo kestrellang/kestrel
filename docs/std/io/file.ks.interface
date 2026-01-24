@@ -1,0 +1,66 @@
+// File I/O
+
+/// Represents a seek position for file operations.
+public enum Seek {
+    /// Seek to an absolute position from the start of the file.
+    case Start(Int64)
+    /// Seek relative to the current position.
+    case Current(Int64)
+    /// Seek relative to the end of the file.
+    case End(Int64)
+}
+
+/// An owned file handle that automatically closes when dropped.
+/// Not copyable to ensure exclusive ownership of the file descriptor.
+public struct File: Read, Write, not Copyable {
+    /// Opens a file for reading.
+    /// Returns Err if the file doesn't exist or cannot be opened.
+    public static func open(path: String) -> Result[File, Error];
+
+    /// Creates a file for writing, truncating if it exists.
+    /// Creates the file if it doesn't exist.
+    public static func create(path: String) -> Result[File, Error];
+
+    /// Opens a file for both reading and writing.
+    public static func openRW(path: String) -> Result[File, Error];
+
+    /// Opens a file for appending, creating if it doesn't exist.
+    /// Writes are always appended to the end of the file.
+    public static func openAppend(path: String) -> Result[File, Error];
+
+    /// Reads bytes from the file into the buffer.
+    public mutating func read(into buf: Slice[UInt8]) -> Result[Int64, Error];
+
+    /// Writes bytes from the buffer to the file.
+    public func write(from buf: Slice[UInt8]) -> Result[Int64, Error];
+
+    /// Flushes any buffered writes to the file.
+    public func flush() -> Result[(), Error];
+
+    /// Seeks to a position in the file.
+    /// Returns the new position from the start of the file.
+    public func seek(to pos: Seek) -> Result[Int64, Error];
+
+    /// Returns the current position in the file.
+    public func position() -> Result[Int64, Error];
+
+    /// Seeks to the beginning of the file.
+    public func rewind() -> Result[(), Error];
+
+    /// Returns the raw file descriptor.
+    public func rawFd() -> libc.Fd;
+
+    /// Destructor: closes the file descriptor.
+    deinit;
+}
+
+// Convenience functions
+
+/// Reads an entire file into a string.
+public func readFileString(path: String) -> Result[String, Error];
+
+/// Writes a string to a file, creating or truncating as needed.
+public func writeFileString(path: String, content: String) -> Result[(), Error];
+
+/// Appends a string to a file, creating if it doesn't exist.
+public func appendFileString(path: String, content: String) -> Result[(), Error];

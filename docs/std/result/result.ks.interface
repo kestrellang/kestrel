@@ -1,0 +1,104 @@
+// Result type - represents either success (Ok) or failure (Err)
+
+/// Represents the result of an operation: either Ok(value) or Err(error).
+/// Used for operations that can fail, providing explicit error handling.
+/// Supports the `try` operator for early return on errors.
+public enum Result[T, E]: Tryable, Returnable[T] {
+    /// Contains a success value.
+    case Ok(T)
+    /// Contains an error value.
+    case Err(E)
+
+    type Output = T
+    type Early = E
+
+    /// Creates an Ok containing the value.
+    public static func ok(value: T) -> Result[T, E];
+
+    /// Creates an Err containing the error.
+    public static func err(error: E) -> Result[T, E];
+
+    /// Returns true if this is Ok.
+    public func isOk() -> Bool;
+
+    /// Returns true if this is Err.
+    public func isErr() -> Bool;
+
+    /// Extracts the value for the try operator.
+    public func tryExtract() -> ControlFlow[T, E];
+
+    /// Creates Ok from a value for the return statement.
+    public static func fromOutput(value: T) -> Result[T, E];
+
+    /// Returns the success value, panicking if Err.
+    public func unwrap() -> T;
+
+    /// Returns the success value or the default if Err.
+    public func unwrapOr(default: T) -> T;
+
+    /// Returns the success value or calls the function with the error if Err.
+    public func unwrap(orElse defaultFn: (E) -> T) -> T;
+
+    /// Returns the error value, panicking if Ok.
+    public func unwrapErr() -> E;
+
+    /// Transforms the success value using the function.
+    public func map[U](transform: (T) -> U) -> Result[U, E];
+
+    /// Transforms the error value using the function.
+    public func mapErr[F](transform: (E) -> F) -> Result[T, F];
+
+    /// Transforms the success value, flattening the result.
+    public func flatMap[U](transform: (T) -> Result[U, E]) -> Result[U, E];
+
+    /// Transforms the error value, flattening the result.
+    public func flatMapErr[F](transform: (E) -> Result[T, F]) -> Result[T, F];
+
+    /// Converts to Optional, discarding the error.
+    public func ok() -> Optional[T];
+
+    /// Converts to Optional, discarding the success value.
+    public func err() -> Optional[E];
+
+    /// Returns other if this is Ok, otherwise returns the error.
+    public func andValue[U](other: Result[U, E]) -> Result[U, E];
+
+    /// Returns the result of transform if Ok, otherwise returns the error.
+    public func andThen[U](transform: (T) -> Result[U, E]) -> Result[U, E];
+
+    /// Returns this if Ok, otherwise returns other.
+    public func orValue(other: Result[T, E]) -> Result[T, E];
+
+    /// Returns this if Ok, otherwise calls alternative with the error.
+    public func orElse[F](alternative: (E) -> Result[T, F]) -> Result[T, F];
+
+    /// Returns an iterator over the success value (0 or 1 elements).
+    public func iter() -> ResultIterator[T, E];
+}
+
+/// FromResidual extension enabling early return propagation.
+extend Result[T, E]: FromResidual[E] {
+    public static func fromResidual(residual: E) -> Result[T, E];
+}
+
+/// Equatable extension when T and E are Equatable.
+extend Result[T, E]: Equatable where T: Equatable, E: Equatable {
+    public func equals(other: Result[T, E]) -> Bool;
+}
+
+/// Formattable extension when T and E are Formattable.
+extend Result[T, E]: Formattable where T: Formattable, E: Formattable {
+    public func format() -> String;
+}
+
+/// Iterator for Result that yields 0 or 1 elements (only Ok values).
+public struct ResultIterator[T, E] {
+    type Item = T
+
+    public init(result: Result[T, E]);
+    public mutating func next() -> Optional[T];
+}
+
+/// Type operator alias for Result.
+@builtin(.ResultTypeOperator)
+public type ResultTypeOperator[T, E] = Result[T, E];

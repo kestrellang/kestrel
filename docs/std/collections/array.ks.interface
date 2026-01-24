@@ -1,0 +1,106 @@
+// Array[T] - dynamic growable array with COW (Copy-on-Write) semantics
+
+/// Iterator for Array that yields elements sequentially.
+public struct ArrayIterator[T]: Iterator {
+    type Item = T
+
+    /// Creates an iterator starting at the given pointer with the given count.
+    public init(ptr ptr: Pointer[T], remaining remaining: Int64);
+
+    /// Returns the next element, or None if exhausted.
+    public mutating func next() -> Optional[T];
+}
+
+/// A dynamic, growable array with copy-on-write semantics.
+/// Arrays automatically resize as elements are added and use COW for efficient copying.
+/// Supports array literal syntax: [1, 2, 3].
+@builtin(.ArrayStruct)
+public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArrayLiteral {
+    type Item = T
+    type Iter = ArrayIterator[T]
+    type Element = T
+
+    /// Creates an empty array.
+    public init();
+
+    /// Creates an empty array with the specified initial capacity.
+    /// Pre-allocating capacity can improve performance when the final size is known.
+    public init(capacity capacity: Int64);
+
+    /// Creates an array from a raw pointer and count (used by compiler for array literals).
+    public init(_arrayLiteralPointer: lang.ptr[T], _arrayLiteralCount: lang.i64);
+
+    /// Creates an array from a literal slice of elements.
+    public init(arrayLiteral elements: LiteralSlice[T]);
+
+    /// Returns the number of elements in the array.
+    public var count: Int64 { get };
+
+    /// Returns the current capacity (number of elements that can be stored without reallocating).
+    public var capacity: Int64 { get };
+
+    /// Returns true if the array contains no elements.
+    public var isEmpty: Bool { get };
+
+    /// Returns a raw pointer to the array's element storage.
+    public func asPointer() -> Pointer[T];
+
+    /// Returns a slice view of the array.
+    public func asSlice() -> Slice[T];
+
+    /// Returns the element at the given index without bounds checking.
+    /// Undefined behavior if index is out of bounds.
+    public func getUnchecked(index: Int64) -> T;
+
+    /// Sets the element at the given index without bounds checking.
+    /// Undefined behavior if index is out of bounds.
+    public mutating func setUnchecked(index: Int64, value: T);
+
+    /// Returns the element at the given index, or None if out of bounds.
+    public func getValue(at index: Int64) -> Optional[T];
+
+    /// Adds an element to the end of the array.
+    public mutating func append(element: T);
+
+    /// Removes and returns the last element, or None if empty.
+    public mutating func pop() -> Optional[T];
+
+    /// Removes all elements from the array.
+    public mutating func clear();
+
+    /// Returns the first element, or None if empty.
+    public func first() -> Optional[T];
+
+    /// Returns the last element, or None if empty.
+    public func last() -> Optional[T];
+
+    /// Inserts an element at the specified index, shifting subsequent elements right.
+    /// Panics if index is out of bounds.
+    public mutating func insert(element: T, at index: Int64);
+
+    /// Removes and returns the element at the specified index, shifting subsequent elements left.
+    /// Panics if index is out of bounds.
+    public mutating func remove(at index: Int64) -> T;
+
+    /// Returns an iterator over the array's elements.
+    public func iter() -> ArrayIterator[T];
+
+    /// Reverses the order of elements in place.
+    public mutating func reverse();
+
+    /// Creates a shallow clone of the array (COW - actual copy deferred until mutation).
+    public func clone() -> Array[T];
+}
+
+/// Equatable extension for arrays with equatable elements.
+extend Array[T]: Equatable where T: Equatable {
+    /// Compares two arrays for equality (same length and all elements equal).
+    public func equals(other: Array[T]) -> Bool;
+}
+
+/// Cloneable conformance for arrays.
+extend Array[T]: Cloneable {}
+
+/// Type operator alias: [T] desugars to Array[T].
+@builtin(.ArrayTypeOperator)
+public type ArrayTypeOperator[T] = Array[T];

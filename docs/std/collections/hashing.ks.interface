@@ -1,0 +1,17 @@
+// Default hashing implementation using FNV-1a
+// FNV-1a is a non-cryptographic hash function created by Glenn Fowler, Landon Curt Noll, and Phong Vo.
+
+/// The default hash function implementation using the FNV-1a algorithm.
+/// FNV-1a provides good distribution for hash tables with reasonable performance.
+/// This is the hasher used by Dictionary and Set when no custom hasher is specified.
+public struct DefaultHasher: Hasher, Defaultable {
+    /// Creates a new hasher with the FNV-1a initial state.
+    public init();
+
+    /// Writes bytes to the hasher, updating the internal state.
+    /// Each byte is XORed with the state and multiplied by the FNV prime.
+    public mutating func write(bytes: Slice[UInt8]);
+
+    /// Finalizes the hash computation and returns the 64-bit hash value.
+    public mutating func finish() -> UInt64;
+}

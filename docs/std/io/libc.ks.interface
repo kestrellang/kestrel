@@ -1,0 +1,78 @@
+// libc bindings for I/O
+//
+// This module provides raw bindings to libc I/O functions via @extern(.C).
+
+/// File descriptor type alias.
+public type Fd = Int32;
+
+// Standard file descriptors
+
+/// Returns the file descriptor for standard input (0).
+public func STDIN() -> Fd;
+
+/// Returns the file descriptor for standard output (1).
+public func STDOUT() -> Fd;
+
+/// Returns the file descriptor for standard error (2).
+public func STDERR() -> Fd;
+
+// Open flags (POSIX)
+
+/// Open for reading only.
+public func O_RDONLY() -> Int32;
+
+/// Open for writing only.
+public func O_WRONLY() -> Int32;
+
+/// Open for reading and writing.
+public func O_RDWR() -> Int32;
+
+/// Create file if it doesn't exist.
+public func O_CREAT() -> Int32;
+
+/// Truncate file to zero length.
+public func O_TRUNC() -> Int32;
+
+/// Append writes to end of file.
+public func O_APPEND() -> Int32;
+
+/// Fail if file exists (with O_CREAT).
+public func O_EXCL() -> Int32;
+
+// Seek whence values
+
+/// Seek from beginning of file.
+public func SEEK_SET() -> Int32;
+
+/// Seek from current position.
+public func SEEK_CUR() -> Int32;
+
+/// Seek from end of file.
+public func SEEK_END() -> Int32;
+
+/// Default file mode (0644 = rw-r--r--).
+public func MODE_DEFAULT() -> Int32;
+
+// Public wrappers for libc functions
+
+/// Opens a file and returns a file descriptor.
+/// Returns negative value on error.
+public func open(path: Pointer[UInt8], flags: Int32, mode: Int32) -> Fd;
+
+/// Closes a file descriptor.
+public func close(fd: Int32) -> Int32;
+
+/// Reads up to count bytes from fd into buf.
+/// Returns number of bytes read, 0 on EOF, negative on error.
+public func read(fd: Int32, buf: Pointer[UInt8], count: Int64) -> Int64;
+
+/// Writes up to count bytes from buf to fd.
+/// Returns number of bytes written, negative on error.
+public func write(fd: Int32, buf: Pointer[UInt8], count: Int64) -> Int64;
+
+/// Seeks to a position in a file.
+/// Returns the new position, negative on error.
+public func lseek(fd: Int32, offset: Int64, whence: Int32) -> Int64;
+
+/// Returns the current errno value.
+public func errno() -> Int32;

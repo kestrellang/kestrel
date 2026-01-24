@@ -1,0 +1,73 @@
+// Float64 - 64-bit floating point (double precision)
+
+/// A 64-bit IEEE 754 double-precision floating-point type.
+/// Supports arithmetic, comparison, mathematical functions, and formatting.
+public struct Float64:
+    Comparable,
+    Equatable,
+    Formattable,
+    Addable,
+    Subtractable,
+    Multipliable,
+    Divisible,
+    Negatable,
+    ExpressibleByFloatLiteral,
+    ExpressibleByIntLiteral,
+    FFISafe
+{
+    public var raw: lang.f64
+
+    public static var zero: Float64;
+    public static var one: Float64;
+    /// Positive infinity.
+    public static var infinity: Float64;
+    /// Not-a-Number value.
+    public static var nan: Float64;
+
+    // Mathematical constants
+    /// The mathematical constant pi (3.14159...).
+    public static var pi: Float64;
+    /// Euler's number e (2.71828...).
+    public static var e: Float64;
+    /// Tau (2*pi, 6.28318...).
+    public static var tau: Float64;
+
+    /// Creates a Float64 from a floating-point literal.
+    public init(floatLiteral value: lang.f64);
+    /// Creates a Float64 from an integer literal.
+    public init(intLiteral value: lang.i64);
+
+    /// Returns true if this value is NaN.
+    public func isNaN() -> Bool;
+    /// Returns true if this value is positive or negative infinity.
+    public func isInfinite() -> Bool;
+    /// Returns true if this value is finite (not NaN and not infinite).
+    public func isFinite() -> Bool;
+
+    public func equals(other: Float64) -> Bool;
+    public func compare(other: Float64) -> Ordering;
+
+    public func add(other: Float64) -> Float64;
+    public func subtract(other: Float64) -> Float64;
+    public func multiply(other: Float64) -> Float64;
+    public func divide(other: Float64) -> Float64;
+    public func negate() -> Float64;
+
+    /// Returns the absolute value.
+    public func abs() -> Float64;
+    /// Returns the largest integer less than or equal to this value.
+    public func floor() -> Float64;
+    /// Returns the smallest integer greater than or equal to this value.
+    public func ceil() -> Float64;
+    /// Returns the nearest integer, rounding half away from zero.
+    public func round() -> Float64;
+    /// Returns the integer part, truncating toward zero.
+    public func trunc() -> Float64;
+    /// Returns the square root.
+    public func sqrt() -> Float64;
+
+    public func format() -> String;
+}
+
+/// Alias for Float64.
+public type Float = Float64;

@@ -1,0 +1,37 @@
+// Core iterator protocol
+
+/// Protocol for types that produce a sequence of values.
+/// Iterators are the foundation of lazy sequence processing in Kestrel.
+@builtin(.IteratorProtocol)
+public protocol Iterator {
+    /// The type of elements yielded by this iterator.
+    type Item
+
+    /// Returns the next element, or None if the sequence is exhausted.
+    @builtin(.IteratorNextMethod)
+    mutating func next() -> Optional[Item];
+}
+
+/// Protocol for types that can produce an iterator.
+/// Enables for-in loops and other iteration constructs.
+@builtin(.IterableProtocol)
+public protocol Iterable {
+    /// The type of elements produced by iteration.
+    type Item
+    /// The type of iterator that will be produced.
+    type Iter: Iterator where Iter.Item = Item
+
+    /// Creates an iterator over this collection's elements.
+    @builtin(.IterableIterMethod)
+    func iter() -> Iter;
+}
+
+/// Extension making all Iterators also Iterable.
+/// An iterator can serve as its own iterable, returning itself.
+extend Iterator: Iterable {
+    type Iterable.Item = Self.Item
+    type Iterable.Iter = Self
+
+    /// Returns self, allowing an iterator to be used where an iterable is expected.
+    func iter() -> Self;
+}

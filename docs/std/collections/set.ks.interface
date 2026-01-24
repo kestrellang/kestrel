@@ -1,0 +1,89 @@
+// Set[T] - hash set backed by Dictionary
+
+/// Iterator for Set that yields elements.
+public struct SetIterator[T, H = DefaultHasher]: Iterator where T: Hash, H: Hasher, H: Defaultable {
+    type Item = T
+
+    /// Creates a set iterator from a dictionary iterator.
+    public init(dictIter dictIter: DictionaryIterator[T, Unit]);
+
+    /// Returns the next element, or None if exhausted.
+    public mutating func next() -> Optional[T];
+}
+
+/// A hash set that stores unique elements.
+/// Backed by a Dictionary internally, providing O(1) average-case lookup, insertion, and removal.
+/// Uses copy-on-write semantics for efficient copying.
+public struct Set[T, H = DefaultHasher]: Iterable where T: Hash, H: Hasher, H: Defaultable {
+    type Item = T
+    type Iter = SetIterator[T, H]
+
+    /// Creates an empty set.
+    /// Requires a placeholder element for internal dictionary initialization.
+    public init(placeholder placeholder: T);
+
+    /// Creates an empty set with the specified initial capacity.
+    /// Pre-allocating capacity can improve performance when the final size is known.
+    public init(capacity capacity: Int64, placeholder placeholder: T);
+
+    /// Returns the number of elements in the set.
+    public func count() -> Int64;
+
+    /// Returns the current capacity of the underlying hash table.
+    public func getCapacity() -> Int64;
+
+    /// Returns true if the set contains no elements.
+    public func isEmpty() -> Bool;
+
+    /// Returns true if the set contains the specified element.
+    public func contains(element: T) -> Bool;
+
+    /// Inserts an element into the set.
+    /// Returns true if the element was newly inserted, false if it already existed.
+    public mutating func insert(element: T) -> Bool;
+
+    /// Removes an element from the set.
+    /// Returns true if the element was present and removed, false otherwise.
+    public mutating func remove(element: T) -> Bool;
+
+    /// Removes all elements from the set.
+    public mutating func clear();
+
+    /// Returns an iterator over the set's elements.
+    public func iter() -> SetIterator[T, H];
+
+    // Set operations
+
+    /// Returns a new set containing all elements from both sets.
+    public func union(other: Set[T, H]) -> Set[T, H];
+
+    /// Returns a new set containing only elements present in both sets.
+    public func intersection(other: Set[T, H]) -> Set[T, H];
+
+    /// Returns a new set containing elements in this set but not in the other.
+    public func difference(other: Set[T, H]) -> Set[T, H];
+
+    /// Returns a new set containing elements in either set but not both.
+    public func symmetricDifference(other: Set[T, H]) -> Set[T, H];
+
+    /// Returns true if all elements of this set are in the other set.
+    public func isSubset(other: Set[T, H]) -> Bool;
+
+    /// Returns true if all elements of the other set are in this set.
+    public func isSuperset(other: Set[T, H]) -> Bool;
+
+    /// Returns true if this set and the other share no common elements.
+    public func isDisjoint(other: Set[T, H]) -> Bool;
+
+    /// Creates a shallow clone of the set (COW - actual copy deferred until mutation).
+    public func clone() -> Set[T, H];
+}
+
+/// Equatable extension for sets.
+extend Set[T, H]: Equatable where T: Hash, H: Hasher, H: Defaultable {
+    /// Compares two sets for equality (same elements).
+    public func equals(other: Set[T, H]) -> Bool;
+}
+
+/// Cloneable conformance for sets.
+extend Set[T, H]: Cloneable where T: Hash, H: Hasher, H: Defaultable {}

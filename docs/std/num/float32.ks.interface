@@ -1,0 +1,53 @@
+// Float32 - 32-bit floating point (single precision)
+
+/// A 32-bit IEEE 754 single-precision floating-point type.
+/// Supports arithmetic, comparison, mathematical functions, and formatting.
+public struct Float32:
+    Comparable,
+    Equatable,
+    Formattable,
+    Addable,
+    Subtractable,
+    Multipliable,
+    Divisible,
+    Negatable,
+    ExpressibleByFloatLiteral,
+    ExpressibleByIntLiteral,
+    FFISafe
+{
+    public var raw: lang.f32
+
+    public static var zero: Float32;
+    public static var one: Float32;
+    public static var infinity: Float32;
+    public static var nan: Float32;
+
+    public static var pi: Float32;
+    public static var e: Float32;
+    public static var tau: Float32;
+
+    public init(floatLiteral value: lang.f64);
+    public init(intLiteral value: lang.i64);
+
+    public func isNaN() -> Bool;
+    public func isInfinite() -> Bool;
+    public func isFinite() -> Bool;
+
+    public func equals(other: Float32) -> Bool;
+    public func compare(other: Float32) -> Ordering;
+
+    public func add(other: Float32) -> Float32;
+    public func subtract(other: Float32) -> Float32;
+    public func multiply(other: Float32) -> Float32;
+    public func divide(other: Float32) -> Float32;
+    public func negate() -> Float32;
+
+    public func abs() -> Float32;
+    public func floor() -> Float32;
+    public func ceil() -> Float32;
+    public func round() -> Float32;
+    public func trunc() -> Float32;
+    public func sqrt() -> Float32;
+
+    public func format() -> String;
+}
