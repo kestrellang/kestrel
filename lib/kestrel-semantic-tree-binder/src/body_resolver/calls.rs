@@ -2328,7 +2328,10 @@ pub(crate) enum MutabilityClassification {
 /// This walks the expression tree to determine:
 /// - Whether it's an lvalue (can be assigned to)
 /// - If so, whether it's mutable throughout the entire access chain
-pub(crate) fn classify_mutability(expr: &Expression, ctx: &BodyResolutionContext) -> MutabilityClassification {
+pub(crate) fn classify_mutability(
+    expr: &Expression,
+    ctx: &BodyResolutionContext,
+) -> MutabilityClassification {
     match &expr.kind {
         // Local variable reference
         ExprKind::LocalRef(local_id) => {

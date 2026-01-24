@@ -120,7 +120,7 @@ impl BinaryOp {
             BinaryOp::Or => Some(LanguageFeature::LogicalOrOperatorMethod),
             BinaryOp::RangeInclusive => Some(LanguageFeature::InclusiveRangeOperatorMethod),
             BinaryOp::RangeExclusive => Some(LanguageFeature::ExclusiveRangeOperatorMethod),
-            BinaryOp::Coalesce => None, // No protocol for coalesce
+            BinaryOp::Coalesce => Some(LanguageFeature::CoalesceOperatorMethod),
         }
     }
 }
@@ -128,16 +128,16 @@ impl BinaryOp {
 /// Compound assignment operators (+=, -=, etc.)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CompoundOp {
-    Add,      // +=
-    Sub,      // -=
-    Mul,      // *=
-    Div,      // /=
-    Rem,      // %=
-    BitAnd,   // &=
-    BitOr,    // |=
-    BitXor,   // ^=
-    Shl,      // <<=
-    Shr,      // >>=
+    Add,    // +=
+    Sub,    // -=
+    Mul,    // *=
+    Div,    // /=
+    Rem,    // %=
+    BitAnd, // &=
+    BitOr,  // |=
+    BitXor, // ^=
+    Shl,    // <<=
+    Shr,    // >>=
 }
 
 impl CompoundOp {
@@ -331,6 +331,7 @@ impl OperatorRegistry {
     fn register_builtins(&mut self) {
         // Precedence levels (higher = tighter binding)
         const DISJUNCTIVE: u8 = 10;
+        const COALESCING: u8 = 15;
         const CONJUNCTIVE: u8 = 20;
         const COMPARATIVE: u8 = 30;
         const RANGE: u8 = 40;
@@ -549,12 +550,13 @@ impl OperatorRegistry {
                 associativity: Left,
             },
         );
+        // Null coalescing (right-assoc, higher than or)
         self.infix.insert(
             SyntaxKind::QuestionQuestion,
             InfixEntry {
                 op: Coalesce,
-                precedence: DISJUNCTIVE,
-                associativity: Left,
+                precedence: COALESCING,
+                associativity: Right,
             },
         );
     }

@@ -2,7 +2,7 @@
 
 module std.result
 
-import std.core.(Equatable, Formattable, Bool, ControlFlow, Tryable, FromResidual, ExpressibleByNullLiteral)
+import std.core.(Equatable, Formattable, Bool, ControlFlow, Tryable, FromResidual, ExpressibleByNullLiteral, Coalesce)
 import std.text.(String)
 // Note: Iterator import creates circular dependency - Iterator imports Optional
 // import std.iter.(Iterator)
@@ -191,6 +191,19 @@ extend Optional[T]: Formattable where T: Formattable {
 extend Optional[T]: ExpressibleByNullLiteral {
     public init() {
         self = .None
+    }
+}
+
+// Coalesce for Optional - enables ?? operator to unwrap with default
+// Optional[T] ?? T -> T
+extend Optional[T]: Coalesce[T] {
+    type Coalesce.Output = T
+
+    public func coalesce(default: () -> T) -> T {
+        match self {
+            .Some(value) => value,
+            .None => default()
+        }
     }
 }
 

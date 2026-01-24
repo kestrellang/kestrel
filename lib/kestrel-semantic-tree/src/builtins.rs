@@ -96,6 +96,10 @@ pub enum LanguageFeature {
     LogicalNotOperatorProtocol,
     LogicalNotOperatorMethod,
 
+    // Operator protocols - null coalescing
+    CoalesceOperatorProtocol,
+    CoalesceOperatorMethod,
+
     // Boolean conditional protocol (for if/while conditions)
     BooleanConditional,
 
@@ -227,6 +231,9 @@ impl LanguageFeature {
             "LogicalOrOperatorMethod" => Some(Self::LogicalOrOperatorMethod),
             "LogicalNotOperatorProtocol" => Some(Self::LogicalNotOperatorProtocol),
             "LogicalNotOperatorMethod" => Some(Self::LogicalNotOperatorMethod),
+            // Operator protocols - null coalescing
+            "CoalesceOperatorProtocol" => Some(Self::CoalesceOperatorProtocol),
+            "CoalesceOperatorMethod" => Some(Self::CoalesceOperatorMethod),
             // Boolean conditional protocol
             "BooleanConditional" => Some(Self::BooleanConditional),
             // Operator protocols - range
@@ -351,6 +358,9 @@ impl LanguageFeature {
             Self::LogicalOrOperatorMethod => "LogicalOrOperatorMethod",
             Self::LogicalNotOperatorProtocol => "LogicalNotOperatorProtocol",
             Self::LogicalNotOperatorMethod => "LogicalNotOperatorMethod",
+            // Operator protocols - null coalescing
+            Self::CoalesceOperatorProtocol => "CoalesceOperatorProtocol",
+            Self::CoalesceOperatorMethod => "CoalesceOperatorMethod",
             // Boolean conditional protocol
             Self::BooleanConditional => "BooleanConditional",
             // Operator protocols - range
@@ -593,6 +603,8 @@ impl LanguageFeature {
             | Self::LogicalAndOperatorProtocol
             | Self::LogicalOrOperatorProtocol
             | Self::LogicalNotOperatorProtocol
+            // Operator protocols - null coalescing
+            | Self::CoalesceOperatorProtocol
             // Boolean conditional protocol
             | Self::BooleanConditional
             // Operator protocols - range
@@ -735,6 +747,13 @@ impl LanguageFeature {
                 feature: *self,
                 kind: BuiltinKind::ProtocolMethod {
                     protocol_feature: LanguageFeature::LogicalNotOperatorProtocol,
+                },
+            },
+            // Operator methods - null coalescing
+            Self::CoalesceOperatorMethod => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::ProtocolMethod {
+                    protocol_feature: LanguageFeature::CoalesceOperatorProtocol,
                 },
             },
             // Operator methods - range

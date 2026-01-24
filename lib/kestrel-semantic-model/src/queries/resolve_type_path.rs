@@ -47,9 +47,7 @@ impl Query for ResolveTypePath {
         // This handles protocol extensions where Self is a synthetic type parameter
         // with the target protocol as a bound, allowing Self.Item to work.
         if self.path[0] == "Self" {
-            if let Some(result) =
-                try_resolve_self_as_type_param(model, &self.path, self.context)
-            {
+            if let Some(result) = try_resolve_self_as_type_param(model, &self.path, self.context) {
                 return result;
             }
         }
@@ -480,7 +478,10 @@ fn try_resolve_self_as_type_param(
                 return None;
             }
 
-            let type_param = symbol.into_any_arc().downcast::<TypeParameterSymbol>().ok()?;
+            let type_param = symbol
+                .into_any_arc()
+                .downcast::<TypeParameterSymbol>()
+                .ok()?;
 
             // "Self.Item" style - use associated type resolution from type param bounds
             let segment = &path[1];
@@ -492,7 +493,7 @@ fn try_resolve_self_as_type_param(
                 1,
                 context,
             )
-        }
+        },
         _ => None,
     }
 }

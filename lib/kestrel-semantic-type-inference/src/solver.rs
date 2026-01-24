@@ -110,8 +110,7 @@ fn apply_default_literal_types(ctx: &mut InferenceContext<'_>) -> bool {
     }
 
     // Apply defaults and track which type IDs were defaulted
-    let mut defaulted_ty_ids: std::collections::HashSet<TyId> =
-        std::collections::HashSet::new();
+    let mut defaulted_ty_ids: std::collections::HashSet<TyId> = std::collections::HashSet::new();
     let mut any_applied = false;
 
     for (ty_id, feature, span) in literals_to_default {
@@ -144,9 +143,7 @@ fn apply_default_literal_types(ctx: &mut InferenceContext<'_>) -> bool {
                     if matches!(elem_ty.kind(), TyKind::Infer) {
                         continue;
                     }
-                    if let Some(array_ty) =
-                        ctx.oracle().default_array_type(elem_ty, span.clone())
-                    {
+                    if let Some(array_ty) = ctx.oracle().default_array_type(elem_ty, span.clone()) {
                         array_ty
                     } else {
                         continue;
@@ -526,7 +523,6 @@ fn unify(
         },
 
         // Note: Array[T] struct types are unified via the Struct case above
-
         (TyKind::Pointer(elem_a), TyKind::Pointer(elem_b)) => {
             ctx.equate(elem_a.id(), elem_b.id(), span.clone());
             Ok(SolveResult::Solved)

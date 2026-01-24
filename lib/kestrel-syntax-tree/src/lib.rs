@@ -113,7 +113,7 @@ pub enum SyntaxKind {
     TyOptional,   // T? - optional type
     TyResult,     // T throws E - result type
     TyList,
-    TyInferred,   // _ - inferred type placeholder
+    TyInferred, // _ - inferred type placeholder
 
     // Path nodes (shared between types and other constructs)
     Path,
@@ -273,7 +273,7 @@ pub enum SyntaxKind {
     DotDotEquals,
     DotDotLess,
     DotDot,
-    LessLessEquals,    // <<=
+    LessLessEquals,       // <<=
     GreaterGreaterEquals, // >>=
     LessLess,
     GreaterGreater,
@@ -285,14 +285,14 @@ pub enum SyntaxKind {
     Arrow,
     FatArrow,
     // Compound assignment (2-char)
-    PlusEquals,        // +=
-    MinusEquals,       // -=
-    StarEquals,        // *=
-    SlashEquals,       // /=
-    PercentEquals,     // %=
-    AmpersandEquals,   // &=
-    PipeEquals,        // |=
-    CaretEquals,       // ^=
+    PlusEquals,      // +=
+    MinusEquals,     // -=
+    StarEquals,      // *=
+    SlashEquals,     // /=
+    PercentEquals,   // %=
+    AmpersandEquals, // &=
+    PipeEquals,      // |=
+    CaretEquals,     // ^=
     // Single-character
     Equals,
     Plus,

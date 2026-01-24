@@ -368,8 +368,9 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
 
             // Add conformance constraint to _ExpressibleByArrayLiteral protocol
             // This allows array literals to be assigned to custom types like Style
-            if let Some(protocol_id) =
-                ctx.oracle().builtin_protocol(LanguageFeature::_ExpressibleByArrayLiteral)
+            if let Some(protocol_id) = ctx
+                .oracle()
+                .builtin_protocol(LanguageFeature::_ExpressibleByArrayLiteral)
             {
                 let protocol_ref = ProtocolRef::new(protocol_id, expr.span.clone());
                 ctx.conforms(expr.ty.id(), protocol_ref);

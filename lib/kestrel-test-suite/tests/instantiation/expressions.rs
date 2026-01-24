@@ -656,7 +656,11 @@ mod nested_expressions {
         assert!(matches!(array2.kind, ExprKind::Array(_)));
 
         // Use infer type for outer array - real types are constructed via semantic model
-        let outer = Expression::array(vec![array1, array2], Ty::infer(Span::new(0, 0..0)), Span::new(0, 0..13));
+        let outer = Expression::array(
+            vec![array1, array2],
+            Ty::infer(Span::new(0, 0..0)),
+            Span::new(0, 0..13),
+        );
 
         assert!(matches!(outer.kind, ExprKind::Array(_)));
         assert_eq!(outer.span, Span::new(0, 0..13));

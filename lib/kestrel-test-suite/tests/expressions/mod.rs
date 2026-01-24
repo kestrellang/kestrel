@@ -16,6 +16,7 @@ mod closures;
 mod control_flow;
 mod field_access;
 mod loops;
+mod null_coalescing;
 mod operators;
 mod paths;
 mod protocol_operators;

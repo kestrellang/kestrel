@@ -75,7 +75,6 @@ pub enum TyKind {
 
     // REMOVED: Array type is now represented as Array[T] struct
     // Array(Box<Ty>),
-
     /// Raw pointer type: lang.ptr[T]
     Pointer(Box<Ty>),
 
@@ -179,7 +178,10 @@ impl std::fmt::Debug for TyKind {
                 write!(f, "]")
             },
             TyKind::Pointer(elem) => write!(f, "Pointer[{}]", elem),
-            TyKind::Function { params, return_type } => {
+            TyKind::Function {
+                params,
+                return_type,
+            } => {
                 write!(f, "Function((")?;
                 for (i, p) in params.iter().enumerate() {
                     if i > 0 {
@@ -195,7 +197,10 @@ impl std::fmt::Debug for TyKind {
             TyKind::TypeParameter(sym) => {
                 write!(f, "TypeParameter({})", sym.metadata().name().value)
             },
-            TyKind::Protocol { symbol, substitutions } => {
+            TyKind::Protocol {
+                symbol,
+                substitutions,
+            } => {
                 write!(f, "Protocol({}", symbol.metadata().name().value)?;
                 if !substitutions.is_empty() {
                     write!(f, "[")?;
@@ -212,7 +217,10 @@ impl std::fmt::Debug for TyKind {
                 }
                 write!(f, ")")
             },
-            TyKind::Struct { symbol, substitutions } => {
+            TyKind::Struct {
+                symbol,
+                substitutions,
+            } => {
                 write!(f, "Struct({}", symbol.metadata().name().value)?;
                 if !substitutions.is_empty() {
                     write!(f, "[")?;
@@ -229,7 +237,10 @@ impl std::fmt::Debug for TyKind {
                 }
                 write!(f, ")")
             },
-            TyKind::Enum { symbol, substitutions } => {
+            TyKind::Enum {
+                symbol,
+                substitutions,
+            } => {
                 write!(f, "Enum({}", symbol.metadata().name().value)?;
                 if !substitutions.is_empty() {
                     write!(f, "[")?;
@@ -246,7 +257,10 @@ impl std::fmt::Debug for TyKind {
                 }
                 write!(f, ")")
             },
-            TyKind::TypeAlias { symbol, substitutions } => {
+            TyKind::TypeAlias {
+                symbol,
+                substitutions,
+            } => {
                 write!(f, "TypeAlias({}", symbol.metadata().name().value)?;
                 if !substitutions.is_empty() {
                     write!(f, "[")?;
@@ -265,12 +279,20 @@ impl std::fmt::Debug for TyKind {
             },
             TyKind::AssociatedType { symbol, container } => {
                 if let Some(c) = container {
-                    write!(f, "AssociatedType({}.{})", c, symbol.metadata().name().value)
+                    write!(
+                        f,
+                        "AssociatedType({}.{})",
+                        c,
+                        symbol.metadata().name().value
+                    )
                 } else {
                     write!(f, "AssociatedType({})", symbol.metadata().name().value)
                 }
             },
-            TyKind::UnresolvedFunction { param_info, return_type } => {
+            TyKind::UnresolvedFunction {
+                param_info,
+                return_type,
+            } => {
                 write!(f, "UnresolvedFunction({:?} -> {})", param_info, return_type)
             },
         }

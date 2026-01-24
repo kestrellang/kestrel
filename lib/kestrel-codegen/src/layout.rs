@@ -164,9 +164,7 @@ impl<'a> LayoutCache<'a> {
                 let tp_def = &self.ctx.type_params[*tp];
                 panic!(
                     "TypeParam {:?} ('{}', owner: {:?}) reached layout computation without substitution - this is a bug",
-                    tp,
-                    tp_def.name,
-                    tp_def.owner
+                    tp, tp_def.name, tp_def.owner
                 )
             },
 
@@ -262,9 +260,7 @@ impl<'a> LayoutCache<'a> {
                     let tp_def = &self.ctx.type_params[*tp];
                     panic!(
                         "TypeParam {:?} ('{}', owner: {:?}) reached layout computation without substitution - this is a bug",
-                        tp,
-                        tp_def.name,
-                        tp_def.owner
+                        tp, tp_def.name, tp_def.owner
                     )
                 }
             },

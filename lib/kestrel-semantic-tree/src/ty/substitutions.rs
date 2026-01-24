@@ -111,7 +111,6 @@ impl Substitutions {
             },
 
             // Note: Array[T] struct types are handled by the Struct case above
-
             TyKind::Pointer(element_type) => {
                 let new_element = self.apply_with_visited(element_type, visited);
                 Ty::pointer(new_element, ty.span().clone())

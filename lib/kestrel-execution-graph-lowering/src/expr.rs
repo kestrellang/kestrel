@@ -1898,21 +1898,19 @@ fn lower_enum_literal_init_call(
 
     // Find init() with no parameters (from ExpressibleByNullLiteral)
     let mut init_symbol: Option<
-        std::sync::Arc<dyn semantic_tree::symbol::Symbol<kestrel_semantic_tree::language::KestrelLanguage>>,
-    > = enum_symbol
-        .metadata()
-        .children()
-        .into_iter()
-        .find(|child| {
-            if child.metadata().kind() != KestrelSymbolKind::Initializer {
-                return false;
-            }
-            if let Some(callable) = child.metadata().get_behavior::<CallableBehavior>() {
-                callable.parameters().is_empty()
-            } else {
-                false
-            }
-        });
+        std::sync::Arc<
+            dyn semantic_tree::symbol::Symbol<kestrel_semantic_tree::language::KestrelLanguage>,
+        >,
+    > = enum_symbol.metadata().children().into_iter().find(|child| {
+        if child.metadata().kind() != KestrelSymbolKind::Initializer {
+            return false;
+        }
+        if let Some(callable) = child.metadata().get_behavior::<CallableBehavior>() {
+            callable.parameters().is_empty()
+        } else {
+            false
+        }
+    });
 
     // If not found on the enum, check extension initializers
     if init_symbol.is_none() {

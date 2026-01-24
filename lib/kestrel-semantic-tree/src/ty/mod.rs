@@ -1142,8 +1142,7 @@ impl Ty {
     /// Check if this is the Array[T] struct type (using builtin registry)
     pub fn is_array_struct(&self, builtins: &BuiltinRegistry) -> bool {
         if let TyKind::Struct { symbol, .. } = &self.kind {
-            builtins.struct_feature(symbol.metadata().id())
-                == Some(LanguageFeature::ArrayStruct)
+            builtins.struct_feature(symbol.metadata().id()) == Some(LanguageFeature::ArrayStruct)
         } else {
             false
         }
@@ -1158,8 +1157,7 @@ impl Ty {
             substitutions,
         } = &self.kind
         {
-            if builtins.struct_feature(symbol.metadata().id())
-                == Some(LanguageFeature::ArrayStruct)
+            if builtins.struct_feature(symbol.metadata().id()) == Some(LanguageFeature::ArrayStruct)
             {
                 // Array[T] has one type parameter T
                 let type_params = symbol.type_parameters();

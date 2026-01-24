@@ -90,7 +90,6 @@ mod execution {
         .with_stdlib()
         .expect(ExitCode(2));
     }
-
 }
 
 mod regression {

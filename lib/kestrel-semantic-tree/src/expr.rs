@@ -1465,15 +1465,24 @@ impl Expression {
                 PatternKind::Local { name, .. } => name.clone(),
                 PatternKind::Wildcard => "_".to_string(),
                 PatternKind::Literal { value } => format!("{:?}", value),
-                PatternKind::Tuple { prefix, has_rest, suffix } => {
-                    let mut parts: Vec<String> = prefix.iter().map(format_pattern_with_type).collect();
+                PatternKind::Tuple {
+                    prefix,
+                    has_rest,
+                    suffix,
+                } => {
+                    let mut parts: Vec<String> =
+                        prefix.iter().map(format_pattern_with_type).collect();
                     if *has_rest {
                         parts.push("..".to_string());
                     }
                     parts.extend(suffix.iter().map(format_pattern_with_type));
                     format!("({})", parts.join(", "))
                 },
-                PatternKind::EnumVariant { case_name, bindings, .. } => {
+                PatternKind::EnumVariant {
+                    case_name,
+                    bindings,
+                    ..
+                } => {
                     if bindings.is_empty() {
                         format!(".{}", case_name)
                     } else {
@@ -1484,14 +1493,22 @@ impl Expression {
                         format!(".{}({})", case_name, bindings_str.join(", "))
                     }
                 },
-                PatternKind::At { name, subpattern, .. } => {
-                    format!("({}: {}) @ {}", name, pattern.ty, format_pattern_with_type(subpattern))
+                PatternKind::At {
+                    name, subpattern, ..
+                } => {
+                    format!(
+                        "({}: {}) @ {}",
+                        name,
+                        pattern.ty,
+                        format_pattern_with_type(subpattern)
+                    )
                 },
                 PatternKind::Range { .. } => "<range>".to_string(),
                 PatternKind::Struct { struct_name, .. } => format!("{} {{ .. }}", struct_name),
                 PatternKind::Array { .. } => "[..]".to_string(),
                 PatternKind::Or { alternatives } => {
-                    let alts: Vec<String> = alternatives.iter().map(format_pattern_with_type).collect();
+                    let alts: Vec<String> =
+                        alternatives.iter().map(format_pattern_with_type).collect();
                     alts.join(" or ")
                 },
                 PatternKind::Rest => "..".to_string(),
@@ -1570,14 +1587,18 @@ impl Expression {
                             }
                         })
                         .collect();
-                    with_type(format!("{}({})", format_expr(callee), args.join(", ")), &expr.ty)
+                    with_type(
+                        format!("{}({})", format_expr(callee), args.join(", ")),
+                        &expr.ty,
+                    )
                 },
                 ExprKind::PrimitiveMethodCall {
                     receiver,
                     method,
                     arguments,
                 } => {
-                    let args: Vec<String> = arguments.iter().map(|a| format_expr(&a.value)).collect();
+                    let args: Vec<String> =
+                        arguments.iter().map(|a| format_expr(&a.value)).collect();
                     format!(
                         "{}.{}({})",
                         format_expr(receiver),
@@ -1593,7 +1614,8 @@ impl Expression {
                     method_name,
                     arguments,
                 } => {
-                    let args: Vec<String> = arguments.iter().map(|a| format_expr(&a.value)).collect();
+                    let args: Vec<String> =
+                        arguments.iter().map(|a| format_expr(&a.value)).collect();
                     format!(
                         "{}.{}({})",
                         format_expr(receiver),
@@ -1607,7 +1629,8 @@ impl Expression {
                     arguments,
                     ..
                 } => {
-                    let args: Vec<String> = arguments.iter().map(|a| format_expr(&a.value)).collect();
+                    let args: Vec<String> =
+                        arguments.iter().map(|a| format_expr(&a.value)).collect();
                     format!("{}.{}({})", target_ty, method_name, args.join(", "))
                 },
                 ExprKind::ImplicitStructInit {
@@ -1653,7 +1676,11 @@ impl Expression {
                         .map(|c| match c {
                             IfCondition::Expr(e) => format_expr(e),
                             IfCondition::Let { pattern, value, .. } => {
-                                format!("let {} = {}", format_pattern_with_type(pattern), format_expr(value))
+                                format!(
+                                    "let {} = {}",
+                                    format_pattern_with_type(pattern),
+                                    format_expr(value)
+                                )
                             },
                         })
                         .collect();
@@ -1677,7 +1704,10 @@ impl Expression {
                     } else {
                         String::new()
                     };
-                    with_type(format!("if {} {{ {} }}{}", cond_str, then_str, else_str), &expr.ty)
+                    with_type(
+                        format!("if {} {{ {} }}{}", cond_str, then_str, else_str),
+                        &expr.ty,
+                    )
                 },
                 ExprKind::While { condition, .. } => {
                     format!("while {} {{ ... }}", format_expr(condition))
@@ -1687,7 +1717,11 @@ impl Expression {
                         .iter()
                         .map(|c| match c {
                             IfCondition::Let { pattern, value, .. } => {
-                                format!("let {} = {}", format_pattern_with_type(pattern), format_expr(value))
+                                format!(
+                                    "let {} = {}",
+                                    format_pattern_with_type(pattern),
+                                    format_expr(value)
+                                )
                             },
                             IfCondition::Expr(e) => format_expr(e),
                         })
@@ -1717,13 +1751,12 @@ impl Expression {
                     }
                 },
                 ExprKind::Closure {
-                    params,
-                    tail_expr,
-                    ..
+                    params, tail_expr, ..
                 } => {
                     let params_str = match params {
                         Some(ps) => {
-                            let p: Vec<_> = ps.iter().map(|p| format!("{}: {}", p.name, p.ty)).collect();
+                            let p: Vec<_> =
+                                ps.iter().map(|p| format!("{}: {}", p.name, p.ty)).collect();
                             format!("({}) in ", p.join(", "))
                         },
                         None => String::new(),
@@ -1755,16 +1788,10 @@ impl Expression {
                         format!(".{}", member_name)
                     }
                 },
-                ExprKind::Match { scrutinee, arms } => {
-                    with_type(
-                        format!(
-                            "match {} {{ {} arms }}",
-                            format_expr(scrutinee),
-                            arms.len()
-                        ),
-                        &expr.ty
-                    )
-                },
+                ExprKind::Match { scrutinee, arms } => with_type(
+                    format!("match {} {{ {} arms }}", format_expr(scrutinee), arms.len()),
+                    &expr.ty,
+                ),
                 ExprKind::Block { value, .. } => {
                     let body_str = value
                         .as_ref()
@@ -1777,7 +1804,8 @@ impl Expression {
                     intrinsic,
                     arguments,
                 } => {
-                    let args: Vec<String> = arguments.iter().map(|a| format_expr(&a.value)).collect();
+                    let args: Vec<String> =
+                        arguments.iter().map(|a| format_expr(&a.value)).collect();
                     format!("{}({})", intrinsic.name(), args.join(", "))
                 },
                 ExprKind::LangIntrinsicRef(intrinsic) => intrinsic.name(),
@@ -1796,7 +1824,10 @@ impl Expression {
                             }
                         })
                         .collect();
-                    with_type(format!("{}[{}]", format_expr(receiver), args.join(", ")), &expr.ty)
+                    with_type(
+                        format!("{}[{}]", format_expr(receiver), args.join(", ")),
+                        &expr.ty,
+                    )
                 },
             }
         }

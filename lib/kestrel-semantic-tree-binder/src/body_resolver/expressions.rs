@@ -23,7 +23,7 @@ use crate::diagnostics::{
 use kestrel_syntax_tree::utils::get_node_span;
 
 use super::calls::{
-    classify_mutability, resolve_argument_list, resolve_call_expression, MutabilityClassification,
+    MutabilityClassification, classify_mutability, resolve_argument_list, resolve_call_expression,
 };
 use super::context::BodyResolutionContext;
 use super::operators::{
@@ -109,7 +109,9 @@ pub fn resolve_expression(expr_node: &SyntaxNode, ctx: &mut BodyResolutionContex
 
         SyntaxKind::ExprAssignment => resolve_assignment_expression(expr_node, ctx),
 
-        SyntaxKind::ExprCompoundAssignment => resolve_compound_assignment_expression(expr_node, ctx),
+        SyntaxKind::ExprCompoundAssignment => {
+            resolve_compound_assignment_expression(expr_node, ctx)
+        },
 
         SyntaxKind::ExprIf => resolve_if_expression(expr_node, ctx),
 
@@ -631,8 +633,12 @@ fn resolve_compound_assignment_expression(
 
     // Try to use MethodRef pattern with builtin registry for better error messages
     if let Some(method_id) = ctx.model.builtin_registry().method(op.method_feature()) {
-        let method_ref =
-            Expression::method_ref(target, vec![method_id], method_name.to_string(), span.clone());
+        let method_ref = Expression::method_ref(
+            target,
+            vec![method_id],
+            method_name.to_string(),
+            span.clone(),
+        );
         return Expression::call(method_ref, vec![arg], result_ty, span);
     }
 
@@ -1232,8 +1238,12 @@ fn resolve_for_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) ->
         .method(LanguageFeature::IterableIterMethod);
     let iter_call = if let Some(method_id) = iter_method_id {
         // Create MethodRef with the protocol method as candidate, then wrap in Call
-        let method_ref =
-            Expression::method_ref(iterable_expr, vec![method_id], "iter".to_string(), span.clone());
+        let method_ref = Expression::method_ref(
+            iterable_expr,
+            vec![method_id],
+            "iter".to_string(),
+            span.clone(),
+        );
         Expression::call(method_ref, vec![], iter_ty.clone(), span.clone())
     } else {
         // Fallback if builtin not registered (shouldn't happen in practice)
@@ -3034,7 +3044,7 @@ fn is_field_access_on_self(target: &Expression, ctx: &BodyResolutionContext) -> 
                 }
             }
             false
-        }
+        },
         _ => false,
     }
 }
@@ -3057,7 +3067,7 @@ fn validate_assignment_target(
     match classify_mutability(target, ctx) {
         MutabilityClassification::Mutable => {
             // Target is mutable, assignment is allowed
-        }
+        },
         MutabilityClassification::ImmutableLocal { name, span } => {
             ctx.diagnostics.add_diagnostic(
                 CannotAssignToLetError {
@@ -3068,7 +3078,7 @@ fn validate_assignment_target(
                 }
                 .into_diagnostic(),
             );
-        }
+        },
         MutabilityClassification::ImmutableField {
             field_name,
             field_span,
@@ -3086,7 +3096,7 @@ fn validate_assignment_target(
                 }
                 .into_diagnostic(),
             );
-        }
+        },
         MutabilityClassification::ImmutableThroughBinding {
             binding_name,
             binding_span,
@@ -3107,7 +3117,7 @@ fn validate_assignment_target(
                 }
                 .into_diagnostic(),
             );
-        }
+        },
         MutabilityClassification::Temporary => {
             ctx.diagnostics.add_diagnostic(
                 CannotAssignToTemporaryError {
@@ -3116,7 +3126,7 @@ fn validate_assignment_target(
                 }
                 .into_diagnostic(),
             );
-        }
+        },
     }
 }
 

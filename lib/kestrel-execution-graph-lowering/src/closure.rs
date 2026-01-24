@@ -225,7 +225,8 @@ fn lower_capturing_closure(
     };
 
     // 1. Generate environment struct with captured variables
-    let env_struct_id = generate_env_struct(ctx, env_struct_name, captures, &parent_type_params, span);
+    let env_struct_id =
+        generate_env_struct(ctx, env_struct_name, captures, &parent_type_params, span);
 
     // 2. Collect the captured values from current context BEFORE switching context
     let capture_values: Vec<Value> = captures

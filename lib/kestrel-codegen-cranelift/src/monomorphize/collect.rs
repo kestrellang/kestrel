@@ -119,7 +119,6 @@ impl<'a> CollectionContext<'a> {
         let locals = func_def.locals.clone();
         let ret = func_def.ret;
 
-
         // Build substitution
         let mut subst = build_substitution(self.mir, &type_params, &inst.type_args);
 

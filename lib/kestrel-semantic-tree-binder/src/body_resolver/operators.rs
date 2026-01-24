@@ -6,7 +6,9 @@
 
 use std::sync::LazyLock;
 
-use kestrel_semantic_tree::expr::{CallArgument, Capture, CaptureKind, Expression, PrimitiveMethod};
+use kestrel_semantic_tree::expr::{
+    CallArgument, Capture, CaptureKind, Expression, PrimitiveMethod,
+};
 use kestrel_semantic_tree::operators::{BinaryOp, InfixAction, OperatorRegistry, UnaryOp};
 use kestrel_semantic_tree::symbol::local::LocalId;
 use kestrel_semantic_tree::ty::{FloatBits, IntBits, Ty, TyKind};
@@ -343,8 +345,8 @@ fn desugar_binary_op(
     let method_name = op.method_name();
     let result_ty = Ty::infer(full_span.clone());
 
-    // For short-circuiting operators (and/or), wrap RHS in a closure
-    let arg = if matches!(op, BinaryOp::And | BinaryOp::Or) {
+    // For short-circuiting operators (and/or/??), wrap RHS in a closure
+    let arg = if matches!(op, BinaryOp::And | BinaryOp::Or | BinaryOp::Coalesce) {
         let closure = wrap_in_closure(rhs, ctx);
         CallArgument::unlabeled(closure.clone(), closure.span.clone())
     } else {
@@ -356,8 +358,12 @@ fn desugar_binary_op(
     if let Some(feature) = op.method_feature() {
         if let Some(method_id) = ctx.model.builtin_registry().method(feature) {
             // Create MethodRef with the protocol method as candidate, then wrap in Call
-            let method_ref =
-                Expression::method_ref(lhs, vec![method_id], method_name.to_string(), full_span.clone());
+            let method_ref = Expression::method_ref(
+                lhs,
+                vec![method_id],
+                method_name.to_string(),
+                full_span.clone(),
+            );
             return Expression::call(method_ref, vec![arg], result_ty, full_span);
         }
     }
@@ -407,8 +413,12 @@ fn desugar_unary_op(
     if let Some(feature) = op.method_feature() {
         if let Some(method_id) = ctx.model.builtin_registry().method(feature) {
             // Create MethodRef with the protocol method as candidate, then wrap in Call
-            let method_ref =
-                Expression::method_ref(operand, vec![method_id], method_name.to_string(), full_span.clone());
+            let method_ref = Expression::method_ref(
+                operand,
+                vec![method_id],
+                method_name.to_string(),
+                full_span.clone(),
+            );
             return Expression::call(method_ref, vec![], result_ty, full_span);
         }
     }
@@ -637,17 +647,23 @@ fn collect_captures_recursive(
                     }
                 }
             }
-        }
+        },
 
         // Recursively walk compound expressions
         ExprKind::Grouping(inner) => {
             collect_captures_recursive(inner, closure_entry_depth, local_scope, captures, seen_ids);
-        }
+        },
 
         ExprKind::Call {
             callee, arguments, ..
         } => {
-            collect_captures_recursive(callee, closure_entry_depth, local_scope, captures, seen_ids);
+            collect_captures_recursive(
+                callee,
+                closure_entry_depth,
+                local_scope,
+                captures,
+                seen_ids,
+            );
             for arg in arguments {
                 collect_captures_recursive(
                     &arg.value,
@@ -657,7 +673,7 @@ fn collect_captures_recursive(
                     seen_ids,
                 );
             }
-        }
+        },
 
         ExprKind::MethodRef { receiver, .. } => {
             collect_captures_recursive(
@@ -667,7 +683,7 @@ fn collect_captures_recursive(
                 captures,
                 seen_ids,
             );
-        }
+        },
 
         ExprKind::DeferredMethodCall {
             receiver,
@@ -690,7 +706,7 @@ fn collect_captures_recursive(
                     seen_ids,
                 );
             }
-        }
+        },
 
         ExprKind::FieldAccess { object, .. } => {
             collect_captures_recursive(
@@ -700,17 +716,11 @@ fn collect_captures_recursive(
                 captures,
                 seen_ids,
             );
-        }
+        },
 
         ExprKind::TupleIndex { tuple, .. } => {
-            collect_captures_recursive(
-                tuple,
-                closure_entry_depth,
-                local_scope,
-                captures,
-                seen_ids,
-            );
-        }
+            collect_captures_recursive(tuple, closure_entry_depth, local_scope, captures, seen_ids);
+        },
 
         ExprKind::If {
             conditions,
@@ -728,7 +738,7 @@ fn collect_captures_recursive(
                             captures,
                             seen_ids,
                         );
-                    }
+                    },
                     kestrel_semantic_tree::expr::IfCondition::Let { value, .. } => {
                         collect_captures_recursive(
                             value,
@@ -737,14 +747,26 @@ fn collect_captures_recursive(
                             captures,
                             seen_ids,
                         );
-                    }
+                    },
                 }
             }
             for stmt in then_branch {
-                collect_captures_from_stmt(stmt, closure_entry_depth, local_scope, captures, seen_ids);
+                collect_captures_from_stmt(
+                    stmt,
+                    closure_entry_depth,
+                    local_scope,
+                    captures,
+                    seen_ids,
+                );
             }
             if let Some(val) = then_value {
-                collect_captures_recursive(val, closure_entry_depth, local_scope, captures, seen_ids);
+                collect_captures_recursive(
+                    val,
+                    closure_entry_depth,
+                    local_scope,
+                    captures,
+                    seen_ids,
+                );
             }
             if let Some(else_br) = else_branch {
                 collect_captures_from_else(
@@ -755,7 +777,7 @@ fn collect_captures_recursive(
                     seen_ids,
                 );
             }
-        }
+        },
 
         ExprKind::Closure {
             body, tail_expr, ..
@@ -763,27 +785,57 @@ fn collect_captures_recursive(
             // Note: nested closures have their own captures, but we still need to
             // walk them to find variables that need to be captured by the outer closure
             for stmt in body {
-                collect_captures_from_stmt(stmt, closure_entry_depth, local_scope, captures, seen_ids);
+                collect_captures_from_stmt(
+                    stmt,
+                    closure_entry_depth,
+                    local_scope,
+                    captures,
+                    seen_ids,
+                );
             }
             if let Some(tail) = tail_expr {
-                collect_captures_recursive(tail, closure_entry_depth, local_scope, captures, seen_ids);
+                collect_captures_recursive(
+                    tail,
+                    closure_entry_depth,
+                    local_scope,
+                    captures,
+                    seen_ids,
+                );
             }
-        }
+        },
 
         ExprKind::Block { statements, value } => {
             for stmt in statements {
-                collect_captures_from_stmt(stmt, closure_entry_depth, local_scope, captures, seen_ids);
+                collect_captures_from_stmt(
+                    stmt,
+                    closure_entry_depth,
+                    local_scope,
+                    captures,
+                    seen_ids,
+                );
             }
             if let Some(val) = value {
-                collect_captures_recursive(val, closure_entry_depth, local_scope, captures, seen_ids);
+                collect_captures_recursive(
+                    val,
+                    closure_entry_depth,
+                    local_scope,
+                    captures,
+                    seen_ids,
+                );
             }
-        }
+        },
 
         ExprKind::Tuple(elements) | ExprKind::Array(elements) => {
             for elem in elements {
-                collect_captures_recursive(elem, closure_entry_depth, local_scope, captures, seen_ids);
+                collect_captures_recursive(
+                    elem,
+                    closure_entry_depth,
+                    local_scope,
+                    captures,
+                    seen_ids,
+                );
             }
-        }
+        },
 
         ExprKind::While {
             condition, body, ..
@@ -796,9 +848,15 @@ fn collect_captures_recursive(
                 seen_ids,
             );
             for stmt in body {
-                collect_captures_from_stmt(stmt, closure_entry_depth, local_scope, captures, seen_ids);
+                collect_captures_from_stmt(
+                    stmt,
+                    closure_entry_depth,
+                    local_scope,
+                    captures,
+                    seen_ids,
+                );
             }
-        }
+        },
 
         ExprKind::WhileLet {
             conditions, body, ..
@@ -813,7 +871,7 @@ fn collect_captures_recursive(
                             captures,
                             seen_ids,
                         );
-                    }
+                    },
                     kestrel_semantic_tree::expr::IfCondition::Let { value, .. } => {
                         collect_captures_recursive(
                             value,
@@ -822,25 +880,37 @@ fn collect_captures_recursive(
                             captures,
                             seen_ids,
                         );
-                    }
+                    },
                 }
             }
             for stmt in body {
-                collect_captures_from_stmt(stmt, closure_entry_depth, local_scope, captures, seen_ids);
+                collect_captures_from_stmt(
+                    stmt,
+                    closure_entry_depth,
+                    local_scope,
+                    captures,
+                    seen_ids,
+                );
             }
-        }
+        },
 
         ExprKind::Loop { body, .. } => {
             for stmt in body {
-                collect_captures_from_stmt(stmt, closure_entry_depth, local_scope, captures, seen_ids);
+                collect_captures_from_stmt(
+                    stmt,
+                    closure_entry_depth,
+                    local_scope,
+                    captures,
+                    seen_ids,
+                );
             }
-        }
+        },
 
         ExprKind::Return { value } => {
             if let Some(e) = value {
                 collect_captures_recursive(e, closure_entry_depth, local_scope, captures, seen_ids);
             }
-        }
+        },
 
         ExprKind::Match { scrutinee, arms } => {
             collect_captures_recursive(
@@ -868,12 +938,18 @@ fn collect_captures_recursive(
                     seen_ids,
                 );
             }
-        }
+        },
 
         ExprKind::Assignment { target, value } => {
-            collect_captures_recursive(target, closure_entry_depth, local_scope, captures, seen_ids);
+            collect_captures_recursive(
+                target,
+                closure_entry_depth,
+                local_scope,
+                captures,
+                seen_ids,
+            );
             collect_captures_recursive(value, closure_entry_depth, local_scope, captures, seen_ids);
-        }
+        },
 
         ExprKind::ImplicitStructInit { arguments, .. } => {
             for arg in arguments {
@@ -885,7 +961,7 @@ fn collect_captures_recursive(
                     seen_ids,
                 );
             }
-        }
+        },
 
         ExprKind::SubscriptCall {
             receiver,
@@ -908,7 +984,7 @@ fn collect_captures_recursive(
                     seen_ids,
                 );
             }
-        }
+        },
 
         ExprKind::PrimitiveMethodCall {
             receiver,
@@ -931,7 +1007,7 @@ fn collect_captures_recursive(
                     seen_ids,
                 );
             }
-        }
+        },
 
         ExprKind::PrimitiveMethodRef { receiver, .. } => {
             collect_captures_recursive(
@@ -941,7 +1017,7 @@ fn collect_captures_recursive(
                 captures,
                 seen_ids,
             );
-        }
+        },
 
         ExprKind::DeferredStaticCall { arguments, .. } => {
             for arg in arguments {
@@ -953,7 +1029,7 @@ fn collect_captures_recursive(
                     seen_ids,
                 );
             }
-        }
+        },
 
         ExprKind::DelegatingInit { arguments, .. } => {
             for arg in arguments {
@@ -965,7 +1041,7 @@ fn collect_captures_recursive(
                     seen_ids,
                 );
             }
-        }
+        },
 
         ExprKind::LangIntrinsic { arguments, .. } => {
             for arg in arguments {
@@ -977,7 +1053,7 @@ fn collect_captures_recursive(
                     seen_ids,
                 );
             }
-        }
+        },
 
         ExprKind::ImplicitMemberAccess { arguments, .. } => {
             if let Some(args) = arguments {
@@ -991,7 +1067,7 @@ fn collect_captures_recursive(
                     );
                 }
             }
-        }
+        },
 
         // Leaf nodes - no recursion needed
         ExprKind::Literal(_)
@@ -1004,7 +1080,7 @@ fn collect_captures_recursive(
         | ExprKind::LangIntrinsicRef(_)
         | ExprKind::Break { .. }
         | ExprKind::Continue { .. }
-        | ExprKind::Error => {}
+        | ExprKind::Error => {},
     }
 }
 
@@ -1021,12 +1097,18 @@ fn collect_captures_from_stmt(
     match &stmt.kind {
         StatementKind::Expr(expr) => {
             collect_captures_recursive(expr, closure_entry_depth, local_scope, captures, seen_ids);
-        }
+        },
         StatementKind::Binding { value, .. } => {
             if let Some(expr) = value {
-                collect_captures_recursive(expr, closure_entry_depth, local_scope, captures, seen_ids);
+                collect_captures_recursive(
+                    expr,
+                    closure_entry_depth,
+                    local_scope,
+                    captures,
+                    seen_ids,
+                );
             }
-        }
+        },
         StatementKind::GuardLet {
             conditions,
             else_block,
@@ -1041,7 +1123,7 @@ fn collect_captures_from_stmt(
                             captures,
                             seen_ids,
                         );
-                    }
+                    },
                     kestrel_semantic_tree::expr::IfCondition::Let { value, .. } => {
                         collect_captures_recursive(
                             value,
@@ -1050,19 +1132,31 @@ fn collect_captures_from_stmt(
                             captures,
                             seen_ids,
                         );
-                    }
+                    },
                 }
             }
             for stmt in &else_block.statements {
-                collect_captures_from_stmt(stmt, closure_entry_depth, local_scope, captures, seen_ids);
+                collect_captures_from_stmt(
+                    stmt,
+                    closure_entry_depth,
+                    local_scope,
+                    captures,
+                    seen_ids,
+                );
             }
             if let Some(yield_expr) = &else_block.yield_expr {
-                collect_captures_recursive(yield_expr, closure_entry_depth, local_scope, captures, seen_ids);
+                collect_captures_recursive(
+                    yield_expr,
+                    closure_entry_depth,
+                    local_scope,
+                    captures,
+                    seen_ids,
+                );
             }
-        }
+        },
         StatementKind::Deinit { .. } => {
             // Deinit doesn't contain expressions to recurse into
-        }
+        },
     }
 }
 
@@ -1077,14 +1171,26 @@ fn collect_captures_from_else(
     match else_branch {
         kestrel_semantic_tree::expr::ElseBranch::Block { statements, value } => {
             for stmt in statements {
-                collect_captures_from_stmt(stmt, closure_entry_depth, local_scope, captures, seen_ids);
+                collect_captures_from_stmt(
+                    stmt,
+                    closure_entry_depth,
+                    local_scope,
+                    captures,
+                    seen_ids,
+                );
             }
             if let Some(val) = value {
-                collect_captures_recursive(val, closure_entry_depth, local_scope, captures, seen_ids);
+                collect_captures_recursive(
+                    val,
+                    closure_entry_depth,
+                    local_scope,
+                    captures,
+                    seen_ids,
+                );
             }
-        }
+        },
         kestrel_semantic_tree::expr::ElseBranch::ElseIf(expr) => {
             collect_captures_recursive(expr, closure_entry_depth, local_scope, captures, seen_ids);
-        }
+        },
     }
 }

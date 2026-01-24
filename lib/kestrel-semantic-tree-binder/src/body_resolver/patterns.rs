@@ -1009,7 +1009,10 @@ fn resolve_array_pattern(
             kestrel_semantic_tree::ty::TyKind::Struct { substitutions, .. } => {
                 // Check if this is Array[T] by looking at substitutions
                 if ty.is_array_struct(ctx.model.builtin_registry()) {
-                    substitutions.iter().next().map(|(_, elem_ty)| elem_ty.clone())
+                    substitutions
+                        .iter()
+                        .next()
+                        .map(|(_, elem_ty)| elem_ty.clone())
                 } else {
                     None
                 }
@@ -1031,7 +1034,12 @@ fn resolve_array_pattern(
             SyntaxKind::ArrayPatternElement => {
                 // Get the inner pattern
                 let pattern = if let Some(inner) = child.children().next() {
-                    resolve_pattern_with_mutability(&inner, ctx, expected_element_ty.as_ref(), force_mutable)
+                    resolve_pattern_with_mutability(
+                        &inner,
+                        ctx,
+                        expected_element_ty.as_ref(),
+                        force_mutable,
+                    )
                 } else {
                     Pattern::error(get_node_span(&child, ctx.file_id))
                 };

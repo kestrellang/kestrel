@@ -205,12 +205,9 @@ pub(crate) fn ty_parser<'tokens>()
                                         .map(|(_comma, more)| (true, more))
                                         .or(empty().to((false, Vec::new()))),
                                 )
-                                .then(
-                                    skip_trivia().ignore_then(
-                                        just(Token::RParen)
-                                            .map_with(|_, e| to_kestrel_span(e.span())),
-                                    ),
-                                )
+                                .then(skip_trivia().ignore_then(
+                                    just(Token::RParen).map_with(|_, e| to_kestrel_span(e.span())),
+                                ))
                                 .map(|((first, (has_comma, more)), rparen)| {
                                     let mut types = vec![first];
                                     types.extend(more);
@@ -276,21 +273,23 @@ pub(crate) fn ty_parser<'tokens>()
                 skip_trivia()
                     .ignore_then(just(Token::RBracket).map_with(|_, e| to_kestrel_span(e.span()))),
             )
-            .map(|(((lbracket, first_ty), maybe_colon_and_value), rbracket)| {
-                if let Some((colon_span, value_ty)) = maybe_colon_and_value {
-                    // Dictionary: [K: V]
-                    TyVariant::Dictionary(
-                        lbracket,
-                        Box::new(first_ty),
-                        colon_span,
-                        Box::new(value_ty),
-                        rbracket,
-                    )
-                } else {
-                    // Array: [T]
-                    TyVariant::Array(lbracket, Box::new(first_ty), rbracket)
-                }
-            })
+            .map(
+                |(((lbracket, first_ty), maybe_colon_and_value), rbracket)| {
+                    if let Some((colon_span, value_ty)) = maybe_colon_and_value {
+                        // Dictionary: [K: V]
+                        TyVariant::Dictionary(
+                            lbracket,
+                            Box::new(first_ty),
+                            colon_span,
+                            Box::new(value_ty),
+                            rbracket,
+                        )
+                    } else {
+                        // Array: [T]
+                        TyVariant::Array(lbracket, Box::new(first_ty), rbracket)
+                    }
+                },
+            )
             .boxed();
 
         // Try never first, then inferred, then paren types, then array/dict, then path
@@ -323,7 +322,9 @@ pub(crate) fn ty_parser<'tokens>()
                     .or(just(Token::Throws)
                         .map_with(|_, e| to_kestrel_span(e.span()))
                         .then(ty.clone())
-                        .map(|(throws_span, error_ty)| TypeOperator::Throws(throws_span, error_ty))),
+                        .map(|(throws_span, error_ty)| {
+                            TypeOperator::Throws(throws_span, error_ty)
+                        })),
             )
             .boxed();
 
@@ -339,8 +340,11 @@ pub(crate) fn ty_parser<'tokens>()
                             result = TyVariant::Optional(Box::new(result), question_span);
                         },
                         TypeOperator::Throws(throws_span, error_ty) => {
-                            result =
-                                TyVariant::Result(Box::new(result), throws_span, Box::new(error_ty));
+                            result = TyVariant::Result(
+                                Box::new(result),
+                                throws_span,
+                                Box::new(error_ty),
+                            );
                         },
                     }
                 }

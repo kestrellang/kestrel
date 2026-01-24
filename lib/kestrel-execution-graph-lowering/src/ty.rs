@@ -49,7 +49,6 @@ pub fn lower_type(ctx: &mut LoweringContext, ty: &Ty) -> Id<MirTyMarker> {
         },
 
         // Note: Array[T] types are now represented as TyKind::Struct and handled above
-
         TyKind::Pointer(element_ty) => {
             let element = lower_type(ctx, element_ty);
             ctx.mir.ty_ptr(element)

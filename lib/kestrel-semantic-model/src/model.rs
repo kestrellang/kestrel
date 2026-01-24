@@ -9,8 +9,8 @@ use std::sync::Arc;
 
 use kestrel_semantic_tree::builtins::{BuiltinRegistry, LanguageFeature};
 use kestrel_semantic_tree::language::KestrelLanguage;
-use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
 use kestrel_semantic_tree::symbol::extension::ExtensionSymbol;
+use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
 use kestrel_semantic_tree::ty::{Substitutions, Ty};
 use kestrel_span::Span;
 use kestrel_syntax_tree::SyntaxNode;
@@ -158,7 +158,9 @@ impl SemanticModel {
     /// Returns None if the Array struct builtin is not registered (stdlib not loaded).
     pub fn make_array_type(&self, element_ty: Ty, span: Span) -> Option<Ty> {
         // Look up the Array struct symbol
-        let symbol_id = self.builtin_registry.builtin_struct(LanguageFeature::ArrayStruct)?;
+        let symbol_id = self
+            .builtin_registry
+            .builtin_struct(LanguageFeature::ArrayStruct)?;
         let symbol = self.registry.get(symbol_id)?;
 
         // Downcast to StructSymbol

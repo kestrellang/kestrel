@@ -1304,10 +1304,7 @@ fn check_transitive_conformance_impl(
 /// Collect protocol IDs reachable via protocol extensions, starting from a seed set.
 ///
 /// This follows chains like `extend A: B` and `extend B: C`, returning `[A, B, C]`.
-fn collect_protocol_ids_via_extensions<I>(
-    model: &SemanticModel,
-    seed_protocols: I,
-) -> Vec<SymbolId>
+fn collect_protocol_ids_via_extensions<I>(model: &SemanticModel, seed_protocols: I) -> Vec<SymbolId>
 where
     I: IntoIterator<Item = SymbolId>,
 {
@@ -1735,7 +1732,6 @@ fn resolve_all_associated_types_impl(
         },
 
         // Note: Array[T] struct types are handled by the Struct case below
-
         TyKind::Pointer(element) => {
             let new_element = resolve_all_associated_types_impl(oracle, element, visited);
             Ty::pointer(new_element, ty.span().clone())

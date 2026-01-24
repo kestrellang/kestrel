@@ -281,8 +281,7 @@ impl Constructor {
 
             TyKind::Struct { symbol, .. } => {
                 // Check for Array[T] struct - arrays have variable length
-                if symbol.metadata().name().value == "Array"
-                    && symbol.type_parameters().len() == 1
+                if symbol.metadata().name().value == "Array" && symbol.type_parameters().len() == 1
                 {
                     return None;
                 }
