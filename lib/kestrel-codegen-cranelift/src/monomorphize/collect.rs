@@ -112,7 +112,7 @@ impl<'a> CollectionContext<'a> {
     fn process_function_instantiation(&mut self, inst: &FunctionInstantiation) {
         // Get function definition (need to clone type_params to avoid borrow conflict)
         let func_def = &self.mir.functions[inst.func_id];
-        let _func_name = self.mir.name(func_def.name).to_string();
+        let func_name = self.mir.name(func_def.name).to_string();
         let type_params = func_def.type_params.clone();
         let blocks = func_def.blocks.clone();
         let params = func_def.params.clone();
@@ -120,6 +120,11 @@ impl<'a> CollectionContext<'a> {
         let ret = func_def.ret;
 
         // Build substitution
+        if type_params.len() != inst.type_args.len() {
+            eprintln!("MISMATCH in function: {}", func_name);
+            eprintln!("  type_params: {:?}", type_params);
+            eprintln!("  type_args: {:?}", inst.type_args);
+        }
         let mut subst = build_substitution(self.mir, &type_params, &inst.type_args);
 
         // Set self_type if this instantiation has one (protocol extension methods)

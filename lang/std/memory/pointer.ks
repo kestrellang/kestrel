@@ -3,13 +3,14 @@
 module std.memory
 
 import std.ffi.(FFISafe)
-import std.core.(Equatable, Bool)
-import std.num.(Int64, UInt64)
+import std.core.(Equatable, Bool, Hash, Hasher)
+import std.num.(Int64, UInt64, UInt8)
+import std.memory.(Slice)
 // Note: Optional comes in Phase 11, Iterator/Iterable in Phase 10
 
 // RawPointer - untyped pointer
 // RawPointer is always FFI-safe as it's just an opaque pointer
-public struct RawPointer: Equatable, FFISafe {
+public struct RawPointer: Equatable, FFISafe, Hash {
     public var raw: lang.ptr[lang.i8]
 
     public init(raw raw: lang.ptr[lang.i8]) {
@@ -43,10 +44,15 @@ public struct RawPointer: Equatable, FFISafe {
     public func equals(other: RawPointer) -> Bool {
         self.address == other.address
     }
+
+    public func hash[H](mutating into hasher: H) where H: Hasher {
+        let addr = self.address;
+        hasher.write(Slice(pointer: Pointer(to: addr).asRaw().cast[UInt8](), count: Int64(intLiteral: 8)))
+    }
 }
 
 // Pointer[T] - typed pointer to a single element
-public struct Pointer[T]: Equatable {
+public struct Pointer[T]: Equatable, Hash {
     private var _raw: lang.ptr[T]
 
     // Public getter for FFI interop
@@ -96,6 +102,11 @@ public struct Pointer[T]: Equatable {
 
     public func equals(other: Pointer[T]) -> Bool {
         self.address == other.address
+    }
+
+    public func hash[H](mutating into hasher: H) where H: Hasher {
+        let addr = self.address;
+        hasher.write(Slice(pointer: Pointer(to: addr).asRaw().cast[UInt8](), count: Int64(intLiteral: 8)))
     }
 }
 

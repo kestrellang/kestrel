@@ -51,8 +51,8 @@
 - [x] Result type syntax Type throws Error
 - [x] Null Literals
 - [x] and / or short-circuit
+- [x] Null Coalescing
 - [ ] Optional Chaining
-- [ ] Null Coalescing
 - [ ] Refactor Matchable for range patterns
 - [ ] Irrefutable patterns in function parameters
 - [ ] String interpolation

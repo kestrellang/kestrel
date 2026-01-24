@@ -4,6 +4,8 @@ module std.core
 
 import std.core.(Less, LessOrEqual, Greater, GreaterOrEqual, NotEqual, Equal)
 import std.text.(String)
+import std.memory.(Slice, Pointer)
+import std.num.(UInt64)
 
 // Equatable - types that can be compared for equality
 public protocol Equatable {
@@ -61,20 +63,17 @@ extend Comparable: Less[Self], LessOrEqual[Self], Greater[Self], GreaterOrEqual[
     }
 }
 
-// Hashable - types that can be hashed
-// Note: write(bytes:) requires Slice[UInt8] which comes later
-public protocol Hashable: Equatable {
+// Hash - types that can be hashed
+public protocol Hash: Equatable {
     func hash[H](mutating into hasher: H) where H: Hasher
 }
 
 // Hasher - types that can compute hash values
-// Note: Full implementation requires Slice and UInt64
 public protocol Hasher {
-    //mutating func write(bytes: Slice[UInt8])
-    //mutating func finish() -> UInt64
+    mutating func write(bytes: Slice[UInt8])
+    mutating func finish() -> UInt64
 }
 
-// DefaultHasher comes later when we have UInt64 and Slice
 
 // Defaultable - types with a default value
 public protocol Defaultable {

@@ -5,12 +5,14 @@ module std.num
 
 import std.ffi.(FFISafe)
 import std.core.(
-    Equatable, Comparable, Ordering, Bool, Matchable, Formattable,
+    Equatable, Comparable, Ordering, Bool, Matchable, Formattable, Hash, Hasher,
     Addable, Subtractable, Multipliable, Divisible, Modulo, Negatable,
     BitwiseAnd, BitwiseOr, BitwiseXor, BitwiseNot, LeftShift, RightShift,
     ExpressibleByIntLiteral, Convertible
 )
 import std.text.(String)
+import std.memory.(Slice, Pointer)
+import std.num.(UInt8, Int64)
 
 public struct Int8:
     SignedInteger,
@@ -19,6 +21,7 @@ public struct Int8:
     Equatable,
     Matchable,
     Formattable,
+    Hash,
     Addable,
     Subtractable,
     Multipliable,
@@ -81,6 +84,11 @@ public struct Int8:
 
     public func successor() -> Int8 { self.add(Int8.one) }
     public func predecessor() -> Int8 { self.subtract(Int8.one) }
+
+    public func hash[H](mutating into hasher: H) where H: Hasher {
+        let val = self;
+        hasher.write(Slice(pointer: Pointer(to: val).asRaw().cast[UInt8](), count: Int64(intLiteral: 1)))
+    }
 
     // Associated type bindings
     type Addable.Output = Int8

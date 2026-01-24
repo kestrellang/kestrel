@@ -4,11 +4,14 @@ module std.core
 
 import std.ffi.(FFISafe)
 import std.text.(String)
+import std.num.(UInt8)
+import std.memory.(Slice, Pointer)
 
 public struct Bool:
     Equatable,
     Matchable,
     Formattable,
+    Hash,
     And[Bool],
     Or[Bool],
     Not,
@@ -33,10 +36,14 @@ public struct Bool:
         Bool(boolLiteral: lang.i1_eq(self.value, other.value))
     }
 
-    // Hashable - deferred until Hasher has write method
-    // public func hash[H](mutating into hasher: H) where H: Hasher {
-    //     ...
-    // }
+    // Hash
+    public func hash[H](mutating into hasher: H) where H: Hasher {
+        if self.value {
+            hasher.write(Slice(pointer: Pointer(to: UInt8(intLiteral: 1)), count: std.num.Int64(intLiteral: 1)))
+        } else {
+            hasher.write(Slice(pointer: Pointer(to: UInt8(intLiteral: 0)), count: std.num.Int64(intLiteral: 1)))
+        }
+    }
 
     // Associated type bindings
     type And.Output = Bool

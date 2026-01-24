@@ -2,10 +2,10 @@
 
 module std.text
 
-import std.core.(Bool, Equatable, Comparable, Cloneable, Formattable, Ordering, Addable, ExpressibleByStringLiteral)
+import std.core.(Bool, Equatable, Comparable, Cloneable, Formattable, Ordering, Addable, ExpressibleByStringLiteral, Hash, Hasher)
 import std.num.(Int64, UInt8)
 import std.result.(Optional)
-import std.memory.(Layout, Pointer, RawPointer, SystemAllocator, RcBox)
+import std.memory.(Layout, Pointer, RawPointer, SystemAllocator, RcBox, Slice)
 import std.iter.(Iterator, Iterable)
 import std.text.(Char, decodeUtf8, encodeUtf8)
 import std.ffi.(memcpy)
@@ -174,7 +174,7 @@ struct StringStorage: Cloneable {
 }
 
 // String - UTF-8 encoded, dynamically sized string with COW semantics
-public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, Addable, ExpressibleByStringLiteral {
+public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, Addable, ExpressibleByStringLiteral, Hash {
     type Item = Char
     type Iter = StringIterator
     type Output = String
@@ -698,6 +698,11 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
         } else {
             .Equal
         }
+    }
+
+    // Hash
+    public func hash[H](mutating into hasher: H) where H: Hasher {
+        hasher.write(Slice(pointer: self.ptr(), count: self.len()))
     }
 
     // Cloneable - shallow clone (COW)

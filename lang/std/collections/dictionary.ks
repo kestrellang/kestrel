@@ -2,11 +2,12 @@
 
 module std.collections
 
-import std.core.(Bool, Equatable, Cloneable)
+import std.core.(Bool, Equatable, Cloneable, Hash, Hasher, Defaultable)
 import std.num.(Int64, UInt64)
 import std.result.(Optional)
 import std.memory.(Layout, Pointer, RawPointer, SystemAllocator, RcBox)
 import std.iter.(Iterator, Iterable)
+import std.collections.(DefaultHasher)
 
 // Compute next power of two, minimum 8
 func nextPowerOfTwo(n: Int64) -> Int64 {
@@ -29,12 +30,14 @@ public struct DictionaryEntry[K, V] {
     public var value: V
     public var hash: UInt64
     public var occupied: Bool
+    public var deleted: Bool
 
-    public init(key key: K, value value: V, hash hash: UInt64, occupied occupied: Bool) {
+    public init(key key: K, value value: V, hash hash: UInt64, occupied occupied: Bool, deleted deleted: Bool) {
         self.key = key;
         self.value = value;
         self.hash = hash;
         self.occupied = occupied;
+        self.deleted = deleted;
     }
 
     // Create an unoccupied entry with placeholder key/value
@@ -43,6 +46,7 @@ public struct DictionaryEntry[K, V] {
         self.value = placeholderValue;
         self.hash = UInt64(intLiteral: 0);
         self.occupied = false;
+        self.deleted = false;
     }
 }
 
@@ -73,8 +77,8 @@ public struct DictionaryIterator[K, V]: Iterator {
     }
 }
 
-// DictionaryStorage[K, V] - internal storage for Dictionary
-struct DictionaryStorage[K, V]: Cloneable where K: Equatable {
+// DictionaryStorage[K, V, H] - internal storage for Dictionary
+struct DictionaryStorage[K, V, H]: Cloneable where K: Hash, H: Hasher, H: Defaultable {
     var entries: Pointer[DictionaryEntry[K, V]]
     var len: Int64
     var cap: Int64
@@ -90,7 +94,7 @@ struct DictionaryStorage[K, V]: Cloneable where K: Equatable {
     }
 
     // Deep clone - allocate new buffer and copy entries
-    func clone() -> DictionaryStorage[K, V] {
+    func clone() -> DictionaryStorage[K, V, H] {
         if self.cap == Int64(intLiteral: 0) {
             return DictionaryStorage(
                 entries: Pointer(raw: lang.ptr_null[DictionaryEntry[K, V]]()),
@@ -132,12 +136,12 @@ struct DictionaryStorage[K, V]: Cloneable where K: Equatable {
     }
 }
 
-// Dictionary[K, V] - hash map with COW semantics using RcBox
-public struct Dictionary[K, V]: Iterable where K: Equatable {
+// Dictionary[K, V, H] - hash map with COW semantics using RcBox
+public struct Dictionary[K, V, H = DefaultHasher]: Iterable where K: Hash, H: Hasher, H: Defaultable {
     type Item = DictionaryEntry[K, V]
     type Iter = DictionaryIterator[K, V]
 
-    private var storage: RcBox[DictionaryStorage[K, V]]
+    private var storage: RcBox[DictionaryStorage[K, V, H]]
 
     // Helper accessors for storage fields
     private func entries() -> Pointer[DictionaryEntry[K, V]] { self.storage.getValue().entries }
@@ -154,7 +158,7 @@ public struct Dictionary[K, V]: Iterable where K: Equatable {
     }
 
     // Private init for internal use (from storage)
-    private init(storage storage: RcBox[DictionaryStorage[K, V]]) {
+    private init(storage storage: RcBox[DictionaryStorage[K, V, H]]) {
         self.storage = storage;
     }
 
@@ -208,13 +212,11 @@ public struct Dictionary[K, V]: Iterable where K: Equatable {
         }
     }
 
-    // Simple hash function - XOR shift based on the UInt64 representation
-    // This works for types whose first 8 bytes are meaningful (Int64, UInt64, pointers, etc.)
-    // For proper hashing, types should implement Hashable protocol
+    // Hash function using the generic hasher H
     private func hashKey(key: K) -> UInt64 {
-        // Use a constant hash for now (all keys hash to same bucket - O(n) but correct)
-        // TODO: Implement proper hashing when Hashable protocol is complete
-        UInt64(intLiteral: 0)
+        var hasher = H();
+        key.hash(into: hasher);
+        hasher.finish()
     }
 
     // Properties
@@ -222,7 +224,7 @@ public struct Dictionary[K, V]: Iterable where K: Equatable {
     public func getCapacity() -> Int64 { self.cap() }
     public func isEmpty() -> Bool { self.len() == Int64(intLiteral: 0) }
 
-    // Find entry by key using linear search (since hash is constant)
+    // Find entry by key using hashing and linear probing
     private func findEntry(key: K) -> Optional[Int64] {
         let myCap = self.cap();
         if myCap == Int64(intLiteral: 0) {
@@ -230,39 +232,56 @@ public struct Dictionary[K, V]: Iterable where K: Equatable {
             return none
         }
 
+        let hashValue: UInt64 = self.hashKey(key);
+        let capU: UInt64 = UInt64(from: myCap);
+        let mod: UInt64 = hashValue.modulo(capU);
+        var index: Int64 = Int64(from: mod);
         let myEntries = self.entries();
         var i: Int64 = Int64(intLiteral: 0);
-        var result: Optional[Int64] = .None;
-        var done: Bool = false;
 
-        while i < myCap and done == false {
-            let entry = myEntries.offset(by: i).read();
-            if entry.occupied == true and entry.key.equals(key) == true {
-                result = .Some(i);
-                done = true
+        while i < myCap {
+            let entry = myEntries.offset(by: index).read();
+            if entry.occupied == false and entry.deleted == false {
+                // Found truly empty slot - stop search
+                let none: Optional[Int64] = .None;
+                return none
             }
+            if entry.occupied == true and entry.key.equals(key) == true {
+                return .Some(index)
+            }
+            // Linear probing
+            index = (index + Int64(intLiteral: 1)) % myCap;
             i = i + Int64(intLiteral: 1)
         }
-        result
+        let none: Optional[Int64] = .None;
+        none
     }
 
-    // Find first unoccupied slot
-    private func findEmptySlot() -> Optional[Int64] {
+    // Find first unoccupied slot (either truly empty or deleted)
+    private func findEmptySlot(hashValue: UInt64) -> Optional[Int64] {
         let myCap = self.cap();
+        if myCap == Int64(intLiteral: 0) {
+            let none: Optional[Int64] = .None;
+            return none
+        }
+
+        let capU: UInt64 = UInt64(from: myCap);
+        let mod: UInt64 = hashValue.modulo(capU);
+        var index: Int64 = Int64(from: mod);
         let myEntries = self.entries();
         var i: Int64 = Int64(intLiteral: 0);
-        var result: Optional[Int64] = .None;
-        var done: Bool = false;
 
-        while i < myCap and done == false {
-            let entry = myEntries.offset(by: i).read();
+        while i < myCap {
+            let entry = myEntries.offset(by: index).read();
             if entry.occupied == false {
-                result = .Some(i);
-                done = true
+                return .Some(index)
             }
+            // Linear probing
+            index = (index + Int64(intLiteral: 1)) % myCap;
             i = i + Int64(intLiteral: 1)
         }
-        result
+        let none: Optional[Int64] = .None;
+        none
     }
 
     // Ensure we have capacity for more entries (resize at 75% load)
@@ -307,24 +326,25 @@ public struct Dictionary[K, V]: Iterable where K: Equatable {
 
             // Copy old entries
             var newLen: Int64 = Int64(intLiteral: 0);
-            var slotIndex: Int64 = Int64(intLiteral: 0);
             i = Int64(intLiteral: 0);
             while i < oldCap {
                 let entry = oldEntries.offset(by: i).read();
                 if entry.occupied {
-                    // Find empty slot in new table
+                    // Find empty slot in new table using hashing and linear probing
+                    let hashValue: UInt64 = entry.hash;
+                    let newCapU: UInt64 = UInt64(from: newCap);
+                    let mod: UInt64 = hashValue.modulo(newCapU);
+                    var slotIndex: Int64 = Int64(from: mod);
                     var foundSlot: Bool = false;
-                    while slotIndex < newCap and foundSlot == false {
+                    while foundSlot == false {
                         let slotEntry = newEntries.offset(by: slotIndex).read();
                         if slotEntry.occupied == false {
                             newEntries.offset(by: slotIndex).write(entry);
                             newLen = newLen + Int64(intLiteral: 1);
                             foundSlot = true
+                        } else {
+                            slotIndex = (slotIndex + Int64(intLiteral: 1)) % newCap
                         }
-                        slotIndex = slotIndex + Int64(intLiteral: 1)
-                    }
-                    if foundSlot == false {
-                        lang.panic("Dictionary resize failed - no empty slot found")
                     }
                 }
                 i = i + Int64(intLiteral: 1)
@@ -366,6 +386,7 @@ public struct Dictionary[K, V]: Iterable where K: Equatable {
 
     // Insert or update value for key, returns old value if any
     public mutating func insert(key: K, value: V) -> Optional[V] {
+        let hashValue = self.hashKey(key);
         // Check if key already exists
         let maybeIndex = self.findEntry(key);
         if maybeIndex.isSome() == true {
@@ -376,8 +397,9 @@ public struct Dictionary[K, V]: Iterable where K: Equatable {
             myEntries.offset(by: index).write(DictionaryEntry(
                 key: key,
                 value: value,
-                hash: UInt64(intLiteral: 0),
-                occupied: true
+                hash: hashValue,
+                occupied: true,
+                deleted: false
             ));
             return .Some(oldEntry.value)
         }
@@ -387,15 +409,16 @@ public struct Dictionary[K, V]: Iterable where K: Equatable {
         self.makeUnique();
 
         // Find empty slot
-        let maybeSlot = self.findEmptySlot();
-        if maybeSlot.isSome() {
+        let maybeSlot = self.findEmptySlot(hashValue);
+        if maybeSlot.isSome() == true {
             var s = self.storage.getValue();
             let slotIndex = maybeSlot.unwrap();
             s.entries.offset(by: slotIndex).write(DictionaryEntry(
                 key: key,
                 value: value,
-                hash: UInt64(intLiteral: 0),
-                occupied: true
+                hash: hashValue,
+                occupied: true,
+                deleted: false
             ));
             s.len = s.len + Int64(intLiteral: 1);
             self.storage.setValue(s)
@@ -418,12 +441,13 @@ public struct Dictionary[K, V]: Iterable where K: Equatable {
             let entry = s.entries.offset(by: index).read();
             let removedValue = entry.value;
 
-            // Mark as unoccupied (keep key/value as placeholder)
+            // Mark as unoccupied and deleted (tombstone)
             s.entries.offset(by: index).write(DictionaryEntry(
                 key: entry.key,
                 value: entry.value,
-                hash: UInt64(intLiteral: 0),
-                occupied: false
+                hash: entry.hash,
+                occupied: false,
+                deleted: true
             ));
             s.len = s.len - Int64(intLiteral: 1);
             self.storage.setValue(s);
@@ -442,12 +466,13 @@ public struct Dictionary[K, V]: Iterable where K: Equatable {
         var i: Int64 = Int64(intLiteral: 0);
         while i < s.cap {
             let entry = s.entries.offset(by: i).read();
-            // Keep key/value but mark unoccupied
+            // Mark unoccupied and not deleted
             s.entries.offset(by: i).write(DictionaryEntry(
                 key: entry.key,
                 value: entry.value,
                 hash: UInt64(intLiteral: 0),
-                occupied: false
+                occupied: false,
+                deleted: false
             ));
             i = i + Int64(intLiteral: 1)
         }
@@ -464,14 +489,14 @@ public struct Dictionary[K, V]: Iterable where K: Equatable {
     public func getEntries() -> Pointer[DictionaryEntry[K, V]] { self.entries() }
 
     // Cloneable - shallow clone (COW)
-    public func clone() -> Dictionary[K, V] {
+    public func clone() -> Dictionary[K, V, H] {
         Dictionary(storage: self.storage.clone())
     }
 }
 
 // Equatable when K and V are Equatable
-extend Dictionary[K, V]: Equatable where K: Equatable, V: Equatable {
-    public func equals(other: Dictionary[K, V]) -> Bool {
+extend Dictionary[K, V, H]: Equatable where K: Hash, V: Equatable, H: Hasher, H: Defaultable {
+    public func equals(other: Dictionary[K, V, H]) -> Bool {
         let selfCount = self.count();
         let otherCount = other.count();
         if selfCount != otherCount {
@@ -502,10 +527,10 @@ extend Dictionary[K, V]: Equatable where K: Equatable, V: Equatable {
 }
 
 // Cloneable conformance
-extend Dictionary[K, V]: Cloneable {}
+extend Dictionary[K, V, H]: Cloneable {}
 
 // KeysIterator must be defined before KeysView
-public struct KeysIterator[K, V]: Iterator where K: Equatable {
+public struct KeysIterator[K, V]: Iterator where K: Hash {
     type Item = K
 
     private var dictIter: DictionaryIterator[K, V]
@@ -525,7 +550,7 @@ public struct KeysIterator[K, V]: Iterator where K: Equatable {
 }
 
 // KeysView - view of dictionary keys
-public struct KeysView[K, V]: Iterable where K: Equatable {
+public struct KeysView[K, V]: Iterable where K: Hash {
     type Item = K
     type Iter = KeysIterator[K, V]
 
@@ -543,7 +568,7 @@ public struct KeysView[K, V]: Iterable where K: Equatable {
 }
 
 // ValuesIterator must be defined before ValuesView
-public struct ValuesIterator[K, V]: Iterator where K: Equatable {
+public struct ValuesIterator[K, V]: Iterator where K: Hash {
     type Item = V
 
     private var dictIter: DictionaryIterator[K, V]
@@ -563,7 +588,7 @@ public struct ValuesIterator[K, V]: Iterator where K: Equatable {
 }
 
 // ValuesView - view of dictionary values
-public struct ValuesView[K, V]: Iterable where K: Equatable {
+public struct ValuesView[K, V]: Iterable where K: Hash {
     type Item = V
     type Iter = ValuesIterator[K, V]
 
@@ -581,7 +606,7 @@ public struct ValuesView[K, V]: Iterable where K: Equatable {
 }
 
 // Extension to add keys() and values() methods
-extend Dictionary[K, V] where K: Equatable {
+extend Dictionary[K, V, H] where K: Hash, H: Hasher, H: Defaultable {
     public func keys() -> KeysView[K, V] {
         KeysView(entries: self.getEntries(), capacity: self.getCapacity())
     }
@@ -592,6 +617,6 @@ extend Dictionary[K, V] where K: Equatable {
 }
 
 // Type operator alias: [K: V] desugars to DictionaryTypeOperator[K, V] which is Dictionary[K, V]
-// Note: The Equatable constraint on K comes from Dictionary itself
+// Note: The Hash constraint on K comes from Dictionary itself
 @builtin(.DictionaryTypeOperator)
-public type DictionaryTypeOperator[K, V] = Dictionary[K, V];
+public type DictionaryTypeOperator[K, V] = Dictionary[K, V, DefaultHasher];

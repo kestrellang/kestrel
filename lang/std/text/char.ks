@@ -2,7 +2,7 @@
 
 module std.text
 
-import std.core.(Equatable, Comparable, Ordering, Bool, Matchable, ExpressibleByCharLiteral)
+import std.core.(Equatable, Comparable, Ordering, Bool, Matchable, ExpressibleByCharLiteral, Hash, Hasher)
 import std.num.(Int64, UInt8, UInt32)
 import std.result.(Optional)
 import std.collections.(Array)
@@ -11,7 +11,7 @@ import std.collections.(Array)
 public type Byte = UInt8
 
 // Char - Unicode code point (single scalar value, 0 to 0x10FFFF)
-public struct Char: Equatable, Comparable, Matchable, ExpressibleByCharLiteral {
+public struct Char: Equatable, Comparable, Matchable, ExpressibleByCharLiteral, Hash {
     private var _value: UInt32
 
     public init(value: UInt32) {
@@ -117,6 +117,11 @@ public struct Char: Equatable, Comparable, Matchable, ExpressibleByCharLiteral {
     // Comparable
     public func compare(other: Char) -> Ordering {
         self._value.compare(other._value)
+    }
+
+    public func hash[H](mutating into hasher: H) where H: Hasher {
+        let val = self._value;
+        hasher.write(Slice(pointer: Pointer(to: val).asRaw().cast[UInt8](), count: Int64(intLiteral: 4)))
     }
 }
 

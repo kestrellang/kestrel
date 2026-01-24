@@ -599,12 +599,16 @@ See [docs/memory-model/implementation-plan.md](docs/memory-model/implementation-
 - [x] Try Operator
 - [x] For Loops
 - [x] And / Or Short Circuiting
-- [ ] Null Coalescing Operator
+- [x] Null Coalescing Operator
 - [ ] Optional Chaining
 - [x] Compound Assignment Operators
 - [x] Character Literals
 - [ ] String Interpolation
 - [x] Null Literals
+
+### Standard Library
+
+- [ ] Create real hash implementation
 
 ### Core Features
 
