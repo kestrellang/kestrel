@@ -495,13 +495,24 @@ impl<'a> CollectionContext<'a> {
                 protocol,
                 method,
                 for_type,
+                method_type_args,
             } => {
                 // Apply substitution to for_type
                 let concrete_for_type = subst.apply_ty(self.mir, *for_type);
 
+                // Apply substitution to method_type_args (the method's own type parameters)
+                let concrete_method_type_args: Vec<_> = method_type_args
+                    .iter()
+                    .map(|ty| subst.apply_ty(self.mir, *ty))
+                    .collect();
+
                 // Resolve the witness to find the actual implementation
                 match witness::resolve_witness(self.mir, *protocol, method, concrete_for_type) {
-                    Ok((impl_name, impl_type_args)) => {
+                    Ok((impl_name, mut impl_type_args)) => {
+                        // Append the method's own type arguments (e.g., H in hash[H])
+                        // to the witness type args (e.g., K, V from Dictionary[K, V, H])
+                        impl_type_args.extend(concrete_method_type_args);
+
                         // Record the implementation function instantiation
                         // For protocol extension methods, set self_type to concrete_for_type
                         // so that MirTy::SelfType gets properly substituted.

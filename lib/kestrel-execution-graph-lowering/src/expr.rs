@@ -95,7 +95,8 @@ fn emit_clone_call(ctx: &mut LoweringContext, value: &Value, ty: &Ty) -> Value {
     };
 
     // Create the witness callee: witness_method Cloneable.clone for T
-    let callee = Callee::witness(protocol_name, "clone", mir_ty);
+    // clone() has no method-level type parameters
+    let callee = Callee::witness(protocol_name, "clone", mir_ty, vec![]);
 
     // The clone method takes `self` by borrow (ref), so pass with PassingMode::Ref
     let call_args = vec![CallArg::borrow(value.clone())];
@@ -2613,8 +2614,9 @@ fn lower_call(
                                 if parent.metadata().kind() == KestrelSymbolKind::Protocol {
                                     let protocol_name = qualified_name_for_symbol(ctx, &parent);
                                     let for_type = lower_type(ctx, &expr.ty);
+                                    // init() has no method-level type parameters
                                     let mir_callee =
-                                        Callee::witness(protocol_name, "init", for_type);
+                                        Callee::witness(protocol_name, "init", for_type, vec![]);
                                     ctx.emit_call_with_modes(unit_place, mir_callee, call_args);
                                 } else {
                                     ctx.emit_error(LoweringError::internal(
@@ -2825,8 +2827,40 @@ fn lower_call(
                                 } else {
                                     lower_type(ctx, &receiver.ty)
                                 };
-                                let mir_callee =
-                                    Callee::witness(protocol_name, method_name.clone(), for_type);
+
+                                // Extract the method's own type arguments (not parent type args).
+                                // For example, in `Hash.hash[H]`, we need to extract the concrete type for `H`.
+                                let method_type_args: Vec<_> = if let Some(func_sym) =
+                                    sym.as_ref().downcast_ref::<FunctionSymbol>()
+                                {
+                                    let method_param_ids: Vec<_> = func_sym
+                                        .type_parameters()
+                                        .iter()
+                                        .map(|tp| Symbol::metadata(tp.as_ref()).id())
+                                        .collect();
+
+                                    if method_param_ids.is_empty() {
+                                        vec![]
+                                    } else if let Some(ordered_types) =
+                                        substitutions.types_in_order(&method_param_ids)
+                                    {
+                                        ordered_types
+                                            .into_iter()
+                                            .map(|ty| lower_type(ctx, ty))
+                                            .collect()
+                                    } else {
+                                        vec![]
+                                    }
+                                } else {
+                                    vec![]
+                                };
+
+                                let mir_callee = Callee::witness(
+                                    protocol_name,
+                                    method_name.clone(),
+                                    for_type,
+                                    method_type_args,
+                                );
                                 ctx.emit_call_with_modes(
                                     result_place.clone(),
                                     mir_callee,

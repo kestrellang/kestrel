@@ -2672,6 +2672,7 @@ pub fn compile_call(
             protocol,
             method,
             for_type,
+            method_type_args,
         } => {
             // If for_type uses SelfType, we need to resolve it from the substitution first
             let concrete_for_type = if type_uses_self(ctx.mir, *for_type) {
@@ -2706,9 +2707,18 @@ pub fn compile_call(
                 applied
             };
 
+            // Apply substitution to method_type_args (the method's own type parameters)
+            let concrete_method_type_args: Vec<_> = method_type_args
+                .iter()
+                .filter_map(|ty| subst.apply_ty_readonly(ctx.mir, *ty).ok())
+                .collect();
+
             // Resolve the witness to get the concrete implementation
-            let (impl_name, impl_type_args) =
+            let (impl_name, mut impl_type_args) =
                 resolve_witness(ctx.mir, *protocol, method, concrete_for_type)?;
+
+            // Append the method's own type arguments (e.g., H in hash[H])
+            impl_type_args.extend(concrete_method_type_args);
             ensure_concrete_type_args(
                 ctx.mir,
                 &impl_type_args,

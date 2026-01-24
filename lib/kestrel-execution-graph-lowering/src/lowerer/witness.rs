@@ -449,18 +449,23 @@ fn bind_methods(
 ) {
     let protocol_id = protocol_symbol.metadata().id();
 
-    // Collect protocol method names for fallback matching
+    // Collect protocol method names for fallback matching (including initializers)
     let protocol_method_names: std::collections::HashSet<String> = protocol_symbol
         .metadata()
         .children()
         .into_iter()
-        .filter(|c| c.metadata().kind() == KestrelSymbolKind::Function)
+        .filter(|c| {
+            let kind = c.metadata().kind();
+            kind == KestrelSymbolKind::Function || kind == KestrelSymbolKind::Initializer
+        })
         .map(|c| c.metadata().name().value.clone())
         .collect();
 
     for child in implementing_symbol.metadata().children() {
         let child_kind = child.metadata().kind();
-        if child_kind != KestrelSymbolKind::Function {
+        // Handle both functions and initializers (for protocols like Defaultable with init())
+        if child_kind != KestrelSymbolKind::Function && child_kind != KestrelSymbolKind::Initializer
+        {
             continue;
         }
 

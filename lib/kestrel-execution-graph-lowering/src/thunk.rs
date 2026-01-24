@@ -212,7 +212,8 @@ pub fn generate_witness_thunk(
     }
 
     // Create witness method callee
-    let callee = Callee::witness(protocol_name, method_name, for_type);
+    // TODO: If thunks need to support methods with type params, we'll need to pass them here
+    let callee = Callee::witness(protocol_name, method_name, for_type, vec![]);
 
     let is_unit_return = matches!(ctx.mir.ty(return_type), MirTy::Unit);
 

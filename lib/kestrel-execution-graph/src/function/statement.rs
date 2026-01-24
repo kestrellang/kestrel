@@ -282,6 +282,9 @@ pub enum Callee {
         method: String,
         /// The type parameter we're calling on (e.g., `T`)
         for_type: Id<Ty>,
+        /// Type arguments for the method itself (not the protocol).
+        /// For example, in `Hash.hash[H]`, this would contain the concrete type for `H`.
+        method_type_args: Vec<Id<Ty>>,
     },
 }
 
@@ -771,11 +774,13 @@ impl Callee {
         protocol: Id<QualifiedName>,
         method: impl Into<String>,
         for_type: Id<Ty>,
+        method_type_args: Vec<Id<Ty>>,
     ) -> Self {
         Callee::Witness {
             protocol,
             method: method.into(),
             for_type,
+            method_type_args,
         }
     }
 
@@ -813,14 +818,20 @@ impl fmt::Display for CalleeDisplay<'_> {
                 protocol,
                 method,
                 for_type,
+                method_type_args,
             } => {
-                write!(
-                    f,
-                    "witness_method {}.{} for {}",
-                    self.ctx.name(*protocol),
-                    method,
-                    self.ctx.ty(*for_type).display(self.ctx)
-                )
+                write!(f, "witness_method {}.{}", self.ctx.name(*protocol), method)?;
+                if !method_type_args.is_empty() {
+                    write!(f, "[")?;
+                    for (i, ty) in method_type_args.iter().enumerate() {
+                        if i > 0 {
+                            write!(f, ", ")?;
+                        }
+                        write!(f, "{}", self.ctx.ty(*ty).display(self.ctx))?;
+                    }
+                    write!(f, "]")?;
+                }
+                write!(f, " for {}", self.ctx.ty(*for_type).display(self.ctx))
             },
         }
     }

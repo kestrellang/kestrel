@@ -1212,7 +1212,8 @@ fn emit_matchable_switch(
                 let result_local = ctx.create_temp("matches_result", bool_mir_ty);
                 let result_place_local = Place::local(result_local);
 
-                let callee = Callee::witness(protocol_name, "matches", for_type);
+                // matches() has no method-level type parameters
+                let callee = Callee::witness(protocol_name, "matches", for_type, vec![]);
                 let call_args = vec![
                     CallArg::borrow(Value::Place(switch_place.clone())),
                     CallArg::borrow(Value::Place(literal_place)),
@@ -1349,7 +1350,8 @@ fn emit_matchable_switch(
                 let result_local = ctx.create_temp("matches_result", bool_mir_ty);
                 let result_place_local = Place::local(result_local);
 
-                let callee = Callee::witness(protocol_name, "matches", for_type);
+                // matches() has no method-level type parameters
+                let callee = Callee::witness(protocol_name, "matches", for_type, vec![]);
                 let call_args = vec![
                     CallArg::borrow(Value::Place(switch_place.clone())),
                     CallArg::borrow(Value::Place(literal_place)),
@@ -1488,7 +1490,8 @@ fn emit_matchable_switch(
                 let result_local = ctx.create_temp("matches_result", bool_mir_ty);
                 let result_place_local = Place::local(result_local);
 
-                let callee = Callee::witness(protocol_name, "matches", for_type);
+                // matches() has no method-level type parameters
+                let callee = Callee::witness(protocol_name, "matches", for_type, vec![]);
                 let call_args = vec![
                     CallArg::borrow(Value::Place(switch_place.clone())),
                     CallArg::borrow(Value::Place(literal_place)),
@@ -1618,8 +1621,9 @@ fn emit_matchable_switch(
                 let cmp1_local = ctx.create_temp("cmp_lo", bool_mir_ty);
                 let cmp1_place = Place::local(cmp1_local);
 
+                // lessThanOrEqual() has no method-level type parameters
                 let callee1 =
-                    Callee::witness(less_or_equal_protocol_name, "lessThanOrEqual", for_type);
+                    Callee::witness(less_or_equal_protocol_name, "lessThanOrEqual", for_type, vec![]);
                 let call_args1 = vec![
                     CallArg::borrow(Value::Place(start_place)),
                     CallArg::borrow(Value::Place(switch_place.clone())),
@@ -1635,8 +1639,9 @@ fn emit_matchable_switch(
                 let cmp2_local = ctx.create_temp("cmp_hi", bool_mir_ty);
                 let cmp2_place = Place::local(cmp2_local);
 
+                // lessThanOrEqual() has no method-level type parameters
                 let callee2 =
-                    Callee::witness(less_or_equal_protocol_name, "lessThanOrEqual", for_type);
+                    Callee::witness(less_or_equal_protocol_name, "lessThanOrEqual", for_type, vec![]);
                 let call_args2 = vec![
                     CallArg::borrow(Value::Place(switch_place.clone())),
                     CallArg::borrow(Value::Place(end_place)),
