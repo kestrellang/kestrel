@@ -457,14 +457,13 @@ struct Game: Iterator {
         // Game box
         self.box.renderOpen();
 
-        // Bricks
-        self.renderBricks();
-
-        // Clear play area below bricks (where ball and paddle move)
-        // Note: paddle is at gameHeight - 2, so we clear up to gameHeight - 1
-        for clearRow in Range[Int64](Config.brickRows + 1, Config.gameHeight - 1) {
+        // Clear entire play area inside box (prevents ball trail artifacts)
+        for clearRow in Range[Int64](0, Config.gameHeight - 1) {
             print(self.box.at(x: 0, y: clearRow) + repeatStr(s: " ", count: Config.gameWidth));
         }
+
+        // Bricks
+        self.renderBricks();
 
         // Ball
         print(self.box.at(x: self.ball.x, y: self.ball.y) + Styles.ball("●"));
