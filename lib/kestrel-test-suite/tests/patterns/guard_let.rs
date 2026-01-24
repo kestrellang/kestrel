@@ -86,6 +86,32 @@ func test(opt: Option[(lang.i64, lang.i64)]) -> lang.i64 {
 }
 
 // ============================================================================
+// TYPE OPERATOR (T?)
+// ============================================================================
+
+mod type_operator {
+    use super::*;
+
+    #[test]
+    fn guard_let_optional_type_operator() {
+        Test::new(
+            r#"
+module Main
+
+func test(opt: std.num.Int64?) -> lang.i64 {
+    guard let .Some(_v) = opt else {
+        return 0
+    }
+    1
+}
+"#,
+        )
+        .with_stdlib()
+        .expect(Compiles);
+    }
+}
+
+// ============================================================================
 // ELSE BLOCK MUST DIVERGE
 // ============================================================================
 

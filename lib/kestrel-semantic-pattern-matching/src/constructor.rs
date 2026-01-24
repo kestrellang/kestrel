@@ -246,6 +246,9 @@ impl Constructor {
     /// Returns `None` if the type has infinitely many constructors
     /// (Int, String, Float, arrays with variable length).
     pub fn all_constructors(ty: &Ty) -> Option<Vec<Constructor>> {
+        // Treat type aliases as transparent for pattern matching.
+        let ty = ty.expand_aliases();
+
         match ty.kind() {
             TyKind::Bool => Some(vec![Constructor::True, Constructor::False]),
 

@@ -64,6 +64,26 @@ func main() -> lang.i64 {
     .expect(Runs);
 }
 
+#[test]
+fn test_guard_let_optional_type_operator() {
+    Test::new(
+        r#"module Test
+
+func main() -> lang.i64 {
+    let opt: std.num.Int64? = .Some(1);
+    guard let .Some(v) = opt else {
+        return 1
+    }
+    if v != 1 { return 1 }
+    0
+}
+"#,
+    )
+    .with_stdlib()
+    .expect(Compiles)
+    .expect(Runs);
+}
+
 // =============================================================================
 // Comparison operator tests
 // =============================================================================

@@ -217,6 +217,30 @@ mod if_let {
                 .has_local("result", MirTy::I64),
         );
     }
+
+    #[test]
+    fn if_let_optional_type_operator() {
+        Test::new(
+            r#"
+            module Main
+
+            func unwrap(opt: std.num.Int64?) -> std.num.Int64 {
+                if let .Some(v) = opt {
+                    v
+                } else {
+                    0
+                }
+            }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(Mir::compiles())
+        .expect(
+            Mir::mir_function("Main.unwrap")
+                .has_at_least_blocks(3)
+                .any_block(|b| b.terminates_with(TerminatorPattern::Switch)),
+        );
+    }
 }
 
 // ============================================================================

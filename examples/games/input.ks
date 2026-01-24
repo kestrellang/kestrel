@@ -76,6 +76,10 @@ func keyFromCode(code: Int32) -> Key {
         100 => .Right,  // d
         65 => .Left,    // A
         68 => .Right,   // D
+        119 => .Up,     // w
+        115 => .Down,   // s
+        87 => .Up,      // W
+        83 => .Down,    // S
         _ => .Char(value: code),
     }
 }
@@ -84,11 +88,11 @@ func keyFromCode(code: Int32) -> Key {
 // External C functions
 // ============================================
 
-@extern(.C, mangleName: "breakout_init_terminal")
+@extern(.C, mangleName: "game_init_terminal")
 func initTerminal() -> Int32
 
-@extern(.C, mangleName: "breakout_restore_terminal")
+@extern(.C, mangleName: "game_restore_terminal")
 func restoreTerminal() -> Int32
 
-@extern(.C, mangleName: "breakout_check_key")
+@extern(.C, mangleName: "game_check_key")
 func checkKey() -> Int32

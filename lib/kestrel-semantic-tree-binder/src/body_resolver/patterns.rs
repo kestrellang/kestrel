@@ -536,7 +536,7 @@ fn resolve_enum_pattern(
 /// If `expected_ty` is an enum type and we can find the case, returns the
 /// parameter types from the case's CallableBehavior, with substitutions applied.
 fn get_enum_case_binding_types(expected_ty: Option<&Ty>, case_name: &str) -> Option<Vec<Ty>> {
-    let ty = expected_ty?;
+    let ty = expected_ty?.expand_aliases();
 
     // Check if the expected type is an enum
     let (enum_sym, substitutions) = match ty.kind() {

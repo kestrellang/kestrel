@@ -215,6 +215,9 @@ impl SignatureType {
     pub fn from_ty(ty: &Ty) -> Self {
         use crate::ty::TyKind;
 
+        // Expand type aliases (e.g., OptionalTypeOperator[T] -> Optional[T])
+        // so signature comparisons treat aliases as their underlying types.
+        let ty = ty.expand_aliases();
         match ty.kind() {
             TyKind::Unit => SignatureType::Unit,
             TyKind::Never => SignatureType::Never,

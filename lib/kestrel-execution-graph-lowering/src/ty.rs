@@ -157,6 +157,12 @@ pub fn lower_type(ctx: &mut LoweringContext, ty: &Ty) -> Id<MirTyMarker> {
 
         // === Type Parameters ===
         TyKind::TypeParameter(param_symbol) => {
+            let param_name = param_symbol.metadata().name().value.clone();
+            if param_name == "Self" {
+                // Treat synthetic `Self` type parameters as the protocol Self type
+                // so protocol extension methods can be monomorphized correctly.
+                return ctx.mir.ty_self();
+            }
             // Look up the MIR type param from our mapping
             let symbol_id = param_symbol.metadata().id();
             if let Some(mir_type_param) = ctx.get_type_param(symbol_id) {
@@ -165,10 +171,7 @@ pub fn lower_type(ctx: &mut LoweringContext, ty: &Ty) -> Id<MirTyMarker> {
                 // Type parameter not in scope - this can happen when lowering
                 // a generic definition without entering its context first
                 ctx.emit_error(LoweringError::unsupported_type(
-                    format!(
-                        "type parameter '{}' not in scope",
-                        param_symbol.metadata().name().value
-                    ),
+                    format!("type parameter '{}' not in scope", param_name),
                     ty.span().clone(),
                 ));
                 ctx.mir.ty_error()

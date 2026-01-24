@@ -202,7 +202,7 @@ impl<'a> CodegenContext<'a> {
                 continue;
             }
 
-            let sig = self.create_signature_with_subst(func_def, &inst.type_args);
+            let sig = self.create_signature_with_subst(func_def, &inst.type_args, inst.self_type);
 
             let cl_func_id = self
                 .module
@@ -244,6 +244,15 @@ impl<'a> CodegenContext<'a> {
         let is_main = self.is_main(func_def);
         let symbol_name = self.symbol_name_for_instantiation(inst);
 
+        if !func_def.type_params.is_empty() && func_def.type_params.len() != inst.type_args.len() {
+            return Err(CodegenError::Unsupported(format!(
+                "missing type arguments for function instantiation '{}': expected {}, got {}",
+                self.mir.name(func_def.name),
+                func_def.type_params.len(),
+                inst.type_args.len()
+            )));
+        }
+
         let cl_func_id = *self.func_ids_by_name.get(&symbol_name).ok_or_else(|| {
             CodegenError::FunctionDefinition {
                 name: symbol_name.clone(),
@@ -259,7 +268,7 @@ impl<'a> CodegenContext<'a> {
             subst.set_self_type(st);
         }
 
-        let sig = self.create_signature_with_subst(func_def, &inst.type_args);
+        let sig = self.create_signature_with_subst(func_def, &inst.type_args, inst.self_type);
         let mut cl_func =
             CraneliftFunction::with_name_signature(UserFuncName::user(0, cl_func_id.as_u32()), sig);
 
@@ -306,6 +315,7 @@ impl<'a> CodegenContext<'a> {
         &self,
         func_def: &FunctionDef,
         type_args: &[Id<Ty>],
+        self_type: Option<Id<Ty>>,
     ) -> Signature {
         // Use C calling convention for extern functions, default otherwise
         let call_conv = if func_def.is_extern() {
@@ -316,7 +326,10 @@ impl<'a> CodegenContext<'a> {
         let mut sig = Signature::new(call_conv);
 
         // Build substitution
-        let subst = build_substitution(self.mir, &func_def.type_params, type_args);
+        let mut subst = build_substitution(self.mir, &func_def.type_params, type_args);
+        if let Some(st) = self_type {
+            subst.set_self_type(st);
+        }
 
         // Return type (used for sret decisions)
         let is_main = self.is_main(func_def);

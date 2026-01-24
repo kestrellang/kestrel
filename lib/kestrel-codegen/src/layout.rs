@@ -161,9 +161,12 @@ impl<'a> LayoutCache<'a> {
 
             // Type parameters should be substituted before layout computation
             MirTy::TypeParam(tp) => {
+                let tp_def = &self.ctx.type_params[*tp];
                 panic!(
-                    "TypeParam {:?} reached layout computation without substitution - this is a bug",
-                    tp
+                    "TypeParam {:?} ('{}', owner: {:?}) reached layout computation without substitution - this is a bug",
+                    tp,
+                    tp_def.name,
+                    tp_def.owner
                 )
             },
 
@@ -256,9 +259,12 @@ impl<'a> LayoutCache<'a> {
                 if let Some(&concrete_ty) = subst.get(tp) {
                     self.layout_of(concrete_ty)
                 } else {
+                    let tp_def = &self.ctx.type_params[*tp];
                     panic!(
-                        "TypeParam {:?} reached layout computation without substitution - this is a bug",
-                        tp
+                        "TypeParam {:?} ('{}', owner: {:?}) reached layout computation without substitution - this is a bug",
+                        tp,
+                        tp_def.name,
+                        tp_def.owner
                     )
                 }
             },

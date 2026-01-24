@@ -276,6 +276,7 @@ struct Game: Iterator {
                 self.render();
             },
             _ => {
+                print("Ended");
                 self.renderGameOver();
                 let action = self.handleGameOverInput();
                 match action {
@@ -287,8 +288,10 @@ struct Game: Iterator {
         }
 
         if self.running {
+            print("Some In");
             .Some(())
         } else {
+            print("None in");
             .None
         }
     }
@@ -457,7 +460,8 @@ struct Game: Iterator {
         // Bricks
         self.renderBricks();
 
-        // Clear play area below bricks
+        // Clear play area below bricks (where ball and paddle move)
+        // Note: paddle is at gameHeight - 2, so we clear up to gameHeight - 1
         for clearRow in Range[Int64](Config.brickRows + 1, Config.gameHeight - 1) {
             print(self.box.at(x: 0, y: clearRow) + repeatStr(s: " ", count: Config.gameWidth));
         }
@@ -540,9 +544,15 @@ func usleep(usec: UInt32) -> Int32
 func main() -> () throws Error {
     var game = Game();
 
-    for _ in game {
-        usleep(16667);  // ~60 FPS
+    let iterator = game.iter();
+
+    while let .Some(x) = iterator.next() {
+        usleep(16667);
     }
+
+    //for _ in game {
+    //    usleep(16667);  // ~60 FPS
+    //}
 
     .Ok(())
 }

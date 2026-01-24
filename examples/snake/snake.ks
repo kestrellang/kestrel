@@ -1,9 +1,57 @@
-// A terminal-based Snake game in Kestrel.
-// Demonstrates: Structs, Methods, Arrays, ANSI Graphics, and External C Calls.
+// A terminal-based Snake game in Kestrel using shared game libraries.
+// Demonstrates: Structs, Methods, Arrays, TUI library, and Input handling.
 
 module Snake
 
-struct Snake {
+import std.core.Range
+import Tui.(Style, StyleOption, Box, moveTo, home, clearScreen, hideCursor, showCursor, clearLine, repeatStr)
+import Input.(Key, InputManager)
+
+// ============================================
+// Configuration
+// ============================================
+
+struct Config {
+    static var gameWidth: Int64 { 40 }
+    static var gameHeight: Int64 { 20 }
+}
+
+// ============================================
+// Styles
+// ============================================
+
+struct Styles {
+    static var border: Style { [.White] }
+    static var title: Style { [.Yellow, .Bold] }
+    static var score: Style { [.White, .Bold] }
+    static var label: Style { [.Gray] }
+    static var head: Style { [.Green, .Bold] }
+    static var body: Style { [.Green] }
+    static var food: Style { [.Red, .Bold] }
+    static var gameOver: Style { [.Red, .Bold] }
+    static var prompt: Style { [.Yellow] }
+}
+
+// ============================================
+// Game State
+// ============================================
+
+enum GameState {
+    case Playing
+    case GameOver
+}
+
+enum GameAction {
+    case Continue
+    case Restart
+    case Quit
+}
+
+// ============================================
+// Snake Game
+// ============================================
+
+struct SnakeGame: not Copyable {
     // Snake position and movement
     var headX: Int64
     var headY: Int64
@@ -20,22 +68,19 @@ struct Snake {
     var foodY: Int64
 
     // Game state
+    var state: GameState
     var score: Int64
-    var gameOver: Bool
-    var width: Int64
-    var height: Int64
-    var frameCount: Int64
+    var box: Box
 
     // Simple random seed
     var seed: Int64
 
-    init(width width: Int64, height height: Int64) {
-        self.width = width;
-        self.height = height;
+    var input: InputManager
 
+    init() {
         // Start snake in center, moving right
-        self.headX = width / 2;
-        self.headY = height / 2;
+        self.headX = Config.gameWidth / 2;
+        self.headY = Config.gameHeight / 2;
         self.direction = 1;  // Right
         self.nextDirection = 1;
 
@@ -50,23 +95,33 @@ struct Snake {
         self.bodyY.append(self.headY);
         self.length = 3;
 
+        self.state = .Playing;
         self.score = 0;
-        self.gameOver = false;
-        self.frameCount = 0;
+        self.box = Box(x: 0, y: 1, width: Config.gameWidth + 2, height: Config.gameHeight + 2, style: Styles.border);
 
-        // Initialize random seed based on initial position
+        // Initialize random seed
         self.seed = 12345;
 
         // Spawn initial food
         self.foodX = 0;
         self.foodY = 0;
+
+        self.input = InputManager();
+
+        print(hideCursor() + clearScreen());
+
+        // Spawn food after init
         self.spawnFood();
     }
 
-    // Convenience init with defaults
-    init() {
-        self.init(width: 40, height: 20);
+    deinit {
+        print(showCursor() + clearScreen() + home());
+        println("Thanks for playing Snake!");
     }
+
+    // ----------------------------------------
+    // Random & Food
+    // ----------------------------------------
 
     // Simple LCG pseudo-random number generator
     mutating func randomNext() -> Int64 {
@@ -81,8 +136,8 @@ struct Snake {
     mutating func spawnFood() {
         var attempts = 0;
         while attempts < 1000 {
-            let rx = self.randomNext() % self.width;
-            let ry = self.randomNext() % self.height;
+            let rx = self.randomNext() % Config.gameWidth;
+            let ry = self.randomNext() % Config.gameHeight;
 
             // Check if position is clear (not head or body)
             if rx != self.headX or ry != self.headY {
@@ -113,128 +168,130 @@ struct Snake {
         false
     }
 
-    // Handle keyboard input
-    mutating func handleInput() {
-        var key = checkKey();
-        while key != -1 {
-            // W or Up arrow
-            if key == KEY_W() or key == KEY_UP() {
-                // Can't reverse into self (can't go up if going down)
-                if self.direction != 2 {
-                    self.nextDirection = 0;
-                }
+    // ----------------------------------------
+    // Input Handling
+    // ----------------------------------------
+
+    mutating func handlePlayingInput() {
+        for key in self.input.drainAll() {
+            match key {
+                .Up => {
+                    // Can't reverse into self (can't go up if going down)
+                    if self.direction != 2 {
+                        self.nextDirection = 0;
+                    }
+                },
+                .Right => {
+                    if self.direction != 3 {
+                        self.nextDirection = 1;
+                    }
+                },
+                .Down => {
+                    if self.direction != 0 {
+                        self.nextDirection = 2;
+                    }
+                },
+                .Left => {
+                    if self.direction != 1 {
+                        self.nextDirection = 3;
+                    }
+                },
+                _ => {}
             }
-            // D or Right arrow
-            else if key == KEY_D() or key == KEY_RIGHT() {
-                if self.direction != 3 {
-                    self.nextDirection = 1;
-                }
-            }
-            // S or Down arrow
-            else if key == KEY_S() or key == KEY_DOWN() {
-                if self.direction != 0 {
-                    self.nextDirection = 2;
-                }
-            }
-            // A or Left arrow
-            else if key == KEY_A() or key == KEY_LEFT() {
-                if self.direction != 1 {
-                    self.nextDirection = 3;
-                }
-            }
-            key = checkKey();
         }
     }
 
-    // Handle input during game over state
-    // Returns: 0 = continue waiting, 1 = restart, 2 = quit
-    mutating func handleGameOverInput() -> Int64 {
-        var key = checkKey();
-        while key != -1 {
-            // Space to restart
-            if key == KEY_SPACE() {
-                return 1;
+    mutating func handleGameOverInput() -> GameAction {
+        for key in self.input.drainAll() {
+            match key {
+                .Space => return .Restart,
+                .Quit => return .Quit,
+                _ => {}
             }
-            // Q to quit
-            if key == KEY_Q() or key == KEY_q() {
-                return 2;
-            }
-            key = checkKey();
         }
-        0
+        .Continue
     }
+
+    // ----------------------------------------
+    // Update Logic
+    // ----------------------------------------
 
     mutating func update() {
-        if self.gameOver {
-            return;
-        }
+        match self.state {
+            .Playing => {
+                self.handlePlayingInput();
 
-        self.frameCount = self.frameCount + 1;
+                // Apply buffered direction
+                self.direction = self.nextDirection;
 
-        // Handle input every frame
-        self.handleInput();
+                // Store old head position (becomes first body segment)
+                let oldHeadX = self.headX;
+                let oldHeadY = self.headY;
 
-        // Apply buffered direction
-        self.direction = self.nextDirection;
+                // Move head based on direction
+                if self.direction == 0 {
+                    self.headY = self.headY - 1;  // Up
+                } else if self.direction == 1 {
+                    self.headX = self.headX + 1;  // Right
+                } else if self.direction == 2 {
+                    self.headY = self.headY + 1;  // Down
+                } else {
+                    self.headX = self.headX - 1;  // Left
+                }
 
-        // Store old head position (becomes first body segment)
-        let oldHeadX = self.headX;
-        let oldHeadY = self.headY;
+                // Check wall collision
+                if self.headX < 0 or self.headX >= Config.gameWidth or
+                   self.headY < 0 or self.headY >= Config.gameHeight {
+                    self.state = .GameOver;
+                    return;
+                }
 
-        // Move head based on direction
-        if self.direction == 0 {
-            self.headY = self.headY - 1;  // Up
-        } else if self.direction == 1 {
-            self.headX = self.headX + 1;  // Right
-        } else if self.direction == 2 {
-            self.headY = self.headY + 1;  // Down
-        } else {
-            self.headX = self.headX - 1;  // Left
-        }
+                // Check self collision
+                if self.isBody(x: self.headX, y: self.headY) {
+                    self.state = .GameOver;
+                    return;
+                }
 
-        // Check wall collision
-        if self.headX < 0 or self.headX >= self.width or
-           self.headY < 0 or self.headY >= self.height {
-            self.gameOver = true;
-            return;
-        }
+                // Check if eating food
+                let ateFood = self.headX == self.foodX and self.headY == self.foodY;
 
-        // Check self collision
-        if self.isBody(x: self.headX, y: self.headY) {
-            self.gameOver = true;
-            return;
-        }
-
-        // Check if eating food
-        let ateFood = self.headX == self.foodX and self.headY == self.foodY;
-
-        if ateFood {
-            self.score = self.score + 10;
-            // Add old head position to front of body (snake grows)
-            self.bodyX.insert(oldHeadX, at: 0);
-            self.bodyY.insert(oldHeadY, at: 0);
-            self.length = self.length + 1;
-            // Spawn new food
-            self.spawnFood();
-        } else {
-            // Move body: shift all segments, add old head at front
-            var i = self.length - 1;
-            while i > 0 {
-                let prevX = self.bodyX.getUnchecked(i - 1);
-                let prevY = self.bodyY.getUnchecked(i - 1);
-                self.bodyX.setUnchecked(i, prevX);
-                self.bodyY.setUnchecked(i, prevY);
-                i = i - 1;
+                if ateFood {
+                    self.score = self.score + 10;
+                    // Add old head position to front of body (snake grows)
+                    self.bodyX.insert(oldHeadX, at: 0);
+                    self.bodyY.insert(oldHeadY, at: 0);
+                    self.length = self.length + 1;
+                    // Spawn new food
+                    self.spawnFood();
+                } else {
+                    // Move body: shift all segments, add old head at front
+                    var i = self.length - 1;
+                    while i > 0 {
+                        let prevX = self.bodyX.getUnchecked(i - 1);
+                        let prevY = self.bodyY.getUnchecked(i - 1);
+                        self.bodyX.setUnchecked(i, prevX);
+                        self.bodyY.setUnchecked(i, prevY);
+                        i = i - 1;
+                    }
+                    self.bodyX.setUnchecked(0, oldHeadX);
+                    self.bodyY.setUnchecked(0, oldHeadY);
+                }
+            },
+            .GameOver => {
+                let action = self.handleGameOverInput();
+                match action {
+                    .Restart => self.reset(),
+                    .Quit => {},  // Handle in main loop
+                    .Continue => {}
+                }
             }
-            self.bodyX.setUnchecked(0, oldHeadX);
-            self.bodyY.setUnchecked(0, oldHeadY);
         }
     }
 
     // Reset game state for restart
     mutating func reset() {
-        self.headX = self.width / 2;
-        self.headY = self.height / 2;
+        self.headX = Config.gameWidth / 2;
+        self.headY = Config.gameHeight / 2;
         self.direction = 1;
         self.nextDirection = 1;
 
@@ -249,244 +306,122 @@ struct Snake {
         self.bodyY.append(self.headY);
         self.length = 3;
 
+        self.state = .Playing;
         self.score = 0;
-        self.gameOver = false;
-        self.frameCount = 0;
 
         self.spawnFood();
     }
 
-    func render() -> Result[(), Error] {
-        // ANSI: Move cursor to home position
-        print("\x1b[H");
+    // ----------------------------------------
+    // Rendering
+    // ----------------------------------------
 
-        // Score line
-        print("  \x1b[1;33mSNAKE\x1b[0m  Score: \x1b[1;37m");
-        print(self.score);
-        println("\x1b[0m\x1b[K");
+    func render() {
+        print(home());
 
-        // Top border
-        print("\x1b[37m╔");
-        var i: Int64 = 0;
-        while i < self.width {
-            print("═");
-            i = i + 1;
-        }
-        println("╗\x1b[0m\x1b[K");
+        // Title and score
+        print(moveTo(x: 2, y: 0));
+        print(Styles.title("SNAKE") + "  " + Styles.label("Score: ") + Styles.score(self.score));
+        print(clearLine());
 
-        // Game field
-        var y: Int64 = 0;
-        while y < self.height {
-            print("\x1b[37m║\x1b[0m");
+        // Game box
+        self.box.render();
 
-            var x: Int64 = 0;
-            while x < self.width {
+        // Draw game field
+        for y in Range[Int64](0, Config.gameHeight) {
+            for x in Range[Int64](0, Config.gameWidth) {
                 if x == self.headX and y == self.headY {
-                    // Green snake head
-                    print("\x1b[1;32m◆\x1b[0m");
+                    print(self.box.at(x: x, y: y) + Styles.head("◆"));
                 } else if x == self.foodX and y == self.foodY {
-                    // Red food
-                    print("\x1b[1;31m●\x1b[0m");
+                    print(self.box.at(x: x, y: y) + Styles.food("●"));
                 } else if self.isBody(x: x, y: y) {
-                    // Green snake body
-                    print("\x1b[32m█\x1b[0m");
+                    print(self.box.at(x: x, y: y) + Styles.body("█"));
                 } else {
-                    print(" ");
+                    print(self.box.at(x: x, y: y) + " ");
                 }
-                x = x + 1;
             }
-
-            println("\x1b[37m║\x1b[0m\x1b[K");
-            y = y + 1;
         }
 
-        // Bottom border
-        print("\x1b[37m╚");
-        i = 0;
-        while i < self.width {
-            print("═");
-            i = i + 1;
-        }
-        println("╝\x1b[0m\x1b[K");
-
-        // Controls hint
-        println("  WASD or Arrow Keys to move | Ctrl+C to exit\x1b[K");
-
-        .Ok(())
+        // Instructions
+        print(moveTo(x: 2, y: Config.gameHeight + 3));
+        print(Styles.label("WASD or Arrow Keys to move | Ctrl+C to exit") + clearLine());
     }
 
-    func renderGameOver() -> Result[(), Error] {
-        // ANSI: Move cursor to home position
-        print("\x1b[H");
+    func renderGameOver() {
+        print(home());
 
-        // Score line
-        print("  \x1b[1;33mSNAKE\x1b[0m  Score: \x1b[1;37m");
-        print(self.score);
-        println("\x1b[0m\x1b[K");
+        // Title and score
+        print(moveTo(x: 2, y: 0));
+        print(Styles.title("SNAKE") + "  " + Styles.label("Score: ") + Styles.score(self.score));
+        print(clearLine());
 
-        // Top border
-        print("\x1b[37m╔");
-        var i: Int64 = 0;
-        while i < self.width {
-            print("═");
-            i = i + 1;
-        }
-        println("╗\x1b[0m\x1b[K");
+        // Game box
+        self.box.render();
 
-        // Game field with game over message
-        let msgY = self.height / 2 - 1;
-        var y: Int64 = 0;
-        while y < self.height {
-            print("\x1b[37m║\x1b[0m");
-
-            if y == msgY {
-                // Center "GAME OVER" message
-                let msg = "GAME OVER";
-                let msgLen: Int64 = 9;
-                let padding = (self.width - msgLen) / 2;
-                var x: Int64 = 0;
-                while x < padding {
-                    print(" ");
-                    x = x + 1;
-                }
-                print("\x1b[1;31mGAME OVER\x1b[0m");
-                x = padding + msgLen;
-                while x < self.width {
-                    print(" ");
-                    x = x + 1;
-                }
-            } else if y == msgY + 2 {
-                // Center score message - "Final Score: X" is 14+ chars
-                // Estimate score digits (1-3 digits typically)
-                var scoreLen: Int64 = 1;
-                if self.score >= 10 { scoreLen = 2; }
-                if self.score >= 100 { scoreLen = 3; }
-                if self.score >= 1000 { scoreLen = 4; }
-                let msgLen = 13 + scoreLen;  // "Final Score: " = 13 chars
-                let padding = (self.width - msgLen) / 2;
-                var x: Int64 = 0;
-                while x < padding {
-                    print(" ");
-                    x = x + 1;
-                }
-                print("\x1b[1;37mFinal Score: ");
-                print(self.score);
-                print("\x1b[0m");
-                // Pad to end
-                x = padding + msgLen;
-                while x < self.width {
-                    print(" ");
-                    x = x + 1;
-                }
-            } else if y == msgY + 4 {
-                // Center restart prompt - visible text is 26 chars
-                // "SPACE = Restart  Q = Quit" = 25 chars visible
-                let msgLen: Int64 = 25;
-                let padding = (self.width - msgLen) / 2;
-                var x: Int64 = 0;
-                while x < padding {
-                    print(" ");
-                    x = x + 1;
-                }
-                print("\x1b[33mSPACE\x1b[0m = Restart  \x1b[33mQ\x1b[0m = Quit");
-                x = padding + msgLen;
-                while x < self.width {
-                    print(" ");
-                    x = x + 1;
-                }
-            } else {
-                var x: Int64 = 0;
-                while x < self.width {
-                    print(" ");
-                    x = x + 1;
-                }
-            }
-
-            println("\x1b[37m║\x1b[0m\x1b[K");
-            y = y + 1;
+        // Clear interior
+        for y in Range[Int64](0, Config.gameHeight) {
+            print(self.box.at(x: 0, y: y) + repeatStr(s: " ", count: Config.gameWidth));
         }
 
-        // Bottom border
-        print("\x1b[37m╚");
-        i = 0;
-        while i < self.width {
-            print("═");
-            i = i + 1;
+        // Center messages
+        let centerY = Config.gameHeight / 2;
+
+        // GAME OVER
+        let msg1 = "GAME OVER";
+        let msg1X = (Config.gameWidth - 9) / 2;
+        print(self.box.at(x: msg1X, y: centerY - 1) + Styles.gameOver(msg1));
+
+        // Final Score
+        let msg2X = (Config.gameWidth - 16) / 2;
+        print(self.box.at(x: msg2X, y: centerY + 1) + Styles.score("Final Score: ") + Styles.score(self.score));
+
+        // Prompt
+        let msg3 = "SPACE = Restart  Q = Quit";
+        let msg3X = (Config.gameWidth - 25) / 2;
+        print(self.box.at(x: msg3X, y: centerY + 3) + Styles.prompt(msg3));
+
+        // Clear instructions line
+        print(moveTo(x: 2, y: Config.gameHeight + 3));
+        print(clearLine());
+    }
+
+    func shouldQuit() -> Bool {
+        match self.state {
+            .GameOver => {
+                // Check if quit was requested (we need to re-check since we don't store it)
+                false
+            },
+            _ => false
         }
-        println("╝\x1b[0m\x1b[K");
-
-        println("\x1b[K");  // Clear the controls line
-
-        .Ok(())
     }
 }
 
-// Import usleep from C for timing
+// ============================================
+// External
+// ============================================
+
 @extern(.C, mangleName: "usleep")
 func usleep(usec: UInt32) -> Int32
 
-// Keyboard input helpers (from pong_input.c)
-@extern(.C, mangleName: "pong_init_terminal")
-func initTerminal() -> Int32
-
-@extern(.C, mangleName: "pong_restore_terminal")
-func restoreTerminal() -> Int32
-
-@extern(.C, mangleName: "pong_check_key")
-func checkKey() -> Int32
-
-// Key codes
-func KEY_W() -> Int32 { 119 }
-func KEY_A() -> Int32 { 97 }
-func KEY_S() -> Int32 { 115 }
-func KEY_D() -> Int32 { 100 }
-func KEY_Q() -> Int32 { 81 }   // Uppercase Q
-func KEY_q() -> Int32 { 113 }  // Lowercase q
-func KEY_SPACE() -> Int32 { 32 }
-func KEY_UP() -> Int32 { 1001 }
-func KEY_DOWN() -> Int32 { 1002 }
-func KEY_RIGHT() -> Int32 { 1003 }
-func KEY_LEFT() -> Int32 { 1004 }
+// ============================================
+// Main
+// ============================================
 
 func main() -> Result[(), Error] {
-    // Initialize terminal for non-blocking input
-    initTerminal();
-
-    // ANSI: Hide cursor and clear screen
-    print("\x1b[?25l");
-    print("\x1b[2J");
-
-    var game = Snake();
+    var game = SnakeGame();
 
     // Game loop
-    var running = true;
-    while running {
-        if game.gameOver {
-            let _ = game.renderGameOver();
+    while true {
+        game.update();
 
-            let action = game.handleGameOverInput();
-            if action == 1 {
-                // Restart
-                game.reset();
-            } else if action == 2 {
-                // Quit
-                running = false;
-            }
-        } else {
-            game.update();
-            let _ = game.render();
+        match game.state {
+            .Playing => game.render(),
+            .GameOver => game.renderGameOver(),
         }
 
         // ~10 FPS for classic snake feel
         usleep(100000);
     }
-
-    // Cleanup
-    restoreTerminal();
-    print("\x1b[?25h");  // Show cursor
-    print("\x1b[2J");    // Clear screen
-    print("\x1b[H");     // Move to home
-    println("Thanks for playing Snake!");
 
     .Ok(())
 }

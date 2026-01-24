@@ -178,6 +178,32 @@ func test(a: lang.i1, b: lang.i1) -> lang.i64 {
 }
 
 // ============================================================================
+// TYPE OPERATOR (T?)
+// ============================================================================
+
+mod type_operator {
+    use super::*;
+
+    #[test]
+    fn match_optional_type_operator() {
+        Test::new(
+            r#"
+module Main
+
+func test(opt: std.num.Int64?) -> lang.i64 {
+    match opt {
+        .Some(_) => 1,
+        .None => 0
+    }
+}
+"#,
+        )
+        .with_stdlib()
+        .expect(Compiles);
+    }
+}
+
+// ============================================================================
 // ENUM PATTERNS WITH ASSOCIATED VALUES
 // ============================================================================
 

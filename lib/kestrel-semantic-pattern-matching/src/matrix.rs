@@ -278,6 +278,9 @@ impl PatternMatrix {
     fn get_sub_type(&self, parent_ty: &Ty, ctor: &Constructor, index: usize) -> Ty {
         use kestrel_semantic_tree::ty::TyKind;
 
+        // Treat type aliases as transparent for pattern matching.
+        let parent_ty = parent_ty.expand_aliases();
+
         match (parent_ty.kind(), ctor) {
             (TyKind::Tuple(elements), Constructor::Tuple { .. }) => elements
                 .get(index)

@@ -1897,7 +1897,7 @@ fn lower_enum_literal_init_call(
     }
 
     // Find init() with no parameters (from ExpressibleByNullLiteral)
-    let init_symbol: Option<
+    let mut init_symbol: Option<
         std::sync::Arc<dyn semantic_tree::symbol::Symbol<kestrel_semantic_tree::language::KestrelLanguage>>,
     > = enum_symbol
         .metadata()
@@ -1913,6 +1913,31 @@ fn lower_enum_literal_init_call(
                 false
             }
         });
+
+    // If not found on the enum, check extension initializers
+    if init_symbol.is_none() {
+        use kestrel_semantic_model::queries::ExtensionsFor;
+
+        let extensions = ctx.model.query(ExtensionsFor {
+            target_id: enum_symbol.metadata().id(),
+        });
+        for extension in extensions {
+            for child in extension.metadata().children() {
+                if child.metadata().kind() != KestrelSymbolKind::Initializer {
+                    continue;
+                }
+                if let Some(callable) = child.metadata().get_behavior::<CallableBehavior>()
+                    && callable.parameters().is_empty()
+                {
+                    init_symbol = Some(child);
+                    break;
+                }
+            }
+            if init_symbol.is_some() {
+                break;
+            }
+        }
+    }
 
     let Some(_init_sym) = init_symbol else {
         ctx.emit_error(LoweringError::internal(
@@ -1933,8 +1958,9 @@ fn lower_enum_literal_init_call(
     );
     name_parts.push("init".to_string());
 
-    // Get type arguments from the enum type
-    let type_args: Vec<_> = match expr.ty.kind() {
+    // Get type arguments from the enum type (expand aliases like OptionalTypeOperator[T])
+    let resolved_ty = expr.ty.expand_aliases();
+    let type_args: Vec<_> = match resolved_ty.kind() {
         TyKind::Enum { substitutions, .. } => substitutions
             .iter()
             .map(|(_, ty)| lower_type(ctx, ty))
@@ -4265,7 +4291,10 @@ fn emit_if_let_switch(
     // Get the place to switch on
     let switch_place = crate::match_lowering::apply_path(scrutinee, path);
 
-    match ty.kind() {
+    // Expand type aliases so enum/bool/etc. switches work with alias types (e.g., T?).
+    let expanded_ty = ty.expand_aliases();
+
+    match expanded_ty.kind() {
         TyKind::Bool => {
             emit_if_let_bool_switch(
                 ctx,
@@ -5075,7 +5104,10 @@ fn emit_while_let_switch(
     // Get the place to switch on
     let switch_place = crate::match_lowering::apply_path(scrutinee, path);
 
-    match ty.kind() {
+    // Expand type aliases so enum/bool/etc. switches work with alias types (e.g., T?).
+    let expanded_ty = ty.expand_aliases();
+
+    match expanded_ty.kind() {
         TyKind::Bool => {
             emit_while_let_bool_switch(
                 ctx,

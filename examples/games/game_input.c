@@ -8,7 +8,7 @@ static struct termios orig_termios;
 static int terminal_initialized = 0;
 
 // Initialize terminal for non-blocking raw input
-int32_t pong_init_terminal(void) {
+int32_t game_init_terminal(void) {
     if (terminal_initialized) return 0;
 
     struct termios raw;
@@ -30,7 +30,7 @@ int32_t pong_init_terminal(void) {
 }
 
 // Restore terminal to original settings
-int32_t pong_restore_terminal(void) {
+int32_t game_restore_terminal(void) {
     if (!terminal_initialized) return 0;
     tcsetattr(STDIN_FILENO, TCSANOW, &orig_termios);
     terminal_initialized = 0;
@@ -41,7 +41,7 @@ int32_t pong_restore_terminal(void) {
 //   -1 = no key pressed
 //   Otherwise returns the key code
 // For arrow keys: returns 1000 + direction (1=up, 2=down, 3=right, 4=left)
-int32_t pong_check_key(void) {
+int32_t game_check_key(void) {
     unsigned char c;
     if (read(STDIN_FILENO, &c, 1) != 1) {
         return -1;  // No key

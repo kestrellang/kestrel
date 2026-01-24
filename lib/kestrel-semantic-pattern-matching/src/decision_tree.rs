@@ -561,12 +561,15 @@ fn get_constructor_field_types(ctor: &Constructor, ty: &Ty) -> Vec<Ty> {
     use kestrel_semantic_tree::ty::TyKind;
     use semantic_tree::symbol::Symbol;
 
-    match (ctor, ty.kind()) {
+    // Treat type aliases as transparent for pattern matching.
+    let expanded_ty = ty.expand_aliases();
+
+    match (ctor, expanded_ty.kind()) {
         (Constructor::Tuple { arity }, TyKind::Tuple(elements)) => {
             if elements.len() == *arity {
                 elements.clone()
             } else {
-                vec![ty.clone(); *arity]
+                vec![expanded_ty.clone(); *arity]
             }
         },
 
@@ -589,7 +592,7 @@ fn get_constructor_field_types(ctor: &Constructor, ty: &Ty) -> Vec<Ty> {
                     .map(|p| substitutions.apply(&p.ty))
                     .collect();
             }
-            vec![ty.clone(); *arity]
+            vec![expanded_ty.clone(); *arity]
         },
 
         (
@@ -625,7 +628,7 @@ fn get_constructor_field_types(ctor: &Constructor, ty: &Ty) -> Vec<Ty> {
                     })
                     .collect()
             } else {
-                vec![ty.clone(); *arity]
+                vec![expanded_ty.clone(); *arity]
             }
         },
 
@@ -643,16 +646,16 @@ fn get_constructor_field_types(ctor: &Constructor, ty: &Ty) -> Vec<Ty> {
                 .iter()
                 .next()
                 .map(|(_, t)| t.clone())
-                .unwrap_or_else(|| ty.clone());
+                .unwrap_or_else(|| expanded_ty.clone());
             let mut types = vec![elem_ty.clone(); *prefix_len];
             if *has_rest {
-                types.push(ty.clone()); // Rest is an array/slice
+                types.push(expanded_ty.clone()); // Rest is an array/slice
             }
             types.extend(vec![elem_ty; *suffix_len]);
             types
         },
 
-        _ => vec![ty.clone(); ctor.arity()],
+        _ => vec![expanded_ty.clone(); ctor.arity()],
     }
 }
 

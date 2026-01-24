@@ -349,7 +349,10 @@ fn emit_guard_let_switch(
     // Get the place to switch on
     let switch_place = crate::match_lowering::apply_path(scrutinee, path);
 
-    match ty.kind() {
+    // Expand type aliases so enum/bool/etc. switches work with alias types (e.g., T?).
+    let expanded_ty = ty.expand_aliases();
+
+    match expanded_ty.kind() {
         TyKind::Bool => {
             emit_guard_let_bool_switch(
                 ctx,

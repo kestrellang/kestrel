@@ -759,6 +759,7 @@ fn get_getter_parent_type_parameters(
 ) -> Vec<Arc<TypeParameterSymbol>> {
     use kestrel_semantic_tree::symbol::extension::ExtensionSymbol;
     use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
+    use kestrel_semantic_tree::ty::TyKind;
 
     // Getter's parent is either Field or Subscript
     let Some(parent) = getter_symbol.metadata().parent() else {
@@ -784,7 +785,18 @@ fn get_getter_parent_type_parameters(
     } else if let Ok(enum_symbol) = type_parent.clone().downcast_arc::<EnumSymbol>() {
         enum_symbol.type_parameters()
     } else if let Ok(extension_symbol) = type_parent.downcast_arc::<ExtensionSymbol>() {
-        extension_symbol.referenced_type_parameters()
+        let params = extension_symbol.referenced_type_parameters();
+        if extension_symbol
+            .target_type()
+            .is_some_and(|ty| matches!(ty.kind(), TyKind::Protocol { .. }))
+        {
+            params
+                .into_iter()
+                .filter(|tp| tp.metadata().name().value != "Self")
+                .collect()
+        } else {
+            params
+        }
     } else {
         vec![]
     }
@@ -828,6 +840,7 @@ fn get_setter_parent_type_parameters(
 ) -> Vec<Arc<TypeParameterSymbol>> {
     use kestrel_semantic_tree::symbol::extension::ExtensionSymbol;
     use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
+    use kestrel_semantic_tree::ty::TyKind;
 
     // Setter's parent is either Field or Subscript
     let Some(parent) = setter_symbol.metadata().parent() else {
@@ -853,7 +866,18 @@ fn get_setter_parent_type_parameters(
     } else if let Ok(enum_symbol) = type_parent.clone().downcast_arc::<EnumSymbol>() {
         enum_symbol.type_parameters()
     } else if let Ok(extension_symbol) = type_parent.downcast_arc::<ExtensionSymbol>() {
-        extension_symbol.referenced_type_parameters()
+        let params = extension_symbol.referenced_type_parameters();
+        if extension_symbol
+            .target_type()
+            .is_some_and(|ty| matches!(ty.kind(), TyKind::Protocol { .. }))
+        {
+            params
+                .into_iter()
+                .filter(|tp| tp.metadata().name().value != "Self")
+                .collect()
+        } else {
+            params
+        }
     } else {
         vec![]
     }
@@ -1003,6 +1027,7 @@ fn compute_self_param_type(
 /// Get type parameters from the parent struct, enum, or extension (for methods).
 fn get_parent_type_parameters(func_symbol: &Arc<FunctionSymbol>) -> Vec<Arc<TypeParameterSymbol>> {
     use kestrel_semantic_tree::symbol::extension::ExtensionSymbol;
+    use kestrel_semantic_tree::ty::TyKind;
 
     if let Some(parent) = func_symbol.metadata().parent() {
         // Try to downcast to StructSymbol
@@ -1015,7 +1040,17 @@ fn get_parent_type_parameters(func_symbol: &Arc<FunctionSymbol>) -> Vec<Arc<Type
         }
         // Try to downcast to ExtensionSymbol
         if let Ok(extension_symbol) = parent.downcast_arc::<ExtensionSymbol>() {
-            return extension_symbol.referenced_type_parameters();
+            let params = extension_symbol.referenced_type_parameters();
+            if extension_symbol
+                .target_type()
+                .is_some_and(|ty| matches!(ty.kind(), TyKind::Protocol { .. }))
+            {
+                return params
+                    .into_iter()
+                    .filter(|tp| tp.metadata().name().value != "Self")
+                    .collect();
+            }
+            return params;
         }
     }
     vec![]
@@ -1026,6 +1061,7 @@ fn get_initializer_parent_type_parameters(
     init_symbol: &Arc<InitializerSymbol>,
 ) -> Vec<Arc<TypeParameterSymbol>> {
     use kestrel_semantic_tree::symbol::extension::ExtensionSymbol;
+    use kestrel_semantic_tree::ty::TyKind;
 
     if let Some(parent) = init_symbol.metadata().parent() {
         // Try to downcast to StructSymbol
@@ -1038,7 +1074,17 @@ fn get_initializer_parent_type_parameters(
         }
         // Try to downcast to ExtensionSymbol
         if let Ok(extension_symbol) = parent.downcast_arc::<ExtensionSymbol>() {
-            return extension_symbol.referenced_type_parameters();
+            let params = extension_symbol.referenced_type_parameters();
+            if extension_symbol
+                .target_type()
+                .is_some_and(|ty| matches!(ty.kind(), TyKind::Protocol { .. }))
+            {
+                return params
+                    .into_iter()
+                    .filter(|tp| tp.metadata().name().value != "Self")
+                    .collect();
+            }
+            return params;
         }
     }
     vec![]
@@ -1049,6 +1095,7 @@ fn get_deinit_parent_type_parameters(
     deinit_symbol: &Arc<DeinitSymbol>,
 ) -> Vec<Arc<TypeParameterSymbol>> {
     use kestrel_semantic_tree::symbol::extension::ExtensionSymbol;
+    use kestrel_semantic_tree::ty::TyKind;
 
     if let Some(parent) = deinit_symbol.metadata().parent() {
         // Try to downcast to StructSymbol
@@ -1061,7 +1108,17 @@ fn get_deinit_parent_type_parameters(
         }
         // Try to downcast to ExtensionSymbol
         if let Ok(extension_symbol) = parent.downcast_arc::<ExtensionSymbol>() {
-            return extension_symbol.referenced_type_parameters();
+            let params = extension_symbol.referenced_type_parameters();
+            if extension_symbol
+                .target_type()
+                .is_some_and(|ty| matches!(ty.kind(), TyKind::Protocol { .. }))
+            {
+                return params
+                    .into_iter()
+                    .filter(|tp| tp.metadata().name().value != "Self")
+                    .collect();
+            }
+            return params;
         }
     }
     vec![]

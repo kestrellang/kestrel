@@ -279,7 +279,10 @@ fn emit_switch(
     // Get the place to switch on
     let switch_place = apply_path(scrutinee, path);
 
-    match ty.kind() {
+    // Expand type aliases so enum/bool/etc. switches work with alias types (e.g., T?).
+    let expanded_ty = ty.expand_aliases();
+
+    match expanded_ty.kind() {
         TyKind::Bool => {
             emit_bool_switch(
                 ctx,
@@ -850,7 +853,8 @@ fn emit_comparison_chain(
     join_block: kestrel_execution_graph::Id<kestrel_execution_graph::Block>,
 ) {
     // For unsupported types, just try int comparison chain as fallback
-    match ty.kind() {
+    let expanded_ty = ty.expand_aliases();
+    match expanded_ty.kind() {
         TyKind::Int(int_bits) => {
             emit_comparison_chain_int(
                 ctx,
@@ -958,7 +962,8 @@ fn type_conforms_to_matchable(ctx: &LoweringContext, ty: &Ty) -> bool {
     }
 
     // Check if the type is a struct or enum that conforms to Matchable
-    match ty.kind() {
+    let expanded_ty = ty.expand_aliases();
+    match expanded_ty.kind() {
         TyKind::Struct { symbol, .. } => check_conformances(symbol.as_ref(), matchable_id),
         TyKind::Enum { symbol, .. } => check_conformances(symbol.as_ref(), matchable_id),
         _ => false,
@@ -1080,7 +1085,8 @@ fn emit_matchable_switch(
     };
 
     let protocol_name = qualified_name_for_symbol(ctx, &matchable_symbol);
-    let for_type = lower_type(ctx, ty);
+    let expanded_ty = ty.expand_aliases();
+    let for_type = lower_type(ctx, &expanded_ty);
 
     // Build a chain of Matchable.matches() calls
     for (i, (ctor, tree)) in cases.iter().enumerate() {
@@ -1108,7 +1114,7 @@ fn emit_matchable_switch(
                 if let TyKind::Struct {
                     symbol: struct_symbol,
                     ..
-                } = ty.kind()
+                } = expanded_ty.kind()
                 {
                     // Find the init with the intLiteral label
                     let init_symbol =
@@ -1241,7 +1247,7 @@ fn emit_matchable_switch(
                 if let TyKind::Struct {
                     symbol: struct_symbol,
                     ..
-                } = ty.kind()
+                } = expanded_ty.kind()
                 {
                     // Find the init with the boolLiteral label
                     let init_symbol =
@@ -1387,7 +1393,7 @@ fn emit_matchable_switch(
                 if let TyKind::Struct {
                     symbol: struct_symbol,
                     ..
-                } = ty.kind()
+                } = expanded_ty.kind()
                 {
                     // Find the init$charLiteral method
                     let init_sym = struct_symbol
@@ -1516,7 +1522,7 @@ fn emit_matchable_switch(
                     if let TyKind::Struct {
                         symbol: struct_symbol,
                         ..
-                    } = ty.kind()
+                    } = expanded_ty.kind()
                     {
                         // Find the init$charLiteral method
                         let init_sym =
