@@ -1,521 +1,246 @@
-// Set[T] - hash set
+// Set[T] - hash set backed by Dictionary
 
 module std.collections
 
-import std.core.(Bool, Equatable, Cloneable)
+import std.core.(Bool, Equatable, Cloneable, Hash, Hasher, Defaultable)
 import std.num.(Int64)
 import std.result.(Optional)
-import std.memory.(Layout, Pointer, RawPointer, SystemAllocator)
 import std.iter.(Iterator, Iterable)
+import std.collections.(Dictionary, DictionaryEntry, DictionaryIterator, DefaultHasher)
 
-// Compute next power of two, minimum 8
-func setNextPowerOfTwo(n: Int64) -> Int64 {
-    var p: Int64 = Int64(intLiteral: 1);
-    while p < n {
-        p = p * Int64(intLiteral: 2)
-    }
-    let minCap = Int64(intLiteral: 8);
-    if p < minCap { minCap } else { p }
+// Unit type for dictionary values (set only cares about keys)
+struct Unit: Equatable, Cloneable {
+    init() {}
+
+    func equals(other: Unit) -> Bool { true }
+    func clone() -> Unit { Unit() }
 }
 
-// Entry in the set
-public struct SetEntry[T] {
-    public var element: T
-    public var occupied: Bool
-
-    public init(element element: T, occupied occupied: Bool) {
-        self.element = element;
-        self.occupied = occupied;
-    }
-
-    // Create an unoccupied entry with placeholder element
-    public init(placeholder placeholder: T) {
-        self.element = placeholder;
-        self.occupied = false;
-    }
-}
-
-// SetIterator must be defined before Set for Iterable conformance
-public struct SetIterator[T]: Iterator {
+// SetIterator extracts keys from dictionary iterator
+public struct SetIterator[T, H = DefaultHasher]: Iterator where T: Hash, H: Hasher, H: Defaultable {
     type Item = T
 
-    private var entries: Pointer[SetEntry[T]]
-    private var capacity: Int64
-    private var index: Int64
+    private var dictIter: DictionaryIterator[T, Unit]
 
-    public init(entries entries: Pointer[SetEntry[T]], capacity capacity: Int64) {
-        self.entries = entries;
-        self.capacity = capacity;
-        self.index = Int64(intLiteral: 0);
+    public init(dictIter dictIter: DictionaryIterator[T, Unit]) {
+        self.dictIter = dictIter;
     }
 
     public mutating func next() -> Optional[T] {
-        while self.index < self.capacity {
-            let entry = self.entries.offset(by: self.index).read();
-            self.index = self.index + Int64(intLiteral: 1);
-            if entry.occupied {
-                return .Some(entry.element)
-            }
+        let maybeEntry = self.dictIter.next();
+        if maybeEntry.isSome() {
+            .Some(maybeEntry.unwrap().key)
+        } else {
+            .None
         }
-        let none: Optional[T] = .None;
-        none
     }
 }
 
-// Set[T] - simple hash set using open addressing
-// Note: Elements must be Equatable. Uses linear search (O(n)) since Hashable isn't complete.
-public struct Set[T]: Iterable where T: Equatable {
+// Set[T, H] - hash set using Dictionary internally
+public struct Set[T, H = DefaultHasher]: Iterable where T: Hash, H: Hasher, H: Defaultable {
     type Item = T
-    type Iter = SetIterator[T]
+    type Iter = SetIterator[T, H]
 
-    // Made internal so extensions can access
-    var entries: Pointer[SetEntry[T]]
-    var len: Int64
-    var cap: Int64
+    var dict: Dictionary[T, Unit, H]
+    var placeholder: T
 
-    // Create empty set
-    public init() {
-        self.entries = Pointer(raw: lang.ptr_null[SetEntry[T]]());
-        self.len = Int64(intLiteral: 0);
-        self.cap = Int64(intLiteral: 0);
+    // Create empty set - requires placeholder element for dictionary
+    public init(placeholder placeholder: T) {
+        self.dict = Dictionary(placeholder, Unit());
+        self.placeholder = placeholder;
     }
 
-    // Create with initial capacity - requires a placeholder element for initialization
+    // Create with initial capacity
     public init(capacity capacity: Int64, placeholder placeholder: T) {
-        let actualCap = setNextPowerOfTwo(capacity);
-        if actualCap > Int64(intLiteral: 0) {
-            let layout = Layout.array[SetEntry[T]](actualCap);
-            var allocator = SystemAllocator();
-            let result = allocator.allocate(layout);
-            if result.isSome() {
-                self.entries = result.unwrap().cast[SetEntry[T]]();
-                self.len = Int64(intLiteral: 0);
-                self.cap = actualCap;
-                // Initialize all entries as unoccupied
-                var i: Int64 = Int64(intLiteral: 0);
-                while i < actualCap {
-                    self.entries.offset(by: i).write(SetEntry(placeholder: placeholder));
-                    i = i + Int64(intLiteral: 1)
-                }
-            } else {
-                lang.panic("Set allocation failed")
-            }
-        } else {
-            self.entries = Pointer(raw: lang.ptr_null[SetEntry[T]]());
-            self.len = Int64(intLiteral: 0);
-            self.cap = Int64(intLiteral: 0)
-        }
-    }
-
-    deinit {
-        if self.cap > Int64(intLiteral: 0) {
-            let layout = Layout.array[SetEntry[T]](self.cap);
-            var allocator = SystemAllocator();
-            allocator.deallocate(self.entries.asRaw(), layout)
-        }
+        self.dict = Dictionary(capacity: capacity, placeholderKey: placeholder, placeholderValue: Unit());
+        self.placeholder = placeholder;
     }
 
     // Properties
-    public func count() -> Int64 { self.len }
-    public func getCapacity() -> Int64 { self.cap }
-    public func isEmpty() -> Bool { self.len == Int64(intLiteral: 0) }
-
-    // Find entry by element using linear search
-    private func findEntry(element: T) -> Optional[Int64] {
-        if self.cap == Int64(intLiteral: 0) {
-            let none: Optional[Int64] = .None;
-            return none
-        }
-
-        var i: Int64 = Int64(intLiteral: 0);
-        var result: Optional[Int64] = .None;
-        var done: Bool = false;
-
-        while i < self.cap and done == false {
-            let entry = self.entries.offset(by: i).read();
-            if entry.occupied and entry.element.equals(element) {
-                result = .Some(i);
-                done = true
-            }
-            i = i + Int64(intLiteral: 1)
-        }
-        result
-    }
-
-    // Find first unoccupied slot
-    private func findEmptySlot() -> Optional[Int64] {
-        var i: Int64 = Int64(intLiteral: 0);
-        var result: Optional[Int64] = .None;
-        var done: Bool = false;
-
-        while i < self.cap and done == false {
-            let entry = self.entries.offset(by: i).read();
-            if entry.occupied == false {
-                result = .Some(i);
-                done = true
-            }
-            i = i + Int64(intLiteral: 1)
-        }
-        result
-    }
-
-    // Ensure we have capacity for more entries (resize at 75% load)
-    private mutating func ensureCapacity(placeholder: T) {
-        let threshold = self.cap * Int64(intLiteral: 3) / Int64(intLiteral: 4);
-        if self.len >= threshold or self.cap == Int64(intLiteral: 0) {
-            self.resize(placeholder)
-        }
-    }
-
-    // Resize the set
-    private mutating func resize(placeholder: T) {
-        let newCap: Int64 = if self.cap == Int64(intLiteral: 0) {
-            Int64(intLiteral: 8)
-        } else {
-            self.cap * Int64(intLiteral: 2)
-        };
-
-        let oldEntries = self.entries;
-        let oldCap = self.cap;
-
-        // Allocate new table
-        let layout = Layout.array[SetEntry[T]](newCap);
-        var allocator = SystemAllocator();
-        let result = allocator.allocate(layout);
-        if result.isSome() {
-            self.entries = result.unwrap().cast[SetEntry[T]]();
-            self.cap = newCap;
-            self.len = Int64(intLiteral: 0);
-
-            // Initialize new entries
-            var i: Int64 = Int64(intLiteral: 0);
-            while i < newCap {
-                self.entries.offset(by: i).write(SetEntry(placeholder: placeholder));
-                i = i + Int64(intLiteral: 1)
-            }
-
-            // Copy old entries
-            i = Int64(intLiteral: 0);
-            while i < oldCap {
-                let entry = oldEntries.offset(by: i).read();
-                if entry.occupied {
-                    // Find empty slot and insert
-                    let maybeSlot = self.findEmptySlot();
-                    if maybeSlot.isSome() {
-                        self.entries.offset(by: maybeSlot.unwrap()).write(entry);
-                        self.len = self.len + Int64(intLiteral: 1)
-                    }
-                }
-                i = i + Int64(intLiteral: 1)
-            }
-
-            // Free old table
-            if oldCap > Int64(intLiteral: 0) {
-                let oldLayout = Layout.array[SetEntry[T]](oldCap);
-                allocator.deallocate(oldEntries.asRaw(), oldLayout)
-            }
-        } else {
-            lang.panic("Set resize failed")
-        }
-    }
+    public func count() -> Int64 { self.dict.count() }
+    public func getCapacity() -> Int64 { self.dict.getCapacity() }
+    public func isEmpty() -> Bool { self.dict.isEmpty() }
 
     // Check if element exists
     public func contains(element: T) -> Bool {
-        self.findEntry(element).isSome()
+        self.dict.contains(element)
     }
 
     // Insert element, returns true if element was new
     public mutating func insert(element: T) -> Bool {
-        // Check if already exists
-        if self.findEntry(element).isSome() {
-            return false
-        }
-
-        // Need to insert - ensure capacity first
-        self.ensureCapacity(element);
-
-        // Find empty slot
-        let maybeSlot = self.findEmptySlot();
-        if maybeSlot.isSome() {
-            self.entries.offset(by: maybeSlot.unwrap()).write(SetEntry(
-                element: element,
-                occupied: true
-            ));
-            self.len = self.len + Int64(intLiteral: 1)
-        } else {
-            lang.panic("Set insert failed - no empty slot")
-        }
-        true
+        let oldValue = self.dict.insert(element, Unit());
+        oldValue.isSome() == false
     }
 
     // Remove element, returns true if element was present
     public mutating func remove(element: T) -> Bool {
-        let maybeIndex = self.findEntry(element);
-
-        if maybeIndex.isSome() {
-            let index = maybeIndex.unwrap();
-            let entry = self.entries.offset(by: index).read();
-
-            // Mark as unoccupied (keep element as placeholder)
-            self.entries.offset(by: index).write(SetEntry(placeholder: entry.element));
-            self.len = self.len - Int64(intLiteral: 1);
-            true
-        } else {
-            false
-        }
+        self.dict.remove(element).isSome()
     }
 
     // Clear all entries
     public mutating func clear() {
-        var i: Int64 = Int64(intLiteral: 0);
-        while i < self.cap {
-            let entry = self.entries.offset(by: i).read();
-            // Keep element but mark unoccupied
-            self.entries.offset(by: i).write(SetEntry(placeholder: entry.element));
-            i = i + Int64(intLiteral: 1)
-        }
-        self.len = Int64(intLiteral: 0)
+        self.dict.clear()
     }
 
     // Iteration
-    public func iter() -> SetIterator[T] {
-        SetIterator(entries: self.entries, capacity: self.cap)
+    public func iter() -> SetIterator[T, H] {
+        SetIterator(dictIter: self.dict.iter())
     }
 
-    // Get internal data for extensions
-    public func getEntries() -> Pointer[SetEntry[T]] { self.entries }
+    // Get internal dictionary for extensions
+    func getDict() -> Dictionary[T, Unit, H] { self.dict }
+
+    // Get placeholder for creating new sets
+    func getPlaceholder() -> T { self.placeholder }
 
     // Set operations
 
     // Union: elements in either set
-    public func union(other: Set[T]) -> Set[T] {
+    public func union(other: Set[T, H]) -> Set[T, H] {
         let selfCount = self.count();
         let otherCount = other.count();
 
-        if selfCount == Int64(intLiteral: 0) and otherCount == Int64(intLiteral: 0) {
-            return Set()
-        }
-
-        // Find a placeholder element
-        var placeholder: T = self.entries.offset(by: Int64(intLiteral: 0)).read().element;
-        if selfCount > Int64(intLiteral: 0) {
-            var i: Int64 = Int64(intLiteral: 0);
-            var found: Bool = false;
-            while i < self.cap and found == false {
-                let entry = self.entries.offset(by: i).read();
-                if entry.occupied {
-                    placeholder = entry.element;
-                    found = true
-                }
-                i = i + Int64(intLiteral: 1)
-            }
-        } else {
-            var i: Int64 = Int64(intLiteral: 0);
-            var found: Bool = false;
-            while i < other.cap and found == false {
-                let entry = other.entries.offset(by: i).read();
-                if entry.occupied {
-                    placeholder = entry.element;
-                    found = true
-                }
-                i = i + Int64(intLiteral: 1)
-            }
-        }
-
-        var result = Set(capacity: selfCount + otherCount, placeholder: placeholder);
+        var result = Set(capacity: selfCount + otherCount, placeholder: self.placeholder);
 
         // Add all from self
-        var i: Int64 = Int64(intLiteral: 0);
-        while i < self.cap {
-            let entry = self.entries.offset(by: i).read();
-            if entry.occupied {
-                let _ = result.insert(entry.element);
-            }
-            i = i + Int64(intLiteral: 1)
+        var selfIter = self.iter();
+        var maybeElem = selfIter.next();
+        while maybeElem.isSome() {
+            let _ = result.insert(maybeElem.unwrap());
+            maybeElem = selfIter.next()
         }
 
         // Add all from other
-        i = Int64(intLiteral: 0);
-        while i < other.cap {
-            let entry = other.entries.offset(by: i).read();
-            if entry.occupied {
-                let _ = result.insert(entry.element);
-            }
-            i = i + Int64(intLiteral: 1)
+        var otherIter = other.iter();
+        maybeElem = otherIter.next();
+        while maybeElem.isSome() {
+            let _ = result.insert(maybeElem.unwrap());
+            maybeElem = otherIter.next()
         }
 
         result
     }
 
     // Intersection: elements in both sets
-    public func intersection(other: Set[T]) -> Set[T] {
+    public func intersection(other: Set[T, H]) -> Set[T, H] {
         let selfCount = self.count();
 
-        if selfCount == Int64(intLiteral: 0) {
-            return Set()
-        }
-
-        // Find a placeholder element
-        var placeholder: T = self.entries.offset(by: Int64(intLiteral: 0)).read().element;
-        var i: Int64 = Int64(intLiteral: 0);
-        var found: Bool = false;
-        while i < self.cap and found == false {
-            let entry = self.entries.offset(by: i).read();
-            if entry.occupied {
-                placeholder = entry.element;
-                found = true
-            }
-            i = i + Int64(intLiteral: 1)
-        }
-
-        var result = Set(capacity: selfCount, placeholder: placeholder);
+        var result = Set(capacity: selfCount, placeholder: self.placeholder);
 
         // Add elements that are in both
-        i = Int64(intLiteral: 0);
-        while i < self.cap {
-            let entry = self.entries.offset(by: i).read();
-            if entry.occupied and other.contains(entry.element) {
-                let _ = result.insert(entry.element);
+        var selfIter = self.iter();
+        var maybeElem = selfIter.next();
+        while maybeElem.isSome() {
+            let elem = maybeElem.unwrap();
+            if other.contains(elem) {
+                let _ = result.insert(elem);
             }
-            i = i + Int64(intLiteral: 1)
+            maybeElem = selfIter.next()
         }
 
         result
     }
 
     // Difference: elements in self but not in other
-    public func difference(other: Set[T]) -> Set[T] {
+    public func difference(other: Set[T, H]) -> Set[T, H] {
         let selfCount = self.count();
 
-        if selfCount == Int64(intLiteral: 0) {
-            return Set()
-        }
-
-        // Find a placeholder element
-        var placeholder: T = self.entries.offset(by: Int64(intLiteral: 0)).read().element;
-        var i: Int64 = Int64(intLiteral: 0);
-        var found: Bool = false;
-        while i < self.cap and found == false {
-            let entry = self.entries.offset(by: i).read();
-            if entry.occupied {
-                placeholder = entry.element;
-                found = true
-            }
-            i = i + Int64(intLiteral: 1)
-        }
-
-        var result = Set(capacity: selfCount, placeholder: placeholder);
+        var result = Set(capacity: selfCount, placeholder: self.placeholder);
 
         // Add elements not in other
-        i = Int64(intLiteral: 0);
-        while i < self.cap {
-            let entry = self.entries.offset(by: i).read();
-            if entry.occupied and other.contains(entry.element) == false {
-                let _ = result.insert(entry.element);
+        var selfIter = self.iter();
+        var maybeElem = selfIter.next();
+        while maybeElem.isSome() {
+            let elem = maybeElem.unwrap();
+            if other.contains(elem) == false {
+                let _ = result.insert(elem);
             }
-            i = i + Int64(intLiteral: 1)
+            maybeElem = selfIter.next()
         }
 
         result
     }
 
     // Symmetric difference: elements in either but not both
-    public func symmetricDifference(other: Set[T]) -> Set[T] {
+    public func symmetricDifference(other: Set[T, H]) -> Set[T, H] {
         let selfCount = self.count();
         let otherCount = other.count();
 
-        if selfCount == Int64(intLiteral: 0) and otherCount == Int64(intLiteral: 0) {
-            return Set()
-        }
-
-        // Find a placeholder element
-        var placeholder: T = self.entries.offset(by: Int64(intLiteral: 0)).read().element;
-        if selfCount > Int64(intLiteral: 0) {
-            var i: Int64 = Int64(intLiteral: 0);
-            var found: Bool = false;
-            while i < self.cap and found == false {
-                let entry = self.entries.offset(by: i).read();
-                if entry.occupied {
-                    placeholder = entry.element;
-                    found = true
-                }
-                i = i + Int64(intLiteral: 1)
-            }
-        } else {
-            var i: Int64 = Int64(intLiteral: 0);
-            var found: Bool = false;
-            while i < other.cap and found == false {
-                let entry = other.entries.offset(by: i).read();
-                if entry.occupied {
-                    placeholder = entry.element;
-                    found = true
-                }
-                i = i + Int64(intLiteral: 1)
-            }
-        }
-
-        var result = Set(capacity: selfCount + otherCount, placeholder: placeholder);
+        var result = Set(capacity: selfCount + otherCount, placeholder: self.placeholder);
 
         // Add elements in self but not other
-        var i: Int64 = Int64(intLiteral: 0);
-        while i < self.cap {
-            let entry = self.entries.offset(by: i).read();
-            if entry.occupied and other.contains(entry.element) == false {
-                let _ = result.insert(entry.element);
+        var selfIter = self.iter();
+        var maybeElem = selfIter.next();
+        while maybeElem.isSome() {
+            let elem = maybeElem.unwrap();
+            if other.contains(elem) == false {
+                let _ = result.insert(elem);
             }
-            i = i + Int64(intLiteral: 1)
+            maybeElem = selfIter.next()
         }
 
         // Add elements in other but not self
-        i = Int64(intLiteral: 0);
-        while i < other.cap {
-            let entry = other.entries.offset(by: i).read();
-            if entry.occupied and self.contains(entry.element) == false {
-                let _ = result.insert(entry.element);
+        var otherIter = other.iter();
+        maybeElem = otherIter.next();
+        while maybeElem.isSome() {
+            let elem = maybeElem.unwrap();
+            if self.contains(elem) == false {
+                let _ = result.insert(elem);
             }
-            i = i + Int64(intLiteral: 1)
+            maybeElem = otherIter.next()
         }
 
         result
     }
 
     // Subset check: all elements in self are in other
-    public func isSubset(other: Set[T]) -> Bool {
+    public func isSubset(other: Set[T, H]) -> Bool {
         var allFound: Bool = true;
-        var i: Int64 = Int64(intLiteral: 0);
-        while i < self.cap and allFound {
-            let entry = self.entries.offset(by: i).read();
-            if entry.occupied and other.contains(entry.element) == false {
+        var selfIter = self.iter();
+        var maybeElem = selfIter.next();
+        while maybeElem.isSome() and allFound {
+            if other.contains(maybeElem.unwrap()) == false {
                 allFound = false
             }
-            i = i + Int64(intLiteral: 1)
+            maybeElem = selfIter.next()
         }
         allFound
     }
 
     // Superset check: all elements in other are in self
-    public func isSuperset(other: Set[T]) -> Bool {
+    public func isSuperset(other: Set[T, H]) -> Bool {
         other.isSubset(self)
     }
 
     // Disjoint check: no common elements
-    public func isDisjoint(other: Set[T]) -> Bool {
+    public func isDisjoint(other: Set[T, H]) -> Bool {
         var noCommon: Bool = true;
-        var i: Int64 = Int64(intLiteral: 0);
-        while i < self.cap and noCommon {
-            let entry = self.entries.offset(by: i).read();
-            if entry.occupied and other.contains(entry.element) {
+        var selfIter = self.iter();
+        var maybeElem = selfIter.next();
+        while maybeElem.isSome() and noCommon {
+            if other.contains(maybeElem.unwrap()) {
                 noCommon = false
             }
-            i = i + Int64(intLiteral: 1)
+            maybeElem = selfIter.next()
         }
         noCommon
+    }
+
+    // Cloneable - Set gets COW semantics from Dictionary
+    public func clone() -> Set[T, H] {
+        Set(dict: self.dict.clone(), placeholder: self.placeholder)
+    }
+
+    // Private init for clone
+    private init(dict dict: Dictionary[T, Unit, H], placeholder placeholder: T) {
+        self.dict = dict;
+        self.placeholder = placeholder;
     }
 }
 
 // Equatable extension
-extend Set[T]: Equatable where T: Equatable {
-    public func equals(other: Set[T]) -> Bool {
+extend Set[T, H]: Equatable where T: Hash, H: Hasher, H: Defaultable {
+    public func equals(other: Set[T, H]) -> Bool {
         let selfCount = self.count();
         let otherCount = other.count();
         if selfCount != otherCount {
@@ -524,53 +249,17 @@ extend Set[T]: Equatable where T: Equatable {
 
         // Check all elements in self exist in other
         var equal: Bool = true;
-        var i: Int64 = Int64(intLiteral: 0);
-        let selfCap = self.getCapacity();
-        let selfEntries = self.getEntries();
-        while i < selfCap and equal {
-            let entry = selfEntries.offset(by: i).read();
-            if entry.occupied and other.contains(entry.element) == false {
+        var selfIter = self.iter();
+        var maybeElem = selfIter.next();
+        while maybeElem.isSome() and equal {
+            if other.contains(maybeElem.unwrap()) == false {
                 equal = false
             }
-            i = i + Int64(intLiteral: 1)
+            maybeElem = selfIter.next()
         }
         equal
     }
 }
 
 // Cloneable extension
-extend Set[T]: Cloneable where T: Cloneable {
-    public func clone() -> Set[T] {
-        let selfCount = self.count();
-        let selfCap = self.getCapacity();
-        let selfEntries = self.getEntries();
-
-        if selfCount == Int64(intLiteral: 0) {
-            return Set()
-        }
-
-        // Find first element to use as placeholder
-        var placeholder: T = selfEntries.offset(by: Int64(intLiteral: 0)).read().element;
-        var i: Int64 = Int64(intLiteral: 0);
-        var found: Bool = false;
-        while i < selfCap and found == false {
-            let entry = selfEntries.offset(by: i).read();
-            if entry.occupied {
-                placeholder = entry.element;
-                found = true
-            }
-            i = i + Int64(intLiteral: 1)
-        }
-
-        var result = Set(capacity: selfCount, placeholder: placeholder.clone());
-        i = Int64(intLiteral: 0);
-        while i < selfCap {
-            let entry = selfEntries.offset(by: i).read();
-            if entry.occupied {
-                let _ = result.insert(entry.element.clone());
-            }
-            i = i + Int64(intLiteral: 1)
-        }
-        result
-    }
-}
+extend Set[T, H]: Cloneable where T: Hash, H: Hasher, H: Defaultable {}
