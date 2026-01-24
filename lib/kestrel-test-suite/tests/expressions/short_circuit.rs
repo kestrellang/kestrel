@@ -744,7 +744,6 @@ func main() -> lang.i64 {
     fn not_with_short_circuit() {
         // (not false) = true, which should short-circuit the or
         // "EFFECT" should NOT be printed
-        // Note: we need explicit parens because `not` has lower precedence than `or`
         Test::new(
             r#"
 module Main
@@ -756,7 +755,7 @@ func effect() -> Bool {
 }
 
 func main() -> lang.i64 {
-    let result = (not false) or effect();
+    let result = not false or effect();
     let _ = println(result);
     0
 }
@@ -767,22 +766,22 @@ func main() -> lang.i64 {
     }
 
     #[test]
-    fn not_precedence_lower_than_or() {
-        // Verify that `not a or b` parses as `not (a or b)`
-        // not (false or true) = not true = false
+    fn not_precedence_higher_than_or() {
+        // Verify that `not a or b` parses as `(not a) or b` (like Rust/Swift)
+        // (not false) or true = true or true = true
         Test::new(
             r#"
 module Main
 import std.io.stdio.println
 
 func main() -> lang.i64 {
-    let _ = println(not false or true);  // not (false or true) = not true = false
+    let _ = println(not false or true);  // (not false) or true = true or true = true
     0
 }
 "#,
         )
         .with_stdlib()
-        .expect(StdoutEquals("false\n"));
+        .expect(StdoutEquals("true\n"));
     }
 }
 

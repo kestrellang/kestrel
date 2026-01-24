@@ -1858,9 +1858,10 @@ pub fn expr_parser<'tokens>()
             })
             .boxed();
 
-        // Unary expression
+        // Unary expression - binds tighter than binary operators
+        // so `not false or x` parses as `(not false) or x`, not `not (false or x)`
         let unary = unary_op
-            .then(expr.clone())
+            .then(postfix.clone())
             .map(|((tok, span), operand)| ExprVariant::Unary(tok, span, Box::new(operand)));
 
         // Try expression: try expr (high precedence - binds to postfix)
