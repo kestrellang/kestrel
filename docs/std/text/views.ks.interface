@@ -28,6 +28,12 @@ public struct BytesView: Iterable {
     /// Returns the byte at the given index without bounds checking.
     public func byteAtUnchecked(index: Int64) -> UInt8;
 
+    /// Returns a substring by byte indices. Panics if out of bounds or invalid UTF-8 boundary.
+    public func substring(from start: Int64, to end: Int64) -> String;
+
+    /// Returns a substring by byte indices, or None if out of bounds or invalid UTF-8 boundary.
+    public func substring(checked from: Int64, to end: Int64) -> Optional[String];
+
     /// Returns an iterator over the bytes.
     public func iter() -> BytesIterator;
 }
@@ -53,6 +59,12 @@ public struct CharsView: Iterable {
 
     /// Returns the number of characters (O(n) - must decode all).
     public func count() -> Int64;
+
+    /// Returns a substring by character indices (O(n)). Panics if out of bounds.
+    public func substring(from start: Int64, to end: Int64) -> String;
+
+    /// Returns a substring by character indices (O(n)), or None if out of bounds.
+    public func substring(checked from: Int64, to end: Int64) -> Optional[String];
 }
 
 /// Iterator over grapheme clusters.

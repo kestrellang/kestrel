@@ -43,6 +43,8 @@ public struct Bool:
     /// Returns the underlying boolean value for use in conditionals.
     public func boolValue() -> lang.i1;
 
-    /// Formats this Bool as a string ("true" or "false").
-    public func format() -> String;
+    /// Formats this Bool as a string.
+    /// Default: "true" or "false".
+    /// Debug: "Bool(true)" or "Bool(false)".
+    public func format(options: FormatOptions = .default) -> String;
 }

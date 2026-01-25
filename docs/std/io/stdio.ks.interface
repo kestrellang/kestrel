@@ -1,64 +1,261 @@
-// Standard I/O streams
+// Standard I/O Streams
+//
+// Provides access to standard input, output, and error streams, plus
+// convenience functions for common I/O patterns like printing and prompting.
+//
+// Example:
+//
+//     // Print to stdout
+//     try println(value: "Hello, World!")
+//     try print(value: "No newline")
+//
+//     // Print to stderr
+//     try eprintln(value: "Error: something went wrong")
+//
+//     // Read from stdin
+//     let line = try readLine()
+//     let name = try prompt(message: "Enter your name: ")
+//
+//     // Direct stream access
+//     var out = stdout()
+//     try writeStr(writer: out, s: "Direct write")
+
+// ============================================================================
+// STANDARD INPUT
+// ============================================================================
 
 /// Standard input stream.
+///
+/// Provides read access to the process's standard input (file descriptor 0).
+/// Typically connected to the terminal for user input, but may be redirected
+/// from a file or pipe.
+///
+/// Example:
+///     var input = Stdin()
+///     var buf = Array[UInt8](repeating: 0, count: 1024)
+///     let n = try input.read(into: buf.asSlice())
 public struct Stdin: Read {
+
     /// Creates a handle to standard input.
+    ///
+    /// Multiple Stdin instances can coexist; they all read from the same
+    /// underlying file descriptor.
+    ///
+    /// Example:
+    ///     var input = Stdin()
     public init();
 
     /// Reads bytes from standard input into the buffer.
+    ///
+    /// Blocks until data is available, EOF is reached, or an error occurs.
+    /// Returns Ok(0) on EOF (e.g., Ctrl+D on Unix terminals).
+    ///
+    /// Example:
+    ///     var input = Stdin()
+    ///     var buf = Array[UInt8](repeating: 0, count: 256)
+    ///     let n = try input.read(into: buf.asSlice())
+    ///     if n == 0 {
+    ///         // EOF - user pressed Ctrl+D or input exhausted
+    ///     }
     public mutating func read(into buf: Slice[UInt8]) -> Result[Int64, Error];
 }
 
+// ============================================================================
+// STANDARD OUTPUT
+// ============================================================================
+
 /// Standard output stream.
+///
+/// Provides write access to the process's standard output (file descriptor 1).
+/// Typically connected to the terminal for displaying output, but may be
+/// redirected to a file or pipe.
+///
+/// Example:
+///     var out = Stdout()
+///     try writeStr(writer: out, s: "Hello!")
+///     try out.flush()
 public struct Stdout: Write {
+
     /// Creates a handle to standard output.
+    ///
+    /// Example:
+    ///     var out = Stdout()
     public init();
 
     /// Writes bytes to standard output.
-    public func write(from buf: Slice[UInt8]) -> Result[Int64, Error];
+    ///
+    /// May write fewer bytes than provided if the output buffer is full
+    /// or interrupted. Use writeAll() to ensure all bytes are written.
+    ///
+    /// Example:
+    ///     var out = Stdout()
+    ///     try out.write(from: data.asSlice())
+    public mutating func write(from buf: Slice[UInt8]) -> Result[Int64, Error];
 
     /// Flushes standard output.
-    public func flush() -> Result[(), Error];
+    ///
+    /// Ensures all buffered output is written to the terminal or file.
+    /// Important when mixing stdout with stderr or when output must
+    /// appear immediately (e.g., progress indicators).
+    ///
+    /// Example:
+    ///     var out = Stdout()
+    ///     try writeStr(writer: out, s: "Processing...")
+    ///     try out.flush()  // ensure "Processing..." appears immediately
+    public mutating func flush() -> Result[(), Error];
 }
 
+// ============================================================================
+// STANDARD ERROR
+// ============================================================================
+
 /// Standard error stream.
+///
+/// Provides write access to the process's standard error (file descriptor 2).
+/// Used for error messages and diagnostics. Unlike stdout, stderr is typically
+/// unbuffered, so output appears immediately.
+///
+/// Example:
+///     var err = Stderr()
+///     try writeLine(writer: err, s: "Error: file not found")
 public struct Stderr: Write {
+
     /// Creates a handle to standard error.
+    ///
+    /// Example:
+    ///     var err = Stderr()
     public init();
 
     /// Writes bytes to standard error.
-    public func write(from buf: Slice[UInt8]) -> Result[Int64, Error];
+    ///
+    /// Example:
+    ///     var err = Stderr()
+    ///     try err.write(from: message.asSlice())
+    public mutating func write(from buf: Slice[UInt8]) -> Result[Int64, Error];
 
     /// Flushes standard error.
-    public func flush() -> Result[(), Error];
+    ///
+    /// Usually a no-op since stderr is typically unbuffered, but provided
+    /// for Write protocol conformance.
+    ///
+    /// Example:
+    ///     var err = Stderr()
+    ///     try err.flush()
+    public mutating func flush() -> Result[(), Error];
 }
 
+// ============================================================================
+// STREAM CONSTRUCTORS
+// ============================================================================
+
 /// Returns a handle to standard input.
+///
+/// Convenience function equivalent to `Stdin()`.
+///
+/// Example:
+///     var input = stdin()
 public func stdin() -> Stdin;
 
 /// Returns a handle to standard output.
+///
+/// Convenience function equivalent to `Stdout()`.
+///
+/// Example:
+///     var out = stdout()
 public func stdout() -> Stdout;
 
 /// Returns a handle to standard error.
+///
+/// Convenience function equivalent to `Stderr()`.
+///
+/// Example:
+///     var err = stderr()
 public func stderr() -> Stderr;
 
+// ============================================================================
+// PRINTING TO STDOUT
+// ============================================================================
+
 /// Prints a formattable value to stdout without a trailing newline.
-public func print[F](value: F) -> Result[(), Error] where F: Formattable;
+///
+/// The value is converted to a string via the Formattable protocol
+/// and written to standard output.
+///
+/// Example:
+///     try print(value: "Hello, ")
+///     try print(value: "World!")  // Output: "Hello, World!"
+///     try print(value: 42)        // Output: "42"
+///     try print(value: true)      // Output: "true"
+public func print[F: Formattable](value: F) -> Result[(), Error];
 
 /// Prints a formattable value to stdout with a trailing newline.
-public func println[F](value: F) -> Result[(), Error] where F: Formattable;
+///
+/// Equivalent to `print(value:)` followed by a newline character.
+///
+/// Example:
+///     try println(value: "Hello, World!")  // prints "Hello, World!\n"
+///     try println(value: 123)              // prints "123\n"
+public func println[F: Formattable](value: F) -> Result[(), Error];
 
 /// Prints an empty line to stdout.
+///
+/// Equivalent to `print(value: "\n")`.
+///
+/// Example:
+///     try println(value: "Section 1")
+///     try printlnEmpty()  // blank line
+///     try println(value: "Section 2")
 public func printlnEmpty() -> Result[(), Error];
 
+// ============================================================================
+// PRINTING TO STDERR
+// ============================================================================
+
 /// Prints a formattable value to stderr without a trailing newline.
-public func eprint[F](value: F) -> Result[(), Error] where F: Formattable;
+///
+/// Use for error messages and diagnostics.
+///
+/// Example:
+///     try eprint(value: "Warning: ")
+///     try eprint(value: "disk space low")
+public func eprint[F: Formattable](value: F) -> Result[(), Error];
 
 /// Prints a formattable value to stderr with a trailing newline.
-public func eprintln[F](value: F) -> Result[(), Error] where F: Formattable;
+///
+/// Use for error messages and diagnostics.
+///
+/// Example:
+///     try eprintln(value: "Error: file not found")
+///     try eprintln(value: "Usage: program <file>")
+public func eprintln[F: Formattable](value: F) -> Result[(), Error];
+
+// ============================================================================
+// READING FROM STDIN
+// ============================================================================
 
 /// Reads a line from stdin, stripping the trailing newline.
+///
+/// Blocks until a complete line is available (user presses Enter) or
+/// EOF is reached. The returned string does not include the newline.
+///
+/// Returns Err on I/O error. Returns Ok("") on EOF.
+///
+/// Example:
+///     try print(value: "Enter command: ")
+///     let command = try readLine()
+///     if command == "quit" {
+///         // exit
+///     }
 public func readLine() -> Result[String, Error];
 
 /// Prints a message and reads a line from stdin.
+///
+/// Combines print() and readLine() for interactive prompts.
+/// The message is printed without a trailing newline, then input is read.
+///
+/// Example:
+///     let name = try prompt(message: "Enter your name: ")
+///     try println(value: "Hello, " + name + "!")
+///
+///     let age = try prompt(message: "Enter your age: ")
 public func prompt(message: String) -> Result[String, Error];

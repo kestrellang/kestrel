@@ -1,79 +1,433 @@
-// Result type - represents either success (Ok) or failure (Err)
+// Result[T, E] - represents either success (Ok) or failure (Err)
 
-/// Represents the result of an operation: either Ok(value) or Err(error).
-/// Used for operations that can fail, providing explicit error handling.
-/// Supports the `try` operator for early return on errors.
-public enum Result[T, E]: Tryable, Returnable[T] {
+// ============================================================================
+// RESULT TYPE
+// ============================================================================
+
+/// Represents the result of an operation: either `Ok(value)` or `Err(error)`.
+///
+/// Used for operations that can fail, providing explicit error handling
+/// without exceptions. The compiler enforces handling of the error case.
+///
+/// Syntactic sugar:
+///     T throws E   desugars to  Result[T, E]
+///
+/// Example:
+///     func divide(a: Int64, by b: Int64) -> Int64 throws String {
+///         if b == 0 {
+///             return Err("division by zero")
+///         }
+///         return Ok(a / b)
+///     }
+///
+///     match divide(a: 10, by: 2) {
+///         case .Ok(let result) => print("Result: \{result}")
+///         case .Err(let msg) => print("Error: \{msg}")
+///     }
+///
+/// The `try` operator extracts values, returning early on Err:
+///     func process() -> Data throws IoError {
+///         let file = try openFile(path)    // returns Err early if failed
+///         let data = try readAll(file)
+///         return transform(data)
+///     }
+public enum Result[T, E] {
     /// Contains a success value.
     case Ok(T)
+
     /// Contains an error value.
     case Err(E)
 
-    type Output = T
-    type Early = E
+    // ========================================================================
+    // CONSTRUCTORS
+    // ========================================================================
 
     /// Creates an Ok containing the value.
+    ///
+    /// Example:
+    ///     let result = Result[Int64, String].ok(value: 42)
+    ///     let result: Int64 throws String = Ok(42)  // preferred
     public static func ok(value: T) -> Result[T, E];
 
     /// Creates an Err containing the error.
+    ///
+    /// Example:
+    ///     let result = Result[Int64, String].err(error: "failed")
+    ///     let result: Int64 throws String = Err("failed")  // preferred
     public static func err(error: E) -> Result[T, E];
 
+    // ========================================================================
+    // QUERY METHODS
+    // ========================================================================
+
     /// Returns true if this is Ok.
+    ///
+    /// Example:
+    ///     Ok(42).isOk()       // true
+    ///     Err("oops").isOk()  // false
     public func isOk() -> Bool;
 
     /// Returns true if this is Err.
+    ///
+    /// Example:
+    ///     Ok(42).isErr()       // false
+    ///     Err("oops").isErr()  // true
     public func isErr() -> Bool;
 
-    /// Extracts the value for the try operator.
-    public func tryExtract() -> ControlFlow[T, E];
+    /// Returns true if this is Ok and the value satisfies the predicate.
+    ///
+    /// Example:
+    ///     Ok(42).isOkAnd(|x| x > 0)    // true
+    ///     Ok(-1).isOkAnd(|x| x > 0)    // false
+    ///     Err("e").isOkAnd(|x| x > 0)  // false
+    public func isOkAnd(predicate: (T) -> Bool) -> Bool;
 
-    /// Creates Ok from a value for the return statement.
-    public static func fromOutput(value: T) -> Result[T, E];
+    /// Returns true if this is Err and the error satisfies the predicate.
+    ///
+    /// Example:
+    ///     Err("not found").isErrAnd(|e| e.contains("not"))  // true
+    ///     Err("timeout").isErrAnd(|e| e.contains("not"))    // false
+    ///     Ok(42).isErrAnd(|e| true)                         // false
+    public func isErrAnd(predicate: (E) -> Bool) -> Bool;
+
+    // ========================================================================
+    // UNWRAPPING - SUCCESS VALUE
+    // ========================================================================
 
     /// Returns the success value, panicking if Err.
+    ///
+    /// WARNING: Only use when you are certain the result is Ok.
+    /// Prefer `unwrapOr`, `unwrap(orElse:)`, or pattern matching.
+    ///
+    /// Example:
+    ///     Ok(42).unwrap()       // 42
+    ///     Err("oops").unwrap()  // PANIC: called unwrap on Err: oops
     public func unwrap() -> T;
 
+    /// Returns the success value, panicking with a custom message if Err.
+    ///
+    /// Use this for better error messages when an Err is unexpected.
+    ///
+    /// Example:
+    ///     let config = loadConfig().expect(message: "Config required")
+    ///     Err("fail").expect(message: "Should succeed")  // PANIC: Should succeed: fail
+    public func expect(message: String) -> T;
+
     /// Returns the success value or the default if Err.
+    ///
+    /// Note: The default is eagerly evaluated. Use `unwrap(orElse:)` for
+    /// lazy evaluation when the default is expensive to compute.
+    ///
+    /// Example:
+    ///     Ok(42).unwrapOr(default: 0)       // 42
+    ///     Err("oops").unwrapOr(default: 0)  // 0
     public func unwrapOr(default: T) -> T;
 
     /// Returns the success value or calls the function with the error if Err.
+    ///
+    /// The function receives the error and can use it to compute a default.
+    ///
+    /// Example:
+    ///     Ok(42).unwrap(orElse: |e| fallback(e))       // 42, no call
+    ///     Err("oops").unwrap(orElse: |e| e.count)      // 4
+    ///     Err(err).unwrap(orElse: |e| recoverFrom(e))  // calls function
     public func unwrap(orElse defaultFn: (E) -> T) -> T;
 
+    // ========================================================================
+    // UNWRAPPING - ERROR VALUE
+    // ========================================================================
+
     /// Returns the error value, panicking if Ok.
+    ///
+    /// Useful in tests to assert that an operation failed.
+    ///
+    /// Example:
+    ///     Err("oops").unwrapErr()  // "oops"
+    ///     Ok(42).unwrapErr()       // PANIC: called unwrapErr on Ok: 42
     public func unwrapErr() -> E;
 
+    /// Returns the error value, panicking with a custom message if Ok.
+    ///
+    /// Example:
+    ///     Err("oops").expectErr(message: "Should fail")  // "oops"
+    ///     Ok(42).expectErr(message: "Should fail")       // PANIC: Should fail: 42
+    public func expectErr(message: String) -> E;
+
+    // ========================================================================
+    // TRANSFORMATIONS - SUCCESS VALUE
+    // ========================================================================
+
     /// Transforms the success value using the function.
+    ///
+    /// Returns Err unchanged if this is Err.
+    ///
+    /// Example:
+    ///     Ok(2).map(|x| x * 2)       // Ok(4)
+    ///     Err("e").map(|x| x * 2)    // Err("e")
+    ///     Ok("hi").map(|s| s.len)    // Ok(2)
     public func map[U](transform: (T) -> U) -> Result[U, E];
 
-    /// Transforms the error value using the function.
-    public func mapErr[F](transform: (E) -> F) -> Result[T, F];
-
     /// Transforms the success value, flattening the result.
+    ///
+    /// Use when your transform function returns a Result.
+    ///
+    /// Example:
+    ///     func parse(s: String) -> Int64 throws ParseError { ... }
+    ///
+    ///     Ok("42").flatMap(parse)   // Ok(42)
+    ///     Ok("abc").flatMap(parse)  // Err(ParseError)
+    ///     Err(e).flatMap(parse)     // Err(e)
     public func flatMap[U](transform: (T) -> Result[U, E]) -> Result[U, E];
 
+    /// Flattens a nested Result.
+    ///
+    /// Converts `Result[Result[T, E], E]` to `Result[T, E]`.
+    ///
+    /// Example:
+    ///     Ok(Ok(42)).flatten()    // Ok(42)
+    ///     Ok(Err("e")).flatten()  // Err("e")
+    ///     Err("e").flatten()      // Err("e")
+    public func flatten[U]() -> Result[U, E] where T = Result[U, E];
+
+    /// Calls the function with the success value for side effects.
+    ///
+    /// Returns self unchanged. Useful for logging or debugging in a chain.
+    ///
+    /// Example:
+    ///     fetchData()
+    ///         .inspect(|data| log("Received \{data.len} bytes"))
+    ///         .map(|data| process(data))
+    public func inspect(fn: (T) -> Void) -> Result[T, E];
+
+    // ========================================================================
+    // TRANSFORMATIONS - ERROR VALUE
+    // ========================================================================
+
+    /// Transforms the error value using the function.
+    ///
+    /// Returns Ok unchanged if this is Ok.
+    ///
+    /// Example:
+    ///     Ok(42).mapErr(|e| "Error: \{e}")       // Ok(42)
+    ///     Err("oops").mapErr(|e| "Error: \{e}")  // Err("Error: oops")
+    public func mapErr[F](transform: (E) -> F) -> Result[T, F];
+
     /// Transforms the error value, flattening the result.
+    ///
+    /// Use when your transform function returns a Result.
+    ///
+    /// Example:
+    ///     Ok(42).flatMapErr(|e| recover(e))   // Ok(42)
+    ///     Err(e).flatMapErr(|e| recover(e))   // result of recover(e)
     public func flatMapErr[F](transform: (E) -> Result[T, F]) -> Result[T, F];
 
+    /// Calls the function with the error value for side effects.
+    ///
+    /// Returns self unchanged. Useful for logging errors in a chain.
+    ///
+    /// Example:
+    ///     fetchData()
+    ///         .inspectErr(|e| log("Failed: \{e}"))
+    ///         .unwrapOr(default: defaultData)
+    public func inspectErr(fn: (E) -> Void) -> Result[T, E];
+
+    // ========================================================================
+    // CONVERSION TO OPTIONAL
+    // ========================================================================
+
     /// Converts to Optional, discarding the error.
+    ///
+    /// Returns Some(value) if Ok, None if Err.
+    ///
+    /// Example:
+    ///     Ok(42).ok()       // Some(42)
+    ///     Err("oops").ok()  // None
     public func ok() -> Optional[T];
 
     /// Converts to Optional, discarding the success value.
+    ///
+    /// Returns Some(error) if Err, None if Ok.
+    ///
+    /// Example:
+    ///     Ok(42).err()       // None
+    ///     Err("oops").err()  // Some("oops")
     public func err() -> Optional[E];
 
-    /// Returns other if this is Ok, otherwise returns the error.
-    public func andValue[U](other: Result[U, E]) -> Result[U, E];
+    /// Transposes a Result of an Optional into an Optional of a Result.
+    ///
+    /// - `Ok(Some(v))` becomes `Some(Ok(v))`
+    /// - `Ok(None)` becomes `None`
+    /// - `Err(e)` becomes `Some(Err(e))`
+    ///
+    /// Example:
+    ///     Ok(Some(42)).transpose()   // Some(Ok(42))
+    ///     Ok(None).transpose()       // None
+    ///     Err("e").transpose()       // Some(Err("e"))
+    public func transpose[U]() -> Optional[Result[U, E]] where T = Optional[U];
 
-    /// Returns the result of transform if Ok, otherwise returns the error.
-    public func andThen[U](transform: (T) -> Result[U, E]) -> Result[U, E];
+    // ========================================================================
+    // COMBINATORS
+    // ========================================================================
+
+    /// Returns other if this is Ok, otherwise returns the Err.
+    ///
+    /// Note: `other` is eagerly evaluated. Use `flatMap` for lazy evaluation.
+    ///
+    /// Example:
+    ///     Ok(1).then(other: Ok("a"))   // Ok("a")
+    ///     Ok(1).then(other: Err("e"))  // Err("e")
+    ///     Err("e").then(other: Ok(1))  // Err("e")
+    public func then[U](other: Result[U, E]) -> Result[U, E];
 
     /// Returns this if Ok, otherwise returns other.
-    public func orValue(other: Result[T, E]) -> Result[T, E];
+    ///
+    /// Note: `other` is eagerly evaluated. Use `orElse` for lazy evaluation.
+    ///
+    /// Example:
+    ///     Ok(1).otherwise(other: Ok(2))      // Ok(1)
+    ///     Err("e").otherwise(other: Ok(2))   // Ok(2)
+    ///     Err("a").otherwise(other: Err("b"))  // Err("b")
+    public func otherwise(other: Result[T, E]) -> Result[T, E];
 
     /// Returns this if Ok, otherwise calls alternative with the error.
+    ///
+    /// The function receives the error and can attempt recovery.
+    /// The error type may change.
+    ///
+    /// Example:
+    ///     Ok(1).orElse(|e| Ok(0))           // Ok(1), no call
+    ///     Err("e").orElse(|e| Ok(0))        // Ok(0)
+    ///     Err(e).orElse(|e| tryBackup(e))   // attempts backup
     public func orElse[F](alternative: (E) -> Result[T, F]) -> Result[T, F];
 
+    /// Combines two Results into a Result of a tuple.
+    ///
+    /// Returns Ok only if both are Ok. If either is Err, returns the first Err.
+    ///
+    /// Example:
+    ///     Ok(1).zip(with: Ok("a"))    // Ok((1, "a"))
+    ///     Ok(1).zip(with: Err("e"))   // Err("e")
+    ///     Err("e").zip(with: Ok("a")) // Err("e")
+    public func zip[U](with other: Result[U, E]) -> Result[(T, U), E];
+
+    // ========================================================================
+    // ITERATION
+    // ========================================================================
+
     /// Returns an iterator over the success value (0 or 1 elements).
+    ///
+    /// Only yields a value if this is Ok. Err yields nothing.
+    ///
+    /// Example:
+    ///     for value in Ok(42).iter() {
+    ///         print(value)  // prints 42
+    ///     }
+    ///
+    ///     for value in Err("e").iter() {
+    ///         print(value)  // never executes
+    ///     }
     public func iter() -> ResultIterator[T, E];
+}
+
+// ============================================================================
+// CONDITIONAL EXTENSIONS - EQUATABLE
+// ============================================================================
+
+/// Extension for Results with equatable values and errors.
+extend Result[T, E]: Equatable where T: Equatable, E: Equatable {
+
+    /// Compares two Results for equality.
+    ///
+    /// Two Results are equal if both are Ok with equal values, or both
+    /// are Err with equal errors.
+    ///
+    /// Example:
+    ///     Ok(1) == Ok(1)        // true
+    ///     Ok(1) == Ok(2)        // false
+    ///     Ok(1) == Err("e")     // false
+    ///     Err("a") == Err("a")  // true
+    public func equals(other: Result[T, E]) -> Bool;
+
+    /// Returns true if this is Ok containing the given value.
+    ///
+    /// Example:
+    ///     Ok(42).contains(value: 42)   // true
+    ///     Ok(42).contains(value: 0)    // false
+    ///     Err("e").contains(value: 42) // false
+    public func contains(value: T) -> Bool;
+
+    /// Returns true if this is Err containing the given error.
+    ///
+    /// Example:
+    ///     Err("e").containsErr(error: "e")  // true
+    ///     Err("e").containsErr(error: "x")  // false
+    ///     Ok(42).containsErr(error: "e")    // false
+    public func containsErr(error: E) -> Bool;
+}
+
+// ============================================================================
+// CONDITIONAL EXTENSIONS - HASHABLE
+// ============================================================================
+
+/// Extension for Results with hashable values and errors.
+extend Result[T, E]: Hashable where T: Hashable, E: Hashable {
+
+    /// Returns the hash value.
+    ///
+    /// Ok and Err have distinct hash spaces to avoid collisions.
+    public func hash() -> Int64;
+}
+
+// ============================================================================
+// CONDITIONAL EXTENSIONS - CLONEABLE
+// ============================================================================
+
+/// Extension for Results with cloneable values and errors.
+extend Result[T, E]: Cloneable where T: Cloneable, E: Cloneable {
+
+    /// Creates a deep clone of the Result.
+    ///
+    /// Example:
+    ///     let result = Ok([1, 2, 3])
+    ///     let copy = result.clone()  // independent copy
+    public func clone() -> Result[T, E];
+}
+
+// ============================================================================
+// PROTOCOL CONFORMANCES
+// ============================================================================
+
+/// Tryable extension enabling `try` on Result values.
+///
+/// When used with the `try` operator, extracts the value from Ok or
+/// causes early return with the Err.
+///
+/// Example:
+///     func process() -> Data throws IoError {
+///         let file = try openFile(path)  // returns Err early if failed
+///         let data = try readAll(file)
+///         return transform(data)
+///     }
+extend Result[T, E]: Tryable {
+    type Output = T
+    type Early = E
+
+    /// Extracts the value for the try operator.
+    public func tryExtract() -> ControlFlow[T, E];
+}
+
+/// Returnable extension enabling implicit Ok wrapping in return statements.
+///
+/// When a function returns `T throws E`, you can return a `T` directly
+/// and it will be wrapped in Ok automatically.
+///
+/// Example:
+///     func double(x: Int64) -> Int64 throws String {
+///         return x * 2  // automatically wrapped as Ok(x * 2)
+///     }
+extend Result[T, E]: Returnable[T] {
+    /// Creates Ok from a value for the return statement.
+    public static func fromOutput(value: T) -> Result[T, E];
 }
 
 /// FromResidual extension enabling early return propagation.
@@ -81,24 +435,54 @@ extend Result[T, E]: FromResidual[E] {
     public static func fromResidual(residual: E) -> Result[T, E];
 }
 
-/// Equatable extension when T and E are Equatable.
-extend Result[T, E]: Equatable where T: Equatable, E: Equatable {
-    public func equals(other: Result[T, E]) -> Bool;
+/// Formattable extension when T and E are Formattable.
+///
+/// Example:
+///     "\{Ok(42)}"       // "Ok(42)"
+///     "\{Err(\"e\")}"   // "Err(e)"
+///     "\{Ok(42):?}"     // "Result.Ok(42)"
+extend Result[T, E]: Formattable where T: Formattable, E: Formattable {
+
+    /// Formats this result.
+    ///
+    /// Default format: "Ok(value)" or "Err(error)".
+    /// Debug format: "Result.Ok(value)" or "Result.Err(error)".
+    public func format(options: FormatOptions = .default) -> String;
 }
 
-/// Formattable extension when T and E are Formattable.
-extend Result[T, E]: Formattable where T: Formattable, E: Formattable {
-    public func format() -> String;
-}
+// ============================================================================
+// RESULT ITERATOR
+// ============================================================================
 
 /// Iterator for Result that yields 0 or 1 elements (only Ok values).
-public struct ResultIterator[T, E] {
+///
+/// Obtained by calling `iter()` on a Result.
+///
+/// Example:
+///     let items: [Int64] = Ok(42).iter().collect()   // [42]
+///     let empty: [Int64] = Err("e").iter().collect() // []
+public struct ResultIterator[T, E]: Iterator {
     type Item = T
 
     public init(result: Result[T, E]);
+
+    /// Returns the next element, or None if exhausted.
     public mutating func next() -> Optional[T];
 }
 
-/// Type operator alias for Result.
+// ============================================================================
+// TYPE OPERATOR
+// ============================================================================
+
+/// Type operator alias: `T throws E` desugars to `Result[T, E]`.
+///
+/// This provides convenient syntax for fallible return types.
+///
+/// Example:
+///     func parse(s: String) -> Int64 throws ParseError  // Result[Int64, ParseError]
+///     func load() -> Config throws IoError              // Result[Config, IoError]
+///
+///     // Nested results
+///     func tryBoth() -> (Int64 throws A) throws B       // Result[Result[Int64, A], B]
 @builtin(.ResultTypeOperator)
 public type ResultTypeOperator[T, E] = Result[T, E];
