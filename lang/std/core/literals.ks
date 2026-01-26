@@ -95,4 +95,4 @@ public type NullLiteralType[T] = std.result.Optional[T]
 public type ArrayLiteralType[T] = std.collections.Array[T]
 
 @builtin(.DefaultDictionaryLiteralType)
-public type DictionaryLiteralType[K, V] = std.collections.Dictionary[K, V]
+public type DictionaryLiteralType[K, V] = std.collections.Dictionary[K, V, std.collections.DefaultHasher]
