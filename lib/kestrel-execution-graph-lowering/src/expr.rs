@@ -728,6 +728,8 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
         // === Other ===
         ExprKind::Array(elements) => lower_array_literal(ctx, elements, expr),
 
+        ExprKind::Dictionary(pairs) => lower_dictionary_literal(ctx, pairs, expr),
+
         ExprKind::Tuple(elements) => {
             // Lower each element
             let element_values: Vec<Value> =
@@ -1599,6 +1601,256 @@ fn lower_array_literal_init_call(
 
     // Build call args: self_ref first (MutRef), then pointer and count (both borrowed)
     // The function signature takes references: &p[T] and &i64
+    let call_args = vec![
+        CallArg::mutating(Value::Place(self_ref_place)),
+        CallArg::borrow(Value::Place(ptr_place)),
+        CallArg::borrow(count_value),
+    ];
+
+    // Create a temp for the unit return value of init (we discard it)
+    let unit_ty = ctx.mir.ty_unit();
+    let unit_local = ctx.create_temp("init_ret", unit_ty);
+    let unit_place = Place::local(unit_local);
+
+    // Extract type arguments from the struct type
+    let type_args = match extract_type_args_from_receiver(ctx, &expr.ty, Some(expr.span.clone())) {
+        Some(args) => args,
+        None => return Value::Immediate(Immediate::error()),
+    };
+
+    // Call the init function
+    let mir_callee = if type_args.is_empty() {
+        Callee::direct(init_name)
+    } else {
+        Callee::direct_generic(init_name, type_args)
+    };
+    ctx.emit_call_with_modes(unit_place, mir_callee, call_args);
+
+    // Return the initialized struct
+    Value::Place(result_place)
+}
+
+/// Lower a dictionary literal expression.
+///
+/// Dictionary literals work similarly to array literals:
+/// 1. Stack allocate a buffer for (Key, Value) tuples
+/// 2. Write each key-value pair as a tuple to the buffer
+/// 3. Call the target type's init(_dictionaryLiteralPointer:_dictionaryLiteralCount:) method
+fn lower_dictionary_literal(
+    ctx: &mut LoweringContext,
+    pairs: &[(Expression, Expression)],
+    expr: &Expression,
+) -> Value {
+    // Expand type aliases (e.g., [K: V] -> DictionaryTypeOperator[K, V] -> Dictionary[K, V])
+    let target_ty = expr.ty.expand_aliases();
+
+    // Get Key and Value types from Dictionary[K, V] struct type
+    let (key_sem_ty, value_sem_ty): (Ty, Ty) = match target_ty.kind() {
+        TyKind::Struct { substitutions, .. } => {
+            // For Dictionary[K, V] struct types, get K and V from substitutions
+            let mut iter = substitutions.iter();
+            let key_ty = iter
+                .next()
+                .map(|(_, t)| t.clone())
+                .or_else(|| pairs.first().map(|(k, _)| k.ty.clone()))
+                .unwrap_or_else(|| Ty::unit(expr.span.clone()));
+            let value_ty = iter
+                .next()
+                .map(|(_, t)| t.clone())
+                .or_else(|| pairs.first().map(|(_, v)| v.ty.clone()))
+                .unwrap_or_else(|| Ty::unit(expr.span.clone()));
+            (key_ty, value_ty)
+        },
+        _ => {
+            ctx.emit_error(LoweringError::internal(
+                "dictionary literal with non-dictionary type",
+                Some(expr.span.clone()),
+            ));
+            return Value::Immediate(Immediate::error());
+        },
+    };
+
+    let key_ty = lower_type(ctx, &key_sem_ty);
+    let value_ty = lower_type(ctx, &value_sem_ty);
+    let count = pairs.len();
+
+    // Create tuple type for (Key, Value)
+    let pair_ty = ctx.mir.ty_tuple(vec![key_ty, value_ty]);
+
+    // Lower each key-value pair and create tuple values
+    let pair_values: Vec<Value> = pairs
+        .iter()
+        .map(|(k, v)| {
+            let key_value = lower_expression(ctx, k);
+            let value_value = lower_expression(ctx, v);
+
+            // Create a tuple value from key and value
+            let tuple_local = ctx.create_temp("dict_pair", pair_ty);
+            let tuple_place = Place::local(tuple_local);
+            ctx.emit_assign(
+                tuple_place.clone(),
+                Rvalue::Tuple(vec![key_value, value_value]),
+            );
+            Value::Place(tuple_place)
+        })
+        .collect();
+
+    // Allocate stack buffer for tuples
+    let ptr_ty = ctx.mir.ty_ptr(pair_ty);
+    let ptr_local = ctx.create_temp("dict_literal_ptr", ptr_ty);
+    let ptr_place = Place::local(ptr_local);
+
+    let i64_ty = ctx.mir.ty_i64();
+    let count_value = Value::Immediate(Immediate::i64(count as i64));
+
+    ctx.emit_assign(
+        ptr_place.clone(),
+        Rvalue::StackAlloc {
+            element_ty: pair_ty,
+            count: count_value.clone(),
+        },
+    );
+
+    // Write each pair to the buffer
+    let sizeof_local = ctx.create_temp("pair_size", i64_ty);
+    ctx.emit_assign(
+        Place::local(sizeof_local),
+        Rvalue::SizeOf { ty: pair_ty },
+    );
+
+    let unit_ty = ctx.mir.ty_unit();
+
+    for (i, pair_value) in pair_values.into_iter().enumerate() {
+        if i == 0 {
+            // First pair: write directly to ptr
+            let unit_local = ctx.create_temp("ptr_write", unit_ty);
+            ctx.emit_assign(
+                Place::local(unit_local),
+                Rvalue::PtrWrite {
+                    ptr: Value::Place(ptr_place.clone()),
+                    value: pair_value,
+                },
+            );
+        } else {
+            // Compute byte offset: i * sizeof(pair_ty)
+            let index_value = Value::Immediate(Immediate::i64(i as i64));
+            let offset_local = ctx.create_temp("pair_offset", i64_ty);
+            ctx.emit_assign(
+                Place::local(offset_local),
+                Rvalue::BinaryOp {
+                    op: BinOp::MulSigned,
+                    lhs: index_value,
+                    rhs: Value::Place(Place::local(sizeof_local)),
+                },
+            );
+
+            // Compute offset pointer
+            let offset_ptr_local = ctx.create_temp("offset_ptr", ptr_ty);
+            ctx.emit_assign(
+                Place::local(offset_ptr_local),
+                Rvalue::PtrOffset {
+                    ptr: Value::Place(ptr_place.clone()),
+                    offset: Value::Place(Place::local(offset_local)),
+                },
+            );
+
+            // Write pair to offset pointer
+            let unit_local = ctx.create_temp("ptr_write", unit_ty);
+            ctx.emit_assign(
+                Place::local(unit_local),
+                Rvalue::PtrWrite {
+                    ptr: Value::Place(Place::local(offset_ptr_local)),
+                    value: pair_value,
+                },
+            );
+        }
+    }
+
+    // Call init(_dictionaryLiteralPointer:_dictionaryLiteralCount:) on the target type
+    match target_ty.kind() {
+        TyKind::Struct { symbol, .. } => {
+            lower_dictionary_literal_init_call(ctx, expr, &target_ty, symbol, ptr_place, count_value)
+        },
+        _ => {
+            ctx.emit_error(LoweringError::internal(
+                "unexpected dictionary literal target type",
+                Some(expr.span.clone()),
+            ));
+            Value::Immediate(Immediate::error())
+        },
+    }
+}
+
+/// Lower a dictionary literal init call to a struct type.
+fn lower_dictionary_literal_init_call(
+    ctx: &mut LoweringContext,
+    expr: &Expression,
+    target_ty: &Ty,
+    struct_symbol: &std::sync::Arc<kestrel_semantic_tree::symbol::r#struct::StructSymbol>,
+    ptr_place: Place,
+    count_value: Value,
+) -> Value {
+    use semantic_tree::symbol::Symbol;
+
+    // Find the init with _dictionaryLiteralPointer and _dictionaryLiteralCount parameters
+    let init_symbol = struct_symbol
+        .metadata()
+        .children()
+        .into_iter()
+        .find(|child| {
+            if child.metadata().kind() != KestrelSymbolKind::Initializer {
+                return false;
+            }
+            if let Some(callable) = child.metadata().get_behavior::<CallableBehavior>() {
+                let params = callable.parameters();
+                params.len() >= 2
+                    && params
+                        .first()
+                        .is_some_and(|p| p.bind_name.value == "_dictionaryLiteralPointer")
+                    && params
+                        .get(1)
+                        .is_some_and(|p| p.bind_name.value == "_dictionaryLiteralCount")
+            } else {
+                false
+            }
+        });
+
+    let Some(_init_sym) = init_symbol else {
+        ctx.emit_error(LoweringError::internal(
+            "dictionary literal target type has no init(_dictionaryLiteralPointer:_dictionaryLiteralCount:)",
+            Some(expr.span.clone()),
+        ));
+        return Value::Immediate(Immediate::error());
+    };
+
+    // Build the qualified name for the init function
+    let mut name_parts = Vec::new();
+    collect_symbol_name_parts(
+        &(struct_symbol.clone()
+            as std::sync::Arc<
+                dyn semantic_tree::symbol::Symbol<kestrel_semantic_tree::language::KestrelLanguage>,
+            >),
+        &mut name_parts,
+    );
+    name_parts.push("init$_dictionaryLiteralPointer$_dictionaryLiteralCount".to_string());
+
+    let init_name = ctx.mir.intern_name(QualifiedNameData::new(name_parts));
+
+    // Lower the result type
+    let result_ty = lower_type(ctx, target_ty);
+
+    // Allocate space for the result
+    let result_local = ctx.create_temp("dict_literal", result_ty);
+    let result_place = Place::local(result_local);
+
+    // Create a mutable reference to the result place
+    let ref_ty = ctx.mir.ty_ref_mut(result_ty);
+    let self_ref_local = ctx.create_temp("self_ref", ref_ty);
+    let self_ref_place = Place::local(self_ref_local);
+
+    ctx.emit_assign(self_ref_place.clone(), Rvalue::RefMut(result_place.clone()));
+
+    // Build call args: self_ref first (MutRef), then pointer and count (both borrowed)
     let call_args = vec![
         CallArg::mutating(Value::Place(self_ref_place)),
         CallArg::borrow(Value::Place(ptr_place)),

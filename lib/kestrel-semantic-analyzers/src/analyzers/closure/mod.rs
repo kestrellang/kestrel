@@ -317,6 +317,13 @@ fn find_assignments_to_locals(
             }
         },
 
+        ExprKind::Dictionary(pairs) => {
+            for (k, v) in pairs {
+                find_assignments_to_locals(k, target_locals, container_id, ctx);
+                find_assignments_to_locals(v, target_locals, container_id, ctx);
+            }
+        },
+
         ExprKind::Grouping(inner) => {
             find_assignments_to_locals(inner, target_locals, container_id, ctx);
         },

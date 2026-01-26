@@ -88,6 +88,8 @@ pub fn resolve_expression(expr_node: &SyntaxNode, ctx: &mut BodyResolutionContex
 
         SyntaxKind::ExprArray => resolve_array_expression(expr_node, ctx),
 
+        SyntaxKind::ExprDictionary => resolve_dictionary_expression(expr_node, ctx),
+
         SyntaxKind::ExprTuple => resolve_tuple_expression(expr_node, ctx),
 
         SyntaxKind::ExprGrouping => resolve_grouping_expression(expr_node, ctx),
@@ -510,6 +512,34 @@ fn resolve_array_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) 
     let array_ty = Ty::infer(span.clone());
 
     Expression::array(elements, array_ty, span)
+}
+
+/// Resolve a dictionary expression: ["key": value, ...]
+/// Dictionary literals use inference types so ExpressibleByDictionaryLiteral
+/// protocol can be applied. This allows dictionary literals to be assigned to
+/// custom types that conform to the protocol.
+fn resolve_dictionary_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> Expression {
+    let span = get_node_span(node, ctx.file_id);
+
+    let pairs: Vec<(Expression, Expression)> = node
+        .children()
+        .filter(|c| c.kind() == SyntaxKind::DictionaryEntry)
+        .filter_map(|entry| {
+            // Each DictionaryEntry contains: key_expr, Colon, value_expr
+            let mut exprs = entry
+                .children()
+                .filter(|c| c.kind() == SyntaxKind::Expression || is_expression_kind(c.kind()));
+
+            let key = exprs.next().map(|c| resolve_expression(&c, ctx))?;
+            let value = exprs.next().map(|c| resolve_expression(&c, ctx))?;
+            Some((key, value))
+        })
+        .collect();
+
+    // Use inference type so ExpressibleByDictionaryLiteral protocol can be applied
+    let dict_ty = Ty::infer(span.clone());
+
+    Expression::dictionary(pairs, dict_ty, span)
 }
 
 /// Resolve a tuple expression: (1, 2, 3)
@@ -1964,6 +1994,13 @@ fn expression_references_local(
             .iter()
             .any(|e| expression_references_local(e, local_id)),
 
+        ExprKind::Dictionary(pairs) => pairs
+            .iter()
+            .any(|(k, v)| {
+                expression_references_local(k, local_id)
+                    || expression_references_local(v, local_id)
+            }),
+
         ExprKind::Grouping(inner) => expression_references_local(inner, local_id),
 
         ExprKind::FieldAccess { object, .. } => expression_references_local(object, local_id),
@@ -2699,6 +2736,12 @@ where
         ExprKind::Array(elements) => {
             for elem in elements {
                 collect_captures_from_expression(elem, process);
+            }
+        },
+        ExprKind::Dictionary(pairs) => {
+            for (key, value) in pairs {
+                collect_captures_from_expression(key, process);
+                collect_captures_from_expression(value, process);
             }
         },
         ExprKind::If {

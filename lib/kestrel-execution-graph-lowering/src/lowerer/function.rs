@@ -1335,6 +1335,12 @@ fn collect_closure_local_ids_from_expr(expr: &Expression, ids: &mut HashSet<Loca
                 collect_closure_local_ids_from_expr(e, ids);
             }
         },
+        ExprKind::Dictionary(pairs) => {
+            for (k, v) in pairs {
+                collect_closure_local_ids_from_expr(k, ids);
+                collect_closure_local_ids_from_expr(v, ids);
+            }
+        },
         ExprKind::Grouping(inner) => {
             collect_closure_local_ids_from_expr(inner, ids);
         },

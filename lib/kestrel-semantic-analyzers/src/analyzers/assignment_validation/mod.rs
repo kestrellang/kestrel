@@ -101,6 +101,7 @@ fn validate_assignment_target(
         // Invalid targets
         ExprKind::Literal(_)
         | ExprKind::Array(_)
+        | ExprKind::Dictionary(_)
         | ExprKind::Tuple(_)
         | ExprKind::Grouping(_)
         | ExprKind::Call { .. }

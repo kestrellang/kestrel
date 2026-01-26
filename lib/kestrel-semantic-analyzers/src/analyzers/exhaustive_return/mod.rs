@@ -291,6 +291,19 @@ fn analyze_expression(expr: &Expression) -> ReturnState {
             }
             ReturnState::MayFallThrough
         },
+        ExprKind::Dictionary(pairs) => {
+            for (k, v) in pairs {
+                let s = analyze_expression(k);
+                if s.definitely_returns() {
+                    return s;
+                }
+                let s = analyze_expression(v);
+                if s.definitely_returns() {
+                    return s;
+                }
+            }
+            ReturnState::MayFallThrough
+        },
         ExprKind::FieldAccess { object, .. } => analyze_expression(object),
         ExprKind::TupleIndex { tuple, .. } => analyze_expression(tuple),
         ExprKind::MethodRef { receiver, .. } => analyze_expression(receiver),

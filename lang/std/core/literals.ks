@@ -58,13 +58,20 @@ public protocol ExpressibleByArrayLiteral: _ExpressibleByArrayLiteral {
 //    }
 //}
 
-// Dictionary literal protocol
-// @builtin(.ExpressibleByDictionaryLiteral)
-// public protocol ExpressibleByDictionaryLiteral {
-//     type Key
-//     type Value
-//     init(dictionaryLiteral pairs: [(Key, Value)])
-// }
+// Low-level protocol - compiler calls this directly with raw pointer + count
+@builtin(._ExpressibleByDictionaryLiteral)
+public protocol _ExpressibleByDictionaryLiteral {
+    type Key
+    type Value
+    init(_dictionaryLiteralPointer: lang.ptr[(Key, Value)], _dictionaryLiteralCount: lang.i64)
+}
+
+// User-facing protocol - takes LiteralSlice for convenience
+@builtin(.ExpressibleByDictionaryLiteral)
+public protocol ExpressibleByDictionaryLiteral: _ExpressibleByDictionaryLiteral {
+    // Key and Value are inherited from _ExpressibleByDictionaryLiteral
+    init(dictionaryLiteral: LiteralSlice[(Key, Value)])
+}
 
 // Default literal types - used when literal type cannot be inferred from context
 @builtin(.DefaultIntegerLiteralType)
@@ -86,3 +93,6 @@ public type CharLiteralType = Char
 public type NullLiteralType[T] = std.result.Optional[T]
 
 public type ArrayLiteralType[T] = std.collections.Array[T]
+
+@builtin(.DefaultDictionaryLiteralType)
+public type DictionaryLiteralType[K, V] = std.collections.Dictionary[K, V]

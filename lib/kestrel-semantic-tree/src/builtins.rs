@@ -34,6 +34,8 @@ pub enum LanguageFeature {
     #[allow(non_camel_case_types)]
     _ExpressibleByArrayLiteral,
     ExpressibleByDictionaryLiteral,
+    #[allow(non_camel_case_types)]
+    _ExpressibleByDictionaryLiteral,
 
     // Protocol builtins - FFI
     FFISafe,
@@ -45,6 +47,7 @@ pub enum LanguageFeature {
     DefaultBooleanLiteralType,
     DefaultCharLiteralType,
     DefaultNullLiteralType,
+    DefaultDictionaryLiteralType,
 
     // Operator protocols - arithmetic
     AddOperatorProtocol,
@@ -178,6 +181,7 @@ impl LanguageFeature {
             "ExpressibleByArrayLiteral" => Some(Self::ExpressibleByArrayLiteral),
             "_ExpressibleByArrayLiteral" => Some(Self::_ExpressibleByArrayLiteral),
             "ExpressibleByDictionaryLiteral" => Some(Self::ExpressibleByDictionaryLiteral),
+            "_ExpressibleByDictionaryLiteral" => Some(Self::_ExpressibleByDictionaryLiteral),
             "FFISafe" => Some(Self::FFISafe),
             "DefaultIntegerLiteralType" => Some(Self::DefaultIntegerLiteralType),
             "DefaultFloatLiteralType" => Some(Self::DefaultFloatLiteralType),
@@ -185,6 +189,7 @@ impl LanguageFeature {
             "DefaultBooleanLiteralType" => Some(Self::DefaultBooleanLiteralType),
             "DefaultCharLiteralType" => Some(Self::DefaultCharLiteralType),
             "DefaultNullLiteralType" => Some(Self::DefaultNullLiteralType),
+            "DefaultDictionaryLiteralType" => Some(Self::DefaultDictionaryLiteralType),
             // Operator protocols - arithmetic
             "AddOperatorProtocol" => Some(Self::AddOperatorProtocol),
             "AddOperatorMethod" => Some(Self::AddOperatorMethod),
@@ -305,6 +310,7 @@ impl LanguageFeature {
             Self::ExpressibleByArrayLiteral => "ExpressibleByArrayLiteral",
             Self::_ExpressibleByArrayLiteral => "_ExpressibleByArrayLiteral",
             Self::ExpressibleByDictionaryLiteral => "ExpressibleByDictionaryLiteral",
+            Self::_ExpressibleByDictionaryLiteral => "_ExpressibleByDictionaryLiteral",
             Self::FFISafe => "FFISafe",
             Self::DefaultIntegerLiteralType => "DefaultIntegerLiteralType",
             Self::DefaultFloatLiteralType => "DefaultFloatLiteralType",
@@ -312,6 +318,7 @@ impl LanguageFeature {
             Self::DefaultBooleanLiteralType => "DefaultBooleanLiteralType",
             Self::DefaultCharLiteralType => "DefaultCharLiteralType",
             Self::DefaultNullLiteralType => "DefaultNullLiteralType",
+            Self::DefaultDictionaryLiteralType => "DefaultDictionaryLiteralType",
             // Operator protocols - arithmetic
             Self::AddOperatorProtocol => "AddOperatorProtocol",
             Self::AddOperatorMethod => "AddOperatorMethod",
@@ -544,6 +551,16 @@ impl LanguageFeature {
                     disallow_enum_conformance: false,
                 },
             },
+            Self::_ExpressibleByDictionaryLiteral => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::Protocol {
+                    implicit_conformance: false,
+                    must_be_marker: false,
+                    tuple_conformance_propagation: false,
+                    requires_fields_conform: false,
+                    disallow_enum_conformance: false,
+                },
+            },
             Self::FFISafe => BuiltinDefinition {
                 feature: *self,
                 kind: BuiltinKind::Protocol {
@@ -575,6 +592,10 @@ impl LanguageFeature {
                 kind: BuiltinKind::TypeAlias,
             },
             Self::DefaultNullLiteralType => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::TypeAlias,
+            },
+            Self::DefaultDictionaryLiteralType => BuiltinDefinition {
                 feature: *self,
                 kind: BuiltinKind::TypeAlias,
             },

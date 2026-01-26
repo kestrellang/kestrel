@@ -837,6 +837,25 @@ fn collect_captures_recursive(
             }
         },
 
+        ExprKind::Dictionary(pairs) => {
+            for (key, value) in pairs {
+                collect_captures_recursive(
+                    key,
+                    closure_entry_depth,
+                    local_scope,
+                    captures,
+                    seen_ids,
+                );
+                collect_captures_recursive(
+                    value,
+                    closure_entry_depth,
+                    local_scope,
+                    captures,
+                    seen_ids,
+                );
+            }
+        },
+
         ExprKind::While {
             condition, body, ..
         } => {

@@ -146,6 +146,18 @@ fn apply_to_expression(expr: &Expression, solution: &Solution) -> Expression {
                 .collect(),
         ),
 
+        ExprKind::Dictionary(pairs) => ExprKind::Dictionary(
+            pairs
+                .iter()
+                .map(|(k, v)| {
+                    (
+                        apply_to_expression(k, solution),
+                        apply_to_expression(v, solution),
+                    )
+                })
+                .collect(),
+        ),
+
         ExprKind::Tuple(elements) => ExprKind::Tuple(
             elements
                 .iter()

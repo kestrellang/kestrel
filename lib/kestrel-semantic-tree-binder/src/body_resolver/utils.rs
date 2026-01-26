@@ -40,6 +40,7 @@ pub fn is_expression_kind(kind: SyntaxKind) -> bool {
             | SyntaxKind::ExprChar
             | SyntaxKind::ExprBool
             | SyntaxKind::ExprArray
+            | SyntaxKind::ExprDictionary
             | SyntaxKind::ExprTuple
             | SyntaxKind::ExprGrouping
             | SyntaxKind::ExprPath

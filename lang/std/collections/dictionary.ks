@@ -616,6 +616,38 @@ extend Dictionary[K, V, H] where K: Hash, H: Hasher, H: Defaultable {
     }
 }
 
+// ExpressibleByDictionaryLiteral conformance
+extend Dictionary[K, V, H]: std.core._ExpressibleByDictionaryLiteral, std.core.ExpressibleByDictionaryLiteral where K: Hash, K: Defaultable, V: Defaultable, H: Hasher, H: Defaultable {
+    type Key = K
+    type Value = V
+
+    // _ExpressibleByDictionaryLiteral (called by compiler for dictionary literals)
+    public init(_dictionaryLiteralPointer: lang.ptr[(K, V)], _dictionaryLiteralCount: lang.i64) {
+        self.init(dictionaryLiteral: std.memory.LiteralSlice(pointer: _dictionaryLiteralPointer, count: _dictionaryLiteralCount))
+    }
+
+    // ExpressibleByDictionaryLiteral
+    public init(dictionaryLiteral elements: std.memory.LiteralSlice[(K, V)]) {
+        // Create empty dictionary with default placeholders
+        let placeholderKey: K = K();
+        let placeholderValue: V = V();
+        self.init(placeholderKey: placeholderKey, placeholderValue: placeholderValue);
+
+        // Insert each key-value pair
+        var iter = elements.iter();
+        var done: Bool = false;
+        while done == false {
+            let item = iter.next();
+            if item.isSome() {
+                let pair = item.unwrap();
+                let _ = self.insert(pair.0, pair.1);
+            } else {
+                done = true;
+            }
+        }
+    }
+}
+
 // Type operator alias: [K: V] desugars to DictionaryTypeOperator[K, V] which is Dictionary[K, V]
 // Note: The Hash constraint on K comes from Dictionary itself
 @builtin(.DictionaryTypeOperator)

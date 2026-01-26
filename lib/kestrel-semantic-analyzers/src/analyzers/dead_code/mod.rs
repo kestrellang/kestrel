@@ -322,6 +322,19 @@ fn analyze_expression(expr: &Expression, errors: &mut Vec<UnreachableCodeWarning
             }
             Divergence::None
         },
+        ExprKind::Dictionary(pairs) => {
+            for (k, v) in pairs {
+                let d = analyze_expression(k, errors);
+                if d.diverges() {
+                    return d;
+                }
+                let d = analyze_expression(v, errors);
+                if d.diverges() {
+                    return d;
+                }
+            }
+            Divergence::None
+        },
         ExprKind::Tuple(elements) => {
             for e in elements {
                 let d = analyze_expression(e, errors);
@@ -550,6 +563,9 @@ fn expression_contains_break(expr: &Expression) -> bool {
         ExprKind::Array(elements) | ExprKind::Tuple(elements) => {
             elements.iter().any(expression_contains_break)
         },
+        ExprKind::Dictionary(pairs) => pairs
+            .iter()
+            .any(|(k, v)| expression_contains_break(k) || expression_contains_break(v)),
         ExprKind::FieldAccess { object, .. } => expression_contains_break(object),
         ExprKind::TupleIndex { tuple, .. } => expression_contains_break(tuple),
         ExprKind::MethodRef { receiver, .. } => expression_contains_break(receiver),

@@ -12,6 +12,7 @@
 
 mod body_literals;
 mod calls;
+mod dictionary_literals;
 mod closures;
 mod control_flow;
 mod field_access;

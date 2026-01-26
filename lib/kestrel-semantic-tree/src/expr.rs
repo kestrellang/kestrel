@@ -927,6 +927,8 @@ pub enum ExprKind {
     Literal(LiteralValue),
     /// Array literal: `[1, 2, 3]`
     Array(Vec<Expression>),
+    /// Dictionary literal: `["key": value, ...]`
+    Dictionary(Vec<(Expression, Expression)>),
     /// Tuple literal: `(1, 2, 3)`
     Tuple(Vec<Expression>),
     /// Grouping expression: `(expr)`
@@ -1551,6 +1553,13 @@ impl Expression {
                     let items: Vec<_> = elements.iter().map(format_expr).collect();
                     with_type(format!("[{}]", items.join(", ")), &expr.ty)
                 },
+                ExprKind::Dictionary(pairs) => {
+                    let items: Vec<_> = pairs
+                        .iter()
+                        .map(|(k, v)| format!("{}: {}", format_expr(k), format_expr(v)))
+                        .collect();
+                    with_type(format!("[{}]", items.join(", ")), &expr.ty)
+                },
                 ExprKind::Tuple(elements) => {
                     let items: Vec<_> = elements.iter().map(format_expr).collect();
                     format!("({})", items.join(", "))
@@ -1987,6 +1996,17 @@ impl Expression {
         Expression {
             id: ExprId::new(),
             kind: ExprKind::Array(elements),
+            ty,
+            span,
+            mutable: false,
+        }
+    }
+
+    /// Create a dictionary literal expression with an explicit type.
+    pub fn dictionary(pairs: Vec<(Expression, Expression)>, ty: Ty, span: Span) -> Self {
+        Expression {
+            id: ExprId::new(),
+            kind: ExprKind::Dictionary(pairs),
             ty,
             span,
             mutable: false,

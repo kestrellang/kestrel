@@ -385,6 +385,12 @@ fn analyze_expression(
                 state = analyze_expression(e, state, false, ctx);
             }
         },
+        ExprKind::Dictionary(pairs) => {
+            for (k, v) in pairs {
+                state = analyze_expression(k, state, false, ctx);
+                state = analyze_expression(v, state, false, ctx);
+            }
+        },
         ExprKind::Grouping(inner) => {
             state = analyze_expression(inner, state, false, ctx);
         },

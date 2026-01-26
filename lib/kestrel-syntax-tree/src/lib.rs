@@ -138,6 +138,8 @@ pub enum SyntaxKind {
     ExprChar,                 // 'a', '\n', '\u{1F600}'
     ExprBool,                 // true, false
     ExprArray,                // [1, 2, 3]
+    ExprDictionary,           // ["key": value, ...]
+    DictionaryEntry,          // key: value (single entry in dictionary literal)
     ExprTuple,                // (1, 2, 3)
     ExprGrouping,             // (expr)
     ExprPath,                 // a.b.c (path expression)
@@ -526,6 +528,8 @@ impl Language for KestrelLanguage {
         const EXPR_CHAR: u16 = SyntaxKind::ExprChar as u16;
         const EXPR_BOOL: u16 = SyntaxKind::ExprBool as u16;
         const EXPR_ARRAY: u16 = SyntaxKind::ExprArray as u16;
+        const EXPR_DICTIONARY: u16 = SyntaxKind::ExprDictionary as u16;
+        const DICTIONARY_ENTRY: u16 = SyntaxKind::DictionaryEntry as u16;
         const EXPR_TUPLE: u16 = SyntaxKind::ExprTuple as u16;
         const EXPR_GROUPING: u16 = SyntaxKind::ExprGrouping as u16;
         const EXPR_PATH: u16 = SyntaxKind::ExprPath as u16;
@@ -768,6 +772,8 @@ impl Language for KestrelLanguage {
             EXPR_CHAR => SyntaxKind::ExprChar,
             EXPR_BOOL => SyntaxKind::ExprBool,
             EXPR_ARRAY => SyntaxKind::ExprArray,
+            EXPR_DICTIONARY => SyntaxKind::ExprDictionary,
+            DICTIONARY_ENTRY => SyntaxKind::DictionaryEntry,
             EXPR_TUPLE => SyntaxKind::ExprTuple,
             EXPR_GROUPING => SyntaxKind::ExprGrouping,
             EXPR_PATH => SyntaxKind::ExprPath,

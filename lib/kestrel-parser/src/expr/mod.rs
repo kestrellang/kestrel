@@ -222,6 +222,13 @@ pub enum ExprVariant {
     Null(Span),
     /// Array literal: [1, 2, 3]
     Array(Span, Vec<ExprVariant>, Vec<Span>, Span), // (lbracket, elements, commas, rbracket)
+    /// Dictionary literal: ["key": value, ...]
+    Dictionary {
+        lbracket: Span,
+        entries: Vec<(ExprVariant, Span, ExprVariant)>, // (key, colon, value)
+        commas: Vec<Span>,
+        rbracket: Span,
+    },
     /// Tuple literal: (1, 2, 3)
     Tuple(Span, Vec<ExprVariant>, Vec<Span>, Span), // (lparen, elements, commas, rparen)
     /// Grouping expression: (expr)
@@ -457,6 +464,27 @@ enum ParenContent {
     Tuple(Vec<ExprVariant>, Vec<Span>, Span),
 }
 
+/// Helper enum for parsing bracket expressions (arrays and dictionaries)
+#[derive(Debug, Clone)]
+enum BracketContent {
+    EmptyArray(Span),                                         // []
+    EmptyDictionary(Span),                                    // [:]
+    NonEmpty { first: ExprVariant, after: BracketContentAfterFirst },
+}
+
+/// Helper enum for what comes after the first expression in a bracket
+#[derive(Debug, Clone)]
+enum BracketContentAfterFirst {
+    ArraySingle { rbracket: Span },                           // [expr]
+    ArrayMore { first_comma: Span, more: Vec<ExprVariant>, rbracket: Span }, // [expr, expr, ...]
+    Dictionary {
+        colon: Span,
+        value: ExprVariant,
+        more_entries: Vec<(Span, ExprVariant, Span, ExprVariant)>, // (comma, key, colon, value)
+        rbracket: Span,
+    },
+}
+
 /// Helper enum for parsing else clauses
 #[derive(Debug, Clone)]
 enum ElseClauseVariant {
@@ -634,31 +662,184 @@ pub fn expr_parser<'tokens>()
             })
             .boxed();
 
-        // Array literal: [elem, elem, ...]
-        let array = skip_trivia()
+        // Array or Dictionary literal: [elem, ...] or [key: value, ...] or [:] or []
+        // We need to distinguish:
+        // - [] = empty array
+        // - [:] = empty dictionary
+        // - [expr, ...] = array
+        // - [expr: expr, ...] = dictionary
+        let array_or_dict = skip_trivia()
             .ignore_then(just(Token::LBracket).map_with(|_, e| to_kestrel_span(e.span())))
             .then(
-                expr.clone()
-                    .separated_by(
+                // Empty dictionary: [:]
+                skip_trivia()
+                    .ignore_then(just(Token::Colon).map_with(|_, e| to_kestrel_span(e.span())))
+                    .then(
                         skip_trivia().ignore_then(
-                            just(Token::Comma).map_with(|_, e| to_kestrel_span(e.span())),
+                            just(Token::RBracket).map_with(|_, e| to_kestrel_span(e.span())),
                         ),
                     )
-                    .allow_trailing()
-                    .collect::<Vec<_>>()
-                    .map(|elements| {
-                        let commas: Vec<Span> = vec![];
-                        (elements, commas)
-                    })
-                    .or_not(),
+                    .map(|(_colon, rbracket)| BracketContent::EmptyDictionary(rbracket))
+                    .or(
+                        // Empty array: []
+                        skip_trivia()
+                            .ignore_then(
+                                just(Token::RBracket).map_with(|_, e| to_kestrel_span(e.span())),
+                            )
+                            .map(BracketContent::EmptyArray),
+                    )
+                    .or(
+                        // Non-empty: parse first expression, then determine array or dict
+                        expr.clone()
+                            .then(
+                                // Check for colon (dictionary) or comma/rbracket (array)
+                                skip_trivia()
+                                    .ignore_then(
+                                        just(Token::Colon)
+                                            .map_with(|_, e| to_kestrel_span(e.span())),
+                                    )
+                                    .then(expr.clone())
+                                    .then(
+                                        // More dictionary entries
+                                        skip_trivia()
+                                            .ignore_then(
+                                                just(Token::Comma)
+                                                    .map_with(|_, e| to_kestrel_span(e.span())),
+                                            )
+                                            .then(expr.clone())
+                                            .then(
+                                                skip_trivia().ignore_then(
+                                                    just(Token::Colon)
+                                                        .map_with(|_, e| to_kestrel_span(e.span())),
+                                                ),
+                                            )
+                                            .then(expr.clone())
+                                            .map(|(((comma, key), colon), value)| {
+                                                (comma, key, colon, value)
+                                            })
+                                            .repeated()
+                                            .collect::<Vec<_>>(),
+                                    )
+                                    .then(
+                                        // Optional trailing comma
+                                        skip_trivia()
+                                            .ignore_then(
+                                                just(Token::Comma)
+                                                    .map_with(|_, e| to_kestrel_span(e.span())),
+                                            )
+                                            .or_not(),
+                                    )
+                                    .then(
+                                        skip_trivia().ignore_then(
+                                            just(Token::RBracket)
+                                                .map_with(|_, e| to_kestrel_span(e.span())),
+                                        ),
+                                    )
+                                    .map(
+                                        |((((colon, value), more_entries), _trailing), rbracket)| {
+                                            BracketContentAfterFirst::Dictionary {
+                                                colon,
+                                                value,
+                                                more_entries,
+                                                rbracket,
+                                            }
+                                        },
+                                    )
+                                    .or(
+                                        // Array: more elements after first
+                                        skip_trivia()
+                                            .ignore_then(
+                                                just(Token::Comma)
+                                                    .map_with(|_, e| to_kestrel_span(e.span())),
+                                            )
+                                            .then(
+                                                expr.clone()
+                                                    .separated_by(skip_trivia().ignore_then(
+                                                        just(Token::Comma)
+                                                            .map_with(|_, e| to_kestrel_span(e.span())),
+                                                    ))
+                                                    .allow_trailing()
+                                                    .collect::<Vec<_>>(),
+                                            )
+                                            .then(
+                                                skip_trivia().ignore_then(
+                                                    just(Token::RBracket)
+                                                        .map_with(|_, e| to_kestrel_span(e.span())),
+                                                ),
+                                            )
+                                            .map(|((first_comma, more), rbracket)| {
+                                                BracketContentAfterFirst::ArrayMore {
+                                                    first_comma,
+                                                    more,
+                                                    rbracket,
+                                                }
+                                            })
+                                            .or(
+                                                // Single element array: [expr]
+                                                skip_trivia()
+                                                    .ignore_then(
+                                                        just(Token::Comma)
+                                                            .map_with(|_, e| to_kestrel_span(e.span()))
+                                                            .or_not(),
+                                                    )
+                                                    .then(
+                                                        skip_trivia().ignore_then(
+                                                            just(Token::RBracket)
+                                                                .map_with(|_, e| to_kestrel_span(e.span())),
+                                                        ),
+                                                    )
+                                                    .map(|(_trailing, rbracket)| {
+                                                        BracketContentAfterFirst::ArraySingle { rbracket }
+                                                    }),
+                                            ),
+                                    ),
+                            )
+                            .map(|(first, after)| BracketContent::NonEmpty { first, after }),
+                    ),
             )
-            .then(
-                skip_trivia()
-                    .ignore_then(just(Token::RBracket).map_with(|_, e| to_kestrel_span(e.span()))),
-            )
-            .map(|((lbracket, contents), rbracket)| {
-                let (elements, commas) = contents.unwrap_or_else(|| (vec![], vec![]));
-                ExprVariant::Array(lbracket, elements, commas, rbracket)
+            .map(|(lbracket, content)| match content {
+                BracketContent::EmptyArray(rbracket) => {
+                    ExprVariant::Array(lbracket, vec![], vec![], rbracket)
+                }
+                BracketContent::EmptyDictionary(rbracket) => ExprVariant::Dictionary {
+                    lbracket,
+                    entries: vec![],
+                    commas: vec![],
+                    rbracket,
+                },
+                BracketContent::NonEmpty { first, after } => match after {
+                    BracketContentAfterFirst::ArraySingle { rbracket } => {
+                        ExprVariant::Array(lbracket, vec![first], vec![], rbracket)
+                    }
+                    BracketContentAfterFirst::ArrayMore {
+                        first_comma: _,
+                        more,
+                        rbracket,
+                    } => {
+                        let mut elements = vec![first];
+                        elements.extend(more);
+                        ExprVariant::Array(lbracket, elements, vec![], rbracket)
+                    }
+                    BracketContentAfterFirst::Dictionary {
+                        colon,
+                        value,
+                        more_entries,
+                        rbracket,
+                    } => {
+                        let mut entries = vec![(first, colon, value)];
+                        let mut commas = Vec::new();
+                        for (comma, key, colon, value) in more_entries {
+                            commas.push(comma);
+                            entries.push((key, colon, value));
+                        }
+                        ExprVariant::Dictionary {
+                            lbracket,
+                            entries,
+                            commas,
+                            rbracket,
+                        }
+                    }
+                },
             })
             .boxed();
 
@@ -1074,7 +1255,7 @@ pub fn expr_parser<'tokens>()
             .or(string.clone())
             .or(boolean.clone())
             .or(null.clone())
-            .or(array.clone())
+            .or(array_or_dict.clone())
             .or(paren_expr.clone())
             .or(path.clone());
 
@@ -1793,7 +1974,7 @@ pub fn expr_parser<'tokens>()
             .or(string)
             .or(boolean)
             .or(null)
-            .or(array)
+            .or(array_or_dict)
             .or(paren_expr)
             .or(if_expr)
             .or(while_expr)
@@ -1973,6 +2154,14 @@ pub fn emit_expr_variant(sink: &mut EventSink, variant: &ExprVariant) {
         },
         ExprVariant::Array(lbracket, elements, commas, rbracket) => {
             emit_array_expr(sink, lbracket.clone(), elements, commas, rbracket.clone());
+        },
+        ExprVariant::Dictionary {
+            lbracket,
+            entries,
+            commas,
+            rbracket,
+        } => {
+            emit_dictionary_expr(sink, lbracket.clone(), entries, commas, rbracket.clone());
         },
         ExprVariant::Tuple(lparen, elements, commas, rparen) => {
             emit_tuple_expr(sink, lparen.clone(), elements, commas, rparen.clone());
@@ -2222,6 +2411,31 @@ fn emit_array_expr(
     sink.add_token(SyntaxKind::LBracket, lbracket);
     for (i, element) in elements.iter().enumerate() {
         emit_expr_variant(sink, element);
+        if i < commas.len() {
+            sink.add_token(SyntaxKind::Comma, commas[i].clone());
+        }
+    }
+    sink.add_token(SyntaxKind::RBracket, rbracket);
+    sink.finish_node();
+    sink.finish_node();
+}
+
+fn emit_dictionary_expr(
+    sink: &mut EventSink,
+    lbracket: Span,
+    entries: &[(ExprVariant, Span, ExprVariant)], // (key, colon, value)
+    commas: &[Span],
+    rbracket: Span,
+) {
+    sink.start_node(SyntaxKind::Expression);
+    sink.start_node(SyntaxKind::ExprDictionary);
+    sink.add_token(SyntaxKind::LBracket, lbracket);
+    for (i, (key, colon, value)) in entries.iter().enumerate() {
+        sink.start_node(SyntaxKind::DictionaryEntry);
+        emit_expr_variant(sink, key);
+        sink.add_token(SyntaxKind::Colon, colon.clone());
+        emit_expr_variant(sink, value);
+        sink.finish_node();
         if i < commas.len() {
             sink.add_token(SyntaxKind::Comma, commas[i].clone());
         }

@@ -171,6 +171,18 @@ fn walk_expression(
                     }
                 }
             },
+            ExprKind::Dictionary(pairs) => {
+                for (k, v) in pairs {
+                    walk_expression(k, analyzers, model, ctx);
+                    if ctx.stopped {
+                        return;
+                    }
+                    walk_expression(v, analyzers, model, ctx);
+                    if ctx.stopped {
+                        return;
+                    }
+                }
+            },
             ExprKind::OverloadedRef(_) => { /* leaf */ },
             ExprKind::Loop { body, .. } => {
                 for stmt in body {

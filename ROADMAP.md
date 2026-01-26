@@ -605,10 +605,11 @@ See [docs/memory-model/implementation-plan.md](docs/memory-model/implementation-
 - [x] Character Literals
 - [ ] String Interpolation
 - [x] Null Literals
+- [ ] Dictionary Literals
 
 ### Standard Library
 
-- [ ] Create real hash implementation
+- [x] Create real hash implementation
 
 ### Core Features
 

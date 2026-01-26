@@ -398,6 +398,48 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
             }
         },
 
+        // Dictionaries: type conforms to _ExpressibleByDictionaryLiteral, pairs have Key/Value types
+        ExprKind::Dictionary(pairs) => {
+            use kestrel_semantic_tree::builtins::LanguageFeature;
+
+            // Add conformance constraint to _ExpressibleByDictionaryLiteral protocol
+            if let Some(protocol_id) = ctx
+                .oracle()
+                .builtin_protocol(LanguageFeature::_ExpressibleByDictionaryLiteral)
+            {
+                let protocol_ref = ProtocolRef::new(protocol_id, expr.span.clone());
+                ctx.conforms(expr.ty.id(), protocol_ref);
+            }
+
+            // Create infer types for Key and Value
+            let key_ty = Ty::infer(expr.span.clone());
+            let value_ty = Ty::infer(expr.span.clone());
+            ctx.register_type(&key_ty);
+            ctx.register_type(&value_ty);
+
+            // Add normalizes constraints for Key and Value associated types
+            ctx.normalizes(
+                expr.ty.id(),
+                "Key".to_string(),
+                key_ty.id(),
+                expr.span.clone(),
+            );
+            ctx.normalizes(
+                expr.ty.id(),
+                "Value".to_string(),
+                value_ty.id(),
+                expr.span.clone(),
+            );
+
+            // All keys must unify to Key type, all values to Value type
+            for (key, value) in pairs {
+                generate_expression_constraints(ctx, key);
+                generate_expression_constraints(ctx, value);
+                ctx.equate(key.ty.id(), key_ty.id(), key.span.clone());
+                ctx.equate(value.ty.id(), value_ty.id(), value.span.clone());
+            }
+        },
+
         // Tuples: each element has its corresponding type
         ExprKind::Tuple(elements) => {
             if let TyKind::Tuple(elem_tys) = expr.ty.kind() {
