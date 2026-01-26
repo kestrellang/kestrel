@@ -282,7 +282,7 @@ func test() {
 "#,
         )
         .with_stdlib()
-        .expect(HasError("cannot infer"));
+        .expect(HasError("could not infer type"));
     }
 
     #[test]
@@ -297,7 +297,7 @@ func test() {
 "#,
         )
         .with_stdlib()
-        .expect(HasError("cannot convert"));
+        .expect(HasError("does not conform to protocol"));
     }
 
     #[test]
@@ -312,7 +312,7 @@ func test() {
 "#,
         )
         .with_stdlib()
-        .expect(HasError("cannot convert"));
+        .expect(HasError("does not conform to protocol"));
     }
 
     #[test]
@@ -327,7 +327,7 @@ func test() {
 "#,
         )
         .with_stdlib()
-        .expect(HasError("cannot convert"));
+        .expect(HasError("does not conform to protocol"));
     }
 
     #[test]
@@ -342,6 +342,6 @@ func test() {
 "#,
         )
         .with_stdlib()
-        .expect(HasError("cannot convert"));
+        .expect(HasError("does not conform to protocol"));
     }
 }
