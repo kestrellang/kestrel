@@ -600,12 +600,12 @@ See [docs/memory-model/implementation-plan.md](docs/memory-model/implementation-
 - [x] For Loops
 - [x] And / Or Short Circuiting
 - [x] Null Coalescing Operator
-- [ ] Optional Chaining
+- [x] Range Operators (`..=`, `..<`)
 - [x] Compound Assignment Operators
 - [x] Character Literals
 - [ ] String Interpolation
 - [x] Null Literals
-- [ ] Dictionary Literals
+- [x] Dictionary Literals
 
 ### Standard Library
 
@@ -613,11 +613,57 @@ See [docs/memory-model/implementation-plan.md](docs/memory-model/implementation-
 
 ### Core Features
 
+- [ ] Range Patterns (`0..=9`, `0..<10`, `'a'..='z'`)
+- [ ] Array Patterns (`[a, b, ..rest]`)
 - [ ] Irrefutable patterns in function parameters
+- [ ] Irrefutable patterns in let/var
 - [ ] Refactor Matchable for range patterns and array patterns
+- [ ] Let/var static variable consistency
 
-### Goals
+## Phase 15 Compiler Infrastructure
 
+### Architecture
+
+- [ ] Refactor semantic model and passes
+- [ ] Incremental compilation
+
+### Tooling
+
+- [ ] Language Server Protocol (LSP)
 - [ ] Web Server
 - [ ] Flock package manager
 - [ ] Jessup version manager
+
+## Phase 16+ Advanced Types & Runtime
+
+### Types
+
+- [ ] Opaque types (`some Protocol`)
+- [ ] Existential types (`any Protocol`)
+
+### Classes
+
+- [ ] Class runtime completeness (identity, RTTI, weak/unowned references)
+
+### Async & Generators
+
+- [ ] `async` / `await`
+- [ ] `generator` / `yield`
+- [ ] `async generator`
+
+### Partial Application
+
+- [ ] Pipe Operator (`|>`)
+- [ ] Placeholder Arguments (`_` for partial application)
+
+### Implicits
+
+- [ ] `using` / `given` implicit parameters
+
+### Syntax & Sugar
+
+- [ ] Optional Chaining
+
+### Standard Library
+
+- [ ] Expand stdlib

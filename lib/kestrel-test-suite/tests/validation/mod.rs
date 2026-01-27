@@ -17,5 +17,6 @@ mod exhaustive_return;
 mod initializers;
 mod misc;
 mod mutability;
+mod properties_intended;
 mod type_checking;
 mod visibility;
