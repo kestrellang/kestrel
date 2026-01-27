@@ -313,6 +313,20 @@ fn get_place_type(
             let local_def = ctx.mir.local(*local_id);
             Ok(local_def.ty)
         },
+        PlaceKind::Global(name_id) => {
+            // Find the static definition to get its type
+            let static_def = ctx
+                .mir
+                .statics
+                .iter()
+                .find(|(_, def)| def.name == *name_id)
+                .map(|(_, def)| def)
+                .ok_or_else(|| {
+                    let global_name = ctx.mir.name(*name_id);
+                    CodegenError::Unsupported(format!("static variable not found: {}", global_name))
+                })?;
+            Ok(static_def.ty)
+        },
         PlaceKind::Field { parent, name } => {
             // Get the parent's type, then look up the field type
             let parent_ty_id = get_place_type(ctx, parent)?;

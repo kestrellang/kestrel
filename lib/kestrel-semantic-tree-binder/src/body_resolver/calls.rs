@@ -2389,20 +2389,57 @@ fn classify_field_chain_mutability(
     use kestrel_semantic_tree::symbol::field::FieldSymbol;
 
     // First, check if the field itself is immutable
-    // Look up the field in the object's type
+    // Look up the field in the object's type (struct or enum)
     if let Some((struct_symbol, _)) = object.ty.as_struct_with_subs() {
         for child in struct_symbol.metadata().children() {
             if child.metadata().kind() == KestrelSymbolKind::Field
                 && child.metadata().name().value == current_field
             {
-                if let Some(field_sym) = child.as_any().downcast_ref::<FieldSymbol>()
-                    && !field_sym.is_mutable()
-                {
-                    // The field itself is immutable (let field)
-                    return MutabilityClassification::ImmutableField {
-                        field_name: current_field.to_string(),
-                        field_span: Some(child.metadata().name().span.clone()),
-                    };
+                if let Some(field_sym) = child.as_any().downcast_ref::<FieldSymbol>() {
+                    // Computed properties with setters are assignable
+                    if field_sym.is_computed() {
+                        if field_sym.setter().is_none() {
+                            // Read-only computed property (no setter)
+                            return MutabilityClassification::ImmutableField {
+                                field_name: current_field.to_string(),
+                                field_span: Some(child.metadata().name().span.clone()),
+                            };
+                        }
+                        // Has setter - assignment is allowed, continue checking the chain
+                    } else if !field_sym.is_mutable() {
+                        // Stored field declared with `let`
+                        return MutabilityClassification::ImmutableField {
+                            field_name: current_field.to_string(),
+                            field_span: Some(child.metadata().name().span.clone()),
+                        };
+                    }
+                }
+                break;
+            }
+        }
+    } else if let Some(enum_symbol) = object.ty.as_enum() {
+        for child in enum_symbol.metadata().children() {
+            if child.metadata().kind() == KestrelSymbolKind::Field
+                && child.metadata().name().value == current_field
+            {
+                if let Some(field_sym) = child.as_any().downcast_ref::<FieldSymbol>() {
+                    // Computed properties with setters are assignable
+                    if field_sym.is_computed() {
+                        if field_sym.setter().is_none() {
+                            // Read-only computed property (no setter)
+                            return MutabilityClassification::ImmutableField {
+                                field_name: current_field.to_string(),
+                                field_span: Some(child.metadata().name().span.clone()),
+                            };
+                        }
+                        // Has setter - assignment is allowed, continue checking the chain
+                    } else if !field_sym.is_mutable() {
+                        // Stored field declared with `let`
+                        return MutabilityClassification::ImmutableField {
+                            field_name: current_field.to_string(),
+                            field_span: Some(child.metadata().name().span.clone()),
+                        };
+                    }
                 }
                 break;
             }
@@ -2426,6 +2463,14 @@ fn classify_field_chain_mutability(
             } else {
                 MutabilityClassification::Temporary
             }
+        },
+
+        ExprKind::TypeRef(_) => {
+            // Static field access (e.g., Foo.staticField)
+            // Static fields are always mutable from a classification perspective
+            // (their mutability is determined by whether the field is `let` or `var`,
+            // which was already checked above)
+            MutabilityClassification::Mutable
         },
 
         ExprKind::FieldAccess {

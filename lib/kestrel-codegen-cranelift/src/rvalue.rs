@@ -1482,6 +1482,26 @@ fn compile_ref(
     };
 
     match &place.kind {
+        PlaceKind::Global(name_id) => {
+            // Global/static variable - return its address
+            let global_name = ctx.mir.name(*name_id);
+            let mangled_name = format!("{}", global_name);
+
+            // Look up the global symbol
+            let global_ref = ctx
+                .module
+                .declare_data(&mangled_name, cranelift_module::Linkage::Import, false, false)
+                .map_err(|e| CodegenError::Unsupported(format!("failed to declare global: {}", e)))?;
+
+            // Get the global address
+            let global_addr = ctx
+                .module
+                .declare_data_in_func(global_ref, builder.func);
+
+            // Return the address of the global
+            Ok(builder.ins().global_value(ptr_type, global_addr))
+        },
+
         PlaceKind::Local(local_id) => {
             // For a local variable, get its address when it's memory-backed.
             let local_def = ctx.mir.local(*local_id);
@@ -1574,6 +1594,21 @@ fn get_place_type(
         PlaceKind::Local(local_id) => {
             let local_def = ctx.mir.local(*local_id);
             Ok(local_def.ty)
+        },
+
+        PlaceKind::Global(name_id) => {
+            // Find the static definition to get its type
+            let static_def = ctx
+                .mir
+                .statics
+                .iter()
+                .find(|(_, def)| def.name == *name_id)
+                .map(|(_, def)| def)
+                .ok_or_else(|| {
+                    let global_name = ctx.mir.name(*name_id);
+                    CodegenError::Unsupported(format!("static variable not found: {}", global_name))
+                })?;
+            Ok(static_def.ty)
         },
 
         PlaceKind::Field { parent, name } => {
@@ -3055,6 +3090,21 @@ fn get_place_type_for_call(
         PlaceKind::Local(local_id) => {
             let local_def = ctx.mir.local(*local_id);
             Ok(local_def.ty)
+        },
+
+        PlaceKind::Global(name_id) => {
+            // Find the static definition to get its type
+            let static_def = ctx
+                .mir
+                .statics
+                .iter()
+                .find(|(_, def)| def.name == *name_id)
+                .map(|(_, def)| def)
+                .ok_or_else(|| {
+                    let global_name = ctx.mir.name(*name_id);
+                    CodegenError::Unsupported(format!("static variable not found: {}", global_name))
+                })?;
+            Ok(static_def.ty)
         },
 
         PlaceKind::Field { parent, name } => {

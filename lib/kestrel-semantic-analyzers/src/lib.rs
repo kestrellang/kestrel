@@ -18,12 +18,12 @@ pub fn default_analyzers() -> Vec<Box<dyn Analyzer>> {
         ConstraintCycleAnalyzer, DeadCodeAnalyzer, DefiniteAssignmentAnalyzer,
         DuplicateCallableAnalyzer, DuplicateCaseAnalyzer, DuplicateLabelAnalyzer,
         DuplicateSymbolAnalyzer, ExhaustiveReturnAnalyzer, ExhaustivenessAnalyzer,
-        ExtensionConflictAnalyzer, ForLoopPatternAnalyzer, FunctionBodyAnalyzer, GenericsAnalyzer,
-        GuardLetDivergenceAnalyzer, ImportAnalyzer, InitializerVerificationAnalyzer,
-        IrrefutablePatternAnalyzer, ProtocolMethodAnalyzer, RecursiveEnumAnalyzer,
-        RefutablePatternAnalyzer, StaticContextAnalyzer, StructCycleAnalyzer,
-        SubscriptValidationAnalyzer, TypeAliasCycleAnalyzer, TypeCheckAnalyzer,
-        TypeInferenceAnalyzer, VisibilityConsistencyAnalyzer,
+        ExtensionConflictAnalyzer, FieldAnalyzer, ForLoopPatternAnalyzer, FunctionBodyAnalyzer,
+        GenericsAnalyzer, GuardLetDivergenceAnalyzer, ImportAnalyzer,
+        InitializerVerificationAnalyzer, IrrefutablePatternAnalyzer, ProtocolMethodAnalyzer,
+        RecursiveEnumAnalyzer, RefutablePatternAnalyzer, StaticContextAnalyzer,
+        StructCycleAnalyzer, SubscriptValidationAnalyzer, TypeAliasCycleAnalyzer,
+        TypeCheckAnalyzer, TypeInferenceAnalyzer, VisibilityConsistencyAnalyzer,
     };
 
     // Match historical order from builder ValidationRunner where possible
@@ -33,6 +33,7 @@ pub fn default_analyzers() -> Vec<Box<dyn Analyzer>> {
         Box::new(ConstraintCycleAnalyzer::new()),
         Box::new(ConformanceAnalyzer::new()),
         Box::new(ExtensionConflictAnalyzer::new()),
+        Box::new(FieldAnalyzer::new()),
         Box::new(InitializerVerificationAnalyzer::new()),
         Box::new(AssignmentValidationAnalyzer::new()),
         Box::new(DefiniteAssignmentAnalyzer::new()),

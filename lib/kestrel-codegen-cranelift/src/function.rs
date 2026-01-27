@@ -69,6 +69,7 @@ fn add_call_arg_locals(result: &mut HashSet<Id<Local>>, args: &[kestrel_executio
 fn get_root_local(place: &Place) -> Option<Id<Local>> {
     match &place.kind {
         PlaceKind::Local(local_id) => Some(*local_id),
+        PlaceKind::Global(_) => None, // Globals don't have a root local
         PlaceKind::Field { parent, .. } => get_root_local(parent),
         PlaceKind::Index { parent, .. } => get_root_local(parent),
         PlaceKind::Downcast { parent, .. } => get_root_local(parent),

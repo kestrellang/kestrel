@@ -921,6 +921,14 @@ impl<'a> CollectionContext<'a> {
                 let local = self.mir.local(*local_id);
                 Some(local.ty)
             },
+            PlaceKind::Global(name_id) => {
+                // Find the static definition to get its type
+                self.mir
+                    .statics
+                    .iter()
+                    .find(|(_, def)| def.name == *name_id)
+                    .map(|(_, def)| def.ty)
+            },
             PlaceKind::Deref(inner) => {
                 // For deref, get the inner place's type and unwrap the pointer/ref
                 let inner_ty_id = self.get_place_type(inner, subst)?;

@@ -68,10 +68,11 @@ impl ComputedMemberAccessBehavior {
     pub fn access(&self, parent: Expression, span: Span) -> Expression {
         // For computed properties, we still create a FieldAccess expression.
         // The lowering phase will detect it's computed and generate a getter call.
+        // Computed properties with setters are assignable (mutable)
         Expression::field_access(
             parent,
             self.member_name.clone(),
-            false, // computed properties are not directly mutable
+            self.has_setter(), // assignable if it has a setter
             self.member_type.clone(),
             span,
         )

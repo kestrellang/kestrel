@@ -739,6 +739,15 @@ pub fn lower_setter(ctx: &mut LoweringContext, setter_symbol: &Arc<SetterSymbol>
         }
     }
 
+    // Lower yield expression if present (for side effects like assignment)
+    // Setter bodies like `{ self._v = newValue }` have no statements but a yield expression
+    if !ctx.is_block_terminated() {
+        if let Some(yield_expr) = body.yield_expr.as_ref() {
+            // Lower the expression for its side effects (result is discarded)
+            let _value = lower_expression(ctx, yield_expr);
+        }
+    }
+
     // Setters return unit
     if !ctx.is_block_terminated() {
         ctx.emit_all_scope_deinits();

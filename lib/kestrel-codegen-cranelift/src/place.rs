@@ -12,6 +12,7 @@ use kestrel_execution_graph::{Id, Local, MirTy, Place, PlaceKind, Ty};
 use cranelift_codegen::ir::types as cl_types;
 use cranelift_codegen::ir::{InstBuilder, MemFlags, Value as CraneliftValue};
 use cranelift_frontend::{FunctionBuilder, Variable};
+use cranelift_module::Module;
 
 use std::collections::{HashMap, HashSet};
 
@@ -38,6 +39,48 @@ pub fn compile_place_read(
                 // Both aggregate and non-aggregate types use the variable directly
                 Ok(builder.use_var(*var))
             }
+        },
+
+        PlaceKind::Global(name_id) => {
+            // Global/static variable access
+            let global_name = ctx.mir.name(*name_id);
+            let mangled_name = format!("{}", global_name);
+
+            // Look up the global symbol
+            let global_ref = ctx
+                .module
+                .declare_data(&mangled_name, cranelift_module::Linkage::Import, false, false)
+                .map_err(|e| CodegenError::Unsupported(format!("failed to declare global: {}", e)))?;
+
+            // Get the global address
+            let global_addr = ctx
+                .module
+                .declare_data_in_func(global_ref, builder.func);
+
+            // Find the static definition to get its type
+            let static_def = ctx
+                .mir
+                .statics
+                .iter()
+                .find(|(_, def)| def.name == *name_id)
+                .map(|(_, def)| def)
+                .ok_or_else(|| {
+                    CodegenError::Unsupported(format!("static variable not found: {}", mangled_name))
+                })?;
+
+            let static_ty = static_def.ty;
+            let cl_type = translate_type_with_subst(ctx.mir, static_ty, ctx.target, subst);
+
+            // Compute pointer type
+            let ptr_type = if ctx.target.is_64bit() {
+                cl_types::I64
+            } else {
+                cl_types::I32
+            };
+
+            // Load the value from the global
+            let ptr = builder.ins().global_value(ptr_type, global_addr);
+            Ok(builder.ins().load(cl_type, MemFlags::new(), ptr, 0))
         },
 
         PlaceKind::Field { parent, name } => {
@@ -298,6 +341,21 @@ fn get_place_type(
         PlaceKind::Local(local_id) => {
             let local_def = ctx.mir.local(*local_id);
             Ok(local_def.ty)
+        },
+
+        PlaceKind::Global(name_id) => {
+            // Find the static definition to get its type
+            let static_def = ctx
+                .mir
+                .statics
+                .iter()
+                .find(|(_, def)| def.name == *name_id)
+                .map(|(_, def)| def)
+                .ok_or_else(|| {
+                    let global_name = ctx.mir.name(*name_id);
+                    CodegenError::Unsupported(format!("static variable not found: {}", global_name))
+                })?;
+            Ok(static_def.ty)
         },
 
         PlaceKind::Field { parent, name } => {
@@ -642,6 +700,37 @@ pub fn compile_place_write(
             Ok(())
         },
 
+        PlaceKind::Global(name_id) => {
+            // Global/static variable write
+            let global_name = ctx.mir.name(*name_id);
+            let mangled_name = format!("{}", global_name);
+
+            // Look up the global symbol
+            let global_ref = ctx
+                .module
+                .declare_data(&mangled_name, cranelift_module::Linkage::Import, false, false)
+                .map_err(|e| CodegenError::Unsupported(format!("failed to declare global: {}", e)))?;
+
+            // Get the global address
+            let global_addr = ctx
+                .module
+                .declare_data_in_func(global_ref, builder.func);
+
+            // Compute pointer type
+            let ptr_type = if ctx.target.is_64bit() {
+                cl_types::I64
+            } else {
+                cl_types::I32
+            };
+
+            // Get the pointer to the global
+            let ptr = builder.ins().global_value(ptr_type, global_addr);
+
+            // Store the value to the global
+            builder.ins().store(MemFlags::new(), value, ptr, 0);
+            Ok(())
+        },
+
         PlaceKind::Field { parent, name } => {
             // Get the struct pointer from the parent place
             let struct_ptr =
@@ -768,6 +857,26 @@ pub fn compile_place_addr(
                 )
             })?;
             Ok(builder.ins().stack_addr(ptr_type, *slot, 0))
+        },
+
+        PlaceKind::Global(name_id) => {
+            // Global/static variable - return the address of the global
+            let global_name = ctx.mir.name(*name_id);
+            let mangled_name = format!("{}", global_name);
+
+            // Look up the global symbol
+            let global_ref = ctx
+                .module
+                .declare_data(&mangled_name, cranelift_module::Linkage::Import, false, false)
+                .map_err(|e| CodegenError::Unsupported(format!("failed to declare global: {}", e)))?;
+
+            // Get the global address
+            let global_addr = ctx
+                .module
+                .declare_data_in_func(global_ref, builder.func);
+
+            // Return the address of the global
+            Ok(builder.ins().global_value(ptr_type, global_addr))
         },
 
         PlaceKind::Field { parent, name } => {

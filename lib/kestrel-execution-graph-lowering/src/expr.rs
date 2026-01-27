@@ -443,8 +443,44 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
 
         // === Field Access ===
         ExprKind::FieldAccess { object, field } => {
+            // Check if this is a static field access via TypeRef (e.g., Foo.staticField)
+            if matches!(object.kind, ExprKind::TypeRef(_)) {
+                // Static field access - need to find the field symbol and create a global place
+                let field_info = find_field_info(ctx, &object.ty, field);
+
+                if let Some((field_id, is_computed)) = field_info {
+                    if is_computed {
+                        // Static computed property - generate a getter call
+                        return lower_getter_call(ctx, object, field_id, field, expr);
+                    } else {
+                        // Static stored field - create a global place reference
+                        // Get the field symbol to build the qualified name
+                        let field_symbol = match ctx.model.query(SymbolFor { id: field_id }) {
+                            Some(sym) => sym,
+                            None => {
+                                ctx.emit_error(LoweringError::internal(
+                                    format!("static field symbol not found: {:?}", field_id),
+                                    Some(expr.span.clone()),
+                                ));
+                                return Value::Immediate(Immediate::error());
+                            },
+                        };
+
+                        // Build the qualified name for the static field
+                        let name_id = qualified_name_for_symbol(ctx, &field_symbol);
+                        return Value::Place(Place::global(name_id));
+                    }
+                } else {
+                    ctx.emit_error(LoweringError::internal(
+                        format!("static field '{}' not found in type", field),
+                        Some(expr.span.clone()),
+                    ));
+                    return Value::Immediate(Immediate::error());
+                }
+            }
+
+            // Instance field access
             // Check if this is a computed property access
-            // First, try to find the field symbol from the object's type
             let field_info = find_field_info(ctx, &object.ty, field);
 
             if let Some((field_id, is_computed)) = field_info
@@ -4034,7 +4070,7 @@ fn lower_setter_call(
                 Some(ReceiverKind::Mutating) => {
                     // Mutable borrow - typical for setters
                     let ref_value = create_ref(ctx, &receiver_value, &object.ty, true);
-                    args.push(CallArg::new(ref_value, PassingMode::Copy));
+                    args.push(CallArg::mutating(ref_value));
                 },
                 Some(ReceiverKind::Consuming) => {
                     // Consumes self

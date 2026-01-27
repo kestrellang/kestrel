@@ -158,319 +158,6 @@ public struct Foo {
     public let structLet: std.num.Int64 = 11;
 }
 
-// =============================================================================
-// Enum properties (intended behavior: no instance stored fields; static stored ok)
-// =============================================================================
-
-mod enum_properties {
-    use super::*;
-
-    #[test]
-    fn enum_non_static_let_disallowed() {
-        Test::new(
-            r#"
-module Test
-enum Foo {
-    case A
-    let x: std.num.Int64
-}
-"#,
-        )
-        .expect(HasError("enums cannot have stored fields"));
-    }
-
-    #[test]
-    fn enum_non_static_var_disallowed() {
-        Test::new(
-            r#"
-module Test
-enum Foo {
-    case A
-    var x: std.num.Int64
-}
-"#,
-        )
-        .expect(HasError("enums cannot have stored fields"));
-    }
-
-    #[test]
-    fn enum_static_let_initial_value() {
-        Test::new(
-            r#"
-module Main
-import std.io.stdio.println
-
-enum Foo {
-    case A
-    static let staticLet: std.num.Int64 = 4;
-}
-
-// =============================================================================
-// Protocol properties (intended behavior)
-// =============================================================================
-
-mod protocol_properties {
-    use super::*;
-
-    #[test]
-    fn protocol_non_static_let_requirement_type_mismatch() {
-        Test::new(
-            r#"
-module Test
-
-protocol P {
-    let value: std.num.Int64
-}
-
-struct S: P {
-    let value: std.num.Int32
-}
-"#,
-        )
-        .expect(HasError("property 'value' has wrong type for protocol"));
-    }
-
-    #[test]
-    fn protocol_non_static_var_requirement_type_mismatch() {
-        Test::new(
-            r#"
-module Test
-
-protocol P {
-    var value: std.num.Int64
-}
-
-struct S: P {
-    var value: std.num.Int32
-}
-"#,
-        )
-        .expect(HasError("property 'value' has wrong type for protocol"));
-    }
-
-    #[test]
-    fn protocol_static_let_requirement_type_mismatch() {
-        Test::new(
-            r#"
-module Test
-
-protocol P {
-    static let value: std.num.Int64
-}
-
-struct S: P {
-    static let value: std.num.Int32 = 0
-}
-"#,
-        )
-        .expect(HasError("property 'value' has wrong type for protocol"));
-    }
-
-    #[test]
-    fn protocol_static_var_requirement_type_mismatch() {
-        Test::new(
-            r#"
-module Test
-
-protocol P {
-    static var value: std.num.Int64
-}
-
-struct S: P {
-    static var value: std.num.Int32 = 0
-}
-"#,
-        )
-        .expect(HasError("property 'value' has wrong type for protocol"));
-    }
-
-    #[test]
-    fn protocol_non_static_computed_let_disallowed() {
-        Test::new(
-            r#"
-module Test
-
-protocol P {
-    let value: std.num.Int64 { get }
-}
-"#,
-        )
-        .expect(HasError("computed properties must use 'var'"));
-    }
-
-    #[test]
-    fn protocol_non_static_computed_var_requirement_type_mismatch() {
-        Test::new(
-            r#"
-module Test
-
-protocol P {
-    var value: std.num.Int64 { get }
-}
-
-struct S: P {
-    var value: std.num.Int32 { 0 }
-}
-"#,
-        )
-        .expect(HasError("property 'value' has wrong type for protocol"));
-    }
-
-    #[test]
-    fn protocol_static_computed_let_disallowed() {
-        Test::new(
-            r#"
-module Test
-
-protocol P {
-    static let value: std.num.Int64 { get }
-}
-"#,
-        )
-        .expect(HasError("computed properties must use 'var'"));
-    }
-
-    #[test]
-    fn protocol_static_computed_var_requirement_type_mismatch() {
-        Test::new(
-            r#"
-module Test
-
-protocol P {
-    static var value: std.num.Int64 { get }
-}
-
-struct S: P {
-    static var value: std.num.Int32 { 0 }
-}
-"#,
-        )
-        .expect(HasError("property 'value' has wrong type for protocol"));
-    }
-}
-
-func main() -> std.num.Int64 {
-    let _ = println(Foo.staticLet);
-    0
-}
-"#,
-        )
-        .with_stdlib()
-        .expect(StdoutEquals("4\n"));
-    }
-
-    #[test]
-    fn enum_static_var_mutability_and_initial_value() {
-        Test::new(
-            r#"
-module Main
-import std.io.stdio.println
-
-enum Foo {
-    case A
-    static var staticVar: std.num.Int64 = 1;
-}
-
-func main() -> std.num.Int64 {
-    let _ = println(Foo.staticVar);
-    Foo.staticVar = 2;
-    let _ = println(Foo.staticVar);
-    0
-}
-"#,
-        )
-        .with_stdlib()
-        .expect(StdoutEquals("1\n2\n"));
-    }
-
-    #[test]
-    fn enum_computed_let_disallowed() {
-        Test::new(
-            r#"
-module Test
-enum Foo {
-    case A
-    let computed: std.num.Int64 { 0 }
-}
-"#,
-        )
-        .expect(HasError("computed properties must use 'var'"));
-    }
-
-    #[test]
-    fn enum_computed_var_get_set() {
-        Test::new(
-            r#"
-module Main
-import std.io.stdio.println
-
-enum Foo {
-    case A
-    private static var _v: std.num.Int64 = 1;
-
-    var computed: std.num.Int64 {
-        get { Foo._v }
-        set { Foo._v = newValue }
-    }
-}
-
-func main() -> std.num.Int64 {
-    var f: Foo = .A;
-    let _ = println(f.computed);
-    f.computed = 3;
-    let _ = println(f.computed);
-    0
-}
-"#,
-        )
-        .with_stdlib()
-        .expect(StdoutEquals("1\n3\n"));
-    }
-
-    #[test]
-    fn enum_static_computed_let_disallowed() {
-        Test::new(
-            r#"
-module Test
-enum Foo {
-    case A
-    static let computed: std.num.Int64 { 0 }
-}
-"#,
-        )
-        .expect(HasError("computed properties must use 'var'"));
-    }
-
-    #[test]
-    fn enum_static_computed_var_get_set() {
-        Test::new(
-            r#"
-module Main
-import std.io.stdio.println
-
-enum Foo {
-    case A
-    private static var _s: std.num.Int64 = 5;
-
-    static var computed: std.num.Int64 {
-        get { _s }
-        set { _s = newValue }
-    }
-}
-
-func main() -> std.num.Int64 {
-    let _ = println(Foo.computed);
-    Foo.computed = 7;
-    let _ = println(Foo.computed);
-    0
-}
-"#,
-        )
-        .with_stdlib()
-        .expect(StdoutEquals("5\n7\n"));
-    }
-}
-
 func main() -> std.num.Int64 {
     let foo = Foo(structLet: 11);
     let _ = println(foo.structLet);
@@ -597,7 +284,7 @@ public struct Foo {
     }
 }
 
-func main() -> lang.i64 {
+func main() -> std.num.Int64 {
     let _ = println(Foo.structStaticComputedVar);
     Foo.structStaticComputedVar = 7;
     let _ = println(Foo.structStaticComputedVar);
@@ -635,5 +322,364 @@ public struct Foo {
         )
         .with_stdlib()
         .expect(HasError("computed properties must use 'var'"));
+    }
+
+    #[test]
+    fn struct_non_static_let_disallowed() {
+        // This test verifies that instance let fields ARE allowed in structs
+        // (unlike enums). This should compile successfully.
+        Test::new(
+            r#"
+module Main
+public struct Foo {
+    public let x: std.num.Int64
+}
+func main() -> std.num.Int64 { 0 }
+"#,
+        )
+        .with_stdlib()
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn struct_non_static_var_disallowed() {
+        // This test verifies that instance var fields ARE allowed in structs
+        // (unlike enums). This should compile successfully.
+        Test::new(
+            r#"
+module Main
+public struct Foo {
+    public var x: std.num.Int64
+}
+func main() -> std.num.Int64 { 0 }
+"#,
+        )
+        .with_stdlib()
+        .expect(Compiles);
+    }
+}
+
+// =============================================================================
+// Enum properties (intended behavior: no instance stored fields; static stored ok)
+// =============================================================================
+
+mod enum_properties {
+    use super::*;
+
+    #[test]
+    fn enum_non_static_let_disallowed() {
+        Test::new(
+            r#"
+module Test
+enum Foo {
+    case A
+    let x: std.num.Int64
+}
+"#,
+        )
+        .with_stdlib()
+        .expect(HasError("enums cannot have stored fields"));
+    }
+
+    #[test]
+    fn enum_non_static_var_disallowed() {
+        Test::new(
+            r#"
+module Test
+enum Foo {
+    case A
+    var x: std.num.Int64
+}
+"#,
+        )
+        .with_stdlib()
+        .expect(HasError("enums cannot have stored fields"));
+    }
+
+    #[test]
+    fn enum_static_let_initial_value() {
+        Test::new(
+            r#"
+module Main
+import std.io.stdio.println
+
+enum Foo {
+    case A
+    static let staticLet: std.num.Int64 = 4;
+}
+
+func main() -> std.num.Int64 {
+    let _ = println(Foo.staticLet);
+    0
+}
+"#,
+        )
+        .with_stdlib()
+        .expect(StdoutEquals("4\n"));
+    }
+
+    #[test]
+    fn enum_static_var_mutability_and_initial_value() {
+        Test::new(
+            r#"
+module Main
+import std.io.stdio.println
+
+enum Foo {
+    case A
+    static var staticVar: std.num.Int64 = 1;
+}
+
+func main() -> std.num.Int64 {
+    let _ = println(Foo.staticVar);
+    Foo.staticVar = 2;
+    let _ = println(Foo.staticVar);
+    0
+}
+"#,
+        )
+        .with_stdlib()
+        .expect(StdoutEquals("1\n2\n"));
+    }
+
+    #[test]
+    fn enum_computed_let_disallowed() {
+        Test::new(
+            r#"
+module Test
+enum Foo {
+    case A
+    let computed: std.num.Int64 { 0 }
+}
+"#,
+        )
+        .with_stdlib()
+        .expect(HasError("computed properties must use 'var'"));
+    }
+
+    #[test]
+    fn enum_computed_var_get_set() {
+        Test::new(
+            r#"
+module Main
+import std.io.stdio.println
+
+enum Foo {
+    case A
+    private static var _v: std.num.Int64 = 1;
+
+    var computed: std.num.Int64 {
+        get { Foo._v }
+        set { Foo._v = newValue }
+    }
+}
+
+func main() -> std.num.Int64 {
+    var f: Foo = .A;
+    let _ = println(f.computed);
+    f.computed = 3;
+    let _ = println(f.computed);
+    0
+}
+"#,
+        )
+        .with_stdlib()
+        .expect(StdoutEquals("1\n3\n"));
+    }
+
+    #[test]
+    fn enum_static_computed_let_disallowed() {
+        Test::new(
+            r#"
+module Test
+enum Foo {
+    case A
+    static let computed: std.num.Int64 { 0 }
+}
+"#,
+        )
+        .with_stdlib()
+        .expect(HasError("computed properties must use 'var'"));
+    }
+
+    #[test]
+    fn enum_static_computed_var_get_set() {
+        Test::new(
+            r#"
+module Main
+import std.io.stdio.println
+
+enum Foo {
+    case A
+    private static var _s: std.num.Int64 = 5;
+
+    static var computed: std.num.Int64 {
+        get { _s }
+        set { _s = newValue }
+    }
+}
+
+func main() -> std.num.Int64 {
+    let _ = println(Foo.computed);
+    Foo.computed = 7;
+    let _ = println(Foo.computed);
+    0
+}
+"#,
+        )
+        .with_stdlib()
+        .expect(StdoutEquals("5\n7\n"));
+    }
+}
+
+// =============================================================================
+// Protocol properties (intended behavior)
+// =============================================================================
+
+mod protocol_properties {
+    use super::*;
+
+    #[test]
+    fn protocol_non_static_let_requirement_type_mismatch() {
+        Test::new(
+            r#"
+module Test
+
+protocol P {
+    let value: std.num.Int64
+}
+
+struct S: P {
+    let value: std.num.Int32
+}
+"#,
+        )
+        .with_stdlib()
+        .expect(HasError("property 'value' has wrong type for protocol"));
+    }
+
+    #[test]
+    fn protocol_non_static_var_requirement_type_mismatch() {
+        Test::new(
+            r#"
+module Test
+
+protocol P {
+    var value: std.num.Int64
+}
+
+struct S: P {
+    var value: std.num.Int32
+}
+"#,
+        )
+        .with_stdlib()
+        .expect(HasError("property 'value' has wrong type for protocol"));
+    }
+
+    #[test]
+    fn protocol_static_let_requirement_type_mismatch() {
+        Test::new(
+            r#"
+module Test
+
+protocol P {
+    static let value: std.num.Int64
+}
+
+struct S: P {
+    static let value: std.num.Int32 = 0
+}
+"#,
+        )
+        .with_stdlib()
+        .expect(HasError("property 'value' has wrong type for protocol"));
+    }
+
+    #[test]
+    fn protocol_static_var_requirement_type_mismatch() {
+        Test::new(
+            r#"
+module Test
+
+protocol P {
+    static var value: std.num.Int64
+}
+
+struct S: P {
+    static var value: std.num.Int32 = 0
+}
+"#,
+        )
+        .with_stdlib()
+        .expect(HasError("property 'value' has wrong type for protocol"));
+    }
+
+    #[test]
+    fn protocol_non_static_computed_let_disallowed() {
+        Test::new(
+            r#"
+module Test
+
+protocol P {
+    let value: std.num.Int64 { get }
+}
+"#,
+        )
+        .with_stdlib()
+        .expect(HasError("computed properties must use 'var'"));
+    }
+
+    #[test]
+    fn protocol_non_static_computed_var_requirement_type_mismatch() {
+        Test::new(
+            r#"
+module Test
+
+protocol P {
+    var value: std.num.Int64 { get }
+}
+
+struct S: P {
+    var value: std.num.Int32 { 0 }
+}
+"#,
+        )
+        .with_stdlib()
+        .expect(HasError("property 'value' has wrong type for protocol"));
+    }
+
+    #[test]
+    fn protocol_static_computed_let_disallowed() {
+        Test::new(
+            r#"
+module Test
+
+protocol P {
+    static let value: std.num.Int64 { get }
+}
+"#,
+        )
+        .with_stdlib()
+        .expect(HasError("computed properties must use 'var'"));
+    }
+
+    #[test]
+    fn protocol_static_computed_var_requirement_type_mismatch() {
+        Test::new(
+            r#"
+module Test
+
+protocol P {
+    static var value: std.num.Int64 { get }
+}
+
+struct S: P {
+    static var value: std.num.Int32 { 0 }
+}
+"#,
+        )
+        .with_stdlib()
+        .expect(HasError("property 'value' has wrong type for protocol"));
     }
 }
