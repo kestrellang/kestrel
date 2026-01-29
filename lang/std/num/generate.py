@@ -106,45 +106,39 @@ def generate_is_power_of_two(type_name: str, signed: bool, lang_type: str) -> st
         else {{ Bool(boolLiteral: lang.{lang_type}_eq(lang.{lang_type}_and(self.raw, lang.{lang_type}_sub(self.raw, 1)), 0)) }}'''
 
 
-def generate_byte_swap(type_name: str, bits: int, lang_type: str, signed_prefix: str) -> str:
-    """Generate byte swap implementation."""
+def generate_count_ones(type_name: str, bits: int, lang_type: str) -> str:
+    """Generate countOnes implementation using popcount intrinsic."""
+    if bits == 64:
+        # For 64-bit, popcount returns i64 which is already Int64
+        return f"Int64(raw: lang.{lang_type}_popcount(self.raw))"
+    else:
+        # For smaller types, popcount returns the same type, need to widen to Int64
+        return f"Int64(raw: lang.cast_i{bits}_i64(lang.{lang_type}_popcount(self.raw)))"
+
+
+def generate_leading_zeros(type_name: str, bits: int, lang_type: str) -> str:
+    """Generate leadingZeros implementation using clz intrinsic."""
+    if bits == 64:
+        return f"Int64(raw: lang.{lang_type}_clz(self.raw))"
+    else:
+        return f"Int64(raw: lang.cast_i{bits}_i64(lang.{lang_type}_clz(self.raw)))"
+
+
+def generate_trailing_zeros(type_name: str, bits: int, lang_type: str) -> str:
+    """Generate trailingZeros implementation using ctz intrinsic."""
+    if bits == 64:
+        return f"Int64(raw: lang.{lang_type}_ctz(self.raw))"
+    else:
+        return f"Int64(raw: lang.cast_i{bits}_i64(lang.{lang_type}_ctz(self.raw)))"
+
+
+def generate_byte_swap(type_name: str, bits: int, lang_type: str) -> str:
+    """Generate byteSwapped implementation using bswap intrinsic."""
     if bits == 8:
+        # Byte swap on 8-bit is a no-op
         return "self"
-    elif bits == 16:
-        return f'''{type_name}(raw: lang.{lang_type}_or(
-            lang.{lang_type}_shl(lang.{lang_type}_and(self.raw, 255), 8),
-            lang.{lang_type}_and(lang.{lang_type}_{signed_prefix}shr(self.raw, 8), 255)
-        ))'''
-    elif bits == 32:
-        return f'''// Swap bytes: ABCD -> DCBA
-        let b0 = lang.{lang_type}_and(self.raw, 255);
-        let b1 = lang.{lang_type}_and(lang.{lang_type}_{signed_prefix}shr(self.raw, 8), 255);
-        let b2 = lang.{lang_type}_and(lang.{lang_type}_{signed_prefix}shr(self.raw, 16), 255);
-        let b3 = lang.{lang_type}_and(lang.{lang_type}_{signed_prefix}shr(self.raw, 24), 255);
-        {type_name}(raw: lang.{lang_type}_or(lang.{lang_type}_or(lang.{lang_type}_or(
-            lang.{lang_type}_shl(b0, 24),
-            lang.{lang_type}_shl(b1, 16)),
-            lang.{lang_type}_shl(b2, 8)),
-            b3))'''
-    else:  # 64-bit
-        return f'''// Swap bytes
-        let b0 = lang.{lang_type}_and(self.raw, 255);
-        let b1 = lang.{lang_type}_and(lang.{lang_type}_{signed_prefix}shr(self.raw, 8), 255);
-        let b2 = lang.{lang_type}_and(lang.{lang_type}_{signed_prefix}shr(self.raw, 16), 255);
-        let b3 = lang.{lang_type}_and(lang.{lang_type}_{signed_prefix}shr(self.raw, 24), 255);
-        let b4 = lang.{lang_type}_and(lang.{lang_type}_{signed_prefix}shr(self.raw, 32), 255);
-        let b5 = lang.{lang_type}_and(lang.{lang_type}_{signed_prefix}shr(self.raw, 40), 255);
-        let b6 = lang.{lang_type}_and(lang.{lang_type}_{signed_prefix}shr(self.raw, 48), 255);
-        let b7 = lang.{lang_type}_and(lang.{lang_type}_{signed_prefix}shr(self.raw, 56), 255);
-        {type_name}(raw: lang.{lang_type}_or(lang.{lang_type}_or(lang.{lang_type}_or(lang.{lang_type}_or(lang.{lang_type}_or(lang.{lang_type}_or(lang.{lang_type}_or(
-            lang.{lang_type}_shl(b0, 56),
-            lang.{lang_type}_shl(b1, 48)),
-            lang.{lang_type}_shl(b2, 40)),
-            lang.{lang_type}_shl(b3, 32)),
-            lang.{lang_type}_shl(b4, 24)),
-            lang.{lang_type}_shl(b5, 16)),
-            lang.{lang_type}_shl(b6, 8)),
-            b7))'''
+    else:
+        return f"{type_name}(raw: lang.{lang_type}_bswap(self.raw))"
 
 
 def generate_checked_arithmetic(type_name: str, bits: int, signed: bool, lang_type: str) -> str:
@@ -488,8 +482,13 @@ def generate_integer(type_name: str, bits: int, signed: bool, is_default: bool) 
     # Generate isPowerOfTwo
     is_power_of_two = generate_is_power_of_two(type_name, signed, lang_type)
 
-    # Generate byte swap
-    byte_swap_impl = generate_byte_swap(type_name, bits, lang_type, signed_prefix)
+    # Generate bit counting operations using intrinsics
+    count_ones_impl = generate_count_ones(type_name, bits, lang_type)
+    leading_zeros_impl = generate_leading_zeros(type_name, bits, lang_type)
+    trailing_zeros_impl = generate_trailing_zeros(type_name, bits, lang_type)
+
+    # Generate byte swap using intrinsic
+    byte_swap_impl = generate_byte_swap(type_name, bits, lang_type)
 
     # Generate checked arithmetic
     checked_arithmetic = generate_checked_arithmetic(type_name, bits, signed, lang_type)
@@ -521,6 +520,9 @@ def generate_integer(type_name: str, bits: int, signed: bool, is_default: bool) 
     result = result.replace("{{FORMAT_METHOD}}", format_method)
     result = result.replace("{{SIGN_PROPERTIES}}", sign_properties)
     result = result.replace("{{IS_POWER_OF_TWO}}", is_power_of_two)
+    result = result.replace("{{COUNT_ONES_IMPL}}", count_ones_impl)
+    result = result.replace("{{LEADING_ZEROS_IMPL}}", leading_zeros_impl)
+    result = result.replace("{{TRAILING_ZEROS_IMPL}}", trailing_zeros_impl)
     result = result.replace("{{BYTE_SWAP_IMPL}}", byte_swap_impl)
     result = result.replace("{{CHECKED_ARITHMETIC}}", checked_arithmetic)
     result = result.replace("{{SATURATING_ARITHMETIC}}", saturating_arithmetic)

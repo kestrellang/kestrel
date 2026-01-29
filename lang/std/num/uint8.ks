@@ -119,60 +119,22 @@ public struct UInt8:
         else { Bool(boolLiteral: lang.i8_eq(lang.i8_and(self.raw, lang.i8_sub(self.raw, 1)), 0)) }
     }}
 
-    // TODO: requires lang.i8_popcount intrinsic
     public var countOnes: Int64 { get {
-        // Stub implementation - counts bits manually
-        var count: Int64 = 0;
-        var n = self.raw;
-        var i: Int64 = 0;
-        while i < 8 {
-            if not Bool(boolLiteral: lang.i8_eq(lang.i8_and(n, 1), 0)) {
-                count = count + 1
-            };
-            n = lang.i8_unsigned_shr(n, 1);
-            i = i + 1
-        };
-        count
+        Int64(raw: lang.cast_i8_i64(lang.i8_popcount(self.raw)))
     }}
 
     public var countZeros: Int64 { get {
         Int64(intLiteral: 8) - self.countOnes
     }}
 
-    // TODO: requires lang.i8_clz intrinsic
     public var leadingZeros: Int64 { get {
-        if self == UInt8.zero {
-            return Int64(intLiteral: 8)
-        };
-        var count: Int64 = 0;
-        var n = self.raw;
-        var i: Int64 = 8 - 1;
-        while i >= 0 {
-            let bit = lang.i8_and(lang.i8_unsigned_shr(n, lang.cast_i64_i8(i.raw)), 1);
-            if not Bool(boolLiteral: lang.i8_eq(bit, 0)) {
-                return count
-            };
-            count = count + 1;
-            i = i - 1
-        };
-        count
+        Int64(raw: lang.cast_i8_i64(lang.i8_clz(self.raw)))
     }}
 
-    // TODO: requires lang.i8_ctz intrinsic
     public var trailingZeros: Int64 { get {
-        if self == UInt8.zero {
-            return Int64(intLiteral: 8)
-        };
-        var count: Int64 = 0;
-        var n = self.raw;
-        while Bool(boolLiteral: lang.i8_eq(lang.i8_and(n, 1), 0)) {
-            count = count + 1;
-            n = lang.i8_unsigned_shr(n, 1)
-        };
-        count
+        Int64(raw: lang.cast_i8_i64(lang.i8_ctz(self.raw)))
     }}
 
-    // TODO: requires lang.i8_bswap intrinsic
     public var byteSwapped: UInt8 { get {
         self
     }}

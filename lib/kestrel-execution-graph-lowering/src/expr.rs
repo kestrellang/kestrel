@@ -1182,6 +1182,10 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
                     let un_op = match op {
                         IntUnaryOp::Neg => UnOp::Neg,
                         IntUnaryOp::Not => UnOp::Not,
+                        IntUnaryOp::Popcount => UnOp::Popcount,
+                        IntUnaryOp::Clz => UnOp::Clz,
+                        IntUnaryOp::Ctz => UnOp::Ctz,
+                        IntUnaryOp::Bswap => UnOp::Bswap,
                     };
 
                     let result_ty = lower_type(ctx, &expr.ty);
@@ -1321,6 +1325,55 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
                             bits,
                             op: math_kind,
                             operand,
+                        },
+                    );
+                    Value::Place(Place::local(result))
+                },
+                LangIntrinsic::FloatFma { primitive } => {
+                    use kestrel_execution_graph::function::FloatBits;
+                    use kestrel_semantic_tree::expr::LangPrimitive;
+
+                    let a = lower_expression(ctx, &arguments[0].value);
+                    let b = lower_expression(ctx, &arguments[1].value);
+                    let c = lower_expression(ctx, &arguments[2].value);
+
+                    let bits = match primitive {
+                        LangPrimitive::F16 => FloatBits::F16,
+                        LangPrimitive::F32 => FloatBits::F32,
+                        LangPrimitive::F64 => FloatBits::F64,
+                        _ => unreachable!("float fma on non-float primitive"),
+                    };
+
+                    let result_ty = lower_type(ctx, &expr.ty);
+                    let result = ctx.create_temp("float_fma", result_ty);
+                    ctx.emit_assign(
+                        Place::local(result),
+                        Rvalue::FloatFma { bits, a, b, c },
+                    );
+                    Value::Place(Place::local(result))
+                },
+                LangIntrinsic::FloatCopysign { primitive } => {
+                    use kestrel_execution_graph::function::FloatBits;
+                    use kestrel_semantic_tree::expr::LangPrimitive;
+
+                    let magnitude = lower_expression(ctx, &arguments[0].value);
+                    let sign_source = lower_expression(ctx, &arguments[1].value);
+
+                    let bits = match primitive {
+                        LangPrimitive::F16 => FloatBits::F16,
+                        LangPrimitive::F32 => FloatBits::F32,
+                        LangPrimitive::F64 => FloatBits::F64,
+                        _ => unreachable!("float copysign on non-float primitive"),
+                    };
+
+                    let result_ty = lower_type(ctx, &expr.ty);
+                    let result = ctx.create_temp("float_copysign", result_ty);
+                    ctx.emit_assign(
+                        Place::local(result),
+                        Rvalue::FloatCopysign {
+                            bits,
+                            magnitude,
+                            sign_source,
                         },
                     );
                     Value::Place(Place::local(result))

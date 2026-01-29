@@ -533,6 +533,14 @@ pub enum IntUnaryOp {
     Neg,
     /// Bitwise NOT
     Not,
+    /// Population count (count of 1-bits)
+    Popcount,
+    /// Count leading zeros
+    Clz,
+    /// Count trailing zeros
+    Ctz,
+    /// Byte swap (reverse byte order)
+    Bswap,
 }
 
 /// Float binary operations.
@@ -663,6 +671,18 @@ pub enum LangIntrinsic {
         op: FloatMathOp,
     },
 
+    /// Fused multiply-add (ternary, arity 3).
+    /// `lang.f64_fma(a, b, c)` computes `a * b + c` with a single rounding.
+    FloatFma {
+        primitive: LangPrimitive,
+    },
+
+    /// Copy sign (binary, arity 2).
+    /// `lang.f64_copysign(magnitude, sign)` returns magnitude with sign from sign.
+    FloatCopysign {
+        primitive: LangPrimitive,
+    },
+
     // === Pointer intrinsics ===
     /// `lang.ptr_null[T]()` - Create null pointer of type T
     PtrNull { pointee_ty: Ty },
@@ -733,6 +753,8 @@ impl LangIntrinsic {
             LangIntrinsic::FloatConst { .. } => 0,
             LangIntrinsic::FloatPred { .. } => 1,
             LangIntrinsic::FloatMath { .. } => 1,
+            LangIntrinsic::FloatFma { .. } => 3,
+            LangIntrinsic::FloatCopysign { .. } => 2,
             // Pointer intrinsics
             LangIntrinsic::PtrNull { .. } => 0,
             LangIntrinsic::PtrFromAddress { .. } => 1,
@@ -805,6 +827,10 @@ impl LangIntrinsic {
                 let op_str = match op {
                     IntUnaryOp::Neg => "neg",
                     IntUnaryOp::Not => "not",
+                    IntUnaryOp::Popcount => "popcount",
+                    IntUnaryOp::Clz => "clz",
+                    IntUnaryOp::Ctz => "ctz",
+                    IntUnaryOp::Bswap => "bswap",
                 };
                 format!("lang.{}_{}", primitive.as_str(), op_str)
             },
@@ -855,6 +881,12 @@ impl LangIntrinsic {
                     FloatMathOp::Sqrt => "sqrt",
                 };
                 format!("lang.{}_{}", primitive.as_str(), op_str)
+            },
+            LangIntrinsic::FloatFma { primitive } => {
+                format!("lang.{}_fma", primitive.as_str())
+            },
+            LangIntrinsic::FloatCopysign { primitive } => {
+                format!("lang.{}_copysign", primitive.as_str())
             },
             // Pointer intrinsics
             LangIntrinsic::PtrNull { .. } => "lang.ptr_null".to_string(),
@@ -2902,6 +2934,10 @@ impl Expression {
             LangIntrinsic::FloatPred { .. } => Ty::bool(span.clone()),
             // FloatMath returns the float type
             LangIntrinsic::FloatMath { primitive, .. } => primitive.to_ty(span.clone()),
+            // FloatFma returns the float type (fused multiply-add)
+            LangIntrinsic::FloatFma { primitive } => primitive.to_ty(span.clone()),
+            // FloatCopysign returns the float type
+            LangIntrinsic::FloatCopysign { primitive } => primitive.to_ty(span.clone()),
             // Pointer intrinsics
             LangIntrinsic::PtrNull { pointee_ty } => Ty::pointer(pointee_ty.clone(), span.clone()),
             LangIntrinsic::PtrFromAddress { pointee_ty } => {
@@ -3033,6 +3069,20 @@ impl Expression {
                 // (T) -> T
                 let prim_ty = primitive.to_ty(span.clone());
                 Ty::function(vec![prim_ty.clone()], prim_ty, span.clone())
+            },
+            LangIntrinsic::FloatFma { primitive } => {
+                // (T, T, T) -> T (fused multiply-add: a * b + c)
+                let prim_ty = primitive.to_ty(span.clone());
+                Ty::function(
+                    vec![prim_ty.clone(), prim_ty.clone(), prim_ty.clone()],
+                    prim_ty,
+                    span.clone(),
+                )
+            },
+            LangIntrinsic::FloatCopysign { primitive } => {
+                // (T, T) -> T (magnitude, sign_source)
+                let prim_ty = primitive.to_ty(span.clone());
+                Ty::function(vec![prim_ty.clone(), prim_ty.clone()], prim_ty, span.clone())
             },
             // Pointer intrinsics
             LangIntrinsic::PtrNull { pointee_ty } => {

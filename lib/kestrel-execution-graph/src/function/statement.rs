@@ -254,6 +254,19 @@ pub enum Rvalue {
         op: FloatMathKind,
         operand: Value,
     },
+    /// Fused multiply-add: a * b + c
+    FloatFma {
+        bits: FloatBits,
+        a: Value,
+        b: Value,
+        c: Value,
+    },
+    /// Copy sign: magnitude with sign from sign_source
+    FloatCopysign {
+        bits: FloatBits,
+        magnitude: Value,
+        sign_source: Value,
+    },
 }
 
 /// What's being called.
@@ -351,6 +364,14 @@ pub enum UnOp {
     Not,
     /// Boolean not
     BoolNot,
+    /// Population count (count of 1-bits)
+    Popcount,
+    /// Count leading zeros
+    Clz,
+    /// Count trailing zeros
+    Ctz,
+    /// Byte swap (reverse byte order)
+    Bswap,
 }
 
 /// Type cast kinds.
@@ -655,6 +676,39 @@ impl fmt::Display for RvalueDisplay<'_> {
                 };
                 write!(f, "{}.{} {}", bits_str, op_str, operand.display(self.ctx))
             },
+            Rvalue::FloatFma { bits, a, b, c } => {
+                let bits_str = match bits {
+                    FloatBits::F16 => "f16",
+                    FloatBits::F32 => "f32",
+                    FloatBits::F64 => "f64",
+                };
+                write!(
+                    f,
+                    "{}.fma {}, {}, {}",
+                    bits_str,
+                    a.display(self.ctx),
+                    b.display(self.ctx),
+                    c.display(self.ctx)
+                )
+            },
+            Rvalue::FloatCopysign {
+                bits,
+                magnitude,
+                sign_source,
+            } => {
+                let bits_str = match bits {
+                    FloatBits::F16 => "f16",
+                    FloatBits::F32 => "f32",
+                    FloatBits::F64 => "f64",
+                };
+                write!(
+                    f,
+                    "{}.copysign {}, {}",
+                    bits_str,
+                    magnitude.display(self.ctx),
+                    sign_source.display(self.ctx)
+                )
+            },
             // Pointer intrinsic displays
             Rvalue::PtrNull { ty } => {
                 write!(f, "ptr.null {}", self.ctx.ty(*ty).display(self.ctx))
@@ -892,6 +946,10 @@ impl UnOp {
             UnOp::FNeg => "f64.neg",
             UnOp::Not => "i64.not",
             UnOp::BoolNot => "bool.not",
+            UnOp::Popcount => "i64.popcount",
+            UnOp::Clz => "i64.clz",
+            UnOp::Ctz => "i64.ctz",
+            UnOp::Bswap => "i64.bswap",
         }
     }
 }

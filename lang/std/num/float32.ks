@@ -301,16 +301,14 @@ public struct Float32:
     // IEEE 754 OPERATIONS
     // ========================================================================
 
-    // TODO: requires lang.f32_fma intrinsic
     public func fma(a: Float32, b: Float32) -> Float32 {
-        // Naive implementation without FMA
-        self.multiply(a).add(b)
+        // Fused multiply-add: self * a + b
+        Float32(raw: lang.f32_fma(self.raw, a.raw, b.raw))
     }
 
-    // TODO: requires lang.f32_copysign intrinsic
     public func copysign(from other: Float32) -> Float32 {
-        let magnitude = self.abs();
-        if other < 0.0 { magnitude.negate() } else { magnitude }
+        // Returns self with the sign of other
+        Float32(raw: lang.f32_copysign(self.raw, other.raw))
     }
 
     // TODO: requires lang.f32_nextUp intrinsic

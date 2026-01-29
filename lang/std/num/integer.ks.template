@@ -87,60 +87,22 @@ public struct {{TYPE_NAME}}:
         {{IS_POWER_OF_TWO}}
     }}
 
-    // TODO: requires lang.{{LANG_TYPE}}_popcount intrinsic
     public var countOnes: Int64 { get {
-        // Stub implementation - counts bits manually
-        var count: Int64 = 0;
-        var n = self.raw;
-        var i: Int64 = 0;
-        while i < {{BITS}} {
-            if not Bool(boolLiteral: lang.{{LANG_TYPE}}_eq(lang.{{LANG_TYPE}}_and(n, 1), 0)) {
-                count = count + 1
-            };
-            n = lang.{{LANG_TYPE}}_{{SIGNED_PREFIX}}shr(n, 1);
-            i = i + 1
-        };
-        count
+        {{COUNT_ONES_IMPL}}
     }}
 
     public var countZeros: Int64 { get {
         Int64(intLiteral: {{BITS}}) - self.countOnes
     }}
 
-    // TODO: requires lang.{{LANG_TYPE}}_clz intrinsic
     public var leadingZeros: Int64 { get {
-        if self == {{TYPE_NAME}}.zero {
-            return Int64(intLiteral: {{BITS}})
-        };
-        var count: Int64 = 0;
-        var n = self.raw;
-        var i: Int64 = {{BITS}} - 1;
-        while i >= 0 {
-            let bit = lang.{{LANG_TYPE}}_and(lang.{{LANG_TYPE}}_{{SIGNED_PREFIX}}shr(n, {{SHIFT_CAST_I}}), 1);
-            if not Bool(boolLiteral: lang.{{LANG_TYPE}}_eq(bit, 0)) {
-                return count
-            };
-            count = count + 1;
-            i = i - 1
-        };
-        count
+        {{LEADING_ZEROS_IMPL}}
     }}
 
-    // TODO: requires lang.{{LANG_TYPE}}_ctz intrinsic
     public var trailingZeros: Int64 { get {
-        if self == {{TYPE_NAME}}.zero {
-            return Int64(intLiteral: {{BITS}})
-        };
-        var count: Int64 = 0;
-        var n = self.raw;
-        while Bool(boolLiteral: lang.{{LANG_TYPE}}_eq(lang.{{LANG_TYPE}}_and(n, 1), 0)) {
-            count = count + 1;
-            n = lang.{{LANG_TYPE}}_{{SIGNED_PREFIX}}shr(n, 1)
-        };
-        count
+        {{TRAILING_ZEROS_IMPL}}
     }}
 
-    // TODO: requires lang.{{LANG_TYPE}}_bswap intrinsic
     public var byteSwapped: {{TYPE_NAME}} { get {
         {{BYTE_SWAP_IMPL}}
     }}

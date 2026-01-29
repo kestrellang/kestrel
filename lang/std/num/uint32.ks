@@ -119,71 +119,24 @@ public struct UInt32:
         else { Bool(boolLiteral: lang.i32_eq(lang.i32_and(self.raw, lang.i32_sub(self.raw, 1)), 0)) }
     }}
 
-    // TODO: requires lang.i32_popcount intrinsic
     public var countOnes: Int64 { get {
-        // Stub implementation - counts bits manually
-        var count: Int64 = 0;
-        var n = self.raw;
-        var i: Int64 = 0;
-        while i < 32 {
-            if not Bool(boolLiteral: lang.i32_eq(lang.i32_and(n, 1), 0)) {
-                count = count + 1
-            };
-            n = lang.i32_unsigned_shr(n, 1);
-            i = i + 1
-        };
-        count
+        Int64(raw: lang.cast_i32_i64(lang.i32_popcount(self.raw)))
     }}
 
     public var countZeros: Int64 { get {
         Int64(intLiteral: 32) - self.countOnes
     }}
 
-    // TODO: requires lang.i32_clz intrinsic
     public var leadingZeros: Int64 { get {
-        if self == UInt32.zero {
-            return Int64(intLiteral: 32)
-        };
-        var count: Int64 = 0;
-        var n = self.raw;
-        var i: Int64 = 32 - 1;
-        while i >= 0 {
-            let bit = lang.i32_and(lang.i32_unsigned_shr(n, lang.cast_i64_i32(i.raw)), 1);
-            if not Bool(boolLiteral: lang.i32_eq(bit, 0)) {
-                return count
-            };
-            count = count + 1;
-            i = i - 1
-        };
-        count
+        Int64(raw: lang.cast_i32_i64(lang.i32_clz(self.raw)))
     }}
 
-    // TODO: requires lang.i32_ctz intrinsic
     public var trailingZeros: Int64 { get {
-        if self == UInt32.zero {
-            return Int64(intLiteral: 32)
-        };
-        var count: Int64 = 0;
-        var n = self.raw;
-        while Bool(boolLiteral: lang.i32_eq(lang.i32_and(n, 1), 0)) {
-            count = count + 1;
-            n = lang.i32_unsigned_shr(n, 1)
-        };
-        count
+        Int64(raw: lang.cast_i32_i64(lang.i32_ctz(self.raw)))
     }}
 
-    // TODO: requires lang.i32_bswap intrinsic
     public var byteSwapped: UInt32 { get {
-        // Swap bytes: ABCD -> DCBA
-        let b0 = lang.i32_and(self.raw, 255);
-        let b1 = lang.i32_and(lang.i32_unsigned_shr(self.raw, 8), 255);
-        let b2 = lang.i32_and(lang.i32_unsigned_shr(self.raw, 16), 255);
-        let b3 = lang.i32_and(lang.i32_unsigned_shr(self.raw, 24), 255);
-        UInt32(raw: lang.i32_or(lang.i32_or(lang.i32_or(
-            lang.i32_shl(b0, 24),
-            lang.i32_shl(b1, 16)),
-            lang.i32_shl(b2, 8)),
-            b3))
+        UInt32(raw: lang.i32_bswap(self.raw))
     }}
 
     // ========================================================================

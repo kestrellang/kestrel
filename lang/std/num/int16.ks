@@ -119,65 +119,24 @@ public struct Int16:
         else { Bool(boolLiteral: lang.i16_eq(lang.i16_and(self.raw, lang.i16_sub(self.raw, 1)), 0)) }
     }}
 
-    // TODO: requires lang.i16_popcount intrinsic
     public var countOnes: Int64 { get {
-        // Stub implementation - counts bits manually
-        var count: Int64 = 0;
-        var n = self.raw;
-        var i: Int64 = 0;
-        while i < 16 {
-            if not Bool(boolLiteral: lang.i16_eq(lang.i16_and(n, 1), 0)) {
-                count = count + 1
-            };
-            n = lang.i16_signed_shr(n, 1);
-            i = i + 1
-        };
-        count
+        Int64(raw: lang.cast_i16_i64(lang.i16_popcount(self.raw)))
     }}
 
     public var countZeros: Int64 { get {
         Int64(intLiteral: 16) - self.countOnes
     }}
 
-    // TODO: requires lang.i16_clz intrinsic
     public var leadingZeros: Int64 { get {
-        if self == Int16.zero {
-            return Int64(intLiteral: 16)
-        };
-        var count: Int64 = 0;
-        var n = self.raw;
-        var i: Int64 = 16 - 1;
-        while i >= 0 {
-            let bit = lang.i16_and(lang.i16_signed_shr(n, lang.cast_i64_i16(i.raw)), 1);
-            if not Bool(boolLiteral: lang.i16_eq(bit, 0)) {
-                return count
-            };
-            count = count + 1;
-            i = i - 1
-        };
-        count
+        Int64(raw: lang.cast_i16_i64(lang.i16_clz(self.raw)))
     }}
 
-    // TODO: requires lang.i16_ctz intrinsic
     public var trailingZeros: Int64 { get {
-        if self == Int16.zero {
-            return Int64(intLiteral: 16)
-        };
-        var count: Int64 = 0;
-        var n = self.raw;
-        while Bool(boolLiteral: lang.i16_eq(lang.i16_and(n, 1), 0)) {
-            count = count + 1;
-            n = lang.i16_signed_shr(n, 1)
-        };
-        count
+        Int64(raw: lang.cast_i16_i64(lang.i16_ctz(self.raw)))
     }}
 
-    // TODO: requires lang.i16_bswap intrinsic
     public var byteSwapped: Int16 { get {
-        Int16(raw: lang.i16_or(
-            lang.i16_shl(lang.i16_and(self.raw, 255), 8),
-            lang.i16_and(lang.i16_signed_shr(self.raw, 8), 255)
-        ))
+        Int16(raw: lang.i16_bswap(self.raw))
     }}
 
     // ========================================================================

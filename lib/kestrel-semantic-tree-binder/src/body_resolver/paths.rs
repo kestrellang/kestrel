@@ -1257,6 +1257,23 @@ fn parse_int_op(
             primitive,
             op: IntUnaryOp::Not,
         }),
+        // Bit manipulation ops
+        "popcount" => Some(LangIntrinsic::IntUnary {
+            primitive,
+            op: IntUnaryOp::Popcount,
+        }),
+        "clz" => Some(LangIntrinsic::IntUnary {
+            primitive,
+            op: IntUnaryOp::Clz,
+        }),
+        "ctz" => Some(LangIntrinsic::IntUnary {
+            primitive,
+            op: IntUnaryOp::Ctz,
+        }),
+        "bswap" => Some(LangIntrinsic::IntUnary {
+            primitive,
+            op: IntUnaryOp::Bswap,
+        }),
         _ => None,
     }
 }
@@ -1356,6 +1373,10 @@ fn parse_float_op(
             primitive,
             op: FloatMathOp::Sqrt,
         }),
+        // Fused multiply-add (ternary)
+        "fma" => Some(LangIntrinsic::FloatFma { primitive }),
+        // Copy sign (binary)
+        "copysign" => Some(LangIntrinsic::FloatCopysign { primitive }),
         _ => None,
     }
 }

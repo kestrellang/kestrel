@@ -301,16 +301,14 @@ public struct Float64:
     // IEEE 754 OPERATIONS
     // ========================================================================
 
-    // TODO: requires lang.f64_fma intrinsic
     public func fma(a: Float64, b: Float64) -> Float64 {
-        // Naive implementation without FMA
-        self.multiply(a).add(b)
+        // Fused multiply-add: self * a + b
+        Float64(raw: lang.f64_fma(self.raw, a.raw, b.raw))
     }
 
-    // TODO: requires lang.f64_copysign intrinsic
     public func copysign(from other: Float64) -> Float64 {
-        let magnitude = self.abs();
-        if other < 0.0 { magnitude.negate() } else { magnitude }
+        // Returns self with the sign of other
+        Float64(raw: lang.f64_copysign(self.raw, other.raw))
     }
 
     // TODO: requires lang.f64_nextUp intrinsic

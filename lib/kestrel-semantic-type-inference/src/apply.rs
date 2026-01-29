@@ -993,6 +993,12 @@ fn resolve_intrinsic(
             primitive: *primitive,
             op: *op,
         },
+        LangIntrinsic::FloatFma { primitive } => LangIntrinsic::FloatFma {
+            primitive: *primitive,
+        },
+        LangIntrinsic::FloatCopysign { primitive } => LangIntrinsic::FloatCopysign {
+            primitive: *primitive,
+        },
         LangIntrinsic::PtrToAddress => LangIntrinsic::PtrToAddress,
         LangIntrinsic::PtrOffset => LangIntrinsic::PtrOffset,
         LangIntrinsic::PtrIsNull => LangIntrinsic::PtrIsNull,

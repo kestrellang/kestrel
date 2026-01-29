@@ -407,6 +407,21 @@ impl<'a> CollectionContext<'a> {
                 self.scan_value(operand, subst);
             },
 
+            Rvalue::FloatFma { a, b, c, .. } => {
+                self.scan_value(a, subst);
+                self.scan_value(b, subst);
+                self.scan_value(c, subst);
+            },
+
+            Rvalue::FloatCopysign {
+                magnitude,
+                sign_source,
+                ..
+            } => {
+                self.scan_value(magnitude, subst);
+                self.scan_value(sign_source, subst);
+            },
+
             // Pointer intrinsics
             Rvalue::PtrNull { ty } | Rvalue::SizeOf { ty } | Rvalue::AlignOf { ty } => {
                 self.scan_type(*ty, subst);

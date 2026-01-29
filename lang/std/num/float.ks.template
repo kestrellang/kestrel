@@ -301,16 +301,14 @@ public struct {{TYPE_NAME}}:
     // IEEE 754 OPERATIONS
     // ========================================================================
 
-    // TODO: requires lang.{{LANG_TYPE}}_fma intrinsic
     public func fma(a: {{TYPE_NAME}}, b: {{TYPE_NAME}}) -> {{TYPE_NAME}} {
-        // Naive implementation without FMA
-        self.multiply(a).add(b)
+        // Fused multiply-add: self * a + b
+        {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_fma(self.raw, a.raw, b.raw))
     }
 
-    // TODO: requires lang.{{LANG_TYPE}}_copysign intrinsic
     public func copysign(from other: {{TYPE_NAME}}) -> {{TYPE_NAME}} {
-        let magnitude = self.abs();
-        if other < 0.0 { magnitude.negate() } else { magnitude }
+        // Returns self with the sign of other
+        {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_copysign(self.raw, other.raw))
     }
 
     // TODO: requires lang.{{LANG_TYPE}}_nextUp intrinsic

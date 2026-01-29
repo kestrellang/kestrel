@@ -119,79 +119,24 @@ public struct Int64:
         else { Bool(boolLiteral: lang.i64_eq(lang.i64_and(self.raw, lang.i64_sub(self.raw, 1)), 0)) }
     }}
 
-    // TODO: requires lang.i64_popcount intrinsic
     public var countOnes: Int64 { get {
-        // Stub implementation - counts bits manually
-        var count: Int64 = 0;
-        var n = self.raw;
-        var i: Int64 = 0;
-        while i < 64 {
-            if not Bool(boolLiteral: lang.i64_eq(lang.i64_and(n, 1), 0)) {
-                count = count + 1
-            };
-            n = lang.i64_signed_shr(n, 1);
-            i = i + 1
-        };
-        count
+        Int64(raw: lang.i64_popcount(self.raw))
     }}
 
     public var countZeros: Int64 { get {
         Int64(intLiteral: 64) - self.countOnes
     }}
 
-    // TODO: requires lang.i64_clz intrinsic
     public var leadingZeros: Int64 { get {
-        if self == Int64.zero {
-            return Int64(intLiteral: 64)
-        };
-        var count: Int64 = 0;
-        var n = self.raw;
-        var i: Int64 = 64 - 1;
-        while i >= 0 {
-            let bit = lang.i64_and(lang.i64_signed_shr(n, i.raw), 1);
-            if not Bool(boolLiteral: lang.i64_eq(bit, 0)) {
-                return count
-            };
-            count = count + 1;
-            i = i - 1
-        };
-        count
+        Int64(raw: lang.i64_clz(self.raw))
     }}
 
-    // TODO: requires lang.i64_ctz intrinsic
     public var trailingZeros: Int64 { get {
-        if self == Int64.zero {
-            return Int64(intLiteral: 64)
-        };
-        var count: Int64 = 0;
-        var n = self.raw;
-        while Bool(boolLiteral: lang.i64_eq(lang.i64_and(n, 1), 0)) {
-            count = count + 1;
-            n = lang.i64_signed_shr(n, 1)
-        };
-        count
+        Int64(raw: lang.i64_ctz(self.raw))
     }}
 
-    // TODO: requires lang.i64_bswap intrinsic
     public var byteSwapped: Int64 { get {
-        // Swap bytes
-        let b0 = lang.i64_and(self.raw, 255);
-        let b1 = lang.i64_and(lang.i64_signed_shr(self.raw, 8), 255);
-        let b2 = lang.i64_and(lang.i64_signed_shr(self.raw, 16), 255);
-        let b3 = lang.i64_and(lang.i64_signed_shr(self.raw, 24), 255);
-        let b4 = lang.i64_and(lang.i64_signed_shr(self.raw, 32), 255);
-        let b5 = lang.i64_and(lang.i64_signed_shr(self.raw, 40), 255);
-        let b6 = lang.i64_and(lang.i64_signed_shr(self.raw, 48), 255);
-        let b7 = lang.i64_and(lang.i64_signed_shr(self.raw, 56), 255);
-        Int64(raw: lang.i64_or(lang.i64_or(lang.i64_or(lang.i64_or(lang.i64_or(lang.i64_or(lang.i64_or(
-            lang.i64_shl(b0, 56),
-            lang.i64_shl(b1, 48)),
-            lang.i64_shl(b2, 40)),
-            lang.i64_shl(b3, 32)),
-            lang.i64_shl(b4, 24)),
-            lang.i64_shl(b5, 16)),
-            lang.i64_shl(b6, 8)),
-            b7))
+        Int64(raw: lang.i64_bswap(self.raw))
     }}
 
     // ========================================================================
