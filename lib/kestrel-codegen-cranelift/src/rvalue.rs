@@ -51,6 +51,49 @@ fn func_uses_self(mir: &MirContext, func_def: &FunctionDef) -> bool {
     }) || type_uses_self(mir, func_def.ret)
 }
 
+/// Try to infer the Self type from a method's qualified name.
+///
+/// For a function like `Test.Widget.create`, this returns the type `Test.Widget`
+/// by looking up the parent name in structs and enums.
+fn infer_self_type_from_method_name(
+    ctx: &CodegenContext<'_>,
+    func_name: Id<QualifiedName>,
+) -> Option<Id<Ty>> {
+    let name_data = ctx.mir.name(func_name);
+    let parent = name_data.parent()?;
+
+    // Try to find a struct with this name
+    for (_, struct_def) in ctx.mir.structs.iter() {
+        if ctx.mir.name(struct_def.name) == &parent {
+            // Build the type: if the struct has type params, this won't work directly,
+            // but for non-generic types it will
+            if struct_def.type_params.is_empty() {
+                // Look up the type - it should already be interned
+                let mir_ty = MirTy::Named {
+                    name: struct_def.name,
+                    type_args: vec![],
+                };
+                return ctx.mir.lookup_type(&mir_ty);
+            }
+        }
+    }
+
+    // Try to find an enum with this name
+    for (_, enum_def) in ctx.mir.enums.iter() {
+        if ctx.mir.name(enum_def.name) == &parent {
+            if enum_def.type_params.is_empty() {
+                let mir_ty = MirTy::Named {
+                    name: enum_def.name,
+                    type_args: vec![],
+                };
+                return ctx.mir.lookup_type(&mir_ty);
+            }
+        }
+    }
+
+    None
+}
+
 fn is_main_function(ctx: &CodegenContext<'_>, func_def: &FunctionDef) -> bool {
     let name = ctx.mir.name(func_def.name);
     name.segments.last().map(|s| s.as_str()) == Some("main")
@@ -82,6 +125,20 @@ fn is_aggregate_value_type(mir: &MirContext, ty_id: Id<Ty>) -> bool {
 
 fn needs_sret_for_type(mir: &MirContext, ty_id: Id<Ty>) -> bool {
     !matches!(mir.ty(ty_id), MirTy::Unit) && is_aggregate_value_type(mir, ty_id)
+}
+
+/// Convert alignment to the shift value needed by Cranelift.
+///
+/// Cranelift's StackSlotData uses `align_shift` which is the log2 of the alignment.
+/// For example:
+/// - alignment=1 → shift=0 (2^0 = 1)
+/// - alignment=4 → shift=2 (2^2 = 4)
+/// - alignment=8 → shift=3 (2^3 = 8)
+pub fn align_to_shift(align: usize) -> u8 {
+    if align == 0 {
+        return 0;
+    }
+    align.trailing_zeros() as u8
 }
 
 fn copy_aggregate_value(
@@ -730,7 +787,7 @@ fn compile_construct(
     let slot = builder.create_sized_stack_slot(StackSlotData::new(
         StackSlotKind::ExplicitSlot,
         layout.size as u32,
-        layout.align as u8,
+        align_to_shift(layout.align),
     ));
 
     // Get pointer type for the target
@@ -859,7 +916,7 @@ fn compile_tuple(
     let slot = builder.create_sized_stack_slot(StackSlotData::new(
         StackSlotKind::ExplicitSlot,
         total_size as u32,
-        max_align as u8,
+        align_to_shift(max_align),
     ));
 
     // Get pointer type for the target
@@ -980,7 +1037,7 @@ fn compile_stack_alloc(
     let slot = builder.create_sized_stack_slot(StackSlotData::new(
         StackSlotKind::ExplicitSlot,
         total_size as u32,
-        align as u8,
+        align_to_shift(align),
     ));
 
     // Get pointer type for the target
@@ -1096,7 +1153,7 @@ fn compile_call_arg(
                 let slot = builder.create_sized_stack_slot(StackSlotData::new(
                     StackSlotKind::ExplicitSlot,
                     size as u32,
-                    align as u8,
+                    align_to_shift(align),
                 ));
                 let addr = builder.ins().stack_addr(ptr_type, slot, 0);
                 copy_aggregate_value(ctx, ty, addr, val, builder);
@@ -1151,7 +1208,7 @@ fn compile_call_arg(
                     let slot = builder.create_sized_stack_slot(StackSlotData::new(
                         StackSlotKind::ExplicitSlot,
                         size as u32,
-                        align as u8,
+                        align_to_shift(align),
                     ));
                     let addr = builder.ins().stack_addr(ptr_type, slot, 0);
                     builder.ins().store(MemFlags::new(), val, addr, 0);
@@ -1326,7 +1383,7 @@ fn compile_enum_variant(
     let slot = builder.create_sized_stack_slot(StackSlotData::new(
         StackSlotKind::ExplicitSlot,
         enum_layout.size as u32,
-        enum_layout.align as u8,
+        align_to_shift(enum_layout.align),
     ));
 
     // Get pointer type for the target
@@ -1524,7 +1581,7 @@ fn compile_ref(
                 let slot = builder.create_sized_stack_slot(StackSlotData::new(
                     StackSlotKind::ExplicitSlot,
                     layout.size as u32,
-                    layout.align as u8,
+                    align_to_shift(layout.align),
                 ));
                 let addr = builder.ins().stack_addr(ptr_type, slot, 0);
                 builder.ins().store(MemFlags::new(), value, addr, 0);
@@ -1961,7 +2018,7 @@ fn wrap_extern_return_value(
     let slot = builder.create_sized_stack_slot(StackSlotData::new(
         StackSlotKind::ExplicitSlot,
         size as u32,
-        align as u8,
+        align_to_shift(align),
     ));
     let struct_ptr = builder.ins().stack_addr(ptr_type, slot, 0);
 
@@ -2133,12 +2190,19 @@ fn compile_immediate(
 
             let self_type = match func_lookup {
                 Some((_, def)) if func_uses_self(ctx.mir, def) => {
-                    let st = subst.get_self_type().ok_or_else(|| {
-                        CodegenError::Unsupported(format!(
-                            "function reference requires Self type: {}",
-                            ctx.mir.name(*name)
-                        ))
-                    })?;
+                    // First try to get self_type from substitution
+                    let st = match subst.get_self_type() {
+                        Some(st) => st,
+                        None => {
+                            // Try to infer self_type from the method's containing type
+                            infer_self_type_from_method_name(ctx, *name).ok_or_else(|| {
+                                CodegenError::Unsupported(format!(
+                                    "function reference requires Self type: {}",
+                                    ctx.mir.name(*name)
+                                ))
+                            })?
+                        },
+                    };
                     if !type_is_concrete(ctx.mir, st) {
                         return Err(CodegenError::Unsupported(format!(
                             "unresolved Self type for function reference: {}",
@@ -2172,7 +2236,7 @@ fn compile_immediate(
             let thick_slot = builder.create_sized_stack_slot(StackSlotData::new(
                 StackSlotKind::ExplicitSlot,
                 (ptr_size * 2) as u32,
-                ptr_size as u8,
+                align_to_shift(ptr_size),
             ));
             let thick_ptr = builder.ins().stack_addr(ptr_type, thick_slot, 0);
 
@@ -2182,7 +2246,7 @@ fn compile_immediate(
             let null_env = builder.ins().iconst(ptr_type, 0);
             builder
                 .ins()
-                .store(MemFlags::new(), null_env, thick_ptr, ptr_size);
+                .store(MemFlags::new(), null_env, thick_ptr, ptr_size as i32);
 
             Ok(thick_ptr)
         },
@@ -2243,7 +2307,7 @@ fn compile_immediate(
             let thick_slot = builder.create_sized_stack_slot(StackSlotData::new(
                 StackSlotKind::ExplicitSlot,
                 (ptr_size * 2) as u32,
-                ptr_size as u8,
+                align_to_shift(ptr_size),
             ));
             let thick_ptr = builder.ins().stack_addr(ptr_type, thick_slot, 0);
 
@@ -2253,7 +2317,7 @@ fn compile_immediate(
             let null_env = builder.ins().iconst(ptr_type, 0);
             builder
                 .ins()
-                .store(MemFlags::new(), null_env, thick_ptr, ptr_size);
+                .store(MemFlags::new(), null_env, thick_ptr, ptr_size as i32);
 
             Ok(thick_ptr)
         },
@@ -2294,7 +2358,7 @@ fn compile_string_literal(
     let slot = builder.create_sized_stack_slot(StackSlotData::new(
         StackSlotKind::ExplicitSlot,
         (ptr_size * 2) as u32,
-        ptr_size as u8,
+        align_to_shift(ptr_size),
     ));
     let struct_ptr = builder.ins().stack_addr(ptr_type, slot, 0);
 
@@ -2303,7 +2367,7 @@ fn compile_string_literal(
     // Store len at offset ptr_size
     builder
         .ins()
-        .store(MemFlags::new(), str_len, struct_ptr, ptr_size);
+        .store(MemFlags::new(), str_len, struct_ptr, ptr_size as i32);
 
     Ok(struct_ptr)
 }
@@ -2562,12 +2626,20 @@ pub fn compile_call(
 
             let self_type = match callee_lookup {
                 Some((_, def)) if func_uses_self(ctx.mir, def) => {
-                    let st = subst.get_self_type().ok_or_else(|| {
-                        CodegenError::Unsupported(format!(
-                            "direct call requires Self type: {}",
-                            ctx.mir.name(*name)
-                        ))
-                    })?;
+                    // First try to get self_type from substitution
+                    let st = match subst.get_self_type() {
+                        Some(st) => st,
+                        None => {
+                            // Try to infer self_type from the method's containing type
+                            // e.g., Test.Widget.create -> Self = Test.Widget
+                            infer_self_type_from_method_name(ctx, *name).ok_or_else(|| {
+                                CodegenError::Unsupported(format!(
+                                    "direct call requires Self type: {}",
+                                    ctx.mir.name(*name)
+                                ))
+                            })?
+                        },
+                    };
                     if !type_is_concrete(ctx.mir, st) {
                         return Err(CodegenError::Unsupported(format!(
                             "unresolved Self type for direct call: {}",
@@ -2616,7 +2688,7 @@ pub fn compile_call(
                     let slot = builder.create_sized_stack_slot(StackSlotData::new(
                         StackSlotKind::ExplicitSlot,
                         size as u32,
-                        align as u8,
+                        align_to_shift(align),
                     ));
                     ret_ptr = Some(builder.ins().stack_addr(ptr_type, slot, 0));
                 }
@@ -2709,8 +2781,11 @@ pub fn compile_call(
             for_type,
             method_type_args,
         } => {
-            // If for_type uses SelfType, we need to resolve it from the substitution first
-            let concrete_for_type = if type_uses_self(ctx.mir, *for_type) {
+            // First apply substitution to for_type
+            let substituted_for_type = subst.apply_ty_readonly(ctx.mir, *for_type).unwrap_or(*for_type);
+
+            // If substituted type uses SelfType, we need to resolve it further
+            let concrete_for_type = if type_uses_self(ctx.mir, substituted_for_type) {
                 // Get the self type from the substitution
                 let self_ty = subst.get_self_type().ok_or_else(|| {
                     CodegenError::Unsupported(format!(
@@ -2724,22 +2799,16 @@ pub fn compile_call(
                         ctx.mir.ty(self_ty)
                     )));
                 }
-                // Now apply substitution with self type resolved
-                subst
-                    .apply_ty_readonly(ctx.mir, *for_type)
-                    .unwrap_or(self_ty)
+                self_ty
             } else {
-                // No self type involved, just apply substitution
-                let applied = subst
-                    .apply_ty_readonly(ctx.mir, *for_type)
-                    .unwrap_or(*for_type);
-                if !type_is_concrete(ctx.mir, applied) {
+                // Substitution already applied, check if concrete
+                if !type_is_concrete(ctx.mir, substituted_for_type) {
                     return Err(CodegenError::Unsupported(format!(
                         "unresolved type for witness call: {:?}",
-                        ctx.mir.ty(applied)
+                        ctx.mir.ty(substituted_for_type)
                     )));
                 }
-                applied
+                substituted_for_type
             };
 
             // Apply substitution to method_type_args (the method's own type parameters)
@@ -2811,7 +2880,7 @@ pub fn compile_call(
                     let slot = builder.create_sized_stack_slot(StackSlotData::new(
                         StackSlotKind::ExplicitSlot,
                         size as u32,
-                        align as u8,
+                        align_to_shift(align),
                     ));
                     ret_ptr = Some(builder.ins().stack_addr(ptr_type, slot, 0));
                 }
@@ -3032,7 +3101,7 @@ fn compile_str_from_parts(
     let slot = builder.create_sized_stack_slot(StackSlotData::new(
         StackSlotKind::ExplicitSlot,
         (ptr_size * 2) as u32,
-        ptr_size as u8,
+        align_to_shift(ptr_size as usize),
     ));
     let struct_ptr = builder.ins().stack_addr(ptr_type, slot, 0);
 
@@ -3386,7 +3455,7 @@ fn compile_apply_partial(
         let slot = builder.create_sized_stack_slot(StackSlotData::new(
             StackSlotKind::ExplicitSlot,
             alloc_size as u32,
-            alloc_align as u8,
+            align_to_shift(alloc_align),
         ));
         let env_ptr = builder.ins().stack_addr(ptr_type, slot, 0);
 
@@ -3466,7 +3535,7 @@ fn compile_apply_partial(
     let thick_slot = builder.create_sized_stack_slot(StackSlotData::new(
         StackSlotKind::ExplicitSlot,
         (ptr_size * 2) as u32,
-        ptr_size as u8,
+        align_to_shift(ptr_size),
     ));
     let thick_ptr = builder.ins().stack_addr(ptr_type, thick_slot, 0);
 
@@ -3475,7 +3544,7 @@ fn compile_apply_partial(
     // Store env_ptr at offset ptr_size
     builder
         .ins()
-        .store(MemFlags::new(), env_ptr, thick_ptr, ptr_size);
+        .store(MemFlags::new(), env_ptr, thick_ptr, ptr_size as i32);
 
     Ok(thick_ptr)
 }
@@ -3569,7 +3638,7 @@ fn compile_func_to_escaping(
     let thick_slot = builder.create_sized_stack_slot(StackSlotData::new(
         StackSlotKind::ExplicitSlot,
         (ptr_size * 2) as u32,
-        ptr_size as u8,
+        align_to_shift(ptr_size),
     ));
     let thick_ptr = builder.ins().stack_addr(ptr_type, thick_slot, 0);
 
@@ -3578,7 +3647,7 @@ fn compile_func_to_escaping(
     // Store env_ptr at offset ptr_size
     builder
         .ins()
-        .store(MemFlags::new(), env_ptr, thick_ptr, ptr_size);
+        .store(MemFlags::new(), env_ptr, thick_ptr, ptr_size as i32);
 
     Ok(thick_ptr)
 }
@@ -3638,7 +3707,7 @@ fn compile_thin_call(
         let slot = builder.create_sized_stack_slot(StackSlotData::new(
             StackSlotKind::ExplicitSlot,
             size as u32,
-            align as u8,
+            align_to_shift(align),
         ));
         ret_ptr = Some(builder.ins().stack_addr(ptr_type, slot, 0));
     }
@@ -3758,7 +3827,7 @@ fn compile_thick_call(
                 let slot = builder.create_sized_stack_slot(StackSlotData::new(
                     StackSlotKind::ExplicitSlot,
                     size as u32,
-                    align as u8,
+                    align_to_shift(align),
                 ));
                 ret_ptr = Some(builder.ins().stack_addr(ptr_type, slot, 0));
             }
@@ -3862,7 +3931,7 @@ fn compile_thick_call(
                 let slot = builder.create_sized_stack_slot(StackSlotData::new(
                     StackSlotKind::ExplicitSlot,
                     size as u32,
-                    align as u8,
+                    align_to_shift(align),
                 ));
                 ret_ptr = Some(builder.ins().stack_addr(ptr_type, slot, 0));
             }
@@ -3956,7 +4025,7 @@ fn copy_string_return_value(
     let slot = builder.create_sized_stack_slot(StackSlotData::new(
         StackSlotKind::ExplicitSlot,
         (ptr_size * 2) as u32,
-        ptr_size as u8,
+        align_to_shift(ptr_size),
     ));
     let dest_ptr = builder.ins().stack_addr(ptr_type, slot, 0);
 
@@ -3967,10 +4036,10 @@ fn copy_string_return_value(
     // Copy the len field (offset ptr_size)
     let str_len = builder
         .ins()
-        .load(ptr_type, MemFlags::new(), src_ptr, ptr_size);
+        .load(ptr_type, MemFlags::new(), src_ptr, ptr_size as i32);
     builder
         .ins()
-        .store(MemFlags::new(), str_len, dest_ptr, ptr_size);
+        .store(MemFlags::new(), str_len, dest_ptr, ptr_size as i32);
 
     dest_ptr
 }

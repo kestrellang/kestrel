@@ -3,6 +3,7 @@
 use crate::context::CodegenContext;
 use crate::error::CodegenError;
 use crate::monomorphize::Substitution;
+use crate::rvalue::align_to_shift;
 use crate::types::translate_type_with_subst;
 
 use kestrel_execution_graph::{
@@ -214,7 +215,7 @@ fn compile_blocks(
                 let slot = builder.create_sized_stack_slot(StackSlotData::new(
                     StackSlotKind::ExplicitSlot,
                     size as u32,
-                    align as u8,
+                    align_to_shift(align),
                 ));
                 let addr = builder.ins().stack_addr(ptr_type, slot, 0);
                 builder
@@ -253,7 +254,7 @@ fn compile_blocks(
             let slot = builder.create_sized_stack_slot(StackSlotData::new(
                 StackSlotKind::ExplicitSlot,
                 size as u32,
-                align as u8,
+                align_to_shift(align),
             ));
             let addr = builder.ins().stack_addr(ptr_type, slot, 0);
 

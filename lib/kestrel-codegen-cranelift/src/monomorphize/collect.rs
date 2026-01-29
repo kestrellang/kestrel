@@ -468,13 +468,18 @@ impl<'a> CollectionContext<'a> {
                     }) || self.type_needs_self(self.mir.ty(callee_def.ret));
 
                     let inst = if callee_needs_self {
-                        if let Some(st) = subst.get_self_type() {
-                            FunctionInstantiation::with_self_type(func_id, concrete_args, st)
+                        let st = if let Some(st) = subst.get_self_type() {
+                            st
+                        } else if let Some(st) = self.infer_self_type_from_method_name(*name) {
+                            // Try to infer Self from the method's containing type
+                            // e.g., Test.Widget.create -> Self = Test.Widget
+                            st
                         } else {
-                            // Callee needs Self but caller doesn't have it - skip for now,
+                            // Callee needs Self but we can't infer it - skip for now,
                             // will be processed later when called with concrete type
                             return;
-                        }
+                        };
+                        FunctionInstantiation::with_self_type(func_id, concrete_args, st)
                     } else {
                         FunctionInstantiation::new(func_id, concrete_args)
                     };
@@ -872,6 +877,47 @@ impl<'a> CollectionContext<'a> {
             },
             _ => false,
         }
+    }
+
+    /// Try to infer the Self type from a method's qualified name.
+    ///
+    /// For a function like `Test.Widget.create`, this returns the type `Test.Widget`
+    /// by looking up the parent name in structs and enums.
+    fn infer_self_type_from_method_name(
+        &self,
+        func_name: Id<QualifiedName>,
+    ) -> Option<Id<kestrel_execution_graph::Ty>> {
+        let name_data = self.mir.name(func_name);
+        let parent = name_data.parent()?;
+
+        // Try to find a struct with this name
+        for (_, struct_def) in self.mir.structs.iter() {
+            if self.mir.name(struct_def.name) == &parent {
+                // Only works for non-generic types
+                if struct_def.type_params.is_empty() {
+                    let mir_ty = MirTy::Named {
+                        name: struct_def.name,
+                        type_args: vec![],
+                    };
+                    return self.mir.lookup_type(&mir_ty);
+                }
+            }
+        }
+
+        // Try to find an enum with this name
+        for (_, enum_def) in self.mir.enums.iter() {
+            if self.mir.name(enum_def.name) == &parent {
+                if enum_def.type_params.is_empty() {
+                    let mir_ty = MirTy::Named {
+                        name: enum_def.name,
+                        type_args: vec![],
+                    };
+                    return self.mir.lookup_type(&mir_ty);
+                }
+            }
+        }
+
+        None
     }
 
     /// Check if a type directly uses SelfType (not just any Named type)
