@@ -618,7 +618,7 @@ See [docs/memory-model/implementation-plan.md](docs/memory-model/implementation-
 - [ ] Irrefutable patterns in function parameters
 - [ ] Irrefutable patterns in let/var
 - [ ] Refactor Matchable for range patterns and array patterns
-- [ ] Let/var static variable consistency
+- [x] Let/var static variable consistency
 
 ## Phase 15 Compiler Infrastructure
 

@@ -337,15 +337,31 @@ pub fn resolve_call(
     let callee_ty = callee.ty.clone();
 
     match callee_kind {
-        // Direct function reference
-        ExprKind::SymbolRef(symbol_id) => resolve_single_function_call(
-            symbol_id,
-            callee,
-            arguments,
-            explicit_type_args,
-            span,
-            ctx,
-        ),
+        // Direct function/field reference
+        ExprKind::SymbolRef(symbol_id) => {
+            // Check if this is a field symbol - if so, and the field's type has subscripts,
+            // try subscript resolution first. This handles cases like Foo.staticField(arg)
+            // where staticField is a computed property returning a type with subscripts.
+            if let Some(symbol) = ctx.model.query(SymbolFor { id: symbol_id })
+                && symbol.metadata().kind() == KestrelSymbolKind::Field
+            {
+                // Try subscript call on the field's type
+                if let Some(subscript_expr) =
+                    try_resolve_subscript_call(&callee, &arguments, arg_labels, &span, ctx)
+                {
+                    return subscript_expr;
+                }
+            }
+            // Not a field, or field type has no subscripts - try function call
+            resolve_single_function_call(
+                symbol_id,
+                callee,
+                arguments,
+                explicit_type_args,
+                span,
+                ctx,
+            )
+        },
 
         // Overloaded function reference - need to pick one
         ExprKind::OverloadedRef(ref candidates) => {
@@ -373,6 +389,21 @@ pub fn resolve_call(
             ref object,
             ref field,
         } => {
+            // For static field access (object is TypeRef), the callee expression represents
+            // the field's value. If that value type has subscripts, use subscript resolution.
+            // Otherwise, fall through to method call resolution.
+            //
+            // Example: Foo.myStyle("test") where myStyle is a static computed property
+            // returning Style, and Style has subscripts - we want to call the subscript
+            // on the Style value, not look for a method named "myStyle" on Foo.
+            if matches!(object.kind, ExprKind::TypeRef(_)) {
+                // Check if the callee's type (the field's type) has subscripts
+                if let Some(subscript_expr) =
+                    try_resolve_subscript_call(&callee, &arguments, arg_labels, &span, ctx)
+                {
+                    return subscript_expr;
+                }
+            }
             // This could be:
             // 1. A field with callable type (first-class function)
             // 2. A method call
