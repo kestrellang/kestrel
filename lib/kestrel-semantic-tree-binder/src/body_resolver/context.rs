@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use kestrel_reporting::DiagnosticContext;
+use kestrel_reporting::{DiagnosticContext, IntoDiagnostic};
 use kestrel_semantic_model::{SemanticModel, SymbolFor};
 use kestrel_semantic_tree::behavior::executable::{CodeBlock, ExecutableBehavior};
 use kestrel_semantic_tree::behavior::generics::GenericsBehavior;
@@ -18,6 +18,7 @@ use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::{Symbol, SymbolId};
 
+use crate::diagnostics::CapturingClosureEscapeError;
 use crate::resolution::LocalScope;
 use kestrel_syntax_tree::utils::get_node_span;
 
@@ -575,6 +576,25 @@ pub(crate) fn resolve_body_and_attach_executable(
     ctx: &mut BodyResolutionContext,
 ) {
     let code_block = resolve_function_body(body_syntax, ctx);
+
+    // Check for escaping capturing closure in tail expression (implicit return)
+    // TODO: Remove this restriction once heap allocation for closure environments is implemented.
+    if let Some(ref tail) = code_block.yield_expr {
+        use kestrel_semantic_tree::expr::ExprKind;
+        if let ExprKind::Closure { captures, .. } = &tail.kind {
+            if !captures.is_empty() {
+                let captured_names: Vec<String> =
+                    captures.iter().map(|c| c.name.clone()).collect();
+                let error = CapturingClosureEscapeError {
+                    closure_span: tail.span.clone(),
+                    return_span: tail.span.clone(), // Use closure span as return span for implicit returns
+                    captured_names,
+                };
+                ctx.diagnostics.add_diagnostic(error.into_diagnostic());
+            }
+        }
+    }
+
     let executable = ExecutableBehavior::new(code_block);
     function_symbol.metadata().add_behavior(executable);
 }

@@ -95,7 +95,18 @@ pub fn compile_terminator(
                         local_map,
                         stack_locals,
                     )?;
-                    builder.ins().return_(&[val]);
+
+                    // For main(), if the return type is an aggregate (Named type), the value
+                    // we get is a pointer to the struct. We need to load the actual i64 value
+                    // since main's C ABI signature returns i64.
+                    if is_main && matches!(ret_ty, MirTy::Named { .. }) {
+                        // Load the first i64 from the struct pointer.
+                        // This handles wrapper types like std.num.Int64 which wrap a primitive.
+                        let loaded = builder.ins().load(cl_types::I64, MemFlags::new(), val, 0);
+                        builder.ins().return_(&[loaded]);
+                    } else {
+                        builder.ins().return_(&[val]);
+                    }
                 }
             }
         },

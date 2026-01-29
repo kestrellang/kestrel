@@ -15,10 +15,10 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use crate::diagnostics::{
     AsciiEscapeOutOfRangeError, BreakOutsideLoopError, CannotAssignThroughImmutableBindingError,
     CannotAssignToImmutableFieldError, CannotAssignToLetError, CannotAssignToTemporaryError,
-    ContinueOutsideLoopError, EmptyCharacterLiteralError, IncompleteEscapeSequenceError,
-    InvalidEscapeSequenceError, InvalidUnicodeEscapeError, MultipleCodepointsInCharLiteralError,
-    TupleIndexOnNonTupleError, TupleIndexOutOfBoundsError, UndeclaredLabelError,
-    UnicodeEscapeErrorReason,
+    CapturingClosureEscapeError, ContinueOutsideLoopError, EmptyCharacterLiteralError,
+    IncompleteEscapeSequenceError, InvalidEscapeSequenceError, InvalidUnicodeEscapeError,
+    MultipleCodepointsInCharLiteralError, TupleIndexOnNonTupleError, TupleIndexOutOfBoundsError,
+    UndeclaredLabelError, UnicodeEscapeErrorReason,
 };
 use kestrel_syntax_tree::utils::get_node_span;
 
@@ -1578,6 +1578,12 @@ fn resolve_return_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext)
             validate_not_standalone_type_param(expr, ctx)
         });
 
+    // Check for escaping capturing closure
+    // TODO: Remove this restriction once heap allocation for closure environments is implemented.
+    if let Some(ref value_expr) = value {
+        check_capturing_closure_escape(value_expr, &span, ctx);
+    }
+
     Expression::return_expr(value, span)
 }
 
@@ -2294,6 +2300,12 @@ fn resolve_closure_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext
     // Resolve the closure body (statements and trailing expression)
     let (body, tail_expr) = resolve_closure_body(node, ctx);
 
+    // Check for escaping capturing closure in closure's tail expression
+    // TODO: Remove this restriction once heap allocation for closure environments is implemented.
+    if let Some(ref tail) = tail_expr {
+        check_capturing_closure_escape(tail, &span, ctx);
+    }
+
     // Check if `it` was actually referenced in the body (if we injected it)
     let it_was_used = if has_it {
         check_it_referenced_in_closure(&body, tail_expr.as_ref(), ctx)
@@ -2591,6 +2603,34 @@ fn collect_captures(
     }
 
     captures
+}
+
+/// Check if an expression is a capturing closure and report an error if so.
+///
+/// This is a temporary restriction until heap allocation for closure environments
+/// is implemented. When a closure captures variables, its environment is allocated
+/// on the stack, which becomes invalid when the function returns.
+///
+/// TODO: Remove this restriction once heap allocation for closure environments
+/// is implemented.
+fn check_capturing_closure_escape(
+    expr: &Expression,
+    return_span: &Span,
+    ctx: &mut BodyResolutionContext,
+) {
+    use kestrel_semantic_tree::expr::ExprKind;
+
+    if let ExprKind::Closure { captures, .. } = &expr.kind {
+        if !captures.is_empty() {
+            let captured_names: Vec<String> = captures.iter().map(|c| c.name.clone()).collect();
+            let error = CapturingClosureEscapeError {
+                closure_span: expr.span.clone(),
+                return_span: return_span.clone(),
+                captured_names,
+            };
+            ctx.diagnostics.add_diagnostic(error.into_diagnostic());
+        }
+    }
 }
 
 /// Walk a statement to find LocalRef expressions.
