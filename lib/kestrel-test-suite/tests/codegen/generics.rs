@@ -466,3 +466,129 @@ func main() -> lang.i64 {
     .expect(Compiles)
     .expect(Runs);
 }
+
+// =============================================================================
+// Generic Type Parameter Property/Method Access via Witness Tables
+// =============================================================================
+
+#[test]
+fn test_static_function_via_type_parameter() {
+    Test::new(
+        r#"module Test
+
+protocol Factory {
+    static func create() -> Self
+}
+
+struct Widget: Factory {
+    let value: std.num.Int64
+    static func create() -> Self {
+        Widget(value: 42)
+    }
+}
+
+func make[T]() -> T where T: Factory {
+    T.create()
+}
+
+func main() -> std.num.Int64 {
+    let w: Widget = make[Widget]();
+    if w.value != 42 { return 1 }
+    0
+}
+"#,
+    )
+    .with_stdlib()
+    .expect(Compiles)
+    .expect(Runs);
+}
+
+#[test]
+fn test_static_property_via_type_parameter() {
+    Test::new(
+        r#"module Test
+
+protocol HasDefault {
+    static var defaultValue: std.num.Int64 { get }
+}
+
+struct Config: HasDefault {
+    static var defaultValue: std.num.Int64 { 100 }
+}
+
+func getDefault[T]() -> std.num.Int64 where T: HasDefault {
+    T.defaultValue
+}
+
+func main() -> std.num.Int64 {
+    if getDefault[Config]() != 100 { return 1 }
+    0
+}
+"#,
+    )
+    .with_stdlib()
+    .expect(Compiles)
+    .expect(Runs);
+}
+
+#[test]
+fn test_instance_property_via_type_parameter() {
+    Test::new(
+        r#"module Test
+
+protocol HasValue {
+    var value: std.num.Int64 { get }
+}
+
+struct Box: HasValue {
+    var value: std.num.Int64 { get { 42 } }
+}
+
+func getValue[T](item: T) -> std.num.Int64 where T: HasValue {
+    item.value
+}
+
+func main() -> std.num.Int64 {
+    let b = Box();
+    if getValue[Box](b) != 42 { return 1 }
+    0
+}
+"#,
+    )
+    .with_stdlib()
+    .expect(Compiles)
+    .expect(Runs);
+}
+
+#[test]
+fn test_static_mutable_property_via_type_parameter() {
+    Test::new(
+        r#"module Test
+
+protocol Counter {
+    static var count: std.num.Int64 { get set }
+}
+
+struct MyCounter: Counter {
+    static var _count: std.num.Int64 = 0
+    static var count: std.num.Int64 {
+        get { MyCounter._count }
+        set { MyCounter._count = newValue }
+    }
+}
+
+func increment[T]() where T: Counter {
+    T.count = T.count + 1
+}
+
+func main() -> std.num.Int64 {
+    increment[MyCounter]();
+    if MyCounter.count != 1 { return 1 }
+    0
+}
+"#,
+    )
+    .with_stdlib()
+    .expect(Compiles)
+    .expect(Runs);
+}

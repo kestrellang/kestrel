@@ -332,6 +332,22 @@ pub fn resolve_path_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContex
                 }
             }
 
+            // Check if this is a field - fields need special handling for mutability
+            if let Some(symbol) = ctx.model.query(SymbolFor { id: symbol_id })
+                && symbol.metadata().kind() == KestrelSymbolKind::Field
+            {
+                use kestrel_semantic_tree::symbol::field::FieldSymbol;
+
+                let is_mutable = symbol
+                    .as_ref()
+                    .downcast_ref::<FieldSymbol>()
+                    .map(|f| f.is_mutable())
+                    .unwrap_or(false);
+
+                // For module-level fields, create a SymbolRef with proper mutability
+                return Expression::symbol_ref(symbol_id, ty, is_mutable, span);
+            }
+
             // Original handling for non-static-method cases
             // Check if type arguments were provided
             let final_ty = if let Some(ref type_args) = explicit_type_args {
@@ -437,26 +453,26 @@ pub fn resolve_path_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContex
                     if let Some(parent) = symbol.metadata().parent() {
                         use super::utils::create_struct_type_with_type_args;
                         use kestrel_semantic_tree::behavior::typed::TypedBehavior;
+                        use kestrel_semantic_tree::symbol::enum_symbol::EnumSymbol;
 
                         let parent_id = parent.metadata().id();
-                        let parent_ty = parent
-                            .clone()
-                            .downcast_arc::<StructSymbol>()
-                            .ok()
-                            .map(|struct_sym| {
-                                create_struct_type_with_type_args(
-                                    &(struct_sym
-                                        as std::sync::Arc<
-                                            dyn Symbol<
-                                                kestrel_semantic_tree::language::KestrelLanguage,
-                                            >,
-                                        >),
-                                    &[],
-                                    span.clone(),
-                                    ctx,
-                                )
-                            })
-                            .unwrap_or_else(|| Ty::infer(span.clone()));
+
+                        // Try to create parent type - handle both struct and enum
+                        let parent_ty = if let Ok(struct_sym) = parent.clone().downcast_arc::<StructSymbol>() {
+                            // Parent is a struct
+                            create_struct_type_with_type_args(
+                                &(struct_sym as std::sync::Arc<dyn Symbol<kestrel_semantic_tree::language::KestrelLanguage>>),
+                                &[],
+                                span.clone(),
+                                ctx,
+                            )
+                        } else if let Ok(enum_sym) = parent.clone().downcast_arc::<EnumSymbol>() {
+                            // Parent is an enum
+                            Ty::r#enum(enum_sym, span.clone())
+                        } else {
+                            // Unknown parent type - fallback to inference
+                            Ty::infer(span.clone())
+                        };
 
                         // Create TypeRef for the parent type
                         let type_ref = Expression::type_ref(parent_id, parent_ty, span.clone());
@@ -469,9 +485,17 @@ pub fn resolve_path_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContex
                             .unwrap_or_else(|| Ty::error(span.clone()));
 
                         let field_name = symbol.metadata().name().value.clone();
+
+                        // Get field mutability from FieldSymbol
+                        let field_mutable = symbol
+                            .as_ref()
+                            .downcast_ref::<FieldSymbol>()
+                            .map(|f| f.is_mutable())
+                            .unwrap_or(false);
+
                         return Expression::field_access(
                             type_ref, field_name,
-                            false, // static fields are not mutable through this access
+                            field_mutable, // use actual mutability of the field
                             field_ty, span,
                         );
                     }

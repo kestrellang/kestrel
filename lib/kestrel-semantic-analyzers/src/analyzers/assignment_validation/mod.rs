@@ -98,6 +98,44 @@ fn validate_assignment_target(
                 ));
             }
         },
+        // SymbolRef can be a valid assignment target for module-level/static fields
+        ExprKind::SymbolRef(symbol_id) => {
+            use kestrel_semantic_model::SymbolFor;
+            use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
+
+            // Check if this is a field symbol
+            let is_field = ctx
+                .model
+                .query(SymbolFor { id: *symbol_id })
+                .map(|s| s.metadata().kind() == KestrelSymbolKind::Field)
+                .unwrap_or(false);
+
+            if is_field {
+                // It's a field - check mutability using the expression's mutable flag
+                if !target.is_mutable() {
+                    // Get field name for error message
+                    let field_name = ctx
+                        .model
+                        .query(SymbolFor { id: *symbol_id })
+                        .map(|s| s.metadata().name().value.clone())
+                        .unwrap_or_else(|| "<unknown>".to_string());
+
+                    out.push(AssignmentError::ImmutableField(
+                        CannotAssignToImmutableFieldError {
+                            span: target.span.clone(),
+                            field_name,
+                        },
+                    ));
+                }
+            } else {
+                // Not a field - invalid target
+                out.push(AssignmentError::InvalidTarget(
+                    CannotAssignToExpressionError {
+                        span: target.span.clone(),
+                    },
+                ));
+            }
+        },
         // Invalid targets
         ExprKind::Literal(_)
         | ExprKind::Array(_)
@@ -112,7 +150,6 @@ fn validate_assignment_target(
         | ExprKind::ImplicitStructInit { .. }
         | ExprKind::DelegatingInit { .. }
         | ExprKind::MethodRef { .. }
-        | ExprKind::SymbolRef(_)
         | ExprKind::OverloadedRef(_)
         | ExprKind::TypeRef(_)
         | ExprKind::TypeParameterRef(_)

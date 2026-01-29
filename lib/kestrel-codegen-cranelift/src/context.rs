@@ -84,12 +84,52 @@ impl<'a> CodegenContext<'a> {
 
     /// Compile all functions in the MIR context.
     pub fn compile_all(&mut self) -> Result<(), CodegenError> {
-        // First pass: declare all functions (including runtime helpers)
+        // First pass: declare and define all static variables
+        self.define_all_statics()?;
+
+        // Second pass: declare all functions (including runtime helpers)
         self.declare_all_functions()?;
         self.declare_runtime_helpers()?;
 
-        // Second pass: define all functions
+        // Third pass: define all functions
         self.define_all_functions()?;
+
+        Ok(())
+    }
+
+    /// Define all static variables in the module.
+    ///
+    /// This creates global data entries for each static variable in the MIR.
+    fn define_all_statics(&mut self) -> Result<(), CodegenError> {
+        use crate::types::translate_type_with_subst;
+        use crate::monomorphize::Substitution;
+
+        // Collect statics to avoid borrow issues
+        let statics: Vec<_> = self.mir.statics.iter().map(|(id, def)| (id, def.name, def.ty)).collect();
+
+        for (_static_id, name_id, ty) in statics {
+            let name = self.mir.name(name_id);
+            let mangled_name = format!("{}", name);
+
+            // Compute the size of the static variable
+            let empty_subst = Substitution::new();
+            let cl_type = translate_type_with_subst(self.mir, ty, self.target, &empty_subst);
+            let size = cl_type.bytes() as usize;
+
+            // Create zeroed data for the static
+            let mut desc = DataDescription::new();
+            desc.define_zeroinit(size);
+
+            // Declare and define the data
+            let data_id = self
+                .module
+                .declare_data(&mangled_name, Linkage::Export, true, false)
+                .map_err(|e| CodegenError::DataSection(format!("failed to declare static '{}': {}", mangled_name, e)))?;
+
+            self.module
+                .define_data(data_id, &desc)
+                .map_err(|e| CodegenError::DataSection(format!("failed to define static '{}': {}", mangled_name, e)))?;
+        }
 
         Ok(())
     }

@@ -415,12 +415,53 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
                             lower_function_ref_as_value(ctx, &sym, &expr.ty, &expr.span)
                         },
                         KestrelSymbolKind::Field => {
-                            // Global variable access - not yet supported
-                            ctx.emit_error(LoweringError::unsupported_expr(
-                                "global variable access",
-                                expr.span.clone(),
-                            ));
-                            Value::Immediate(Immediate::error())
+                            // Global/module-level field or static field accessed by name
+                            // (e.g., `globalLet` at module scope or `_s` in a static context)
+                            //
+                            // This is similar to static field access via TypeRef, but the
+                            // field is accessed directly by name rather than through a type.
+
+                            // Check if this is a computed property
+                            let is_computed = sym
+                                .as_ref()
+                                .downcast_ref::<FieldSymbol>()
+                                .map(|f| f.is_computed())
+                                .unwrap_or(false);
+
+                            if is_computed {
+                                // Computed property - need to call the getter
+                                // Look up the getter symbol
+                                let getter_id = sym
+                                    .as_ref()
+                                    .downcast_ref::<FieldSymbol>()
+                                    .and_then(|f| f.getter());
+
+                                if let Some(getter_id) = getter_id {
+                                    // Generate a call to the getter with no receiver
+                                    // (static computed property)
+                                    return lower_static_getter_call(ctx, getter_id, expr);
+                                } else {
+                                    ctx.emit_error(LoweringError::internal(
+                                        "computed property has no getter",
+                                        Some(expr.span.clone()),
+                                    ));
+                                    return Value::Immediate(Immediate::error());
+                                }
+                            }
+
+                            // Stored field - create a global place reference
+                            // Build the qualified name for the field
+                            let name_id = qualified_name_for_symbol(ctx, &sym);
+
+                            // Register the static in MIR if not already registered
+                            let static_exists =
+                                ctx.mir.statics.iter().any(|(_, def)| def.name == name_id);
+                            if !static_exists {
+                                let mir_ty = lower_type(ctx, &expr.ty);
+                                ctx.mir.add_static(name_id, mir_ty);
+                            }
+
+                            Value::Place(Place::global(name_id))
                         },
                         _ => {
                             ctx.emit_error(LoweringError::unsupported_expr(
@@ -454,7 +495,7 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
                         return lower_getter_call(ctx, object, field_id, field, expr);
                     } else {
                         // Static stored field - create a global place reference
-                        // Get the field symbol to build the qualified name
+                        // Get the field symbol to build the qualified name and type
                         let field_symbol = match ctx.model.query(SymbolFor { id: field_id }) {
                             Some(sym) => sym,
                             None => {
@@ -468,6 +509,17 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
 
                         // Build the qualified name for the static field
                         let name_id = qualified_name_for_symbol(ctx, &field_symbol);
+
+                        // Register the static in MIR if not already registered
+                        // Check if this static already exists
+                        let static_exists = ctx.mir.statics.iter().any(|(_, def)| def.name == name_id);
+                        if !static_exists {
+                            // Get the field type and lower it
+                            let field_ty = &expr.ty;
+                            let mir_ty = lower_type(ctx, field_ty);
+                            ctx.mir.add_static(name_id, mir_ty);
+                        }
+
                         return Value::Place(Place::global(name_id));
                     }
                 } else {
@@ -536,6 +588,39 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
                 {
                     // Computed property assignment - generate a setter call
                     return lower_setter_call(ctx, object, field_id, field_name, value, expr);
+                }
+            }
+
+            // Check if target is a SymbolRef pointing to a computed field (module-level computed property)
+            if let ExprKind::SymbolRef(symbol_id) = &target.kind {
+                if let Some(symbol) = ctx.model.query(SymbolFor { id: *symbol_id }) {
+                    if symbol.metadata().kind() == KestrelSymbolKind::Field {
+                        // Check if it's a computed property
+                        let is_computed = symbol
+                            .as_ref()
+                            .downcast_ref::<FieldSymbol>()
+                            .map(|f| f.is_computed())
+                            .unwrap_or(false);
+
+                        if is_computed {
+                            // Get the setter ID
+                            let setter_id = symbol
+                                .as_ref()
+                                .downcast_ref::<FieldSymbol>()
+                                .and_then(|f| f.setter());
+
+                            if let Some(setter_id) = setter_id {
+                                // Generate a call to the setter
+                                return lower_static_setter_call(ctx, setter_id, value, expr);
+                            } else {
+                                ctx.emit_error(LoweringError::internal(
+                                    "computed property has no setter",
+                                    Some(expr.span.clone()),
+                                ));
+                                return Value::Immediate(Immediate::error());
+                            }
+                        }
+                    }
                 }
             }
 
@@ -3860,6 +3945,96 @@ fn lower_getter_call(
     }
 
     Value::Place(result_place)
+}
+
+/// Lower a static getter call for a module-level or static computed property.
+///
+/// This is used when a computed property is accessed directly by name (e.g., `globalComputedVar`)
+/// rather than through a type (e.g., `Foo.staticComputedVar`).
+fn lower_static_getter_call(
+    ctx: &mut LoweringContext,
+    getter_id: SymbolId,
+    expr: &Expression,
+) -> Value {
+    // Get the getter symbol
+    let getter_symbol = match ctx.model.query(SymbolFor { id: getter_id }) {
+        Some(sym) => sym,
+        None => {
+            ctx.emit_error(LoweringError::internal(
+                format!("getter symbol not found: {:?}", getter_id),
+                Some(expr.span.clone()),
+            ));
+            return Value::Immediate(Immediate::error());
+        },
+    };
+
+    // Get the result type and create a temp for the result
+    let result_ty = lower_type(ctx, &expr.ty);
+    let result_local = ctx.create_temp("getter_result", result_ty);
+    let result_place = Place::local(result_local);
+
+    // Track the temp for deinit if needed
+    if ctx.type_needs_deinit(&expr.ty) {
+        ctx.track_statement_temp(result_local);
+    }
+
+    // Build the qualified name for the getter
+    let getter_name = qualified_name_for_symbol(ctx, &getter_symbol);
+
+    // Static computed property - no receiver, no type args (module-level fields aren't generic)
+    let mir_callee = Callee::direct(getter_name);
+    ctx.emit_call_with_modes(result_place.clone(), mir_callee, vec![]);
+
+    Value::Place(result_place)
+}
+
+/// Lower a static setter call for a module-level or static computed property.
+///
+/// This is used when a computed property is assigned directly by name (e.g., `globalComputedVar = 2`)
+/// rather than through a type (e.g., `Foo.staticComputedVar = 2`).
+fn lower_static_setter_call(
+    ctx: &mut LoweringContext,
+    setter_id: SymbolId,
+    value: &Expression,
+    expr: &Expression,
+) -> Value {
+    // Get the setter symbol
+    let setter_symbol = match ctx.model.query(SymbolFor { id: setter_id }) {
+        Some(sym) => sym,
+        None => {
+            ctx.emit_error(LoweringError::internal(
+                format!("setter symbol not found: {:?}", setter_id),
+                Some(expr.span.clone()),
+            ));
+            return Value::Immediate(Immediate::error());
+        },
+    };
+
+    // Build the qualified name for the setter
+    let setter_name = qualified_name_for_symbol(ctx, &setter_symbol);
+
+    // Lower the value to be set
+    let rhs_value = lower_expression(ctx, value);
+
+    // Build the call argument for the value (newValue parameter)
+    let passing_mode = if value.ty.is_copyable() {
+        PassingMode::Copy
+    } else {
+        PassingMode::Move
+    };
+    let call_arg = CallArg::new(rhs_value, passing_mode);
+
+    // Create a dummy result place (setters return unit)
+    let unit_ty = ctx.mir.ty_unit();
+    let result_local = ctx.create_temp("setter_result", unit_ty);
+    let result_place = Place::local(result_local);
+
+    // Static computed property - no receiver, just the newValue argument
+    let mir_callee = Callee::direct(setter_name);
+    ctx.emit_call_with_modes(result_place, mir_callee, vec![call_arg]);
+
+    // Assignment expression yields unit
+    Value::Immediate(Immediate::unit())
 }
 
 /// Extract type arguments from a receiver's type.

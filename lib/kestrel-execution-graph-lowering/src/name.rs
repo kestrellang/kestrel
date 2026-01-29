@@ -157,10 +157,39 @@ fn collect_name_segments(symbol: &Arc<dyn Symbol<KestrelLanguage>>, segments: &m
             segments.push(name.value.clone());
         },
 
-        // Fields don't contribute to qualified names - they're containers for getters/setters
-        // which already include the field name in their synthetic name (e.g., "get:fieldName")
+        // Fields contribute their name for static stored fields (needed for global variable access).
+        // Instance fields don't contribute since they use getters/setters (e.g., "get:fieldName").
         KestrelSymbolKind::Field => {
-            // Don't add field name - getter/setter will add "get:fieldName" or "set:fieldName"
+            use kestrel_semantic_tree::symbol::field::FieldSymbol;
+
+            // Check if field is explicitly static
+            let explicit_static = symbol
+                .as_ref()
+                .downcast_ref::<FieldSymbol>()
+                .map(|f| f.is_static())
+                .unwrap_or(false);
+
+            // Check if field is module-level (implicitly static)
+            let is_module_level = symbol
+                .metadata()
+                .parent()
+                .map(|p| {
+                    let kind = p.metadata().kind();
+                    kind == KestrelSymbolKind::Module || kind == KestrelSymbolKind::SourceFile
+                })
+                .unwrap_or(false);
+
+            let is_computed = symbol
+                .as_ref()
+                .downcast_ref::<FieldSymbol>()
+                .map(|f| f.is_computed())
+                .unwrap_or(false);
+
+            // Add field name if it's a static/module-level stored field
+            if (explicit_static || is_module_level) && !is_computed {
+                let name = symbol.metadata().name();
+                segments.push(name.value.clone());
+            }
         },
 
         KestrelSymbolKind::Import

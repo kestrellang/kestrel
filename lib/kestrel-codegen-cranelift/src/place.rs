@@ -69,7 +69,9 @@ pub fn compile_place_read(
                 })?;
 
             let static_ty = static_def.ty;
-            let cl_type = translate_type_with_subst(ctx.mir, static_ty, ctx.target, subst);
+            let concrete_ty = subst
+                .apply_ty_readonly(ctx.mir, static_ty)
+                .unwrap_or(static_ty);
 
             // Compute pointer type
             let ptr_type = if ctx.target.is_64bit() {
@@ -78,9 +80,17 @@ pub fn compile_place_read(
                 cl_types::I32
             };
 
-            // Load the value from the global
+            // Get pointer to the global
             let ptr = builder.ins().global_value(ptr_type, global_addr);
-            Ok(builder.ins().load(cl_type, MemFlags::new(), ptr, 0))
+
+            // For aggregate types, return the pointer (like stack-allocated locals)
+            // For scalar types, load the value
+            if is_aggregate_type(ctx, concrete_ty) {
+                Ok(ptr)
+            } else {
+                let cl_type = translate_type_with_subst(ctx.mir, static_ty, ctx.target, subst);
+                Ok(builder.ins().load(cl_type, MemFlags::new(), ptr, 0))
+            }
         },
 
         PlaceKind::Field { parent, name } => {
@@ -708,13 +718,30 @@ pub fn compile_place_write(
             // Look up the global symbol
             let global_ref = ctx
                 .module
-                .declare_data(&mangled_name, cranelift_module::Linkage::Import, false, false)
+                .declare_data(&mangled_name, cranelift_module::Linkage::Import, true, false)
                 .map_err(|e| CodegenError::Unsupported(format!("failed to declare global: {}", e)))?;
 
             // Get the global address
             let global_addr = ctx
                 .module
                 .declare_data_in_func(global_ref, builder.func);
+
+            // Find the static definition to get its type
+            let static_def = ctx
+                .mir
+                .statics
+                .iter()
+                .find(|(_, def)| def.name == *name_id)
+                .map(|(_, def)| def)
+                .ok_or_else(|| {
+                    let global_name = ctx.mir.name(*name_id);
+                    CodegenError::Unsupported(format!("static variable not found: {}", global_name))
+                })?;
+
+            let static_ty = static_def.ty;
+            let concrete_ty = subst
+                .apply_ty_readonly(ctx.mir, static_ty)
+                .unwrap_or(static_ty);
 
             // Compute pointer type
             let ptr_type = if ctx.target.is_64bit() {
@@ -726,8 +753,13 @@ pub fn compile_place_write(
             // Get the pointer to the global
             let ptr = builder.ins().global_value(ptr_type, global_addr);
 
-            // Store the value to the global
-            builder.ins().store(MemFlags::new(), value, ptr, 0);
+            // Handle aggregate types (structs, tuples) by copying the data
+            if is_aggregate_type(ctx, concrete_ty) {
+                copy_aggregate_value(ctx, concrete_ty, ptr, value, builder);
+            } else {
+                // Store scalar value directly to the global
+                builder.ins().store(MemFlags::new(), value, ptr, 0);
+            }
             Ok(())
         },
 

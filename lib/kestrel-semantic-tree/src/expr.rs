@@ -2122,6 +2122,7 @@ impl Expression {
 
     /// Create a field access expression.
     /// Mutability is computed as: field_mutable AND object.mutable
+    /// Exception: For static field access (object is TypeRef), mutability only depends on field_mutable
     pub fn field_access(
         object: Expression,
         field: String,
@@ -2129,7 +2130,13 @@ impl Expression {
         ty: Ty,
         span: Span,
     ) -> Self {
-        let mutable = field_mutable && object.mutable;
+        // For static field access (TypeRef base), mutability only depends on the field itself
+        // TypeRef expressions aren't lvalues - static fields are global storage
+        let mutable = if matches!(object.kind, ExprKind::TypeRef(_)) {
+            field_mutable
+        } else {
+            field_mutable && object.mutable
+        };
         Expression {
             id: ExprId::new(),
             kind: ExprKind::FieldAccess {

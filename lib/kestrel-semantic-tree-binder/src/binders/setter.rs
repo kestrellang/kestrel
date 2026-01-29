@@ -50,11 +50,23 @@ impl DeclarationBinder for SetterBinder {
             .unwrap_or_else(|| Ty::error(span.clone()));
 
         // Check if the field is static by downcasting to FieldSymbol
-        let is_static = parent
+        let explicit_static = parent
             .as_ref()
             .downcast_ref::<FieldSymbol>()
             .map(|f| f.is_static())
             .unwrap_or(false);
+
+        // Module-level fields are implicitly static even without the 'static' keyword
+        let is_module_level = parent
+            .metadata()
+            .parent()
+            .map(|gp| {
+                let kind = gp.metadata().kind();
+                kind == KestrelSymbolKind::Module || kind == KestrelSymbolKind::SourceFile
+            })
+            .unwrap_or(false);
+
+        let is_static = explicit_static || is_module_level;
 
         // Create the `newValue` parameter with consuming access mode
         // The parameter takes the field's type
@@ -192,38 +204,52 @@ fn resolve_setter_body(
 
 /// Get the type of `self` for a setter
 ///
-/// Returns the concrete type of the containing struct (grandparent of the setter).
-/// The hierarchy is: Struct -> Field -> Setter
+/// Returns the concrete type of the containing struct/enum (grandparent of the setter).
+/// The hierarchy is: Struct/Enum -> Field -> Setter
 fn get_self_type(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> Option<Ty> {
     use kestrel_semantic_tree::behavior::extension_target::ExtensionTargetBehavior;
     use kestrel_semantic_tree::behavior::generics::GenericsBehavior;
+    use kestrel_semantic_tree::symbol::enum_symbol::EnumSymbol;
     use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
     use kestrel_semantic_tree::ty::Substitutions;
 
-    // Setter's parent is Field, Field's parent is Struct/Extension
+    // Setter's parent is Field, Field's parent is Struct/Enum/Extension
     let field = symbol.metadata().parent()?;
-    let struct_parent = field.metadata().parent()?;
-    let struct_span = struct_parent.metadata().span().clone();
+    let type_parent = field.metadata().parent()?;
+    let type_span = type_parent.metadata().span().clone();
 
-    match struct_parent.metadata().kind() {
+    match type_parent.metadata().kind() {
         KestrelSymbolKind::Struct => {
             // Create concrete struct type with type parameters mapping to themselves
-            let struct_arc = Arc::clone(&struct_parent)
+            let struct_arc = Arc::clone(&type_parent)
                 .downcast_arc::<StructSymbol>()
                 .ok()?;
             let mut substitutions = Substitutions::new();
-            if let Some(generics) = struct_parent.metadata().get_behavior::<GenericsBehavior>() {
+            if let Some(generics) = type_parent.metadata().get_behavior::<GenericsBehavior>() {
                 for param in generics.type_parameters() {
                     let param_id = param.metadata().id();
-                    let param_ty = Ty::type_parameter(param.clone(), struct_span.clone());
+                    let param_ty = Ty::type_parameter(param.clone(), type_span.clone());
                     substitutions.insert(param_id, param_ty);
                 }
             }
-            Some(Ty::generic_struct(struct_arc, substitutions, struct_span))
+            Some(Ty::generic_struct(struct_arc, substitutions, type_span))
+        },
+        KestrelSymbolKind::Enum => {
+            // Create concrete enum type with type parameters mapping to themselves
+            let enum_arc = Arc::clone(&type_parent).downcast_arc::<EnumSymbol>().ok()?;
+            let mut substitutions = Substitutions::new();
+            if let Some(generics) = type_parent.metadata().get_behavior::<GenericsBehavior>() {
+                for param in generics.type_parameters() {
+                    let param_id = param.metadata().id();
+                    let param_ty = Ty::type_parameter(param.clone(), type_span.clone());
+                    substitutions.insert(param_id, param_ty);
+                }
+            }
+            Some(Ty::generic_enum(enum_arc, substitutions, type_span))
         },
         KestrelSymbolKind::Extension => {
             // For extension properties, use the target type
-            struct_parent
+            type_parent
                 .metadata()
                 .get_behavior::<ExtensionTargetBehavior>()
                 .map(|b| b.target_type().clone())

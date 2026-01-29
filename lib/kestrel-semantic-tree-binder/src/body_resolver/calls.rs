@@ -2375,6 +2375,34 @@ pub(crate) fn classify_mutability(
         // Grouping expression: (expr)
         ExprKind::Grouping(inner) => classify_mutability(inner, ctx),
 
+        // Symbol reference: could be a module-level field
+        ExprKind::SymbolRef(symbol_id) => {
+            use kestrel_semantic_tree::symbol::field::FieldSymbol;
+
+            // Check if this is a field symbol
+            if let Some(symbol) = ctx.model.query(SymbolFor { id: *symbol_id })
+                && symbol.metadata().kind() == KestrelSymbolKind::Field
+            {
+                // Use the expression's mutable flag (set during path resolution)
+                if expr.mutable {
+                    return MutabilityClassification::Mutable;
+                }
+
+                // Not mutable - check if it's an immutable field (let)
+                if let Some(field) = symbol.as_ref().downcast_ref::<FieldSymbol>() {
+                    if !field.is_mutable() {
+                        return MutabilityClassification::ImmutableField {
+                            field_name: symbol.metadata().name().value.clone(),
+                            field_span: Some(symbol.metadata().span().clone()),
+                        };
+                    }
+                }
+            }
+
+            // Not a field, or not found - treat as temporary
+            MutabilityClassification::Temporary
+        },
+
         // Everything else is a temporary (call results, literals, etc.)
         _ => MutabilityClassification::Temporary,
     }

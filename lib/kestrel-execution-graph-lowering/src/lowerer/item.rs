@@ -167,7 +167,17 @@ pub fn lower_item(ctx: &mut LoweringContext, symbol: &Arc<dyn Symbol<KestrelLang
         },
 
         KestrelSymbolKind::Field => {
-            // Fields are handled as part of struct lowering
+            // For computed properties at module level, lower getter/setter children.
+            // Note: Fields within Struct/Enum/Extension are handled by those lowerers,
+            // but module-level fields (global computed properties) come through here.
+            for child in symbol.metadata().children() {
+                let child_kind = child.metadata().kind();
+                if child_kind == KestrelSymbolKind::Getter
+                    || child_kind == KestrelSymbolKind::Setter
+                {
+                    lower_item(ctx, &child);
+                }
+            }
         },
 
         KestrelSymbolKind::Import => {

@@ -235,6 +235,21 @@ pub fn resolve_function_body(body_node: &SyntaxNode, ctx: &mut BodyResolutionCon
     CodeBlock::empty()
 }
 
+/// Resolve a standalone expression into a CodeBlock with that expression as the yield value.
+/// This is useful for field initializers and similar constructs that are just expressions.
+pub fn resolve_expression_to_code_block(
+    expr_node: &SyntaxNode,
+    ctx: &mut BodyResolutionContext,
+) -> CodeBlock {
+    use super::expressions::resolve_expression;
+
+    let resolved_expr = resolve_expression(expr_node, ctx);
+    CodeBlock {
+        statements: vec![],
+        yield_expr: Some(Box::new(resolved_expr)),
+    }
+}
+
 /// Resolve a code block (statements + optional yield expression)
 pub fn resolve_code_block(block_node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> CodeBlock {
     ctx.local_scope.push_scope();

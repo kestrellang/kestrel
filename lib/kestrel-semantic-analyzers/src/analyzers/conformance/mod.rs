@@ -813,11 +813,6 @@ fn check_property_requirements(
         all_fields.iter().map(|f| (f.name.clone(), f)).collect();
 
     for requirement in required_properties {
-        // TODO: Handle static properties when needed
-        if requirement.is_static {
-            continue;
-        }
-
         match field_map.get(&requirement.name) {
             None => {
                 // Missing property
