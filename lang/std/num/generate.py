@@ -54,6 +54,282 @@ def get_cast(from_bits: int, to_bits: int) -> str:
         return f"lang.cast_i{from_bits}_i{to_bits}(other.raw)"
 
 
+def generate_sign_properties(type_name: str, bits: int, signed: bool, lang_type: str, signed_prefix: str) -> str:
+    """Generate sign inspection properties for integer types."""
+    if signed:
+        return f'''    public var sign: {type_name} {{ get {{
+        if Bool(boolLiteral: lang.{lang_type}_signed_lt(self.raw, 0)) {{ {type_name}(intLiteral: lang.i64_neg(1)) }}
+        else if Bool(boolLiteral: lang.{lang_type}_eq(self.raw, 0)) {{ {type_name}.zero }}
+        else {{ {type_name}.one }}
+    }}}}
+
+    public var isPositive: Bool {{ get {{
+        Bool(boolLiteral: lang.{lang_type}_signed_gt(self.raw, 0))
+    }}}}
+
+    public var isNegative: Bool {{ get {{
+        Bool(boolLiteral: lang.{lang_type}_signed_lt(self.raw, 0))
+    }}}}
+
+    public var isZero: Bool {{ get {{
+        Bool(boolLiteral: lang.{lang_type}_eq(self.raw, 0))
+    }}}}
+'''
+    else:
+        return f'''    public var sign: {type_name} {{ get {{
+        if Bool(boolLiteral: lang.{lang_type}_eq(self.raw, 0)) {{ {type_name}.zero }}
+        else {{ {type_name}.one }}
+    }}}}
+
+    public var isPositive: Bool {{ get {{
+        Bool(boolLiteral: lang.{lang_type}_unsigned_gt(self.raw, 0))
+    }}}}
+
+    public var isNegative: Bool {{ get {{
+        // Unsigned types are never negative
+        false
+    }}}}
+
+    public var isZero: Bool {{ get {{
+        Bool(boolLiteral: lang.{lang_type}_eq(self.raw, 0))
+    }}}}
+'''
+
+
+def generate_is_power_of_two(type_name: str, signed: bool, lang_type: str) -> str:
+    """Generate isPowerOfTwo check."""
+    if signed:
+        return f'''if Bool(boolLiteral: lang.{lang_type}_signed_lt(self.raw, 1)) {{ false }}
+        else {{ Bool(boolLiteral: lang.{lang_type}_eq(lang.{lang_type}_and(self.raw, lang.{lang_type}_sub(self.raw, 1)), 0)) }}'''
+    else:
+        return f'''if Bool(boolLiteral: lang.{lang_type}_eq(self.raw, 0)) {{ false }}
+        else {{ Bool(boolLiteral: lang.{lang_type}_eq(lang.{lang_type}_and(self.raw, lang.{lang_type}_sub(self.raw, 1)), 0)) }}'''
+
+
+def generate_byte_swap(type_name: str, bits: int, lang_type: str, signed_prefix: str) -> str:
+    """Generate byte swap implementation."""
+    if bits == 8:
+        return "self"
+    elif bits == 16:
+        return f'''{type_name}(raw: lang.{lang_type}_or(
+            lang.{lang_type}_shl(lang.{lang_type}_and(self.raw, 255), 8),
+            lang.{lang_type}_and(lang.{lang_type}_{signed_prefix}shr(self.raw, 8), 255)
+        ))'''
+    elif bits == 32:
+        return f'''// Swap bytes: ABCD -> DCBA
+        let b0 = lang.{lang_type}_and(self.raw, 255);
+        let b1 = lang.{lang_type}_and(lang.{lang_type}_{signed_prefix}shr(self.raw, 8), 255);
+        let b2 = lang.{lang_type}_and(lang.{lang_type}_{signed_prefix}shr(self.raw, 16), 255);
+        let b3 = lang.{lang_type}_and(lang.{lang_type}_{signed_prefix}shr(self.raw, 24), 255);
+        {type_name}(raw: lang.{lang_type}_or(lang.{lang_type}_or(lang.{lang_type}_or(
+            lang.{lang_type}_shl(b0, 24),
+            lang.{lang_type}_shl(b1, 16)),
+            lang.{lang_type}_shl(b2, 8)),
+            b3))'''
+    else:  # 64-bit
+        return f'''// Swap bytes
+        let b0 = lang.{lang_type}_and(self.raw, 255);
+        let b1 = lang.{lang_type}_and(lang.{lang_type}_{signed_prefix}shr(self.raw, 8), 255);
+        let b2 = lang.{lang_type}_and(lang.{lang_type}_{signed_prefix}shr(self.raw, 16), 255);
+        let b3 = lang.{lang_type}_and(lang.{lang_type}_{signed_prefix}shr(self.raw, 24), 255);
+        let b4 = lang.{lang_type}_and(lang.{lang_type}_{signed_prefix}shr(self.raw, 32), 255);
+        let b5 = lang.{lang_type}_and(lang.{lang_type}_{signed_prefix}shr(self.raw, 40), 255);
+        let b6 = lang.{lang_type}_and(lang.{lang_type}_{signed_prefix}shr(self.raw, 48), 255);
+        let b7 = lang.{lang_type}_and(lang.{lang_type}_{signed_prefix}shr(self.raw, 56), 255);
+        {type_name}(raw: lang.{lang_type}_or(lang.{lang_type}_or(lang.{lang_type}_or(lang.{lang_type}_or(lang.{lang_type}_or(lang.{lang_type}_or(lang.{lang_type}_or(
+            lang.{lang_type}_shl(b0, 56),
+            lang.{lang_type}_shl(b1, 48)),
+            lang.{lang_type}_shl(b2, 40)),
+            lang.{lang_type}_shl(b3, 32)),
+            lang.{lang_type}_shl(b4, 24)),
+            lang.{lang_type}_shl(b5, 16)),
+            lang.{lang_type}_shl(b6, 8)),
+            b7))'''
+
+
+def generate_checked_arithmetic(type_name: str, bits: int, signed: bool, lang_type: str) -> str:
+    """Generate checked arithmetic methods that return Optional."""
+    if signed:
+        return f'''    // TODO: requires overflow-detecting intrinsics for proper implementation
+    public func addChecked(other: {type_name}) -> {type_name}? {{
+        // Simplified check - detect if signs are same and result sign differs
+        let result = self.add(other);
+        if self.isPositive and other.isPositive and result.isNegative {{
+            return .None
+        }};
+        if self.isNegative and other.isNegative and result.isPositive {{
+            return .None
+        }};
+        .Some(result)
+    }}
+
+    public func subtractChecked(other: {type_name}) -> {type_name}? {{
+        // Simplified check
+        let result = self.subtract(other);
+        if self.isPositive and other.isNegative and result.isNegative {{
+            return .None
+        }};
+        if self.isNegative and other.isPositive and result.isPositive {{
+            return .None
+        }};
+        .Some(result)
+    }}
+
+    public func multiplyChecked(other: {type_name}) -> {type_name}? {{
+        if other == {type_name}.zero {{
+            return .Some({type_name}.zero)
+        }};
+        let result = self.multiply(other);
+        // Check by dividing back
+        if result.divide(other) != self {{
+            return .None
+        }};
+        .Some(result)
+    }}
+
+    public func divideChecked(other: {type_name}) -> {type_name}? {{
+        if other == {type_name}.zero {{
+            return .None
+        }};
+        // Check for minValue / -1 overflow
+        if self == {type_name}.minValue and other == {type_name}(intLiteral: lang.i64_neg(1)) {{
+            return .None
+        }};
+        .Some(self.divide(other))
+    }}
+
+    public func negateChecked() -> {type_name}? {{
+        if self == {type_name}.minValue {{
+            return .None
+        }};
+        .Some(self.negate())
+    }}
+
+    public func absChecked() -> {type_name}? {{
+        if self == {type_name}.minValue {{
+            return .None
+        }};
+        .Some(self.abs())
+    }}
+
+'''
+    else:
+        return f'''    // TODO: requires overflow-detecting intrinsics for proper implementation
+    public func addChecked(other: {type_name}) -> {type_name}? {{
+        let result = self.add(other);
+        // For unsigned, overflow if result < either operand
+        if result < self {{
+            return .None
+        }};
+        .Some(result)
+    }}
+
+    public func subtractChecked(other: {type_name}) -> {type_name}? {{
+        // For unsigned, underflow if other > self
+        if other > self {{
+            return .None
+        }};
+        .Some(self.subtract(other))
+    }}
+
+    public func multiplyChecked(other: {type_name}) -> {type_name}? {{
+        if other == {type_name}.zero {{
+            return .Some({type_name}.zero)
+        }};
+        let result = self.multiply(other);
+        // Check by dividing back
+        if result.divide(other) != self {{
+            return .None
+        }};
+        .Some(result)
+    }}
+
+    public func divideChecked(other: {type_name}) -> {type_name}? {{
+        if other == {type_name}.zero {{
+            return .None
+        }};
+        .Some(self.divide(other))
+    }}
+
+'''
+
+
+def generate_saturating_arithmetic(type_name: str, bits: int, signed: bool, lang_type: str) -> str:
+    """Generate saturating arithmetic methods."""
+    if signed:
+        return f'''    public func addSaturating(other: {type_name}) -> {type_name} {{
+        let checked = self.addChecked(other);
+        match checked {{
+            .Some(result) => result,
+            .None => if other.isPositive {{ {type_name}.maxValue }} else {{ {type_name}.minValue }}
+        }}
+    }}
+
+    public func subtractSaturating(other: {type_name}) -> {type_name} {{
+        let checked = self.subtractChecked(other);
+        match checked {{
+            .Some(result) => result,
+            .None => if other.isNegative {{ {type_name}.maxValue }} else {{ {type_name}.minValue }}
+        }}
+    }}
+
+    public func multiplySaturating(other: {type_name}) -> {type_name} {{
+        let checked = self.multiplyChecked(other);
+        match checked {{
+            .Some(result) => result,
+            .None => {{
+                // Determine sign of result
+                let sameSign = (self.isNegative == other.isNegative);
+                if sameSign {{ {type_name}.maxValue }} else {{ {type_name}.minValue }}
+            }}
+        }}
+    }}
+
+    public func negateSaturating() -> {type_name} {{
+        if self == {type_name}.minValue {{
+            {type_name}.maxValue
+        }} else {{
+            self.negate()
+        }}
+    }}
+
+    public func absSaturating() -> {type_name} {{
+        if self == {type_name}.minValue {{
+            {type_name}.maxValue
+        }} else {{
+            self.abs()
+        }}
+    }}
+
+'''
+    else:
+        return f'''    public func addSaturating(other: {type_name}) -> {type_name} {{
+        let checked = self.addChecked(other);
+        match checked {{
+            .Some(result) => result,
+            .None => {type_name}.maxValue
+        }}
+    }}
+
+    public func subtractSaturating(other: {type_name}) -> {type_name} {{
+        let checked = self.subtractChecked(other);
+        match checked {{
+            .Some(result) => result,
+            .None => {type_name}.zero
+        }}
+    }}
+
+    public func multiplySaturating(other: {type_name}) -> {type_name} {{
+        let checked = self.multiplyChecked(other);
+        match checked {{
+            .Some(result) => result,
+            .None => {type_name}.maxValue
+        }}
+    }}
+
+'''
+
+
 def generate_integer_format_method(type_name: str, bits: int, signed: bool) -> str:
     """Generate the format() method for integer types."""
 
@@ -157,6 +433,12 @@ def generate_integer(type_name: str, bits: int, signed: bool, is_default: bool) 
         negatable_output = f"type Negatable.Output = {type_name}"
         negate_method = f"public func negate() -> {type_name} {{ {type_name}(raw: lang.{lang_type}_neg(self.raw)) }}"
         abs_method = f"public func abs() -> {type_name} {{ if Bool(boolLiteral: lang.{lang_type}_signed_lt(self.raw, 0)) {{ self.negate() }} else {{ self }} }}"
+        # For signed, use negation for min value
+        min_value_expr = f"{type_name}(intLiteral: lang.i64_neg({min_val_abs}))"
+        gcd_abs_self = "self.abs()"
+        gcd_abs_other = "other.abs()"
+        lcm_abs_self = "self.abs()"
+        lcm_abs_other = "other.abs()"
     else:
         min_val = 0
         min_val_abs = 0
@@ -168,6 +450,11 @@ def generate_integer(type_name: str, bits: int, signed: bool, is_default: bool) 
         negatable_output = ""
         negate_method = ""
         abs_method = ""
+        min_value_expr = f"{type_name}(intLiteral: 0)"
+        gcd_abs_self = "self"
+        gcd_abs_other = "other"
+        lcm_abs_self = "self"
+        lcm_abs_other = "other"
 
     # Int literal init - need to cast from i64 for smaller types
     if bits == 64:
@@ -178,8 +465,10 @@ def generate_integer(type_name: str, bits: int, signed: bool, is_default: bool) 
     # Shift cast - need to cast count from i64 for smaller types
     if bits == 64:
         shift_cast = "count"
+        shift_cast_i = "i.raw"
     else:
         shift_cast = f"lang.cast_i64_i{bits}(count)"
+        shift_cast_i = f"lang.cast_i64_i{bits}(i.raw)"
 
     # Type alias for platform defaults
     if is_default:
@@ -193,6 +482,21 @@ def generate_integer(type_name: str, bits: int, signed: bool, is_default: bool) 
     # Generate format method
     format_method = generate_integer_format_method(type_name, bits, signed)
 
+    # Generate sign properties
+    sign_properties = generate_sign_properties(type_name, bits, signed, lang_type, signed_prefix)
+
+    # Generate isPowerOfTwo
+    is_power_of_two = generate_is_power_of_two(type_name, signed, lang_type)
+
+    # Generate byte swap
+    byte_swap_impl = generate_byte_swap(type_name, bits, lang_type, signed_prefix)
+
+    # Generate checked arithmetic
+    checked_arithmetic = generate_checked_arithmetic(type_name, bits, signed, lang_type)
+
+    # Generate saturating arithmetic
+    saturating_arithmetic = generate_saturating_arithmetic(type_name, bits, signed, lang_type)
+
     result = template
     result = result.replace("{{TYPE_NAME}}", type_name)
     result = result.replace("{{BITS}}", str(bits))
@@ -201,6 +505,7 @@ def generate_integer(type_name: str, bits: int, signed: bool, is_default: bool) 
     result = result.replace("{{LANG_TYPE}}", lang_type)
     result = result.replace("{{MIN_VALUE}}", str(min_val))
     result = result.replace("{{MIN_VALUE_ABS}}", str(min_val_abs))
+    result = result.replace("{{MIN_VALUE_EXPR}}", min_value_expr)
     result = result.replace("{{MAX_VALUE}}", str(max_val))
     result = result.replace("{{SIGNED_PREFIX}}", signed_prefix)
     result = result.replace("{{NEGATABLE}}", negatable)
@@ -209,10 +514,20 @@ def generate_integer(type_name: str, bits: int, signed: bool, is_default: bool) 
     result = result.replace("{{ABS_METHOD}}", abs_method)
     result = result.replace("{{INT_LITERAL_INIT}}", int_literal_init)
     result = result.replace("{{SHIFT_CAST}}", shift_cast)
+    result = result.replace("{{SHIFT_CAST_I}}", shift_cast_i)
     result = result.replace("{{TYPE_ALIAS}}", type_alias)
     result = result.replace("{{CONVERTIBLE_CONFORMANCES}}", convertible_conformances)
     result = result.replace("{{CONVERTIBLE_INITS}}", convertible_inits)
     result = result.replace("{{FORMAT_METHOD}}", format_method)
+    result = result.replace("{{SIGN_PROPERTIES}}", sign_properties)
+    result = result.replace("{{IS_POWER_OF_TWO}}", is_power_of_two)
+    result = result.replace("{{BYTE_SWAP_IMPL}}", byte_swap_impl)
+    result = result.replace("{{CHECKED_ARITHMETIC}}", checked_arithmetic)
+    result = result.replace("{{SATURATING_ARITHMETIC}}", saturating_arithmetic)
+    result = result.replace("{{GCD_ABS_SELF}}", gcd_abs_self)
+    result = result.replace("{{GCD_ABS_OTHER}}", gcd_abs_other)
+    result = result.replace("{{LCM_ABS_SELF}}", lcm_abs_self)
+    result = result.replace("{{LCM_ABS_OTHER}}", lcm_abs_other)
 
     return result
 
@@ -224,10 +539,10 @@ def generate_float_format_method(type_name: str, bits: int) -> str:
     return f'''    // Formattable
     public func format() -> String {{
         // Handle special cases
-        if self.isNaN() {{
+        if self.isNaN {{
             return "NaN"
         }}
-        if self.isInfinite() {{
+        if self.isInfinite {{
             if self < 0.0 {{
                 return "-Infinity"
             }} else {{
@@ -294,6 +609,8 @@ def generate_float(type_name: str, bits: int, is_default: bool) -> str:
     template = (SCRIPT_DIR / "float.ks.template").read_text()
 
     lang_type = f"f{bits}"
+    other_float = "Float32" if bits == 64 else "Float64"
+    other_lang_type = "f32" if bits == 64 else "f64"
 
     # Float literal init - need to cast from f64 for f32
     if bits == 64:
@@ -312,14 +629,38 @@ def generate_float(type_name: str, bits: int, is_default: bool) -> str:
     # Generate format method
     format_method = generate_float_format_method(type_name, bits)
 
+    # Float constants - use literal values since intrinsics don't exist
+    # Note: negative constants need special handling to avoid -literal being parsed as negate()
+    if bits == 64:
+        # min_value is -(max_value) - we'll construct it differently in the template
+        max_value = "1.7976931348623157e308"
+        min_positive = "2.2250738585072014e-308"
+        epsilon = "2.220446049250313e-16"
+    else:
+        max_value = "3.4028235e38"
+        min_positive = "1.17549435e-38"
+        epsilon = "1.1920929e-7"
+
+    # Conversion to other float type
+    if bits == 64:
+        to_other_float = f"Float32(raw: lang.cast_f64_f32(self.raw))"
+    else:
+        to_other_float = f"Float64(raw: lang.cast_f32_f64(self.raw))"
+
     result = template
     result = result.replace("{{TYPE_NAME}}", type_name)
     result = result.replace("{{BITS}}", str(bits))
     result = result.replace("{{LANG_TYPE}}", lang_type)
+    result = result.replace("{{OTHER_FLOAT}}", other_float)
+    result = result.replace("{{OTHER_LANG_TYPE}}", other_lang_type)
     result = result.replace("{{FLOAT_LITERAL_INIT}}", float_literal_init)
     result = result.replace("{{ZERO_LITERAL}}", zero_literal)
     result = result.replace("{{TYPE_ALIAS}}", type_alias)
     result = result.replace("{{FORMAT_METHOD}}", format_method)
+    result = result.replace("{{MAX_VALUE}}", max_value)
+    result = result.replace("{{MIN_POSITIVE}}", min_positive)
+    result = result.replace("{{EPSILON}}", epsilon)
+    result = result.replace("{{TO_OTHER_FLOAT}}", to_other_float)
 
     return result
 

@@ -8,6 +8,8 @@ import std.core.(
     Equatable, Comparable, Ordering, Bool, Matchable, Formattable, Hash, Hasher,
     Addable, Subtractable, Multipliable, Divisible, Modulo, Negatable,
     BitwiseAnd, BitwiseOr, BitwiseXor, BitwiseNot, LeftShift, RightShift,
+    AddAssign, SubtractAssign, MultiplyAssign, DivideAssign, ModuloAssign,
+    BitwiseAndAssign, BitwiseOrAssign, BitwiseXorAssign, LeftShiftAssign, RightShiftAssign,
     ExpressibleByIntLiteral, Convertible
 )
 import std.text.(String)
@@ -34,9 +36,19 @@ public struct Int8:
     BitwiseNot,
     LeftShift,
     RightShift,
+    AddAssign,
+    SubtractAssign,
+    MultiplyAssign,
+    DivideAssign,
+    ModuloAssign,
+    BitwiseAndAssign,
+    BitwiseOrAssign,
+    BitwiseXorAssign,
+    LeftShiftAssign[lang.i64],
+    RightShiftAssign[lang.i64],
     ExpressibleByIntLiteral,
     FFISafe,
-        Convertible[Int16],
+    Convertible[Int16],
     Convertible[Int32],
     Convertible[Int64],
     Convertible[UInt8],
@@ -46,11 +58,19 @@ public struct Int8:
 {
     public var raw: lang.i8
 
+    // ========================================================================
+    // CONSTANTS
+    // ========================================================================
+
     public static var zero: Int8 { Int8(intLiteral: 0) }
     public static var one: Int8 { Int8(intLiteral: 1) }
     public static var minValue: Int8 { Int8(intLiteral: lang.i64_neg(128)) }
     public static var maxValue: Int8 { Int8(intLiteral: 127) }
-    // public static var bitWidth: Int { 8 }
+    public static var bitWidth: Int64 { Int64(intLiteral: 8) }
+
+    // ========================================================================
+    // INITIALIZERS
+    // ========================================================================
 
     public init(intLiteral value: lang.i64) {
         self.raw = lang.cast_i64_i8(value)
@@ -68,6 +88,99 @@ public struct Int8:
     public init(from other: UInt32) { self.raw = lang.cast_i32_i8(other.raw) }
     public init(from other: UInt64) { self.raw = lang.cast_i64_i8(other.raw) }
 
+    // ========================================================================
+    // SIGN INSPECTION (Properties)
+    // ========================================================================
+
+    public var sign: Int8 { get {
+        if Bool(boolLiteral: lang.i8_signed_lt(self.raw, 0)) { Int8(intLiteral: lang.i64_neg(1)) }
+        else if Bool(boolLiteral: lang.i8_eq(self.raw, 0)) { Int8.zero }
+        else { Int8.one }
+    }}
+
+    public var isPositive: Bool { get {
+        Bool(boolLiteral: lang.i8_signed_gt(self.raw, 0))
+    }}
+
+    public var isNegative: Bool { get {
+        Bool(boolLiteral: lang.i8_signed_lt(self.raw, 0))
+    }}
+
+    public var isZero: Bool { get {
+        Bool(boolLiteral: lang.i8_eq(self.raw, 0))
+    }}
+
+    // ========================================================================
+    // BIT INSPECTION (Properties)
+    // ========================================================================
+
+    public var isPowerOfTwo: Bool { get {
+        if Bool(boolLiteral: lang.i8_signed_lt(self.raw, 1)) { false }
+        else { Bool(boolLiteral: lang.i8_eq(lang.i8_and(self.raw, lang.i8_sub(self.raw, 1)), 0)) }
+    }}
+
+    // TODO: requires lang.i8_popcount intrinsic
+    public var countOnes: Int64 { get {
+        // Stub implementation - counts bits manually
+        var count: Int64 = 0;
+        var n = self.raw;
+        var i: Int64 = 0;
+        while i < 8 {
+            if not Bool(boolLiteral: lang.i8_eq(lang.i8_and(n, 1), 0)) {
+                count = count + 1
+            };
+            n = lang.i8_signed_shr(n, 1);
+            i = i + 1
+        };
+        count
+    }}
+
+    public var countZeros: Int64 { get {
+        Int64(intLiteral: 8) - self.countOnes
+    }}
+
+    // TODO: requires lang.i8_clz intrinsic
+    public var leadingZeros: Int64 { get {
+        if self == Int8.zero {
+            return Int64(intLiteral: 8)
+        };
+        var count: Int64 = 0;
+        var n = self.raw;
+        var i: Int64 = 8 - 1;
+        while i >= 0 {
+            let bit = lang.i8_and(lang.i8_signed_shr(n, lang.cast_i64_i8(i.raw)), 1);
+            if not Bool(boolLiteral: lang.i8_eq(bit, 0)) {
+                return count
+            };
+            count = count + 1;
+            i = i - 1
+        };
+        count
+    }}
+
+    // TODO: requires lang.i8_ctz intrinsic
+    public var trailingZeros: Int64 { get {
+        if self == Int8.zero {
+            return Int64(intLiteral: 8)
+        };
+        var count: Int64 = 0;
+        var n = self.raw;
+        while Bool(boolLiteral: lang.i8_eq(lang.i8_and(n, 1), 0)) {
+            count = count + 1;
+            n = lang.i8_signed_shr(n, 1)
+        };
+        count
+    }}
+
+    // TODO: requires lang.i8_bswap intrinsic
+    public var byteSwapped: Int8 { get {
+        self
+    }}
+
+    // ========================================================================
+    // COMPARISON
+    // ========================================================================
+
     public func equals(other: Int8) -> Bool {
         Bool(boolLiteral: lang.i8_eq(self.raw, other.raw))
     }
@@ -82,15 +195,26 @@ public struct Int8:
         else { .Equal }
     }
 
+    // ========================================================================
+    // STEPPING
+    // ========================================================================
+
     public func successor() -> Int8 { self.add(Int8.one) }
     public func predecessor() -> Int8 { self.subtract(Int8.one) }
 
+    // ========================================================================
+    // HASHING
+    // ========================================================================
+
     public func hash[H](mutating into hasher: H) where H: Hasher {
         let val = self;
-        hasher.write(Slice(pointer: Pointer(to: val).asRaw().cast[UInt8](), count: Int64(intLiteral: 1)))
+        hasher.write(Slice(pointer: Pointer(to: val).asRaw().cast[UInt8](), count: Int64(intLiteral: lang.sizeof[Int8]())))
     }
 
-    // Associated type bindings
+    // ========================================================================
+    // ASSOCIATED TYPE BINDINGS
+    // ========================================================================
+
     type Addable.Output = Int8
     type Subtractable.Output = Int8
     type Multipliable.Output = Int8
@@ -104,6 +228,10 @@ public struct Int8:
     type LeftShift.Output = Int8
     type RightShift.Output = Int8
 
+    // ========================================================================
+    // ARITHMETIC (Wrapping - Default)
+    // ========================================================================
+
     public func add(other: Int8) -> Int8 { Int8(raw: lang.i8_add(self.raw, other.raw)) }
     public func subtract(other: Int8) -> Int8 { Int8(raw: lang.i8_sub(self.raw, other.raw)) }
     public func multiply(other: Int8) -> Int8 { Int8(raw: lang.i8_mul(self.raw, other.raw)) }
@@ -111,12 +239,240 @@ public struct Int8:
     public func modulo(other: Int8) -> Int8 { Int8(raw: lang.i8_signed_rem(self.raw, other.raw)) }
     public func negate() -> Int8 { Int8(raw: lang.i8_neg(self.raw)) }
     public func abs() -> Int8 { if Bool(boolLiteral: lang.i8_signed_lt(self.raw, 0)) { self.negate() } else { self } }
+
+    // ========================================================================
+    // ARITHMETIC (Checked - Returns Optional)
+    // ========================================================================
+
+    // TODO: requires overflow-detecting intrinsics for proper implementation
+    public func addChecked(other: Int8) -> Int8? {
+        // Simplified check - detect if signs are same and result sign differs
+        let result = self.add(other);
+        if self.isPositive and other.isPositive and result.isNegative {
+            return .None
+        };
+        if self.isNegative and other.isNegative and result.isPositive {
+            return .None
+        };
+        .Some(result)
+    }
+
+    public func subtractChecked(other: Int8) -> Int8? {
+        // Simplified check
+        let result = self.subtract(other);
+        if self.isPositive and other.isNegative and result.isNegative {
+            return .None
+        };
+        if self.isNegative and other.isPositive and result.isPositive {
+            return .None
+        };
+        .Some(result)
+    }
+
+    public func multiplyChecked(other: Int8) -> Int8? {
+        if other == Int8.zero {
+            return .Some(Int8.zero)
+        };
+        let result = self.multiply(other);
+        // Check by dividing back
+        if result.divide(other) != self {
+            return .None
+        };
+        .Some(result)
+    }
+
+    public func divideChecked(other: Int8) -> Int8? {
+        if other == Int8.zero {
+            return .None
+        };
+        // Check for minValue / -1 overflow
+        if self == Int8.minValue and other == Int8(intLiteral: lang.i64_neg(1)) {
+            return .None
+        };
+        .Some(self.divide(other))
+    }
+
+    public func negateChecked() -> Int8? {
+        if self == Int8.minValue {
+            return .None
+        };
+        .Some(self.negate())
+    }
+
+    public func absChecked() -> Int8? {
+        if self == Int8.minValue {
+            return .None
+        };
+        .Some(self.abs())
+    }
+
+
+    // ========================================================================
+    // ARITHMETIC (Saturating - Clamps to Bounds)
+    // ========================================================================
+
+    public func addSaturating(other: Int8) -> Int8 {
+        let checked = self.addChecked(other);
+        match checked {
+            .Some(result) => result,
+            .None => if other.isPositive { Int8.maxValue } else { Int8.minValue }
+        }
+    }
+
+    public func subtractSaturating(other: Int8) -> Int8 {
+        let checked = self.subtractChecked(other);
+        match checked {
+            .Some(result) => result,
+            .None => if other.isNegative { Int8.maxValue } else { Int8.minValue }
+        }
+    }
+
+    public func multiplySaturating(other: Int8) -> Int8 {
+        let checked = self.multiplyChecked(other);
+        match checked {
+            .Some(result) => result,
+            .None => {
+                // Determine sign of result
+                let sameSign = (self.isNegative == other.isNegative);
+                if sameSign { Int8.maxValue } else { Int8.minValue }
+            }
+        }
+    }
+
+    public func negateSaturating() -> Int8 {
+        if self == Int8.minValue {
+            Int8.maxValue
+        } else {
+            self.negate()
+        }
+    }
+
+    public func absSaturating() -> Int8 {
+        if self == Int8.minValue {
+            Int8.maxValue
+        } else {
+            self.abs()
+        }
+    }
+
+
+    // ========================================================================
+    // ARITHMETIC (Extended)
+    // ========================================================================
+
+    public func pow(exponent: Int64) -> Int8 {
+        if exponent < 0 {
+            return Int8.zero
+        };
+        if exponent == 0 {
+            return Int8.one
+        };
+        var result = Int8.one;
+        var base = self;
+        var exp = exponent;
+        while exp > 0 {
+            if exp % 2 == 1 {
+                result = result.multiply(base)
+            };
+            base = base.multiply(base);
+            exp = exp / 2
+        };
+        result
+    }
+
+    public func gcd(other: Int8) -> Int8 {
+        var a = self.abs();
+        var b = other.abs();
+        while b != Int8.zero {
+            let t = b;
+            b = a.modulo(b);
+            a = t
+        };
+        a
+    }
+
+    public func lcm(other: Int8) -> Int8 {
+        if self == Int8.zero or other == Int8.zero {
+            return Int8.zero
+        };
+        let g = self.gcd(other);
+        self.abs().divide(g).multiply(other.abs())
+    }
+
+    // ========================================================================
+    // CLAMPING
+    // ========================================================================
+
+    public func clamp(min: Int8, max: Int8) -> Int8 {
+        if self < min { min }
+        else if self > max { max }
+        else { self }
+    }
+
+    // ========================================================================
+    // BITWISE OPERATIONS
+    // ========================================================================
+
     public func bitwiseAnd(other: Int8) -> Int8 { Int8(raw: lang.i8_and(self.raw, other.raw)) }
     public func bitwiseOr(other: Int8) -> Int8 { Int8(raw: lang.i8_or(self.raw, other.raw)) }
     public func bitwiseXor(other: Int8) -> Int8 { Int8(raw: lang.i8_xor(self.raw, other.raw)) }
     public func bitwiseNot() -> Int8 { Int8(raw: lang.i8_not(self.raw)) }
     public func shiftLeft(by count: lang.i64) -> Int8 { Int8(raw: lang.i8_shl(self.raw, lang.cast_i64_i8(count))) }
     public func shiftRight(by count: lang.i64) -> Int8 { Int8(raw: lang.i8_signed_shr(self.raw, lang.cast_i64_i8(count))) }
+
+    public func rotateLeft(by count: Int64) -> Int8 {
+        let bits: Int64 = 8;
+        let c = count % bits;
+        if c == 0 { self }
+        else { self.shiftLeft(by: c.raw).bitwiseOr(self.shiftRight(by: (bits - c).raw)) }
+    }
+
+    public func rotateRight(by count: Int64) -> Int8 {
+        let bits: Int64 = 8;
+        let c = count % bits;
+        if c == 0 { self }
+        else { self.shiftRight(by: c.raw).bitwiseOr(self.shiftLeft(by: (bits - c).raw)) }
+    }
+
+    // ========================================================================
+    // COMPOUND ASSIGNMENT
+    // ========================================================================
+
+    public mutating func addAssign(other: Int8) { self = self.add(other) }
+    public mutating func subtractAssign(other: Int8) { self = self.subtract(other) }
+    public mutating func multiplyAssign(other: Int8) { self = self.multiply(other) }
+    public mutating func divideAssign(other: Int8) { self = self.divide(other) }
+    public mutating func modAssign(other: Int8) { self = self.modulo(other) }
+    public mutating func bitwiseAndAssign(other: Int8) { self = self.bitwiseAnd(other) }
+    public mutating func bitwiseOrAssign(other: Int8) { self = self.bitwiseOr(other) }
+    public mutating func bitwiseXorAssign(other: Int8) { self = self.bitwiseXor(other) }
+    public mutating func shiftLeftAssign(by count: lang.i64) { self = self.shiftLeft(by: count) }
+    public mutating func shiftRightAssign(by count: lang.i64) { self = self.shiftRight(by: count) }
+
+    // ========================================================================
+    // BYTE CONVERSION
+    // ========================================================================
+
+    // TODO: implement byte conversion methods
+    // These require Array from std.collections which creates circular import issues
+    // public func toBytes() -> Array[UInt8]
+    // public func toBytesBigEndian() -> Array[UInt8]
+    // public func toBytesLittleEndian() -> Array[UInt8]
+    // public static func fromBytes(bytes: Array[UInt8]) -> Int8?
+    // public static func fromBytesBigEndian(bytes: Array[UInt8]) -> Int8?
+    // public static func fromBytesLittleEndian(bytes: Array[UInt8]) -> Int8?
+
+    // ========================================================================
+    // PARSING
+    // ========================================================================
+
+    // TODO: implement string parsing
+    // public static func parse(string: String) -> Int8?
+    // public static func parse(string: String, radix: Int64) -> Int8?
+
+    // ========================================================================
+    // FORMATTING
+    // ========================================================================
 
     // Formattable
     public func format() -> String {
