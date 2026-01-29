@@ -98,6 +98,21 @@ fn validate_assignment_target(
                 ));
             }
         },
+        // Protocol property access is valid if the property has a setter
+        ExprKind::ProtocolPropertyAccess {
+            property_name,
+            has_setter,
+            ..
+        } => {
+            if !has_setter {
+                out.push(AssignmentError::ImmutableField(
+                    CannotAssignToImmutableFieldError {
+                        span: target.span.clone(),
+                        field_name: property_name.clone(),
+                    },
+                ));
+            }
+        },
         // SymbolRef can be a valid assignment target for module-level/static fields
         ExprKind::SymbolRef(symbol_id) => {
             use kestrel_semantic_model::SymbolFor;

@@ -1356,6 +1356,9 @@ fn collect_closure_local_ids_from_expr(expr: &Expression, ids: &mut HashSet<Loca
         ExprKind::FieldAccess { object, .. } => {
             collect_closure_local_ids_from_expr(object, ids);
         },
+        ExprKind::ProtocolPropertyAccess { receiver, .. } => {
+            collect_closure_local_ids_from_expr(receiver, ids);
+        },
         ExprKind::TupleIndex { tuple, .. } => {
             collect_closure_local_ids_from_expr(tuple, ids);
         },

@@ -22,6 +22,7 @@ use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::associated_type::AssociatedTypeSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::symbol::local::LocalId;
+use kestrel_semantic_tree::symbol::field::FieldSymbol;
 use kestrel_semantic_tree::symbol::protocol::FlattenedProtocolBehavior;
 use kestrel_semantic_tree::symbol::protocol::ProtocolSymbol;
 use kestrel_semantic_tree::symbol::type_parameter::TypeParameterSymbol;
@@ -477,6 +478,17 @@ fn resolve_constrained_member_access(
         };
         ctx.diagnostics.add_diagnostic(error.into_diagnostic());
         return Expression::error(full_span);
+    }
+
+    // First, check if member_name is an instance property in any protocol bound
+    if let Some(property_expr) = find_instance_property_in_bounds(
+        base.clone(),
+        &bounds,
+        member_name,
+        full_span.clone(),
+        ctx,
+    ) {
+        return property_expr;
     }
 
     // Collect all method candidates from protocol bounds, tracking their source
@@ -1320,6 +1332,18 @@ fn resolve_type_parameter_static_member(
         return assoc_type_expr;
     }
 
+    // Second, check if member_name is a static property in any protocol bound
+    if let Some(property_expr) = find_static_property_in_bounds(
+        symbol_id,
+        &bounds,
+        member_name,
+        &type_param_ty,
+        full_span.clone(),
+        ctx,
+    ) {
+        return property_expr;
+    }
+
     // Collect static methods from all protocol bounds
     let mut candidates: Vec<StaticMethodCandidate> = Vec::new();
     let mut bound_names: Vec<String> = Vec::new();
@@ -1633,6 +1657,163 @@ fn collect_protocol_static_methods(
             }
         }
     }
+}
+
+/// Find a static property in protocol bounds.
+///
+/// Returns a ProtocolPropertyAccess expression if a matching static property is found.
+fn find_static_property_in_bounds(
+    type_param_id: SymbolId,
+    bounds: &[Ty],
+    property_name: &str,
+    type_param_ty: &Ty,
+    span: Span,
+    _ctx: &BodyResolutionContext,
+) -> Option<Expression> {
+    for bound in bounds {
+        if let TyKind::Protocol { symbol: proto, .. } = bound.kind() {
+            // Use flattened behavior if available
+            if let Some(flattened) = proto.metadata().get_behavior::<FlattenedProtocolBehavior>() {
+                if let Some(prop) = flattened.properties().get(property_name) {
+                    if prop.is_static {
+                        // Get the property type from the field's TypedBehavior
+                        let prop_ty = prop
+                            .symbol
+                            .metadata()
+                            .get_behavior::<TypedBehavior>()
+                            .map(|tb| substitute_self(tb.ty(), type_param_ty))
+                            .unwrap_or_else(|| Ty::error(span.clone()));
+
+                        // Create TypeParameterRef for the receiver
+                        let receiver = Expression::type_parameter_ref(
+                            type_param_id,
+                            type_param_ty.clone(),
+                            Span::new(span.file_id, span.start..span.start),
+                        );
+
+                        return Some(Expression::protocol_property_access(
+                            receiver,
+                            prop.symbol.metadata().id(),
+                            property_name.to_string(),
+                            proto.metadata().id(),
+                            true, // is_static
+                            prop.has_setter,
+                            prop_ty,
+                            span,
+                        ));
+                    }
+                }
+            }
+
+            // FALLBACK: Direct search in protocol children
+            for child in proto.metadata().children() {
+                if child.metadata().kind() == KestrelSymbolKind::Field
+                    && child.metadata().name().value == property_name
+                {
+                    if let Ok(field) = child.clone().downcast_arc::<FieldSymbol>() {
+                        if field.is_computed() && field.is_static() {
+                            let prop_ty = field
+                                .metadata()
+                                .get_behavior::<TypedBehavior>()
+                                .map(|tb| substitute_self(tb.ty(), type_param_ty))
+                                .unwrap_or_else(|| Ty::error(span.clone()));
+
+                            let receiver = Expression::type_parameter_ref(
+                                type_param_id,
+                                type_param_ty.clone(),
+                                Span::new(span.file_id, span.start..span.start),
+                            );
+
+                            return Some(Expression::protocol_property_access(
+                                receiver,
+                                field.metadata().id(),
+                                property_name.to_string(),
+                                proto.metadata().id(),
+                                true, // is_static
+                                field.setter().is_some(),
+                                prop_ty,
+                                span,
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Find an instance property in protocol bounds.
+///
+/// Returns a ProtocolPropertyAccess expression if a matching instance property is found.
+fn find_instance_property_in_bounds(
+    base: Expression,
+    bounds: &[Ty],
+    property_name: &str,
+    span: Span,
+    _ctx: &BodyResolutionContext,
+) -> Option<Expression> {
+    // Get the type parameter type from the base expression for Self substitution
+    let type_param_ty = &base.ty;
+
+    for bound in bounds {
+        if let TyKind::Protocol { symbol: proto, .. } = bound.kind() {
+            // Use flattened behavior if available
+            if let Some(flattened) = proto.metadata().get_behavior::<FlattenedProtocolBehavior>() {
+                if let Some(prop) = flattened.properties().get(property_name) {
+                    if !prop.is_static {
+                        // Get the property type from the field's TypedBehavior
+                        let prop_ty = prop
+                            .symbol
+                            .metadata()
+                            .get_behavior::<TypedBehavior>()
+                            .map(|tb| substitute_self(tb.ty(), type_param_ty))
+                            .unwrap_or_else(|| Ty::error(span.clone()));
+
+                        return Some(Expression::protocol_property_access(
+                            base,
+                            prop.symbol.metadata().id(),
+                            property_name.to_string(),
+                            proto.metadata().id(),
+                            false, // is_static
+                            prop.has_setter,
+                            prop_ty,
+                            span,
+                        ));
+                    }
+                }
+            }
+
+            // FALLBACK: Direct search in protocol children
+            for child in proto.metadata().children() {
+                if child.metadata().kind() == KestrelSymbolKind::Field
+                    && child.metadata().name().value == property_name
+                {
+                    if let Ok(field) = child.clone().downcast_arc::<FieldSymbol>() {
+                        if field.is_computed() && !field.is_static() {
+                            let prop_ty = field
+                                .metadata()
+                                .get_behavior::<TypedBehavior>()
+                                .map(|tb| substitute_self(tb.ty(), type_param_ty))
+                                .unwrap_or_else(|| Ty::error(span.clone()));
+
+                            return Some(Expression::protocol_property_access(
+                                base,
+                                field.metadata().id(),
+                                property_name.to_string(),
+                                proto.metadata().id(),
+                                false, // is_static
+                                field.setter().is_some(),
+                                prop_ty,
+                                span,
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    None
 }
 
 /// Filter extensions to find those applicable to the given type instance.

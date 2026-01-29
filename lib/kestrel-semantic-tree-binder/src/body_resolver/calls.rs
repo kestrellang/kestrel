@@ -2403,6 +2403,23 @@ pub(crate) fn classify_mutability(
             MutabilityClassification::Temporary
         },
 
+        // Protocol property access on type parameters
+        ExprKind::ProtocolPropertyAccess {
+            property_name,
+            has_setter,
+            ..
+        } => {
+            // Protocol property is mutable only if it has a setter
+            if *has_setter {
+                MutabilityClassification::Mutable
+            } else {
+                MutabilityClassification::ImmutableField {
+                    field_name: property_name.clone(),
+                    field_span: None,
+                }
+            }
+        },
+
         // Everything else is a temporary (call results, literals, etc.)
         _ => MutabilityClassification::Temporary,
     }

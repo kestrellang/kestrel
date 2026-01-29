@@ -965,6 +965,24 @@ pub enum ExprKind {
         field: String,
     },
 
+    /// Protocol property access on type parameter: `T.property` or `t.property` where T: Protocol.
+    /// This is used when accessing a computed property requirement from a protocol bound.
+    /// At codegen, this generates witness calls to `get:property` or `set:property`.
+    ProtocolPropertyAccess {
+        /// The receiver - either TypeParameterRef (static) or instance expression (instance property)
+        receiver: Box<Expression>,
+        /// The field symbol from the protocol
+        field_id: SymbolId,
+        /// The property name
+        property_name: String,
+        /// The protocol symbol that declares this property
+        protocol_id: SymbolId,
+        /// Whether this is a static property
+        is_static: bool,
+        /// Whether this property has a setter (determines mutability)
+        has_setter: bool,
+    },
+
     /// Tuple index: `tuple.0`, `tuple.1`
     /// Accesses an element of a tuple by its position.
     TupleIndex {
@@ -1575,6 +1593,13 @@ impl Expression {
                 ExprKind::FieldAccess { object, field } => {
                     format!("{}.{}", format_expr(object), field)
                 },
+                ExprKind::ProtocolPropertyAccess {
+                    receiver,
+                    property_name,
+                    ..
+                } => {
+                    format!("{}.{}", format_expr(receiver), property_name)
+                },
                 ExprKind::TupleIndex { tuple, index } => {
                     format!("{}.{}", format_expr(tuple), index)
                 },
@@ -2142,6 +2167,36 @@ impl Expression {
             kind: ExprKind::FieldAccess {
                 object: Box::new(object),
                 field,
+            },
+            ty,
+            span,
+            mutable,
+        }
+    }
+
+    /// Create a protocol property access expression.
+    /// This is used for property access on type parameters through protocol bounds.
+    pub fn protocol_property_access(
+        receiver: Expression,
+        field_id: SymbolId,
+        property_name: String,
+        protocol_id: SymbolId,
+        is_static: bool,
+        has_setter: bool,
+        ty: Ty,
+        span: Span,
+    ) -> Self {
+        // Mutable only if has_setter and (static or receiver is mutable)
+        let mutable = has_setter && (is_static || receiver.mutable);
+        Expression {
+            id: ExprId::new(),
+            kind: ExprKind::ProtocolPropertyAccess {
+                receiver: Box::new(receiver),
+                field_id,
+                property_name,
+                protocol_id,
+                is_static,
+                has_setter,
             },
             ty,
             span,

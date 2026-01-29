@@ -635,6 +635,26 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
                 return lower_subscript_setter_call(ctx, receiver, *getter, arguments, value, expr);
             }
 
+            // Check if target is a protocol property access (witness dispatch setter)
+            if let ExprKind::ProtocolPropertyAccess {
+                receiver,
+                property_name,
+                protocol_id,
+                is_static,
+                ..
+            } = &target.kind
+            {
+                return lower_protocol_property_setter(
+                    ctx,
+                    receiver,
+                    property_name,
+                    *protocol_id,
+                    *is_static,
+                    value,
+                    expr,
+                );
+            }
+
             // Not a computed property or subscript - use direct assignment
             let target_place = match lower_expression(ctx, target) {
                 Value::Place(p) => p,
@@ -1500,6 +1520,26 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
                 Some(expr.span.clone()),
             ));
             Value::Immediate(Immediate::error())
+        },
+
+        // === Protocol Property Access (via witness table) ===
+        ExprKind::ProtocolPropertyAccess {
+            receiver,
+            field_id: _,
+            property_name,
+            protocol_id,
+            is_static,
+            has_setter: _,
+        } => {
+            // Access a computed property on a type parameter through witness dispatch
+            lower_protocol_property_access(
+                ctx,
+                receiver,
+                property_name,
+                *protocol_id,
+                *is_static,
+                expr,
+            )
         },
 
         ExprKind::Error => {
@@ -3945,6 +3985,152 @@ fn lower_getter_call(
     }
 
     Value::Place(result_place)
+}
+
+/// Lower a protocol property access through witness dispatch.
+///
+/// This is used when accessing a computed property on a type parameter through protocol bounds.
+/// For example: `T.defaultValue` or `item.value` where T/item conforms to a protocol with
+/// that property requirement.
+fn lower_protocol_property_access(
+    ctx: &mut LoweringContext,
+    receiver: &Expression,
+    property_name: &str,
+    protocol_id: SymbolId,
+    is_static: bool,
+    expr: &Expression,
+) -> Value {
+    // Get the protocol symbol for the qualified name
+    let protocol_symbol = match ctx.model.query(SymbolFor { id: protocol_id }) {
+        Some(sym) => sym,
+        None => {
+            ctx.emit_error(LoweringError::internal(
+                format!("protocol symbol not found: {:?}", protocol_id),
+                Some(expr.span.clone()),
+            ));
+            return Value::Immediate(Immediate::error());
+        },
+    };
+    let protocol_name = qualified_name_for_symbol(ctx, &protocol_symbol);
+
+    // Get the result type and create a temp for the result
+    let result_ty = lower_type(ctx, &expr.ty);
+    let result_local = ctx.create_temp("getter_result", result_ty);
+    let result_place = Place::local(result_local);
+
+    // Track the temp for deinit if needed
+    if ctx.type_needs_deinit(&expr.ty) {
+        ctx.track_statement_temp(result_local);
+    }
+
+    // Build the getter method name for witness lookup
+    let getter_method_name = format!("get:{}", property_name);
+
+    // Lower the receiver type for witness dispatch
+    let for_type = lower_type(ctx, &receiver.ty);
+
+    if is_static {
+        // Static property access on type parameter: T.property
+        // No receiver value, just call the witness getter
+        let mir_callee = Callee::witness(protocol_name, getter_method_name, for_type, vec![]);
+        ctx.emit_call_with_modes(result_place.clone(), mir_callee, vec![]);
+    } else {
+        // Instance property access on type parameter: item.property where item: T
+        // Pass receiver as argument (borrowed)
+        let receiver_value = lower_expression(ctx, receiver);
+
+        // Getters typically borrow self
+        let ref_value = create_ref(ctx, &receiver_value, &receiver.ty, false);
+        let call_args = vec![CallArg::new(ref_value, PassingMode::Copy)];
+
+        mark_moved_args(ctx, &call_args);
+        let mir_callee = Callee::witness(protocol_name, getter_method_name, for_type, vec![]);
+        ctx.emit_call_with_modes(result_place.clone(), mir_callee, call_args);
+    }
+
+    Value::Place(result_place)
+}
+
+/// Lower a protocol property setter through witness dispatch.
+///
+/// This is used when assigning to a computed property on a type parameter through protocol bounds.
+/// For example: `T.count = 5` or `item.value = 10` where T/item conforms to a protocol with
+/// that property requirement.
+fn lower_protocol_property_setter(
+    ctx: &mut LoweringContext,
+    receiver: &Expression,
+    property_name: &str,
+    protocol_id: SymbolId,
+    is_static: bool,
+    value: &Expression,
+    expr: &Expression,
+) -> Value {
+    // Get the protocol symbol for the qualified name
+    let protocol_symbol = match ctx.model.query(SymbolFor { id: protocol_id }) {
+        Some(sym) => sym,
+        None => {
+            ctx.emit_error(LoweringError::internal(
+                format!("protocol symbol not found: {:?}", protocol_id),
+                Some(expr.span.clone()),
+            ));
+            return Value::Immediate(Immediate::error());
+        },
+    };
+    let protocol_name = qualified_name_for_symbol(ctx, &protocol_symbol);
+
+    // Build the setter method name for witness lookup
+    let setter_method_name = format!("set:{}", property_name);
+
+    // Lower the receiver type for witness dispatch
+    let for_type = lower_type(ctx, &receiver.ty);
+
+    // Lower the value to be set
+    let rhs_value = lower_expression(ctx, value);
+
+    // Build call args: value is the "newValue" parameter (consuming)
+    // Setters return unit, so we need a unit result place
+    let unit_ty = ctx.mir.ty_unit();
+    let unit_local = ctx.create_temp("setter_result", unit_ty);
+    let unit_place = Place::local(unit_local);
+
+    if is_static {
+        // Static property setter: T.property = value
+        // Only pass the newValue argument
+        let call_args = if value.ty.is_copyable() {
+            vec![CallArg::new(rhs_value, PassingMode::Copy)]
+        } else {
+            vec![CallArg::new(rhs_value, PassingMode::Move)]
+        };
+
+        mark_moved_args(ctx, &call_args);
+        let mir_callee = Callee::witness(protocol_name, setter_method_name, for_type, vec![]);
+        ctx.emit_call_with_modes(unit_place, mir_callee, call_args);
+    } else {
+        // Instance property setter: item.property = value
+        // Pass receiver (mutating) and newValue
+        let receiver_value = lower_expression(ctx, receiver);
+
+        // Setter needs mutable reference to self
+        let ref_value = create_ref(ctx, &receiver_value, &receiver.ty, true);
+
+        // Build call args: mutable self reference + newValue
+        let value_arg = if value.ty.is_copyable() {
+            CallArg::new(rhs_value, PassingMode::Copy)
+        } else {
+            CallArg::new(rhs_value, PassingMode::Move)
+        };
+        let call_args = vec![
+            CallArg::new(ref_value, PassingMode::Copy), // self: &var Self
+            value_arg,                                  // newValue: T
+        ];
+
+        mark_moved_args(ctx, &call_args);
+        let mir_callee = Callee::witness(protocol_name, setter_method_name, for_type, vec![]);
+        ctx.emit_call_with_modes(unit_place, mir_callee, call_args);
+    }
+
+    // Assignment returns unit
+    Value::Immediate(Immediate::unit())
 }
 
 /// Lower a static getter call for a module-level or static computed property.

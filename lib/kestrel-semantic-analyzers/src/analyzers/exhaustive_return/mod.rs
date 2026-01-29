@@ -305,6 +305,7 @@ fn analyze_expression(expr: &Expression) -> ReturnState {
             ReturnState::MayFallThrough
         },
         ExprKind::FieldAccess { object, .. } => analyze_expression(object),
+        ExprKind::ProtocolPropertyAccess { receiver, .. } => analyze_expression(receiver),
         ExprKind::TupleIndex { tuple, .. } => analyze_expression(tuple),
         ExprKind::MethodRef { receiver, .. } => analyze_expression(receiver),
         ExprKind::PrimitiveMethodRef { receiver, .. } => analyze_expression(receiver),

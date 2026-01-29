@@ -2253,6 +2253,7 @@ fn expression_references_local(
         | ExprKind::TypeRef(_)
         | ExprKind::TypeParameterRef(_)
         | ExprKind::AssociatedTypeRef
+        | ExprKind::ProtocolPropertyAccess { .. }
         | ExprKind::EnumCase { .. }
         | ExprKind::Break { .. }
         | ExprKind::Continue { .. }
@@ -2878,6 +2879,11 @@ where
             for arg in arguments {
                 collect_captures_from_expression(&arg.value, process);
             }
+        },
+
+        // ProtocolPropertyAccess - recurse into receiver
+        ExprKind::ProtocolPropertyAccess { receiver, .. } => {
+            collect_captures_from_expression(receiver, process);
         },
 
         // Leaf nodes - no recursion needed

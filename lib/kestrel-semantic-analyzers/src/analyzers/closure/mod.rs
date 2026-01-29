@@ -332,6 +332,10 @@ fn find_assignments_to_locals(
             find_assignments_to_locals(object, target_locals, container_id, ctx);
         },
 
+        ExprKind::ProtocolPropertyAccess { receiver, .. } => {
+            find_assignments_to_locals(receiver, target_locals, container_id, ctx);
+        },
+
         ExprKind::TupleIndex { tuple, .. } => {
             find_assignments_to_locals(tuple, target_locals, container_id, ctx);
         },

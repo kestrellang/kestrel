@@ -397,6 +397,9 @@ fn analyze_expression(
         ExprKind::FieldAccess { object, .. } => {
             state = analyze_expression(object, state, false, ctx);
         },
+        ExprKind::ProtocolPropertyAccess { receiver, .. } => {
+            state = analyze_expression(receiver, state, false, ctx);
+        },
         ExprKind::TupleIndex { tuple, .. } => {
             state = analyze_expression(tuple, state, false, ctx);
         },

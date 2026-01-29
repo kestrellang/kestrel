@@ -718,6 +718,16 @@ fn collect_captures_recursive(
             );
         },
 
+        ExprKind::ProtocolPropertyAccess { receiver, .. } => {
+            collect_captures_recursive(
+                receiver,
+                closure_entry_depth,
+                local_scope,
+                captures,
+                seen_ids,
+            );
+        },
+
         ExprKind::TupleIndex { tuple, .. } => {
             collect_captures_recursive(tuple, closure_entry_depth, local_scope, captures, seen_ids);
         },

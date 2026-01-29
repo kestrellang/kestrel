@@ -587,6 +587,21 @@ fn apply_to_expression(expr: &Expression, solution: &Solution) -> Expression {
                 .map(|arg| apply_to_argument(arg, solution))
                 .collect(),
         },
+        ExprKind::ProtocolPropertyAccess {
+            receiver,
+            field_id,
+            property_name,
+            protocol_id,
+            is_static,
+            has_setter,
+        } => ExprKind::ProtocolPropertyAccess {
+            receiver: Box::new(apply_to_expression(receiver, solution)),
+            field_id: *field_id,
+            property_name: property_name.clone(),
+            protocol_id: *protocol_id,
+            is_static: *is_static,
+            has_setter: *has_setter,
+        },
     };
 
     Expression::new(kind, resolved_ty, expr.span.clone(), expr.mutable)

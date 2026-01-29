@@ -1251,6 +1251,12 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
             }
         },
 
+        ExprKind::ProtocolPropertyAccess { receiver, .. } => {
+            // Constraints already handled during resolution
+            // Just recurse into receiver
+            generate_expression_constraints(ctx, receiver);
+        },
+
         ExprKind::Error => {},
     }
 }

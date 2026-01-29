@@ -206,6 +206,9 @@ fn walk_expression(
             ExprKind::FieldAccess { object, .. } => {
                 walk_expression(object, analyzers, model, ctx);
             },
+            ExprKind::ProtocolPropertyAccess { receiver, .. } => {
+                walk_expression(receiver, analyzers, model, ctx);
+            },
             ExprKind::TupleIndex { tuple, .. } => {
                 walk_expression(tuple, analyzers, model, ctx);
             },

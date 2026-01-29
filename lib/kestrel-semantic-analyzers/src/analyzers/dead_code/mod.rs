@@ -345,6 +345,7 @@ fn analyze_expression(expr: &Expression, errors: &mut Vec<UnreachableCodeWarning
             Divergence::None
         },
         ExprKind::FieldAccess { object, .. } => analyze_expression(object, errors),
+        ExprKind::ProtocolPropertyAccess { receiver, .. } => analyze_expression(receiver, errors),
         ExprKind::TupleIndex { tuple, .. } => analyze_expression(tuple, errors),
         ExprKind::MethodRef { receiver, .. } => analyze_expression(receiver, errors),
         ExprKind::PrimitiveMethodRef { receiver, .. } => analyze_expression(receiver, errors),
@@ -567,6 +568,7 @@ fn expression_contains_break(expr: &Expression) -> bool {
             .iter()
             .any(|(k, v)| expression_contains_break(k) || expression_contains_break(v)),
         ExprKind::FieldAccess { object, .. } => expression_contains_break(object),
+        ExprKind::ProtocolPropertyAccess { receiver, .. } => expression_contains_break(receiver),
         ExprKind::TupleIndex { tuple, .. } => expression_contains_break(tuple),
         ExprKind::MethodRef { receiver, .. } => expression_contains_break(receiver),
         ExprKind::PrimitiveMethodRef { receiver, .. } => expression_contains_break(receiver),

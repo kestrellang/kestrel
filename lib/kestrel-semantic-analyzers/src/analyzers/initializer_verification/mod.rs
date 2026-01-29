@@ -614,6 +614,9 @@ fn analyze_expression(
                 state = analyze_expression(&arg.value, state, false, ctx);
             }
         },
+        ExprKind::ProtocolPropertyAccess { receiver, .. } => {
+            state = analyze_expression(receiver, state, false, ctx);
+        },
     }
     state
 }

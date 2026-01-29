@@ -13,6 +13,7 @@ use kestrel_semantic_tree::behavior::implements::ImplementsBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::enum_symbol::EnumSymbol;
 use kestrel_semantic_tree::symbol::extension::ExtensionSymbol;
+use kestrel_semantic_tree::symbol::field::FieldSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
 use kestrel_semantic_tree::symbol::type_alias::TypeAliasSymbol;
@@ -496,6 +497,80 @@ fn bind_methods(
         if protocol_method_names.contains(&func_name) {
             let impl_name = qualified_name_for_symbol(ctx, &child);
             ctx.mir.witnesses[witness_id].bind_method(func_name, impl_name, vec![]);
+        }
+    }
+
+    // Bind property getters and setters
+    // Protocol property requirements need their getters/setters in the witness table
+    // so that T.property can be resolved through witness lookup.
+    bind_property_accessors(ctx, witness_id, implementing_symbol, protocol_symbol);
+}
+
+/// Bind computed property getters and setters to the witness table.
+///
+/// For a protocol property requirement like `var value: Int { get set }`,
+/// we need witness entries for "get:value" and "set:value" pointing to
+/// the implementing type's getter/setter functions.
+fn bind_property_accessors(
+    ctx: &mut LoweringContext,
+    witness_id: Id<kestrel_execution_graph::Witness>,
+    implementing_symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+    protocol_symbol: &Arc<kestrel_semantic_tree::symbol::protocol::ProtocolSymbol>,
+) {
+    // Collect protocol property names for fallback matching
+    let protocol_property_names: std::collections::HashSet<String> = protocol_symbol
+        .metadata()
+        .children()
+        .into_iter()
+        .filter(|c| c.metadata().kind() == KestrelSymbolKind::Field)
+        .filter_map(|c| {
+            let field = c.downcast_arc::<FieldSymbol>().ok()?;
+            if field.is_computed() {
+                Some(field.metadata().name().value.clone())
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    // Find implementing fields (computed properties)
+    for child in implementing_symbol.metadata().children() {
+        if child.metadata().kind() != KestrelSymbolKind::Field {
+            continue;
+        }
+
+        let Ok(field) = child.clone().downcast_arc::<FieldSymbol>() else {
+            continue;
+        };
+
+        // Only process computed properties
+        if !field.is_computed() {
+            continue;
+        }
+
+        let field_name = field.metadata().name().value.clone();
+
+        // Check if this field implements a protocol property requirement
+        if !protocol_property_names.contains(&field_name) {
+            continue;
+        }
+
+        // Bind getter if present
+        if let Some(getter_id) = field.getter() {
+            if let Some(getter_sym) = ctx.model.query(SymbolFor { id: getter_id }) {
+                let getter_method_name = format!("get:{}", field_name);
+                let impl_name = qualified_name_for_symbol(ctx, &getter_sym);
+                ctx.mir.witnesses[witness_id].bind_method(getter_method_name, impl_name, vec![]);
+            }
+        }
+
+        // Bind setter if present
+        if let Some(setter_id) = field.setter() {
+            if let Some(setter_sym) = ctx.model.query(SymbolFor { id: setter_id }) {
+                let setter_method_name = format!("set:{}", field_name);
+                let impl_name = qualified_name_for_symbol(ctx, &setter_sym);
+                ctx.mir.witnesses[witness_id].bind_method(setter_method_name, impl_name, vec![]);
+            }
         }
     }
 }
