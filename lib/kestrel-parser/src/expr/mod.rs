@@ -419,10 +419,12 @@ pub struct ClosureParamsData {
     pub rparen: Span,
 }
 
-/// Single closure parameter: name or name: Type
+/// Single closure parameter: pattern or pattern: Type
+///
+/// Supports destructuring patterns like `(a, b)` or `Point { x, y }`.
 #[derive(Debug, Clone)]
 pub struct ClosureParamData {
-    pub name: Span,
+    pub pattern: crate::pattern::PatternVariant,
     pub colon: Option<Span>,
     pub ty: Option<TyVariant>,
 }
@@ -1677,7 +1679,7 @@ pub fn expr_parser<'tokens>()
         let closure_expr =
             {
                 let closure_param = skip_trivia()
-                    .ignore_then(just(Token::Identifier).map_with(|_, e| to_kestrel_span(e.span())))
+                    .ignore_then(crate::common::parsers::parameter_pattern_parser())
                     .then(
                         skip_trivia()
                             .ignore_then(
@@ -1686,12 +1688,12 @@ pub fn expr_parser<'tokens>()
                             .then(ty_parser())
                             .or_not(),
                     )
-                    .map(|(name, ty_opt)| {
+                    .map(|(pattern, ty_opt)| {
                         let (colon, ty) = match ty_opt {
                             Some((c, t)) => (Some(c), Some(t)),
                             None => (None, None),
                         };
-                        ClosureParamData { name, colon, ty }
+                        ClosureParamData { pattern, colon, ty }
                     });
 
                 let closure_params = skip_trivia()
@@ -2924,7 +2926,7 @@ fn emit_closure_expr(
                 sink.add_token(SyntaxKind::Comma, params_data.commas[i - 1].clone());
             }
             sink.start_node(SyntaxKind::ClosureParam);
-            sink.add_token(SyntaxKind::Identifier, param.name.clone());
+            crate::pattern::emit_pattern_variant(sink, &param.pattern);
             if let Some(ref colon) = param.colon {
                 sink.add_token(SyntaxKind::Colon, colon.clone());
             }

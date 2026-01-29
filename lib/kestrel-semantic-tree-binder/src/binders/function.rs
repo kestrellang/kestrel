@@ -471,6 +471,7 @@ impl DeclarationBinder for FunctionBinder {
         if let Some(body_node) = find_child(syntax, SyntaxKind::FunctionBody) {
             resolve_function_body(
                 symbol,
+                syntax,  // Pass full syntax for parameter pattern access
                 &body_node,
                 &resolved_params,
                 context,
@@ -484,6 +485,7 @@ impl DeclarationBinder for FunctionBinder {
 /// Resolve a function's body and attach ExecutableBehavior to the symbol
 fn resolve_function_body(
     symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+    func_syntax: &SyntaxNode,  // Full function syntax for parameter pattern access
     body_node: &SyntaxNode,
     params: &[Parameter],
     context: &mut BindingContext,
@@ -492,9 +494,11 @@ fn resolve_function_body(
 ) {
     use crate::body_resolver::BodyResolutionContext;
     use crate::body_resolver::context::{
-        create_local_scope_for_body, resolve_body_and_attach_executable,
+        create_local_scope_for_body, resolve_body_and_attach_executable_with_patterns,
     };
+    use crate::body_resolver::patterns::resolve_pattern_with_mutability;
     use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
+    use kestrel_semantic_tree::pattern::{Mutability, Pattern};
     use kestrel_semantic_tree::symbol::function::FunctionSymbol;
 
     // Downcast to FunctionSymbol to get Arc<FunctionSymbol> for LocalScope
@@ -534,32 +538,13 @@ fn resolve_function_body(
         );
     }
 
-    // Add parameters to local scope
-    // Mutability depends on access mode:
-    // - Borrow: immutable (read-only)
-    // - Mutating: mutable (read-write, but caller keeps ownership)
-    // - Consuming: mutable (takes ownership, can modify)
-    for param in params {
-        use kestrel_semantic_tree::behavior::callable::ParameterAccessMode;
-        let param_ty = param.ty.clone();
-        let param_name = param.bind_name.value.clone();
-        let param_span = param.bind_name.span.clone();
-        let is_mutable = match param.access_mode {
-            ParameterAccessMode::Borrow => false,
-            ParameterAccessMode::Mutating => true,
-            ParameterAccessMode::Consuming => true,
-        };
-        // Add to local scope (this also adds it to the FunctionSymbol's locals)
-        local_scope.bind(param_name, param_ty, is_mutable, param_span);
-    }
-
     // Get the where clause from the function's generics behavior
     let where_clause = symbol
         .metadata()
         .get_behavior::<GenericsBehavior>()
         .map(|g| g.where_clause().clone());
 
-    // Create body resolution context
+    // Create body resolution context early so we can use pattern resolution
     let mut body_ctx = BodyResolutionContext::new_with_scope(
         context.model,
         context.diagnostics,
@@ -570,7 +555,111 @@ fn resolve_function_body(
         where_clause,
     );
 
-    resolve_body_and_attach_executable(symbol, body_node, &mut body_ctx);
+    // Get parameter syntax nodes from the function declaration
+    let param_syntax_nodes: Vec<SyntaxNode> = find_child(func_syntax, SyntaxKind::ParameterList)
+        .map(|param_list| {
+            param_list
+                .children()
+                .filter(|c| c.kind() == SyntaxKind::Parameter)
+                .collect()
+        })
+        .unwrap_or_default();
+
+    // Collect parameter patterns for lowering support
+    let mut parameter_patterns: Vec<Pattern> = Vec::new();
+
+    // Add parameters to local scope using proper pattern resolution
+    // Mutability depends on access mode:
+    // - Borrow: immutable (read-only)
+    // - Mutating: mutable (read-write, but caller keeps ownership)
+    // - Consuming: mutable (takes ownership, can modify)
+    for (i, param) in params.iter().enumerate() {
+        use kestrel_semantic_tree::behavior::callable::ParameterAccessMode;
+        let param_ty = param.ty.clone();
+        let is_mutable = match param.access_mode {
+            ParameterAccessMode::Borrow => false,
+            ParameterAccessMode::Mutating => true,
+            ParameterAccessMode::Consuming => true,
+        };
+        let mutability = if is_mutable {
+            Mutability::Mutable
+        } else {
+            Mutability::Immutable
+        };
+
+        // Try to find the Pattern node in the parameter syntax
+        if let Some(param_syntax) = param_syntax_nodes.get(i) {
+            if let Some(pattern_node) = param_syntax
+                .children()
+                .find(|c| c.kind() == SyntaxKind::Pattern)
+            {
+                // Use the existing pattern resolution machinery
+                // This properly handles tuple/struct destructuring with correct types
+                let pattern = resolve_pattern_with_mutability(
+                    &pattern_node,
+                    &mut body_ctx,
+                    Some(&param_ty),
+                    is_mutable,
+                );
+                // Store the pattern for lowering
+                parameter_patterns.push(pattern);
+                // The pattern resolution automatically binds names to local scope
+                continue;
+            }
+
+            // Fallback: look for Name nodes (backward compat with old syntax)
+            let name_nodes: Vec<SyntaxNode> = param_syntax
+                .children()
+                .filter(|c| c.kind() == SyntaxKind::Name)
+                .collect();
+
+            if let Some(name_node) = name_nodes.last() {
+                // Try to extract a simple binding
+                for child in name_node.children_with_tokens() {
+                    if let Some(token) = child.as_token() {
+                        if token.kind() == SyntaxKind::Identifier {
+                            let span = kestrel_syntax_tree::utils::get_node_span(&name_node, file_id);
+                            let local_id = body_ctx.local_scope.bind(
+                                token.text().to_string(),
+                                param_ty.clone(),
+                                is_mutable,
+                                span.clone(),
+                            );
+                            // Create simple binding pattern for lowering
+                            let pattern = Pattern::local(
+                                local_id,
+                                mutability,
+                                token.text().to_string(),
+                                param_ty.clone(),
+                                span,
+                            );
+                            parameter_patterns.push(pattern);
+                            break;
+                        }
+                    }
+                }
+                continue;
+            }
+        }
+
+        // Final fallback: use bind_name from semantic parameter data
+        let param_name = param.bind_name.value.clone();
+        let param_span = param.bind_name.span.clone();
+        let local_id =
+            body_ctx
+                .local_scope
+                .bind(param_name.clone(), param_ty.clone(), is_mutable, param_span.clone());
+        // Create simple binding pattern for lowering
+        let pattern = Pattern::local(local_id, mutability, param_name, param_ty, param_span);
+        parameter_patterns.push(pattern);
+    }
+
+    resolve_body_and_attach_executable_with_patterns(
+        symbol,
+        body_node,
+        &mut body_ctx,
+        parameter_patterns,
+    );
 }
 
 /// Resolve return type from a FunctionDeclaration syntax node during bind phase

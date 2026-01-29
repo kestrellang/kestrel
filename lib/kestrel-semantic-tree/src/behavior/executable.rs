@@ -8,6 +8,7 @@ use semantic_tree::behavior::Behavior;
 use crate::behavior::KestrelBehaviorKind;
 use crate::expr::Expression;
 use crate::language::KestrelLanguage;
+use crate::pattern::Pattern;
 use crate::stmt::Statement;
 
 /// A code block containing statements and an optional yield expression.
@@ -58,6 +59,10 @@ impl CodeBlock {
 pub struct ExecutableBehavior {
     /// The resolved code block
     body: CodeBlock,
+    /// Resolved patterns for parameters (for destructuring support).
+    /// One pattern per CallableParameter, in the same order.
+    /// Empty for functions without destructuring patterns.
+    parameter_patterns: Vec<Pattern>,
 }
 
 impl Behavior<KestrelLanguage> for ExecutableBehavior {
@@ -69,7 +74,18 @@ impl Behavior<KestrelLanguage> for ExecutableBehavior {
 impl ExecutableBehavior {
     /// Create a new ExecutableBehavior with the given body.
     pub fn new(body: CodeBlock) -> Self {
-        ExecutableBehavior { body }
+        ExecutableBehavior {
+            body,
+            parameter_patterns: Vec::new(),
+        }
+    }
+
+    /// Create a new ExecutableBehavior with body and parameter patterns.
+    pub fn with_parameter_patterns(body: CodeBlock, parameter_patterns: Vec<Pattern>) -> Self {
+        ExecutableBehavior {
+            body,
+            parameter_patterns,
+        }
     }
 
     /// Get the code block body.
@@ -81,6 +97,12 @@ impl ExecutableBehavior {
     pub fn body_mut(&mut self) -> &mut CodeBlock {
         &mut self.body
     }
+
+    /// Get the parameter patterns for destructuring support.
+    /// Returns one pattern per parameter, in the same order as CallableBehavior::parameters().
+    pub fn parameter_patterns(&self) -> &[Pattern] {
+        &self.parameter_patterns
+    }
 }
 
 /// Behavior indicating that a symbol has a type-resolved executable body.
@@ -91,6 +113,10 @@ impl ExecutableBehavior {
 pub struct ResolvedExecutableBehavior {
     /// The type-resolved code block
     body: CodeBlock,
+    /// Resolved patterns for parameters (for destructuring support).
+    /// One pattern per CallableParameter, in the same order.
+    /// Empty for functions without destructuring patterns.
+    parameter_patterns: Vec<Pattern>,
 }
 
 impl Behavior<KestrelLanguage> for ResolvedExecutableBehavior {
@@ -102,12 +128,29 @@ impl Behavior<KestrelLanguage> for ResolvedExecutableBehavior {
 impl ResolvedExecutableBehavior {
     /// Create a new ResolvedExecutableBehavior with the given body.
     pub fn new(body: CodeBlock) -> Self {
-        ResolvedExecutableBehavior { body }
+        ResolvedExecutableBehavior {
+            body,
+            parameter_patterns: Vec::new(),
+        }
+    }
+
+    /// Create a new ResolvedExecutableBehavior with body and parameter patterns.
+    pub fn with_parameter_patterns(body: CodeBlock, parameter_patterns: Vec<Pattern>) -> Self {
+        ResolvedExecutableBehavior {
+            body,
+            parameter_patterns,
+        }
     }
 
     /// Get the code block body.
     pub fn body(&self) -> &CodeBlock {
         &self.body
+    }
+
+    /// Get the parameter patterns for destructuring support.
+    /// Returns one pattern per parameter, in the same order as CallableBehavior::parameters().
+    pub fn parameter_patterns(&self) -> &[Pattern] {
+        &self.parameter_patterns
     }
 }
 

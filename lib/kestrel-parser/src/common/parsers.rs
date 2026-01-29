@@ -24,6 +24,7 @@ use crate::attribute::attribute_list_parser;
 use crate::block::{CodeBlockData, code_block_parser};
 use crate::expr::expr_parser;
 use crate::input::{ParserExtra, ParserInput, to_kestrel_span};
+use crate::pattern::{PatternVariant, StructPatternFieldData};
 use crate::ty::{TyVariant, ty_parser};
 use crate::type_param::{type_parameter_list_parser, where_clause_parser};
 
@@ -287,13 +288,108 @@ fn parameter_access_mode_parser<'tokens>()
         .or(empty().to(None))
 }
 
-/// Parser for a single parameter: `(access_mode)? (label)? bind_name: Type`
+/// Parser for irrefutable patterns used in function parameters.
+///
+/// Only allows patterns that always match:
+/// - Binding patterns: `x`, `var x`
+/// - Tuple patterns: `(a, b)`, `(a, (b, c))`
+/// - Struct patterns: `Point { x, y }`, `Point { x: a, .. }`
+/// - Wildcard: `_`
+///
+/// Does NOT allow refutable patterns (enum, literal, range, or).
+pub(crate) fn parameter_pattern_parser<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, PatternVariant, ParserExtra<'tokens>> + Clone {
+    recursive(|param_pattern| {
+        // Wildcard pattern: _
+        let wildcard = skip_trivia()
+            .ignore_then(just(Token::Underscore).map_with(|_, e| to_kestrel_span(e.span())))
+            .map(PatternVariant::Wildcard);
+
+        // Binding pattern: name or var name
+        let binding = skip_trivia()
+            .ignore_then(
+                just(Token::Var)
+                    .map_with(|_, e| Some(to_kestrel_span(e.span())))
+                    .or(empty().to(None)),
+            )
+            .then(trivia(select! {
+                Token::Identifier = e => to_kestrel_span(e.span()),
+            }))
+            .map(|(var_span, name_span)| PatternVariant::Binding { var_span, name_span });
+
+        // Tuple pattern: (p1, p2, ...)
+        let tuple = skip_trivia()
+            .ignore_then(just(Token::LParen).map_with(|_, e| to_kestrel_span(e.span())))
+            .then(
+                param_pattern
+                    .clone()
+                    .separated_by(trivia(just(Token::Comma)))
+                    .allow_trailing()
+                    .collect::<Vec<_>>(),
+            )
+            .then(trivia(just(Token::RParen).map_with(|_, e| to_kestrel_span(e.span()))))
+            .map(|((lparen, elements), rparen)| PatternVariant::Tuple {
+                lparen,
+                elements,
+                rparen,
+            });
+
+        // Struct pattern: StructName { field, field: pattern, .. }
+        let struct_field = trivia(select! {
+            Token::Identifier = e => to_kestrel_span(e.span()),
+        })
+        .then(
+            trivia(just(Token::Colon).map_with(|_, e| to_kestrel_span(e.span())))
+                .then(param_pattern.clone())
+                .map(|(colon, pattern)| Some((colon, pattern)))
+                .or(empty().to(None)),
+        )
+        .map(|(field_name, binding)| StructPatternFieldData { field_name, binding });
+
+        let struct_rest = trivia(just(Token::DotDot).map_with(|_, e| to_kestrel_span(e.span())));
+
+        let struct_pattern = trivia(select! {
+            Token::Identifier = e => to_kestrel_span(e.span()),
+        })
+        .then(trivia(just(Token::LBrace).map_with(|_, e| to_kestrel_span(e.span()))))
+        .then(
+            struct_field
+                .separated_by(trivia(just(Token::Comma)))
+                .allow_trailing()
+                .collect::<Vec<_>>(),
+        )
+        .then(
+            trivia(just(Token::Comma))
+                .or_not()
+                .ignore_then(struct_rest.or_not()),
+        )
+        .then(trivia(just(Token::RBrace).map_with(|_, e| to_kestrel_span(e.span()))))
+        .map(
+            |((((struct_name, lbrace), fields), rest), rbrace)| PatternVariant::Struct {
+                struct_name,
+                lbrace,
+                fields,
+                rest,
+                rbrace,
+            },
+        );
+
+        // Priority: tuple first (starts with `(`), then struct (identifier + `{`),
+        // then wildcard (`_`), then binding (identifier without `{`)
+        tuple.or(struct_pattern).or(wildcard).or(binding).boxed()
+    })
+}
+
+/// Parser for a single parameter: `(access_mode)? (label)? pattern: Type`
 ///
 /// # Examples
-/// - `x: Int` → access_mode=None, label=None, bind_name=x
-/// - `with x: Int` → access_mode=None, label="with", bind_name=x
-/// - `mutating x: Int` → access_mode=Mutating, label=None, bind_name=x
-/// - `consuming point p: Point` → access_mode=Consuming, label="point", bind_name=p
+/// - `x: Int` → access_mode=None, label=None, pattern=Binding(x)
+/// - `with x: Int` → access_mode=None, label="with", pattern=Binding(x)
+/// - `mutating x: Int` → access_mode=Mutating, label=None, pattern=Binding(x)
+/// - `(a, b): (Int, Int)` → access_mode=None, label=None, pattern=Tuple
+/// - `point (x, y): Point` → access_mode=None, label="point", pattern=Tuple
+/// - `Point { x, y }: Point` → access_mode=None, label=None, pattern=Struct
+/// - `_: Int` → access_mode=None, label=None, pattern=Wildcard
 pub(crate) fn parameter_parser<'tokens>()
 -> impl Parser<'tokens, ParserInput<'tokens>, ParameterData, ParserExtra<'tokens>> + Clone {
     // Parse identifier (with trivia skipping)
@@ -301,35 +397,38 @@ pub(crate) fn parameter_parser<'tokens>()
         Token::Identifier = e => to_kestrel_span(e.span()),
     });
 
-    // Labeled parameter: (access_mode)? label name: Type
+    let param_pattern = parameter_pattern_parser();
+
+    // Labeled parameter: (access_mode)? label pattern: Type
+    // The label is always a simple identifier, followed by a pattern
     let labeled = parameter_access_mode_parser()
         .then(ident.clone())
-        .then(ident.clone())
+        .then(param_pattern.clone())
         .then(trivia(
             just(Token::Colon).map_with(|_, e| to_kestrel_span(e.span())),
         ))
         .then(ty_parser())
         .map(
-            |((((access_mode, label), bind_name), colon), ty)| ParameterData {
+            |((((access_mode, label), pattern), colon), ty)| ParameterData {
                 access_mode,
                 label: Some(label),
-                bind_name,
+                pattern,
                 colon,
                 ty,
             },
         );
 
-    // Unlabeled parameter: (access_mode)? name: Type
+    // Unlabeled parameter: (access_mode)? pattern: Type
     let unlabeled = parameter_access_mode_parser()
-        .then(ident)
+        .then(param_pattern)
         .then(trivia(
             just(Token::Colon).map_with(|_, e| to_kestrel_span(e.span())),
         ))
         .then(ty_parser())
-        .map(|(((access_mode, bind_name), colon), ty)| ParameterData {
+        .map(|(((access_mode, pattern), colon), ty)| ParameterData {
             access_mode,
             label: None,
-            bind_name,
+            pattern,
             colon,
             ty,
         });

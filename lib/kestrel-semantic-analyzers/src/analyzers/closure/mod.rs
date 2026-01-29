@@ -175,8 +175,20 @@ fn validate_parameter_assignments(
     // This would require walking the closure body and detecting assignments
 
     // Build a set of parameter names for detection
+    // For patterns, we need to collect names from all bindings in the pattern
     if let Some(param_list) = params {
-        let _param_names: Vec<_> = param_list.iter().map(|p| p.name.clone()).collect();
+        let _param_names: Vec<_> = param_list
+            .iter()
+            .filter_map(|p| {
+                // For simple binding patterns, extract the name
+                // For complex patterns, this placeholder just gets the first name (if any)
+                use kestrel_semantic_tree::pattern::PatternKind;
+                match &p.pattern.kind {
+                    PatternKind::Local { name, .. } => Some(name.clone()),
+                    _ => None, // Complex patterns - would need full traversal
+                }
+            })
+            .collect();
 
         // Similar to capture validation, we'd need to walk the closure body
         // and check for assignments to these parameters

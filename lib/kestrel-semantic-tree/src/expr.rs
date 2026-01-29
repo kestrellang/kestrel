@@ -9,6 +9,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use kestrel_span::Span;
 use semantic_tree::symbol::SymbolId;
 
+use crate::pattern::Pattern;
 use crate::stmt::{Statement, StatementKind};
 use crate::symbol::local::LocalId;
 use crate::ty::{IntBits, Substitutions, Ty};
@@ -1278,18 +1279,18 @@ pub enum ExprKind {
 }
 
 /// A closure parameter.
+///
+/// Supports destructuring patterns like `(a, b)` or `Point { x, y }`.
 #[derive(Debug, Clone)]
 pub struct ClosureParam {
-    /// Parameter name
-    pub name: String,
+    /// Pattern for the parameter (may contain multiple bindings)
+    pub pattern: Pattern,
     /// Parameter type (may be inferred initially)
     pub ty: Ty,
     /// Whether the type was explicitly annotated
     pub is_type_annotated: bool,
     /// Source span
     pub span: Span,
-    /// The local variable ID for this parameter
-    pub local_id: LocalId,
 }
 
 /// A captured variable from an enclosing scope.
@@ -1790,7 +1791,7 @@ impl Expression {
                     let params_str = match params {
                         Some(ps) => {
                             let p: Vec<_> =
-                                ps.iter().map(|p| format!("{}: {}", p.name, p.ty)).collect();
+                                ps.iter().map(|p| format!("{:?}: {}", p.pattern, p.ty)).collect();
                             format!("({}) in ", p.join(", "))
                         },
                         None => String::new(),

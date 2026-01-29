@@ -40,7 +40,7 @@ mod oracle;
 mod solution;
 mod solver;
 
-pub use apply::{apply_solution, apply_solution_to_locals};
+pub use apply::{apply_solution, apply_solution_to_locals, apply_solution_to_patterns};
 pub use constraint::{Constraint, ProtocolRef};
 pub use constraint_generator::generate_constraints;
 pub use context::InferenceContext;

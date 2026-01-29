@@ -8,6 +8,7 @@ use kestrel_span::Span;
 
 use crate::block::CodeBlockData;
 use crate::expr::ExprVariant;
+use crate::pattern::PatternVariant;
 use crate::ty::TyVariant;
 use crate::type_param::{TypeParameterData, WhereClauseData};
 
@@ -80,27 +81,30 @@ pub enum ParameterAccessMode {
 
 /// Raw parsed data for a single parameter
 ///
-/// Parameter syntax: `(access_mode)? (label)? bind_name: Type`
+/// Parameter syntax: `(access_mode)? (label)? pattern: Type`
 /// - `access_mode` is an optional access mode (mutating/consuming)
 /// - `label` is an optional external parameter name (used by callers)
-/// - `bind_name` is the internal parameter name (used in function body)
-/// - If only one name is provided, it's used as both label and bind_name
+/// - `pattern` is the binding pattern (identifier, tuple, struct, or wildcard)
+/// - If only one identifier is provided (no label), it's used as both label and pattern
 ///
 /// # Examples
-/// - `x: Int` → access_mode=None, label=None, bind_name=x
-/// - `with x: Int` → access_mode=None, label="with", bind_name=x
-/// - `mutating x: Int` → access_mode=Mutating, label=None, bind_name=x
-/// - `consuming point p: Point` → access_mode=Consuming, label="point", bind_name=p
+/// - `x: Int` → access_mode=None, label=None, pattern=Binding(x)
+/// - `with x: Int` → access_mode=None, label="with", pattern=Binding(x)
+/// - `mutating x: Int` → access_mode=Mutating, label=None, pattern=Binding(x)
+/// - `(a, b): (Int, Int)` → access_mode=None, label=None, pattern=Tuple
+/// - `point (x, y): Point` → access_mode=None, label="point", pattern=Tuple
+/// - `Point { x, y }: Point` → access_mode=None, label=None, pattern=Struct
+/// - `_: Int` → access_mode=None, label=None, pattern=Wildcard
 #[derive(Debug, Clone)]
 pub struct ParameterData {
     /// Optional access mode (mutating/consuming)
     /// If None, the default is borrow (read-only)
     pub access_mode: Option<(ParameterAccessMode, Span)>,
     /// Optional label (external name for callers)
-    /// If None, bind_name is used as the label
+    /// If None, the pattern's primary name is used as the label (for binding patterns)
     pub label: Option<Span>,
-    /// The binding name (internal name used in function body)
-    pub bind_name: Span,
+    /// The binding pattern (identifier, tuple, struct, or wildcard)
+    pub pattern: PatternVariant,
     /// The colon span
     pub colon: Span,
     /// The parameter type

@@ -20,6 +20,7 @@ use kestrel_execution_graph::{
     Id, MirTy, Origin, Place, QualifiedName, QualifiedNameData, Rvalue, Struct, Ty, Value,
 };
 use kestrel_semantic_tree::expr::{Capture, ClosureParam, Expression};
+use kestrel_semantic_tree::pattern::Pattern;
 use kestrel_semantic_tree::stmt::Statement;
 use kestrel_semantic_tree::symbol::local::LocalId;
 use kestrel_semantic_tree::ty::{Ty as SemanticTy, TyKind};
@@ -27,14 +28,21 @@ use kestrel_span::Span;
 
 use crate::context::LoweringContext;
 use crate::expr::lower_expression;
+use crate::pattern::lower_pattern;
 use crate::stmt::lower_statement;
 use crate::ty::lower_type;
 
 /// An effective parameter for a closure (either explicit or implicit `it`).
+///
+/// For destructuring patterns, `pattern` contains the full pattern structure
+/// and `name` is a generated name for the MIR parameter.
 struct EffectiveParam {
+    /// Name for the MIR parameter (generated for destructuring patterns)
     name: String,
+    /// Full parameter type
     ty: SemanticTy,
-    local_id: LocalId,
+    /// The pattern for this parameter (used for destructuring)
+    pattern: Pattern,
 }
 
 /// Lower a closure expression to MIR.
@@ -139,23 +147,44 @@ fn build_effective_params(
     implicit_param: &Option<(LocalId, SemanticTy, Span)>,
     uses_it: bool,
 ) -> Vec<EffectiveParam> {
+    use kestrel_semantic_tree::pattern::{Mutability, PatternKind};
+
     if let Some(explicit_params) = params {
-        // Explicit parameters - use the LocalId from the ClosureParam
+        // Explicit parameters - extract pattern and generate MIR parameter name
         explicit_params
             .iter()
-            .map(|p| EffectiveParam {
-                name: p.name.clone(),
-                ty: p.ty.clone(),
-                local_id: p.local_id,
+            .enumerate()
+            .map(|(i, p)| {
+                // For simple binding patterns, use the binding name
+                // For complex patterns, generate a name like __param0
+                let name = match &p.pattern.kind {
+                    PatternKind::Local { name, .. } => name.clone(),
+                    _ => format!("__param{}", i),
+                };
+                EffectiveParam {
+                    name,
+                    ty: p.ty.clone(),
+                    pattern: p.pattern.clone(),
+                }
             })
             .collect()
     } else if uses_it {
         // Implicit `it` parameter was used - include it
-        if let Some((local_id, ty, _span)) = implicit_param {
+        if let Some((local_id, ty, span)) = implicit_param {
+            // Create a simple binding pattern for `it`
+            let it_pattern = Pattern {
+                kind: PatternKind::Local {
+                    local_id: *local_id,
+                    mutability: Mutability::Immutable,
+                    name: "it".to_string(),
+                },
+                ty: ty.clone(),
+                span: span.clone(),
+            };
             vec![EffectiveParam {
                 name: "it".to_string(),
                 ty: ty.clone(),
-                local_id: *local_id,
+                pattern: it_pattern,
             }]
         } else {
             vec![]
@@ -414,16 +443,20 @@ fn create_closure_function(
     // Calculate the offset for regular params (always skip env param at index 0)
     let param_offset = 1;
 
-    // Map regular parameters to their MIR locals
-    for (i, param) in params.iter().enumerate() {
-        let mir_local_id = mir_locals[param_offset + i];
-        ctx.map_local(param.local_id, mir_local_id);
-    }
-
-    // Create entry block
+    // Create entry block first so we can emit pattern decomposition code
     let entry_block = ctx.create_block();
     ctx.set_current_block(entry_block);
     ctx.mir.function_mut(func_id).entry_block = Some(entry_block);
+
+    // For each parameter, generate pattern decomposition code
+    // This maps pattern bindings (which may be multiple for destructuring) to MIR locals
+    for (i, param) in params.iter().enumerate() {
+        let mir_local_id = mir_locals[param_offset + i];
+        let param_value = Value::Place(Place::local(mir_local_id));
+        // lower_pattern handles both simple bindings (maps LocalId directly) and
+        // destructuring patterns (generates decomposition code and maps each binding)
+        lower_pattern(ctx, &param.pattern, param_value);
+    }
 
     // If we have captures, set up access by loading from the env struct
     if env_info.is_some() {

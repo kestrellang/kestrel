@@ -37,6 +37,16 @@ pub fn apply_solution(block: &CodeBlock, solution: &Solution) -> CodeBlock {
     }
 }
 
+/// Apply a solution to a vector of patterns, resolving all inference placeholders.
+///
+/// Used for parameter patterns in function declarations.
+pub fn apply_solution_to_patterns(patterns: &[Pattern], solution: &Solution) -> Vec<Pattern> {
+    patterns
+        .iter()
+        .map(|p| apply_to_pattern(p, solution))
+        .collect()
+}
+
 /// Apply solution to a statement.
 fn apply_to_statement(stmt: &Statement, solution: &Solution) -> Statement {
     let kind = match &stmt.kind {
@@ -486,11 +496,10 @@ fn apply_to_expression(expr: &Expression, solution: &Solution) -> Expression {
             let resolved_params = params.as_ref().map(|ps| {
                 ps.iter()
                     .map(|p| kestrel_semantic_tree::expr::ClosureParam {
-                        name: p.name.clone(),
+                        pattern: apply_to_pattern(&p.pattern, solution),
                         ty: resolve_type(&p.ty, solution),
                         is_type_annotated: p.is_type_annotated,
                         span: p.span.clone(),
-                        local_id: p.local_id,
                     })
                     .collect()
             });

@@ -18,7 +18,9 @@ use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::symbol::local::LocalContainer;
 use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
 use kestrel_semantic_tree::ty::{Substitutions, Ty};
-use kestrel_semantic_type_inference::{apply_solution, apply_solution_to_locals};
+use kestrel_semantic_type_inference::{
+    apply_solution, apply_solution_to_locals, apply_solution_to_patterns,
+};
 use semantic_tree::symbol::Symbol;
 
 use crate::analyzer::Analyzer;
@@ -157,6 +159,10 @@ impl Analyzer for TypeInferenceAnalyzer {
         // Apply solution to create resolved body (even if there are errors)
         let resolved_body = apply_solution(executable.body(), &solution);
 
+        // Apply solution to parameter patterns for destructuring support
+        let resolved_patterns =
+            apply_solution_to_patterns(executable.parameter_patterns(), &solution);
+
         // Update local variables in the container with resolved types.
         // This is necessary because pattern-bound locals are created with Ty::infer()
         // placeholder types, and subsequent code reads the type from the LocalContainer.
@@ -182,9 +188,9 @@ impl Analyzer for TypeInferenceAnalyzer {
             );
         }
 
-        // Add ResolvedExecutableBehavior to the symbol
-        symbol
-            .metadata()
-            .add_behavior(ResolvedExecutableBehavior::new(resolved_body));
+        // Add ResolvedExecutableBehavior to the symbol with parameter patterns
+        symbol.metadata().add_behavior(
+            ResolvedExecutableBehavior::with_parameter_patterns(resolved_body, resolved_patterns),
+        );
     }
 }

@@ -53,6 +53,104 @@ fn extract_access_mode(param_node: &SyntaxNode) -> ParameterAccessMode {
     ParameterAccessMode::Borrow
 }
 
+/// Extract the primary binding name from a pattern.
+///
+/// For simple binding patterns like `x`, returns the identifier.
+/// For complex patterns like `(a, b)`, returns the first binding name found.
+/// For wildcards `_`, returns None.
+fn extract_primary_name_from_pattern(pattern_node: &SyntaxNode, file_id: usize) -> Option<(String, kestrel_span::Span)> {
+    fn extract_recursive(node: &SyntaxNode, file_id: usize) -> Option<(String, kestrel_span::Span)> {
+        match node.kind() {
+            SyntaxKind::Pattern => {
+                // Pattern wrapper - recurse into first child
+                for child in node.children() {
+                    if let Some(result) = extract_recursive(&child, file_id) {
+                        return Some(result);
+                    }
+                }
+                None
+            }
+            SyntaxKind::BindingPattern => {
+                // Extract the identifier from the binding pattern
+                for child in node.children_with_tokens() {
+                    if let Some(token) = child.as_token() {
+                        if token.kind() == SyntaxKind::Identifier {
+                            let span = get_node_span(node, file_id);
+                            return Some((token.text().to_string(), span));
+                        }
+                    }
+                }
+                None
+            }
+            SyntaxKind::TuplePattern => {
+                // Return first binding in the tuple
+                for child in node.children() {
+                    if let Some(result) = extract_recursive(&child, file_id) {
+                        return Some(result);
+                    }
+                }
+                None
+            }
+            SyntaxKind::TuplePatternElement => {
+                // Recurse into element
+                for child in node.children() {
+                    if let Some(result) = extract_recursive(&child, file_id) {
+                        return Some(result);
+                    }
+                }
+                None
+            }
+            SyntaxKind::StructPattern => {
+                // Return first field binding
+                for child in node.children() {
+                    if child.kind() == SyntaxKind::StructPatternField {
+                        if let Some(result) = extract_recursive(&child, file_id) {
+                            return Some(result);
+                        }
+                    }
+                }
+                None
+            }
+            SyntaxKind::StructPatternField => {
+                // Check for explicit binding or shorthand
+                for inner in node.children() {
+                    if inner.kind() == SyntaxKind::Pattern
+                        || inner.kind() == SyntaxKind::BindingPattern
+                    {
+                        if let Some(result) = extract_recursive(&inner, file_id) {
+                            return Some(result);
+                        }
+                    }
+                }
+                // Shorthand: use field name
+                if let Some(name_node) = node.children().find(|c| c.kind() == SyntaxKind::Name) {
+                    for token in name_node.children_with_tokens() {
+                        if let Some(t) = token.as_token() {
+                            if t.kind() == SyntaxKind::Identifier {
+                                let span = get_node_span(&name_node, file_id);
+                                return Some((t.text().to_string(), span));
+                            }
+                        }
+                    }
+                }
+                None
+            }
+            SyntaxKind::WildcardPattern => None, // Wildcards have no binding name
+            _ => {
+                // For other nodes, recurse into children
+                for child in node.children() {
+                    if let Some(result) = extract_recursive(&child, file_id) {
+                        return Some(result);
+                    }
+                }
+                None
+            }
+        }
+    }
+
+    extract_recursive(pattern_node, file_id)
+}
+
 fn resolve_single_parameter(
     param_node: &SyntaxNode,
     source: &str,
@@ -64,32 +162,59 @@ fn resolve_single_parameter(
     // Extract access mode first (mutating/consuming keyword)
     let access_mode = extract_access_mode(param_node);
 
+    // Collect Name nodes (for labels) and Pattern nodes (for bindings)
     let name_nodes: Vec<SyntaxNode> = param_node
         .children()
         .filter(|child| child.kind() == SyntaxKind::Name)
         .collect();
 
-    if name_nodes.is_empty() {
-        return None;
-    }
+    let pattern_node = param_node
+        .children()
+        .find(|child| child.kind() == SyntaxKind::Pattern);
 
-    let (label, bind_name) = if name_nodes.len() >= 2 {
-        let label_name = extract_identifier_from_name(&name_nodes[0]);
-        let bind_name = Spanned::new(
-            extract_identifier_from_name(&name_nodes[1])?,
-            get_node_span(&name_nodes[1], file_id),
-        );
-        (
-            label_name.map(|n| Spanned::new(n, get_node_span(&name_nodes[0], file_id))),
-            bind_name,
-        )
-    } else {
-        // Single name - use it as both the label and internal binding name.
-        let name = extract_identifier_from_name(&name_nodes[0])?;
-        let span = get_node_span(&name_nodes[0], file_id);
-        let label = implicit_labels.then(|| Spanned::new(name.clone(), span.clone()));
+    // Determine label and bind_name based on what nodes are present
+    let (label, bind_name) = if let Some(pattern) = &pattern_node {
+        // New-style parameter with pattern
+        // If there's a Name node, it's the label; the pattern provides the binding
+        let label = if !name_nodes.is_empty() {
+            extract_identifier_from_name(&name_nodes[0])
+                .map(|n| Spanned::new(n, get_node_span(&name_nodes[0], file_id)))
+        } else {
+            None
+        };
+
+        // Extract primary name from pattern for the bind_name field
+        let (name, span) = extract_primary_name_from_pattern(pattern, file_id)
+            .unwrap_or_else(|| {
+                // Fallback for wildcards or unparseable patterns
+                ("_".to_string(), get_node_span(pattern, file_id))
+            });
         let bind_name = Spanned::new(name, span);
+
         (label, bind_name)
+    } else if !name_nodes.is_empty() {
+        // Old-style parameter with Name nodes only (backward compatibility)
+        if name_nodes.len() >= 2 {
+            let label_name = extract_identifier_from_name(&name_nodes[0]);
+            let bind_name = Spanned::new(
+                extract_identifier_from_name(&name_nodes[1])?,
+                get_node_span(&name_nodes[1], file_id),
+            );
+            (
+                label_name.map(|n| Spanned::new(n, get_node_span(&name_nodes[0], file_id))),
+                bind_name,
+            )
+        } else {
+            // Single name - use it as both the label and internal binding name.
+            let name = extract_identifier_from_name(&name_nodes[0])?;
+            let span = get_node_span(&name_nodes[0], file_id);
+            let label = implicit_labels.then(|| Spanned::new(name.clone(), span.clone()));
+            let bind_name = Spanned::new(name, span);
+            (label, bind_name)
+        }
+    } else {
+        // No pattern or name found - invalid parameter
+        return None;
     };
 
     let ty = if let Some(ty_node) = param_node.children().find(|c| c.kind() == SyntaxKind::Ty) {

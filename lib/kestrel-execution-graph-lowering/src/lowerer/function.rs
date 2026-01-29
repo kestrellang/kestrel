@@ -11,6 +11,7 @@ use kestrel_semantic_tree::behavior::callable::{
 use kestrel_semantic_tree::behavior::executable::{CodeBlock, ResolvedExecutableBehavior};
 use kestrel_semantic_tree::behavior::extern_fn::{CallingConvention, ExternBehavior};
 use kestrel_semantic_tree::expr::{ElseBranch, ExprKind, Expression, IfCondition};
+use kestrel_semantic_tree::pattern::{Pattern, PatternKind};
 use kestrel_semantic_tree::stmt::{Statement, StatementKind};
 use kestrel_semantic_tree::symbol::deinit::DeinitSymbol;
 use kestrel_semantic_tree::symbol::enum_symbol::EnumSymbol;
@@ -40,25 +41,19 @@ pub fn lower_function(ctx: &mut LoweringContext, func_symbol: &Arc<FunctionSymbo
         return;
     }
 
-    // Get the resolved body (not required for extern functions)
-    let body = if extern_behavior.is_some() {
-        // Extern functions have no body
-        None
-    } else {
-        match func_symbol
+    // Check for resolved body (not required for extern functions)
+    if extern_behavior.is_none()
+        && func_symbol
             .metadata()
             .get_behavior::<ResolvedExecutableBehavior>()
-        {
-            Some(behavior) => Some(behavior.body().clone()),
-            None => {
-                ctx.emit_error(LoweringError::missing_body(
-                    func_symbol.metadata().name().value.clone(),
-                    func_symbol.metadata().span().clone(),
-                ));
-                return;
-            },
-        }
-    };
+            .is_none()
+    {
+        ctx.emit_error(LoweringError::missing_body(
+            func_symbol.metadata().name().value.clone(),
+            func_symbol.metadata().span().clone(),
+        ));
+        return;
+    }
 
     // Get callable behavior for parameter info
     let callable = func_symbol.metadata().get_behavior::<CallableBehavior>();
@@ -148,8 +143,13 @@ pub fn lower_function(ctx: &mut LoweringContext, func_symbol: &Arc<FunctionSymbo
         return;
     }
 
-    // Get the body (we know it's Some because we checked above)
-    let body = body.unwrap();
+    // Get the body and parameter patterns (we know body is Some because we checked above)
+    let resolved = func_symbol
+        .metadata()
+        .get_behavior::<ResolvedExecutableBehavior>()
+        .unwrap();
+    let body = resolved.body().clone();
+    let parameter_patterns = resolved.parameter_patterns().to_vec();
 
     // Enter the function context
     ctx.enter_function(func_id);
@@ -159,25 +159,15 @@ pub fn lower_function(ctx: &mut LoweringContext, func_symbol: &Arc<FunctionSymbo
     // created when the closure function is lowered.
     let closure_local_ids = collect_closure_local_ids(&body);
 
-    // Map semantic locals to MIR locals
-    // Parameters are already created, map them first
-    // Copy the locals vector to avoid borrow issues
-    let (param_count, mir_locals) = {
-        let func_def = ctx.mir.function(func_id);
-        (func_def.params.len(), func_def.locals.clone())
-    };
-
     // Get all locals from the semantic function
     let locals = func_symbol.locals();
 
-    // First, map parameter locals (they were already created)
-    for (i, local) in locals.iter().take(param_count).enumerate() {
-        let mir_local_id = mir_locals[i];
-        ctx.map_local(local.id(), mir_local_id);
-    }
+    // Get MIR parameter count (one per CallableParameter, not per pattern binding)
+    let mir_param_count = ctx.mir.function(func_id).params.len();
 
-    // Then create and map non-parameter locals, excluding closure parameters
-    for local in locals.iter().skip(param_count) {
+    // Create MIR locals for ALL semantic locals (except closure ones)
+    // This includes locals created by parameter patterns
+    for local in locals.iter() {
         // Skip locals that belong to closures
         if closure_local_ids.contains(&local.id()) {
             continue;
@@ -191,6 +181,27 @@ pub fn lower_function(ctx: &mut LoweringContext, func_symbol: &Arc<FunctionSymbo
     let entry_block = ctx.create_block();
     ctx.set_current_block(entry_block);
     ctx.mir.function_mut(func_id).entry_block = Some(entry_block);
+
+    // Generate parameter pattern decomposition at function entry.
+    // For each parameter, if it has a destructuring pattern, emit code to
+    // decompose the parameter value into the pattern bindings.
+    // MIR param indices start after self (if method)
+    let has_self = callable.as_ref().map_or(false, |c| c.receiver().is_some());
+    let param_mir_offset = if has_self { 1 } else { 0 };
+
+    for (i, pattern) in parameter_patterns.iter().enumerate() {
+        // Get the MIR parameter local (created during param setup)
+        let mir_param_index = param_mir_offset + i;
+        if mir_param_index >= mir_param_count {
+            // Safety check - shouldn't happen if semantic and lowering are in sync
+            continue;
+        }
+        let mir_param_local = ctx.mir.function(func_id).locals[mir_param_index];
+        let param_value = kestrel_execution_graph::Value::Place(kestrel_execution_graph::Place::local(mir_param_local));
+
+        // Lower the pattern to generate decomposition code
+        crate::pattern::lower_pattern(ctx, pattern, param_value);
+    }
 
     // Enter the function body scope for deinit tracking
     ctx.enter_scope();
@@ -1201,10 +1212,10 @@ fn collect_closure_local_ids_from_expr(expr: &Expression, ids: &mut HashSet<Loca
             implicit_param,
             ..
         } => {
-            // Collect explicit parameter LocalIds
+            // Collect explicit parameter LocalIds from patterns
             if let Some(param_list) = params {
                 for param in param_list {
-                    ids.insert(param.local_id);
+                    collect_closure_local_ids_from_pattern(&param.pattern, ids);
                 }
             }
             // Collect implicit `it` parameter LocalId
@@ -1415,3 +1426,62 @@ fn collect_closure_local_ids_from_expr(expr: &Expression, ids: &mut HashSet<Loca
         | ExprKind::Error => {},
     }
 }
+
+/// Collect all LocalIds from a pattern (for destructuring closure parameters).
+fn collect_closure_local_ids_from_pattern(pattern: &Pattern, ids: &mut HashSet<LocalId>) {
+    match &pattern.kind {
+        PatternKind::Local { local_id, .. } => {
+            ids.insert(*local_id);
+        },
+        PatternKind::Wildcard => {},
+        PatternKind::Tuple {
+            prefix, suffix, ..
+        } => {
+            for elem in prefix.iter().chain(suffix.iter()) {
+                collect_closure_local_ids_from_pattern(elem, ids);
+            }
+        },
+        PatternKind::Literal { .. } => {},
+        PatternKind::EnumVariant { bindings, .. } => {
+            for binding in bindings {
+                collect_closure_local_ids_from_pattern(&binding.pattern, ids);
+            }
+        },
+        PatternKind::Range { .. } => {},
+        PatternKind::Struct { fields, .. } => {
+            for field in fields {
+                collect_closure_local_ids_from_pattern(&field.pattern, ids);
+            }
+        },
+        PatternKind::Array {
+            prefix,
+            suffix,
+            rest,
+        } => {
+            for elem in prefix {
+                collect_closure_local_ids_from_pattern(elem, ids);
+            }
+            for elem in suffix {
+                collect_closure_local_ids_from_pattern(elem, ids);
+            }
+            if let Some((Some(_name), Some(local_id))) = rest {
+                ids.insert(*local_id);
+            }
+        },
+        PatternKind::Or { alternatives } => {
+            if let Some(first) = alternatives.first() {
+                collect_closure_local_ids_from_pattern(first, ids);
+            }
+        },
+        PatternKind::At {
+            local_id,
+            subpattern,
+            ..
+        } => {
+            ids.insert(*local_id);
+            collect_closure_local_ids_from_pattern(subpattern, ids);
+        },
+        PatternKind::Rest | PatternKind::Error => {},
+    }
+}
+

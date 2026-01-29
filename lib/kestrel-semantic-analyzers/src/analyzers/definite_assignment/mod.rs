@@ -52,14 +52,38 @@ impl Analyzer for DefiniteAssignmentAnalyzer {
         let mut assigned = HashSet::new();
 
         // Parameters and 'self' (for instance methods/initializers) are always initialized.
+        // For destructuring patterns, we need to mark ALL locals created by the pattern.
         use kestrel_semantic_tree::behavior::callable::CallableBehavior;
-        if let Some(callable) = symbol.metadata().get_behavior::<CallableBehavior>() {
-            let mut count = callable.arity();
-            if callable.is_instance_method() {
-                count += 1;
+        use kestrel_semantic_tree::behavior::executable::ExecutableBehavior;
+
+        // Check if we have parameter patterns from destructuring
+        let param_patterns = symbol
+            .metadata()
+            .get_behavior::<ExecutableBehavior>()
+            .map(|e| e.parameter_patterns().to_vec())
+            .unwrap_or_default();
+
+        if !param_patterns.is_empty() {
+            // Mark 'self' as initialized for instance methods
+            if let Some(callable) = symbol.metadata().get_behavior::<CallableBehavior>() {
+                if callable.is_instance_method() {
+                    assigned.insert(LocalId::new(0));
+                }
             }
-            for i in 0..count {
-                assigned.insert(LocalId::new(i));
+            // Mark all locals from parameter patterns as initialized
+            for pattern in &param_patterns {
+                collect_pattern_local_ids(pattern, &mut assigned);
+            }
+        } else {
+            // No parameter patterns - use arity-based approach (original behavior)
+            if let Some(callable) = symbol.metadata().get_behavior::<CallableBehavior>() {
+                let mut count = callable.arity();
+                if callable.is_instance_method() {
+                    count += 1;
+                }
+                for i in 0..count {
+                    assigned.insert(LocalId::new(i));
+                }
             }
         }
 
@@ -570,6 +594,64 @@ fn mark_pattern_locals_assigned(pattern: &Pattern, state: &mut State) {
         PatternKind::Error => {
             // Error patterns don't bind anything
         },
+    }
+}
+
+/// Collect all local IDs from a pattern into a HashSet.
+///
+/// Used to mark parameter pattern bindings as initialized at function entry.
+fn collect_pattern_local_ids(pattern: &Pattern, ids: &mut HashSet<LocalId>) {
+    match &pattern.kind {
+        PatternKind::Local { local_id, .. } => {
+            ids.insert(*local_id);
+        },
+        PatternKind::Wildcard => {},
+        PatternKind::Tuple { prefix, suffix, .. } => {
+            for elem in prefix.iter().chain(suffix.iter()) {
+                collect_pattern_local_ids(elem, ids);
+            }
+        },
+        PatternKind::Literal { .. } => {},
+        PatternKind::EnumVariant { bindings, .. } => {
+            for binding in bindings {
+                collect_pattern_local_ids(&binding.pattern, ids);
+            }
+        },
+        PatternKind::Range { .. } => {},
+        PatternKind::Struct { fields, .. } => {
+            for field in fields {
+                collect_pattern_local_ids(&field.pattern, ids);
+            }
+        },
+        PatternKind::Array {
+            prefix,
+            suffix,
+            rest,
+        } => {
+            for elem in prefix {
+                collect_pattern_local_ids(elem, ids);
+            }
+            for elem in suffix {
+                collect_pattern_local_ids(elem, ids);
+            }
+            if let Some((Some(_name), Some(local_id))) = rest {
+                ids.insert(*local_id);
+            }
+        },
+        PatternKind::Or { alternatives } => {
+            if let Some(first) = alternatives.first() {
+                collect_pattern_local_ids(first, ids);
+            }
+        },
+        PatternKind::At {
+            local_id,
+            subpattern,
+            ..
+        } => {
+            ids.insert(*local_id);
+            collect_pattern_local_ids(subpattern, ids);
+        },
+        PatternKind::Rest | PatternKind::Error => {},
     }
 }
 

@@ -30,6 +30,7 @@ use super::operators::{
     resolve_binary_expression, resolve_postfix_expression, resolve_unary_expression,
 };
 use super::paths::resolve_path_expression;
+use super::patterns::resolve_pattern_with_mutability;
 use super::statements::resolve_statement;
 use super::utils::{is_expression_kind, validate_not_standalone_type_param};
 
@@ -2378,6 +2379,8 @@ fn resolve_closure_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext
 }
 
 /// Resolve closure parameters from the syntax tree.
+///
+/// Supports destructuring patterns like `(a, b)` or `Point { x, y }`.
 fn resolve_closure_params(
     node: &SyntaxNode,
     ctx: &mut BodyResolutionContext,
@@ -2393,13 +2396,6 @@ fn resolve_closure_params(
     for child in params_node.children() {
         if child.kind() == SyntaxKind::ClosureParam {
             let param_span = get_node_span(&child, ctx.file_id);
-
-            // Extract name
-            let name = child
-                .children_with_tokens()
-                .filter_map(|e| e.into_token())
-                .find(|t| t.kind() == SyntaxKind::Identifier)
-                .map(|t| t.text().to_string())?;
 
             // Extract optional type annotation
             let ty_node = child.children().find(|c| c.kind() == SyntaxKind::Ty);
@@ -2421,20 +2417,51 @@ fn resolve_closure_params(
                 ),
             };
 
-            // Bind parameter as local
-            let local_id = ctx.local_scope.bind(
-                name.clone(),
-                ty.clone(),
-                false, // closure params are immutable
-                param_span.clone(),
-            );
+            // Find and resolve the pattern
+            // The Pattern node contains the destructuring pattern for this parameter
+            let pattern_node = child.children().find(|c| c.kind() == SyntaxKind::Pattern);
+            let pattern = if let Some(pattern_node) = pattern_node {
+                // Use pattern resolution with the declared type as expected type
+                // Closure params are always immutable (false for force_mutable)
+                resolve_pattern_with_mutability(
+                    &pattern_node,
+                    ctx,
+                    Some(&ty),
+                    false, // closure params are immutable
+                )
+            } else {
+                // Fallback: try to find identifier directly (for simple patterns)
+                // This handles the case where the pattern is a simple binding
+                if let Some(ident_token) = child
+                    .children_with_tokens()
+                    .filter_map(|e| e.into_token())
+                    .find(|t| t.kind() == SyntaxKind::Identifier)
+                {
+                    let name = ident_token.text().to_string();
+                    let local_id = ctx.local_scope.bind(
+                        name.clone(),
+                        ty.clone(),
+                        false, // closure params are immutable
+                        param_span.clone(),
+                    );
+                    kestrel_semantic_tree::pattern::Pattern::local(
+                        local_id,
+                        kestrel_semantic_tree::pattern::Mutability::Immutable,
+                        name,
+                        ty.clone(),
+                        param_span.clone(),
+                    )
+                } else {
+                    // No pattern found - create error pattern
+                    kestrel_semantic_tree::pattern::Pattern::error(param_span.clone())
+                }
+            };
 
             params.push(kestrel_semantic_tree::expr::ClosureParam {
-                name,
+                pattern,
                 ty,
                 is_type_annotated: is_annotated,
                 span: param_span,
-                local_id,
             });
         }
     }

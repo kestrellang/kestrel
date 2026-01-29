@@ -610,13 +610,17 @@ See [docs/memory-model/implementation-plan.md](docs/memory-model/implementation-
 ### Standard Library
 
 - [x] Create real hash implementation
+- [ ] Improve numeric implementation
+- [ ] Improve iterators
+- [ ] Improve collections
+- [ ] Improve strings
+- [ ] Improve options / results
 
 ### Core Features
 
 - [ ] Range Patterns (`0..=9`, `0..<10`, `'a'..='z'`)
 - [ ] Array Patterns (`[a, b, ..rest]`)
-- [ ] Irrefutable patterns in function parameters
-- [ ] Irrefutable patterns in let/var
+- [x] Irrefutable patterns in function parameters
 - [ ] Refactor Matchable for range patterns and array patterns
 - [x] Let/var static variable consistency
 

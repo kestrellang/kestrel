@@ -21,6 +21,7 @@ mod extern_functions;
 mod functions;
 mod imports;
 mod init_where_clauses;
+mod parameter_destructuring;
 mod protocol_method_linking;
 mod protocols;
 mod structs;

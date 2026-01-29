@@ -20,6 +20,7 @@ use super::data::{
 use crate::block::emit_code_block;
 use crate::event::EventSink;
 use crate::expr::emit_expr_variant;
+use crate::pattern::emit_pattern_variant;
 use crate::ty::emit_ty_variant;
 use crate::type_param::{emit_conformance_list, emit_type_parameter_list, emit_where_clause};
 
@@ -300,11 +301,14 @@ pub fn emit_parameter(sink: &mut EventSink, param: ParameterData) {
         sink.add_token(kind, span);
     }
 
+    // Emit label if present (external parameter name)
     if let Some(label_span) = param.label {
         emit_name(sink, label_span);
     }
 
-    emit_name(sink, param.bind_name);
+    // Emit the parameter pattern (identifier, tuple, struct, or wildcard)
+    emit_pattern_variant(sink, &param.pattern);
+
     sink.add_token(SyntaxKind::Colon, param.colon);
     emit_ty_variant(sink, &param.ty);
 
