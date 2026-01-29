@@ -20,7 +20,7 @@ use kestrel_execution_graph::{
     Id, MirTy, Origin, Place, QualifiedName, QualifiedNameData, Rvalue, Struct, Ty, Value,
 };
 use kestrel_semantic_tree::expr::{Capture, ClosureParam, Expression};
-use kestrel_semantic_tree::pattern::Pattern;
+use kestrel_semantic_tree::pattern::{Pattern, PatternKind};
 use kestrel_semantic_tree::stmt::Statement;
 use kestrel_semantic_tree::symbol::local::LocalId;
 use kestrel_semantic_tree::ty::{Ty as SemanticTy, TyKind};
@@ -448,14 +448,20 @@ fn create_closure_function(
     ctx.set_current_block(entry_block);
     ctx.mir.function_mut(func_id).entry_block = Some(entry_block);
 
-    // For each parameter, generate pattern decomposition code
-    // This maps pattern bindings (which may be multiple for destructuring) to MIR locals
+    // For each parameter, handle pattern decomposition:
+    // - Simple binding patterns: map LocalId directly to MIR param local (no decomposition needed)
+    // - Complex patterns: call lower_pattern to generate decomposition code
     for (i, param) in params.iter().enumerate() {
         let mir_local_id = mir_locals[param_offset + i];
-        let param_value = Value::Place(Place::local(mir_local_id));
-        // lower_pattern handles both simple bindings (maps LocalId directly) and
-        // destructuring patterns (generates decomposition code and maps each binding)
-        lower_pattern(ctx, &param.pattern, param_value);
+
+        if let PatternKind::Local { local_id, .. } = &param.pattern.kind {
+            // Simple binding pattern - map directly to MIR param local
+            ctx.map_local(*local_id, mir_local_id);
+        } else {
+            // Complex pattern - generate decomposition code
+            let param_value = Value::Place(Place::local(mir_local_id));
+            lower_pattern(ctx, &param.pattern, param_value);
+        }
     }
 
     // If we have captures, set up access by loading from the env struct

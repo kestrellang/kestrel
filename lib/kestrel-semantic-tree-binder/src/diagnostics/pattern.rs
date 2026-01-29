@@ -192,6 +192,26 @@ impl IntoDiagnostic for TuplePatternArityMismatchError {
     }
 }
 
+/// Error when a tuple pattern is used with a non-tuple type
+pub struct TuplePatternOnNonTupleError {
+    pub span: Span,
+    pub actual_type: String,
+}
+
+impl IntoDiagnostic for TuplePatternOnNonTupleError {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
+        Diagnostic::error()
+            .with_message(format!(
+                "tuple pattern cannot match non-tuple type `{}`",
+                self.actual_type
+            ))
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message(format!("expected tuple, found `{}`", self.actual_type)),
+            ])
+    }
+}
+
 /// Error when a pattern contains multiple rest patterns (`..`)
 pub struct MultipleRestPatternsError {
     pub span: Span,

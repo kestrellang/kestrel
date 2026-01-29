@@ -165,11 +165,50 @@ pub fn lower_function(ctx: &mut LoweringContext, func_symbol: &Arc<FunctionSymbo
     // Get MIR parameter count (one per CallableParameter, not per pattern binding)
     let mir_param_count = ctx.mir.function(func_id).params.len();
 
-    // Create MIR locals for ALL semantic locals (except closure ones)
-    // This includes locals created by parameter patterns
+    // For simple binding patterns (e.g., `x: Int64`), we need to map the semantic
+    // LocalId directly to the MIR param local. This preserves the correct type
+    // (including reference wrappers for borrow/mutating modes).
+    // For complex patterns (tuples, structs), we create new locals for the bindings
+    // and lower_pattern will decompose the parameter value into them.
+    let has_self = callable.as_ref().map_or(false, |c| c.receiver().is_some());
+    let param_mir_offset = if has_self { 1 } else { 0 };
+
+    // Collect LocalIds that are directly mapped to MIR param locals
+    let mut param_direct_local_ids = std::collections::HashSet::new();
+
+    // Map `self` parameter if present. The `self` local is implicit (not in parameter_patterns)
+    // but needs to be mapped to MIR param local at index 0.
+    if has_self {
+        // Find the `self` local - it's typically the first local named "self"
+        if let Some(self_local) = locals.iter().find(|l| l.name() == "self") {
+            let mir_param_local = ctx.mir.function(func_id).locals[0];
+            ctx.map_local(self_local.id(), mir_param_local);
+            param_direct_local_ids.insert(self_local.id());
+        }
+    }
+
+    // Map explicit parameter patterns
+    for (i, pattern) in parameter_patterns.iter().enumerate() {
+        if let PatternKind::Local { local_id, .. } = &pattern.kind {
+            // Simple binding pattern - map directly to MIR param
+            let mir_param_index = param_mir_offset + i;
+            if mir_param_index < mir_param_count {
+                let mir_param_local = ctx.mir.function(func_id).locals[mir_param_index];
+                ctx.map_local(*local_id, mir_param_local);
+                param_direct_local_ids.insert(*local_id);
+            }
+        }
+    }
+
+    // Create MIR locals for ALL semantic locals (except closure ones and direct param bindings)
+    // This includes locals created by complex parameter patterns (tuple, struct destructuring)
     for local in locals.iter() {
         // Skip locals that belong to closures
         if closure_local_ids.contains(&local.id()) {
+            continue;
+        }
+        // Skip locals that are directly mapped to MIR param locals
+        if param_direct_local_ids.contains(&local.id()) {
             continue;
         }
         let mir_ty = lower_type(ctx, local.ty());
@@ -183,13 +222,15 @@ pub fn lower_function(ctx: &mut LoweringContext, func_symbol: &Arc<FunctionSymbo
     ctx.mir.function_mut(func_id).entry_block = Some(entry_block);
 
     // Generate parameter pattern decomposition at function entry.
-    // For each parameter, if it has a destructuring pattern, emit code to
-    // decompose the parameter value into the pattern bindings.
-    // MIR param indices start after self (if method)
-    let has_self = callable.as_ref().map_or(false, |c| c.receiver().is_some());
-    let param_mir_offset = if has_self { 1 } else { 0 };
-
+    // For complex patterns (tuples, structs), emit code to decompose the parameter
+    // value into the pattern bindings. Simple binding patterns are already mapped
+    // directly to MIR param locals and don't need decomposition.
     for (i, pattern) in parameter_patterns.iter().enumerate() {
+        // Skip simple binding patterns - they're already mapped to MIR param locals
+        if matches!(&pattern.kind, PatternKind::Local { .. }) {
+            continue;
+        }
+
         // Get the MIR parameter local (created during param setup)
         let mir_param_index = param_mir_offset + i;
         if mir_param_index >= mir_param_count {
