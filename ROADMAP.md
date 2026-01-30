@@ -594,6 +594,22 @@ See [docs/memory-model/implementation-plan.md](docs/memory-model/implementation-
 - [x] Optional Type Syntax
 - [x] Result Type Syntax
 
+### Type Promotion
+
+- [ ] Optional Promotion - Implicit wrapping of values into Optional
+  - `let x: Int? = 5` desugars to `Optional.Some(5)`
+  - Works in variable declarations, returns, and assignments
+- [ ] Result Promotion - Implicit wrapping of values into Result
+  - `let r: Int throws Error = 42` desugars to `Result.Ok(42)`
+  - Complements the `try` operator for ergonomic error handling
+
+### Error Handling
+
+- [ ] Throw Expression - Early return with error value
+  - `throw error` desugars to `return .Err(error)` in functions returning Result
+  - Works with `T throws E` type syntax for ergonomic error propagation
+  - Enables `let x = try expr ?? throw fallbackError` patterns
+
 ### Expressions
 
 - [x] Try Operator
@@ -618,7 +634,7 @@ See [docs/memory-model/implementation-plan.md](docs/memory-model/implementation-
 
 ### Core Features
 
-- [ ] Range Patterns (`0..=9`, `0..<10`, `'a'..='z'`)
+- [x] Range Patterns (`0..=9`, `0..<10`, `'a'..='z'`)
 - [ ] Array Patterns (`[a, b, ..rest]`)
 - [x] Irrefutable patterns in function parameters
 - [ ] Refactor Matchable for range patterns and array patterns
