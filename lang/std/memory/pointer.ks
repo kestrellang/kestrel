@@ -3,7 +3,7 @@
 module std.memory
 
 import std.ffi.(FFISafe)
-import std.core.(Equatable, Bool, Hash, Hasher)
+import std.core.(Equatable, Bool, Hash, Hasher, ArrayMatchable)
 import std.num.(Int64, UInt64, UInt8)
 import std.memory.(Slice)
 // Note: Optional comes in Phase 11, Iterator/Iterable in Phase 10
@@ -138,6 +138,7 @@ extend Pointer: FFISafe where T: FFISafe {}
 
 /// A non-owning view into contiguous memory.
 /// Does not manage lifetime - the underlying memory must outlive the slice.
+@builtin(.SliceStruct)
 public struct Slice[T]: Equatable {
     // type Item = T
     // type Iter = SliceIterator[T]
@@ -216,6 +217,27 @@ public struct Slice[T]: Equatable {
         // Element-wise comparison requires iteration
         // For now just check length matches
         true
+    }
+}
+
+/// ArrayMatchable extension for Slice pattern matching.
+/// Enables patterns like `[a, b]`, `[a, ..rest]`, `[a, .., z]` on Slice values.
+extend Slice[T]: ArrayMatchable {
+    type Element = T
+
+    /// Returns the number of elements in the slice.
+    public func matchLength() -> Int64 {
+        self.count
+    }
+
+    /// Returns the element at the given index (unchecked).
+    public func matchGet(index: Int64) -> T {
+        self.pointer.offset(by: index).read()
+    }
+
+    /// Returns a sub-slice from `from` (inclusive) to `to` (exclusive).
+    public func matchSlice(from: Int64, to: Int64) -> Slice[T] {
+        Slice(pointer: self.pointer.offset(by: from), count: to - from)
     }
 }
 

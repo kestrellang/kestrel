@@ -92,8 +92,21 @@ pub fn is_irrefutable(pattern: &Pattern) -> bool {
         // Struct patterns are irrefutable if all field patterns are irrefutable
         PatternKind::Struct { fields, .. } => fields.iter().all(|f| is_irrefutable(&f.pattern)),
 
-        // Array patterns are REFUTABLE - they check array length
-        PatternKind::Array { .. } => false,
+        // Array patterns: [..] and [..rest] are irrefutable (capture all elements)
+        // But [a, ..] or [.., z] require at least one element, so they're refutable
+        PatternKind::Array {
+            prefix,
+            rest,
+            suffix,
+        } => {
+            // Irrefutable only if: has rest AND no prefix AND no suffix
+            // AND all nested patterns (if any) are irrefutable
+            if rest.is_some() && prefix.is_empty() && suffix.is_empty() {
+                true
+            } else {
+                false
+            }
+        },
 
         // Or-patterns are irrefutable if ANY alternative is irrefutable
         PatternKind::Or { alternatives } => alternatives.iter().any(is_irrefutable),

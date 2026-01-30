@@ -26,6 +26,10 @@ pub enum LanguageFeature {
     RangeMatchableIsAtLeast,
     RangeMatchableIsAtMost,
     RangeMatchableIsBelow,
+    ArrayMatchable,
+    ArrayMatchableMatchLength,
+    ArrayMatchableMatchGet,
+    ArrayMatchableMatchSlice,
 
     // Protocol builtins - literal expressibility
     ExpressibleByIntLiteral,
@@ -145,6 +149,9 @@ pub enum LanguageFeature {
     // Array struct builtin (for detecting Array[T] types)
     ArrayStruct,
 
+    // Slice struct builtin (for array pattern rest bindings)
+    SliceStruct,
+
     // Compound assignment protocols
     AddAssignProtocol,
     AddAssignMethod,
@@ -180,6 +187,10 @@ impl LanguageFeature {
             "RangeMatchableIsAtLeast" => Some(Self::RangeMatchableIsAtLeast),
             "RangeMatchableIsAtMost" => Some(Self::RangeMatchableIsAtMost),
             "RangeMatchableIsBelow" => Some(Self::RangeMatchableIsBelow),
+            "ArrayMatchable" => Some(Self::ArrayMatchable),
+            "ArrayMatchableMatchLength" => Some(Self::ArrayMatchableMatchLength),
+            "ArrayMatchableMatchGet" => Some(Self::ArrayMatchableMatchGet),
+            "ArrayMatchableMatchSlice" => Some(Self::ArrayMatchableMatchSlice),
             "ExpressibleByIntLiteral" => Some(Self::ExpressibleByIntLiteral),
             "ExpressibleByFloatLiteral" => Some(Self::ExpressibleByFloatLiteral),
             "ExpressibleByStringLiteral" => Some(Self::ExpressibleByStringLiteral),
@@ -277,6 +288,8 @@ impl LanguageFeature {
             "ResultTypeOperator" => Some(Self::ResultTypeOperator),
             // Array struct builtin
             "ArrayStruct" => Some(Self::ArrayStruct),
+            // Slice struct builtin
+            "SliceStruct" => Some(Self::SliceStruct),
             // Compound assignment protocols
             "AddAssignProtocol" => Some(Self::AddAssignProtocol),
             "AddAssignMethod" => Some(Self::AddAssignMethod),
@@ -313,6 +326,10 @@ impl LanguageFeature {
             Self::RangeMatchableIsAtLeast => "RangeMatchableIsAtLeast",
             Self::RangeMatchableIsAtMost => "RangeMatchableIsAtMost",
             Self::RangeMatchableIsBelow => "RangeMatchableIsBelow",
+            Self::ArrayMatchable => "ArrayMatchable",
+            Self::ArrayMatchableMatchLength => "ArrayMatchableMatchLength",
+            Self::ArrayMatchableMatchGet => "ArrayMatchableMatchGet",
+            Self::ArrayMatchableMatchSlice => "ArrayMatchableMatchSlice",
             Self::ExpressibleByIntLiteral => "ExpressibleByIntLiteral",
             Self::ExpressibleByFloatLiteral => "ExpressibleByFloatLiteral",
             Self::ExpressibleByStringLiteral => "ExpressibleByStringLiteral",
@@ -410,6 +427,8 @@ impl LanguageFeature {
             Self::ResultTypeOperator => "ResultTypeOperator",
             // Array struct builtin
             Self::ArrayStruct => "ArrayStruct",
+            // Slice struct builtin
+            Self::SliceStruct => "SliceStruct",
             // Compound assignment protocols
             Self::AddAssignProtocol => "AddAssignProtocol",
             Self::AddAssignMethod => "AddAssignMethod",
@@ -499,6 +518,34 @@ impl LanguageFeature {
                 feature: *self,
                 kind: BuiltinKind::ProtocolMethod {
                     protocol_feature: LanguageFeature::RangeMatchable,
+                },
+            },
+            Self::ArrayMatchable => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::Protocol {
+                    implicit_conformance: false,
+                    must_be_marker: false,
+                    tuple_conformance_propagation: false,
+                    requires_fields_conform: false,
+                    disallow_enum_conformance: false,
+                },
+            },
+            Self::ArrayMatchableMatchLength => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::ProtocolMethod {
+                    protocol_feature: LanguageFeature::ArrayMatchable,
+                },
+            },
+            Self::ArrayMatchableMatchGet => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::ProtocolMethod {
+                    protocol_feature: LanguageFeature::ArrayMatchable,
+                },
+            },
+            Self::ArrayMatchableMatchSlice => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::ProtocolMethod {
+                    protocol_feature: LanguageFeature::ArrayMatchable,
                 },
             },
             Self::ExpressibleByIntLiteral => BuiltinDefinition {
@@ -921,6 +968,11 @@ impl LanguageFeature {
                 feature: *self,
                 kind: BuiltinKind::Struct,
             },
+            // Slice struct builtin
+            Self::SliceStruct => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::Struct,
+            },
             // Compound assignment protocols
             Self::AddAssignProtocol
             | Self::SubtractAssignProtocol
@@ -1203,6 +1255,11 @@ impl BuiltinRegistry {
     /// Convenience: Get the RangeMatchable protocol.
     pub fn range_matchable_protocol(&self) -> Option<SymbolId> {
         self.protocol(LanguageFeature::RangeMatchable)
+    }
+
+    /// Convenience: Get the ArrayMatchable protocol.
+    pub fn array_matchable_protocol(&self) -> Option<SymbolId> {
+        self.protocol(LanguageFeature::ArrayMatchable)
     }
 
     // =========================================================================

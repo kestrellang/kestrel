@@ -1048,11 +1048,15 @@ fn resolve_array_pattern(
     let span = get_node_span(node, ctx.file_id);
 
     // Get expected element type if we have an array type (Array[T] struct)
+    // Note: [T] is a type alias for Array[T], so we need to expand aliases first
     let expected_element_ty: Option<Ty> = expected_ty.and_then(|ty| {
-        match ty.kind() {
+        let expanded = ty.expand_aliases();
+        match expanded.kind() {
             kestrel_semantic_tree::ty::TyKind::Struct { substitutions, .. } => {
-                // Check if this is Array[T] by looking at substitutions
-                if ty.is_array_struct(ctx.model.builtin_registry()) {
+                // Check if this is Array[T] or Slice[T] by looking at substitutions
+                if expanded.is_array_struct(ctx.model.builtin_registry())
+                    || expanded.is_slice_struct(ctx.model.builtin_registry())
+                {
                     substitutions
                         .iter()
                         .next()
@@ -1114,10 +1118,10 @@ fn resolve_array_pattern(
                         )
                     };
 
-                    // The rest binding will be a slice/array of the element type
+                    // The rest binding will be a Slice[T] of the element type
                     let rest_ty = expected_element_ty
                         .clone()
-                        .and_then(|elem_ty| ctx.model.make_array_type(elem_ty, span.clone()))
+                        .and_then(|elem_ty| ctx.model.make_slice_type(elem_ty, span.clone()))
                         .unwrap_or_else(|| Ty::infer(span.clone()));
 
                     let is_mutable = force_mutable;
@@ -1132,14 +1136,6 @@ fn resolve_array_pattern(
             },
             _ => {},
         }
-    }
-
-    // Check for suffix elements - not yet supported
-    if !suffix.is_empty() {
-        use crate::diagnostics::ArraySuffixPatternError;
-        let error = ArraySuffixPatternError { span: span.clone() };
-        ctx.diagnostics.add_diagnostic(error.into_diagnostic());
-        return Pattern::error(span);
     }
 
     // Build element type from patterns

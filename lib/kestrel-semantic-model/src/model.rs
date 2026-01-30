@@ -177,6 +177,31 @@ impl SemanticModel {
         Some(Ty::generic_struct(struct_symbol, substitutions, span))
     }
 
+    /// Create a Slice[T] struct type given an element type.
+    ///
+    /// This is used to create slice types for array pattern rest bindings.
+    /// Returns None if the Slice struct builtin is not registered (stdlib not loaded).
+    pub fn make_slice_type(&self, element_ty: Ty, span: Span) -> Option<Ty> {
+        // Look up the Slice struct symbol
+        let symbol_id = self
+            .builtin_registry
+            .builtin_struct(LanguageFeature::SliceStruct)?;
+        let symbol = self.registry.get(symbol_id)?;
+
+        // Downcast to StructSymbol
+        let struct_symbol: Arc<StructSymbol> = symbol.into_any_arc().downcast().ok()?;
+
+        // Get the T type parameter
+        let type_params = struct_symbol.type_parameters();
+        let t_param = type_params.first()?;
+
+        // Create substitutions: T -> element_ty
+        let mut substitutions = Substitutions::new();
+        substitutions.insert(t_param.metadata().id(), element_ty);
+
+        Some(Ty::generic_struct(struct_symbol, substitutions, span))
+    }
+
     /// Debug print the semantic model (symbol hierarchy).
     ///
     /// If `full` is true, shows complete details including function body statements.

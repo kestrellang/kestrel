@@ -10,6 +10,7 @@
 //! - For loops (desugared to while-let)
 //! - Exhaustiveness and irrefutability checking
 
+mod array_matchable;
 mod exhaustiveness;
 mod for_loops;
 mod guard_let;

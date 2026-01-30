@@ -6,7 +6,7 @@ module std.core
 import std.core.(Less, LessOrEqual, Greater, GreaterOrEqual, NotEqual, Equal)
 import std.text.(String)
 import std.memory.(Slice, Pointer)
-import std.num.(UInt64)
+import std.num.(UInt64, Int64)
 
 /// Protocol for types that can be compared for equality.
 /// Provides the foundation for the == operator via the Equal protocol extension.
@@ -41,6 +41,30 @@ public protocol RangeMatchable[Bound = Self] {
     /// Returns true if self < bound (for ..<end patterns)
     @builtin(.RangeMatchableIsBelow)
     func isBelow(bound: Bound) -> Bool
+}
+
+/// Protocol for types that support array pattern matching.
+/// Enables patterns like `[a, b]`, `[a, ..rest]`, `[a, .., z]`, `[a, ..rest, z]`
+///
+/// The protocol provides methods for length checking, element access, and slicing.
+/// Conforming types include Array[T] and Slice[T].
+@builtin(.ArrayMatchable)
+public protocol ArrayMatchable {
+    type Element
+
+    /// Returns the number of elements in the collection.
+    @builtin(.ArrayMatchableMatchLength)
+    func matchLength() -> Int64
+
+    /// Returns the element at the given index.
+    /// Caller guarantees index is valid (0 <= index < matchLength()).
+    @builtin(.ArrayMatchableMatchGet)
+    func matchGet(index: Int64) -> Element
+
+    /// Returns a slice from `from` (inclusive) to `to` (exclusive).
+    /// Caller guarantees valid bounds (0 <= from <= to <= matchLength()).
+    @builtin(.ArrayMatchableMatchSlice)
+    func matchSlice(from: Int64, to: Int64) -> Slice[Element]
 }
 
 /// Extension that provides == and != operators for all Equatable types.

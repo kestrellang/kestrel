@@ -2,7 +2,7 @@
 
 module std.collections
 
-import std.core.(Bool, Equatable, Comparable, Cloneable)
+import std.core.(Bool, Equatable, Comparable, Cloneable, ArrayMatchable)
 import std.num.(Int64)
 import std.result.(Optional)
 import std.memory.(Layout, Pointer, Slice, RawPointer, SystemAllocator, LiteralSlice, RcBox)
@@ -461,6 +461,26 @@ extend Array[T]: Equatable where T: Equatable {
     }
 }
 
+/// ArrayMatchable extension for array pattern matching.
+/// Enables patterns like `[a, b]`, `[a, ..rest]`, `[a, .., z]`, `[a, ..rest, z]`.
+extend Array[T]: ArrayMatchable {
+    type Element = T
+
+    /// Returns the number of elements in the array.
+    public func matchLength() -> Int64 {
+        self.count()
+    }
+
+    /// Returns the element at the given index (unchecked).
+    public func matchGet(index: Int64) -> T {
+        self.getUnchecked(index)
+    }
+
+    /// Returns a slice from `from` (inclusive) to `to` (exclusive).
+    public func matchSlice(from: Int64, to: Int64) -> Slice[T] {
+        Slice(pointer: self.pointer().offset(by: from), count: to - from)
+    }
+}
 
 // ============================================================================
 // TYPE OPERATOR

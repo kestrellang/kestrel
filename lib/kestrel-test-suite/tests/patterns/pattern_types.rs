@@ -1066,8 +1066,8 @@ func test(arr: [lang.i64]) -> lang.i64 {
     }
 
     #[test]
-    fn array_pattern_rest_at_beginning_not_supported() {
-        // Array suffix patterns (elements after ..) are not yet supported
+    fn array_pattern_rest_at_beginning() {
+        // Array suffix patterns (elements after ..) are now supported via ArrayMatchable
         Test::new(
             r#"
 module Main
@@ -1075,19 +1075,17 @@ module Main
 func test(arr: [lang.i64]) -> lang.i64 {
     match arr {
         [.., last] => last,
-        [] => 0
+        _ => 0
     }
 }
 "#,
         )
-        .expect(HasError(
-            "array patterns with suffix elements are not yet supported",
-        ));
+        .expect(Compiles);
     }
 
     #[test]
-    fn array_pattern_rest_in_middle_not_supported() {
-        // Array suffix patterns (elements after ..) are not yet supported
+    fn array_pattern_rest_in_middle() {
+        // Array patterns with prefix + rest + suffix are now supported via ArrayMatchable
         Test::new(
             r#"
 module Main
@@ -1095,15 +1093,12 @@ module Main
 func test(arr: [lang.i64]) -> lang.i64 {
     match arr {
         [first, .., last] => lang.i64_add(first, last),
-        [only] => only,
-        [] => 0
+        _ => 0
     }
 }
 "#,
         )
-        .expect(HasError(
-            "array patterns with suffix elements are not yet supported",
-        ));
+        .expect(Compiles);
     }
 
     #[test]

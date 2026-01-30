@@ -251,26 +251,6 @@ impl IntoDiagnostic for NestedAtPatternError {
     }
 }
 
-/// Error when an array pattern has suffix elements after a rest pattern
-pub struct ArraySuffixPatternError {
-    pub span: Span,
-}
-
-impl IntoDiagnostic for ArraySuffixPatternError {
-    fn into_diagnostic(&self) -> Diagnostic<usize> {
-        Diagnostic::error()
-            .with_message("array patterns with suffix elements are not yet supported")
-            .with_labels(vec![
-                Label::primary(self.span.file_id, self.span.range())
-                    .with_message("suffix elements after `..` are not supported"),
-            ])
-            .with_notes(vec![
-                "only prefix patterns are currently supported: `[a, b, ..]` or `[a, b, ..rest]`"
-                    .to_string(),
-            ])
-    }
-}
-
 /// Error when a refutable pattern is used in a for-loop
 pub struct RefutableForLoopPatternError {
     pub span: Span,

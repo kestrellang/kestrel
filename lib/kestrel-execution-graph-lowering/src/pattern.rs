@@ -15,14 +15,18 @@
 //! Refutable patterns (enum variants, literals, ranges) are handled by
 //! match/if-let/guard-let lowering, which uses decision trees.
 
-use kestrel_execution_graph::{Place, Rvalue, Value};
+use kestrel_execution_graph::{BinOp, CallArg, Callee, Id, Place, QualifiedName, QualifiedNameData, Rvalue, Ty as MirTyMarker, Value};
+use kestrel_semantic_model::SymbolFor;
 use kestrel_semantic_tree::pattern::{
     EnumPatternBinding, Pattern, PatternKind, StructPatternField,
 };
+use kestrel_semantic_tree::symbol::local::LocalId;
+use kestrel_semantic_tree::ty::IntBits;
 
 use crate::context::LoweringContext;
 use crate::error::LoweringError;
-use crate::ty::lower_type;
+use crate::name::qualified_name_for_symbol;
+use crate::ty::{lower_type, make_int_immediate};
 
 /// Lower a pattern, assigning the value to the appropriate places.
 ///
@@ -107,10 +111,10 @@ pub fn lower_pattern(ctx: &mut LoweringContext, pattern: &Pattern, value: Value)
 
         PatternKind::Array {
             prefix,
-            rest: _,
+            rest,
             suffix,
         } => {
-            lower_array_pattern(ctx, prefix, suffix, value, pattern);
+            lower_array_pattern(ctx, prefix, rest, suffix, value, pattern);
         },
 
         PatternKind::Or { alternatives: _ } => {
@@ -242,9 +246,16 @@ fn lower_enum_variant_pattern(
 /// - a = array[0]
 /// - b = array[1]
 /// - c = array[2]
+///
+/// `let [a, ..rest, z] = array` becomes:
+/// - a = array.matchGet(0)
+/// - len = array.matchLength()
+/// - z = array.matchGet(len - 1)
+/// - rest = array.matchSlice(1, len - 1)
 fn lower_array_pattern(
     ctx: &mut LoweringContext,
     prefix: &[Pattern],
+    rest: &Option<(Option<String>, Option<LocalId>)>,
     suffix: &[Pattern],
     value: Value,
     pattern: &Pattern,
@@ -252,20 +263,189 @@ fn lower_array_pattern(
     // We need the value in a place to index from
     let array_place = ensure_place(ctx, value, &pattern.ty, "array");
 
-    // Lower prefix elements
-    for (i, sub_pattern) in prefix.iter().enumerate() {
-        let element_place = array_place.clone().index(i);
-        lower_pattern(ctx, sub_pattern, Value::Place(element_place));
+    let needs_length = !suffix.is_empty() || rest.is_some();
+
+    if !needs_length {
+        // Simple case: prefix-only pattern, use direct indexing
+        for (i, sub_pattern) in prefix.iter().enumerate() {
+            let element_place = array_place.clone().index(i);
+            lower_pattern(ctx, sub_pattern, Value::Place(element_place));
+        }
+        return;
     }
 
-    // For suffix elements, we'd need runtime length computation
-    // For now, only support patterns without suffix or where array length is known
-    if !suffix.is_empty() {
-        ctx.emit_error(LoweringError::unsupported_pattern(
-            "Array pattern with suffix elements",
-            pattern.span.clone(),
-        ));
+    // Complex case: we need length computation for suffix/rest
+    // Get the ArrayMatchable protocol name
+    let array_matchable_protocol_name = get_array_matchable_protocol_name(ctx);
+
+    // Get the type for the witness call
+    let for_type = lower_type(ctx, &pattern.ty);
+    let i64_mir_ty = ctx.mir.ty_i64();
+
+    // Get length: let len = array.matchLength()
+    let len_local = ctx.create_temp("array_len", i64_mir_ty);
+    let len_place = Place::local(len_local);
+    let length_callee = Callee::witness(
+        array_matchable_protocol_name,
+        "matchLength",
+        for_type.clone(),
+        vec![],
+    );
+    let length_args = vec![CallArg::borrow(Value::Place(array_place.clone()))];
+    ctx.emit_call_with_modes(len_place.clone(), length_callee, length_args);
+
+    // Lower prefix elements using witness calls
+    for (i, sub_pattern) in prefix.iter().enumerate() {
+        let element_value = emit_array_match_get(
+            ctx,
+            &array_place,
+            Value::Immediate(make_int_immediate(IntBits::I64, i as i64)),
+            &for_type,
+            array_matchable_protocol_name,
+            sub_pattern,
+        );
+        lower_pattern(ctx, sub_pattern, element_value);
     }
+
+    // Lower suffix elements (from end)
+    let suffix_len = suffix.len();
+    for (i, sub_pattern) in suffix.iter().enumerate() {
+        // Index from end: len - suffix_len + i
+        let offset_from_end = suffix_len - i;
+        let index_local = ctx.create_temp("suffix_idx", i64_mir_ty);
+        let index_place = Place::local(index_local);
+
+        // index = len - offset_from_end
+        ctx.emit_assign(
+            index_place.clone(),
+            Rvalue::BinaryOp {
+                op: BinOp::SubSigned,
+                lhs: Value::Place(len_place.clone()),
+                rhs: Value::Immediate(make_int_immediate(IntBits::I64, offset_from_end as i64)),
+            },
+        );
+
+        let element_value = emit_array_match_get(
+            ctx,
+            &array_place,
+            Value::Place(index_place),
+            &for_type,
+            array_matchable_protocol_name,
+            sub_pattern,
+        );
+        lower_pattern(ctx, sub_pattern, element_value);
+    }
+
+    // Lower rest binding if present
+    if let Some((name, local_id_opt)) = rest {
+        if let Some(local_id) = local_id_opt {
+            // We have a named rest binding: ..rest
+            // rest = array.matchSlice(prefix_len, len - suffix_len)
+            let prefix_len = prefix.len();
+
+            // Calculate end index: len - suffix_len
+            let end_local = ctx.create_temp("rest_end", i64_mir_ty);
+            let end_place = Place::local(end_local);
+            ctx.emit_assign(
+                end_place.clone(),
+                Rvalue::BinaryOp {
+                    op: BinOp::SubSigned,
+                    lhs: Value::Place(len_place.clone()),
+                    rhs: Value::Immediate(make_int_immediate(IntBits::I64, suffix_len as i64)),
+                },
+            );
+
+            // Get or create the MIR local for the rest binding
+            let mir_local = if let Some(existing) = ctx.get_local(*local_id) {
+                existing
+            } else {
+                // Get the rest pattern's type (should be Slice[T])
+                // We need to infer it from the array's element type
+                let rest_name = name.as_deref().unwrap_or("rest");
+                let rest_ty = get_rest_slice_type(ctx, &pattern.ty);
+                let new_local = ctx.create_local(rest_name, rest_ty);
+                ctx.map_local(*local_id, new_local);
+                new_local
+            };
+            let rest_place = Place::local(mir_local);
+
+            // Call matchSlice(prefix_len, end)
+            let slice_callee = Callee::witness(
+                array_matchable_protocol_name,
+                "matchSlice",
+                for_type.clone(),
+                vec![],
+            );
+            let slice_args = vec![
+                CallArg::borrow(Value::Place(array_place.clone())),
+                CallArg::copy(Value::Immediate(make_int_immediate(IntBits::I64, prefix_len as i64))),
+                CallArg::copy(Value::Place(end_place)),
+            ];
+            ctx.emit_call_with_modes(rest_place, slice_callee, slice_args);
+        }
+        // If local_id is None, it's anonymous rest `..` - nothing to bind
+    }
+}
+
+/// Get the ArrayMatchable protocol name for witness calls.
+fn get_array_matchable_protocol_name(ctx: &mut LoweringContext) -> Id<QualifiedName> {
+    if let Some(am_id) = ctx.model.builtin_registry().array_matchable_protocol() {
+        if let Some(am_symbol) = ctx.model.query(SymbolFor { id: am_id }) {
+            return qualified_name_for_symbol(ctx, &am_symbol);
+        }
+    }
+    // Fallback to manual construction
+    ctx.mir.intern_name(QualifiedNameData::new(vec![
+        "std".to_string(),
+        "core".to_string(),
+        "ArrayMatchable".to_string(),
+    ]))
+}
+
+/// Emit a call to array.matchGet(index) and return the result value.
+fn emit_array_match_get(
+    ctx: &mut LoweringContext,
+    array_place: &Place,
+    index: Value,
+    for_type: &Id<MirTyMarker>,
+    protocol_name: Id<QualifiedName>,
+    sub_pattern: &Pattern,
+) -> Value {
+    let element_ty = lower_type(ctx, &sub_pattern.ty);
+    let element_local = ctx.create_temp("array_elem", element_ty);
+    let element_place = Place::local(element_local);
+
+    let get_callee = Callee::witness(protocol_name, "matchGet", *for_type, vec![]);
+    let get_args = vec![
+        CallArg::borrow(Value::Place(array_place.clone())),
+        CallArg::copy(index),
+    ];
+    ctx.emit_call_with_modes(element_place.clone(), get_callee, get_args);
+
+    Value::Place(element_place)
+}
+
+/// Get the Slice[T] type for the rest binding given the array type.
+fn get_rest_slice_type(
+    ctx: &mut LoweringContext,
+    array_ty: &kestrel_semantic_tree::ty::Ty,
+) -> Id<MirTyMarker> {
+    // The array type should be Array[T] or similar - extract T and make Slice[T]
+    // For now, we'll get the element type and create the corresponding MIR slice type
+    use kestrel_semantic_tree::ty::TyKind;
+
+    if let TyKind::Struct { substitutions, .. } = array_ty.kind() {
+        // Get the element type from the Array[T] substitutions
+        if let Some((_, elem_ty)) = substitutions.iter().next() {
+            // Create Slice[elem_ty] using the model
+            if let Some(slice_ty) = ctx.model.make_slice_type(elem_ty.clone(), array_ty.span().clone()) {
+                return lower_type(ctx, &slice_ty);
+            }
+        }
+    }
+
+    // Fallback: return a unit type (this shouldn't happen with valid code)
+    ctx.mir.ty_unit()
 }
 
 /// Lower an @ pattern.

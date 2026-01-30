@@ -1159,6 +1159,15 @@ impl Ty {
         }
     }
 
+    /// Check if this is the Slice[T] struct type (using builtin registry)
+    pub fn is_slice_struct(&self, builtins: &BuiltinRegistry) -> bool {
+        if let TyKind::Struct { symbol, .. } = &self.kind {
+            builtins.struct_feature(symbol.metadata().id()) == Some(LanguageFeature::SliceStruct)
+        } else {
+            false
+        }
+    }
+
     /// Get element type if this is Array[T] struct (using builtin registry)
     ///
     /// Returns the T in Array[T] by looking up the type parameter substitution.
