@@ -610,11 +610,11 @@ See [docs/memory-model/implementation-plan.md](docs/memory-model/implementation-
 ### Standard Library
 
 - [x] Create real hash implementation
-- [ ] Improve numeric implementation
-- [ ] Improve iterators
-- [ ] Improve collections
-- [ ] Improve strings
-- [ ] Improve options / results
+- [x] Improve numeric implementation
+- [x] Improve iterators
+- [x] Improve collections
+- [x] Improve strings
+- [x] Improve options / results
 
 ### Core Features
 

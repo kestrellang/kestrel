@@ -646,7 +646,6 @@ func test(x: lang.i64) -> lang.str {
     }
 
     #[test]
-    #[ignore = "Char range patterns with Matchable - LessOrEqual witness call needs investigation"]
     fn char_range_pattern() {
         // Tests char range patterns with Char struct
         Test::new(
@@ -693,7 +692,6 @@ func main() -> lang.i64 {
     }
 
     #[test]
-    #[ignore = "Char range patterns with Matchable - LessOrEqual witness call needs investigation"]
     fn char_range_pattern_exclusive() {
         // Tests exclusive char range patterns
         Test::new(

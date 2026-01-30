@@ -853,10 +853,43 @@ fn constructors_compatible(pattern_ctor: &Constructor, target_ctor: &Constructor
             Constructor::IntRange { start: s1, end: e1 },
             Constructor::IntRange { start: s2, end: e2 },
         ) => {
-            s1 <= e2 && s2 <= e1 // Overlapping ranges
+            // Overlapping ranges - handle optional bounds
+            // None means unbounded, so treat as -∞ or +∞
+            let overlap_start = match (s1, e2) {
+                (Some(s), Some(e)) => *s <= *e,
+                _ => true, // Unbounded always overlaps
+            };
+            let overlap_end = match (s2, e1) {
+                (Some(s), Some(e)) => *s <= *e,
+                _ => true, // Unbounded always overlaps
+            };
+            overlap_start && overlap_end
         },
         (Constructor::IntLiteral(v), Constructor::IntRange { start, end }) => {
-            *v >= *start && *v <= *end
+            let ge_start = start.map(|s| *v >= s).unwrap_or(true);
+            let le_end = end.map(|e| *v <= e).unwrap_or(true);
+            ge_start && le_end
+        },
+        (
+            Constructor::CharRange { start: s1, end: e1 },
+            Constructor::CharRange { start: s2, end: e2 },
+        ) => {
+            // Overlapping ranges - handle optional bounds
+            // None means unbounded, so treat as min/max char
+            let overlap_start = match (s1, e2) {
+                (Some(s), Some(e)) => *s <= *e,
+                _ => true, // Unbounded always overlaps
+            };
+            let overlap_end = match (s2, e1) {
+                (Some(s), Some(e)) => *s <= *e,
+                _ => true, // Unbounded always overlaps
+            };
+            overlap_start && overlap_end
+        },
+        (Constructor::CharLiteral(v), Constructor::CharRange { start, end }) => {
+            let ge_start = start.map(|s| *v >= s).unwrap_or(true);
+            let le_end = end.map(|e| *v <= e).unwrap_or(true);
+            ge_start && le_end
         },
         (
             Constructor::Array {

@@ -22,6 +22,10 @@ pub enum LanguageFeature {
 
     // Protocol builtins - pattern matching
     Matchable,
+    RangeMatchable,
+    RangeMatchableIsAtLeast,
+    RangeMatchableIsAtMost,
+    RangeMatchableIsBelow,
 
     // Protocol builtins - literal expressibility
     ExpressibleByIntLiteral,
@@ -172,6 +176,10 @@ impl LanguageFeature {
             "Cloneable" => Some(Self::Cloneable),
             "Clone" => Some(Self::Clone),
             "Matchable" => Some(Self::Matchable),
+            "RangeMatchable" => Some(Self::RangeMatchable),
+            "RangeMatchableIsAtLeast" => Some(Self::RangeMatchableIsAtLeast),
+            "RangeMatchableIsAtMost" => Some(Self::RangeMatchableIsAtMost),
+            "RangeMatchableIsBelow" => Some(Self::RangeMatchableIsBelow),
             "ExpressibleByIntLiteral" => Some(Self::ExpressibleByIntLiteral),
             "ExpressibleByFloatLiteral" => Some(Self::ExpressibleByFloatLiteral),
             "ExpressibleByStringLiteral" => Some(Self::ExpressibleByStringLiteral),
@@ -301,6 +309,10 @@ impl LanguageFeature {
             Self::Cloneable => "Cloneable",
             Self::Clone => "Clone",
             Self::Matchable => "Matchable",
+            Self::RangeMatchable => "RangeMatchable",
+            Self::RangeMatchableIsAtLeast => "RangeMatchableIsAtLeast",
+            Self::RangeMatchableIsAtMost => "RangeMatchableIsAtMost",
+            Self::RangeMatchableIsBelow => "RangeMatchableIsBelow",
             Self::ExpressibleByIntLiteral => "ExpressibleByIntLiteral",
             Self::ExpressibleByFloatLiteral => "ExpressibleByFloatLiteral",
             Self::ExpressibleByStringLiteral => "ExpressibleByStringLiteral",
@@ -459,6 +471,34 @@ impl LanguageFeature {
                     tuple_conformance_propagation: false,
                     requires_fields_conform: false,
                     disallow_enum_conformance: false,
+                },
+            },
+            Self::RangeMatchable => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::Protocol {
+                    implicit_conformance: false,
+                    must_be_marker: false,
+                    tuple_conformance_propagation: false,
+                    requires_fields_conform: false,
+                    disallow_enum_conformance: false,
+                },
+            },
+            Self::RangeMatchableIsAtLeast => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::ProtocolMethod {
+                    protocol_feature: LanguageFeature::RangeMatchable,
+                },
+            },
+            Self::RangeMatchableIsAtMost => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::ProtocolMethod {
+                    protocol_feature: LanguageFeature::RangeMatchable,
+                },
+            },
+            Self::RangeMatchableIsBelow => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::ProtocolMethod {
+                    protocol_feature: LanguageFeature::RangeMatchable,
                 },
             },
             Self::ExpressibleByIntLiteral => BuiltinDefinition {
@@ -1158,6 +1198,11 @@ impl BuiltinRegistry {
     /// Convenience: Get the Matchable protocol.
     pub fn matchable_protocol(&self) -> Option<SymbolId> {
         self.protocol(LanguageFeature::Matchable)
+    }
+
+    /// Convenience: Get the RangeMatchable protocol.
+    pub fn range_matchable_protocol(&self) -> Option<SymbolId> {
+        self.protocol(LanguageFeature::RangeMatchable)
     }
 
     // =========================================================================

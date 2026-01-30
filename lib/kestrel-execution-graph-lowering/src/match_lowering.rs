@@ -622,48 +622,87 @@ fn emit_comparison_chain_int(
             },
 
             Constructor::IntRange { start, end } => {
-                // Range check: start <= switch_place && switch_place <= end
+                // Range check with optional bounds
                 let match_block = ctx.create_block();
                 let next_block = ctx.create_block();
 
-                // start <= value
-                let cmp1_ty = ctx.mir.ty_bool();
-                let cmp1_local = ctx.create_temp("cmp_lo", cmp1_ty);
-                let cmp1_place = Place::local(cmp1_local);
-                ctx.emit_assign(
-                    cmp1_place.clone(),
-                    Rvalue::BinaryOp {
-                        op: BinOp::LeSigned,
-                        lhs: Value::Immediate(make_int_immediate(int_bits, *start)),
-                        rhs: Value::Place(switch_place.clone()),
-                    },
-                );
+                // Build comparison for the range bounds we have
+                let cmp_place = match (start, end) {
+                    (Some(s), Some(e)) => {
+                        // Full range: start <= value && value <= end
+                        let cmp1_ty = ctx.mir.ty_bool();
+                        let cmp1_local = ctx.create_temp("cmp_lo", cmp1_ty);
+                        let cmp1_place = Place::local(cmp1_local);
+                        ctx.emit_assign(
+                            cmp1_place.clone(),
+                            Rvalue::BinaryOp {
+                                op: BinOp::LeSigned,
+                                lhs: Value::Immediate(make_int_immediate(int_bits, *s)),
+                                rhs: Value::Place(switch_place.clone()),
+                            },
+                        );
 
-                // value <= end
-                let cmp2_ty = ctx.mir.ty_bool();
-                let cmp2_local = ctx.create_temp("cmp_hi", cmp2_ty);
-                let cmp2_place = Place::local(cmp2_local);
-                ctx.emit_assign(
-                    cmp2_place.clone(),
-                    Rvalue::BinaryOp {
-                        op: BinOp::LeSigned,
-                        lhs: Value::Place(switch_place.clone()),
-                        rhs: Value::Immediate(make_int_immediate(int_bits, *end)),
-                    },
-                );
+                        let cmp2_ty = ctx.mir.ty_bool();
+                        let cmp2_local = ctx.create_temp("cmp_hi", cmp2_ty);
+                        let cmp2_place = Place::local(cmp2_local);
+                        ctx.emit_assign(
+                            cmp2_place.clone(),
+                            Rvalue::BinaryOp {
+                                op: BinOp::LeSigned,
+                                lhs: Value::Place(switch_place.clone()),
+                                rhs: Value::Immediate(make_int_immediate(int_bits, *e)),
+                            },
+                        );
 
-                // cmp1 && cmp2
-                let cmp_ty = ctx.mir.ty_bool();
-                let cmp_local = ctx.create_temp("cmp_range", cmp_ty);
-                let cmp_place = Place::local(cmp_local);
-                ctx.emit_assign(
-                    cmp_place.clone(),
-                    Rvalue::BinaryOp {
-                        op: BinOp::BoolAnd,
-                        lhs: Value::Place(cmp1_place),
-                        rhs: Value::Place(cmp2_place),
+                        let cmp_ty = ctx.mir.ty_bool();
+                        let cmp_local = ctx.create_temp("cmp_range", cmp_ty);
+                        let cmp_place = Place::local(cmp_local);
+                        ctx.emit_assign(
+                            cmp_place.clone(),
+                            Rvalue::BinaryOp {
+                                op: BinOp::BoolAnd,
+                                lhs: Value::Place(cmp1_place),
+                                rhs: Value::Place(cmp2_place),
+                            },
+                        );
+                        cmp_place
                     },
-                );
+                    (Some(s), None) => {
+                        // Range from: start <= value
+                        let cmp_ty = ctx.mir.ty_bool();
+                        let cmp_local = ctx.create_temp("cmp_lo", cmp_ty);
+                        let cmp_place = Place::local(cmp_local);
+                        ctx.emit_assign(
+                            cmp_place.clone(),
+                            Rvalue::BinaryOp {
+                                op: BinOp::LeSigned,
+                                lhs: Value::Immediate(make_int_immediate(int_bits, *s)),
+                                rhs: Value::Place(switch_place.clone()),
+                            },
+                        );
+                        cmp_place
+                    },
+                    (None, Some(e)) => {
+                        // Range to: value <= end
+                        let cmp_ty = ctx.mir.ty_bool();
+                        let cmp_local = ctx.create_temp("cmp_hi", cmp_ty);
+                        let cmp_place = Place::local(cmp_local);
+                        ctx.emit_assign(
+                            cmp_place.clone(),
+                            Rvalue::BinaryOp {
+                                op: BinOp::LeSigned,
+                                lhs: Value::Place(switch_place.clone()),
+                                rhs: Value::Immediate(make_int_immediate(int_bits, *e)),
+                            },
+                        );
+                        cmp_place
+                    },
+                    (None, None) => {
+                        // Unbounded range - always matches (shouldn't happen)
+                        emit_decision_tree(ctx, tree, scrutinee, arms, result_place, join_block);
+                        continue;
+                    },
+                };
 
                 // Branch
                 ctx.emit_branch(Value::Place(cmp_place), match_block, next_block);
@@ -706,48 +745,87 @@ fn emit_comparison_chain_int(
             },
 
             Constructor::CharRange { start, end } => {
-                // Char range check: start <= switch_place && switch_place <= end
+                // Char range check with optional bounds
                 let match_block = ctx.create_block();
                 let next_block = ctx.create_block();
 
-                // start <= value
-                let cmp1_ty = ctx.mir.ty_bool();
-                let cmp1_local = ctx.create_temp("cmp_lo", cmp1_ty);
-                let cmp1_place = Place::local(cmp1_local);
-                ctx.emit_assign(
-                    cmp1_place.clone(),
-                    Rvalue::BinaryOp {
-                        op: BinOp::LeSigned,
-                        lhs: Value::Immediate(make_int_immediate(int_bits, *start as i64)),
-                        rhs: Value::Place(switch_place.clone()),
-                    },
-                );
+                // Build comparison for the range bounds we have
+                let cmp_place = match (start, end) {
+                    (Some(s), Some(e)) => {
+                        // Full range: start <= value && value <= end
+                        let cmp1_ty = ctx.mir.ty_bool();
+                        let cmp1_local = ctx.create_temp("cmp_lo", cmp1_ty);
+                        let cmp1_place = Place::local(cmp1_local);
+                        ctx.emit_assign(
+                            cmp1_place.clone(),
+                            Rvalue::BinaryOp {
+                                op: BinOp::LeSigned,
+                                lhs: Value::Immediate(make_int_immediate(int_bits, *s as i64)),
+                                rhs: Value::Place(switch_place.clone()),
+                            },
+                        );
 
-                // value <= end
-                let cmp2_ty = ctx.mir.ty_bool();
-                let cmp2_local = ctx.create_temp("cmp_hi", cmp2_ty);
-                let cmp2_place = Place::local(cmp2_local);
-                ctx.emit_assign(
-                    cmp2_place.clone(),
-                    Rvalue::BinaryOp {
-                        op: BinOp::LeSigned,
-                        lhs: Value::Place(switch_place.clone()),
-                        rhs: Value::Immediate(make_int_immediate(int_bits, *end as i64)),
-                    },
-                );
+                        let cmp2_ty = ctx.mir.ty_bool();
+                        let cmp2_local = ctx.create_temp("cmp_hi", cmp2_ty);
+                        let cmp2_place = Place::local(cmp2_local);
+                        ctx.emit_assign(
+                            cmp2_place.clone(),
+                            Rvalue::BinaryOp {
+                                op: BinOp::LeSigned,
+                                lhs: Value::Place(switch_place.clone()),
+                                rhs: Value::Immediate(make_int_immediate(int_bits, *e as i64)),
+                            },
+                        );
 
-                // cmp1 && cmp2
-                let cmp_ty = ctx.mir.ty_bool();
-                let cmp_local = ctx.create_temp("cmp_range", cmp_ty);
-                let cmp_place = Place::local(cmp_local);
-                ctx.emit_assign(
-                    cmp_place.clone(),
-                    Rvalue::BinaryOp {
-                        op: BinOp::BoolAnd,
-                        lhs: Value::Place(cmp1_place),
-                        rhs: Value::Place(cmp2_place),
+                        let cmp_ty = ctx.mir.ty_bool();
+                        let cmp_local = ctx.create_temp("cmp_range", cmp_ty);
+                        let cmp_place = Place::local(cmp_local);
+                        ctx.emit_assign(
+                            cmp_place.clone(),
+                            Rvalue::BinaryOp {
+                                op: BinOp::BoolAnd,
+                                lhs: Value::Place(cmp1_place),
+                                rhs: Value::Place(cmp2_place),
+                            },
+                        );
+                        cmp_place
                     },
-                );
+                    (Some(s), None) => {
+                        // Range from: start <= value
+                        let cmp_ty = ctx.mir.ty_bool();
+                        let cmp_local = ctx.create_temp("cmp_lo", cmp_ty);
+                        let cmp_place = Place::local(cmp_local);
+                        ctx.emit_assign(
+                            cmp_place.clone(),
+                            Rvalue::BinaryOp {
+                                op: BinOp::LeSigned,
+                                lhs: Value::Immediate(make_int_immediate(int_bits, *s as i64)),
+                                rhs: Value::Place(switch_place.clone()),
+                            },
+                        );
+                        cmp_place
+                    },
+                    (None, Some(e)) => {
+                        // Range to: value <= end
+                        let cmp_ty = ctx.mir.ty_bool();
+                        let cmp_local = ctx.create_temp("cmp_hi", cmp_ty);
+                        let cmp_place = Place::local(cmp_local);
+                        ctx.emit_assign(
+                            cmp_place.clone(),
+                            Rvalue::BinaryOp {
+                                op: BinOp::LeSigned,
+                                lhs: Value::Place(switch_place.clone()),
+                                rhs: Value::Immediate(make_int_immediate(int_bits, *e as i64)),
+                            },
+                        );
+                        cmp_place
+                    },
+                    (None, None) => {
+                        // Unbounded range - always matches (shouldn't happen)
+                        emit_decision_tree(ctx, tree, scrutinee, arms, result_place, join_block);
+                        continue;
+                    },
+                };
 
                 // Branch
                 ctx.emit_branch(Value::Place(cmp_place), match_block, next_block);
@@ -1511,10 +1589,9 @@ fn emit_matchable_switch(
             },
 
             Constructor::CharRange { start, end } => {
-                // Char ranges for Matchable types - create temporaries for the low and high bounds
-                // and check if scrutinee is in range using LessOrEqual.lessThanOrEqual
+                // Char ranges for Matchable types - create temporaries for bounds and check
+                // using LessOrEqual.lessThanOrEqual
                 let match_block = ctx.create_block();
-                let check_hi_block = ctx.create_block(); // Block for checking upper bound
                 let next_block = ctx.create_block();
 
                 // Helper to create a char literal temp
@@ -1599,57 +1676,131 @@ fn emit_matchable_switch(
 
                             let mir_callee = Callee::direct(init_name);
                             ctx.emit_call_with_modes(unit_place, mir_callee, call_args);
+                        } else {
+                            // No init$charLiteral found - fall back to direct assignment
+                            // This shouldn't happen for proper Char types
+                            ctx.emit_assign(
+                                char_place.clone(),
+                                Rvalue::Use(Immediate::i32(c as i32)),
+                            );
                         }
+                    } else {
+                        // Not a struct type - fall back to direct assignment
+                        ctx.emit_assign(
+                            char_place.clone(),
+                            Rvalue::Use(Immediate::i32(c as i32)),
+                        );
                     }
 
                     char_place
                 };
 
-                // Create start and end char temps
-                let start_place = create_char_temp(ctx, *start, "range_start");
-                let end_place = create_char_temp(ctx, *end, "range_end");
-
-                // Get the LessOrEqual protocol for witness calls
-                let less_or_equal_protocol_name =
+                // Get the RangeMatchable protocol for witness calls
+                let range_matchable_protocol_name = if let Some(rm_id) =
+                    ctx.model.builtin_registry().range_matchable_protocol()
+                {
+                    if let Some(rm_symbol) = ctx.model.query(SymbolFor { id: rm_id }) {
+                        qualified_name_for_symbol(ctx, &rm_symbol)
+                    } else {
+                        // Fallback to manual construction
+                        ctx.mir.intern_name(QualifiedNameData::new(vec![
+                            "std".to_string(),
+                            "core".to_string(),
+                            "RangeMatchable".to_string(),
+                        ]))
+                    }
+                } else {
+                    // Fallback to manual construction
                     ctx.mir.intern_name(QualifiedNameData::new(vec![
                         "std".to_string(),
                         "core".to_string(),
-                        "LessOrEqual".to_string(),
-                    ]));
+                        "RangeMatchable".to_string(),
+                    ]))
+                };
 
-                // Check: start <= scrutinee (start.lessThanOrEqual(scrutinee))
-                let cmp1_local = ctx.create_temp("cmp_lo", bool_mir_ty);
-                let cmp1_place = Place::local(cmp1_local);
+                // Handle optional bounds
+                match (start, end) {
+                    (Some(s), Some(e)) => {
+                        // Full range: scrutinee >= start && scrutinee <= end
+                        let check_hi_block = ctx.create_block();
 
-                // lessThanOrEqual() has no method-level type parameters
-                let callee1 =
-                    Callee::witness(less_or_equal_protocol_name, "lessThanOrEqual", for_type, vec![]);
-                let call_args1 = vec![
-                    CallArg::borrow(Value::Place(start_place)),
-                    CallArg::borrow(Value::Place(switch_place.clone())),
-                ];
-                ctx.emit_call_with_modes(cmp1_place.clone(), callee1, call_args1);
+                        let start_place = create_char_temp(ctx, *s, "range_start");
+                        let end_place = create_char_temp(ctx, *e, "range_end");
 
-                // Branch: if start <= scrutinee, check upper bound; otherwise skip
-                ctx.emit_branch(Value::Place(cmp1_place), check_hi_block, next_block);
+                        // Check: scrutinee >= start (scrutinee.isAtLeast(start))
+                        let cmp1_local = ctx.create_temp("cmp_lo", bool_mir_ty);
+                        let cmp1_place = Place::local(cmp1_local);
+                        let callee1 = Callee::witness(
+                            range_matchable_protocol_name,
+                            "isAtLeast",
+                            for_type,
+                            vec![],
+                        );
+                        let call_args1 = vec![
+                            CallArg::borrow(Value::Place(switch_place.clone())),
+                            CallArg::borrow(Value::Place(start_place)),
+                        ];
+                        ctx.emit_call_with_modes(cmp1_place.clone(), callee1, call_args1);
+                        ctx.emit_branch(Value::Place(cmp1_place), check_hi_block, next_block);
 
-                // In check_hi_block: Check scrutinee <= end
-                ctx.set_current_block(check_hi_block);
-
-                let cmp2_local = ctx.create_temp("cmp_hi", bool_mir_ty);
-                let cmp2_place = Place::local(cmp2_local);
-
-                // lessThanOrEqual() has no method-level type parameters
-                let callee2 =
-                    Callee::witness(less_or_equal_protocol_name, "lessThanOrEqual", for_type, vec![]);
-                let call_args2 = vec![
-                    CallArg::borrow(Value::Place(switch_place.clone())),
-                    CallArg::borrow(Value::Place(end_place)),
-                ];
-                ctx.emit_call_with_modes(cmp2_place.clone(), callee2, call_args2);
-
-                // Branch: if scrutinee <= end, go to match; otherwise skip
-                ctx.emit_branch(Value::Place(cmp2_place), match_block, next_block);
+                        // Check: scrutinee <= end (scrutinee.isAtMost(end))
+                        ctx.set_current_block(check_hi_block);
+                        let cmp2_local = ctx.create_temp("cmp_hi", bool_mir_ty);
+                        let cmp2_place = Place::local(cmp2_local);
+                        let callee2 = Callee::witness(
+                            range_matchable_protocol_name,
+                            "isAtMost",
+                            for_type,
+                            vec![],
+                        );
+                        let call_args2 = vec![
+                            CallArg::borrow(Value::Place(switch_place.clone())),
+                            CallArg::borrow(Value::Place(end_place)),
+                        ];
+                        ctx.emit_call_with_modes(cmp2_place.clone(), callee2, call_args2);
+                        ctx.emit_branch(Value::Place(cmp2_place), match_block, next_block);
+                    },
+                    (Some(s), None) => {
+                        // Range from: scrutinee >= start (scrutinee.isAtLeast(start))
+                        let start_place = create_char_temp(ctx, *s, "range_start");
+                        let cmp_local = ctx.create_temp("cmp_lo", bool_mir_ty);
+                        let cmp_place = Place::local(cmp_local);
+                        let callee = Callee::witness(
+                            range_matchable_protocol_name,
+                            "isAtLeast",
+                            for_type,
+                            vec![],
+                        );
+                        let call_args = vec![
+                            CallArg::borrow(Value::Place(switch_place.clone())),
+                            CallArg::borrow(Value::Place(start_place)),
+                        ];
+                        ctx.emit_call_with_modes(cmp_place.clone(), callee, call_args);
+                        ctx.emit_branch(Value::Place(cmp_place), match_block, next_block);
+                    },
+                    (None, Some(e)) => {
+                        // Range to: scrutinee <= end (scrutinee.isAtMost(end))
+                        let end_place = create_char_temp(ctx, *e, "range_end");
+                        let cmp_local = ctx.create_temp("cmp_hi", bool_mir_ty);
+                        let cmp_place = Place::local(cmp_local);
+                        let callee = Callee::witness(
+                            range_matchable_protocol_name,
+                            "isAtMost",
+                            for_type,
+                            vec![],
+                        );
+                        let call_args = vec![
+                            CallArg::borrow(Value::Place(switch_place.clone())),
+                            CallArg::borrow(Value::Place(end_place)),
+                        ];
+                        ctx.emit_call_with_modes(cmp_place.clone(), callee, call_args);
+                        ctx.emit_branch(Value::Place(cmp_place), match_block, next_block);
+                    },
+                    (None, None) => {
+                        // Unbounded - always matches
+                        ctx.emit_jump(match_block);
+                    },
+                }
 
                 // Emit match body
                 ctx.set_current_block(match_block);

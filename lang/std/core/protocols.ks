@@ -23,6 +23,26 @@ public protocol Matchable {
     func matches(other: Self) -> Bool
 }
 
+/// Protocol for types that support range pattern matching.
+/// Enables patterns like `start..=end`, `start..<end`, `..=end`, `..<end`, `start..`
+///
+/// The Bound type parameter allows heterogeneous matching, e.g., matching
+/// an Int64 against Char bounds.
+@builtin(.RangeMatchable)
+public protocol RangeMatchable[Bound = Self] {
+    /// Returns true if self >= bound (for start.. patterns)
+    @builtin(.RangeMatchableIsAtLeast)
+    func isAtLeast(bound: Bound) -> Bool
+
+    /// Returns true if self <= bound (for ..=end patterns)
+    @builtin(.RangeMatchableIsAtMost)
+    func isAtMost(bound: Bound) -> Bool
+
+    /// Returns true if self < bound (for ..<end patterns)
+    @builtin(.RangeMatchableIsBelow)
+    func isBelow(bound: Bound) -> Bool
+}
+
 /// Extension that provides == and != operators for all Equatable types.
 extend Equatable: Equal[Self], NotEqual[Self] {
     type Equal.Output = Bool
@@ -72,6 +92,28 @@ extend Comparable: Less[Self], LessOrEqual[Self], Greater[Self], GreaterOrEqual[
     /// Returns true if this value is not equal to the other.
     public func notEquals(other: Self) -> Bool {
         self.compare(other) != Ordering.Equal
+    }
+}
+
+/// Extension that provides RangeMatchable for all Comparable types.
+/// This allows any Comparable type to be used in range patterns automatically.
+extend Comparable: RangeMatchable[Self] {
+    /// Returns true if self >= bound
+    public func isAtLeast(bound: Self) -> Bool {
+        // Use compare() instead of >= to avoid protocol lookup issues
+        self.compare(bound) != Ordering.Less
+    }
+
+    /// Returns true if self <= bound
+    public func isAtMost(bound: Self) -> Bool {
+        // Use compare() instead of <= to avoid protocol lookup issues
+        self.compare(bound) != Ordering.Greater
+    }
+
+    /// Returns true if self < bound
+    public func isBelow(bound: Self) -> Bool {
+        // Use compare() instead of < to avoid protocol lookup issues
+        self.compare(bound) == Ordering.Less
     }
 }
 

@@ -634,12 +634,26 @@ fn ctor_to_witness(ctor: &Constructor, _ty: &Ty) -> Witness {
             args: vec![],
         },
         Constructor::IntLiteral(n) => Witness::integer(*n),
-        Constructor::IntRange { start, .. } => {
-            // For ranges, pick the start value as witness
-            Witness::integer(*start)
+        Constructor::IntRange { start, end } => {
+            // For ranges, pick the start value as witness (or 0 if unbounded)
+            match start {
+                Some(s) => Witness::integer(*s),
+                None => match end {
+                    Some(e) => Witness::integer(*e),
+                    None => Witness::any(),
+                },
+            }
         },
         Constructor::CharLiteral(c) => Witness::Literal(format!("'{}'", c)),
-        Constructor::CharRange { start, .. } => Witness::Literal(format!("'{}'", start)),
+        Constructor::CharRange { start, end } => {
+            match start {
+                Some(s) => Witness::Literal(format!("'{}'", s)),
+                None => match end {
+                    Some(e) => Witness::Literal(format!("'{}'", e)),
+                    None => Witness::any(),
+                },
+            }
+        },
         Constructor::StringLiteral(s) => Witness::string(s),
         Constructor::Unit => Witness::tuple(vec![]),
         Constructor::Wildcard => Witness::any(),

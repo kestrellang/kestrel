@@ -2,7 +2,7 @@
 
 module std.text
 
-import std.core.(Equatable, Comparable, Ordering, Bool, Matchable, ExpressibleByCharLiteral, Hash, Hasher)
+import std.core.(Equatable, Comparable, Ordering, Bool, Matchable, ExpressibleByCharLiteral, Hash, Hasher, RangeMatchable)
 import std.num.(Int64, UInt8, UInt32)
 import std.result.(Optional)
 import std.collections.(Array)
@@ -21,7 +21,7 @@ public type Byte = UInt8
 /// A Unicode code point (scalar value from 0 to 0x10FFFF).
 ///
 /// Supports character literal syntax: 'a', '\n', '\u{1F600}'.
-public struct Char: Equatable, Comparable, Matchable, ExpressibleByCharLiteral, Hash {
+public struct Char: Equatable, Comparable, Matchable, ExpressibleByCharLiteral, Hash, RangeMatchable {
     private var _value: UInt32
 
     // ========================================================================
@@ -173,6 +173,21 @@ public struct Char: Equatable, Comparable, Matchable, ExpressibleByCharLiteral, 
     public func hash[H](mutating into hasher: H) where H: Hasher {
         let val = self._value;
         hasher.write(Slice(pointer: Pointer(to: val).asRaw().cast[UInt8](), count: Int64(intLiteral: 4)))
+    }
+
+    /// Returns true if self >= bound (for range pattern matching).
+    public func isAtLeast(bound: Char) -> Bool {
+        self.compare(bound) != Ordering.Less
+    }
+
+    /// Returns true if self <= bound (for range pattern matching).
+    public func isAtMost(bound: Char) -> Bool {
+        self.compare(bound) != Ordering.Greater
+    }
+
+    /// Returns true if self < bound (for range pattern matching).
+    public func isBelow(bound: Char) -> Bool {
+        self.compare(bound) == Ordering.Less
     }
 }
 

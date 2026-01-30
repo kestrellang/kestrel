@@ -17,4 +17,5 @@ mod if_let;
 mod let_destructuring;
 mod match_expressions;
 mod pattern_types;
+mod range_matchable;
 mod while_let;

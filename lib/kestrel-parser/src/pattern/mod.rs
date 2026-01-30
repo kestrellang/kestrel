@@ -117,12 +117,14 @@ pub enum PatternVariant {
     },
     /// Literal pattern: integer, float, string, bool, char
     Literal(LiteralPatternKind),
-    /// Range pattern: `0..=9` or `0..<10`
+    /// Range pattern: `0..=9`, `0..<10`, `..=9`, `..<10`, `0..`
     Range {
-        start: LiteralPatternKind,
+        /// Start bound (None for `..=end` or `..<end`)
+        start: Option<LiteralPatternKind>,
         operator: Span,
         inclusive: bool,
-        end: LiteralPatternKind,
+        /// End bound (None for `start..`)
+        end: Option<LiteralPatternKind>,
     },
     /// Enum pattern: `.Case` or `.Case(args)`
     Enum {
@@ -217,23 +219,17 @@ pub fn pattern_parser<'tokens>()
             .ignore_then(select! { Token::Char = e => to_kestrel_span(e.span()) })
             .map(|span| PatternVariant::Literal(LiteralPatternKind::Char(span)));
 
-        // Range pattern: `0..=9` or `0..<10` or `'a'..='z'`
+        // Range patterns: `0..=9`, `0..<10`, `..=9`, `..<10`, `0..`
         // Must parse before standalone literals
-        let range_start = skip_trivia()
+        let range_bound = skip_trivia()
             .ignore_then(select! { Token::Integer = e => LiteralPatternKind::Integer(to_kestrel_span(e.span())) })
             .or(skip_trivia().ignore_then(select! { Token::Char = e => {
                 let span = to_kestrel_span(e.span());
                 LiteralPatternKind::Char(span)
             }}));
 
-        let range_end = skip_trivia()
-            .ignore_then(select! { Token::Integer = e => LiteralPatternKind::Integer(to_kestrel_span(e.span())) })
-            .or(skip_trivia().ignore_then(select! { Token::Char = e => {
-                let span = to_kestrel_span(e.span());
-                LiteralPatternKind::Char(span)
-            }}));
-
-        let range_pattern = range_start
+        // Full range: `start..=end` or `start..<end`
+        let full_range_pattern = range_bound
             .clone()
             .then(
                 skip_trivia()
@@ -245,15 +241,51 @@ pub fn pattern_parser<'tokens>()
                         just(Token::DotDotLess).map_with(|_, e| (to_kestrel_span(e.span()), false)),
                     )),
             )
-            .then(range_end)
+            .then(range_bound.clone())
             .map(
                 |((start, (operator, inclusive)), end)| PatternVariant::Range {
-                    start,
+                    start: Some(start),
                     operator,
                     inclusive,
-                    end,
+                    end: Some(end),
                 },
             );
+
+        // Range from: `start..` (no end bound)
+        let range_from_pattern = range_bound
+            .clone()
+            .then(
+                skip_trivia()
+                    .ignore_then(just(Token::DotDot).map_with(|_, e| to_kestrel_span(e.span()))),
+            )
+            .map(|(start, operator)| PatternVariant::Range {
+                start: Some(start),
+                operator,
+                inclusive: false, // No end to be inclusive of
+                end: None,
+            });
+
+        // Range to: `..=end` or `..<end` (no start bound)
+        let range_to_pattern = skip_trivia()
+            .ignore_then(
+                just(Token::DotDotEquals)
+                    .map_with(|_, e| (to_kestrel_span(e.span()), true))
+                    .or(just(Token::DotDotLess)
+                        .map_with(|_, e| (to_kestrel_span(e.span()), false))),
+            )
+            .then(range_bound.clone())
+            .map(|((operator, inclusive), end)| PatternVariant::Range {
+                start: None,
+                operator,
+                inclusive,
+                end: Some(end),
+            });
+
+        // Combine all range patterns - order matters for parsing precedence
+        // full_range must come before range_from to avoid `1..2` being parsed as `1..` followed by `2`
+        let range_pattern = full_range_pattern
+            .or(range_from_pattern)
+            .or(range_to_pattern);
 
         let literal = float_literal
             .or(integer_literal)
@@ -645,47 +677,23 @@ pub fn emit_pattern_variant(sink: &mut EventSink, variant: &PatternVariant) {
             end,
         } => {
             sink.start_node(SyntaxKind::RangePattern);
-            // Emit start literal
-            match start {
-                LiteralPatternKind::Integer(span) => {
-                    sink.add_token(SyntaxKind::Integer, span.clone());
-                },
-                LiteralPatternKind::Float(span) => {
-                    sink.add_token(SyntaxKind::Float, span.clone());
-                },
-                LiteralPatternKind::String(span) => {
-                    sink.add_token(SyntaxKind::String, span.clone());
-                },
-                LiteralPatternKind::Bool(span) => {
-                    sink.add_token(SyntaxKind::Boolean, span.clone());
-                },
-                LiteralPatternKind::Char(span) => {
-                    sink.add_token(SyntaxKind::Char, span.clone());
-                },
+            // Emit start literal (if present)
+            if let Some(start_lit) = start {
+                emit_literal_pattern_kind(sink, start_lit);
             }
             // Emit range operator
-            if *inclusive {
+            // For `start..` patterns, we use DotDot; for others, DotDotEquals or DotDotLess
+            if end.is_none() {
+                // `start..` pattern - use DotDot
+                sink.add_token(SyntaxKind::DotDot, operator.clone());
+            } else if *inclusive {
                 sink.add_token(SyntaxKind::DotDotEquals, operator.clone());
             } else {
                 sink.add_token(SyntaxKind::DotDotLess, operator.clone());
             }
-            // Emit end literal
-            match end {
-                LiteralPatternKind::Integer(span) => {
-                    sink.add_token(SyntaxKind::Integer, span.clone());
-                },
-                LiteralPatternKind::Float(span) => {
-                    sink.add_token(SyntaxKind::Float, span.clone());
-                },
-                LiteralPatternKind::String(span) => {
-                    sink.add_token(SyntaxKind::String, span.clone());
-                },
-                LiteralPatternKind::Bool(span) => {
-                    sink.add_token(SyntaxKind::Boolean, span.clone());
-                },
-                LiteralPatternKind::Char(span) => {
-                    sink.add_token(SyntaxKind::Char, span.clone());
-                },
+            // Emit end literal (if present)
+            if let Some(end_lit) = end {
+                emit_literal_pattern_kind(sink, end_lit);
             }
             sink.finish_node();
         },
@@ -821,6 +829,27 @@ pub fn emit_pattern_variant(sink: &mut EventSink, variant: &PatternVariant) {
     sink.finish_node(); // Finish Pattern wrapper
 }
 
+/// Helper function to emit a literal pattern kind token
+fn emit_literal_pattern_kind(sink: &mut EventSink, lit: &LiteralPatternKind) {
+    match lit {
+        LiteralPatternKind::Integer(span) => {
+            sink.add_token(SyntaxKind::Integer, span.clone());
+        },
+        LiteralPatternKind::Float(span) => {
+            sink.add_token(SyntaxKind::Float, span.clone());
+        },
+        LiteralPatternKind::String(span) => {
+            sink.add_token(SyntaxKind::String, span.clone());
+        },
+        LiteralPatternKind::Bool(span) => {
+            sink.add_token(SyntaxKind::Boolean, span.clone());
+        },
+        LiteralPatternKind::Char(span) => {
+            sink.add_token(SyntaxKind::Char, span.clone());
+        },
+    }
+}
+
 /// Emit events for a pattern variant without the Pattern wrapper
 /// Used for nested patterns (e.g., in tuple elements)
 fn emit_pattern_variant_inner(sink: &mut EventSink, variant: &PatternVariant) {
@@ -884,47 +913,23 @@ fn emit_pattern_variant_inner(sink: &mut EventSink, variant: &PatternVariant) {
             end,
         } => {
             sink.start_node(SyntaxKind::RangePattern);
-            // Emit start literal
-            match start {
-                LiteralPatternKind::Integer(span) => {
-                    sink.add_token(SyntaxKind::Integer, span.clone());
-                },
-                LiteralPatternKind::Float(span) => {
-                    sink.add_token(SyntaxKind::Float, span.clone());
-                },
-                LiteralPatternKind::String(span) => {
-                    sink.add_token(SyntaxKind::String, span.clone());
-                },
-                LiteralPatternKind::Bool(span) => {
-                    sink.add_token(SyntaxKind::Boolean, span.clone());
-                },
-                LiteralPatternKind::Char(span) => {
-                    sink.add_token(SyntaxKind::Char, span.clone());
-                },
+            // Emit start literal (if present)
+            if let Some(start_lit) = start {
+                emit_literal_pattern_kind(sink, start_lit);
             }
             // Emit range operator
-            if *inclusive {
+            // For `start..` patterns, we use DotDot; for others, DotDotEquals or DotDotLess
+            if end.is_none() {
+                // `start..` pattern - use DotDot
+                sink.add_token(SyntaxKind::DotDot, operator.clone());
+            } else if *inclusive {
                 sink.add_token(SyntaxKind::DotDotEquals, operator.clone());
             } else {
                 sink.add_token(SyntaxKind::DotDotLess, operator.clone());
             }
-            // Emit end literal
-            match end {
-                LiteralPatternKind::Integer(span) => {
-                    sink.add_token(SyntaxKind::Integer, span.clone());
-                },
-                LiteralPatternKind::Float(span) => {
-                    sink.add_token(SyntaxKind::Float, span.clone());
-                },
-                LiteralPatternKind::String(span) => {
-                    sink.add_token(SyntaxKind::String, span.clone());
-                },
-                LiteralPatternKind::Bool(span) => {
-                    sink.add_token(SyntaxKind::Boolean, span.clone());
-                },
-                LiteralPatternKind::Char(span) => {
-                    sink.add_token(SyntaxKind::Char, span.clone());
-                },
+            // Emit end literal (if present)
+            if let Some(end_lit) = end {
+                emit_literal_pattern_kind(sink, end_lit);
             }
             sink.finish_node();
         },

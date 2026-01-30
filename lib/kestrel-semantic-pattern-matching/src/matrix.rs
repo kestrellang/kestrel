@@ -631,24 +631,46 @@ fn constructors_match(pattern_ctor: &Constructor, target_ctor: &Constructor) -> 
 
         (Constructor::IntLiteral(v1), Constructor::IntLiteral(v2)) => v1 == v2,
         (Constructor::IntLiteral(v), Constructor::IntRange { start, end }) => {
-            *v >= *start && *v <= *end
+            let ge_start = start.map(|s| *v >= s).unwrap_or(true);
+            let le_end = end.map(|e| *v <= e).unwrap_or(true);
+            ge_start && le_end
         },
         (
             Constructor::IntRange { start: s1, end: e1 },
             Constructor::IntRange { start: s2, end: e2 },
         ) => {
-            // Ranges match if they overlap
-            s1 <= e2 && s2 <= e1
+            // Ranges match if they overlap - handle optional bounds
+            let overlap_start = match (s1, e2) {
+                (Some(s), Some(e)) => *s <= *e,
+                _ => true,
+            };
+            let overlap_end = match (s2, e1) {
+                (Some(s), Some(e)) => *s <= *e,
+                _ => true,
+            };
+            overlap_start && overlap_end
         },
 
         (Constructor::CharLiteral(v1), Constructor::CharLiteral(v2)) => v1 == v2,
         (Constructor::CharLiteral(v), Constructor::CharRange { start, end }) => {
-            *v >= *start && *v <= *end
+            let ge_start = start.map(|s| *v >= s).unwrap_or(true);
+            let le_end = end.map(|e| *v <= e).unwrap_or(true);
+            ge_start && le_end
         },
         (
             Constructor::CharRange { start: s1, end: e1 },
             Constructor::CharRange { start: s2, end: e2 },
-        ) => s1 <= e2 && s2 <= e1,
+        ) => {
+            let overlap_start = match (s1, e2) {
+                (Some(s), Some(e)) => *s <= *e,
+                _ => true,
+            };
+            let overlap_end = match (s2, e1) {
+                (Some(s), Some(e)) => *s <= *e,
+                _ => true,
+            };
+            overlap_start && overlap_end
+        },
 
         (Constructor::StringLiteral(s1), Constructor::StringLiteral(s2)) => s1 == s2,
 

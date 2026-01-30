@@ -257,11 +257,23 @@ impl<'a> ExhaustivenessChecker<'a> {
             Constructor::Struct { name, .. } => Witness::struct_witness(name, vec![]),
             Constructor::IntLiteral(n) => Witness::integer(*n),
             Constructor::IntRange { start, end } => {
-                Witness::range(start.to_string(), end.to_string(), true)
+                let start_str = start.map(|s| s.to_string()).unwrap_or_default();
+                let end_str = end.map(|e| e.to_string()).unwrap_or_default();
+                if end.is_none() {
+                    Witness::Literal(format!("{}..", start_str))
+                } else {
+                    Witness::range(start_str, end_str, true)
+                }
             },
             Constructor::CharLiteral(c) => Witness::Literal(format!("'{}'", c)),
             Constructor::CharRange { start, end } => {
-                Witness::range(format!("'{}'", start), format!("'{}'", end), true)
+                let start_str = start.map(|s| format!("'{}'", s)).unwrap_or_default();
+                let end_str = end.map(|e| format!("'{}'", e)).unwrap_or_default();
+                if end.is_none() {
+                    Witness::Literal(format!("{}..", start_str))
+                } else {
+                    Witness::range(start_str, end_str, true)
+                }
             },
             Constructor::StringLiteral(s) => Witness::string(s),
             Constructor::Array {
@@ -278,7 +290,8 @@ impl<'a> ExhaustivenessChecker<'a> {
 
 /// Extract integer range bounds from a pattern, if it is a range pattern.
 ///
-/// Returns `Some((start, end))` for inclusive ranges.
+/// Returns `Some((start, end))` for ranges with both bounds defined.
+/// Open-ended ranges (like `..=10` or `5..`) return None.
 fn extract_int_range(pattern: &Pattern) -> Option<(i64, i64)> {
     match &pattern.kind {
         PatternKind::Range {
@@ -286,11 +299,11 @@ fn extract_int_range(pattern: &Pattern) -> Option<(i64, i64)> {
             end,
             inclusive,
         } => match (start, end) {
-            (RangeBound::Integer(s), RangeBound::Integer(e)) => {
+            (Some(RangeBound::Integer(s)), Some(RangeBound::Integer(e))) => {
                 let end_val = if *inclusive { *e } else { e - 1 };
                 Some((*s, end_val))
             },
-            _ => None,
+            _ => None, // Open-ended or char ranges
         },
         _ => None,
     }

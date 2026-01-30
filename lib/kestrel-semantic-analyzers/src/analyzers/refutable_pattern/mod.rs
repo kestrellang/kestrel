@@ -185,14 +185,22 @@ fn describe_pattern(pattern: &Pattern) -> String {
         } => {
             use kestrel_semantic_tree::pattern::RangeBound;
             let start_str = match start {
-                RangeBound::Integer(i) => i.to_string(),
-                RangeBound::Char(c) => format!("'{}'", c),
+                Some(RangeBound::Integer(i)) => i.to_string(),
+                Some(RangeBound::Char(c)) => format!("'{}'", c),
+                None => String::new(),
             };
             let end_str = match end {
-                RangeBound::Integer(i) => i.to_string(),
-                RangeBound::Char(c) => format!("'{}'", c),
+                Some(RangeBound::Integer(i)) => i.to_string(),
+                Some(RangeBound::Char(c)) => format!("'{}'", c),
+                None => String::new(),
             };
-            let op = if *inclusive { "..=" } else { "..<" };
+            let op = if end.is_none() {
+                ".."
+            } else if *inclusive {
+                "..="
+            } else {
+                "..<"
+            };
             format!("{}{}{}", start_str, op, end_str)
         },
         PatternKind::Struct {

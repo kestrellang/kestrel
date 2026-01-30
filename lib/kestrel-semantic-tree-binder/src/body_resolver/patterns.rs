@@ -776,7 +776,7 @@ fn resolve_struct_pattern_field(
     }
 }
 
-/// Resolve a range pattern (`0..=9` or `0..<10`).
+/// Resolve a range pattern (`0..=9`, `0..<10`, `..=9`, `..<10`, `0..`).
 fn resolve_range_pattern(
     node: &SyntaxNode,
     ctx: &mut BodyResolutionContext,
@@ -790,12 +790,15 @@ fn resolve_range_pattern(
         .filter_map(|elem| elem.into_token())
         .collect();
 
-    // We expect: start_literal, range_operator, end_literal
-    // The range operator is ..= (inclusive) or ..< (exclusive)
+    // We support:
+    // - Full range: start..=end, start..<end
+    // - Range to: ..=end, ..<end
+    // - Range from: start..
     let mut start_bound: Option<RangeBound> = None;
     let mut end_bound: Option<RangeBound> = None;
     let mut inclusive = true;
     let mut found_operator = false;
+    let mut is_range_from = false; // start.. pattern (uses DotDot)
 
     for token in &tokens {
         match token.kind() {
@@ -843,61 +846,71 @@ fn resolve_range_pattern(
                 found_operator = true;
                 inclusive = false;
             },
+            SyntaxKind::DotDot => {
+                // This is for `start..` patterns (range from)
+                found_operator = true;
+                is_range_from = true;
+                inclusive = false; // No end to be inclusive of
+            },
             _ => {},
         }
     }
 
-    // Validate we have both bounds
-    let (start, end) = match (start_bound, end_bound) {
-        (Some(s), Some(e)) => (s, e),
-        _ => return Pattern::error(span),
-    };
-
-    // Validate that start <= end (or start < end for exclusive ranges)
-    let is_valid_range = match (&start, &end) {
-        (RangeBound::Integer(s), RangeBound::Integer(e)) => {
-            if inclusive {
-                *s <= *e
-            } else {
-                *s < *e
-            }
-        },
-        (RangeBound::Char(s), RangeBound::Char(e)) => {
-            if inclusive {
-                *s <= *e
-            } else {
-                *s < *e
-            }
-        },
-        _ => false, // Mismatched types are invalid
-    };
-
-    if !is_valid_range {
-        use crate::diagnostics::InvalidRangeBoundsError;
-        let error = InvalidRangeBoundsError {
-            span: span.clone(),
-            inclusive,
-        };
-        ctx.diagnostics.add_diagnostic(error.into_diagnostic());
+    // Validate we have at least one bound (or it's a range_from pattern)
+    if start_bound.is_none() && end_bound.is_none() {
         return Pattern::error(span);
     }
 
-    // Determine the type based on the bounds
-    let ty = match (&start, &end) {
-        (RangeBound::Integer(_), RangeBound::Integer(_)) => expected_ty
+    // For full ranges, validate that start <= end (or start < end for exclusive ranges)
+    if let (Some(start), Some(end)) = (&start_bound, &end_bound) {
+        let is_valid_range = match (start, end) {
+            (RangeBound::Integer(s), RangeBound::Integer(e)) => {
+                if inclusive {
+                    *s <= *e
+                } else {
+                    *s < *e
+                }
+            },
+            (RangeBound::Char(s), RangeBound::Char(e)) => {
+                if inclusive {
+                    *s <= *e
+                } else {
+                    *s < *e
+                }
+            },
+            _ => false, // Mismatched types are invalid
+        };
+
+        if !is_valid_range {
+            use crate::diagnostics::InvalidRangeBoundsError;
+            let error = InvalidRangeBoundsError {
+                span: span.clone(),
+                inclusive,
+            };
+            ctx.diagnostics.add_diagnostic(error.into_diagnostic());
+            return Pattern::error(span);
+        }
+    }
+
+    // Determine the type based on the bounds we have
+    let bound_for_type = start_bound.as_ref().or(end_bound.as_ref());
+    let ty = match bound_for_type {
+        Some(RangeBound::Integer(_)) => expected_ty
             .cloned()
             .unwrap_or_else(|| Ty::int(kestrel_semantic_tree::ty::IntBits::I64, span.clone())),
-        (RangeBound::Char(_), RangeBound::Char(_)) => {
-            // We'd need a Char type here - for now use infer
+        Some(RangeBound::Char(_)) => {
+            // We'd need a Char type here - for now use expected or infer
             expected_ty
                 .cloned()
                 .unwrap_or_else(|| Ty::infer(span.clone()))
         },
-        // Mismatched bounds (e.g., int..=char) - error
-        _ => return Pattern::error(span),
+        None => return Pattern::error(span),
     };
 
-    Pattern::range(start, end, inclusive, ty, span)
+    // For range_from patterns, ensure inclusive is false (no end to be inclusive of)
+    let final_inclusive = if is_range_from { false } else { inclusive };
+
+    Pattern::range(start_bound, end_bound, final_inclusive, ty, span)
 }
 
 /// Resolve an or-pattern (`p1 or p2 or ...`).

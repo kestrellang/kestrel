@@ -5340,42 +5340,82 @@ fn emit_if_let_int_switch(
                 let match_block = ctx.create_block();
                 let next_block = ctx.create_block();
 
-                // Range check: start <= value && value <= end
-                let cmp1_ty = ctx.mir.ty_bool();
-                let cmp1_local = ctx.create_temp("cmp_lo", cmp1_ty);
-                let cmp1_place = Place::local(cmp1_local);
-                ctx.emit_assign(
-                    cmp1_place.clone(),
-                    Rvalue::BinaryOp {
-                        op: BinOp::LeSigned,
-                        lhs: Value::Immediate(make_int_immediate(int_bits, *start)),
-                        rhs: Value::Place(switch_place.clone()),
-                    },
-                );
+                // Build comparison for the range bounds we have
+                let cmp_place = match (start, end) {
+                    (Some(s), Some(e)) => {
+                        // Full range: start <= value && value <= end
+                        let cmp1_ty = ctx.mir.ty_bool();
+                        let cmp1_local = ctx.create_temp("cmp_lo", cmp1_ty);
+                        let cmp1_place = Place::local(cmp1_local);
+                        ctx.emit_assign(
+                            cmp1_place.clone(),
+                            Rvalue::BinaryOp {
+                                op: BinOp::LeSigned,
+                                lhs: Value::Immediate(make_int_immediate(int_bits, *s)),
+                                rhs: Value::Place(switch_place.clone()),
+                            },
+                        );
 
-                let cmp2_ty = ctx.mir.ty_bool();
-                let cmp2_local = ctx.create_temp("cmp_hi", cmp2_ty);
-                let cmp2_place = Place::local(cmp2_local);
-                ctx.emit_assign(
-                    cmp2_place.clone(),
-                    Rvalue::BinaryOp {
-                        op: BinOp::LeSigned,
-                        lhs: Value::Place(switch_place.clone()),
-                        rhs: Value::Immediate(make_int_immediate(int_bits, *end)),
-                    },
-                );
+                        let cmp2_ty = ctx.mir.ty_bool();
+                        let cmp2_local = ctx.create_temp("cmp_hi", cmp2_ty);
+                        let cmp2_place = Place::local(cmp2_local);
+                        ctx.emit_assign(
+                            cmp2_place.clone(),
+                            Rvalue::BinaryOp {
+                                op: BinOp::LeSigned,
+                                lhs: Value::Place(switch_place.clone()),
+                                rhs: Value::Immediate(make_int_immediate(int_bits, *e)),
+                            },
+                        );
 
-                let cmp_ty = ctx.mir.ty_bool();
-                let cmp_local = ctx.create_temp("cmp_range", cmp_ty);
-                let cmp_place = Place::local(cmp_local);
-                ctx.emit_assign(
-                    cmp_place.clone(),
-                    Rvalue::BinaryOp {
-                        op: BinOp::BoolAnd,
-                        lhs: Value::Place(cmp1_place),
-                        rhs: Value::Place(cmp2_place),
+                        let cmp_ty = ctx.mir.ty_bool();
+                        let cmp_local = ctx.create_temp("cmp_range", cmp_ty);
+                        let cmp_place = Place::local(cmp_local);
+                        ctx.emit_assign(
+                            cmp_place.clone(),
+                            Rvalue::BinaryOp {
+                                op: BinOp::BoolAnd,
+                                lhs: Value::Place(cmp1_place),
+                                rhs: Value::Place(cmp2_place),
+                            },
+                        );
+                        cmp_place
                     },
-                );
+                    (Some(s), None) => {
+                        let cmp_ty = ctx.mir.ty_bool();
+                        let cmp_local = ctx.create_temp("cmp_lo", cmp_ty);
+                        let cmp_place = Place::local(cmp_local);
+                        ctx.emit_assign(
+                            cmp_place.clone(),
+                            Rvalue::BinaryOp {
+                                op: BinOp::LeSigned,
+                                lhs: Value::Immediate(make_int_immediate(int_bits, *s)),
+                                rhs: Value::Place(switch_place.clone()),
+                            },
+                        );
+                        cmp_place
+                    },
+                    (None, Some(e)) => {
+                        let cmp_ty = ctx.mir.ty_bool();
+                        let cmp_local = ctx.create_temp("cmp_hi", cmp_ty);
+                        let cmp_place = Place::local(cmp_local);
+                        ctx.emit_assign(
+                            cmp_place.clone(),
+                            Rvalue::BinaryOp {
+                                op: BinOp::LeSigned,
+                                lhs: Value::Place(switch_place.clone()),
+                                rhs: Value::Immediate(make_int_immediate(int_bits, *e)),
+                            },
+                        );
+                        cmp_place
+                    },
+                    (None, None) => {
+                        emit_if_let_decision_tree(
+                            ctx, tree, scrutinee, conditions, index, then_block, else_block,
+                        );
+                        continue;
+                    },
+                };
 
                 ctx.emit_branch(Value::Place(cmp_place), match_block, next_block);
 
@@ -6152,42 +6192,81 @@ fn emit_while_let_int_switch(
                 let match_block = ctx.create_block();
                 let next_block = ctx.create_block();
 
-                // Range check: start <= value && value <= end
-                let cmp1_ty = ctx.mir.ty_bool();
-                let cmp1_local = ctx.create_temp("cmp_lo", cmp1_ty);
-                let cmp1_place = Place::local(cmp1_local);
-                ctx.emit_assign(
-                    cmp1_place.clone(),
-                    Rvalue::BinaryOp {
-                        op: BinOp::LeSigned,
-                        lhs: Value::Immediate(make_int_immediate(int_bits, *start)),
-                        rhs: Value::Place(switch_place.clone()),
-                    },
-                );
+                // Build comparison for the range bounds we have
+                let cmp_place = match (start, end) {
+                    (Some(s), Some(e)) => {
+                        let cmp1_ty = ctx.mir.ty_bool();
+                        let cmp1_local = ctx.create_temp("cmp_lo", cmp1_ty);
+                        let cmp1_place = Place::local(cmp1_local);
+                        ctx.emit_assign(
+                            cmp1_place.clone(),
+                            Rvalue::BinaryOp {
+                                op: BinOp::LeSigned,
+                                lhs: Value::Immediate(make_int_immediate(int_bits, *s)),
+                                rhs: Value::Place(switch_place.clone()),
+                            },
+                        );
 
-                let cmp2_ty = ctx.mir.ty_bool();
-                let cmp2_local = ctx.create_temp("cmp_hi", cmp2_ty);
-                let cmp2_place = Place::local(cmp2_local);
-                ctx.emit_assign(
-                    cmp2_place.clone(),
-                    Rvalue::BinaryOp {
-                        op: BinOp::LeSigned,
-                        lhs: Value::Place(switch_place.clone()),
-                        rhs: Value::Immediate(make_int_immediate(int_bits, *end)),
-                    },
-                );
+                        let cmp2_ty = ctx.mir.ty_bool();
+                        let cmp2_local = ctx.create_temp("cmp_hi", cmp2_ty);
+                        let cmp2_place = Place::local(cmp2_local);
+                        ctx.emit_assign(
+                            cmp2_place.clone(),
+                            Rvalue::BinaryOp {
+                                op: BinOp::LeSigned,
+                                lhs: Value::Place(switch_place.clone()),
+                                rhs: Value::Immediate(make_int_immediate(int_bits, *e)),
+                            },
+                        );
 
-                let cmp_ty = ctx.mir.ty_bool();
-                let cmp_local = ctx.create_temp("cmp_range", cmp_ty);
-                let cmp_place = Place::local(cmp_local);
-                ctx.emit_assign(
-                    cmp_place.clone(),
-                    Rvalue::BinaryOp {
-                        op: BinOp::BoolAnd,
-                        lhs: Value::Place(cmp1_place),
-                        rhs: Value::Place(cmp2_place),
+                        let cmp_ty = ctx.mir.ty_bool();
+                        let cmp_local = ctx.create_temp("cmp_range", cmp_ty);
+                        let cmp_place = Place::local(cmp_local);
+                        ctx.emit_assign(
+                            cmp_place.clone(),
+                            Rvalue::BinaryOp {
+                                op: BinOp::BoolAnd,
+                                lhs: Value::Place(cmp1_place),
+                                rhs: Value::Place(cmp2_place),
+                            },
+                        );
+                        cmp_place
                     },
-                );
+                    (Some(s), None) => {
+                        let cmp_ty = ctx.mir.ty_bool();
+                        let cmp_local = ctx.create_temp("cmp_lo", cmp_ty);
+                        let cmp_place = Place::local(cmp_local);
+                        ctx.emit_assign(
+                            cmp_place.clone(),
+                            Rvalue::BinaryOp {
+                                op: BinOp::LeSigned,
+                                lhs: Value::Immediate(make_int_immediate(int_bits, *s)),
+                                rhs: Value::Place(switch_place.clone()),
+                            },
+                        );
+                        cmp_place
+                    },
+                    (None, Some(e)) => {
+                        let cmp_ty = ctx.mir.ty_bool();
+                        let cmp_local = ctx.create_temp("cmp_hi", cmp_ty);
+                        let cmp_place = Place::local(cmp_local);
+                        ctx.emit_assign(
+                            cmp_place.clone(),
+                            Rvalue::BinaryOp {
+                                op: BinOp::LeSigned,
+                                lhs: Value::Place(switch_place.clone()),
+                                rhs: Value::Immediate(make_int_immediate(int_bits, *e)),
+                            },
+                        );
+                        cmp_place
+                    },
+                    (None, None) => {
+                        emit_while_let_decision_tree(
+                            ctx, tree, scrutinee, conditions, index, body_block, exit_block,
+                        );
+                        continue;
+                    },
+                };
 
                 ctx.emit_branch(Value::Place(cmp_place), match_block, next_block);
 
