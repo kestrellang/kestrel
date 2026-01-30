@@ -4,14 +4,17 @@ module std.core
 
 import std.text.(String)
 
-// Note: Equal[Self] and NotEqual[Self] are automatically provided by
-// the extension `extend Equatable: Equal[Self], NotEqual[Self]`
-
+/// Represents the result of comparing two values.
+/// Used by the Comparable protocol to express total ordering.
 public enum Ordering: Equatable, Formattable {
+    /// The first value is less than the second.
     case Less
+    /// The values are equal.
     case Equal
+    /// The first value is greater than the second.
     case Greater
 
+    /// Compares this ordering with another for equality.
     public func equals(other: Ordering) -> Bool {
         match (self, other) {
             (.Less, .Less) => true,
@@ -21,10 +24,12 @@ public enum Ordering: Equatable, Formattable {
         }
     }
 
+    /// Compares this ordering with another for inequality.
     public func notEquals(other: Ordering) -> Bool {
         if self.equals(other) { false } else { true }
     }
 
+    /// Reverses this ordering (Less becomes Greater and vice versa).
     public func reverse() -> Ordering {
         match self {
             .Less => .Greater,
@@ -33,6 +38,8 @@ public enum Ordering: Equatable, Formattable {
         }
     }
 
+    /// Returns this ordering if not Equal, otherwise returns the other ordering.
+    /// Useful for chaining comparisons by multiple fields.
     public func then(other: Ordering) -> Ordering {
         match self {
             .Equal => other,
@@ -40,6 +47,8 @@ public enum Ordering: Equatable, Formattable {
         }
     }
 
+    /// Returns this ordering if not Equal, otherwise evaluates and returns the comparison.
+    /// Lazy version of then() that only evaluates the closure if needed.
     public func thenWith(compare: () -> Ordering) -> Ordering {
         match self {
             .Equal => compare(),
@@ -47,7 +56,7 @@ public enum Ordering: Equatable, Formattable {
         }
     }
 
-    // Formattable
+    /// Formats this ordering as a string.
     public func format() -> String {
         match self {
             .Less => "Less",

@@ -14,5 +14,9 @@
 
 module std.ffi
 
+/// Marker protocol for types that can safely cross FFI boundaries.
+/// Types must have a well-defined memory layout compatible with C.
+/// Primitive types and pointers to FFISafe types conform automatically.
+/// Custom structs can conform if all their fields are FFISafe.
 @builtin(.FFISafe)
 public protocol FFISafe {}

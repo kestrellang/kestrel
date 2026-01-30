@@ -98,13 +98,13 @@ mod string {
                 if pos.isNone() { return 3 }
                 if pos.unwrap() != 6 { return 4 }
 
-                // Test startsWith
-                if s.startsWith("hello") == false { return 5 }
-                if s.startsWith("world") { return 6 }
+                // Test starts/ends with
+                if s.starts(with: "hello") == false { return 5 }
+                if s.starts(with: "world") { return 6 }
 
-                // Test endsWith
-                if s.endsWith("world") == false { return 7 }
-                if s.endsWith("hello") { return 8 }
+                // Test ends with
+                if s.ends(with: "world") == false { return 7 }
+                if s.ends(with: "hello") { return 8 }
 
                 0
             }
@@ -125,17 +125,17 @@ mod string {
                 var s = std.text.String();
                 s.append("hello");
                 s.append(" world");
-                if s.byteCount() != 11 { return 1 }
+                if s.byteCount != 11 { return 1 }
 
                 // Test trim
                 let padded: std.text.String = "  hello  ";
-                let trimmed = padded.trim();
-                if trimmed.byteCount() != 5 { return 2 }
+                let trimmed = padded.trimmed();
+                if trimmed.byteCount != 5 { return 2 }
 
                 // Test lowercase/uppercase
                 let mixed: std.text.String = "HeLLo";
-                let lower = mixed.lowercase();
-                let upper = mixed.uppercase();
+                let lower = mixed.lowercased();
+                let upper = mixed.uppercased();
                 if lower.equals("hello") == false { return 3 }
                 if upper.equals("HELLO") == false { return 4 }
 

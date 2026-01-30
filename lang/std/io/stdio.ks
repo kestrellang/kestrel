@@ -13,10 +13,16 @@ import std.io.error.(Error)
 import std.io.read.(Read)
 import std.io.write.(Write, writeStr, writeByte, writeLine)
 
-// Stdin - standard input
+// ============================================================================
+// STANDARD INPUT
+// ============================================================================
+
+/// Standard input stream.
 public struct Stdin: Read {
+    /// Creates a stdin handle.
     public init() {}
 
+    /// Reads bytes from standard input.
     public mutating func read(into buf: Slice[UInt8]) -> Result[Int64, Error] {
         let n = libc.read(libc.STDIN(), buf.pointer, buf.count);
         if n < 0 {
@@ -26,11 +32,17 @@ public struct Stdin: Read {
     }
 }
 
-// Stdout - standard output
+// ============================================================================
+// STANDARD OUTPUT
+// ============================================================================
+
+/// Standard output stream.
 public struct Stdout: Write {
+    /// Creates a stdout handle.
     public init() {}
 
-    public func write(from buf: Slice[UInt8]) -> Result[Int64, Error] {
+    /// Writes bytes to standard output.
+    public mutating func write(from buf: Slice[UInt8]) -> Result[Int64, Error] {
         let n = libc.write(libc.STDOUT(), buf.pointer, buf.count);
         if n < 0 {
             return .Err(Error.last())
@@ -38,16 +50,23 @@ public struct Stdout: Write {
         .Ok(n)
     }
 
-    public func flush() -> Result[(), Error] {
+    /// Flushes standard output.
+    public mutating func flush() -> Result[(), Error] {
         .Ok(())
     }
 }
 
-// Stderr - standard error
+// ============================================================================
+// STANDARD ERROR
+// ============================================================================
+
+/// Standard error stream.
 public struct Stderr: Write {
+    /// Creates a stderr handle.
     public init() {}
 
-    public func write(from buf: Slice[UInt8]) -> Result[Int64, Error] {
+    /// Writes bytes to standard error.
+    public mutating func write(from buf: Slice[UInt8]) -> Result[Int64, Error] {
         let n = libc.write(libc.STDERR(), buf.pointer, buf.count);
         if n < 0 {
             return .Err(Error.last())
@@ -55,57 +74,70 @@ public struct Stderr: Write {
         .Ok(n)
     }
 
-    public func flush() -> Result[(), Error] {
+    /// Flushes standard error.
+    public mutating func flush() -> Result[(), Error] {
         .Ok(())
     }
 }
 
-// Get stdin handle
+// ============================================================================
+// HANDLE ACCESSORS
+// ============================================================================
+
+/// Returns a handle to standard input.
 public func stdin() -> Stdin {
     Stdin()
 }
 
-// Get stdout handle
+/// Returns a handle to standard output.
 public func stdout() -> Stdout {
     Stdout()
 }
 
-// Get stderr handle
+/// Returns a handle to standard error.
 public func stderr() -> Stderr {
     Stderr()
 }
 
-// Print to stdout (no newline)
+// ============================================================================
+// PRINT FUNCTIONS
+// ============================================================================
+
+/// Prints a value to stdout (no newline).
 public func print[F](value: F) -> Result[(), Error] where F: Formattable {
     var out = stdout();
     writeStr(out, value.format())
 }
 
-// Print to stdout with newline
+/// Prints a value to stdout with a newline.
 public func println[F](value: F) -> Result[(), Error] where F: Formattable {
     var out = stdout();
     writeLine(out, value.format())
 }
 
-// Print empty line
+/// Prints an empty line to stdout.
 public func printlnEmpty() -> Result[(), Error] {
     var out = stdout();
     writeByte(out, 10)
 }
 
-// Print to stderr (no newline)
+/// Prints a value to stderr (no newline).
 public func eprint[F](value: F) -> Result[(), Error] where F: Formattable {
     var err = stderr();
     writeStr(err, value.format())
 }
 
-// Print to stderr with newline
+/// Prints a value to stderr with a newline.
 public func eprintln[F](value: F) -> Result[(), Error] where F: Formattable {
     var err = stderr();
     writeLine(err, value.format())
 }
 
-// Read line from stdin
+// ============================================================================
+// INPUT FUNCTIONS
+// ============================================================================
+
+/// Reads a line from stdin (without the newline).
 public func readLine() -> Result[String, Error] {
     var input = stdin();
     var bytes = Array[UInt8]();
@@ -149,12 +181,12 @@ public func readLine() -> Result[String, Error] {
     .Ok(result)
 }
 
-// Prompt and read line
+/// Prints a prompt message and reads a line from stdin.
 public func prompt(message: String) -> Result[String, Error] {
+    var out = stdout();
     // TODO: add try back
-    match print(message) {
+    match writeStr(out, message) {
         .Ok(_) => {
-            var out = stdout();
             // TODO: add try back
             match out.flush() {
                 .Ok(_) => readLine(),

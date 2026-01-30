@@ -13,27 +13,93 @@ import std.io.error.(Error)
 import std.io.read.(Read, readAll)
 import std.io.write.(Write, writeAll, writeStr)
 
-// Seek position
+// ============================================================================
+// SEEK POSITION
+// ============================================================================
+
+/// Represents a seek position for file operations.
+///
+/// Used with `File.seek()` to reposition the file cursor.
+///
+/// Example:
+///     try file.seek(to: .Start(0))     // beginning
+///     try file.seek(to: .Current(-10)) // back 10 bytes
+///     try file.seek(to: .End(0))       // end of file
 public enum Seek {
+    /// Seek to an absolute position from the start of the file.
+    ///
+    /// Example:
+    ///     try file.seek(to: .Start(100))  // go to byte 100
     case Start(Int64)
+
+    /// Seek relative to the current position.
+    ///
+    /// Positive values move forward, negative values move backward.
+    ///
+    /// Example:
+    ///     try file.seek(to: .Current(10))   // forward 10 bytes
+    ///     try file.seek(to: .Current(-5))   // back 5 bytes
     case Current(Int64)
+
+    /// Seek relative to the end of the file.
+    ///
+    /// Use negative values to seek before the end.
+    ///
+    /// Example:
+    ///     try file.seek(to: .End(0))    // go to end
+    ///     try file.seek(to: .End(-10))  // 10 bytes before end
     case End(Int64)
 }
 
-// File - owned file handle
+// ============================================================================
+// FILE
+// ============================================================================
+
+/// An owned file handle that automatically closes when dropped.
+///
+/// File provides safe, RAII-style file access. The underlying file descriptor
+/// is closed automatically when the File goes out of scope. File is not
+/// copyable to ensure exclusive ownership of the file descriptor.
+///
+/// File implements both Read and Write protocols, though not all open modes
+/// support both operations (e.g., a file opened with `open()` is read-only).
+///
+/// Example:
+///     // RAII: file automatically closed at end of scope
+///     {
+///         var file = try File.open(path: "data.txt")
+///         // use file...
+///     } // file closed here
+///
+///     // Read entire file
+///     var file = try File.open(path: "input.txt")
+///     var contents = Array[UInt8]()
+///     try readAll(reader: file, into: contents)
 public struct File: Read, Write, not Copyable {
     var fd: libc.Fd
 
-    // Private: create from raw fd
+    /// Private: create from raw fd.
     init(fd: libc.Fd) {
         self.fd = fd
     }
 
-    // Open file for reading
+    // ========================================================================
+    // OPENING FILES
+    // ========================================================================
+
+    /// Opens a file for reading.
+    ///
+    /// The file must exist. Returns Err with ENOENT if the file doesn't exist,
+    /// or EACCES if permission is denied.
+    ///
+    /// Example:
+    ///     var file = try File.open(path: "existing.txt")
+    ///     var buf = Array[UInt8](repeating: 0, count: 100)
+    ///     let n = try file.read(into: buf.asSlice())
     public static func open(path: String) -> Result[File, Error] {
         // Get pointer to string bytes (need null-terminated for libc)
         // For now, we'll copy to a buffer with null terminator
-        let len = path.byteCount();
+        let len = path.byteCount;
         var pathBuf = Array[UInt8](capacity: len + 1);
         var i: Int64 = 0;
         while i < len {
@@ -49,9 +115,16 @@ public struct File: Read, Write, not Copyable {
         .Ok(File(fd))
     }
 
-    // Create file for writing (truncates if exists)
+    /// Creates a file for writing, truncating if it exists.
+    ///
+    /// If the file exists, it is truncated to zero length.
+    /// If the file doesn't exist, it is created with default permissions (0644).
+    ///
+    /// Example:
+    ///     var file = try File.create(path: "output.txt")
+    ///     try writeStr(writer: file, s: "New content")
     public static func create(path: String) -> Result[File, Error] {
-        let len = path.byteCount();
+        let len = path.byteCount;
         var pathBuf = Array[UInt8](capacity: len + 1);
         var i: Int64 = 0;
         while i < len {
@@ -68,9 +141,18 @@ public struct File: Read, Write, not Copyable {
         .Ok(File(fd))
     }
 
-    // Open for read and write
-    public static func openRW(path: String) -> Result[File, Error] {
-        let len = path.byteCount();
+    /// Opens a file for both reading and writing.
+    ///
+    /// The file must exist. Use for in-place modification of existing files.
+    ///
+    /// Example:
+    ///     var file = try File.openReadWrite(path: "data.bin")
+    ///     var header = Array[UInt8](repeating: 0, count: 16)
+    ///     try file.read(into: header.asSlice())
+    ///     try file.seek(to: .Start(0))
+    ///     try file.write(from: newHeader.asSlice())
+    public static func openReadWrite(path: String) -> Result[File, Error] {
+        let len = path.byteCount;
         var pathBuf = Array[UInt8](capacity: len + 1);
         var i: Int64 = 0;
         while i < len {
@@ -86,9 +168,16 @@ public struct File: Read, Write, not Copyable {
         .Ok(File(fd))
     }
 
-    // Open for appending
+    /// Opens a file for appending, creating if it doesn't exist.
+    ///
+    /// All writes are atomically appended to the end of the file,
+    /// regardless of seek position. Useful for log files.
+    ///
+    /// Example:
+    ///     var log = try File.openAppend(path: "app.log")
+    ///     try writeLine(writer: log, s: "Application started")
     public static func openAppend(path: String) -> Result[File, Error] {
-        let len = path.byteCount();
+        let len = path.byteCount;
         var pathBuf = Array[UInt8](capacity: len + 1);
         var i: Int64 = 0;
         while i < len {
@@ -105,7 +194,59 @@ public struct File: Read, Write, not Copyable {
         .Ok(File(fd))
     }
 
-    // Read implementation
+    /// Creates a new file, failing if it already exists.
+    ///
+    /// Use for exclusive file creation when overwriting would be an error.
+    /// Returns Err with EEXIST if the file already exists.
+    ///
+    /// Example:
+    ///     match File.createNew(path: "lock.pid") {
+    ///         case .Ok(file) => // we have the lock
+    ///         case .Err(e) => // another process has the lock
+    ///     }
+    public static func createNew(path: String) -> Result[File, Error] {
+        let len = path.byteCount;
+        var pathBuf = Array[UInt8](capacity: len + 1);
+        var i: Int64 = 0;
+        while i < len {
+            pathBuf.append(path.byteAtUnchecked(i));
+            i = i + 1
+        }
+        pathBuf.append(0);
+
+        let flags = libc.O_WRONLY() | libc.O_CREAT() | libc.O_EXCL();
+        let fd = libc.open(pathBuf.pointer(), flags, libc.MODE_DEFAULT());
+        if fd < 0 {
+            return .Err(Error.last())
+        }
+        .Ok(File(fd))
+    }
+
+    // ========================================================================
+    // READ/WRITE IMPLEMENTATION
+    // ========================================================================
+
+    /// Reads bytes from the file into the buffer.
+    ///
+    /// Reads up to buf.count bytes starting at the current position.
+    /// Advances the file position by the number of bytes read.
+    ///
+    /// Returns:
+    /// - Ok(n) where n > 0: read n bytes into buf[0..n]
+    /// - Ok(0): end of file reached
+    /// - Err: an error occurred
+    ///
+    /// Note: May read fewer bytes than requested even if more data exists.
+    /// This is not an error; call read again for more data.
+    ///
+    /// Example:
+    ///     var file = try File.open(path: "data.bin")
+    ///     var buf = Array[UInt8](repeating: 0, count: 4096)
+    ///     while true {
+    ///         let n = try file.read(into: buf.asSlice())
+    ///         if n == 0 { break }  // EOF
+    ///         // process buf[0..n]
+    ///     }
     public mutating func read(into buf: Slice[UInt8]) -> Result[Int64, Error] {
         let n = libc.read(self.fd, buf.pointer, buf.count);
         if n < 0 {
@@ -114,8 +255,24 @@ public struct File: Read, Write, not Copyable {
         .Ok(n)
     }
 
-    // Write implementation
-    public func write(from buf: Slice[UInt8]) -> Result[Int64, Error] {
+    /// Writes bytes from the buffer to the file.
+    ///
+    /// Writes up to buf.count bytes starting at the current position
+    /// (or at end of file if opened with openAppend).
+    /// Advances the file position by the number of bytes written.
+    ///
+    /// Returns:
+    /// - Ok(n): wrote n bytes from buf[0..n]
+    /// - Err: an error occurred (e.g., disk full, permission denied)
+    ///
+    /// Note: May write fewer bytes than provided. Use writeAll() to ensure
+    /// all bytes are written, or retry with the remaining bytes.
+    ///
+    /// Example:
+    ///     var file = try File.create(path: "output.bin")
+    ///     let data: [UInt8] = [0x00, 0x01, 0x02, 0x03]
+    ///     try writeAll(writer: file, from: data.asSlice())
+    public mutating func write(from buf: Slice[UInt8]) -> Result[Int64, Error] {
         let n = libc.write(self.fd, buf.pointer, buf.count);
         if n < 0 {
             return .Err(Error.last())
@@ -123,13 +280,42 @@ public struct File: Read, Write, not Copyable {
         .Ok(n)
     }
 
-    // Flush (fsync would go here, but keeping it simple)
-    public func flush() -> Result[(), Error] {
+    /// Flushes buffered writes to the underlying file.
+    ///
+    /// Ensures data written to the file handle reaches the OS.
+    /// Note: This does not guarantee data is persisted to disk;
+    /// the OS may still buffer the data.
+    ///
+    /// Example:
+    ///     var file = try File.create(path: "important.dat")
+    ///     try writeAll(writer: file, from: data.asSlice())
+    ///     try file.flush()  // ensure data reaches OS
+    public mutating func flush() -> Result[(), Error] {
         .Ok(())
     }
 
-    // Seek to position
-    public func seek(to pos: Seek) -> Result[Int64, Error] {
+    // ========================================================================
+    // SEEKING
+    // ========================================================================
+
+    /// Seeks to a position in the file.
+    ///
+    /// Returns the new absolute position from the start of the file.
+    /// Seeking past the end of a file is allowed; a subsequent write
+    /// will extend the file (creating a hole on some filesystems).
+    ///
+    /// Example:
+    ///     var file = try File.openReadWrite(path: "data.bin")
+    ///
+    ///     // Go to beginning
+    ///     try file.seek(to: .Start(0))
+    ///
+    ///     // Skip forward
+    ///     try file.seek(to: .Current(100))
+    ///
+    ///     // Go to end and get file size
+    ///     let size = try file.seek(to: .End(0))
+    public mutating func seek(to pos: Seek) -> Result[Int64, Error] {
         let pair = match pos {
             .Start(o) => (o, libc.SEEK_SET()),
             .Current(o) => (o, libc.SEEK_CUR()),
@@ -144,23 +330,58 @@ public struct File: Read, Write, not Copyable {
         .Ok(result)
     }
 
-    // Get current position
+    /// Returns the current position in the file.
+    ///
+    /// Equivalent to `seek(to: .Current(0))`.
+    ///
+    /// Example:
+    ///     var file = try File.open(path: "data.bin")
+    ///     let start = try file.position()  // 0
+    ///     try file.read(into: buf.asSlice())
+    ///     let after = try file.position()  // advanced by bytes read
     public func position() -> Result[Int64, Error] {
         self.seek(to: .Current(0))
     }
 
-    // Rewind to start
-    public func rewind() -> Result[(), Error] {
+    /// Seeks to the beginning of the file.
+    ///
+    /// Equivalent to `seek(to: .Start(0))` but discards the position result.
+    ///
+    /// Example:
+    ///     var file = try File.open(path: "data.txt")
+    ///     // read some data...
+    ///     try file.rewind()  // back to start
+    ///     // read again from beginning
+    public mutating func rewind() -> Result[(), Error] {
         try self.seek(to: .Start(0));
         .Ok(())
     }
 
-    // Get raw file descriptor
+    // ========================================================================
+    // LOW-LEVEL ACCESS
+    // ========================================================================
+
+    /// Returns the raw file descriptor.
+    ///
+    /// Use for interop with libc functions or FFI. The File retains
+    /// ownership; do not close the returned fd manually.
+    ///
+    /// Example:
+    ///     let file = try File.open(path: "data.bin")
+    ///     let fd = file.rawFd()
+    ///     // use fd with libc functions...
     public func rawFd() -> libc.Fd {
         self.fd
     }
 
-    // Close and cleanup
+    // ========================================================================
+    // DESTRUCTOR
+    // ========================================================================
+
+    /// Closes the file descriptor.
+    ///
+    /// Called automatically when the File goes out of scope.
+    /// Errors during close are silently ignored (RAII semantics).
     deinit {
         if self.fd >= 0 {
             let _ = libc.close(self.fd);
@@ -168,35 +389,90 @@ public struct File: Read, Write, not Copyable {
     }
 }
 
-// Convenience functions
+// ============================================================================
+// CONVENIENCE FUNCTIONS
+// ============================================================================
 
-// Read entire file to string
+/// Reads an entire file into a string.
+///
+/// Opens the file, reads all contents, closes the file, and returns
+/// the contents as a UTF-8 string. Suitable for small to medium files.
+///
+/// Returns Err if the file cannot be opened or read.
+///
+/// Example:
+///     let config = try readFileString(path: "config.json")
+///     let readme = try readFileString(path: "/etc/hosts")
 public func readFileString(path: String) -> Result[String, Error] {
-    let file = try File.open(path);
+    var file = try File.open(path);
     var bytes = Array[UInt8]();
     try readAll(file, into: bytes);
-    // Create string from bytes
-    // Note: This requires String to have a constructor from bytes
-    // For now we'll build it character by character
-    var result = "";
+    // Build string from bytes
+    var result = String();
     var i: Int64 = 0;
     let count = bytes.count();
     while i < count {
-        // This is inefficient but works for now
-        // TODO: Add String.fromUtf8Bytes() method
+        result.appendByte(bytes.getUnchecked(i));
         i = i + 1
     }
     .Ok(result)
 }
 
-// Write string to file
+/// Reads an entire file into a byte array.
+///
+/// Opens the file, reads all contents, closes the file, and returns
+/// the contents as a byte array. Suitable for binary files.
+///
+/// Example:
+///     let bytes = try readFileBytes(path: "image.png")
+public func readFileBytes(path: String) -> Result[Array[UInt8], Error] {
+    var file = try File.open(path);
+    var bytes = Array[UInt8]();
+    try readAll(file, into: bytes);
+    .Ok(bytes)
+}
+
+/// Writes a string to a file, creating or truncating as needed.
+///
+/// Creates the file if it doesn't exist, truncates if it does.
+/// Writes the string as UTF-8 bytes.
+///
+/// Example:
+///     try writeFileString(path: "output.txt", content: "Hello, World!")
 public func writeFileString(path: String, content: String) -> Result[(), Error] {
-    let file = try File.create(path);
+    var file = try File.create(path);
     writeStr(file, content)
 }
 
-// Append string to file
+/// Writes bytes to a file, creating or truncating as needed.
+///
+/// Creates the file if it doesn't exist, truncates if it does.
+///
+/// Example:
+///     let data: [UInt8] = [0x89, 0x50, 0x4E, 0x47]  // PNG header
+///     try writeFileBytes(path: "header.bin", content: data)
+public func writeFileBytes(path: String, content: Array[UInt8]) -> Result[(), Error] {
+    var file = try File.create(path);
+    writeAll(file, from: content.asSlice())
+}
+
+/// Appends a string to a file, creating if it doesn't exist.
+///
+/// Opens the file in append mode and writes the string as UTF-8.
+/// Useful for log files or accumulating data.
+///
+/// Example:
+///     try appendFileString(path: "log.txt", content: "Event occurred\n")
 public func appendFileString(path: String, content: String) -> Result[(), Error] {
-    let file = try File.openAppend(path);
+    var file = try File.openAppend(path);
     writeStr(file, content)
+}
+
+/// Appends bytes to a file, creating if it doesn't exist.
+///
+/// Example:
+///     try appendFileBytes(path: "data.bin", content: newData)
+public func appendFileBytes(path: String, content: Array[UInt8]) -> Result[(), Error] {
+    var file = try File.openAppend(path);
+    writeAll(file, from: content.asSlice())
 }

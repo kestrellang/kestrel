@@ -9,7 +9,11 @@ import std.iter.(Iterator, Iterable)
 import std.text.(Char, Grapheme, Byte, decodeUtf8, String)
 import std.collections.(Array)
 
-// BytesIterator must be defined before BytesView for Iterable conformance
+// ============================================================================
+// BYTES VIEW
+// ============================================================================
+
+/// Iterator over raw UTF-8 bytes.
 public struct BytesIterator: Iterator {
     type Item = UInt8
 
@@ -17,12 +21,14 @@ public struct BytesIterator: Iterator {
     private var length: Int64
     private var index: Int64
 
+    /// Creates a bytes iterator.
     public init(ptr ptr: lang.ptr[lang.i8], length length: Int64, index index: Int64) {
         self.ptr = ptr;
         self.length = length;
         self.index = index;
     }
 
+    /// Returns the next byte, or None if exhausted.
     public mutating func next() -> Optional[UInt8] {
         if self.index < self.length {
             let rawOffset: lang.i64 = self.index.raw;
@@ -36,7 +42,9 @@ public struct BytesIterator: Iterator {
     }
 }
 
-// BytesView - raw UTF-8 bytes (O(1) indexing)
+/// A view over the raw UTF-8 bytes of a string.
+///
+/// Provides O(1) indexing by byte position.
 public struct BytesView: Iterable {
     type Item = UInt8
     type Iter = BytesIterator
@@ -44,15 +52,19 @@ public struct BytesView: Iterable {
     private var ptr: lang.ptr[lang.i8]
     private var length: Int64
 
+    /// Creates a bytes view.
     public init(ptr ptr: lang.ptr[lang.i8], length length: Int64) {
         self.ptr = ptr;
         self.length = length;
     }
 
+    /// Returns the number of bytes.
     public func count() -> Int64 { self.length }
 
+    /// Returns true if the view is empty.
     public func isEmpty() -> Bool { self.length == Int64(intLiteral: 0) }
 
+    /// Returns the byte at the given index, or None if out of bounds.
     public func byteAt(index: Int64) -> Optional[UInt8] {
         if index >= Int64(intLiteral: 0) and index < self.length {
             let rawOffset: lang.i64 = index.raw;
@@ -64,6 +76,7 @@ public struct BytesView: Iterable {
         }
     }
 
+    /// Returns the byte at the given index without bounds checking.
     public func byteAtUnchecked(index: Int64) -> UInt8 {
         let rawOffset: lang.i64 = index.raw;
         let bytePtr: lang.ptr[lang.i8] = lang.ptr_offset[lang.i8](self.ptr, rawOffset);
@@ -71,12 +84,17 @@ public struct BytesView: Iterable {
         UInt8(raw: signedByte)
     }
 
+    /// Returns an iterator over the bytes.
     public func iter() -> BytesIterator {
         BytesIterator(ptr: self.ptr, length: self.length, index: Int64(intLiteral: 0))
     }
 }
 
-// CharsIterator must be defined before CharsView
+// ============================================================================
+// CHARS VIEW
+// ============================================================================
+
+/// Iterator over Unicode code points.
 public struct CharsIterator: Iterator {
     type Item = Char
 
@@ -84,12 +102,14 @@ public struct CharsIterator: Iterator {
     private var length: Int64
     private var byteIndex: Int64
 
+    /// Creates a chars iterator.
     public init(ptr ptr: lang.ptr[lang.i8], length length: Int64, byteIndex byteIndex: Int64) {
         self.ptr = ptr;
         self.length = length;
         self.byteIndex = byteIndex;
     }
 
+    /// Returns the next character, or None if exhausted.
     public mutating func next() -> Optional[Char] {
         if self.byteIndex >= self.length {
             return .None
@@ -109,7 +129,9 @@ public struct CharsIterator: Iterator {
     }
 }
 
-// CharsView - Unicode chars (O(1) iteration, O(n) indexing)
+/// A view over the Unicode code points in a string.
+///
+/// Iteration is O(1) per character, but indexing is O(n).
 public struct CharsView: Iterable {
     type Item = Char
     type Iter = CharsIterator
@@ -117,16 +139,18 @@ public struct CharsView: Iterable {
     private var ptr: lang.ptr[lang.i8]
     private var length: Int64
 
+    /// Creates a chars view.
     public init(ptr ptr: lang.ptr[lang.i8], length length: Int64) {
         self.ptr = ptr;
         self.length = length;
     }
 
+    /// Returns an iterator over the characters.
     public func iter() -> CharsIterator {
         CharsIterator(ptr: self.ptr, length: self.length, byteIndex: Int64(intLiteral: 0))
     }
 
-    // Count is O(n) - must decode all chars
+    /// Returns the number of characters (O(n) - must decode all).
     public func count() -> Int64 {
         var n: Int64 = Int64(intLiteral: 0);
         var i: Int64 = Int64(intLiteral: 0);
@@ -145,16 +169,22 @@ public struct CharsView: Iterable {
     }
 }
 
-// GraphemesIterator must be defined before GraphemesView
+// ============================================================================
+// GRAPHEMES VIEW
+// ============================================================================
+
+/// Iterator over grapheme clusters.
 public struct GraphemesIterator: Iterator {
     type Item = Grapheme
 
     private var charsIter: CharsIterator
 
+    /// Creates a graphemes iterator.
     public init(charsIter: CharsIterator) {
         self.charsIter = charsIter;
     }
 
+    /// Returns the next grapheme cluster, or None if exhausted.
     public mutating func next() -> Optional[Grapheme] {
         // Simplified: treat each char as a grapheme
         // Full implementation would need grapheme cluster segmentation
@@ -167,9 +197,9 @@ public struct GraphemesIterator: Iterator {
     }
 }
 
-// GraphemesView - Extended grapheme clusters (O(1) iteration, O(n) indexing)
-// Note: Full grapheme cluster support requires Unicode segmentation tables
-// This is a simplified implementation that treats each char as a grapheme
+/// A view over the extended grapheme clusters in a string.
+///
+/// Note: Simplified implementation treats each char as a grapheme.
 public struct GraphemesView: Iterable {
     type Item = Grapheme
     type Iter = GraphemesIterator
@@ -177,16 +207,18 @@ public struct GraphemesView: Iterable {
     private var ptr: lang.ptr[lang.i8]
     private var length: Int64
 
+    /// Creates a graphemes view.
     public init(ptr ptr: lang.ptr[lang.i8], length length: Int64) {
         self.ptr = ptr;
         self.length = length;
     }
 
+    /// Returns an iterator over the grapheme clusters.
     public func iter() -> GraphemesIterator {
         GraphemesIterator(CharsIterator(ptr: self.ptr, length: self.length, byteIndex: Int64(intLiteral: 0)))
     }
 
-    // Count is O(n) - must process all grapheme clusters
+    /// Returns the number of grapheme clusters (O(n)).
     public func count() -> Int64 {
         // Simplified: same as char count
         var n: Int64 = Int64(intLiteral: 0);
@@ -205,7 +237,11 @@ public struct GraphemesView: Iterable {
     }
 }
 
-// LinesIterator must be defined before LinesView
+// ============================================================================
+// LINES VIEW
+// ============================================================================
+
+/// Iterator over lines in a string.
 public struct LinesIterator: Iterator {
     type Item = String
 
@@ -214,6 +250,7 @@ public struct LinesIterator: Iterator {
     private var byteIndex: Int64
     private var done: Bool
 
+    /// Creates a lines iterator.
     public init(ptr ptr: lang.ptr[lang.i8], length length: Int64, byteIndex byteIndex: Int64, done done: Bool) {
         self.ptr = ptr;
         self.length = length;
@@ -221,6 +258,7 @@ public struct LinesIterator: Iterator {
         self.done = done;
     }
 
+    /// Returns the next line, or None if exhausted.
     public mutating func next() -> Optional[String] {
         if self.done or self.byteIndex >= self.length {
             return .None
@@ -278,7 +316,7 @@ public struct LinesIterator: Iterator {
         none
     }
 
-    // Helper to create a substring from byte range
+    /// Helper to create a substring from byte range.
     private func createSubstring(start: Int64, end: Int64) -> String {
         let count = end - start;
         if count == Int64(intLiteral: 0) {
@@ -298,7 +336,9 @@ public struct LinesIterator: Iterator {
     }
 }
 
-// LinesView - line iterator
+/// A view that iterates over lines in a string.
+///
+/// Handles both \n and \r\n line endings.
 public struct LinesView: Iterable {
     type Item = String
     type Iter = LinesIterator
@@ -306,52 +346,70 @@ public struct LinesView: Iterable {
     private var ptr: lang.ptr[lang.i8]
     private var length: Int64
 
+    /// Creates a lines view.
     public init(ptr ptr: lang.ptr[lang.i8], length length: Int64) {
         self.ptr = ptr;
         self.length = length;
     }
 
+    /// Returns an iterator over the lines.
     public func iter() -> LinesIterator {
         LinesIterator(ptr: self.ptr, length: self.length, byteIndex: Int64(intLiteral: 0), done: false)
     }
 }
 
-// String index types for O(1) access after initial scan
+// ============================================================================
+// STRING INDEX TYPES
+// ============================================================================
+
+/// An index into a string by byte position.
 public struct ByteIndex: Equatable, Comparable {
+    /// The byte offset value.
     public var value: Int64
 
+    /// Creates a byte index.
     public init(value: Int64) {
         self.value = value;
     }
 
+    /// Compares two byte indices for equality.
     public func equals(other: ByteIndex) -> Bool {
         self.value == other.value
     }
 
+    /// Compares two byte indices for ordering.
     public func compare(other: ByteIndex) -> Ordering {
         self.value.compare(other.value)
     }
 }
 
+/// An index into a string by character position.
 public struct CharIndex: Equatable {
+    /// The byte offset of this character.
     public var byteOffset: Int64
 
+    /// Creates a char index.
     public init(byteOffset: Int64) {
         self.byteOffset = byteOffset;
     }
 
+    /// Compares two char indices for equality.
     public func equals(other: CharIndex) -> Bool {
         self.byteOffset == other.byteOffset
     }
 }
 
+/// An index into a string by grapheme cluster position.
 public struct GraphemeIndex: Equatable {
+    /// The byte offset of this grapheme.
     public var byteOffset: Int64
 
+    /// Creates a grapheme index.
     public init(byteOffset: Int64) {
         self.byteOffset = byteOffset;
     }
 
+    /// Compares two grapheme indices for equality.
     public func equals(other: GraphemeIndex) -> Bool {
         self.byteOffset == other.byteOffset
     }

@@ -4,50 +4,62 @@
 
 module std.core
 
+/// Protocol for types that support equality comparison (==).
 @builtin(.EqualsOperatorProtocol)
 public protocol Equal[Rhs = Self] {
     type Output
 
+    /// Compares this value with another for equality.
     @builtin(.EqualsOperatorMethod)
     func equals(other: Rhs) -> Output
 }
 
+/// Protocol for types that support inequality comparison (!=).
 @builtin(.NotEqualsOperatorProtocol)
 public protocol NotEqual[Rhs = Self] {
     type Output
 
+    /// Compares this value with another for inequality.
     @builtin(.NotEqualsOperatorMethod)
     func notEquals(other: Rhs) -> Output
 }
 
+/// Protocol for types that support less-than comparison (<).
 @builtin(.LessThanOperatorProtocol)
 public protocol Less[Rhs = Self] {
     type Output
 
+    /// Returns true if this value is less than the other.
     @builtin(.LessThanOperatorMethod)
     func lessThan(other: Rhs) -> Output
 }
 
+/// Protocol for types that support less-than-or-equal comparison (<=).
 @builtin(.LessOrEqualOperatorProtocol)
 public protocol LessOrEqual[Rhs = Self] {
     type Output
 
+    /// Returns true if this value is less than or equal to the other.
     @builtin(.LessOrEqualOperatorMethod)
     func lessThanOrEqual(other: Rhs) -> Output
 }
 
+/// Protocol for types that support greater-than comparison (>).
 @builtin(.GreaterThanOperatorProtocol)
 public protocol Greater[Rhs = Self] {
     type Output
 
+    /// Returns true if this value is greater than the other.
     @builtin(.GreaterThanOperatorMethod)
     func greaterThan(other: Rhs) -> Output
 }
 
+/// Protocol for types that support greater-than-or-equal comparison (>=).
 @builtin(.GreaterOrEqualOperatorProtocol)
 public protocol GreaterOrEqual[Rhs = Self] {
     type Output
 
+    /// Returns true if this value is greater than or equal to the other.
     @builtin(.GreaterOrEqualOperatorMethod)
     func greaterThanOrEqual(other: Rhs) -> Output
 }

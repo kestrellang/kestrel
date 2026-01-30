@@ -5,19 +5,26 @@ module std.memory
 import std.core.(Equatable, Bool)
 import std.num.(Int64)
 
+/// Describes the memory layout requirements for a type.
+/// Contains size and alignment information used for allocation.
 public struct Layout: Equatable {
+    /// The size in bytes.
     public var size: Int64
+    /// The required alignment in bytes.
     public var alignment: Int64
 
+    /// Creates a layout with the specified size and alignment.
     public init(size size: Int64, alignment alignment: Int64) {
         self.size = size;
         self.alignment = alignment;
     }
 
+    /// Returns the layout for a single value of type T.
     public static func of[T]() -> Layout {
         Layout(size: Int64(intLiteral: lang.sizeof[T]()), alignment: Int64(intLiteral: lang.alignof[T]()))
     }
 
+    /// Returns the layout for an array of count elements of type T.
     public static func array[T](count: Int64) -> Layout {
         let elementLayout = Layout.of[T]();
         Layout(
@@ -26,17 +33,19 @@ public struct Layout: Equatable {
         )
     }
 
+    /// Compares two layouts for equality.
     public func equals(other: Layout) -> Bool {
         self.size == other.size and self.alignment == other.alignment
     }
 
-    // Pad size to alignment
+    /// Returns a layout with size padded to the alignment boundary.
     public func padToAlign() -> Layout {
         let padding = (self.alignment - (self.size % self.alignment)) % self.alignment;
         Layout(size: self.size + padding, alignment: self.alignment)
     }
 
-    // Extend layout to include another layout (for struct field layout)
+    /// Extends this layout to include another layout for struct field layout.
+    /// Returns the combined layout and the offset where the other layout begins.
     public func merge(with other: Layout) -> (Layout, Int64) {
         let newAlign = if self.alignment > other.alignment {
             self.alignment

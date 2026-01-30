@@ -201,3 +201,28 @@ impl IntoDiagnostic for ProtocolPropertyMissingSetterError {
             )])
     }
 }
+
+pub struct ExtensionMissingProtocolMethodError {
+    pub span: Span,
+    pub type_name: String,
+    pub protocol_name: String,
+    pub method_name: String,
+}
+
+impl IntoDiagnostic for ExtensionMissingProtocolMethodError {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
+        Diagnostic::error()
+            .with_message(format!(
+                "extension adds conformance to '{}' but does not implement method '{}'",
+                self.protocol_name, self.method_name
+            ))
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message(format!("missing method '{}' in extension", self.method_name)),
+            ])
+            .with_notes(vec![format!(
+                "when adding protocol conformance via extension, required methods must be defined in the extension body, not on '{}'",
+                self.type_name
+            )])
+    }
+}

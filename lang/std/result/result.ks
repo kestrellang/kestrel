@@ -1,4 +1,4 @@
-// Result type - represents either success (Ok) or failure (Err)
+// Result[T, E] - represents either success (Ok) or failure (Err)
 
 module std.result
 
@@ -6,24 +6,43 @@ import std.core.(Equatable, Formattable, Bool, ControlFlow, Tryable, FromResidua
 import std.text.(String)
 import std.result.(Optional)
 
+/// Represents the result of an operation: either `Ok(value)` or `Err(error)`.
+///
+/// Used for operations that can fail, providing explicit error handling
+/// without exceptions. The compiler enforces handling of the error case.
+///
+/// Syntactic sugar:
+///     T throws E   desugars to  Result[T, E]
 public enum Result[T, E]: Tryable, Returnable[T] {
+    /// Contains a success value.
     case Ok(T)
+
+    /// Contains an error value.
     case Err(E)
 
     // Tryable - associated types
     type Output = T
     type Early = E
 
-    // Convenience constructors
+    // ========================================================================
+    // CONSTRUCTORS
+    // ========================================================================
+
+    /// Creates an Ok containing the value.
     public static func ok(value: T) -> Result[T, E] {
         .Ok(value)
     }
 
+    /// Creates an Err containing the error.
     public static func err(error: E) -> Result[T, E] {
         .Err(error)
     }
 
-    // Properties - using functions due to computed property parsing issues in enums
+    // ========================================================================
+    // QUERY METHODS
+    // ========================================================================
+
+    /// Returns true if this is Ok.
     public func isOk() -> Bool {
         match self {
             .Ok(_) => true,
@@ -31,6 +50,7 @@ public enum Result[T, E]: Tryable, Returnable[T] {
         }
     }
 
+    /// Returns true if this is Err.
     public func isErr() -> Bool {
         match self {
             .Ok(_) => false,
@@ -38,7 +58,11 @@ public enum Result[T, E]: Tryable, Returnable[T] {
         }
     }
 
-    // Tryable - enables `try`
+    // ========================================================================
+    // PROTOCOL CONFORMANCES (inline)
+    // ========================================================================
+
+    /// Extracts the value for the try operator.
     public func tryExtract() -> ControlFlow[T, E] {
         match self {
             .Ok(value) => .Continue(value),
@@ -46,12 +70,19 @@ public enum Result[T, E]: Tryable, Returnable[T] {
         }
     }
 
-    // Returnable - enables `return value`
+    /// Creates Ok from a value for the return statement.
     public static func fromOutput(value: T) -> Result[T, E] {
         .Ok(value)
     }
 
-    // Unwrapping
+    // ========================================================================
+    // UNWRAPPING - SUCCESS VALUE
+    // ========================================================================
+
+    /// Returns the success value, panicking if Err.
+    ///
+    /// WARNING: Only use when you are certain the result is Ok.
+    /// Prefer `unwrapOr`, `unwrap(orElse:)`, or pattern matching.
     public func unwrap() -> T {
         match self {
             .Ok(value) => value,
@@ -59,6 +90,10 @@ public enum Result[T, E]: Tryable, Returnable[T] {
         }
     }
 
+    /// Returns the success value or the default if Err.
+    ///
+    /// Note: The default is eagerly evaluated. Use `unwrap(orElse:)` for
+    /// lazy evaluation when the default is expensive to compute.
     public func unwrapOr(default: T) -> T {
         match self {
             .Ok(value) => value,
@@ -66,6 +101,9 @@ public enum Result[T, E]: Tryable, Returnable[T] {
         }
     }
 
+    /// Returns the success value or calls the function with the error if Err.
+    ///
+    /// The function receives the error and can use it to compute a default.
     public func unwrap(orElse defaultFn: (E) -> T) -> T {
         match self {
             .Ok(value) => value,
@@ -73,6 +111,13 @@ public enum Result[T, E]: Tryable, Returnable[T] {
         }
     }
 
+    // ========================================================================
+    // UNWRAPPING - ERROR VALUE
+    // ========================================================================
+
+    /// Returns the error value, panicking if Ok.
+    ///
+    /// Useful in tests to assert that an operation failed.
     public func unwrapErr() -> E {
         match self {
             .Ok(_) => lang.panic("called unwrapErr() on Ok"),
@@ -80,7 +125,13 @@ public enum Result[T, E]: Tryable, Returnable[T] {
         }
     }
 
-    // Transformations
+    // ========================================================================
+    // TRANSFORMATIONS - SUCCESS VALUE
+    // ========================================================================
+
+    /// Transforms the success value using the function.
+    ///
+    /// Returns Err unchanged if this is Err.
     public func map[U](transform: (T) -> U) -> Result[U, E] {
         match self {
             .Ok(value) => .Ok(transform(value)),
@@ -88,13 +139,9 @@ public enum Result[T, E]: Tryable, Returnable[T] {
         }
     }
 
-    public func mapErr[F](transform: (E) -> F) -> Result[T, F] {
-        match self {
-            .Ok(value) => .Ok(value),
-            .Err(error) => .Err(transform(error))
-        }
-    }
-
+    /// Transforms the success value, flattening the result.
+    ///
+    /// Use when your transform function returns a Result.
     public func flatMap[U](transform: (T) -> Result[U, E]) -> Result[U, E] {
         match self {
             .Ok(value) => transform(value),
@@ -102,6 +149,23 @@ public enum Result[T, E]: Tryable, Returnable[T] {
         }
     }
 
+    // ========================================================================
+    // TRANSFORMATIONS - ERROR VALUE
+    // ========================================================================
+
+    /// Transforms the error value using the function.
+    ///
+    /// Returns Ok unchanged if this is Ok.
+    public func mapErr[F](transform: (E) -> F) -> Result[T, F] {
+        match self {
+            .Ok(value) => .Ok(value),
+            .Err(error) => .Err(transform(error))
+        }
+    }
+
+    /// Transforms the error value, flattening the result.
+    ///
+    /// Use when your transform function returns a Result.
     public func flatMapErr[F](transform: (E) -> Result[T, F]) -> Result[T, F] {
         match self {
             .Ok(value) => .Ok(value),
@@ -109,7 +173,13 @@ public enum Result[T, E]: Tryable, Returnable[T] {
         }
     }
 
-    // Convert to Optional
+    // ========================================================================
+    // CONVERSION TO OPTIONAL
+    // ========================================================================
+
+    /// Converts to Optional, discarding the error.
+    ///
+    /// Returns Some(value) if Ok, None if Err.
     public func ok() -> Optional[T] {
         match self {
             .Ok(value) => .Some(value),
@@ -117,6 +187,9 @@ public enum Result[T, E]: Tryable, Returnable[T] {
         }
     }
 
+    /// Converts to Optional, discarding the success value.
+    ///
+    /// Returns Some(error) if Err, None if Ok.
     public func err() -> Optional[E] {
         match self {
             .Ok(_) => .None,
@@ -124,8 +197,12 @@ public enum Result[T, E]: Tryable, Returnable[T] {
         }
     }
 
-    // Combinator operations
-    // Note: 'and'/'or' are keywords, so we use 'andValue'/'orValue'
+    // ========================================================================
+    // COMBINATORS
+    // ========================================================================
+
+    /// Returns other if this is Ok, otherwise returns the Err.
+    /// Note: 'and' is a keyword, so we use 'andValue'.
     public func andValue[U](other: Result[U, E]) -> Result[U, E] {
         match self {
             .Ok(_) => other,
@@ -133,6 +210,7 @@ public enum Result[T, E]: Tryable, Returnable[T] {
         }
     }
 
+    /// Alias for flatMap - chains result operations.
     public func andThen[U](transform: (T) -> Result[U, E]) -> Result[U, E] {
         match self {
             .Ok(value) => transform(value),
@@ -140,6 +218,8 @@ public enum Result[T, E]: Tryable, Returnable[T] {
         }
     }
 
+    /// Returns this if Ok, otherwise returns other.
+    /// Note: 'or' is a keyword, so we use 'orValue'.
     public func orValue(other: Result[T, E]) -> Result[T, E] {
         match self {
             .Ok(value) => .Ok(value),
@@ -147,6 +227,9 @@ public enum Result[T, E]: Tryable, Returnable[T] {
         }
     }
 
+    /// Returns this if Ok, otherwise calls alternative with the error.
+    ///
+    /// The function receives the error and can attempt recovery.
     public func orElse[F](alternative: (E) -> Result[T, F]) -> Result[T, F] {
         match self {
             .Ok(value) => .Ok(value),
@@ -154,21 +237,37 @@ public enum Result[T, E]: Tryable, Returnable[T] {
         }
     }
 
-    // Iteration
+    // ========================================================================
+    // ITERATION
+    // ========================================================================
+
+    /// Returns an iterator over the success value (0 or 1 elements).
     public func iter() -> ResultIterator[T, E] {
         ResultIterator(self)
     }
 }
 
-// FromResidual conformance - enables early return propagation
+// ============================================================================
+// PROTOCOL CONFORMANCES
+// ============================================================================
+
+/// FromResidual extension enabling early return propagation.
 extend Result[T, E]: FromResidual[E] {
     public static func fromResidual(residual: E) -> Result[T, E] {
         .Err(residual)
     }
 }
 
-// Equatable when T and E are Equatable
+// ============================================================================
+// CONDITIONAL EXTENSIONS - EQUATABLE
+// ============================================================================
+
+/// Extension for Results with equatable values and errors.
 extend Result[T, E]: Equatable where T: Equatable, E: Equatable {
+    /// Compares two Results for equality.
+    ///
+    /// Two Results are equal if both are Ok with equal values, or both
+    /// are Err with equal errors.
     public func equals(other: Result[T, E]) -> Bool {
         match (self, other) {
             (.Ok(a), .Ok(b)) => a == b,
@@ -178,8 +277,13 @@ extend Result[T, E]: Equatable where T: Equatable, E: Equatable {
     }
 }
 
-// Formattable when T and E are Formattable
+// ============================================================================
+// CONDITIONAL EXTENSIONS - FORMATTABLE
+// ============================================================================
+
+/// Formattable extension when T and E are Formattable.
 extend Result[T, E]: Formattable where T: Formattable, E: Formattable {
+    /// Formats this result as "Ok(value)" or "Err(error)".
     public func format() -> String {
         match self {
             .Ok(value) => "Ok(" + value.format() + ")",
@@ -188,7 +292,13 @@ extend Result[T, E]: Formattable where T: Formattable, E: Formattable {
     }
 }
 
-// Result iterator - iterates 0 or 1 times (only Ok values)
+// ============================================================================
+// RESULT ITERATOR
+// ============================================================================
+
+/// Iterator for Result that yields 0 or 1 elements (only Ok values).
+///
+/// Obtained by calling `iter()` on a Result.
 public struct ResultIterator[T, E] {
     type Item = T
 
@@ -198,6 +308,7 @@ public struct ResultIterator[T, E] {
         self.value = result.ok();
     }
 
+    /// Returns the next element, or None if exhausted.
     public mutating func next() -> Optional[T] {
         let result = self.value;
         self.value = .None;
@@ -205,6 +316,10 @@ public struct ResultIterator[T, E] {
     }
 }
 
-// Type operator alias: T throws E desugars to ResultTypeOperator[T, E] which is Result[T, E]
+// ============================================================================
+// TYPE OPERATOR
+// ============================================================================
+
+/// Type operator alias: `T throws E` desugars to `Result[T, E]`.
 @builtin(.ResultTypeOperator)
 public type ResultTypeOperator[T, E] = Result[T, E];

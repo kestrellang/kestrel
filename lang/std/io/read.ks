@@ -9,30 +9,49 @@ import std.collections.(Array)
 import std.core.(Bool)
 import std.io.error.(Error)
 
-// Read trait - source of bytes
+// ============================================================================
+// READ PROTOCOL
+// ============================================================================
+
+/// Protocol for types that can be read from.
+///
+/// Implementors provide a source of bytes that can be read into a buffer.
 public protocol Read {
-    // Read bytes into buffer, return number of bytes read.
-    // Returns 0 on EOF.
+    /// Reads bytes into the buffer.
+    ///
+    /// Returns the number of bytes read, or 0 on EOF.
     mutating func read(into buf: Slice[UInt8]) -> Result[Int64, Error]
 }
 
-// Empty reader - always returns EOF
+// ============================================================================
+// EMPTY READER
+// ============================================================================
+
+/// A reader that always returns EOF immediately.
 public struct Empty: Read {
+    /// Creates an empty reader.
     public init() {}
 
+    /// Always returns 0 (EOF).
     public mutating func read(into buf: Slice[UInt8]) -> Result[Int64, Error] {
         .Ok(0)
     }
 }
 
-// Repeat reader - infinite stream of a byte
+// ============================================================================
+// REPEAT READER
+// ============================================================================
+
+/// A reader that produces an infinite stream of a single byte.
 public struct Repeat: Read {
     var byte: UInt8
 
+    /// Creates a repeat reader that yields the given byte forever.
     public init(byte: UInt8) {
         self.byte = byte
     }
 
+    /// Fills the entire buffer with the repeated byte.
     public mutating func read(into buf: Slice[UInt8]) -> Result[Int64, Error] {
         var i: Int64 = 0;
         while i < buf.count {
@@ -43,16 +62,22 @@ public struct Repeat: Read {
     }
 }
 
-// Cursor - read from a byte array
+// ============================================================================
+// CURSOR
+// ============================================================================
+
+/// A reader that reads from a byte array with a movable position.
 public struct Cursor: Read {
     var data: Array[UInt8]
     var pos: Int64
 
+    /// Creates a cursor that reads from the given data.
     public init(data: Array[UInt8]) {
         self.data = data;
         self.pos = 0;
     }
 
+    /// Reads bytes from the current position.
     public mutating func read(into buf: Slice[UInt8]) -> Result[Int64, Error] {
         let available = self.data.count() - self.pos;
         if available == 0 {
@@ -72,8 +97,10 @@ public struct Cursor: Read {
         .Ok(n)
     }
 
+    /// Returns the current position.
     public func position() -> Int64 { self.pos }
 
+    /// Sets the position, clamping to valid range.
     public mutating func setPosition(to pos: Int64) {
         let count = self.data.count();
         if pos < 0 {
@@ -86,9 +113,13 @@ public struct Cursor: Read {
     }
 }
 
-// Helper functions for readers
+// ============================================================================
+// HELPER FUNCTIONS
+// ============================================================================
 
-// Read single byte from a reader
+/// Reads a single byte from a reader.
+///
+/// Returns None on EOF.
 public func readByte[R](reader: R) -> Result[Optional[UInt8], Error] where R: Read {
     var buf = Array[UInt8](capacity: 1);
     buf.append(0);
@@ -106,7 +137,9 @@ public func readByte[R](reader: R) -> Result[Optional[UInt8], Error] where R: Re
     }
 }
 
-// Read all bytes from a reader into an array
+/// Reads all bytes from a reader into an array.
+///
+/// Returns the total number of bytes read.
 public func readAll[R](reader: R, into buf: Array[UInt8]) -> Result[Int64, Error] where R: Read {
     var total: Int64 = 0;
     var chunk = Array[UInt8](capacity: 4096);

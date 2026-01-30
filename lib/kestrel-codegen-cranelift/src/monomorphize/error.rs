@@ -21,6 +21,10 @@ pub enum MonomorphizeError {
         protocol: Id<QualifiedName>,
         method: String,
         for_type: Id<Ty>,
+        /// Human-readable protocol name (set when MirContext is available)
+        protocol_name: Option<String>,
+        /// Human-readable type description (set when MirContext is available)
+        type_name: Option<String>,
     },
 
     /// A function was not found by name.
@@ -69,11 +73,21 @@ impl fmt::Display for MonomorphizeError {
                 protocol,
                 method,
                 for_type,
+                protocol_name,
+                type_name,
             } => {
+                let protocol_display = protocol_name
+                    .as_ref()
+                    .map(|s| s.as_str())
+                    .unwrap_or("unknown");
+                let type_display = type_name
+                    .as_ref()
+                    .map(|s| s.as_str())
+                    .unwrap_or("unknown");
                 write!(
                     f,
-                    "method '{}' not found in witness: protocol {:?} for type {:?}",
-                    method, protocol, for_type
+                    "method '{}' not found in witness: protocol {} ({:?}) for type {} ({:?})",
+                    method, protocol_display, protocol, type_display, for_type
                 )
             },
             MonomorphizeError::FunctionNotFound { name } => {

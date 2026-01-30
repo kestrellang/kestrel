@@ -9,7 +9,11 @@ import std.memory.(Layout, Pointer, RawPointer, SystemAllocator, RcBox)
 import std.iter.(Iterator, Iterable)
 import std.collections.(DefaultHasher)
 
-// Compute next power of two, minimum 8
+// ============================================================================
+// HELPER FUNCTIONS
+// ============================================================================
+
+/// Computes the next power of two, minimum 8.
 func nextPowerOfTwo(n: Int64) -> Int64 {
     var p: Int64 = Int64(intLiteral: 1);
     while p < n {
@@ -24,14 +28,28 @@ func nextPowerOfTwo(n: Int64) -> Int64 {
     if p < minCap { minCap } else { p }
 }
 
-// Entry in the hash table
+// ============================================================================
+// DICTIONARY ENTRY
+// ============================================================================
+
+/// An entry in the hash table.
 public struct DictionaryEntry[K, V] {
+    /// The key.
     public var key: K
+
+    /// The value.
     public var value: V
+
+    /// The cached hash value.
     public var hash: UInt64
+
+    /// True if this slot is occupied.
     public var occupied: Bool
+
+    /// True if this slot was deleted (tombstone).
     public var deleted: Bool
 
+    /// Creates an occupied entry.
     public init(key key: K, value value: V, hash hash: UInt64, occupied occupied: Bool, deleted deleted: Bool) {
         self.key = key;
         self.value = value;
@@ -40,7 +58,7 @@ public struct DictionaryEntry[K, V] {
         self.deleted = deleted;
     }
 
-    // Create an unoccupied entry with placeholder key/value
+    /// Creates an unoccupied entry with placeholder key/value.
     public init(placeholderKey placeholderKey: K, placeholderValue placeholderValue: V) {
         self.key = placeholderKey;
         self.value = placeholderValue;
@@ -50,7 +68,11 @@ public struct DictionaryEntry[K, V] {
     }
 }
 
-// DictionaryIterator must be defined before Dictionary for Iterable conformance
+// ============================================================================
+// DICTIONARY ITERATOR
+// ============================================================================
+
+/// Iterator over dictionary entries.
 public struct DictionaryIterator[K, V]: Iterator {
     type Item = DictionaryEntry[K, V]
 
@@ -58,12 +80,14 @@ public struct DictionaryIterator[K, V]: Iterator {
     private var capacity: Int64
     private var index: Int64
 
+    /// Creates a dictionary iterator.
     public init(entries entries: Pointer[DictionaryEntry[K, V]], capacity capacity: Int64) {
         self.entries = entries;
         self.capacity = capacity;
         self.index = Int64(intLiteral: 0);
     }
 
+    /// Returns the next occupied entry, or None if exhausted.
     public mutating func next() -> Optional[DictionaryEntry[K, V]] {
         while self.index < self.capacity {
             let entry = self.entries.offset(by: self.index).read();
@@ -77,7 +101,11 @@ public struct DictionaryIterator[K, V]: Iterator {
     }
 }
 
-// DictionaryStorage[K, V, H] - internal storage for Dictionary
+// ============================================================================
+// DICTIONARY STORAGE (Internal)
+// ============================================================================
+
+/// Internal storage for Dictionary.
 struct DictionaryStorage[K, V, H]: Cloneable where K: Hash, H: Hasher, H: Defaultable {
     var entries: Pointer[DictionaryEntry[K, V]]
     var len: Int64
@@ -93,7 +121,7 @@ struct DictionaryStorage[K, V, H]: Cloneable where K: Hash, H: Hasher, H: Defaul
         self.placeholderValue = placeholderValue;
     }
 
-    // Deep clone - allocate new buffer and copy entries
+    /// Deep clone - allocate new buffer and copy entries.
     func clone() -> DictionaryStorage[K, V, H] {
         if self.cap == Int64(intLiteral: 0) {
             return DictionaryStorage(
@@ -136,8 +164,14 @@ struct DictionaryStorage[K, V, H]: Cloneable where K: Hash, H: Hasher, H: Defaul
     }
 }
 
-// Dictionary[K, V, H] - hash map with COW semantics using RcBox
-public struct Dictionary[K, V, H = DefaultHasher]: Iterable where K: Hash, H: Hasher, H: Defaultable {
+// ============================================================================
+// DICTIONARY
+// ============================================================================
+
+/// A hash map with copy-on-write semantics.
+///
+/// Uses open addressing with linear probing. Keys must implement Hash.
+public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: Hash, H: Hasher, H: Defaultable {
     type Item = DictionaryEntry[K, V]
     type Iter = DictionaryIterator[K, V]
 
@@ -157,12 +191,18 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable where K: Hash, H: Ha
         }
     }
 
-    // Private init for internal use (from storage)
+    /// Private init for internal use (from storage).
     private init(storage storage: RcBox[DictionaryStorage[K, V, H]]) {
         self.storage = storage;
     }
 
-    // Create empty dictionary - requires placeholder key/value for future resizing
+    // ========================================================================
+    // CONSTRUCTORS
+    // ========================================================================
+
+    /// Creates an empty dictionary.
+    ///
+    /// Requires placeholder key/value for internal storage initialization.
     public init(placeholderKey: K, placeholderValue: V) {
         self.storage = RcBox(DictionaryStorage(
             entries: Pointer(raw: lang.ptr_null[DictionaryEntry[K, V]]()),
@@ -173,7 +213,9 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable where K: Hash, H: Ha
         ));
     }
 
-    // Create with initial capacity - requires a placeholder key/value for initialization
+    /// Creates an empty dictionary with initial capacity.
+    ///
+    /// Requires placeholder key/value for internal storage initialization.
     public init(capacity capacity: Int64, placeholderKey placeholderKey: K, placeholderValue placeholderValue: V) {
         let actualCap = nextPowerOfTwo(capacity);
         if actualCap > Int64(intLiteral: 0) {
@@ -212,19 +254,35 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable where K: Hash, H: Ha
         }
     }
 
-    // Hash function using the generic hasher H
+    // ========================================================================
+    // HASHING (Internal)
+    // ========================================================================
+
+    /// Hashes a key using the generic hasher H.
     private func hashKey(key: K) -> UInt64 {
         var hasher = H();
         key.hash(into: hasher);
         hasher.finish()
     }
 
-    // Properties
+    // ========================================================================
+    // SIZE & CAPACITY
+    // ========================================================================
+
+    /// The number of key-value pairs.
     public func count() -> Int64 { self.len() }
+
+    /// The allocated capacity.
     public func getCapacity() -> Int64 { self.cap() }
+
+    /// True if the dictionary is empty.
     public func isEmpty() -> Bool { self.len() == Int64(intLiteral: 0) }
 
-    // Find entry by key using hashing and linear probing
+    // ========================================================================
+    // INTERNAL LOOKUP
+    // ========================================================================
+
+    /// Finds entry by key using hashing and linear probing.
     private func findEntry(key: K) -> Optional[Int64] {
         let myCap = self.cap();
         if myCap == Int64(intLiteral: 0) {
@@ -257,7 +315,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable where K: Hash, H: Ha
         none
     }
 
-    // Find first unoccupied slot (either truly empty or deleted)
+    /// Finds first unoccupied slot (either truly empty or deleted).
     private func findEmptySlot(hashValue: UInt64) -> Optional[Int64] {
         let myCap = self.cap();
         if myCap == Int64(intLiteral: 0) {
@@ -284,7 +342,11 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable where K: Hash, H: Ha
         none
     }
 
-    // Ensure we have capacity for more entries (resize at 75% load)
+    // ========================================================================
+    // CAPACITY MANAGEMENT (Internal)
+    // ========================================================================
+
+    /// Ensures capacity for more entries (resizes at 75% load).
     private mutating func ensureCapacity() {
         let myCap = self.cap();
         let myLen = self.len();
@@ -294,7 +356,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable where K: Hash, H: Ha
         }
     }
 
-    // Resize the hash table
+    /// Resizes the hash table to double capacity.
     private mutating func resize() {
         self.makeUnique();
         let s = self.storage.getValue();
@@ -368,7 +430,11 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable where K: Hash, H: Ha
         }
     }
 
-    // Get value for key
+    // ========================================================================
+    // VALUE ACCESS
+    // ========================================================================
+
+    /// Returns the value for the given key, or None if not found.
     public func getValue(key: K) -> Optional[V] {
         let maybeIndex = self.findEntry(key);
         if maybeIndex.isSome() {
@@ -379,12 +445,18 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable where K: Hash, H: Ha
         }
     }
 
-    // Check if key exists
+    /// Returns true if the dictionary contains the given key.
     public func contains(key: K) -> Bool {
         self.findEntry(key).isSome()
     }
 
-    // Insert or update value for key, returns old value if any
+    // ========================================================================
+    // MUTATING OPERATIONS
+    // ========================================================================
+
+    /// Inserts or updates a value for the given key.
+    ///
+    /// Returns the old value if the key already existed.
     public mutating func insert(key: K, value: V) -> Optional[V] {
         let hashValue = self.hashKey(key);
         // Check if key already exists
@@ -430,7 +502,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable where K: Hash, H: Ha
         none
     }
 
-    // Remove key and return its value
+    /// Removes the key and returns its value, or None if not found.
     public mutating func remove(key: K) -> Optional[V] {
         let maybeIndex = self.findEntry(key);
 
@@ -459,7 +531,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable where K: Hash, H: Ha
         none
     }
 
-    // Clear all entries
+    /// Removes all entries from the dictionary.
     public mutating func clear() {
         self.makeUnique();
         var s = self.storage.getValue();
@@ -480,22 +552,35 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable where K: Hash, H: Ha
         self.storage.setValue(s)
     }
 
-    // Iteration
+    // ========================================================================
+    // ITERATION
+    // ========================================================================
+
+    /// Returns an iterator over the entries.
     public func iter() -> DictionaryIterator[K, V] {
         DictionaryIterator(entries: self.entries(), capacity: self.cap())
     }
 
-    // Get internal data for views
+    /// Returns the internal entries pointer for views.
     public func getEntries() -> Pointer[DictionaryEntry[K, V]] { self.entries() }
 
-    // Cloneable - shallow clone (COW)
+    // ========================================================================
+    // PROTOCOL CONFORMANCES
+    // ========================================================================
+
+    /// Creates a shallow clone (COW - copy deferred until mutation).
     public func clone() -> Dictionary[K, V, H] {
         Dictionary(storage: self.storage.clone())
     }
 }
 
-// Equatable when K and V are Equatable
+// ============================================================================
+// CONDITIONAL EXTENSIONS
+// ============================================================================
+
+/// Equatable extension when K and V are Equatable.
 extend Dictionary[K, V, H]: Equatable where K: Hash, V: Equatable, H: Hasher, H: Defaultable {
+    /// Compares two dictionaries for equality.
     public func equals(other: Dictionary[K, V, H]) -> Bool {
         let selfCount = self.count();
         let otherCount = other.count();
@@ -526,19 +611,23 @@ extend Dictionary[K, V, H]: Equatable where K: Hash, V: Equatable, H: Hasher, H:
     }
 }
 
-// Cloneable conformance
-extend Dictionary[K, V, H]: Cloneable {}
 
-// KeysIterator must be defined before KeysView
+// ============================================================================
+// KEYS VIEW
+// ============================================================================
+
+/// Iterator over dictionary keys.
 public struct KeysIterator[K, V]: Iterator where K: Hash {
     type Item = K
 
     private var dictIter: DictionaryIterator[K, V]
 
+    /// Creates a keys iterator.
     public init(dictIter: DictionaryIterator[K, V]) {
         self.dictIter = dictIter;
     }
 
+    /// Returns the next key, or None if exhausted.
     public mutating func next() -> Optional[K] {
         let maybeEntry = self.dictIter.next();
         if maybeEntry.isSome() {
@@ -549,7 +638,7 @@ public struct KeysIterator[K, V]: Iterator where K: Hash {
     }
 }
 
-// KeysView - view of dictionary keys
+/// A view over dictionary keys.
 public struct KeysView[K, V]: Iterable where K: Hash {
     type Item = K
     type Iter = KeysIterator[K, V]
@@ -557,26 +646,34 @@ public struct KeysView[K, V]: Iterable where K: Hash {
     private var entries: Pointer[DictionaryEntry[K, V]]
     private var capacity: Int64
 
+    /// Creates a keys view.
     public init(entries entries: Pointer[DictionaryEntry[K, V]], capacity capacity: Int64) {
         self.entries = entries;
         self.capacity = capacity;
     }
 
+    /// Returns an iterator over the keys.
     public func iter() -> KeysIterator[K, V] {
         KeysIterator(DictionaryIterator(entries: self.entries, capacity: self.capacity))
     }
 }
 
-// ValuesIterator must be defined before ValuesView
+// ============================================================================
+// VALUES VIEW
+// ============================================================================
+
+/// Iterator over dictionary values.
 public struct ValuesIterator[K, V]: Iterator where K: Hash {
     type Item = V
 
     private var dictIter: DictionaryIterator[K, V]
 
+    /// Creates a values iterator.
     public init(dictIter: DictionaryIterator[K, V]) {
         self.dictIter = dictIter;
     }
 
+    /// Returns the next value, or None if exhausted.
     public mutating func next() -> Optional[V] {
         let maybeEntry = self.dictIter.next();
         if maybeEntry.isSome() {
@@ -587,7 +684,7 @@ public struct ValuesIterator[K, V]: Iterator where K: Hash {
     }
 }
 
-// ValuesView - view of dictionary values
+/// A view over dictionary values.
 public struct ValuesView[K, V]: Iterable where K: Hash {
     type Item = V
     type Iter = ValuesIterator[K, V]
@@ -595,38 +692,50 @@ public struct ValuesView[K, V]: Iterable where K: Hash {
     private var entries: Pointer[DictionaryEntry[K, V]]
     private var capacity: Int64
 
+    /// Creates a values view.
     public init(entries entries: Pointer[DictionaryEntry[K, V]], capacity capacity: Int64) {
         self.entries = entries;
         self.capacity = capacity;
     }
 
+    /// Returns an iterator over the values.
     public func iter() -> ValuesIterator[K, V] {
         ValuesIterator(DictionaryIterator(entries: self.entries, capacity: self.capacity))
     }
 }
 
-// Extension to add keys() and values() methods
+// ============================================================================
+// VIEW EXTENSIONS
+// ============================================================================
+
+/// Extension to add keys() and values() methods.
 extend Dictionary[K, V, H] where K: Hash, H: Hasher, H: Defaultable {
+    /// Returns a view over the keys.
     public func keys() -> KeysView[K, V] {
         KeysView(entries: self.getEntries(), capacity: self.getCapacity())
     }
 
+    /// Returns a view over the values.
     public func values() -> ValuesView[K, V] {
         ValuesView(entries: self.getEntries(), capacity: self.getCapacity())
     }
 }
 
-// ExpressibleByDictionaryLiteral conformance
+// ============================================================================
+// LITERAL CONFORMANCE
+// ============================================================================
+
+/// ExpressibleByDictionaryLiteral conformance.
 extend Dictionary[K, V, H]: std.core._ExpressibleByDictionaryLiteral, std.core.ExpressibleByDictionaryLiteral where K: Hash, K: Defaultable, V: Defaultable, H: Hasher, H: Defaultable {
     type Key = K
     type Value = V
 
-    // _ExpressibleByDictionaryLiteral (called by compiler for dictionary literals)
+    /// Internal initializer called by compiler for dictionary literals.
     public init(_dictionaryLiteralPointer: lang.ptr[(K, V)], _dictionaryLiteralCount: lang.i64) {
         self.init(dictionaryLiteral: std.memory.LiteralSlice(pointer: _dictionaryLiteralPointer, count: _dictionaryLiteralCount))
     }
 
-    // ExpressibleByDictionaryLiteral
+    /// Creates a dictionary from a dictionary literal.
     public init(dictionaryLiteral elements: std.memory.LiteralSlice[(K, V)]) {
         // Create empty dictionary with default placeholders
         let placeholderKey: K = K();
@@ -648,7 +757,10 @@ extend Dictionary[K, V, H]: std.core._ExpressibleByDictionaryLiteral, std.core.E
     }
 }
 
-// Type operator alias: [K: V] desugars to DictionaryTypeOperator[K, V] which is Dictionary[K, V]
-// Note: The Hash constraint on K comes from Dictionary itself
+// ============================================================================
+// TYPE OPERATOR
+// ============================================================================
+
+/// Type operator alias: [K: V] desugars to Dictionary[K, V].
 @builtin(.DictionaryTypeOperator)
 public type DictionaryTypeOperator[K, V] = Dictionary[K, V, DefaultHasher];

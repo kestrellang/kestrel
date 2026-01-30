@@ -16,6 +16,7 @@ use kestrel_semantic_tree::behavior::executable::ExecutableBehavior;
 use kestrel_semantic_tree::behavior::typed::TypedBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::enum_symbol::EnumSymbol;
+use kestrel_semantic_tree::symbol::extension::ExtensionSymbol;
 use kestrel_semantic_tree::symbol::field::FieldSymbol;
 use kestrel_semantic_tree::symbol::function::FunctionSymbol;
 use kestrel_semantic_tree::symbol::initializer::InitializerSymbol;
@@ -246,6 +247,9 @@ fn check_struct_conformance(
     if conformances.is_empty() {
         return;
     }
+
+    // Check that extension-added conformances have their methods IN the extension
+    check_extension_conformances(struct_name, &extensions, model, ctx);
 
     let associated_type_bindings = model.query(AssociatedTypeBindingsForStruct { struct_id });
 
@@ -1055,6 +1059,9 @@ fn check_enum_conformance(
         return;
     }
 
+    // Check that extension-added conformances have their methods IN the extension
+    check_extension_conformances(enum_name, &extensions, model, ctx);
+
     let associated_type_bindings = model.query(AssociatedTypeBindingsForEnum { enum_id });
 
     // Compute self_type first - this is used for Self substitution in enum method signatures
@@ -1340,5 +1347,66 @@ fn resolve_protocol_type_for_link_enum(
             Some((symbol.clone(), bindings))
         },
         _ => None,
+    }
+}
+
+/// Check that extension-added conformances have their required methods defined in extensions.
+///
+/// When a conformance is added via extension (e.g., `extend Array[T]: Cloneable {}`),
+/// the required methods must be defined in an extension (either the same one or another),
+/// not just on the target type itself. This is because witness generation only looks
+/// in extensions for method bindings when the conformance comes from an extension.
+fn check_extension_conformances(
+    type_name: &str,
+    extensions: &[Arc<ExtensionSymbol>],
+    model: &SemanticModel,
+    ctx: &mut AnalysisContext,
+) {
+    // Collect methods from ALL extensions of this type
+    let mut all_extension_method_names: std::collections::HashSet<String> =
+        std::collections::HashSet::new();
+    for ext in extensions {
+        let ext_methods =
+            collect_methods_from_symbol(&(ext.clone() as Arc<dyn Symbol<KestrelLanguage>>));
+        for m in ext_methods {
+            all_extension_method_names.insert(m.metadata().name().value.clone());
+        }
+    }
+
+    for extension in extensions {
+        let ext_conformances = model.query(ConformancesForSymbol {
+            symbol_id: extension.metadata().id(),
+        });
+        if ext_conformances.is_empty() {
+            continue;
+        }
+
+        // Check each conformance added by this extension
+        for conformance_ty in &ext_conformances {
+            let (protocol_symbol, _) = match resolve_protocol_type(conformance_ty) {
+                Some(r) => r,
+                None => continue,
+            };
+            let protocol_name = &protocol_symbol.metadata().name().value;
+
+            // Get required methods for this protocol
+            let required_methods = model.query(ProtocolRequiredMethods {
+                protocol_id: protocol_symbol.metadata().id(),
+            });
+
+            // Check each required method is in some extension (not just on the struct)
+            for (_protocol_sig, method) in &required_methods {
+                let method_name = &method.metadata().name().value;
+                if !all_extension_method_names.contains(method_name) {
+                    let span = extension.metadata().declaration_span().clone();
+                    ctx.report(ExtensionMissingProtocolMethodError {
+                        span,
+                        type_name: type_name.to_string(),
+                        protocol_name: protocol_name.clone(),
+                        method_name: method_name.clone(),
+                    });
+                }
+            }
+        }
     }
 }

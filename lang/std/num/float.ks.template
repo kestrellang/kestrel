@@ -12,6 +12,18 @@ import std.core.(
 import std.text.(String)
 import std.num.(Int64, {{OTHER_FLOAT}})
 
+/// A {{BITS}}-bit IEEE 754 floating-point type.
+///
+/// {{TYPE_NAME}} supports arithmetic, comparison, mathematical functions, and formatting.
+///
+/// Special values:
+/// - `{{TYPE_NAME}}.nan`: Not-a-Number (result of undefined operations like 0/0)
+/// - `{{TYPE_NAME}}.infinity`: Positive infinity (result of overflow or 1/0)
+///
+/// NaN behavior:
+/// - NaN is not equal to anything, including itself: `nan == nan` is false
+/// - NaN comparisons always return false: `nan < 0`, `nan > 0` are both false
+/// - Any arithmetic with NaN produces NaN
 public struct {{TYPE_NAME}}:
     Comparable,
     Equatable,
@@ -27,57 +39,91 @@ public struct {{TYPE_NAME}}:
     Convertible[{{OTHER_FLOAT}}],
     FFISafe
 {
+    /// The underlying raw value.
     public var raw: lang.{{LANG_TYPE}}
 
     // ========================================================================
     // CONSTANTS - Basic Values
     // ========================================================================
 
+    /// The zero value (0.0).
     public static var zero: {{TYPE_NAME}} { {{TYPE_NAME}}(floatLiteral: 0.0) }
+
+    /// The one value (1.0).
     public static var one: {{TYPE_NAME}} { {{TYPE_NAME}}(floatLiteral: 1.0) }
+
+    /// The minimum finite value (most negative).
     public static var minValue: {{TYPE_NAME}} { {{TYPE_NAME}}(floatLiteral: {{MAX_VALUE}}).negate() }
+
+    /// The maximum finite value (most positive).
     public static var maxValue: {{TYPE_NAME}} { {{TYPE_NAME}}(floatLiteral: {{MAX_VALUE}}) }
+
+    /// The smallest positive normal value.
+    /// Values smaller than this are subnormal (denormalized) and have reduced precision.
     public static var minPositive: {{TYPE_NAME}} { {{TYPE_NAME}}(floatLiteral: {{MIN_POSITIVE}}) }
+
+    /// Machine epsilon: the smallest value such that `1.0 + epsilon != 1.0`.
+    /// Useful for comparing floating-point values with tolerance.
     public static var epsilon: {{TYPE_NAME}} { {{TYPE_NAME}}(floatLiteral: {{EPSILON}}) }
 
     // ========================================================================
     // CONSTANTS - Special Values
     // ========================================================================
 
+    /// Positive infinity. Result of dividing by zero or overflow.
     public static var infinity: {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_infinity()) }
+
+    /// Not-a-Number. Result of undefined operations like 0/0.
+    /// NaN is not equal to anything, including itself.
     public static var nan: {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_nan()) }
 
     // ========================================================================
     // CONSTANTS - Mathematical
     // ========================================================================
 
+    /// Pi (π ≈ 3.14159...). The ratio of a circle's circumference to its diameter.
     public static var pi: {{TYPE_NAME}} { {{TYPE_NAME}}(floatLiteral: 3.141592653589793) }
+
+    /// Euler's number (e ≈ 2.71828...). Base of the natural logarithm.
     public static var e: {{TYPE_NAME}} { {{TYPE_NAME}}(floatLiteral: 2.718281828459045) }
+
+    /// Tau (τ = 2π ≈ 6.28318...). The ratio of a circle's circumference to its radius.
     public static var tau: {{TYPE_NAME}} { {{TYPE_NAME}}(floatLiteral: 6.283185307179586) }
+
+    /// Natural logarithm of 2 (ln(2) ≈ 0.693...).
     public static var ln2: {{TYPE_NAME}} { {{TYPE_NAME}}(floatLiteral: 0.6931471805599453) }
+
+    /// Natural logarithm of 10 (ln(10) ≈ 2.302...).
     public static var ln10: {{TYPE_NAME}} { {{TYPE_NAME}}(floatLiteral: 2.302585092994046) }
+
+    /// Square root of 2 (√2 ≈ 1.414...).
     public static var sqrt2: {{TYPE_NAME}} { {{TYPE_NAME}}(floatLiteral: 1.4142135623730951) }
 
     // ========================================================================
     // INITIALIZERS
     // ========================================================================
 
+    /// Creates a {{TYPE_NAME}} from a floating-point literal.
     public init(floatLiteral value: lang.f64) {
         {{FLOAT_LITERAL_INIT}}
     }
 
+    /// Creates a {{TYPE_NAME}} from an integer literal.
     public init(intLiteral value: lang.i64) {
         self.raw = lang.cast_i64_{{LANG_TYPE}}(value)
     }
 
+    /// Creates a {{TYPE_NAME}} from a raw `lang.{{LANG_TYPE}}` value.
     init(raw value: lang.{{LANG_TYPE}}) {
         self.raw = value
     }
 
+    /// Creates a {{TYPE_NAME}} from an Int64.
     public init(from value: Int64) {
         self.raw = lang.cast_i64_{{LANG_TYPE}}(value.raw)
     }
 
+    /// Creates a {{TYPE_NAME}} from a {{OTHER_FLOAT}}.
     public init(from value: {{OTHER_FLOAT}}) {
         self.raw = lang.cast_{{OTHER_LANG_TYPE}}_{{LANG_TYPE}}(value.raw)
     }
@@ -86,24 +132,28 @@ public struct {{TYPE_NAME}}:
     // CLASSIFICATION (Properties)
     // ========================================================================
 
+    /// Returns true if this value is NaN (Not-a-Number).
     public var isNaN: Bool { get {
         Bool(boolLiteral: lang.{{LANG_TYPE}}_is_nan(self.raw))
     }}
 
+    /// Returns true if this value is positive or negative infinity.
     public var isInfinite: Bool { get {
         Bool(boolLiteral: lang.{{LANG_TYPE}}_is_infinite(self.raw))
     }}
 
+    /// Returns true if this value is finite (not NaN and not infinite).
     public var isFinite: Bool { get {
         not self.isNaN and not self.isInfinite
     }}
 
-    // TODO: requires lang.{{LANG_TYPE}}_is_normal intrinsic
+    /// Returns true if this value is a normal number (not zero, subnormal, infinite, or NaN).
     public var isNormal: Bool { get {
         self.isFinite and not self.isZero and self.abs() >= {{TYPE_NAME}}.minPositive
     }}
 
-    // TODO: requires lang.{{LANG_TYPE}}_is_subnormal intrinsic
+    /// Returns true if this value is subnormal (denormalized).
+    /// Subnormal numbers have reduced precision but allow gradual underflow.
     public var isSubnormal: Bool { get {
         self.isFinite and not self.isZero and self.abs() < {{TYPE_NAME}}.minPositive
     }}
@@ -112,6 +162,7 @@ public struct {{TYPE_NAME}}:
     // SIGN INSPECTION (Properties)
     // ========================================================================
 
+    /// Returns -1.0 if negative, 0.0 if zero, 1.0 if positive, or NaN if NaN.
     public var sign: {{TYPE_NAME}} { get {
         if self.isNaN { {{TYPE_NAME}}.nan }
         else if self < 0.0 { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_neg(1.0)) }
@@ -119,14 +170,17 @@ public struct {{TYPE_NAME}}:
         else { {{TYPE_NAME}}(floatLiteral: 0.0) }
     }}
 
+    /// Returns true if this value is greater than zero.
     public var isPositive: Bool { get {
         self > 0.0
     }}
 
+    /// Returns true if this value is less than zero.
     public var isNegative: Bool { get {
         self < 0.0
     }}
 
+    /// Returns true if this value is zero (positive or negative).
     public var isZero: Bool { get {
         self == 0.0
     }}
@@ -135,10 +189,13 @@ public struct {{TYPE_NAME}}:
     // COMPARISON
     // ========================================================================
 
+    /// Compares two values for equality.
+    /// Note: NaN is not equal to anything, including itself.
     public func equals(other: {{TYPE_NAME}}) -> Bool {
         Bool(boolLiteral: lang.{{LANG_TYPE}}_eq(self.raw, other.raw))
     }
 
+    /// Compares this value to another, returning an Ordering.
     public func compare(other: {{TYPE_NAME}}) -> Ordering {
         if Bool(boolLiteral: lang.{{LANG_TYPE}}_lt(self.raw, other.raw)) { .Less }
         else if Bool(boolLiteral: lang.{{LANG_TYPE}}_gt(self.raw, other.raw)) { .Greater }
@@ -159,77 +216,96 @@ public struct {{TYPE_NAME}}:
     // ARITHMETIC
     // ========================================================================
 
+    /// Adds two values.
     public func add(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_add(self.raw, other.raw)) }
+
+    /// Subtracts two values.
     public func subtract(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_sub(self.raw, other.raw)) }
+
+    /// Multiplies two values.
     public func multiply(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_mul(self.raw, other.raw)) }
+
+    /// Divides two values.
     public func divide(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_div(self.raw, other.raw)) }
+    /// Negates this value.
     public func negate() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_neg(self.raw)) }
 
     // ========================================================================
     // BASIC MATHEMATICAL FUNCTIONS
     // ========================================================================
 
+    /// Returns the absolute value.
     public func abs() -> {{TYPE_NAME}} {
         if Bool(boolLiteral: lang.{{LANG_TYPE}}_lt(self.raw, {{ZERO_LITERAL}})) { self.negate() } else { self }
     }
 
+    /// Rounds down to the nearest integer.
     public func floor() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_floor(self.raw)) }
+
+    /// Rounds up to the nearest integer.
     public func ceil() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_ceil(self.raw)) }
+
+    /// Rounds to the nearest integer (half away from zero).
     public func round() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_round(self.raw)) }
+
+    /// Truncates toward zero.
     public func trunc() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_trunc(self.raw)) }
 
+    /// Returns the fractional part (self - trunc(self)).
     public func fract() -> {{TYPE_NAME}} {
         self.subtract(self.trunc())
     }
 
+    /// Returns the square root.
     public func sqrt() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_sqrt(self.raw)) }
 
-    // TODO: requires lang.{{LANG_TYPE}}_cbrt intrinsic
+    /// Returns the cube root.
     public func cbrt() -> {{TYPE_NAME}} {
-        // Stub: cube root not available, return nan
-        {{TYPE_NAME}}.nan
+        {{TYPE_NAME}}(raw: libm_cbrt{{LIBM_SUFFIX}}(self.raw))
     }
 
-    // TODO: requires lang.{{LANG_TYPE}}_hypot intrinsic
+    /// Returns the hypotenuse: sqrt(self² + other²).
     public func hypot(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} {
-        // Naive implementation (may overflow for large values)
-        (self.multiply(self).add(other.multiply(other))).sqrt()
+        {{TYPE_NAME}}(raw: libm_hypot{{LIBM_SUFFIX}}(self.raw, other.raw))
     }
 
     // ========================================================================
     // EXPONENTIAL AND LOGARITHMIC FUNCTIONS
     // ========================================================================
 
-    // TODO: requires lang.{{LANG_TYPE}}_exp intrinsic
-    public func exp() -> {{TYPE_NAME}} { {{TYPE_NAME}}.nan }
+    /// Returns e^self (exponential).
+    public func exp() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: libm_exp{{LIBM_SUFFIX}}(self.raw)) }
 
-    // TODO: requires lang.{{LANG_TYPE}}_exp2 intrinsic
-    public func exp2() -> {{TYPE_NAME}} { {{TYPE_NAME}}.nan }
+    /// Returns 2^self.
+    public func exp2() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: libm_exp2{{LIBM_SUFFIX}}(self.raw)) }
 
-    // TODO: requires lang.{{LANG_TYPE}}_expm1 intrinsic
-    public func expm1() -> {{TYPE_NAME}} { {{TYPE_NAME}}.nan }
+    /// Returns e^self - 1, accurate for small values.
+    public func expm1() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: libm_expm1{{LIBM_SUFFIX}}(self.raw)) }
 
-    // TODO: requires lang.{{LANG_TYPE}}_ln intrinsic
-    public func ln() -> {{TYPE_NAME}} { {{TYPE_NAME}}.nan }
+    /// Returns the natural logarithm (base e).
+    public func ln() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: libm_log{{LIBM_SUFFIX}}(self.raw)) }
 
-    // TODO: requires lang.{{LANG_TYPE}}_ln1p intrinsic
-    public func ln1p() -> {{TYPE_NAME}} { {{TYPE_NAME}}.nan }
+    /// Returns ln(1 + self), accurate for small values.
+    public func ln1p() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: libm_log1p{{LIBM_SUFFIX}}(self.raw)) }
 
-    // TODO: requires lang.{{LANG_TYPE}}_log2 intrinsic
-    public func log2() -> {{TYPE_NAME}} { {{TYPE_NAME}}.nan }
+    /// Returns the base-2 logarithm.
+    public func log2() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: libm_log2{{LIBM_SUFFIX}}(self.raw)) }
 
-    // TODO: requires lang.{{LANG_TYPE}}_log10 intrinsic
-    public func log10() -> {{TYPE_NAME}} { {{TYPE_NAME}}.nan }
+    /// Returns the base-10 logarithm.
+    public func log10() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: libm_log10{{LIBM_SUFFIX}}(self.raw)) }
 
-    // TODO: requires ln intrinsic
-    public func log(base: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}.nan }
+    /// Returns the logarithm with the given base.
+    public func log(base: {{TYPE_NAME}}) -> {{TYPE_NAME}} {
+        self.ln().divide(base.ln())
+    }
 
-    // TODO: requires lang.{{LANG_TYPE}}_pow intrinsic
-    public func pow(exponent: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}.nan }
+    /// Raises self to the given floating-point power.
+    public func pow(exponent: {{TYPE_NAME}}) -> {{TYPE_NAME}} {
+        {{TYPE_NAME}}(raw: libm_pow{{LIBM_SUFFIX}}(self.raw, exponent.raw))
+    }
 
-    // TODO: requires lang.{{LANG_TYPE}}_powi intrinsic
+    /// Raises self to the given integer power.
     public func powi(exponent: Int64) -> {{TYPE_NAME}} {
-        // Simple implementation for integer powers
         if exponent == 0 { return {{TYPE_NAME}}(floatLiteral: 1.0) };
         if exponent < 0 { return {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_div(1.0, self.powi(exponent.negate()).raw)) };
         var result = {{TYPE_NAME}}(floatLiteral: 1.0);
@@ -249,28 +325,28 @@ public struct {{TYPE_NAME}}:
     // TRIGONOMETRIC FUNCTIONS
     // ========================================================================
 
-    // TODO: requires lang.{{LANG_TYPE}}_sin intrinsic
-    public func sin() -> {{TYPE_NAME}} { {{TYPE_NAME}}.nan }
+    /// Returns the sine (argument in radians).
+    public func sin() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: libm_sin{{LIBM_SUFFIX}}(self.raw)) }
 
-    // TODO: requires lang.{{LANG_TYPE}}_cos intrinsic
-    public func cos() -> {{TYPE_NAME}} { {{TYPE_NAME}}.nan }
+    /// Returns the cosine (argument in radians).
+    public func cos() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: libm_cos{{LIBM_SUFFIX}}(self.raw)) }
 
-    // TODO: requires lang.{{LANG_TYPE}}_tan intrinsic
-    public func tan() -> {{TYPE_NAME}} { {{TYPE_NAME}}.nan }
+    /// Returns the tangent (argument in radians).
+    public func tan() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: libm_tan{{LIBM_SUFFIX}}(self.raw)) }
 
-    // TODO: requires lang.{{LANG_TYPE}}_asin intrinsic
-    public func asin() -> {{TYPE_NAME}} { {{TYPE_NAME}}.nan }
+    /// Returns the arc sine (result in radians).
+    public func asin() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: libm_asin{{LIBM_SUFFIX}}(self.raw)) }
 
-    // TODO: requires lang.{{LANG_TYPE}}_acos intrinsic
-    public func acos() -> {{TYPE_NAME}} { {{TYPE_NAME}}.nan }
+    /// Returns the arc cosine (result in radians).
+    public func acos() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: libm_acos{{LIBM_SUFFIX}}(self.raw)) }
 
-    // TODO: requires lang.{{LANG_TYPE}}_atan intrinsic
-    public func atan() -> {{TYPE_NAME}} { {{TYPE_NAME}}.nan }
+    /// Returns the arc tangent (result in radians).
+    public func atan() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: libm_atan{{LIBM_SUFFIX}}(self.raw)) }
 
-    // TODO: requires lang.{{LANG_TYPE}}_atan2 intrinsic
-    public func atan2(x: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}.nan }
+    /// Returns the arc tangent of self/x, with proper quadrant handling.
+    public func atan2(x: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: libm_atan2{{LIBM_SUFFIX}}(self.raw, x.raw)) }
 
-    // TODO: requires sin and cos intrinsics
+    /// Returns both sine and cosine as a tuple.
     public func sinCos() -> ({{TYPE_NAME}}, {{TYPE_NAME}}) {
         (self.sin(), self.cos())
     }
@@ -279,51 +355,59 @@ public struct {{TYPE_NAME}}:
     // HYPERBOLIC FUNCTIONS
     // ========================================================================
 
-    // TODO: requires lang.{{LANG_TYPE}}_sinh intrinsic
-    public func sinh() -> {{TYPE_NAME}} { {{TYPE_NAME}}.nan }
+    /// Returns the hyperbolic sine.
+    public func sinh() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: libm_sinh{{LIBM_SUFFIX}}(self.raw)) }
 
-    // TODO: requires lang.{{LANG_TYPE}}_cosh intrinsic
-    public func cosh() -> {{TYPE_NAME}} { {{TYPE_NAME}}.nan }
+    /// Returns the hyperbolic cosine.
+    public func cosh() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: libm_cosh{{LIBM_SUFFIX}}(self.raw)) }
 
-    // TODO: requires lang.{{LANG_TYPE}}_tanh intrinsic
-    public func tanh() -> {{TYPE_NAME}} { {{TYPE_NAME}}.nan }
+    /// Returns the hyperbolic tangent.
+    public func tanh() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: libm_tanh{{LIBM_SUFFIX}}(self.raw)) }
+    /// Returns the inverse hyperbolic sine.
+    public func asinh() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: libm_asinh{{LIBM_SUFFIX}}(self.raw)) }
 
-    // TODO: requires lang.{{LANG_TYPE}}_asinh intrinsic
-    public func asinh() -> {{TYPE_NAME}} { {{TYPE_NAME}}.nan }
+    /// Returns the inverse hyperbolic cosine.
+    public func acosh() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: libm_acosh{{LIBM_SUFFIX}}(self.raw)) }
 
-    // TODO: requires lang.{{LANG_TYPE}}_acosh intrinsic
-    public func acosh() -> {{TYPE_NAME}} { {{TYPE_NAME}}.nan }
-
-    // TODO: requires lang.{{LANG_TYPE}}_atanh intrinsic
-    public func atanh() -> {{TYPE_NAME}} { {{TYPE_NAME}}.nan }
+    /// Returns the inverse hyperbolic tangent.
+    public func atanh() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: libm_atanh{{LIBM_SUFFIX}}(self.raw)) }
 
     // ========================================================================
     // IEEE 754 OPERATIONS
     // ========================================================================
 
+    /// Fused multiply-add: self * a + b with a single rounding.
+    /// More accurate than separate multiply and add operations.
     public func fma(a: {{TYPE_NAME}}, b: {{TYPE_NAME}}) -> {{TYPE_NAME}} {
-        // Fused multiply-add: self * a + b
         {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_fma(self.raw, a.raw, b.raw))
     }
 
+    /// Returns the magnitude of self with the sign of other.
     public func copysign(from other: {{TYPE_NAME}}) -> {{TYPE_NAME}} {
-        // Returns self with the sign of other
         {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_copysign(self.raw, other.raw))
     }
 
-    // TODO: requires lang.{{LANG_TYPE}}_nextUp intrinsic
-    public func nextUp() -> {{TYPE_NAME}} { {{TYPE_NAME}}.nan }
+    /// Returns the smallest representable value greater than self.
+    public func nextUp() -> {{TYPE_NAME}} {
+        {{TYPE_NAME}}(raw: libm_nextafter{{LIBM_SUFFIX}}(self.raw, lang.{{LANG_TYPE}}_infinity()))
+    }
 
-    // TODO: requires lang.{{LANG_TYPE}}_nextDown intrinsic
-    public func nextDown() -> {{TYPE_NAME}} { {{TYPE_NAME}}.nan }
+    /// Returns the largest representable value less than self.
+    public func nextDown() -> {{TYPE_NAME}} {
+        {{TYPE_NAME}}(raw: libm_nextafter{{LIBM_SUFFIX}}(self.raw, lang.{{LANG_TYPE}}_neg(lang.{{LANG_TYPE}}_infinity())))
+    }
 
-    // TODO: requires lang.{{LANG_TYPE}}_remainder intrinsic (IEEE 754)
-    public func remainder(dividingBy other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}.nan }
+    /// Returns the IEEE remainder of self divided by other.
+    public func remainder(dividingBy other: {{TYPE_NAME}}) -> {{TYPE_NAME}} {
+        {{TYPE_NAME}}(raw: libm_remainder{{LIBM_SUFFIX}}(self.raw, other.raw))
+    }
 
     // ========================================================================
     // CLAMPING AND INTERPOLATION
     // ========================================================================
 
+    /// Clamps this value to the given range.
+    /// Returns NaN if self is NaN.
     public func clamp(min: {{TYPE_NAME}}, max: {{TYPE_NAME}}) -> {{TYPE_NAME}} {
         if self.isNaN { self }
         else if self < min { min }
@@ -331,6 +415,8 @@ public struct {{TYPE_NAME}}:
         else { self }
     }
 
+    /// Linear interpolation from self to other.
+    /// Returns self + (other - self) * t.
     public func lerp(to other: {{TYPE_NAME}}, t: {{TYPE_NAME}}) -> {{TYPE_NAME}} {
         self.add(other.subtract(self).multiply(t))
     }
@@ -339,12 +425,19 @@ public struct {{TYPE_NAME}}:
     // CONVERSION
     // ========================================================================
 
-    // TODO: requires proper bounds checking
+    /// Converts to Int64, returning None if out of range or not finite.
     public func toInt64() -> Int64? {
         if self.isNaN or self.isInfinite {
             return .None
         };
-        .Some(Int64(raw: lang.cast_{{LANG_TYPE}}_i64(self.raw)))
+        let truncated = self.trunc();
+        if truncated >= 9223372036854775808.0 {
+            return .None
+        };
+        if truncated < -9223372036854775808.0 {
+            return .None
+        };
+        .Some(Int64(raw: lang.cast_{{LANG_TYPE}}_i64(truncated.raw)))
     }
 
     public func to{{OTHER_FLOAT}}() -> {{OTHER_FLOAT}} {
@@ -355,8 +448,7 @@ public struct {{TYPE_NAME}}:
     // PARSING
     // ========================================================================
 
-    // TODO: implement string parsing
-    // public static func parse(string: String) -> {{TYPE_NAME}}?
+{{PARSE_METHOD}}
 
     // ========================================================================
     // FORMATTING

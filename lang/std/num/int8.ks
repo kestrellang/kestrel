@@ -16,6 +16,19 @@ import std.text.(String)
 import std.memory.(Slice, Pointer)
 import std.num.(UInt8, Int64)
 
+/// A 8-bit signed integer type.
+///
+/// Int8 supports arithmetic, bitwise, comparison, and formatting operations.
+/// It is FFI-safe for interoperability with C code.
+///
+/// Arithmetic operations wrap on overflow (two's complement) by default.
+/// Use checked methods for overflow detection or saturating methods for
+/// clamping behavior.
+///
+/// Example:
+///     let a: Int8 = 100
+///     let b = a + 50
+///     let c = a * 2
 public struct Int8:
     SignedInteger,
     Steppable,
@@ -56,26 +69,45 @@ public struct Int8:
     Convertible[UInt32],
     Convertible[UInt64]
 {
+    /// The underlying raw value.
+    ///
+    /// Direct access to the primitive `lang.i8` type. Useful for FFI
+    /// or low-level operations.
     public var raw: lang.i8
 
     // ========================================================================
     // CONSTANTS
     // ========================================================================
 
+    /// The zero value (0).
     public static var zero: Int8 { Int8(intLiteral: 0) }
+
+    /// The one value (1).
     public static var one: Int8 { Int8(intLiteral: 1) }
-    public static var minValue: Int8 { Int8(intLiteral: lang.i64_neg(128)) }
+
+    /// The minimum representable value.
+    /// This is -2^7 (-128).
+    public static var minValue: Int8 { Int8(raw: lang.i8_shl(1, 7)) }
+
+    /// The maximum representable value.
+    /// This is 2^7 - 1 (127).
     public static var maxValue: Int8 { Int8(intLiteral: 127) }
+
+    /// The number of bits in this integer type (8).
     public static var bitWidth: Int64 { Int64(intLiteral: 8) }
 
     // ========================================================================
     // INITIALIZERS
     // ========================================================================
 
+    /// Creates a Int8 from an integer literal.
+    ///
+    /// This initializer is called implicitly when using integer literals.
     public init(intLiteral value: lang.i64) {
         self.raw = lang.cast_i64_i8(value)
     }
 
+    /// Creates a Int8 from a raw `lang.i8` value.
     init(raw value: lang.i8) {
         self.raw = value
     }
@@ -114,27 +146,58 @@ public struct Int8:
     // BIT INSPECTION (Properties)
     // ========================================================================
 
+    /// Returns true if this value is a power of two.
+    ///
+    /// Zero and negative numbers are not powers of two.
+    ///
+    /// Example:
+    ///     (1).isPowerOfTwo   // true  (2^0)
+    ///     (4).isPowerOfTwo   // true  (2^2)
+    ///     (3).isPowerOfTwo   // false
+    ///     (0).isPowerOfTwo   // false
     public var isPowerOfTwo: Bool { get {
         if Bool(boolLiteral: lang.i8_signed_lt(self.raw, 1)) { false }
         else { Bool(boolLiteral: lang.i8_eq(lang.i8_and(self.raw, lang.i8_sub(self.raw, 1)), 0)) }
     }}
 
+    /// Returns the number of 1 bits in the binary representation.
+    ///
+    /// Also known as "population count" or "Hamming weight".
+    ///
+    /// Example:
+    ///     (0b1010).countOnes  // 2
+    ///     (0b1111).countOnes  // 4
+    ///     (0).countOnes       // 0
     public var countOnes: Int64 { get {
         Int64(raw: lang.cast_i8_i64(lang.i8_popcount(self.raw)))
     }}
 
+    /// Returns the number of 0 bits in the binary representation.
+    ///
+    /// Equal to `8 - countOnes`.
     public var countZeros: Int64 { get {
         Int64(intLiteral: 8) - self.countOnes
     }}
 
+    /// Returns the number of leading zeros in the binary representation.
+    ///
+    /// Example:
+    ///     (1).leadingZeros   // 8 - 1
+    ///     (0).leadingZeros   // 8
     public var leadingZeros: Int64 { get {
         Int64(raw: lang.cast_i8_i64(lang.i8_clz(self.raw)))
     }}
 
+    /// Returns the number of trailing zeros in the binary representation.
+    ///
+    /// Useful for finding the largest power of 2 that divides this number.
     public var trailingZeros: Int64 { get {
         Int64(raw: lang.cast_i8_i64(lang.i8_ctz(self.raw)))
     }}
 
+    /// Returns the value with its bytes in reversed order.
+    ///
+    /// Useful for converting between big-endian and little-endian byte orders.
     public var byteSwapped: Int8 { get {
         self
     }}
@@ -143,14 +206,24 @@ public struct Int8:
     // COMPARISON
     // ========================================================================
 
+    /// Compares two values for equality.
+    ///
+    /// Example:
+    ///     (42).equals(other: 42)  // true
+    ///     42 == 42                // true (operator form)
     public func equals(other: Int8) -> Bool {
         Bool(boolLiteral: lang.i8_eq(self.raw, other.raw))
     }
 
+    /// Pattern matching support. Equivalent to `equals`.
     public func matches(other: Int8) -> Bool {
         Bool(boolLiteral: lang.i8_eq(self.raw, other.raw))
     }
 
+    /// Compares this value to another, returning an Ordering.
+    ///
+    /// Returns `.Less` if self < other, `.Greater` if self > other,
+    /// or `.Equal` if they are equal.
     public func compare(other: Int8) -> Ordering {
         if Bool(boolLiteral: lang.i8_signed_lt(self.raw, other.raw)) { .Less }
         else if Bool(boolLiteral: lang.i8_signed_gt(self.raw, other.raw)) { .Greater }
@@ -161,13 +234,17 @@ public struct Int8:
     // STEPPING
     // ========================================================================
 
+    /// Returns the next value (self + 1).
     public func successor() -> Int8 { self.add(Int8.one) }
+
+    /// Returns the previous value (self - 1).
     public func predecessor() -> Int8 { self.subtract(Int8.one) }
 
     // ========================================================================
     // HASHING
     // ========================================================================
 
+    /// Hashes this value into the given hasher.
     public func hash[H](mutating into hasher: H) where H: Hasher {
         let val = self;
         hasher.write(Slice(pointer: Pointer(to: val).asRaw().cast[UInt8](), count: Int64(intLiteral: lang.sizeof[Int8]())))
@@ -194,11 +271,21 @@ public struct Int8:
     // ARITHMETIC (Wrapping - Default)
     // ========================================================================
 
+    /// Adds two values. Wraps on overflow.
     public func add(other: Int8) -> Int8 { Int8(raw: lang.i8_add(self.raw, other.raw)) }
+
+    /// Subtracts two values. Wraps on overflow.
     public func subtract(other: Int8) -> Int8 { Int8(raw: lang.i8_sub(self.raw, other.raw)) }
+
+    /// Multiplies two values. Wraps on overflow.
     public func multiply(other: Int8) -> Int8 { Int8(raw: lang.i8_mul(self.raw, other.raw)) }
+
+    /// Divides two values (integer division, truncates toward zero).
     public func divide(other: Int8) -> Int8 { Int8(raw: lang.i8_signed_div(self.raw, other.raw)) }
+
+    /// Returns the remainder of division (self % other).
     public func modulo(other: Int8) -> Int8 { Int8(raw: lang.i8_signed_rem(self.raw, other.raw)) }
+
     public func negate() -> Int8 { Int8(raw: lang.i8_neg(self.raw)) }
     public func abs() -> Int8 { if Bool(boolLiteral: lang.i8_signed_lt(self.raw, 0)) { self.negate() } else { self } }
 
@@ -322,6 +409,14 @@ public struct Int8:
     // ARITHMETIC (Extended)
     // ========================================================================
 
+    /// Raises this value to the given power.
+    ///
+    /// Uses binary exponentiation for efficiency. Negative exponents return 0
+    /// (integer division truncation).
+    ///
+    /// Example:
+    ///     (2).pow(10)  // 1024
+    ///     (3).pow(4)   // 81
     public func pow(exponent: Int64) -> Int8 {
         if exponent < 0 {
             return Int8.zero
@@ -342,6 +437,13 @@ public struct Int8:
         result
     }
 
+    /// Returns the greatest common divisor of two values.
+    ///
+    /// Uses the Euclidean algorithm.
+    ///
+    /// Example:
+    ///     (12).gcd(8)  // 4
+    ///     (17).gcd(5)  // 1 (coprime)
     public func gcd(other: Int8) -> Int8 {
         var a = self.abs();
         var b = other.abs();
@@ -353,6 +455,11 @@ public struct Int8:
         a
     }
 
+    /// Returns the least common multiple of two values.
+    ///
+    /// Example:
+    ///     (4).lcm(6)   // 12
+    ///     (3).lcm(5)   // 15
     public func lcm(other: Int8) -> Int8 {
         if self == Int8.zero or other == Int8.zero {
             return Int8.zero
@@ -365,6 +472,14 @@ public struct Int8:
     // CLAMPING
     // ========================================================================
 
+    /// Clamps this value to the given range.
+    ///
+    /// Returns `min` if self < min, `max` if self > max, otherwise self.
+    ///
+    /// Example:
+    ///     (5).clamp(min: 0, max: 10)   // 5
+    ///     (-5).clamp(min: 0, max: 10)  // 0
+    ///     (15).clamp(min: 0, max: 10)  // 10
     public func clamp(min: Int8, max: Int8) -> Int8 {
         if self < min { min }
         else if self > max { max }
@@ -375,13 +490,25 @@ public struct Int8:
     // BITWISE OPERATIONS
     // ========================================================================
 
+    /// Bitwise AND. Example: `0b1010 & 0b1100 = 0b1000`
     public func bitwiseAnd(other: Int8) -> Int8 { Int8(raw: lang.i8_and(self.raw, other.raw)) }
+
+    /// Bitwise OR. Example: `0b1010 | 0b1100 = 0b1110`
     public func bitwiseOr(other: Int8) -> Int8 { Int8(raw: lang.i8_or(self.raw, other.raw)) }
+
+    /// Bitwise XOR. Example: `0b1010 ^ 0b1100 = 0b0110`
     public func bitwiseXor(other: Int8) -> Int8 { Int8(raw: lang.i8_xor(self.raw, other.raw)) }
+
+    /// Bitwise NOT (complement). Flips all bits.
     public func bitwiseNot() -> Int8 { Int8(raw: lang.i8_not(self.raw)) }
+
+    /// Left shift. Example: `1 << 4 = 16`
     public func shiftLeft(by count: lang.i64) -> Int8 { Int8(raw: lang.i8_shl(self.raw, lang.cast_i64_i8(count))) }
+
+    /// Right shift (arithmetic for signed, logical for unsigned).
     public func shiftRight(by count: lang.i64) -> Int8 { Int8(raw: lang.i8_signed_shr(self.raw, lang.cast_i64_i8(count))) }
 
+    /// Rotates bits left by the given count.
     public func rotateLeft(by count: Int64) -> Int8 {
         let bits: Int64 = 8;
         let c = count % bits;
@@ -389,6 +516,7 @@ public struct Int8:
         else { self.shiftLeft(by: c.raw).bitwiseOr(self.shiftRight(by: (bits - c).raw)) }
     }
 
+    /// Rotates bits right by the given count.
     public func rotateRight(by count: Int64) -> Int8 {
         let bits: Int64 = 8;
         let c = count % bits;
@@ -400,15 +528,25 @@ public struct Int8:
     // COMPOUND ASSIGNMENT
     // ========================================================================
 
+    /// `self += other`
     public mutating func addAssign(other: Int8) { self = self.add(other) }
+    /// `self -= other`
     public mutating func subtractAssign(other: Int8) { self = self.subtract(other) }
+    /// `self *= other`
     public mutating func multiplyAssign(other: Int8) { self = self.multiply(other) }
+    /// `self /= other`
     public mutating func divideAssign(other: Int8) { self = self.divide(other) }
+    /// `self %= other`
     public mutating func modAssign(other: Int8) { self = self.modulo(other) }
+    /// `self &= other`
     public mutating func bitwiseAndAssign(other: Int8) { self = self.bitwiseAnd(other) }
+    /// `self |= other`
     public mutating func bitwiseOrAssign(other: Int8) { self = self.bitwiseOr(other) }
+    /// `self ^= other`
     public mutating func bitwiseXorAssign(other: Int8) { self = self.bitwiseXor(other) }
+    /// `self <<= count`
     public mutating func shiftLeftAssign(by count: lang.i64) { self = self.shiftLeft(by: count) }
+    /// `self >>= count`
     public mutating func shiftRightAssign(by count: lang.i64) { self = self.shiftRight(by: count) }
 
     // ========================================================================
@@ -428,9 +566,74 @@ public struct Int8:
     // PARSING
     // ========================================================================
 
-    // TODO: implement string parsing
-    // public static func parse(string: String) -> Int8?
-    // public static func parse(string: String, radix: Int64) -> Int8?
+    public static func parse(string: String) -> Int8? {
+        let len = string.byteCount;
+        if len == 0 {
+            return .None
+        }
+
+        var index: Int64 = 0;
+        var isNegative = false;
+
+        // Check for sign
+        let firstByte: UInt8 = string.byteAtUnchecked(0);
+        let firstByteVal = Int64(from: firstByte);
+        if firstByteVal == 45 {  // '-'
+            isNegative = true;
+            index = 1
+        } else if firstByteVal == 43 {  // '+'
+            index = 1
+        }
+
+        // Must have at least one digit
+        if index >= len {
+            return .None
+        }
+
+        // Parse digits using Int64 for accumulation
+        var result: Int64 = 0;
+        let maxBeforeMultiply: Int64 = 922337203685477580;  // Int64.maxValue / 10
+
+        while index < len {
+            let byte: UInt8 = string.byteAtUnchecked(index);
+            let byteVal = Int64(from: byte);
+
+            // Check if digit (0-9 = 48-57)
+            if byteVal < 48 or byteVal > 57 {
+                return .None
+            }
+
+            let digit = byteVal - 48;
+
+            // Check for overflow before multiply
+            if result > maxBeforeMultiply {
+                return .None
+            }
+            result = result * 10;
+
+            // Check for overflow before add
+            if result > 9223372036854775807 - digit {
+                return .None
+            }
+            result = result + digit;
+
+            index = index + 1
+        }
+
+        // Apply sign and check bounds for target type
+        if isNegative {
+            result = result.negate();
+            if result < Int64(from: Int8.minValue) {
+                return .None
+            }
+        } else {
+            if result > Int64(from: Int8.maxValue) {
+                return .None
+            }
+        }
+
+        .Some(Int8(from: result))
+    }
 
     // ========================================================================
     // FORMATTING
@@ -463,7 +666,7 @@ public struct Int8:
 
         // Reverse the string
         var reversed = String();
-        var i = result.byteCount() - 1;
+        var i = result.byteCount - 1;
         while i >= 0 {
             reversed.appendByte(result.byteAtUnchecked(i));
             i = i - 1

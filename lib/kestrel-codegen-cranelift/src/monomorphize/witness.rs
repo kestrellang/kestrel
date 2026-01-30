@@ -266,6 +266,8 @@ pub fn resolve_witness(
                 protocol,
                 method: method.to_string(),
                 for_type,
+                protocol_name: Some(mir.name(protocol).to_string()),
+                type_name: Some(format!("{}", mir.ty(for_type).display(mir))),
             }
         })?;
 
@@ -320,6 +322,8 @@ pub fn resolve_associated_type(
             protocol,
             method: format!("type {}", associated),
             for_type: base_type,
+            protocol_name: Some(mir.name(protocol).to_string()),
+            type_name: Some(format!("{}", mir.ty(base_type).display(mir))),
         }
     })?;
 

@@ -398,6 +398,173 @@ def generate_integer_format_method(type_name: str, bits: int, signed: bool) -> s
     }}'''
 
 
+def generate_integer_parse_method(type_name: str, bits: int, signed: bool) -> str:
+    """Generate the parse() method for integer types."""
+    if signed:
+        min_val, max_val = SIGNED_RANGES[bits]
+    else:
+        min_val = 0
+        max_val = UNSIGNED_MAX[bits]
+
+    # Determine how to return the result and bounds check expressions
+    # For 64-bit types, we accumulate in the same type, so just return result
+    # For smaller types, we need to convert from Int64/UInt64
+    if bits == 64:
+        if signed:
+            return_expr = "result"
+            # Use type constants to avoid literal overflow issues
+            min_val_expr = "Int64.minValue"
+            max_val_expr = "Int64.maxValue"
+        else:
+            return_expr = "result"
+            min_val_expr = "0"
+            max_val_expr = "UInt64.maxValue"
+    else:
+        return_expr = f"{type_name}(from: result)"
+        if signed:
+            # Convert smaller type's bounds to Int64 for comparison
+            min_val_expr = f"Int64(from: {type_name}.minValue)"
+            max_val_expr = f"Int64(from: {type_name}.maxValue)"
+        else:
+            min_val_expr = "0"
+            max_val_expr = f"UInt64(from: {type_name}.maxValue)"
+
+    # For signed types, handle negative numbers
+    if signed:
+        return f'''    public static func parse(string: String) -> {type_name}? {{
+        let len = string.byteCount();
+        if len == 0 {{
+            return .None
+        }}
+
+        var index: Int64 = 0;
+        var isNegative = false;
+
+        // Check for sign
+        let firstByte: UInt8 = string.byteAtUnchecked(0);
+        let firstByteVal = Int64(from: firstByte);
+        if firstByteVal == 45 {{  // '-'
+            isNegative = true;
+            index = 1
+        }} else if firstByteVal == 43 {{  // '+'
+            index = 1
+        }}
+
+        // Must have at least one digit
+        if index >= len {{
+            return .None
+        }}
+
+        // Parse digits using Int64 for accumulation
+        var result: Int64 = 0;
+        let maxBeforeMultiply: Int64 = 922337203685477580;  // Int64.maxValue / 10
+
+        while index < len {{
+            let byte: UInt8 = string.byteAtUnchecked(index);
+            let byteVal = Int64(from: byte);
+
+            // Check if digit (0-9 = 48-57)
+            if byteVal < 48 or byteVal > 57 {{
+                return .None
+            }}
+
+            let digit = byteVal - 48;
+
+            // Check for overflow before multiply
+            if result > maxBeforeMultiply {{
+                return .None
+            }}
+            result = result * 10;
+
+            // Check for overflow before add
+            if result > 9223372036854775807 - digit {{
+                return .None
+            }}
+            result = result + digit;
+
+            index = index + 1
+        }}
+
+        // Apply sign and check bounds for target type
+        if isNegative {{
+            result = result.negate();
+            if result < {min_val_expr} {{
+                return .None
+            }}
+        }} else {{
+            if result > {max_val_expr} {{
+                return .None
+            }}
+        }}
+
+        .Some({return_expr})
+    }}'''
+    else:
+        # Unsigned - no negative numbers allowed
+        max_before_multiply = "1844674407370955161"  # UInt64.maxValue / 10
+
+        return f'''    public static func parse(string: String) -> {type_name}? {{
+        let len = string.byteCount();
+        if len == 0 {{
+            return .None
+        }}
+
+        var index: Int64 = 0;
+
+        // Check for optional + sign
+        let firstByte: UInt8 = string.byteAtUnchecked(0);
+        let firstByteVal = Int64(from: firstByte);
+        if firstByteVal == 43 {{  // '+'
+            index = 1
+        }} else if firstByteVal == 45 {{  // '-' not allowed for unsigned
+            return .None
+        }}
+
+        // Must have at least one digit
+        if index >= len {{
+            return .None
+        }}
+
+        // Parse digits using UInt64 for accumulation
+        var result: UInt64 = 0;
+        let maxBeforeMultiply: UInt64 = {max_before_multiply};
+        let maxVal: UInt64 = {max_val_expr};
+
+        while index < len {{
+            let byte: UInt8 = string.byteAtUnchecked(index);
+            let byteVal = UInt64(from: byte);
+
+            // Check if digit (0-9 = 48-57)
+            if byteVal < 48 or byteVal > 57 {{
+                return .None
+            }}
+
+            let digit = byteVal - 48;
+
+            // Check for overflow before multiply
+            if result > maxBeforeMultiply {{
+                return .None
+            }}
+            result = result * 10;
+
+            // Check for overflow before add
+            if result > UInt64.maxValue - digit {{
+                return .None
+            }}
+            result = result + digit;
+
+            index = index + 1
+        }}
+
+        // Check bounds for target type
+        if result > maxVal {{
+            return .None
+        }}
+
+        .Some({return_expr})
+    }}'''
+
+
 def generate_integer(type_name: str, bits: int, signed: bool, is_default: bool) -> str:
     template = (SCRIPT_DIR / "integer.ks.template").read_text()
 
@@ -427,12 +594,18 @@ def generate_integer(type_name: str, bits: int, signed: bool, is_default: bool) 
         negatable_output = f"type Negatable.Output = {type_name}"
         negate_method = f"public func negate() -> {type_name} {{ {type_name}(raw: lang.{lang_type}_neg(self.raw)) }}"
         abs_method = f"public func abs() -> {type_name} {{ if Bool(boolLiteral: lang.{lang_type}_signed_lt(self.raw, 0)) {{ self.negate() }} else {{ self }} }}"
-        # For signed, use negation for min value
-        min_value_expr = f"{type_name}(intLiteral: lang.i64_neg({min_val_abs}))"
+        # For signed, compute minValue via shift left: 1 << (bits - 1)
+        # This avoids literal overflow issues with large values like 9223372036854775808
+        min_value_expr = f"{type_name}(raw: lang.{lang_type}_shl(1, {bits - 1}))"
         gcd_abs_self = "self.abs()"
         gcd_abs_other = "other.abs()"
         lcm_abs_self = "self.abs()"
         lcm_abs_other = "other.abs()"
+        # Format min/max with commas for readability
+        min_val_formatted = f"{min_val:,}".replace(",", "_")
+        max_val_formatted = f"{max_val:,}".replace(",", "_")
+        min_value_doc = f"/// This is -2^{bits-1} ({min_val_formatted})."
+        max_value_doc = f"/// This is 2^{bits-1} - 1 ({max_val_formatted})."
     else:
         min_val = 0
         min_val_abs = 0
@@ -449,6 +622,9 @@ def generate_integer(type_name: str, bits: int, signed: bool, is_default: bool) 
         gcd_abs_other = "other"
         lcm_abs_self = "self"
         lcm_abs_other = "other"
+        max_val_formatted = f"{max_val:,}".replace(",", "_")
+        min_value_doc = "/// This is always 0 for unsigned types."
+        max_value_doc = f"/// This is 2^{bits} - 1 ({max_val_formatted})."
 
     # Int literal init - need to cast from i64 for smaller types
     if bits == 64:
@@ -496,6 +672,9 @@ def generate_integer(type_name: str, bits: int, signed: bool, is_default: bool) 
     # Generate saturating arithmetic
     saturating_arithmetic = generate_saturating_arithmetic(type_name, bits, signed, lang_type)
 
+    # Generate parse method
+    parse_method = generate_integer_parse_method(type_name, bits, signed)
+
     result = template
     result = result.replace("{{TYPE_NAME}}", type_name)
     result = result.replace("{{BITS}}", str(bits))
@@ -505,7 +684,9 @@ def generate_integer(type_name: str, bits: int, signed: bool, is_default: bool) 
     result = result.replace("{{MIN_VALUE}}", str(min_val))
     result = result.replace("{{MIN_VALUE_ABS}}", str(min_val_abs))
     result = result.replace("{{MIN_VALUE_EXPR}}", min_value_expr)
+    result = result.replace("{{MIN_VALUE_DOC}}", min_value_doc)
     result = result.replace("{{MAX_VALUE}}", str(max_val))
+    result = result.replace("{{MAX_VALUE_DOC}}", max_value_doc)
     result = result.replace("{{SIGNED_PREFIX}}", signed_prefix)
     result = result.replace("{{NEGATABLE}}", negatable)
     result = result.replace("{{NEGATABLE_OUTPUT}}", negatable_output)
@@ -530,8 +711,237 @@ def generate_integer(type_name: str, bits: int, signed: bool, is_default: bool) 
     result = result.replace("{{GCD_ABS_OTHER}}", gcd_abs_other)
     result = result.replace("{{LCM_ABS_SELF}}", lcm_abs_self)
     result = result.replace("{{LCM_ABS_OTHER}}", lcm_abs_other)
+    result = result.replace("{{PARSE_METHOD}}", parse_method)
 
     return result
+
+
+def generate_float_parse_method(type_name: str, bits: int) -> str:
+    """Generate the parse() method for float types."""
+    lang_type = f"f{bits}"
+
+    return f'''    public static func parse(string: String) -> {type_name}? {{
+        let len = string.byteCount();
+        if len == 0 {{
+            return .None
+        }}
+
+        // Check for special values
+        // "nan"
+        if len == 3 {{
+            let b0: UInt8 = string.byteAtUnchecked(0);
+            let b1: UInt8 = string.byteAtUnchecked(1);
+            let b2: UInt8 = string.byteAtUnchecked(2);
+            // 'n' or 'N' = 110 or 78
+            // 'a' or 'A' = 97 or 65
+            let isN0 = Int64(from: b0) == 110 or Int64(from: b0) == 78;
+            let isA1 = Int64(from: b1) == 97 or Int64(from: b1) == 65;
+            let isN2 = Int64(from: b2) == 110 or Int64(from: b2) == 78;
+            if isN0 and isA1 and isN2 {{
+                return .Some({type_name}.nan)
+            }}
+        }}
+
+        // "inf"
+        if len == 3 {{
+            let b0: UInt8 = string.byteAtUnchecked(0);
+            let b1: UInt8 = string.byteAtUnchecked(1);
+            let b2: UInt8 = string.byteAtUnchecked(2);
+            // 'i' or 'I' = 105 or 73
+            // 'n' or 'N' = 110 or 78
+            // 'f' or 'F' = 102 or 70
+            let isI = Int64(from: b0) == 105 or Int64(from: b0) == 73;
+            let isN = Int64(from: b1) == 110 or Int64(from: b1) == 78;
+            let isF = Int64(from: b2) == 102 or Int64(from: b2) == 70;
+            if isI and isN and isF {{
+                return .Some({type_name}.infinity)
+            }}
+        }}
+
+        // "-inf"
+        if len == 4 {{
+            let b0: UInt8 = string.byteAtUnchecked(0);
+            let b1: UInt8 = string.byteAtUnchecked(1);
+            let b2: UInt8 = string.byteAtUnchecked(2);
+            let b3: UInt8 = string.byteAtUnchecked(3);
+            let isMinus = Int64(from: b0) == 45;
+            let isI = Int64(from: b1) == 105 or Int64(from: b1) == 73;
+            let isN = Int64(from: b2) == 110 or Int64(from: b2) == 78;
+            let isF = Int64(from: b3) == 102 or Int64(from: b3) == 70;
+            if isMinus and isI and isN and isF {{
+                return .Some({type_name}(raw: lang.{lang_type}_neg(lang.{lang_type}_infinity())))
+            }}
+        }}
+
+        // "+inf"
+        if len == 4 {{
+            let b0: UInt8 = string.byteAtUnchecked(0);
+            let b1: UInt8 = string.byteAtUnchecked(1);
+            let b2: UInt8 = string.byteAtUnchecked(2);
+            let b3: UInt8 = string.byteAtUnchecked(3);
+            let isPlus = Int64(from: b0) == 43;
+            let isI = Int64(from: b1) == 105 or Int64(from: b1) == 73;
+            let isN = Int64(from: b2) == 110 or Int64(from: b2) == 78;
+            let isF = Int64(from: b3) == 102 or Int64(from: b3) == 70;
+            if isPlus and isI and isN and isF {{
+                return .Some({type_name}.infinity)
+            }}
+        }}
+
+        // "infinity"
+        if len == 8 {{
+            // Check for "infinity" (case insensitive)
+            let b0: UInt8 = string.byteAtUnchecked(0);
+            let b1: UInt8 = string.byteAtUnchecked(1);
+            let b2: UInt8 = string.byteAtUnchecked(2);
+            let b3: UInt8 = string.byteAtUnchecked(3);
+            let b4: UInt8 = string.byteAtUnchecked(4);
+            let b5: UInt8 = string.byteAtUnchecked(5);
+            let b6: UInt8 = string.byteAtUnchecked(6);
+            let b7: UInt8 = string.byteAtUnchecked(7);
+            let isI0 = Int64(from: b0) == 105 or Int64(from: b0) == 73;
+            let isN1 = Int64(from: b1) == 110 or Int64(from: b1) == 78;
+            let isF2 = Int64(from: b2) == 102 or Int64(from: b2) == 70;
+            let isI3 = Int64(from: b3) == 105 or Int64(from: b3) == 73;
+            let isN4 = Int64(from: b4) == 110 or Int64(from: b4) == 78;
+            let isI5 = Int64(from: b5) == 105 or Int64(from: b5) == 73;
+            let isT6 = Int64(from: b6) == 116 or Int64(from: b6) == 84;
+            let isY7 = Int64(from: b7) == 121 or Int64(from: b7) == 89;
+            if isI0 and isN1 and isF2 and isI3 and isN4 and isI5 and isT6 and isY7 {{
+                return .Some({type_name}.infinity)
+            }}
+        }}
+
+        // Parse regular number: [+-]?[0-9]*[.]?[0-9]*([eE][+-]?[0-9]+)?
+        var index: Int64 = 0;
+        var isNegative = false;
+
+        // Check for sign
+        let firstByte: UInt8 = string.byteAtUnchecked(0);
+        let firstByteVal = Int64(from: firstByte);
+        if firstByteVal == 45 {{  // '-'
+            isNegative = true;
+            index = 1
+        }} else if firstByteVal == 43 {{  // '+'
+            index = 1
+        }}
+
+        // Must have something after sign
+        if index >= len {{
+            return .None
+        }}
+
+        // Parse integer part - inline digit check (48='0', 57='9')
+        var integerPart: {type_name} = 0.0;
+        var hasIntegerPart = false;
+        var currentByte: Int64 = Int64(from: string.byteAtUnchecked(index));
+
+        while index < len and currentByte >= 48 and currentByte <= 57 {{
+            let digit = {type_name}(from: currentByte - 48);
+            integerPart = integerPart * 10.0 + digit;
+            hasIntegerPart = true;
+            index = index + 1;
+            if index < len {{
+                currentByte = Int64(from: string.byteAtUnchecked(index))
+            }}
+        }}
+
+        // Parse fractional part
+        var fractionalPart: {type_name} = 0.0;
+        var hasFractionalPart = false;
+
+        if index < len and currentByte == 46 {{  // '.'
+            index = index + 1;
+            var divisor: {type_name} = 10.0;
+
+            if index < len {{
+                currentByte = Int64(from: string.byteAtUnchecked(index));
+                while index < len and currentByte >= 48 and currentByte <= 57 {{
+                    let digit = {type_name}(from: currentByte - 48);
+                    fractionalPart = fractionalPart + digit / divisor;
+                    divisor = divisor * 10.0;
+                    hasFractionalPart = true;
+                    index = index + 1;
+                    if index < len {{
+                        currentByte = Int64(from: string.byteAtUnchecked(index))
+                    }}
+                }}
+            }}
+        }}
+
+        // Must have at least integer or fractional part
+        if not hasIntegerPart and not hasFractionalPart {{
+            return .None
+        }}
+
+        var result = integerPart + fractionalPart;
+
+        // Parse exponent part
+        if index < len and (currentByte == 101 or currentByte == 69) {{  // 'e' or 'E'
+            index = index + 1;
+
+            if index >= len {{
+                return .None  // 'e' with no exponent
+            }}
+
+            var expNegative = false;
+            currentByte = Int64(from: string.byteAtUnchecked(index));
+
+            if currentByte == 45 {{  // '-'
+                expNegative = true;
+                index = index + 1;
+                if index < len {{
+                    currentByte = Int64(from: string.byteAtUnchecked(index))
+                }}
+            }} else if currentByte == 43 {{  // '+'
+                index = index + 1;
+                if index < len {{
+                    currentByte = Int64(from: string.byteAtUnchecked(index))
+                }}
+            }}
+
+            if index >= len {{
+                return .None  // No exponent digits
+            }}
+
+            var exponent: Int64 = 0;
+            var hasExpDigit = false;
+
+            while index < len and currentByte >= 48 and currentByte <= 57 {{
+                exponent = exponent * 10 + (currentByte - 48);
+                hasExpDigit = true;
+                index = index + 1;
+                if index < len {{
+                    currentByte = Int64(from: string.byteAtUnchecked(index))
+                }}
+            }}
+
+            if not hasExpDigit {{
+                return .None
+            }}
+
+            // Apply exponent using pow
+            let expFloat = {type_name}(from: exponent);
+            let ten: {type_name} = 10.0;
+            if expNegative {{
+                result = result / ten.pow(expFloat)
+            }} else {{
+                result = result * ten.pow(expFloat)
+            }}
+        }}
+
+        // Check for trailing characters
+        if index != len {{
+            return .None
+        }}
+
+        // Apply sign
+        if isNegative {{
+            result = result.negate()
+        }}
+
+        .Some(result)
+    }}'''
 
 
 def generate_float_format_method(type_name: str, bits: int) -> str:
@@ -631,6 +1041,9 @@ def generate_float(type_name: str, bits: int, is_default: bool) -> str:
     # Generate format method
     format_method = generate_float_format_method(type_name, bits)
 
+    # Generate parse method
+    parse_method = generate_float_parse_method(type_name, bits)
+
     # Float constants - use literal values since intrinsics don't exist
     # Note: negative constants need special handling to avoid -literal being parsed as negate()
     if bits == 64:
@@ -646,8 +1059,10 @@ def generate_float(type_name: str, bits: int, is_default: bool) -> str:
     # Conversion to other float type
     if bits == 64:
         to_other_float = f"Float32(raw: lang.cast_f64_f32(self.raw))"
+        libm_suffix = ""  # f64 functions: sin, cos, etc.
     else:
         to_other_float = f"Float64(raw: lang.cast_f32_f64(self.raw))"
+        libm_suffix = "f"  # f32 functions: sinf, cosf, etc.
 
     result = template
     result = result.replace("{{TYPE_NAME}}", type_name)
@@ -663,6 +1078,8 @@ def generate_float(type_name: str, bits: int, is_default: bool) -> str:
     result = result.replace("{{MIN_POSITIVE}}", min_positive)
     result = result.replace("{{EPSILON}}", epsilon)
     result = result.replace("{{TO_OTHER_FLOAT}}", to_other_float)
+    result = result.replace("{{LIBM_SUFFIX}}", libm_suffix)
+    result = result.replace("{{PARSE_METHOD}}", parse_method)
 
     return result
 

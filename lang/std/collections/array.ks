@@ -9,18 +9,24 @@ import std.memory.(Layout, Pointer, Slice, RawPointer, SystemAllocator, LiteralS
 import std.iter.(Iterator, Iterable)
 import std.core.(ExpressibleByArrayLiteral, _ExpressibleByArrayLiteral)
 
-// ArrayIterator must be defined before Array for Iterable conformance
+// ============================================================================
+// ARRAY ITERATOR
+// ============================================================================
+
+/// Iterator over array elements.
 public struct ArrayIterator[T]: Iterator {
     type Item = T
 
     private var ptr: Pointer[T]
     private var remaining: Int64
 
+    /// Creates an array iterator.
     public init(ptr ptr: Pointer[T], remaining remaining: Int64) {
         self.ptr = ptr;
         self.remaining = remaining;
     }
 
+    /// Returns the next element, or None if exhausted.
     public mutating func next() -> Optional[T] {
         if self.remaining > Int64(intLiteral: 0) {
             let value = self.ptr.read();
@@ -33,7 +39,11 @@ public struct ArrayIterator[T]: Iterator {
     }
 }
 
-// ArrayStorage[T] - internal storage for Array (ptr, len, cap)
+// ============================================================================
+// ARRAY STORAGE (Internal)
+// ============================================================================
+
+/// Internal storage for Array (ptr, len, cap).
 struct ArrayStorage[T]: Cloneable {
     var ptr: Pointer[T]
     var len: Int64
@@ -45,7 +55,7 @@ struct ArrayStorage[T]: Cloneable {
         self.cap = cap;
     }
 
-    // Deep clone - allocate new buffer and copy elements
+    /// Deep clone - allocate new buffer and copy elements.
     func clone() -> ArrayStorage[T] {
         if self.len == Int64(intLiteral: 0) {
             return ArrayStorage(
@@ -80,9 +90,16 @@ struct ArrayStorage[T]: Cloneable {
     }
 }
 
-// Array[T] - dynamic array with COW semantics using RcBox
+// ============================================================================
+// ARRAY
+// ============================================================================
+
+/// A dynamic growable array with copy-on-write semantics.
+///
+/// Arrays automatically grow when elements are added and use COW
+/// to efficiently share data between copies until mutation occurs.
 @builtin(.ArrayStruct)
-public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArrayLiteral {
+public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArrayLiteral, Cloneable {
     type Item = T
     type Iter = ArrayIterator[T]
     type Element = T
@@ -101,12 +118,16 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
         }
     }
 
-    // Private init for internal use (from storage)
+    /// Private init for internal use (from storage).
     private init(storage storage: RcBox[ArrayStorage[T]]) {
         self.storage = storage;
     }
 
-    // Create empty array
+    // ========================================================================
+    // CONSTRUCTORS
+    // ========================================================================
+
+    /// Creates an empty array.
     public init() {
         self.storage = RcBox(ArrayStorage(
             ptr: Pointer(raw: lang.ptr_null[T]()),
@@ -115,7 +136,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
         ));
     }
 
-    // Create with capacity
+    /// Creates an empty array with the specified capacity.
     public init(capacity capacity: Int64) {
         if capacity > Int64(intLiteral: 0) {
             let layout = Layout.array[T](capacity);
@@ -139,12 +160,12 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
         }
     }
 
-    // _ExpressibleByArrayLiteral (called by compiler for array literals)
+    /// Internal initializer called by compiler for array literals.
     public init(_arrayLiteralPointer: lang.ptr[T], _arrayLiteralCount: lang.i64) {
         self.init(arrayLiteral: LiteralSlice(pointer: _arrayLiteralPointer, count: _arrayLiteralCount))
     }
 
-    // ExpressibleByArrayLiteral
+    /// Creates an array from an array literal.
     public init(arrayLiteral elements: LiteralSlice[T]) {
         let elementCount = elements.count();
         if elementCount > Int64(intLiteral: 0) {
@@ -183,18 +204,32 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
         }
     }
 
-    // Properties
+    // ========================================================================
+    // SIZE & CAPACITY
+    // ========================================================================
+
+    /// The number of elements in the array.
     public func count() -> Int64 { self.len() }
+
+    /// The allocated capacity.
     public func capacity() -> Int64 { self.cap() }
+
+    /// True if the array is empty.
     public func isEmpty() -> Bool { self.len() == Int64(intLiteral: 0) }
+
+    /// Returns a pointer to the underlying storage.
     public func pointer() -> Pointer[T] { self.ptr() }
 
-    // Get a slice view of the array
+    /// Returns a slice view of the array.
     public func asSlice() -> Slice[T] {
         Slice(pointer: self.ptr(), count: self.len())
     }
 
-    // Grow capacity if needed
+    // ========================================================================
+    // CAPACITY MANAGEMENT (Internal)
+    // ========================================================================
+
+    /// Grows capacity to at least minCapacity.
     private mutating func grow(minCapacity: Int64) {
         let myCap = self.cap();
         if myCap >= minCapacity {
@@ -236,18 +271,22 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
         }
     }
 
-    // Unchecked element access
+    // ========================================================================
+    // ELEMENT ACCESS
+    // ========================================================================
+
+    /// Returns the element at the given index without bounds checking.
     public func getUnchecked(index: Int64) -> T {
         self.ptr().offset(by: index).read()
     }
 
-    // Unchecked write
+    /// Sets the element at the given index without bounds checking.
     public mutating func setUnchecked(index: Int64, value: T) {
         self.makeUnique();
         self.ptr().offset(by: index).write(value)
     }
 
-    // Safe element access
+    /// Returns the element at the given index, or None if out of bounds.
     public func getValue(at index: Int64) -> Optional[T] {
         let myLen = self.len();
         if index >= Int64(intLiteral: 0) and index < myLen {
@@ -257,7 +296,11 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
         }
     }
 
-    // Append element
+    // ========================================================================
+    // MUTATING OPERATIONS
+    // ========================================================================
+
+    /// Appends an element to the end of the array.
     public mutating func append(element: T) {
         let myLen = self.len();
         self.grow(myLen + Int64(intLiteral: 1));
@@ -268,7 +311,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
         self.storage.setValue(s)
     }
 
-    // Pop last element
+    /// Removes and returns the last element, or None if empty.
     public mutating func pop() -> Optional[T] {
         let myLen = self.len();
         if myLen > Int64(intLiteral: 0) {
@@ -283,7 +326,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
         }
     }
 
-    // Clear all elements
+    /// Removes all elements from the array.
     public mutating func clear() {
         self.makeUnique();
         var s = self.storage.getValue();
@@ -291,7 +334,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
         self.storage.setValue(s)
     }
 
-    // First element
+    /// Returns the first element, or None if empty.
     public func first() -> Optional[T] {
         if self.len() > Int64(intLiteral: 0) {
             .Some(self.ptr().read())
@@ -300,7 +343,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
         }
     }
 
-    // Last element
+    /// Returns the last element, or None if empty.
     public func last() -> Optional[T] {
         let myLen = self.len();
         if myLen > Int64(intLiteral: 0) {
@@ -310,7 +353,9 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
         }
     }
 
-    // Insert at index
+    /// Inserts an element at the specified index.
+    ///
+    /// Panics if index is out of bounds.
     public mutating func insert(element: T, at index: Int64) {
         let myLen = self.len();
         if index < Int64(intLiteral: 0) or index > myLen {
@@ -330,7 +375,9 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
         self.storage.setValue(s)
     }
 
-    // Remove at index
+    /// Removes and returns the element at the specified index.
+    ///
+    /// Panics if index is out of bounds.
     public mutating func remove(at index: Int64) -> T {
         let myLen = self.len();
         if index < Int64(intLiteral: 0) or index >= myLen {
@@ -350,12 +397,20 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
         removed
     }
 
-    // Iterable
+    // ========================================================================
+    // ITERATION
+    // ========================================================================
+
+    /// Returns an iterator over the elements.
     public func iter() -> ArrayIterator[T] {
         ArrayIterator(ptr: self.ptr(), remaining: self.len())
     }
 
-    // Reverse in place
+    // ========================================================================
+    // TRANSFORMATIONS
+    // ========================================================================
+
+    /// Reverses the array in place.
     public mutating func reverse() {
         self.makeUnique();
         var s = self.storage.getValue();
@@ -371,14 +426,23 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
         self.storage.setValue(s)
     }
 
-    // Cloneable - shallow clone (COW)
+    // ========================================================================
+    // PROTOCOL CONFORMANCES
+    // ========================================================================
+
+    /// Creates a shallow clone (COW - copy deferred until mutation).
     public func clone() -> Array[T] {
         Array(storage: self.storage.clone())
     }
 }
 
-// Equatable when T is Equatable
+// ============================================================================
+// CONDITIONAL EXTENSIONS
+// ============================================================================
+
+/// Equatable extension when T is Equatable.
 extend Array[T]: Equatable where T: Equatable {
+    /// Compares two arrays for equality.
     public func equals(other: Array[T]) -> Bool {
         let selfCount = self.count();
         let otherCount = other.count();
@@ -397,9 +461,11 @@ extend Array[T]: Equatable where T: Equatable {
     }
 }
 
-// Cloneable conformance
-extend Array[T]: Cloneable {}
 
-// Type operator alias: [T] desugars to ArrayTypeOperator[T] which is Array[T]
+// ============================================================================
+// TYPE OPERATOR
+// ============================================================================
+
+/// Type operator alias: [T] desugars to Array[T].
 @builtin(.ArrayTypeOperator)
 public type ArrayTypeOperator[T] = Array[T];
