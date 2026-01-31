@@ -605,10 +605,10 @@ See [docs/memory-model/implementation-plan.md](docs/memory-model/implementation-
 
 ### Error Handling
 
-- [ ] Throw Expression - Early return with error value
-  - `throw error` desugars to `return .Err(error)` in functions returning Result
+- [x] Throw Expression - Early return with error value
+  - `throw error` desugars to `return R.fromResidual(error)` in functions with FromResidual
   - Works with `T throws E` type syntax for ergonomic error propagation
-  - Enables `let x = try expr ?? throw fallbackError` patterns
+  - Type is Never (diverging expression like return)
 
 ### Expressions
 

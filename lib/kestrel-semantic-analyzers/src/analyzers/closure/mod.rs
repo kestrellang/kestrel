@@ -414,6 +414,9 @@ fn find_assignments_to_locals(
                 find_assignments_to_locals(val, target_locals, container_id, ctx);
             }
         },
+        ExprKind::Throw { value } => {
+            find_assignments_to_locals(value, target_locals, container_id, ctx);
+        },
 
         // Implicit member access - check arguments if present
         ExprKind::ImplicitMemberAccess { arguments, .. } => {

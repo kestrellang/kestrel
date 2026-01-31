@@ -1232,6 +1232,15 @@ pub enum ExprKind {
         value: Option<Box<Expression>>,
     },
 
+    /// Throw expression: `throw expr`
+    ///
+    /// Desugars to `return R.fromResidual(expr)` where R is the function return type.
+    /// Type is `Never` - control transfers out of the function.
+    Throw {
+        /// The error value to throw
+        value: Box<Expression>,
+    },
+
     /// Closure expression: `{ params in body }` or `{ body }`
     ///
     /// Closures are anonymous functions that can capture variables from their enclosing scope.
@@ -1816,6 +1825,9 @@ impl Expression {
                     } else {
                         "return".to_string()
                     }
+                },
+                ExprKind::Throw { value } => {
+                    format!("throw {}", format_expr(value))
                 },
                 ExprKind::Closure {
                     params, tail_expr, ..
@@ -2766,6 +2778,22 @@ impl Expression {
             id: ExprId::new(),
             kind: ExprKind::Return {
                 value: value.map(Box::new),
+            },
+            ty: Ty::never(span.clone()),
+            span,
+            mutable: false,
+        }
+    }
+
+    /// Create a throw expression.
+    ///
+    /// Type is `Never` - control transfers out of the function.
+    /// The throw desugars to `return R.fromResidual(value)` during body resolution.
+    pub fn throw_expr(value: Expression, span: Span) -> Self {
+        Expression {
+            id: ExprId::new(),
+            kind: ExprKind::Throw {
+                value: Box::new(value),
             },
             ty: Ty::never(span.clone()),
             span,

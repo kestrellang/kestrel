@@ -414,6 +414,9 @@ fn walk_expression(
             ExprKind::Return { value: Some(v) } => {
                 walk_expression(v, analyzers, model, ctx);
             },
+            ExprKind::Throw { value } => {
+                walk_expression(value, analyzers, model, ctx);
+            },
             ExprKind::Match { scrutinee, arms } => {
                 walk_expression(scrutinee, analyzers, model, ctx);
                 for arm in arms {

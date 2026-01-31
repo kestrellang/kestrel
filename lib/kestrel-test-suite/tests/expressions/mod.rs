@@ -12,9 +12,9 @@
 
 mod body_literals;
 mod calls;
-mod dictionary_literals;
 mod closures;
 mod control_flow;
+mod dictionary_literals;
 mod field_access;
 mod loops;
 mod null_coalescing;
@@ -24,4 +24,5 @@ mod protocol_operators;
 mod returns;
 mod short_circuit;
 mod strings;
+mod throw;
 mod try_operator;

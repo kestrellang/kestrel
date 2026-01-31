@@ -940,6 +940,9 @@ fn collect_captures_recursive(
                 collect_captures_recursive(e, closure_entry_depth, local_scope, captures, seen_ids);
             }
         },
+        ExprKind::Throw { value } => {
+            collect_captures_recursive(value, closure_entry_depth, local_scope, captures, seen_ids);
+        },
 
         ExprKind::Match { scrutinee, arms } => {
             collect_captures_recursive(

@@ -533,6 +533,23 @@ fn analyze_expression(
             }
             state.diverged = true;
         },
+        ExprKind::Throw { value } => {
+            state = analyze_expression(value, state, false, ctx);
+            let uninitialized: Vec<String> = ctx
+                .all_fields
+                .iter()
+                .filter(|f| !state.assigned.contains(*f))
+                .cloned()
+                .collect();
+            if !uninitialized.is_empty() {
+                ctx.errors
+                    .push(InitializerError::ReturnBeforeFullyInitialized {
+                        span: expr.span.clone(),
+                        uninitialized,
+                    });
+            }
+            state.diverged = true;
+        },
         ExprKind::Closure {
             body, tail_expr, ..
         } => {

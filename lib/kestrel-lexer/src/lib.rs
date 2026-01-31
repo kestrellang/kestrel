@@ -297,6 +297,9 @@ pub enum Token {
     #[token("return")]
     Return,
 
+    #[token("throw")]
+    Throw,
+
     #[token("try")]
     Try,
 

@@ -89,6 +89,9 @@ impl Analyzer for TypeCheckAnalyzer {
             ExprKind::Return { value } => {
                 self.check_return(value.as_ref().map(|v| v.as_ref()), expr, ctx);
             },
+            // Throw expressions are desugared to return R.fromResidual(value) in the binder,
+            // so type checking happens through that mechanism
+            ExprKind::Throw { .. } => {},
             ExprKind::Assignment { target, value } => {
                 self.check_assignment(target, value, ctx);
             },

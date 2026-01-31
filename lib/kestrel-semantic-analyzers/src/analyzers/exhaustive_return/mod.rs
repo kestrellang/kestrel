@@ -169,6 +169,7 @@ fn analyze_statement(stmt: &Statement) -> ReturnState {
 fn analyze_expression(expr: &Expression) -> ReturnState {
     match &expr.kind {
         ExprKind::Return { .. } => ReturnState::Returns,
+        ExprKind::Throw { .. } => ReturnState::Returns,
         ExprKind::Break { .. } | ExprKind::Continue { .. } => ReturnState::Diverges,
         ExprKind::If {
             conditions,

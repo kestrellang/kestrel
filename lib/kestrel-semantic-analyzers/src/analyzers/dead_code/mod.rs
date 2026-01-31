@@ -170,6 +170,10 @@ fn analyze_expression(expr: &Expression, errors: &mut Vec<UnreachableCodeWarning
             }
             Divergence::Returns
         },
+        ExprKind::Throw { value } => {
+            let _ = analyze_expression(value, errors);
+            Divergence::Returns
+        },
         ExprKind::Break { .. } => Divergence::Breaks,
         ExprKind::Continue { .. } => Divergence::Continues,
         ExprKind::If {

@@ -817,6 +817,12 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
             Value::Unreachable
         },
 
+        // Throw should have been desugared to return by the binder
+        // This arm should never be reached in practice
+        ExprKind::Throw { .. } => {
+            panic!("Throw expression should have been desugared to return by the binder")
+        },
+
         // === Match Expressions ===
         ExprKind::Match { scrutinee, arms } => {
             crate::match_lowering::lower_match_expr(ctx, scrutinee, arms, expr)

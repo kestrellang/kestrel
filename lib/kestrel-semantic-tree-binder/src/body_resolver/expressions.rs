@@ -130,6 +130,8 @@ pub fn resolve_expression(expr_node: &SyntaxNode, ctx: &mut BodyResolutionContex
 
         SyntaxKind::ExprReturn => resolve_return_expression(expr_node, ctx),
 
+        SyntaxKind::ExprThrow => resolve_throw_expression(expr_node, ctx),
+
         SyntaxKind::ExprTry => resolve_try_expression(expr_node, ctx),
 
         SyntaxKind::ExprTupleIndex => resolve_tuple_index_expression(expr_node, ctx),
@@ -1588,6 +1590,28 @@ fn resolve_return_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext)
     Expression::return_expr(value, span)
 }
 
+/// Resolve a throw expression: throw expr
+fn resolve_throw_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> Expression {
+    let span = get_node_span(node, ctx.file_id);
+
+    // Find the value expression (required for throw)
+    let value_node = match node
+        .children()
+        .find(|c| c.kind() == SyntaxKind::Expression || is_expression_kind(c.kind()))
+    {
+        Some(n) => n,
+        None => return Expression::error(span),
+    };
+
+    let value = resolve_expression(&value_node, ctx);
+    let value = validate_not_standalone_type_param(value, ctx);
+
+    // Check for escaping capturing closure
+    check_capturing_closure_escape(&value, &span, ctx);
+
+    Expression::throw_expr(value, span)
+}
+
 /// Resolve a try expression: try expr
 ///
 /// Desugars to:
@@ -2200,6 +2224,7 @@ fn expression_references_local(
                 false
             }
         },
+        ExprKind::Throw { value } => expression_references_local(value, local_id),
 
         // Implicit member access - check arguments if present
         ExprKind::ImplicitMemberAccess { arguments, .. } => {
@@ -2884,6 +2909,9 @@ where
             if let Some(val) = value {
                 collect_captures_from_expression(val, process);
             }
+        },
+        ExprKind::Throw { value } => {
+            collect_captures_from_expression(value, process);
         },
         ExprKind::Closure {
             body, tail_expr, ..

@@ -1425,6 +1425,9 @@ fn collect_closure_local_ids_from_expr(expr: &Expression, ids: &mut HashSet<Loca
                 collect_closure_local_ids_from_expr(e, ids);
             }
         },
+        ExprKind::Throw { value } => {
+            collect_closure_local_ids_from_expr(value, ids);
+        },
         ExprKind::ImplicitMemberAccess { arguments, .. } => {
             if let Some(args) = arguments {
                 for arg in args {

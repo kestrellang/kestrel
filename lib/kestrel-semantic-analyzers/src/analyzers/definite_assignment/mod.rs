@@ -371,6 +371,10 @@ fn analyze_expression(
             }
             state.diverged = true;
         },
+        ExprKind::Throw { value } => {
+            state = analyze_expression(value, state, false, ctx);
+            state.diverged = true;
+        },
         ExprKind::Break { .. } | ExprKind::Continue { .. } => {
             state.diverged = true;
         },

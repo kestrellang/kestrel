@@ -162,6 +162,7 @@ pub enum SyntaxKind {
     ExprBreak,                // break or break label
     ExprContinue,             // continue or continue label
     ExprReturn,               // return or return expr
+    ExprThrow,                // throw expr
     ExprTry,                  // try expr
     ExprTupleIndex,           // tuple.0, tuple.1 (tuple element access)
     ExprClosure,              // { params in body } or { body }
@@ -233,6 +234,7 @@ pub enum SyntaxKind {
     Protocol,
     Public,
     Return,
+    Throw,
     Try,
     Throws,
     Static,
@@ -366,6 +368,7 @@ impl From<Token> for SyntaxKind {
             Token::Protocol => SyntaxKind::Protocol,
             Token::Public => SyntaxKind::Public,
             Token::Return => SyntaxKind::Return,
+            Token::Throw => SyntaxKind::Throw,
             Token::Try => SyntaxKind::Try,
             Token::Throws => SyntaxKind::Throws,
             Token::Static => SyntaxKind::Static,
@@ -552,6 +555,7 @@ impl Language for KestrelLanguage {
         const EXPR_BREAK: u16 = SyntaxKind::ExprBreak as u16;
         const EXPR_CONTINUE: u16 = SyntaxKind::ExprContinue as u16;
         const EXPR_RETURN: u16 = SyntaxKind::ExprReturn as u16;
+        const EXPR_THROW: u16 = SyntaxKind::ExprThrow as u16;
         const EXPR_TRY: u16 = SyntaxKind::ExprTry as u16;
         const EXPR_TUPLE_INDEX: u16 = SyntaxKind::ExprTupleIndex as u16;
         const EXPR_CLOSURE: u16 = SyntaxKind::ExprClosure as u16;
@@ -616,6 +620,7 @@ impl Language for KestrelLanguage {
         const PROTOCOL: u16 = SyntaxKind::Protocol as u16;
         const PUBLIC: u16 = SyntaxKind::Public as u16;
         const RETURN: u16 = SyntaxKind::Return as u16;
+        const THROW: u16 = SyntaxKind::Throw as u16;
         const TRY: u16 = SyntaxKind::Try as u16;
         const THROWS: u16 = SyntaxKind::Throws as u16;
         const STATIC: u16 = SyntaxKind::Static as u16;
@@ -796,6 +801,7 @@ impl Language for KestrelLanguage {
             EXPR_BREAK => SyntaxKind::ExprBreak,
             EXPR_CONTINUE => SyntaxKind::ExprContinue,
             EXPR_RETURN => SyntaxKind::ExprReturn,
+            EXPR_THROW => SyntaxKind::ExprThrow,
             EXPR_TRY => SyntaxKind::ExprTry,
             EXPR_TUPLE_INDEX => SyntaxKind::ExprTupleIndex,
             EXPR_CLOSURE => SyntaxKind::ExprClosure,
@@ -860,6 +866,7 @@ impl Language for KestrelLanguage {
             PROTOCOL => SyntaxKind::Protocol,
             PUBLIC => SyntaxKind::Public,
             RETURN => SyntaxKind::Return,
+            THROW => SyntaxKind::Throw,
             TRY => SyntaxKind::Try,
             THROWS => SyntaxKind::Throws,
             STATIC => SyntaxKind::Static,

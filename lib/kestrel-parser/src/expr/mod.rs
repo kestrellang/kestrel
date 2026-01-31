@@ -9,12 +9,12 @@ use kestrel_lexer::Token;
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
-use crate::block::{BlockItem, CodeBlockData, ElseBlockItem, GuardLetData, emit_code_block};
+use crate::block::{emit_code_block, BlockItem, CodeBlockData, ElseBlockItem, GuardLetData};
 use crate::common::skip_trivia;
 use crate::event::{EventSink, TreeBuilder};
-use crate::input::{ParserExtra, ParserInput, create_input, prepare_tokens, to_kestrel_span};
+use crate::input::{create_input, prepare_tokens, to_kestrel_span, ParserExtra, ParserInput};
 use crate::stmt::{StmtVariant, VariableDeclarationData};
-use crate::ty::{TyVariant, emit_ty_variant, ty_parser};
+use crate::ty::{emit_ty_variant, ty_parser, TyVariant};
 
 /// Represents an expression
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -148,8 +148,8 @@ impl Expression {
 
 /// Parser for type arguments with full type support: [T, (A, B), [Int], (X) -> Y]
 /// Returns (lbracket, types, rbracket)
-fn full_type_args_parser<'tokens>()
--> impl Parser<'tokens, ParserInput<'tokens>, TypeArgsData, ParserExtra<'tokens>> + Clone {
+fn full_type_args_parser<'tokens>(
+) -> impl Parser<'tokens, ParserInput<'tokens>, TypeArgsData, ParserExtra<'tokens>> + Clone {
     skip_trivia()
         .ignore_then(just(Token::LBracket).map_with(|_, e| to_kestrel_span(e.span())))
         .then(
@@ -347,6 +347,11 @@ pub enum ExprVariant {
         return_span: Span,
         value: Option<Box<ExprVariant>>,
     },
+    /// Throw expression: throw expr
+    Throw {
+        throw_span: Span,
+        value: Box<ExprVariant>,
+    },
     /// Try expression: try expr
     Try {
         try_span: Span,
@@ -469,16 +474,25 @@ enum ParenContent {
 /// Helper enum for parsing bracket expressions (arrays and dictionaries)
 #[derive(Debug, Clone)]
 enum BracketContent {
-    EmptyArray(Span),                                         // []
-    EmptyDictionary(Span),                                    // [:]
-    NonEmpty { first: ExprVariant, after: BracketContentAfterFirst },
+    EmptyArray(Span),      // []
+    EmptyDictionary(Span), // [:]
+    NonEmpty {
+        first: ExprVariant,
+        after: BracketContentAfterFirst,
+    },
 }
 
 /// Helper enum for what comes after the first expression in a bracket
 #[derive(Debug, Clone)]
 enum BracketContentAfterFirst {
-    ArraySingle { rbracket: Span },                           // [expr]
-    ArrayMore { first_comma: Span, more: Vec<ExprVariant>, rbracket: Span }, // [expr, expr, ...]
+    ArraySingle {
+        rbracket: Span,
+    }, // [expr]
+    ArrayMore {
+        first_comma: Span,
+        more: Vec<ExprVariant>,
+        rbracket: Span,
+    }, // [expr, expr, ...]
     Dictionary {
         colon: Span,
         value: ExprVariant,
@@ -553,6 +567,7 @@ fn is_inline_statement_like(expr: &ExprVariant) -> bool {
             | ExprVariant::For { .. }
             | ExprVariant::Match { .. }
             | ExprVariant::Return { .. }
+            | ExprVariant::Throw { .. }
             | ExprVariant::Try { .. }
     )
 }
@@ -605,8 +620,8 @@ fn attach_trailing_closures(expr: ExprVariant, trailing: Vec<CallArg>) -> ExprVa
 /// Parser for expressions
 ///
 /// Uses boxed() on key sub-parsers to reduce compile time.
-pub fn expr_parser<'tokens>()
--> impl Parser<'tokens, ParserInput<'tokens>, ExprVariant, ParserExtra<'tokens>> + Clone {
+pub fn expr_parser<'tokens>(
+) -> impl Parser<'tokens, ParserInput<'tokens>, ExprVariant, ParserExtra<'tokens>> + Clone {
     recursive(|expr| {
         // Literals - these are simple and don't need boxing
         let integer = skip_trivia()
@@ -676,11 +691,9 @@ pub fn expr_parser<'tokens>()
                 // Empty dictionary: [:]
                 skip_trivia()
                     .ignore_then(just(Token::Colon).map_with(|_, e| to_kestrel_span(e.span())))
-                    .then(
-                        skip_trivia().ignore_then(
-                            just(Token::RBracket).map_with(|_, e| to_kestrel_span(e.span())),
-                        ),
-                    )
+                    .then(skip_trivia().ignore_then(
+                        just(Token::RBracket).map_with(|_, e| to_kestrel_span(e.span())),
+                    ))
                     .map(|(_colon, rbracket)| BracketContent::EmptyDictionary(rbracket))
                     .or(
                         // Empty array: []
@@ -710,10 +723,10 @@ pub fn expr_parser<'tokens>()
                                             )
                                             .then(expr.clone())
                                             .then(
-                                                skip_trivia().ignore_then(
-                                                    just(Token::Colon)
-                                                        .map_with(|_, e| to_kestrel_span(e.span())),
-                                                ),
+                                                skip_trivia()
+                                                    .ignore_then(just(Token::Colon).map_with(
+                                                        |_, e| to_kestrel_span(e.span()),
+                                                    )),
                                             )
                                             .then(expr.clone())
                                             .map(|(((comma, key), colon), value)| {
@@ -738,7 +751,10 @@ pub fn expr_parser<'tokens>()
                                         ),
                                     )
                                     .map(
-                                        |((((colon, value), more_entries), _trailing), rbracket)| {
+                                        |(
+                                            (((colon, value), more_entries), _trailing),
+                                            rbracket,
+                                        )| {
                                             BracketContentAfterFirst::Dictionary {
                                                 colon,
                                                 value,
@@ -757,17 +773,18 @@ pub fn expr_parser<'tokens>()
                                             .then(
                                                 expr.clone()
                                                     .separated_by(skip_trivia().ignore_then(
-                                                        just(Token::Comma)
-                                                            .map_with(|_, e| to_kestrel_span(e.span())),
+                                                        just(Token::Comma).map_with(|_, e| {
+                                                            to_kestrel_span(e.span())
+                                                        }),
                                                     ))
                                                     .allow_trailing()
                                                     .collect::<Vec<_>>(),
                                             )
                                             .then(
-                                                skip_trivia().ignore_then(
-                                                    just(Token::RBracket)
-                                                        .map_with(|_, e| to_kestrel_span(e.span())),
-                                                ),
+                                                skip_trivia()
+                                                    .ignore_then(just(Token::RBracket).map_with(
+                                                        |_, e| to_kestrel_span(e.span()),
+                                                    )),
                                             )
                                             .map(|((first_comma, more), rbracket)| {
                                                 BracketContentAfterFirst::ArrayMore {
@@ -781,17 +798,20 @@ pub fn expr_parser<'tokens>()
                                                 skip_trivia()
                                                     .ignore_then(
                                                         just(Token::Comma)
-                                                            .map_with(|_, e| to_kestrel_span(e.span()))
+                                                            .map_with(|_, e| {
+                                                                to_kestrel_span(e.span())
+                                                            })
                                                             .or_not(),
                                                     )
-                                                    .then(
-                                                        skip_trivia().ignore_then(
-                                                            just(Token::RBracket)
-                                                                .map_with(|_, e| to_kestrel_span(e.span())),
-                                                        ),
-                                                    )
+                                                    .then(skip_trivia().ignore_then(
+                                                        just(Token::RBracket).map_with(|_, e| {
+                                                            to_kestrel_span(e.span())
+                                                        }),
+                                                    ))
                                                     .map(|(_trailing, rbracket)| {
-                                                        BracketContentAfterFirst::ArraySingle { rbracket }
+                                                        BracketContentAfterFirst::ArraySingle {
+                                                            rbracket,
+                                                        }
                                                     }),
                                             ),
                                     ),
@@ -802,7 +822,7 @@ pub fn expr_parser<'tokens>()
             .map(|(lbracket, content)| match content {
                 BracketContent::EmptyArray(rbracket) => {
                     ExprVariant::Array(lbracket, vec![], vec![], rbracket)
-                }
+                },
                 BracketContent::EmptyDictionary(rbracket) => ExprVariant::Dictionary {
                     lbracket,
                     entries: vec![],
@@ -812,7 +832,7 @@ pub fn expr_parser<'tokens>()
                 BracketContent::NonEmpty { first, after } => match after {
                     BracketContentAfterFirst::ArraySingle { rbracket } => {
                         ExprVariant::Array(lbracket, vec![first], vec![], rbracket)
-                    }
+                    },
                     BracketContentAfterFirst::ArrayMore {
                         first_comma: _,
                         more,
@@ -821,7 +841,7 @@ pub fn expr_parser<'tokens>()
                         let mut elements = vec![first];
                         elements.extend(more);
                         ExprVariant::Array(lbracket, elements, vec![], rbracket)
-                    }
+                    },
                     BracketContentAfterFirst::Dictionary {
                         colon,
                         value,
@@ -840,7 +860,7 @@ pub fn expr_parser<'tokens>()
                             commas,
                             rbracket,
                         }
-                    }
+                    },
                 },
             })
             .boxed();
@@ -1614,6 +1634,12 @@ pub fn expr_parser<'tokens>()
             .then(expr.clone().map(Box::new).or_not())
             .map(|(return_span, value)| ExprVariant::Return { return_span, value });
 
+        // Throw expression: throw expr
+        let throw_expr = skip_trivia()
+            .ignore_then(just(Token::Throw).map_with(|_, e| to_kestrel_span(e.span())))
+            .then(expr.clone().map(Box::new))
+            .map(|(throw_span, value)| ExprVariant::Throw { throw_span, value });
+
         // Try expression - note: we'll connect it to postfix later for high precedence
         let try_keyword =
             skip_trivia().ignore_then(just(Token::Try).map_with(|_, e| to_kestrel_span(e.span())));
@@ -1985,6 +2011,7 @@ pub fn expr_parser<'tokens>()
             .or(break_expr)
             .or(continue_expr)
             .or(return_expr)
+            .or(throw_expr)
             .or(match_expr)
             .or(closure_expr)
             .or(implicit_member_access)
@@ -2296,6 +2323,9 @@ pub fn emit_expr_variant(sink: &mut EventSink, variant: &ExprVariant) {
         },
         ExprVariant::Return { return_span, value } => {
             emit_return_expr(sink, return_span.clone(), value.as_deref());
+        },
+        ExprVariant::Throw { throw_span, value } => {
+            emit_throw_expr(sink, throw_span.clone(), value);
         },
         ExprVariant::Try { try_span, operand } => {
             emit_try_expr(sink, try_span.clone(), operand);
@@ -2894,6 +2924,15 @@ fn emit_return_expr(sink: &mut EventSink, return_span: Span, value: Option<&Expr
     if let Some(val) = value {
         emit_expr_variant(sink, val);
     }
+    sink.finish_node();
+    sink.finish_node();
+}
+
+fn emit_throw_expr(sink: &mut EventSink, throw_span: Span, value: &ExprVariant) {
+    sink.start_node(SyntaxKind::Expression);
+    sink.start_node(SyntaxKind::ExprThrow);
+    sink.add_token(SyntaxKind::Throw, throw_span);
+    emit_expr_variant(sink, value);
     sink.finish_node();
     sink.finish_node();
 }

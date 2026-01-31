@@ -484,6 +484,10 @@ fn apply_to_expression(expr: &Expression, solution: &Solution) -> Expression {
                 .map(|v| Box::new(apply_to_expression(v, solution))),
         },
 
+        ExprKind::Throw { value } => ExprKind::Throw {
+            value: Box::new(apply_to_expression(value, solution)),
+        },
+
         ExprKind::Closure {
             params,
             body,

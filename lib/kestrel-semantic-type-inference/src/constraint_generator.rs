@@ -830,6 +830,13 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
             }
         },
 
+        ExprKind::Throw { value } => {
+            // Throw desugars to return R.fromResidual(value)
+            // We just need to generate constraints for the value expression
+            // The type system will validate that the return type implements FromResidual
+            generate_expression_constraints(ctx, value);
+        },
+
         ExprKind::Closure {
             body,
             tail_expr,

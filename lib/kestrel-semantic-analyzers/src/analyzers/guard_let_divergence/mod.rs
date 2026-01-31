@@ -217,6 +217,7 @@ fn statement_diverges(stmt: &Statement) -> bool {
 fn expression_diverges(expr: &kestrel_semantic_tree::expr::Expression) -> bool {
     match &expr.kind {
         ExprKind::Return { .. } => true,
+        ExprKind::Throw { .. } => true,
         ExprKind::Break { .. } => true,
         ExprKind::Continue { .. } => true,
         ExprKind::If {

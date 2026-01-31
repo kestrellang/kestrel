@@ -179,6 +179,7 @@ fn validate_assignment_target(
         | ExprKind::Break { .. }
         | ExprKind::Continue { .. }
         | ExprKind::Return { .. }
+        | ExprKind::Throw { .. }
         | ExprKind::Closure { .. }
         | ExprKind::Match { .. }
         | ExprKind::Block { .. }
