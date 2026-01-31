@@ -631,13 +631,14 @@ See [docs/memory-model/implementation-plan.md](docs/memory-model/implementation-
 - [x] Improve collections
 - [x] Improve strings
 - [x] Improve options / results
+- [x] CString
 
 ### Core Features
 
 - [x] Range Patterns (`0..=9`, `0..<10`, `'a'..='z'`)
-- [ ] Array Patterns (`[a, b, ..rest]`)
+- [x] Array Patterns (`[a, b, ..rest]`)
 - [x] Irrefutable patterns in function parameters
-- [ ] Refactor Matchable for range patterns and array patterns
+- [x] Refactor Matchable for range patterns and array patterns
 - [x] Let/var static variable consistency
 
 ## Phase 15 Compiler Infrastructure

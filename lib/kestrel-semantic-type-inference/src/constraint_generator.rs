@@ -628,17 +628,16 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
                 expr.span.clone(),
             );
 
-            // For zero-argument methods on literals, speculatively equate receiver with result.
-            // This enables bidirectional type inference for Self-returning operators like
-            // negate(), bitwiseNot(), etc. When the expected result type is known (e.g., Int16),
-            // this constraint propagates that type back to the receiver (the literal),
-            // preventing default literal inference.
-            // IMPORTANT: Only apply this to actual literals, not to local references or other
-            // expressions that happen to have Infer type. Otherwise, desugared for loops
-            // would incorrectly equate iterator types with Optional types.
-            if arguments.is_empty() && matches!(receiver.kind, ExprKind::Literal(_)) {
-                ctx.equate(receiver.ty.id(), expr.ty.id(), expr.span.clone());
-            }
+            // NOTE: We previously had a speculative equate here for zero-argument methods on
+            // literals that would equate receiver with result. This enabled bidirectional type
+            // inference for Self-returning operators like negate(). However, this caused issues
+            // for methods that return a different type (like String.toCString() -> CString):
+            // the speculative equate would set the result type to String before the method
+            // could be resolved, then conflict with the actual return type CString.
+            //
+            // For now, we disable this optimization. Self-returning operator type inference
+            // may need a different approach (e.g., checking if the resolved method actually
+            // returns Self before applying the equate constraint).
         },
 
         ExprKind::DeferredStaticCall {

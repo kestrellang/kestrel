@@ -14,8 +14,9 @@ SDL_LIBS=$(sdl2-config --libs)
 # Compile the C helpers
 cc -c $SDL_CFLAGS "$SCRIPT_DIR/sdl_helpers.c" -o "$SCRIPT_DIR/sdl_helpers.o"
 
-# Build with Kestrel (single file)
+# Build with Kestrel
 "$PROJECT_ROOT/target/release/kestrel" build \
+    "$SCRIPT_DIR/sdl.ks" \
     "$SCRIPT_DIR/pong.ks" \
     -l ":$SCRIPT_DIR/sdl_helpers.o" \
     $SDL_LIBS \

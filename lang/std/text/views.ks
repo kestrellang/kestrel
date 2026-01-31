@@ -64,6 +64,9 @@ public struct BytesView: Iterable {
     /// Returns true if the view is empty.
     public func isEmpty() -> Bool { self.length == Int64(intLiteral: 0) }
 
+    /// Returns the raw pointer to the bytes.
+    public func asRaw() -> lang.ptr[lang.i8] { self.ptr }
+
     /// Returns the byte at the given index, or None if out of bounds.
     public func byteAt(index: Int64) -> Optional[UInt8] {
         if index >= Int64(intLiteral: 0) and index < self.length {

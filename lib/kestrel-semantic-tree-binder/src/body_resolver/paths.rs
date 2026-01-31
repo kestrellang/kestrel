@@ -700,7 +700,27 @@ fn extract_path_element_name_with_span(
 fn find_nested_expression(node: &SyntaxNode) -> Option<SyntaxNode> {
     // We're looking inside an ExprPath node. Normally it contains only identifiers and dots.
     // But when member access is on a complex expression, the parser emits it inside the ExprPath.
-    // We need to find such nested expressions (calls, groupings, etc.).
+    // We need to find such nested expressions (calls, groupings, literals, etc.).
+
+    fn is_complex_expression(kind: SyntaxKind) -> bool {
+        matches!(
+            kind,
+            SyntaxKind::ExprCall
+                | SyntaxKind::ExprGrouping
+                | SyntaxKind::ExprBinary
+                // Include literal expressions to support method calls on literals
+                // like "hello".toCString() or 42.toString()
+                | SyntaxKind::ExprString
+                | SyntaxKind::ExprRawString
+                | SyntaxKind::ExprInteger
+                | SyntaxKind::ExprFloat
+                | SyntaxKind::ExprChar
+                | SyntaxKind::ExprBool
+                | SyntaxKind::ExprArray
+                | SyntaxKind::ExprDictionary
+                | SyntaxKind::ExprTuple
+        )
+    }
 
     for child in node.children() {
         // Look for Expression wrapper containing a non-path expression
@@ -708,19 +728,13 @@ fn find_nested_expression(node: &SyntaxNode) -> Option<SyntaxNode> {
             // Check if this Expression contains a complex (non-path) expression
             for inner in child.children() {
                 // Return if it's a complex expression type, not just another path
-                if matches!(
-                    inner.kind(),
-                    SyntaxKind::ExprCall | SyntaxKind::ExprGrouping | SyntaxKind::ExprBinary
-                ) {
+                if is_complex_expression(inner.kind()) {
                     return Some(child);
                 }
             }
         }
         // Also check for direct complex expression nodes
-        if matches!(
-            child.kind(),
-            SyntaxKind::ExprCall | SyntaxKind::ExprGrouping | SyntaxKind::ExprBinary
-        ) {
+        if is_complex_expression(child.kind()) {
             return Some(child);
         }
     }

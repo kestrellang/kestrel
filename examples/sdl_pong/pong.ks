@@ -1,265 +1,260 @@
 module SdlPong
 
-// --- SDL2 Bindings (Using Int64 for everything to ensure alignment) ---
+import Sdl.(Color, Rectangle, Milliseconds, Key, Event, Renderer, SDLApp)
 
-@extern(.C, mangleName: "SDL_Init")
-func sdlInit(flags: UInt32) -> Int32
+// --- Game Components ---
 
-@extern(.C, mangleName: "SDL_Quit")
-func sdlQuit()
+struct Vector2 {
+    var x: Float64
+    var y: Float64
 
-@extern(.C, mangleName: "Kestrel_CreateWindow")
-func sdlCreateWindow(title: lang.ptr[lang.i8], w: Int64, h: Int64) -> lang.ptr[lang.i8]
-
-@extern(.C, mangleName: "SDL_DestroyWindow")
-func sdlDestroyWindow(window: lang.ptr[lang.i8])
-
-@extern(.C, mangleName: "Kestrel_CreateRenderer")
-func sdlCreateRenderer(window: lang.ptr[lang.i8]) -> lang.ptr[lang.i8]
-
-@extern(.C, mangleName: "SDL_DestroyRenderer")
-func sdlDestroyRenderer(renderer: lang.ptr[lang.i8])
-
-@extern(.C, mangleName: "Kestrel_SetRenderDrawColor")
-func sdlSetRenderDrawColor(renderer: lang.ptr[lang.i8], r: Int64, g: Int64, b: Int64, a: Int64) -> Int64
-
-@extern(.C, mangleName: "SDL_RenderClear")
-func sdlRenderClear(renderer: lang.ptr[lang.i8]) -> Int32
-
-@extern(.C, mangleName: "SDL_RenderPresent")
-func sdlRenderPresent(renderer: lang.ptr[lang.i8])
-
-@extern(.C, mangleName: "Kestrel_FillRect")
-func sdlFillRect(renderer: lang.ptr[lang.i8], x: Int64, y: Int64, w: Int64, h: Int64)
-
-@extern(.C, mangleName: "SDL_PollEvent")
-func sdlPollEvent(event: lang.ptr[lang.i8]) -> Int32
-
-@extern(.C, mangleName: "Kestrel_GetEventType")
-func sdlGetEventType(event: lang.ptr[lang.i8]) -> UInt32
-
-@extern(.C, mangleName: "Kestrel_GetKeyScancode")
-func sdlGetKeyScancode(event: lang.ptr[lang.i8]) -> Int32
-
-@extern(.C, mangleName: "SDL_Delay")
-func sdlDelay(ms: UInt32)
-
-@extern(.C, mangleName: "Kestrel_IsNull")
-func isNull(ptr: lang.ptr[lang.i8]) -> Int32
-
-@extern(.C, mangleName: "Kestrel_DrawText")
-func sdlDrawText(renderer: lang.ptr[lang.i8], text: lang.ptr[lang.i8], x: Int64, y: Int64, scale: Int64)
-
-// --- Game ---
-
-struct SDLApp : not Copyable {
-    var window: lang.ptr[lang.i8]
-    var renderer: lang.ptr[lang.i8]
-
-    static func create() -> SDLApp {
-        if sdlInit(UInt32(intLiteral: 0x20)) < Int32(intLiteral: 0) {
-            lang.panic("SDL Init failed");
-        }
-
-        var title = Array[Int8]();
-        title.append(Int8(intLiteral: 80)); // P
-        title.append(Int8(intLiteral: 111)); // o
-        title.append(Int8(intLiteral: 110)); // n
-        title.append(Int8(intLiteral: 103)); // g
-        title.append(Int8(intLiteral: 0));
-
-        let win = sdlCreateWindow(lang.cast_ptr[lang.i8](title.pointer().asRaw().raw), 800, 600);
-        if isNull(win) != Int32(intLiteral: 0) {
-            lang.panic("Window failed");
-        }
-
-        let ren = sdlCreateRenderer(win);
-        if isNull(ren) != Int32(intLiteral: 0) {
-            lang.panic("Renderer failed");
-        }
-
-        SDLApp(window: win, renderer: ren)
-    }
-
-    deinit {
-        sdlDestroyRenderer(self.renderer);
-        sdlDestroyWindow(self.window);
-        sdlQuit();
+    static func zero() -> Vector2 {
+        Vector2(x: 0.0, y: 0.0)
     }
 }
 
-struct State {
-    var ballX: Float64
-    var ballY: Float64
-    var ballVX: Float64
-    var ballVY: Float64
-    var p1Y: Float64
-    var p2Y: Float64
-    var p1Up: Bool
-    var p1Down: Bool
-    var score1: Int64
-    var score2: Int64
-    var waiting: Bool
+struct Ball {
+    var position: Vector2
+    var velocity: Vector2
+    var size: Int64
+
+    static func create() -> Ball {
+        Ball(
+            position: Vector2(x: 400.0, y: 300.0),
+            velocity: Vector2(x: 12.0, y: 8.0),
+            size: 10
+        )
+    }
+
+    mutating func update() {
+        self.position.x = self.position.x + self.velocity.x;
+        self.position.y = self.position.y + self.velocity.y;
+
+        // Bounce off top/bottom walls
+        if self.position.y < 0.0 {
+            self.position.y = 0.0;
+            self.velocity.y = 0.0 - self.velocity.y;
+        } else if self.position.y > 590.0 {
+            self.position.y = 590.0;
+            self.velocity.y = 0.0 - self.velocity.y;
+        }
+    }
+
+    mutating func reset(direction direction: Float64) {
+        self.position = Vector2(x: 400.0, y: 300.0);
+        self.velocity = Vector2(x: 12.0 * direction, y: 8.0);
+    }
+
+    func render(renderer: Renderer) {
+        let rect = Rectangle(
+            x: self.position.x.toInt64().unwrap(),
+            y: self.position.y.toInt64().unwrap(),
+            width: self.size,
+            height: self.size
+        );
+        renderer.fill(rect, Color.yellow());
+    }
+}
+
+struct Paddle {
+    var x: Int64
+    var y: Float64
+    var width: Int64
+    var height: Int64
+    var speed: Float64
+    var color: Color
+
+    static func left() -> Paddle {
+        Paddle(x: 10, y: 250.0, width: 20, height: 100, speed: 10.0, color: Color.cyan())
+    }
+
+    static func right() -> Paddle {
+        Paddle(x: 770, y: 250.0, width: 20, height: 100, speed: 7.2, color: Color.magenta())
+    }
+
+    mutating func moveUp() {
+        self.y = self.y - self.speed;
+        self.clamp();
+    }
+
+    mutating func moveDown() {
+        self.y = self.y + self.speed;
+        self.clamp();
+    }
+
+    mutating func clamp() {
+        if self.y < 0.0 {
+            self.y = 0.0;
+        } else if self.y > 500.0 {
+            self.y = 500.0;
+        }
+    }
+
+    mutating func trackBall(ball: Ball) {
+        let paddleCenter = self.y + 50.0;
+        if ball.position.y > paddleCenter {
+            self.moveDown();
+        } else {
+            self.moveUp();
+        }
+    }
+
+    func containsY(y: Float64) -> Bool {
+        y >= self.y and y <= self.y + Float64(intLiteral: self.height.raw)
+    }
+
+    func render(renderer: Renderer) {
+        let rect = Rectangle(x: self.x, y: self.y.toInt64().unwrap(), width: self.width, height: self.height);
+        renderer.fill(rect, self.color);
+    }
+}
+
+struct Score {
+    var player1: Int64
+    var player2: Int64
 
     init() {
-        self.ballX = 400.0;
-        self.ballY = 300.0;
-        self.ballVX = 12.0;
-        self.ballVY = 8.0;
-        self.p1Y = 250.0;
-        self.p2Y = 250.0;
-        self.p1Up = false;
-        self.p1Down = false;
-        self.score1 = 0;
-        self.score2 = 0;
-        self.waiting = true;
+        self.player1 = 0;
+        self.player2 = 0;
     }
 
-    mutating func resetBall(winner winner: Int64) {
-        self.ballX = 400.0;
-        self.ballY = 300.0;
-        if winner == 1 {
-            self.ballVX = 0.0 - 12.0;
-        } else {
-            self.ballVX = 12.0;
-        }
-        self.ballVY = 8.0;
-        self.waiting = true;
+    mutating func player1Scores() {
+        self.player1 = self.player1 + 1;
+    }
+
+    mutating func player2Scores() {
+        self.player2 = self.player2 + 1;
+    }
+
+    func render(renderer: Renderer) {
+        let text = self.format();
+        renderer.drawText(text, 350, 20, 4);
+    }
+
+    func format() -> String {
+        var result = self.player1.format() + " - " + self.player2.format();
+        result
     }
 }
 
+struct Message : Cloneable {
+    var text: String
+    var x: Int64
+    var y: Int64
+    var scale: Int64
+
+    func render(renderer: Renderer) {
+        renderer.drawText(self.text, self.x, self.y, self.scale);
+    }
+
+    func clone() -> Message {
+        Message(text: self.text.clone(), x: self.x, y: self.y, scale: self.scale)
+    }
+}
+
+struct InputState {
+    var up: Bool
+    var down: Bool
+
+    init() {
+        self.up = false;
+        self.down = false;
+    }
+}
+
+// --- Main Game ---
+
 func main() -> Int32 {
-    var app = SDLApp.create();
-    var s = State();
+    var app = SDLApp();
+    var ball = Ball.create();
+    var paddle1 = Paddle.left();
+    var paddle2 = Paddle.right();
+    var score = Score();
+    var input = InputState();
+    var waiting = true;
     var running = true;
 
-    var eventBuf = Array[Int8]();
-    var j: Int64 = 0;
-    while j < 64 {
-        eventBuf.append(Int8(intLiteral: 0));
-        j = j + 1
-    }
-    let eventPtr = lang.cast_ptr[lang.i8](eventBuf.pointer().asRaw().raw);
-
-    let zero = Int32(intLiteral: 0);
-    let zero64 = Int64(intLiteral: 0);
-    let white64 = Int64(intLiteral: 255);
-    
-    let QUIT = UInt32(intLiteral: 0x100);
-    let KEYDOWN = UInt32(intLiteral: 0x300);
-    let KEYUP = UInt32(intLiteral: 0x301);
-
-    var startMsg = Array[Int8]();
-    let msg = "PRESS [SPACE] TO START\0";
-    var mi: Int64 = 0;
-    // msg.byteCount() or similar? String doesn't have many public methods.
-    // Let's just hardcode the append for the message.
-    startMsg.append(Int8(intLiteral: 80)); // P
-    startMsg.append(Int8(intLiteral: 82)); // R
-    startMsg.append(Int8(intLiteral: 69)); // E
-    startMsg.append(Int8(intLiteral: 83)); // S
-    startMsg.append(Int8(intLiteral: 83)); // S
-    startMsg.append(Int8(intLiteral: 32)); //  
-    startMsg.append(Int8(intLiteral: 91)); // [
-    startMsg.append(Int8(intLiteral: 83)); // S
-    startMsg.append(Int8(intLiteral: 80)); // P
-    startMsg.append(Int8(intLiteral: 65)); // A
-    startMsg.append(Int8(intLiteral: 67)); // C
-    startMsg.append(Int8(intLiteral: 69)); // E
-    startMsg.append(Int8(intLiteral: 93)); // ]
-    startMsg.append(Int8(intLiteral: 32)); //  
-    startMsg.append(Int8(intLiteral: 84)); // T
-    startMsg.append(Int8(intLiteral: 79)); // O
-    startMsg.append(Int8(intLiteral: 32)); //  
-    startMsg.append(Int8(intLiteral: 83)); // S
-    startMsg.append(Int8(intLiteral: 84)); // T
-    startMsg.append(Int8(intLiteral: 65)); // A
-    startMsg.append(Int8(intLiteral: 82)); // R
-    startMsg.append(Int8(intLiteral: 84)); // T
-    startMsg.append(Int8(intLiteral: 0));
-    let startMsgPtr = lang.cast_ptr[lang.i8](startMsg.pointer().asRaw().raw);
+    let startMessage = Message(
+        text: "PRESS [SPACE] TO START",
+        x: 180,
+        y: 200,
+        scale: 3
+    );
 
     while running {
-        while sdlPollEvent(eventPtr) != zero {
-            let eventType = sdlGetEventType(eventPtr);
-            if eventType == QUIT {
-                running = false;
-            } else if eventType == KEYDOWN {
-                let code = sdlGetKeyScancode(eventPtr);
-                if code == Int32(intLiteral: 26) or code == Int32(intLiteral: 82) { s.p1Up = true; }
-                else if code == Int32(intLiteral: 22) or code == Int32(intLiteral: 81) { s.p1Down = true; }
-                else if code == Int32(intLiteral: 44) { s.waiting = false; }
-                else if code == Int32(intLiteral: 41) { running = false; }
-            } else if eventType == KEYUP {
-                let code = sdlGetKeyScancode(eventPtr);
-                if code == Int32(intLiteral: 26) or code == Int32(intLiteral: 82) { s.p1Up = false; }
-                else if code == Int32(intLiteral: 22) or code == Int32(intLiteral: 81) { s.p1Down = false; }
+        // Handle events
+        while let .Some(event) = app.pollEvent() {
+            match event {
+                .Quit => { running = false },
+                .KeyDown(key) => {
+                    match key {
+                        .W or .UpArrow => { input.up = true },
+                        .S or .DownArrow => { input.down = true },
+                        .Space => { waiting = false },
+                        .Escape => { running = false },
+                        _ => {}
+                    }
+                },
+                .KeyUp(key) => {
+                    match key {
+                        .W or .UpArrow => { input.up = false },
+                        .S or .DownArrow => { input.down = false },
+                        _ => {}
+                    }
+                }
             }
         }
 
-        if s.p1Up { s.p1Y = s.p1Y - 10.0; }
-        if s.p1Down { s.p1Y = s.p1Y + 10.0; }
-        if s.p1Y < 0.0 { s.p1Y = 0.0; } else if s.p1Y > 500.0 { s.p1Y = 500.0; }
+        // Update paddle 1 based on input
+        if input.up { paddle1.moveUp(); }
+        if input.down { paddle1.moveDown(); }
 
-        if s.waiting == false {
-            // Paddle 2: Simple AI (Fast speed and reacts much earlier)
-            if s.ballX > 200.0 {
-                if s.ballY > s.p2Y + 50.0 { s.p2Y = s.p2Y + 7.2; } else { s.p2Y = s.p2Y - 7.2; }
-            }
-            if s.p2Y < 0.0 { s.p2Y = 0.0; } else if s.p2Y > 500.0 { s.p2Y = 500.0; }
-
-            s.ballX = s.ballX + s.ballVX;
-            s.ballY = s.ballY + s.ballVY;
-
-            if s.ballY < 0.0 { s.ballY = 0.0; s.ballVY = 0.0 - s.ballVY; }
-            else if s.ballY > 590.0 { s.ballY = 590.0; s.ballVY = 0.0 - s.ballVY; }
-            
-            if s.ballX < 0.0 {
-                s.score2 = s.score2 + 1;
-                s.resetBall(winner: 2);
-            }
-            else if s.ballX > 800.0 {
-                s.score1 = s.score1 + 1;
-                s.resetBall(winner: 1);
+        if not waiting {
+            // AI for paddle 2
+            if ball.position.x > 200.0 {
+                paddle2.trackBall(ball);
             }
 
-            if s.ballX < 30.0 and s.ballY >= s.p1Y and s.ballY <= s.p1Y + 100.0 { s.ballVX = 12.0; }
-            if s.ballX > 760.0 and s.ballY >= s.p2Y and s.ballY <= s.p2Y + 100.0 { s.ballVX = 0.0 - 12.0; }
+            // Update ball
+            ball.update();
+
+            // Check scoring
+            if ball.position.x < 0.0 {
+                score.player2Scores();
+                ball.reset(direction: 1.0);
+                waiting = true;
+            } else if ball.position.x > 800.0 {
+                score.player1Scores();
+                ball.reset(direction: 0.0 - 1.0);
+                waiting = true;
+            }
+
+            // Paddle collisions
+            if ball.position.x < 30.0 and paddle1.containsY(ball.position.y) {
+                ball.velocity.x = 12.0;
+            }
+            if ball.position.x > 760.0 and paddle2.containsY(ball.position.y) {
+                ball.velocity.x = 0.0 - 12.0;
+            }
         }
 
-        let _ = sdlSetRenderDrawColor(app.renderer, zero64, zero64, zero64, white64);
-        let _ = sdlRenderClear(app.renderer);
-        let _ = sdlSetRenderDrawColor(app.renderer, white64, white64, white64, white64);
+        // Render
+        app.render { (renderer) in
+            renderer.clear(Color.black());
 
-        sdlFillRect(app.renderer, 10, s.p1Y.toInt64().unwrap(), 20, 100);
-        sdlFillRect(app.renderer, 770, s.p2Y.toInt64().unwrap(), 20, 100);
-        
-        // Draw score text
-        var scoreStr = Array[Int8]();
-        // Format: "00 - 00"
-        let s1 = s.score1;
-        let s2 = s.score2;
-        let ten = Int64(intLiteral: 10);
-        let fortyEight = Int64(intLiteral: 48);
-        scoreStr.append(Int8(intLiteral: ((s1 / ten % ten) + fortyEight).raw));
-        scoreStr.append(Int8(intLiteral: ((s1 % ten) + fortyEight).raw));
-        scoreStr.append(Int8(intLiteral: 32)); //  
-        scoreStr.append(Int8(intLiteral: 45)); // -
-        scoreStr.append(Int8(intLiteral: 32)); //  
-        scoreStr.append(Int8(intLiteral: ((s2 / ten % ten) + fortyEight).raw));
-        scoreStr.append(Int8(intLiteral: ((s2 % ten) + fortyEight).raw));
-        scoreStr.append(Int8(intLiteral: 0));
-        sdlDrawText(app.renderer, lang.cast_ptr[lang.i8](scoreStr.pointer().asRaw().raw), 350, 20, 4);
+            paddle1.render(renderer);
+            paddle2.render(renderer);
+            score.render(renderer);
 
-        if s.waiting {
-            sdlDrawText(app.renderer, startMsgPtr, 180, 200, 3);
-        }
+            if waiting {
+                startMessage.render(renderer);
+            }
 
-        sdlFillRect(app.renderer, s.ballX.toInt64().unwrap(), s.ballY.toInt64().unwrap(), 10, 10);
+            ball.render(renderer);
+        };
 
-        sdlRenderPresent(app.renderer);
-        sdlDelay(UInt32(intLiteral: 16));
+        app.delay(Milliseconds(16));
     }
 
-    Int32(intLiteral: 0)
+    0
 }

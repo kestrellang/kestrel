@@ -503,9 +503,9 @@ impl TypeOracle for SemanticModel {
             target_id: type_symbol_id,
         });
 
-        // Filter to only applicable extensions based on type arguments
+        // Filter to only applicable extensions based on type arguments and where clauses
         let applicable_extensions =
-            filter_applicable_extensions_for_conformance(&extensions, &actual_subs);
+            filter_applicable_extensions_for_conformance(Some(self), &extensions, &actual_subs);
 
         for extension in &applicable_extensions {
             let ext_conformances = self.query(ConformancesForSymbol {
@@ -587,6 +587,7 @@ impl TypeOracle for SemanticModel {
                 });
 
                 let applicable_extensions = filter_applicable_extensions_for_conformance(
+                    Some(self),
                     &extensions,
                     &Some(substitutions.clone()),
                 );
@@ -1371,7 +1372,7 @@ fn collect_protocol_conformance_ids_for_type(model: &SemanticModel, ty: &Ty) -> 
         target_id: type_symbol_id,
     });
     let applicable_extensions =
-        filter_applicable_extensions_for_conformance(&extensions, &actual_subs);
+        filter_applicable_extensions_for_conformance(Some(model), &extensions, &actual_subs);
 
     for extension in &applicable_extensions {
         let ext_conformances = model.query(ConformancesForSymbol {
@@ -1402,7 +1403,11 @@ fn get_type_substitutions(ty: &Ty) -> Option<Substitutions> {
 ///
 /// This is similar to `filter_applicable_extensions` in members.rs but simplified
 /// for the conformance checking use case.
+///
+/// When `model` is provided, also checks that where clause constraints are satisfied.
+/// This is necessary for conditional conformances like `extend Pointer: FFISafe where T: FFISafe`.
 fn filter_applicable_extensions_for_conformance<'a>(
+    model: Option<&SemanticModel>,
     extensions: &'a [Arc<ExtensionSymbol>],
     actual_subs: &Option<Substitutions>,
 ) -> Vec<&'a Arc<ExtensionSymbol>> {
@@ -1438,6 +1443,12 @@ fn filter_applicable_extensions_for_conformance<'a>(
 
             // If extension has no type arguments, it applies to all instances
             let Some(extension_subs) = extension_subs else {
+                // Still need to check where clause even without type arguments
+                if let Some(model) = model {
+                    if let Some(actual_subs) = actual_subs {
+                        return check_where_clause_satisfied(model, target_behavior.where_clause(), actual_subs);
+                    }
+                }
                 return true;
             };
 
@@ -1448,9 +1459,63 @@ fn filter_applicable_extensions_for_conformance<'a>(
             };
 
             // Check if extension's type arguments are applicable
-            is_extension_applicable_for_conformance(extension_subs, actual_subs)
+            if !is_extension_applicable_for_conformance(extension_subs, actual_subs) {
+                return false;
+            }
+
+            // Check where clause constraints (for conditional conformances)
+            if let Some(model) = model {
+                if !check_where_clause_satisfied(model, target_behavior.where_clause(), actual_subs) {
+                    return false;
+                }
+            }
+
+            true
         })
         .collect()
+}
+
+/// Check if a where clause is satisfied given the actual type substitutions.
+///
+/// For each `TypeBound` constraint like `T: FFISafe`, looks up the actual type
+/// for T and checks if it conforms to FFISafe.
+fn check_where_clause_satisfied(
+    model: &SemanticModel,
+    where_clause: &WhereClause,
+    actual_subs: &Substitutions,
+) -> bool {
+    use kestrel_semantic_tree::ty::Constraint;
+
+    for constraint in where_clause.constraints() {
+        match constraint {
+            Constraint::TypeBound {
+                param: Some(param_id),
+                bounds,
+                ..
+            } => {
+                // Get the actual type for this parameter
+                let Some(actual_ty) = actual_subs.get(*param_id) else {
+                    // No substitution for this param - might be a constraint on
+                    // a different parameter or inherited constraint. Skip it.
+                    continue;
+                };
+
+                // Check each bound
+                for bound in bounds {
+                    if let TyKind::Protocol { symbol, .. } = bound.kind() {
+                        if !model.conforms_to(actual_ty, symbol.metadata().id()) {
+                            return false;
+                        }
+                    }
+                }
+            }
+            // Other constraint types (NegativeBound, InheritedAssociatedTypeBound,
+            // TypeEquality, SelfBound) are not relevant for basic conformance filtering
+            _ => {}
+        }
+    }
+
+    true
 }
 
 /// Check if an extension's type arguments are applicable to an actual type's substitutions.

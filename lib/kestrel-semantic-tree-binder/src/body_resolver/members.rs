@@ -183,6 +183,7 @@ pub fn resolve_member_access(
     let extensions = ctx.model.query(ExtensionsFor {
         target_id: container_id,
     });
+
     // Resolve Self to concrete type for extension filtering (Self doesn't have substitutions)
     let resolved_base_ty_for_extensions = resolve_self_type_to_concrete(base_ty, ctx);
     // Filter to only applicable extensions (now with cycle detection in substitutions)

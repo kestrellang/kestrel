@@ -121,6 +121,11 @@ public struct Pointer[T]: Equatable, Hash {
         RawPointer(raw: lang.cast_ptr[lang.i8](self._raw))
     }
 
+    /// Casts this pointer to a pointer of a different type.
+    public func cast[U]() -> Pointer[U] {
+        Pointer(raw: lang.cast_ptr[U](lang.cast_ptr[lang.i8](self._raw)))
+    }
+
     /// Compares two pointers for equality by address.
     public func equals(other: Pointer[T]) -> Bool {
         self.address == other.address
