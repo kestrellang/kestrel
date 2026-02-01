@@ -497,6 +497,7 @@ enum BracketContentAfterFirst {
         rbracket: Span,
     }, // [expr]
     ArrayMore {
+        #[allow(dead_code)]
         first_comma: Span,
         more: Vec<ExprVariant>,
         rbracket: Span,
@@ -3106,14 +3107,12 @@ fn string_contains_interpolation(source: &str, span: &Span) -> bool {
     // Look for `\(` that is not escaped (i.e., not preceded by `\\`)
     let mut chars = text.chars().peekable();
     while let Some(c) = chars.next() {
-        if c == '\\' {
-            if let Some(&next) = chars.peek() {
-                if next == '(' {
-                    return true;
-                }
-                // Skip the escaped character
-                chars.next();
+        if c == '\\' && let Some(&next) = chars.peek() {
+            if next == '(' {
+                return true;
             }
+            // Skip the escaped character
+            chars.next();
         }
     }
     false

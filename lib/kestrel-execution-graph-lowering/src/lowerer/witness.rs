@@ -556,21 +556,21 @@ fn bind_property_accessors(
         }
 
         // Bind getter if present
-        if let Some(getter_id) = field.getter() {
-            if let Some(getter_sym) = ctx.model.query(SymbolFor { id: getter_id }) {
-                let getter_method_name = format!("get:{}", field_name);
-                let impl_name = qualified_name_for_symbol(ctx, &getter_sym);
-                ctx.mir.witnesses[witness_id].bind_method(getter_method_name, impl_name, vec![]);
-            }
+        if let Some(getter_id) = field.getter()
+            && let Some(getter_sym) = ctx.model.query(SymbolFor { id: getter_id })
+        {
+            let getter_method_name = format!("get:{}", field_name);
+            let impl_name = qualified_name_for_symbol(ctx, &getter_sym);
+            ctx.mir.witnesses[witness_id].bind_method(getter_method_name, impl_name, vec![]);
         }
 
         // Bind setter if present
-        if let Some(setter_id) = field.setter() {
-            if let Some(setter_sym) = ctx.model.query(SymbolFor { id: setter_id }) {
-                let setter_method_name = format!("set:{}", field_name);
-                let impl_name = qualified_name_for_symbol(ctx, &setter_sym);
-                ctx.mir.witnesses[witness_id].bind_method(setter_method_name, impl_name, vec![]);
-            }
+        if let Some(setter_id) = field.setter()
+            && let Some(setter_sym) = ctx.model.query(SymbolFor { id: setter_id })
+        {
+            let setter_method_name = format!("set:{}", field_name);
+            let impl_name = qualified_name_for_symbol(ctx, &setter_sym);
+            ctx.mir.witnesses[witness_id].bind_method(setter_method_name, impl_name, vec![]);
         }
     }
 }

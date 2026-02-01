@@ -1170,21 +1170,22 @@ impl Ty {
     ///
     /// Returns the T in Array[T] by looking up the type parameter substitution.
     pub fn as_array_struct_element<'a>(&'a self, builtins: &BuiltinRegistry) -> Option<&'a Ty> {
-        if let TyKind::Struct {
+        let TyKind::Struct {
             symbol,
             substitutions,
         } = &self.kind
-        {
-            if builtins.struct_feature(symbol.metadata().id()) == Some(LanguageFeature::ArrayStruct)
-            {
-                // Array[T] has one type parameter T
-                let type_params = symbol.type_parameters();
-                if let Some(t_param) = type_params.first() {
-                    return substitutions.get(t_param.metadata().id());
-                }
-            }
+        else {
+            return None;
+        };
+
+        if builtins.struct_feature(symbol.metadata().id()) != Some(LanguageFeature::ArrayStruct) {
+            return None;
         }
-        None
+
+        // Array[T] has one type parameter T
+        let type_params = symbol.type_parameters();
+        let t_param = type_params.first()?;
+        substitutions.get(t_param.metadata().id())
     }
 
     /// Get pointer element type if this is a pointer type

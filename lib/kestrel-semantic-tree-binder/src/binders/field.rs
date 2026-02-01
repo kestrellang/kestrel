@@ -224,10 +224,10 @@ fn resolve_static_field_initializer(
     // This ensures literals like `1` get properly typed as `Int64` instead of staying as raw i64.
     if let Some(typed_behavior) = symbol.metadata().get_behavior::<TypedBehavior>() {
         let field_type = typed_behavior.ty();
-        if let Some(ref mut yield_expr) = code_block.yield_expr {
-            if yield_expr.ty.is_infer() {
-                yield_expr.ty = field_type.clone();
-            }
+        if let Some(ref mut yield_expr) = code_block.yield_expr
+            && yield_expr.ty.is_infer()
+        {
+            yield_expr.ty = field_type.clone();
         }
     }
 

@@ -928,14 +928,12 @@ impl<'a> CollectionContext<'a> {
 
         // Try to find an enum with this name
         for (_, enum_def) in self.mir.enums.iter() {
-            if self.mir.name(enum_def.name) == &parent {
-                if enum_def.type_params.is_empty() {
-                    let mir_ty = MirTy::Named {
-                        name: enum_def.name,
-                        type_args: vec![],
-                    };
-                    return self.mir.lookup_type(&mir_ty);
-                }
+            if self.mir.name(enum_def.name) == &parent && enum_def.type_params.is_empty() {
+                let mir_ty = MirTy::Named {
+                    name: enum_def.name,
+                    type_args: vec![],
+                };
+                return self.mir.lookup_type(&mir_ty);
             }
         }
 

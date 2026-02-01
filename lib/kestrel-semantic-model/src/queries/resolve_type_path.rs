@@ -46,10 +46,10 @@ impl Query for ResolveTypePath {
         // For "Self" paths, check if it resolves to a type parameter first.
         // This handles protocol extensions where Self is a synthetic type parameter
         // with the target protocol as a bound, allowing Self.Item to work.
-        if self.path[0] == "Self" {
-            if let Some(result) = try_resolve_self_as_type_param(model, &self.path, self.context) {
-                return result;
-            }
+        if self.path[0] == "Self"
+            && let Some(result) = try_resolve_self_as_type_param(model, &self.path, self.context)
+        {
+            return result;
         }
 
         // Handle built-in types that don't exist as real symbols.

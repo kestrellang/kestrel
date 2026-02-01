@@ -891,10 +891,10 @@ fn add_conforms_to_behavior(
     // Find protocols that define this associated type and add ConformsToBehavior for each
     for protocol_symbol in all_protocols {
         // For qualified bindings, only add for the specified protocol
-        if let Some(qualified_name) = qualified_protocol_name {
-            if protocol_symbol.metadata().name().value != qualified_name {
-                continue;
-            }
+        if let Some(qualified_name) = qualified_protocol_name
+            && protocol_symbol.metadata().name().value != qualified_name
+        {
+            continue;
         }
 
         let protocol_dyn = protocol_symbol.clone() as Arc<dyn Symbol<KestrelLanguage>>;

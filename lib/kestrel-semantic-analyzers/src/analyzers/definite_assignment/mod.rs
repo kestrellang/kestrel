@@ -65,10 +65,10 @@ impl Analyzer for DefiniteAssignmentAnalyzer {
 
         if !param_patterns.is_empty() {
             // Mark 'self' as initialized for instance methods
-            if let Some(callable) = symbol.metadata().get_behavior::<CallableBehavior>() {
-                if callable.is_instance_method() {
-                    assigned.insert(LocalId::new(0));
-                }
+            if let Some(callable) = symbol.metadata().get_behavior::<CallableBehavior>()
+                && callable.is_instance_method()
+            {
+                assigned.insert(LocalId::new(0));
             }
             // Mark all locals from parameter patterns as initialized
             for pattern in &param_patterns {

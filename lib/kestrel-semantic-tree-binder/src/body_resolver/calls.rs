@@ -2426,13 +2426,13 @@ pub(crate) fn classify_mutability(
                 }
 
                 // Not mutable - check if it's an immutable field (let)
-                if let Some(field) = symbol.as_ref().downcast_ref::<FieldSymbol>() {
-                    if !field.is_mutable() {
-                        return MutabilityClassification::ImmutableField {
-                            field_name: symbol.metadata().name().value.clone(),
-                            field_span: Some(symbol.metadata().span().clone()),
-                        };
-                    }
+                if let Some(field) = symbol.as_ref().downcast_ref::<FieldSymbol>()
+                    && !field.is_mutable()
+                {
+                    return MutabilityClassification::ImmutableField {
+                        field_name: symbol.metadata().name().value.clone(),
+                        field_span: Some(symbol.metadata().span().clone()),
+                    };
                 }
             }
 

@@ -181,29 +181,29 @@ fn collect_static_fields_with_initializers(
     let kind = symbol.metadata().kind();
 
     // Check if this is a static field with an initializer
-    if kind == KestrelSymbolKind::Field {
-        if let Some(field) = symbol.as_ref().downcast_ref::<FieldSymbol>() {
-            // Module-level fields are implicitly static even without the 'static' keyword
-            let is_module_level = symbol
+    if kind == KestrelSymbolKind::Field
+        && let Some(field) = symbol.as_ref().downcast_ref::<FieldSymbol>()
+    {
+        // Module-level fields are implicitly static even without the 'static' keyword
+        let is_module_level = symbol
+            .metadata()
+            .parent()
+            .map(|p| {
+                let pk = p.metadata().kind();
+                pk == KestrelSymbolKind::Module || pk == KestrelSymbolKind::SourceFile
+            })
+            .unwrap_or(false);
+
+        let is_static_field = field.is_static() || is_module_level;
+
+        if is_static_field
+            && !field.is_computed()
+            && symbol
                 .metadata()
-                .parent()
-                .map(|p| {
-                    let pk = p.metadata().kind();
-                    pk == KestrelSymbolKind::Module || pk == KestrelSymbolKind::SourceFile
-                })
-                .unwrap_or(false);
-
-            let is_static_field = field.is_static() || is_module_level;
-
-            if is_static_field
-                && !field.is_computed()
-                && symbol
-                    .metadata()
-                    .get_behavior::<ExecutableBehavior>()
-                    .is_some()
-            {
-                result.push(symbol.clone());
-            }
+                .get_behavior::<ExecutableBehavior>()
+                .is_some()
+        {
+            result.push(symbol.clone());
         }
     }
 

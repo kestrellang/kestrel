@@ -608,16 +608,16 @@ pub(crate) fn resolve_body_and_attach_executable_with_defaults(
     // TODO: Remove this restriction once heap allocation for closure environments is implemented.
     if let Some(ref tail) = code_block.yield_expr {
         use kestrel_semantic_tree::expr::ExprKind;
-        if let ExprKind::Closure { captures, .. } = &tail.kind {
-            if !captures.is_empty() {
-                let captured_names: Vec<String> = captures.iter().map(|c| c.name.clone()).collect();
-                let error = CapturingClosureEscapeError {
-                    closure_span: tail.span.clone(),
-                    return_span: tail.span.clone(), // Use closure span as return span for implicit returns
-                    captured_names,
-                };
-                ctx.diagnostics.add_diagnostic(error.into_diagnostic());
-            }
+        if let ExprKind::Closure { captures, .. } = &tail.kind
+            && !captures.is_empty()
+        {
+            let captured_names: Vec<String> = captures.iter().map(|c| c.name.clone()).collect();
+            let error = CapturingClosureEscapeError {
+                closure_span: tail.span.clone(),
+                return_span: tail.span.clone(), // Use closure span as return span for implicit returns
+                captured_names,
+            };
+            ctx.diagnostics.add_diagnostic(error.into_diagnostic());
         }
     }
 

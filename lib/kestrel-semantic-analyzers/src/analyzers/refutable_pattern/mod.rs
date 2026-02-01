@@ -111,11 +111,7 @@ fn is_pattern_irrefutable(pattern: &Pattern) -> bool {
             suffix,
         } => {
             // Irrefutable only if: has rest AND no prefix AND no suffix
-            if rest.is_some() && prefix.is_empty() && suffix.is_empty() {
-                true
-            } else {
-                false
-            }
+            rest.is_some() && prefix.is_empty() && suffix.is_empty()
         },
 
         // Or-patterns are irrefutable if ANY alternative is irrefutable

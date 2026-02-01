@@ -101,11 +101,7 @@ pub fn is_irrefutable(pattern: &Pattern) -> bool {
         } => {
             // Irrefutable only if: has rest AND no prefix AND no suffix
             // AND all nested patterns (if any) are irrefutable
-            if rest.is_some() && prefix.is_empty() && suffix.is_empty() {
-                true
-            } else {
-                false
-            }
+            rest.is_some() && prefix.is_empty() && suffix.is_empty()
         },
 
         // Or-patterns are irrefutable if ANY alternative is irrefutable

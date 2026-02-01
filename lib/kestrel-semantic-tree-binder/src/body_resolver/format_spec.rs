@@ -12,8 +12,8 @@
 //! - width: Integer minimum field width
 //! - `.precision`: `.` followed by integer precision
 //! - type: `s` (string), `d` (decimal), `b` (binary), `o` (octal),
-//!         `x`/`X` (hex), `e`/`E` (scientific), `f`/`F` (fixed),
-//!         `%` (percent), `?` (debug)
+//!   `x`/`X` (hex), `e`/`E` (scientific), `f`/`F` (fixed),
+//!   `%` (percent), `?` (debug)
 
 /// Alignment options for formatted output.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

@@ -623,27 +623,27 @@ fn resolve_function_body(
             if let Some(name_node) = name_nodes.last() {
                 // Try to extract a simple binding
                 for child in name_node.children_with_tokens() {
-                    if let Some(token) = child.as_token() {
-                        if token.kind() == SyntaxKind::Identifier {
-                            let span =
-                                kestrel_syntax_tree::utils::get_node_span(&name_node, file_id);
-                            let local_id = body_ctx.local_scope.bind(
-                                token.text().to_string(),
-                                param_ty.clone(),
-                                is_mutable,
-                                span.clone(),
-                            );
-                            // Create simple binding pattern for lowering
-                            let pattern = Pattern::local(
-                                local_id,
-                                mutability,
-                                token.text().to_string(),
-                                param_ty.clone(),
-                                span,
-                            );
-                            parameter_patterns.push(pattern);
-                            break;
-                        }
+                    if let Some(token) = child.as_token()
+                        && token.kind() == SyntaxKind::Identifier
+                    {
+                        let span =
+                            kestrel_syntax_tree::utils::get_node_span(name_node, file_id);
+                        let local_id = body_ctx.local_scope.bind(
+                            token.text().to_string(),
+                            param_ty.clone(),
+                            is_mutable,
+                            span.clone(),
+                        );
+                        // Create simple binding pattern for lowering
+                        let pattern = Pattern::local(
+                            local_id,
+                            mutability,
+                            token.text().to_string(),
+                            param_ty.clone(),
+                            span,
+                        );
+                        parameter_patterns.push(pattern);
+                        break;
                     }
                 }
                 continue;
@@ -989,10 +989,10 @@ fn check_stmt_for_param_refs(
 ) {
     use kestrel_semantic_tree::stmt::StatementKind;
     match &stmt.kind {
-        StatementKind::Binding { value, .. } => {
-            if let Some(val) = value {
-                check_expr_for_param_refs(val, param_local_ids, current_param_name, ctx);
-            }
+        StatementKind::Binding {
+            value: Some(val), ..
+        } => {
+            check_expr_for_param_refs(val, param_local_ids, current_param_name, ctx);
         },
         StatementKind::Expr(expr) => {
             check_expr_for_param_refs(expr, param_local_ids, current_param_name, ctx);

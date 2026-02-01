@@ -245,24 +245,16 @@ fn scan_block_comment_in_interpolation(chars: &mut std::iter::Peekable<std::str:
         chars.next();
         offset += c.len_utf8();
 
-        if c == '/' {
-            if let Some(&next) = chars.peek() {
-                if next == '*' {
-                    chars.next();
-                    offset += 1;
-                    depth += 1;
-                }
-            }
-        } else if c == '*' {
-            if let Some(&next) = chars.peek() {
-                if next == '/' {
-                    chars.next();
-                    offset += 1;
-                    depth -= 1;
-                    if depth == 0 {
-                        return offset;
-                    }
-                }
+        if c == '/' && chars.peek() == Some(&'*') {
+            chars.next();
+            offset += 1;
+            depth += 1;
+        } else if c == '*' && chars.peek() == Some(&'/') {
+            chars.next();
+            offset += 1;
+            depth -= 1;
+            if depth == 0 {
+                return offset;
             }
         }
     }

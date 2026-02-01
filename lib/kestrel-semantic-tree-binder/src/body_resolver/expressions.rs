@@ -2676,16 +2676,16 @@ fn check_capturing_closure_escape(
 ) {
     use kestrel_semantic_tree::expr::ExprKind;
 
-    if let ExprKind::Closure { captures, .. } = &expr.kind {
-        if !captures.is_empty() {
-            let captured_names: Vec<String> = captures.iter().map(|c| c.name.clone()).collect();
-            let error = CapturingClosureEscapeError {
-                closure_span: expr.span.clone(),
-                return_span: return_span.clone(),
-                captured_names,
-            };
-            ctx.diagnostics.add_diagnostic(error.into_diagnostic());
-        }
+    if let ExprKind::Closure { captures, .. } = &expr.kind
+        && !captures.is_empty()
+    {
+        let captured_names: Vec<String> = captures.iter().map(|c| c.name.clone()).collect();
+        let error = CapturingClosureEscapeError {
+            closure_span: expr.span.clone(),
+            return_span: return_span.clone(),
+            captured_names,
+        };
+        ctx.diagnostics.add_diagnostic(error.into_diagnostic());
     }
 }
 
@@ -3196,10 +3196,10 @@ fn is_field_access_on_self(target: &Expression, ctx: &BodyResolutionContext) -> 
     match &target.kind {
         ExprKind::FieldAccess { object, .. } => {
             // Check if the object is `self`
-            if let ExprKind::LocalRef(local_id) = &object.kind {
-                if let Some(local) = ctx.local_scope.get_local(*local_id) {
-                    return local.name() == "self";
-                }
+            if let ExprKind::LocalRef(local_id) = &object.kind
+                && let Some(local) = ctx.local_scope.get_local(*local_id)
+            {
+                return local.name() == "self";
             }
             false
         },

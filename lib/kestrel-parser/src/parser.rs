@@ -335,7 +335,7 @@ impl ParseError {
         };
 
         // Format found token using our display helper
-        let found = error.found().map(|t| format_token_for_display(t));
+        let found = error.found().map(format_token_for_display);
 
         // Extract expected tokens from the error
         let expected: Vec<String> = error

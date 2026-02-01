@@ -1106,10 +1106,10 @@ fn get_type_container_with_subs(
             let mut subs_with_defaults = substitutions.clone();
             for type_param in symbol.type_parameters() {
                 let param_id = type_param.metadata().id();
-                if !subs_with_defaults.contains(param_id) {
-                    if let Some(default_ty) = type_param.default() {
-                        subs_with_defaults.insert(param_id, default_ty.clone());
-                    }
+                if !subs_with_defaults.contains(param_id)
+                    && let Some(default_ty) = type_param.default()
+                {
+                    subs_with_defaults.insert(param_id, default_ty.clone());
                 }
             }
             let dyn_symbol: Arc<dyn Symbol<KestrelLanguage>> = symbol.clone();
@@ -1461,14 +1461,14 @@ fn filter_applicable_extensions_for_conformance<'a>(
             // If extension has no type arguments, it applies to all instances
             let Some(extension_subs) = extension_subs else {
                 // Still need to check where clause even without type arguments
-                if let Some(model) = model {
-                    if let Some(actual_subs) = actual_subs {
-                        return check_where_clause_satisfied(
-                            model,
-                            target_behavior.where_clause(),
-                            actual_subs,
-                        );
-                    }
+                if let Some(model) = model
+                    && let Some(actual_subs) = actual_subs
+                {
+                    return check_where_clause_satisfied(
+                        model,
+                        target_behavior.where_clause(),
+                        actual_subs,
+                    );
                 }
                 return true;
             };
@@ -1485,11 +1485,10 @@ fn filter_applicable_extensions_for_conformance<'a>(
             }
 
             // Check where clause constraints (for conditional conformances)
-            if let Some(model) = model {
-                if !check_where_clause_satisfied(model, target_behavior.where_clause(), actual_subs)
-                {
-                    return false;
-                }
+            if let Some(model) = model
+                && !check_where_clause_satisfied(model, target_behavior.where_clause(), actual_subs)
+            {
+                return false;
             }
 
             true
@@ -1509,31 +1508,32 @@ fn check_where_clause_satisfied(
     use kestrel_semantic_tree::ty::Constraint;
 
     for constraint in where_clause.constraints() {
-        match constraint {
-            Constraint::TypeBound {
-                param: Some(param_id),
-                bounds,
-                ..
-            } => {
-                // Get the actual type for this parameter
-                let Some(actual_ty) = actual_subs.get(*param_id) else {
-                    // No substitution for this param - might be a constraint on
-                    // a different parameter or inherited constraint. Skip it.
-                    continue;
-                };
+        // Only process TypeBound constraints - other types (NegativeBound,
+        // InheritedAssociatedTypeBound, TypeEquality, SelfBound) are not
+        // relevant for basic conformance filtering
+        let Constraint::TypeBound {
+            param: Some(param_id),
+            bounds,
+            ..
+        } = constraint
+        else {
+            continue;
+        };
 
-                // Check each bound
-                for bound in bounds {
-                    if let TyKind::Protocol { symbol, .. } = bound.kind() {
-                        if !model.conforms_to(actual_ty, symbol.metadata().id()) {
-                            return false;
-                        }
-                    }
-                }
-            },
-            // Other constraint types (NegativeBound, InheritedAssociatedTypeBound,
-            // TypeEquality, SelfBound) are not relevant for basic conformance filtering
-            _ => {},
+        // Get the actual type for this parameter
+        let Some(actual_ty) = actual_subs.get(*param_id) else {
+            // No substitution for this param - might be a constraint on
+            // a different parameter or inherited constraint. Skip it.
+            continue;
+        };
+
+        // Check each bound
+        for bound in bounds {
+            if let TyKind::Protocol { symbol, .. } = bound.kind()
+                && !model.conforms_to(actual_ty, symbol.metadata().id())
+            {
+                return false;
+            }
         }
     }
 
@@ -1947,10 +1947,10 @@ fn get_where_clause_from_symbol(symbol: &dyn Symbol<KestrelLanguage>) -> Option<
         return Some(ext.where_clause());
     }
     // Try SubscriptSymbol - get where clause from GenericsBehavior
-    if symbol.metadata().kind() == KestrelSymbolKind::Subscript {
-        if let Some(generics) = symbol.metadata().get_behavior::<GenericsBehavior>() {
-            return Some(generics.where_clause().clone());
-        }
+    if symbol.metadata().kind() == KestrelSymbolKind::Subscript
+        && let Some(generics) = symbol.metadata().get_behavior::<GenericsBehavior>()
+    {
+        return Some(generics.where_clause().clone());
     }
     None
 }

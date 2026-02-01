@@ -291,7 +291,7 @@ fn lower_array_pattern(
     let length_callee = Callee::witness(
         array_matchable_protocol_name,
         "matchLength",
-        for_type.clone(),
+        for_type,
         vec![],
     );
     let length_args = vec![CallArg::borrow(Value::Place(array_place.clone()))];
@@ -340,65 +340,65 @@ fn lower_array_pattern(
     }
 
     // Lower rest binding if present
-    if let Some((name, local_id_opt)) = rest {
-        if let Some(local_id) = local_id_opt {
-            // We have a named rest binding: ..rest
-            // rest = array.matchSlice(prefix_len, len - suffix_len)
-            let prefix_len = prefix.len();
+    if let Some((name, local_id_opt)) = rest
+        && let Some(local_id) = local_id_opt
+    {
+        // We have a named rest binding: ..rest
+        // rest = array.matchSlice(prefix_len, len - suffix_len)
+        let prefix_len = prefix.len();
 
-            // Calculate end index: len - suffix_len
-            let end_local = ctx.create_temp("rest_end", i64_mir_ty);
-            let end_place = Place::local(end_local);
-            ctx.emit_assign(
-                end_place.clone(),
-                Rvalue::BinaryOp {
-                    op: BinOp::SubSigned,
-                    lhs: Value::Place(len_place.clone()),
-                    rhs: Value::Immediate(make_int_immediate(IntBits::I64, suffix_len as i64)),
-                },
-            );
+        // Calculate end index: len - suffix_len
+        let end_local = ctx.create_temp("rest_end", i64_mir_ty);
+        let end_place = Place::local(end_local);
+        ctx.emit_assign(
+            end_place.clone(),
+            Rvalue::BinaryOp {
+                op: BinOp::SubSigned,
+                lhs: Value::Place(len_place.clone()),
+                rhs: Value::Immediate(make_int_immediate(IntBits::I64, suffix_len as i64)),
+            },
+        );
 
-            // Get or create the MIR local for the rest binding
-            let mir_local = if let Some(existing) = ctx.get_local(*local_id) {
-                existing
-            } else {
-                // Get the rest pattern's type (should be Slice[T])
-                // We need to infer it from the array's element type
-                let rest_name = name.as_deref().unwrap_or("rest");
-                let rest_ty = get_rest_slice_type(ctx, &pattern.ty);
-                let new_local = ctx.create_local(rest_name, rest_ty);
-                ctx.map_local(*local_id, new_local);
-                new_local
-            };
-            let rest_place = Place::local(mir_local);
+        // Get or create the MIR local for the rest binding
+        let mir_local = if let Some(existing) = ctx.get_local(*local_id) {
+            existing
+        } else {
+            // Get the rest pattern's type (should be Slice[T])
+            // We need to infer it from the array's element type
+            let rest_name = name.as_deref().unwrap_or("rest");
+            let rest_ty = get_rest_slice_type(ctx, &pattern.ty);
+            let new_local = ctx.create_local(rest_name, rest_ty);
+            ctx.map_local(*local_id, new_local);
+            new_local
+        };
+        let rest_place = Place::local(mir_local);
 
-            // Call matchSlice(prefix_len, end)
-            let slice_callee = Callee::witness(
-                array_matchable_protocol_name,
-                "matchSlice",
-                for_type.clone(),
-                vec![],
-            );
-            let slice_args = vec![
-                CallArg::borrow(Value::Place(array_place.clone())),
-                CallArg::copy(Value::Immediate(make_int_immediate(
-                    IntBits::I64,
-                    prefix_len as i64,
-                ))),
-                CallArg::copy(Value::Place(end_place)),
-            ];
-            ctx.emit_call_with_modes(rest_place, slice_callee, slice_args);
-        }
-        // If local_id is None, it's anonymous rest `..` - nothing to bind
+        // Call matchSlice(prefix_len, end)
+        let slice_callee = Callee::witness(
+            array_matchable_protocol_name,
+            "matchSlice",
+            for_type,
+            vec![],
+        );
+        let slice_args = vec![
+            CallArg::borrow(Value::Place(array_place.clone())),
+            CallArg::copy(Value::Immediate(make_int_immediate(
+                IntBits::I64,
+                prefix_len as i64,
+            ))),
+            CallArg::copy(Value::Place(end_place)),
+        ];
+        ctx.emit_call_with_modes(rest_place, slice_callee, slice_args);
     }
+    // If local_id is None, it's anonymous rest `..` - nothing to bind
 }
 
 /// Get the ArrayMatchable protocol name for witness calls.
 fn get_array_matchable_protocol_name(ctx: &mut LoweringContext) -> Id<QualifiedName> {
-    if let Some(am_id) = ctx.model.builtin_registry().array_matchable_protocol() {
-        if let Some(am_symbol) = ctx.model.query(SymbolFor { id: am_id }) {
-            return qualified_name_for_symbol(ctx, &am_symbol);
-        }
+    if let Some(am_id) = ctx.model.builtin_registry().array_matchable_protocol()
+        && let Some(am_symbol) = ctx.model.query(SymbolFor { id: am_id })
+    {
+        return qualified_name_for_symbol(ctx, &am_symbol);
     }
     // Fallback to manual construction
     ctx.mir.intern_name(QualifiedNameData::new(vec![

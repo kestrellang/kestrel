@@ -170,7 +170,7 @@ pub fn lower_function(ctx: &mut LoweringContext, func_symbol: &Arc<FunctionSymbo
     // (including reference wrappers for borrow/mutating modes).
     // For complex patterns (tuples, structs), we create new locals for the bindings
     // and lower_pattern will decompose the parameter value into them.
-    let has_self = callable.as_ref().map_or(false, |c| c.receiver().is_some());
+    let has_self = callable.as_ref().is_some_and(|c| c.receiver().is_some());
     let param_mir_offset = if has_self { 1 } else { 0 };
 
     // Collect LocalIds that are directly mapped to MIR param locals
@@ -636,8 +636,7 @@ pub fn lower_getter(ctx: &mut LoweringContext, getter_symbol: &Arc<GetterSymbol>
     let mir_locals = ctx.mir.function(func_id).locals.clone();
 
     // Map all parameter locals to their MIR counterparts
-    for i in 0..param_count {
-        let mir_local = mir_locals[i];
+    for (i, &mir_local) in mir_locals.iter().enumerate().take(param_count) {
         ctx.map_local(LocalId(i), mir_local);
     }
 
@@ -795,11 +794,11 @@ pub fn lower_setter(ctx: &mut LoweringContext, setter_symbol: &Arc<SetterSymbol>
 
     // Lower yield expression if present (for side effects like assignment)
     // Setter bodies like `{ self._v = newValue }` have no statements but a yield expression
-    if !ctx.is_block_terminated() {
-        if let Some(yield_expr) = body.yield_expr.as_ref() {
-            // Lower the expression for its side effects (result is discarded)
-            let _value = lower_expression(ctx, yield_expr);
-        }
+    if !ctx.is_block_terminated()
+        && let Some(yield_expr) = body.yield_expr.as_ref()
+    {
+        // Lower the expression for its side effects (result is discarded)
+        let _value = lower_expression(ctx, yield_expr);
     }
 
     // Setters return unit

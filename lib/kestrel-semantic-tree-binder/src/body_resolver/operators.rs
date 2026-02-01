@@ -355,17 +355,17 @@ fn desugar_binary_op(
 
     // Try to use the MethodRef pattern with builtin registry for better error messages.
     // This produces "does not conform to X" errors instead of "no member Y".
-    if let Some(feature) = op.method_feature() {
-        if let Some(method_id) = ctx.model.builtin_registry().method(feature) {
-            // Create MethodRef with the protocol method as candidate, then wrap in Call
-            let method_ref = Expression::method_ref(
-                lhs,
-                vec![method_id],
-                method_name.to_string(),
-                full_span.clone(),
-            );
-            return Expression::call(method_ref, vec![arg], result_ty, full_span);
-        }
+    if let Some(feature) = op.method_feature()
+        && let Some(method_id) = ctx.model.builtin_registry().method(feature)
+    {
+        // Create MethodRef with the protocol method as candidate, then wrap in Call
+        let method_ref = Expression::method_ref(
+            lhs,
+            vec![method_id],
+            method_name.to_string(),
+            full_span.clone(),
+        );
+        return Expression::call(method_ref, vec![arg], result_ty, full_span);
     }
 
     // Fallback: use DeferredMethodCall if builtin not registered
@@ -410,17 +410,17 @@ fn desugar_unary_op(
 
     // Try to use the MethodRef pattern with builtin registry for better error messages.
     // This produces "does not conform to X" errors instead of "no member Y".
-    if let Some(feature) = op.method_feature() {
-        if let Some(method_id) = ctx.model.builtin_registry().method(feature) {
-            // Create MethodRef with the protocol method as candidate, then wrap in Call
-            let method_ref = Expression::method_ref(
-                operand,
-                vec![method_id],
-                method_name.to_string(),
-                full_span.clone(),
-            );
-            return Expression::call(method_ref, vec![], result_ty, full_span);
-        }
+    if let Some(feature) = op.method_feature()
+        && let Some(method_id) = ctx.model.builtin_registry().method(feature)
+    {
+        // Create MethodRef with the protocol method as candidate, then wrap in Call
+        let method_ref = Expression::method_ref(
+            operand,
+            vec![method_id],
+            method_name.to_string(),
+            full_span.clone(),
+        );
+        return Expression::call(method_ref, vec![], result_ty, full_span);
     }
 
     // Fallback: use DeferredMethodCall if builtin not registered
@@ -628,23 +628,23 @@ fn collect_captures_recursive(
         ExprKind::LocalRef(local_id) => {
             if !seen_ids.contains(local_id) {
                 // Check if this local was declared before the closure scope
-                if let Some(local_depth) = local_scope.scope_depth_of(*local_id) {
-                    if local_depth <= closure_entry_depth {
-                        // This is a capture
-                        let name = local_scope
-                            .get_local(*local_id)
-                            .map(|info| info.name().to_string())
-                            .unwrap_or_default();
+                if let Some(local_depth) = local_scope.scope_depth_of(*local_id)
+                    && local_depth <= closure_entry_depth
+                {
+                    // This is a capture
+                    let name = local_scope
+                        .get_local(*local_id)
+                        .map(|info| info.name().to_string())
+                        .unwrap_or_default();
 
-                        captures.push(Capture {
-                            local_id: *local_id,
-                            name,
-                            ty: expr.ty.clone(),
-                            kind: CaptureKind::Value,
-                            span: expr.span.clone(),
-                        });
-                        seen_ids.insert(*local_id);
-                    }
+                    captures.push(Capture {
+                        local_id: *local_id,
+                        name,
+                        ty: expr.ty.clone(),
+                        kind: CaptureKind::Value,
+                        span: expr.span.clone(),
+                    });
+                    seen_ids.insert(*local_id);
                 }
             }
         },

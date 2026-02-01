@@ -242,16 +242,17 @@ fn resolve_tuple_pattern(
     });
 
     // Validate: if we have an expected type that's not a tuple, that's an error
-    if let Some(ty) = expected_ty {
-        if expected_element_types.is_none() && !matches!(ty.kind(), TyKind::Infer | TyKind::Error) {
-            use crate::diagnostics::TuplePatternOnNonTupleError;
-            let error = TuplePatternOnNonTupleError {
-                span: span.clone(),
-                actual_type: format!("{}", ty),
-            };
-            ctx.diagnostics.add_diagnostic(error.into_diagnostic());
-            return Pattern::error(span);
-        }
+    if let Some(ty) = expected_ty
+        && expected_element_types.is_none()
+        && !matches!(ty.kind(), TyKind::Infer | TyKind::Error)
+    {
+        use crate::diagnostics::TuplePatternOnNonTupleError;
+        let error = TuplePatternOnNonTupleError {
+            span: span.clone(),
+            actual_type: format!("{}", ty),
+        };
+        ctx.diagnostics.add_diagnostic(error.into_diagnostic());
+        return Pattern::error(span);
     }
 
     // Find rest pattern indices
@@ -288,20 +289,18 @@ fn resolve_tuple_pattern(
     };
 
     // Validate arity: if no rest pattern, the number of pattern elements must match expected
-    if !has_rest {
-        if let Some(expected_tys) = &expected_element_types {
-            let pattern_count = prefix_nodes.len();
-            let expected_count = expected_tys.len();
-            if pattern_count != expected_count {
-                use crate::diagnostics::TuplePatternArityMismatchError;
-                let error = TuplePatternArityMismatchError {
-                    span: span.clone(),
-                    expected: expected_count,
-                    found: pattern_count,
-                };
-                ctx.diagnostics.add_diagnostic(error.into_diagnostic());
-                return Pattern::error(span);
-            }
+    if !has_rest && let Some(expected_tys) = &expected_element_types {
+        let pattern_count = prefix_nodes.len();
+        let expected_count = expected_tys.len();
+        if pattern_count != expected_count {
+            use crate::diagnostics::TuplePatternArityMismatchError;
+            let error = TuplePatternArityMismatchError {
+                span: span.clone(),
+                expected: expected_count,
+                found: pattern_count,
+            };
+            ctx.diagnostics.add_diagnostic(error.into_diagnostic());
+            return Pattern::error(span);
         }
     }
 

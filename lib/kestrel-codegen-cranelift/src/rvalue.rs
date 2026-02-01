@@ -80,14 +80,12 @@ fn infer_self_type_from_method_name(
 
     // Try to find an enum with this name
     for (_, enum_def) in ctx.mir.enums.iter() {
-        if ctx.mir.name(enum_def.name) == &parent {
-            if enum_def.type_params.is_empty() {
-                let mir_ty = MirTy::Named {
-                    name: enum_def.name,
-                    type_args: vec![],
-                };
-                return ctx.mir.lookup_type(&mir_ty);
-            }
+        if ctx.mir.name(enum_def.name) == &parent && enum_def.type_params.is_empty() {
+            let mir_ty = MirTy::Named {
+                name: enum_def.name,
+                type_args: vec![],
+            };
+            return ctx.mir.lookup_type(&mir_ty);
         }
     }
 

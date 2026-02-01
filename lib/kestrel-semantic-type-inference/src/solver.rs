@@ -42,24 +42,23 @@ pub fn solve(mut ctx: InferenceContext<'_>) -> Solution {
         .constraints()
         .iter()
         .filter_map(|constraint| {
-            if let Constraint::Conforms { ty, protocol } = constraint {
-                if let Some(feature) = get_literal_feature_for_protocol(&ctx, protocol.symbol_id) {
-                    // Only mark literals that have defaults
-                    match feature {
-                        LanguageFeature::ExpressibleByIntLiteral
-                        | LanguageFeature::ExpressibleByFloatLiteral
-                        | LanguageFeature::ExpressibleByStringLiteral
-                        | LanguageFeature::ExpressibleByBoolLiteral
-                        | LanguageFeature::ExpressibleByCharLiteral => return Some(*ty),
-                        // Null, array, and dictionary literals need context, don't defer
-                        LanguageFeature::ExpressibleByNullLiteral
-                        | LanguageFeature::_ExpressibleByArrayLiteral
-                        | LanguageFeature::_ExpressibleByDictionaryLiteral => {},
-                        _ => {},
-                    }
-                }
+            let Constraint::Conforms { ty, protocol } = constraint else {
+                return None;
+            };
+            let feature = get_literal_feature_for_protocol(&ctx, protocol.symbol_id)?;
+            // Only mark literals that have defaults
+            match feature {
+                LanguageFeature::ExpressibleByIntLiteral
+                | LanguageFeature::ExpressibleByFloatLiteral
+                | LanguageFeature::ExpressibleByStringLiteral
+                | LanguageFeature::ExpressibleByBoolLiteral
+                | LanguageFeature::ExpressibleByCharLiteral => Some(*ty),
+                // Null, array, and dictionary literals need context, don't defer
+                LanguageFeature::ExpressibleByNullLiteral
+                | LanguageFeature::_ExpressibleByArrayLiteral
+                | LanguageFeature::_ExpressibleByDictionaryLiteral => None,
+                _ => None,
             }
-            None
         })
         .collect();
 
@@ -136,10 +135,9 @@ fn apply_default_literal_types(ctx: &mut InferenceContext<'_>) -> bool {
             result,
             ..
         } = constraint
+            && assoc_name == "Element"
         {
-            if assoc_name == "Element" {
-                array_element_types.insert(*base, *result);
-            }
+            array_element_types.insert(*base, *result);
         }
     }
 
@@ -1142,7 +1140,7 @@ fn contains_unresolved_infer(ty: &Ty) -> bool {
         },
         TyKind::AssociatedType { container, .. } => container
             .as_ref()
-            .map_or(false, |c| contains_unresolved_infer(c)),
+            .is_some_and(|c| contains_unresolved_infer(c)),
         _ => false,
     }
 }

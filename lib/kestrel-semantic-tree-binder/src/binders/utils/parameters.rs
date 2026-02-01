@@ -81,11 +81,11 @@ fn extract_primary_name_from_pattern(
             SyntaxKind::BindingPattern => {
                 // Extract the identifier from the binding pattern
                 for child in node.children_with_tokens() {
-                    if let Some(token) = child.as_token() {
-                        if token.kind() == SyntaxKind::Identifier {
-                            let span = get_node_span(node, file_id);
-                            return Some((token.text().to_string(), span));
-                        }
+                    if let Some(token) = child.as_token()
+                        && token.kind() == SyntaxKind::Identifier
+                    {
+                        let span = get_node_span(node, file_id);
+                        return Some((token.text().to_string(), span));
                     }
                 }
                 None
@@ -111,10 +111,10 @@ fn extract_primary_name_from_pattern(
             SyntaxKind::StructPattern => {
                 // Return first field binding
                 for child in node.children() {
-                    if child.kind() == SyntaxKind::StructPatternField {
-                        if let Some(result) = extract_recursive(&child, file_id) {
-                            return Some(result);
-                        }
+                    if child.kind() == SyntaxKind::StructPatternField
+                        && let Some(result) = extract_recursive(&child, file_id)
+                    {
+                        return Some(result);
                     }
                 }
                 None
@@ -122,22 +122,21 @@ fn extract_primary_name_from_pattern(
             SyntaxKind::StructPatternField => {
                 // Check for explicit binding or shorthand
                 for inner in node.children() {
-                    if inner.kind() == SyntaxKind::Pattern
-                        || inner.kind() == SyntaxKind::BindingPattern
+                    if (inner.kind() == SyntaxKind::Pattern
+                        || inner.kind() == SyntaxKind::BindingPattern)
+                        && let Some(result) = extract_recursive(&inner, file_id)
                     {
-                        if let Some(result) = extract_recursive(&inner, file_id) {
-                            return Some(result);
-                        }
+                        return Some(result);
                     }
                 }
                 // Shorthand: use field name
                 if let Some(name_node) = node.children().find(|c| c.kind() == SyntaxKind::Name) {
                     for token in name_node.children_with_tokens() {
-                        if let Some(t) = token.as_token() {
-                            if t.kind() == SyntaxKind::Identifier {
-                                let span = get_node_span(&name_node, file_id);
-                                return Some((t.text().to_string(), span));
-                            }
+                        if let Some(t) = token.as_token()
+                            && t.kind() == SyntaxKind::Identifier
+                        {
+                            let span = get_node_span(&name_node, file_id);
+                            return Some((t.text().to_string(), span));
                         }
                     }
                 }

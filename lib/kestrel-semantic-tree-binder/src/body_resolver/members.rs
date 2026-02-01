@@ -1672,69 +1672,67 @@ fn find_static_property_in_bounds(
     for bound in bounds {
         if let TyKind::Protocol { symbol: proto, .. } = bound.kind() {
             // Use flattened behavior if available
-            if let Some(flattened) = proto.metadata().get_behavior::<FlattenedProtocolBehavior>() {
-                if let Some(prop) = flattened.properties().get(property_name) {
-                    if prop.is_static {
-                        // Get the property type from the field's TypedBehavior
-                        let prop_ty = prop
-                            .symbol
-                            .metadata()
-                            .get_behavior::<TypedBehavior>()
-                            .map(|tb| substitute_self(tb.ty(), type_param_ty))
-                            .unwrap_or_else(|| Ty::error(span.clone()));
+            if let Some(flattened) = proto.metadata().get_behavior::<FlattenedProtocolBehavior>()
+                && let Some(prop) = flattened.properties().get(property_name)
+                && prop.is_static
+            {
+                // Get the property type from the field's TypedBehavior
+                let prop_ty = prop
+                    .symbol
+                    .metadata()
+                    .get_behavior::<TypedBehavior>()
+                    .map(|tb| substitute_self(tb.ty(), type_param_ty))
+                    .unwrap_or_else(|| Ty::error(span.clone()));
 
-                        // Create TypeParameterRef for the receiver
-                        let receiver = Expression::type_parameter_ref(
-                            type_param_id,
-                            type_param_ty.clone(),
-                            Span::new(span.file_id, span.start..span.start),
-                        );
+                // Create TypeParameterRef for the receiver
+                let receiver = Expression::type_parameter_ref(
+                    type_param_id,
+                    type_param_ty.clone(),
+                    Span::new(span.file_id, span.start..span.start),
+                );
 
-                        return Some(Expression::protocol_property_access(
-                            receiver,
-                            prop.symbol.metadata().id(),
-                            property_name.to_string(),
-                            proto.metadata().id(),
-                            true, // is_static
-                            prop.has_setter,
-                            prop_ty,
-                            span,
-                        ));
-                    }
-                }
+                return Some(Expression::protocol_property_access(
+                    receiver,
+                    prop.symbol.metadata().id(),
+                    property_name.to_string(),
+                    proto.metadata().id(),
+                    true, // is_static
+                    prop.has_setter,
+                    prop_ty,
+                    span,
+                ));
             }
 
             // FALLBACK: Direct search in protocol children
             for child in proto.metadata().children() {
                 if child.metadata().kind() == KestrelSymbolKind::Field
                     && child.metadata().name().value == property_name
+                    && let Ok(field) = child.clone().downcast_arc::<FieldSymbol>()
+                    && field.is_computed()
+                    && field.is_static()
                 {
-                    if let Ok(field) = child.clone().downcast_arc::<FieldSymbol>() {
-                        if field.is_computed() && field.is_static() {
-                            let prop_ty = field
-                                .metadata()
-                                .get_behavior::<TypedBehavior>()
-                                .map(|tb| substitute_self(tb.ty(), type_param_ty))
-                                .unwrap_or_else(|| Ty::error(span.clone()));
+                    let prop_ty = field
+                        .metadata()
+                        .get_behavior::<TypedBehavior>()
+                        .map(|tb| substitute_self(tb.ty(), type_param_ty))
+                        .unwrap_or_else(|| Ty::error(span.clone()));
 
-                            let receiver = Expression::type_parameter_ref(
-                                type_param_id,
-                                type_param_ty.clone(),
-                                Span::new(span.file_id, span.start..span.start),
-                            );
+                    let receiver = Expression::type_parameter_ref(
+                        type_param_id,
+                        type_param_ty.clone(),
+                        Span::new(span.file_id, span.start..span.start),
+                    );
 
-                            return Some(Expression::protocol_property_access(
-                                receiver,
-                                field.metadata().id(),
-                                property_name.to_string(),
-                                proto.metadata().id(),
-                                true, // is_static
-                                field.setter().is_some(),
-                                prop_ty,
-                                span,
-                            ));
-                        }
-                    }
+                    return Some(Expression::protocol_property_access(
+                        receiver,
+                        field.metadata().id(),
+                        property_name.to_string(),
+                        proto.metadata().id(),
+                        true, // is_static
+                        field.setter().is_some(),
+                        prop_ty,
+                        span,
+                    ));
                 }
             }
         }
@@ -1758,56 +1756,54 @@ fn find_instance_property_in_bounds(
     for bound in bounds {
         if let TyKind::Protocol { symbol: proto, .. } = bound.kind() {
             // Use flattened behavior if available
-            if let Some(flattened) = proto.metadata().get_behavior::<FlattenedProtocolBehavior>() {
-                if let Some(prop) = flattened.properties().get(property_name) {
-                    if !prop.is_static {
-                        // Get the property type from the field's TypedBehavior
-                        let prop_ty = prop
-                            .symbol
-                            .metadata()
-                            .get_behavior::<TypedBehavior>()
-                            .map(|tb| substitute_self(tb.ty(), type_param_ty))
-                            .unwrap_or_else(|| Ty::error(span.clone()));
+            if let Some(flattened) = proto.metadata().get_behavior::<FlattenedProtocolBehavior>()
+                && let Some(prop) = flattened.properties().get(property_name)
+                && !prop.is_static
+            {
+                // Get the property type from the field's TypedBehavior
+                let prop_ty = prop
+                    .symbol
+                    .metadata()
+                    .get_behavior::<TypedBehavior>()
+                    .map(|tb| substitute_self(tb.ty(), type_param_ty))
+                    .unwrap_or_else(|| Ty::error(span.clone()));
 
-                        return Some(Expression::protocol_property_access(
-                            base,
-                            prop.symbol.metadata().id(),
-                            property_name.to_string(),
-                            proto.metadata().id(),
-                            false, // is_static
-                            prop.has_setter,
-                            prop_ty,
-                            span,
-                        ));
-                    }
-                }
+                return Some(Expression::protocol_property_access(
+                    base,
+                    prop.symbol.metadata().id(),
+                    property_name.to_string(),
+                    proto.metadata().id(),
+                    false, // is_static
+                    prop.has_setter,
+                    prop_ty,
+                    span,
+                ));
             }
 
             // FALLBACK: Direct search in protocol children
             for child in proto.metadata().children() {
                 if child.metadata().kind() == KestrelSymbolKind::Field
                     && child.metadata().name().value == property_name
+                    && let Ok(field) = child.clone().downcast_arc::<FieldSymbol>()
+                    && field.is_computed()
+                    && !field.is_static()
                 {
-                    if let Ok(field) = child.clone().downcast_arc::<FieldSymbol>() {
-                        if field.is_computed() && !field.is_static() {
-                            let prop_ty = field
-                                .metadata()
-                                .get_behavior::<TypedBehavior>()
-                                .map(|tb| substitute_self(tb.ty(), type_param_ty))
-                                .unwrap_or_else(|| Ty::error(span.clone()));
+                    let prop_ty = field
+                        .metadata()
+                        .get_behavior::<TypedBehavior>()
+                        .map(|tb| substitute_self(tb.ty(), type_param_ty))
+                        .unwrap_or_else(|| Ty::error(span.clone()));
 
-                            return Some(Expression::protocol_property_access(
-                                base,
-                                field.metadata().id(),
-                                property_name.to_string(),
-                                proto.metadata().id(),
-                                false, // is_static
-                                field.setter().is_some(),
-                                prop_ty,
-                                span,
-                            ));
-                        }
-                    }
+                    return Some(Expression::protocol_property_access(
+                        base,
+                        field.metadata().id(),
+                        property_name.to_string(),
+                        proto.metadata().id(),
+                        false, // is_static
+                        field.setter().is_some(),
+                        prop_ty,
+                        span,
+                    ));
                 }
             }
         }

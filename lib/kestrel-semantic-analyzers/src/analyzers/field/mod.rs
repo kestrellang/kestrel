@@ -99,15 +99,15 @@ impl Analyzer for FieldAnalyzer {
         // Check 4: static stored properties not supported in generic types
         if field.is_static() && !field.is_computed() {
             // Check if parent type is generic
-            if let Some(generics) = parent.metadata().get_behavior::<GenericsBehavior>() {
-                if generics.is_generic() {
-                    let type_name = parent.metadata().name().value.clone();
+            if let Some(generics) = parent.metadata().get_behavior::<GenericsBehavior>()
+                && generics.is_generic()
+            {
+                let type_name = parent.metadata().name().value.clone();
 
-                    ctx.report(GenericTypeStaticStoredPropertyError {
-                        span: symbol.metadata().span().clone(),
-                        type_name,
-                    });
-                }
+                ctx.report(GenericTypeStaticStoredPropertyError {
+                    span: symbol.metadata().span().clone(),
+                    type_name,
+                });
             }
         }
     }

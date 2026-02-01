@@ -594,34 +594,33 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
             }
 
             // Check if target is a SymbolRef pointing to a computed field (module-level computed property)
-            if let ExprKind::SymbolRef(symbol_id) = &target.kind {
-                if let Some(symbol) = ctx.model.query(SymbolFor { id: *symbol_id }) {
-                    if symbol.metadata().kind() == KestrelSymbolKind::Field {
-                        // Check if it's a computed property
-                        let is_computed = symbol
-                            .as_ref()
-                            .downcast_ref::<FieldSymbol>()
-                            .map(|f| f.is_computed())
-                            .unwrap_or(false);
+            if let ExprKind::SymbolRef(symbol_id) = &target.kind
+                && let Some(symbol) = ctx.model.query(SymbolFor { id: *symbol_id })
+                && symbol.metadata().kind() == KestrelSymbolKind::Field
+            {
+                // Check if it's a computed property
+                let is_computed = symbol
+                    .as_ref()
+                    .downcast_ref::<FieldSymbol>()
+                    .map(|f| f.is_computed())
+                    .unwrap_or(false);
 
-                        if is_computed {
-                            // Get the setter ID
-                            let setter_id = symbol
-                                .as_ref()
-                                .downcast_ref::<FieldSymbol>()
-                                .and_then(|f| f.setter());
+                if is_computed {
+                    // Get the setter ID
+                    let setter_id = symbol
+                        .as_ref()
+                        .downcast_ref::<FieldSymbol>()
+                        .and_then(|f| f.setter());
 
-                            if let Some(setter_id) = setter_id {
-                                // Generate a call to the setter
-                                return lower_static_setter_call(ctx, setter_id, value, expr);
-                            } else {
-                                ctx.emit_error(LoweringError::internal(
-                                    "computed property has no setter",
-                                    Some(expr.span.clone()),
-                                ));
-                                return Value::Immediate(Immediate::error());
-                            }
-                        }
+                    if let Some(setter_id) = setter_id {
+                        // Generate a call to the setter
+                        return lower_static_setter_call(ctx, setter_id, value, expr);
+                    } else {
+                        ctx.emit_error(LoweringError::internal(
+                            "computed property has no setter",
+                            Some(expr.span.clone()),
+                        ));
+                        return Value::Immediate(Immediate::error());
                     }
                 }
             }
