@@ -953,11 +953,43 @@ impl LangIntrinsic {
 ///
 /// All variants represent resolved expressions - there is no `Path` variant
 /// because expressions are only created after path resolution during bind phase.
+/// A part of an interpolated string.
+///
+/// Interpolated strings like `"Hello \(name)!"` are broken down into parts:
+/// - Literal text segments: "Hello ", "!"
+/// - Interpolation expressions: \(name)
+#[derive(Debug, Clone)]
+pub enum InterpolationPart {
+    /// A literal text segment (already unescaped)
+    Literal {
+        text: String,
+        span: Span,
+    },
+    /// An interpolation expression `\(expr)` or `\(expr:format)`
+    Interpolation {
+        /// The expression to be formatted
+        expr: Box<Expression>,
+        /// Format specification (if provided, e.g., `:>8` or `:08x`)
+        /// Stored as raw string; parsed later when applying formatting
+        format_spec: Option<String>,
+        /// Span of the entire interpolation `\(expr:format)`
+        span: Span,
+    },
+}
+
 #[derive(Debug, Clone)]
 pub enum ExprKind {
     // Literals
     /// Literal expression (integer, float, string, bool, unit)
     Literal(LiteralValue),
+    /// Interpolated string literal: `"Hello \(name)!"`
+    ///
+    /// Contains parts that are either literal text or interpolation expressions.
+    /// The result type is always String (or a type conforming to ExpressibleByStringInterpolation).
+    InterpolatedString {
+        /// The parts of the interpolated string
+        parts: Vec<InterpolationPart>,
+    },
     /// Array literal: `[1, 2, 3]`
     Array(Vec<Expression>),
     /// Dictionary literal: `["key": value, ...]`
@@ -1609,6 +1641,22 @@ impl Expression {
                     LiteralValue::Bool(b) => b.to_string(),
                     LiteralValue::Null => format!("null: {}", expr.ty),
                 },
+                ExprKind::InterpolatedString { parts } => {
+                    let parts_str: Vec<_> = parts
+                        .iter()
+                        .map(|p| match p {
+                            InterpolationPart::Literal { text, .. } => format!("\"{}\"", text),
+                            InterpolationPart::Interpolation { expr, format_spec, .. } => {
+                                if let Some(spec) = format_spec {
+                                    format!("\\({}:{})", format_expr(expr), spec)
+                                } else {
+                                    format!("\\({})", format_expr(expr))
+                                }
+                            }
+                        })
+                        .collect();
+                    format!("interpolated_string[{}]", parts_str.join(", "))
+                },
                 ExprKind::Array(elements) => {
                     let items: Vec<_> = elements.iter().map(format_expr).collect();
                     with_type(format!("[{}]", items.join(", ")), &expr.ty)
@@ -2000,6 +2048,20 @@ impl Expression {
         Expression {
             id: ExprId::new(),
             kind: ExprKind::Literal(LiteralValue::String(value)),
+            ty: Ty::infer(span.clone()),
+            span,
+            mutable: false,
+        }
+    }
+
+    /// Create an interpolated string expression.
+    ///
+    /// During type inference, the result type is inferred (defaulting to String).
+    /// Each interpolation expression must conform to Formattable.
+    pub fn interpolated_string(parts: Vec<InterpolationPart>, span: Span) -> Self {
+        Expression {
+            id: ExprId::new(),
+            kind: ExprKind::InterpolatedString { parts },
             ty: Ty::infer(span.clone()),
             span,
             mutable: false,

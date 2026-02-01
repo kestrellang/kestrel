@@ -156,6 +156,15 @@ pub enum LanguageFeature {
     // Slice struct builtin (for array pattern rest bindings)
     SliceStruct,
 
+    // String interpolation
+    DefaultStringInterpolation,
+    DefaultStringInterpolationInit,
+    DefaultStringInterpolationAppendLiteral,
+    DefaultStringInterpolationAppendInterpolation,
+    DefaultStringInterpolationBuild,
+    FormattableProtocol,
+    FormattableFormat,
+
     // Compound assignment protocols
     AddAssignProtocol,
     AddAssignMethod,
@@ -297,6 +306,18 @@ impl LanguageFeature {
             "ArrayStruct" => Some(Self::ArrayStruct),
             // Slice struct builtin
             "SliceStruct" => Some(Self::SliceStruct),
+            // String interpolation
+            "DefaultStringInterpolation" => Some(Self::DefaultStringInterpolation),
+            "DefaultStringInterpolationInit" => Some(Self::DefaultStringInterpolationInit),
+            "DefaultStringInterpolationAppendLiteral" => {
+                Some(Self::DefaultStringInterpolationAppendLiteral)
+            },
+            "DefaultStringInterpolationAppendInterpolation" => {
+                Some(Self::DefaultStringInterpolationAppendInterpolation)
+            },
+            "DefaultStringInterpolationBuild" => Some(Self::DefaultStringInterpolationBuild),
+            "FormattableProtocol" => Some(Self::FormattableProtocol),
+            "FormattableFormat" => Some(Self::FormattableFormat),
             // Compound assignment protocols
             "AddAssignProtocol" => Some(Self::AddAssignProtocol),
             "AddAssignMethod" => Some(Self::AddAssignMethod),
@@ -439,6 +460,18 @@ impl LanguageFeature {
             Self::ArrayStruct => "ArrayStruct",
             // Slice struct builtin
             Self::SliceStruct => "SliceStruct",
+            // String interpolation
+            Self::DefaultStringInterpolation => "DefaultStringInterpolation",
+            Self::DefaultStringInterpolationInit => "DefaultStringInterpolationInit",
+            Self::DefaultStringInterpolationAppendLiteral => {
+                "DefaultStringInterpolationAppendLiteral"
+            },
+            Self::DefaultStringInterpolationAppendInterpolation => {
+                "DefaultStringInterpolationAppendInterpolation"
+            },
+            Self::DefaultStringInterpolationBuild => "DefaultStringInterpolationBuild",
+            Self::FormattableProtocol => "FormattableProtocol",
+            Self::FormattableFormat => "FormattableFormat",
             // Compound assignment protocols
             Self::AddAssignProtocol => "AddAssignProtocol",
             Self::AddAssignMethod => "AddAssignMethod",
@@ -991,6 +1024,43 @@ impl LanguageFeature {
                 feature: *self,
                 kind: BuiltinKind::Struct,
             },
+            // String interpolation
+            Self::DefaultStringInterpolation => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::Struct,
+            },
+            Self::DefaultStringInterpolationInit => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::Function,
+            },
+            Self::DefaultStringInterpolationAppendLiteral => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::Function,
+            },
+            Self::DefaultStringInterpolationAppendInterpolation => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::Function,
+            },
+            Self::DefaultStringInterpolationBuild => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::Function,
+            },
+            Self::FormattableProtocol => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::Protocol {
+                    implicit_conformance: false,
+                    must_be_marker: false,
+                    tuple_conformance_propagation: false,
+                    requires_fields_conform: false,
+                    disallow_enum_conformance: false,
+                },
+            },
+            Self::FormattableFormat => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::ProtocolMethod {
+                    protocol_feature: LanguageFeature::FormattableProtocol,
+                },
+            },
             // Compound assignment protocols
             Self::AddAssignProtocol
             | Self::SubtractAssignProtocol
@@ -1469,6 +1539,41 @@ impl BuiltinRegistry {
     /// Convenience: Get the Clone method.
     pub fn clone_method(&self) -> Option<SymbolId> {
         self.method(LanguageFeature::Clone)
+    }
+
+    /// Convenience: Get the Formattable protocol.
+    pub fn formattable_protocol(&self) -> Option<SymbolId> {
+        self.protocol(LanguageFeature::FormattableProtocol)
+    }
+
+    /// Convenience: Get the Formattable.format method.
+    pub fn formattable_format_method(&self) -> Option<SymbolId> {
+        self.method(LanguageFeature::FormattableFormat)
+    }
+
+    /// Convenience: Get the DefaultStringInterpolation struct.
+    pub fn default_string_interpolation(&self) -> Option<SymbolId> {
+        self.builtin_struct(LanguageFeature::DefaultStringInterpolation)
+    }
+
+    /// Convenience: Get the DefaultStringInterpolation init.
+    pub fn default_string_interpolation_init(&self) -> Option<SymbolId> {
+        self.builtin_function(LanguageFeature::DefaultStringInterpolationInit)
+    }
+
+    /// Convenience: Get the DefaultStringInterpolation.appendLiteral method.
+    pub fn default_string_interpolation_append_literal(&self) -> Option<SymbolId> {
+        self.builtin_function(LanguageFeature::DefaultStringInterpolationAppendLiteral)
+    }
+
+    /// Convenience: Get the DefaultStringInterpolation.appendInterpolation method.
+    pub fn default_string_interpolation_append_interpolation(&self) -> Option<SymbolId> {
+        self.builtin_function(LanguageFeature::DefaultStringInterpolationAppendInterpolation)
+    }
+
+    /// Convenience: Get the DefaultStringInterpolation.build method.
+    pub fn default_string_interpolation_build(&self) -> Option<SymbolId> {
+        self.builtin_function(LanguageFeature::DefaultStringInterpolationBuild)
     }
 
     // =========================================================================

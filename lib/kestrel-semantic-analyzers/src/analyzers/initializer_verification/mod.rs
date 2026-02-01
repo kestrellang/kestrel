@@ -620,7 +620,7 @@ fn analyze_expression(
                 state.diverged = true;
             }
         },
-        ExprKind::LangIntrinsicRef(_) | ExprKind::Error => {},
+        ExprKind::LangIntrinsicRef(_) | ExprKind::InterpolatedString { .. } | ExprKind::Error => {},
         ExprKind::SubscriptCall {
             receiver,
             arguments,

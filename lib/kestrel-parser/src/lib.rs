@@ -314,3 +314,19 @@ where
         span: Span::new(file_id, 0..source.len()),
     }
 }
+
+/// Convenience function to parse an expression from source and tokens
+/// Returns a fully built Expression with its syntax tree
+pub fn parse_expr_from_source<I>(source: &str, tokens: I) -> Expression
+where
+    I: Iterator<Item = (Token, Span)> + Clone,
+{
+    let file_id = extract_file_id(&tokens);
+    let mut sink = EventSink::new(file_id);
+    expr::parse_expr(source, tokens, &mut sink);
+    let tree = TreeBuilder::new(source, sink.into_events()).build();
+    Expression {
+        syntax: tree,
+        span: Span::new(file_id, 0..source.len()),
+    }
+}

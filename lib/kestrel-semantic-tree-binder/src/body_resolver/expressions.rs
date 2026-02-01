@@ -6,7 +6,9 @@
 
 use kestrel_reporting::IntoDiagnostic;
 use kestrel_semantic_tree::builtins::LanguageFeature;
-use kestrel_semantic_tree::expr::{CallArgument, ElseBranch, Expression, IfCondition, LabelInfo};
+use kestrel_semantic_tree::expr::{
+    CallArgument, ElseBranch, Expression, IfCondition, InterpolationPart, LabelInfo,
+};
 use kestrel_semantic_tree::stmt::Statement;
 use kestrel_semantic_tree::ty::Ty;
 use kestrel_span::Span;
@@ -141,6 +143,10 @@ pub fn resolve_expression(expr_node: &SyntaxNode, ctx: &mut BodyResolutionContex
         SyntaxKind::ExprImplicitMemberAccess => resolve_implicit_member_access(expr_node, ctx),
 
         SyntaxKind::ExprMatch => resolve_match_expression(expr_node, ctx),
+
+        SyntaxKind::ExprInterpolatedString => {
+            resolve_interpolated_string_expression(expr_node, ctx)
+        },
 
         _ => Expression::error(span),
     }
@@ -2290,6 +2296,7 @@ fn expression_references_local(
         | ExprKind::Break { .. }
         | ExprKind::Continue { .. }
         | ExprKind::LangIntrinsicRef(_)
+        | ExprKind::InterpolatedString { .. }
         | ExprKind::Error => false,
     }
 }
@@ -2991,6 +2998,16 @@ where
         | ExprKind::EnumCase { .. }
         | ExprKind::LangIntrinsicRef(_)
         | ExprKind::Error => {},
+
+        // Interpolated strings - recurse into interpolation expressions
+        ExprKind::InterpolatedString { parts } => {
+            use kestrel_semantic_tree::expr::InterpolationPart;
+            for part in parts {
+                if let InterpolationPart::Interpolation { expr, .. } = part {
+                    collect_captures_from_expression(expr, process);
+                }
+            }
+        },
     }
 }
 
@@ -3274,6 +3291,234 @@ fn validate_assignment_target(
     }
 }
 
+/// Resolve an interpolated string expression (e.g., "Hello \(name)!")
+fn resolve_interpolated_string_expression(
+    node: &SyntaxNode,
+    ctx: &mut BodyResolutionContext,
+) -> Expression {
+    let span = get_node_span(node, ctx.file_id);
+
+    // Extract the string token
+    let Some(token) = node
+        .children_with_tokens()
+        .filter_map(|e| e.into_token())
+        .find(|t| t.kind() == SyntaxKind::String)
+    else {
+        return Expression::error(span);
+    };
+
+    let text = token.text();
+    let text_range = token.text_range();
+    let token_start: usize = text_range.start().into();
+
+    // Strip surrounding quotes
+    if text.len() < 2 {
+        return Expression::error(span);
+    }
+    let inner = &text[1..text.len() - 1];
+
+    // Parse the string content into parts
+    let parts = parse_interpolated_string_parts(inner, ctx.file_id, token_start + 1, ctx);
+
+    Expression::interpolated_string(parts, span)
+}
+
+/// Parse the content of an interpolated string into literal and interpolation parts.
+///
+/// The input should be the string content without the surrounding quotes.
+/// `base_offset` is the offset of the first character in the input within the file.
+fn parse_interpolated_string_parts(
+    input: &str,
+    file_id: usize,
+    base_offset: usize,
+    ctx: &mut BodyResolutionContext,
+) -> Vec<InterpolationPart> {
+    let mut parts = Vec::new();
+    let mut chars = input.char_indices().peekable();
+    let mut literal_start = 0;
+    let mut literal = String::new();
+
+    while let Some((i, c)) = chars.next() {
+        if c == '\\' {
+            if let Some(&(_, next)) = chars.peek() {
+                if next == '(' {
+                    // Start of interpolation
+                    // First, emit any accumulated literal
+                    if !literal.is_empty() {
+                        parts.push(InterpolationPart::Literal {
+                            text: literal.clone(),
+                            span: Span::new(file_id, (base_offset + literal_start)..(base_offset + i)),
+                        });
+                        literal.clear();
+                    }
+
+                    // Skip the '('
+                    chars.next();
+                    let interp_start = i;
+
+                    // Find the matching ')' and extract expression + format spec
+                    let (expr_text, format_spec, interp_end) =
+                        extract_interpolation(&mut chars, input, i + 2);
+
+                    // Parse and resolve the expression
+                    let resolved_expr = parse_and_resolve_expression(&expr_text, file_id, base_offset + i + 2, ctx);
+
+                    parts.push(InterpolationPart::Interpolation {
+                        expr: Box::new(resolved_expr),
+                        format_spec,
+                        span: Span::new(
+                            file_id,
+                            (base_offset + interp_start)..(base_offset + interp_end),
+                        ),
+                    });
+
+                    literal_start = interp_end;
+                } else {
+                    // Regular escape sequence
+                    chars.next(); // consume the escaped character
+                    // Unescape the sequence
+                    let escaped = unescape_char(next, file_id, base_offset + i + 1, ctx);
+                    literal.push(escaped);
+                }
+            }
+        } else {
+            literal.push(c);
+        }
+    }
+
+    // Emit any remaining literal
+    if !literal.is_empty() {
+        parts.push(InterpolationPart::Literal {
+            text: literal,
+            span: Span::new(file_id, (base_offset + literal_start)..(base_offset + input.len())),
+        });
+    }
+
+    parts
+}
+
+/// Extract the expression text and optional format spec from an interpolation.
+///
+/// Returns (expression_text, format_spec, end_offset).
+/// `chars` should be positioned just after the opening `\(`.
+/// `input` is the full string content.
+/// `start` is the offset of the first character after `\(` within `input`.
+fn extract_interpolation(
+    chars: &mut std::iter::Peekable<std::str::CharIndices>,
+    input: &str,
+    start: usize,
+) -> (String, Option<String>, usize) {
+    let mut depth = 1;
+    let mut in_string = false;
+    let mut in_char = false;
+    let mut format_start: Option<usize> = None;
+
+    while let Some(&(i, c)) = chars.peek() {
+        chars.next();
+
+        // Track string literals
+        if c == '"' && !in_char {
+            in_string = !in_string;
+        }
+        // Track character literals
+        if c == '\'' && !in_string {
+            in_char = !in_char;
+        }
+
+        if in_string || in_char {
+            // Skip escape sequences inside strings/chars
+            if c == '\\' {
+                chars.next();
+            }
+            continue;
+        }
+
+        match c {
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth == 0 {
+                    // Found the closing paren
+                    let end = i + 1;
+
+                    // Determine expression and format spec
+                    if let Some(fmt_start) = format_start {
+                        let expr_text = input[start..fmt_start].to_string();
+                        let fmt_text = input[fmt_start + 1..i].to_string();
+                        return (expr_text, Some(fmt_text), end);
+                    } else {
+                        let expr_text = input[start..i].to_string();
+                        return (expr_text, None, end);
+                    }
+                }
+            },
+            ':' if depth == 1 && format_start.is_none() => {
+                // This colon introduces a format spec (only at depth 1)
+                format_start = Some(i);
+            },
+            _ => {},
+        }
+    }
+
+    // Unterminated interpolation - return what we have
+    let expr_text = input[start..].to_string();
+    (expr_text, None, input.len())
+}
+
+/// Parse and resolve an expression from source text.
+fn parse_and_resolve_expression(
+    expr_text: &str,
+    file_id: usize,
+    offset: usize,
+    ctx: &mut BodyResolutionContext,
+) -> Expression {
+    use kestrel_lexer::lex;
+    use kestrel_parser::event::{EventSink, TreeBuilder};
+    use kestrel_parser::parse_expr;
+
+    // Lex the expression text
+    let tokens: Vec<_> = lex(expr_text, file_id)
+        .filter_map(|t| t.ok())
+        .map(|spanned| {
+            // Adjust spans to be relative to the original file
+            let adjusted_span = Span::new(
+                file_id,
+                (spanned.span.start + offset)..(spanned.span.end + offset),
+            );
+            (spanned.value, adjusted_span)
+        })
+        .collect();
+
+    if tokens.is_empty() {
+        return Expression::error(Span::new(file_id, offset..(offset + expr_text.len())));
+    }
+
+    // Parse the expression
+    let mut sink = EventSink::new(file_id);
+    parse_expr(expr_text, tokens.into_iter(), &mut sink);
+    let tree = TreeBuilder::new(expr_text, sink.into_events()).build();
+
+    // Resolve the parsed expression
+    // The tree's root should be an Expression node
+    resolve_expression(&tree, ctx)
+}
+
+/// Unescape a single escape character (simplified version for interpolation parsing).
+fn unescape_char(c: char, _file_id: usize, _offset: usize, _ctx: &mut BodyResolutionContext) -> char {
+    match c {
+        'n' => '\n',
+        'r' => '\r',
+        't' => '\t',
+        '\\' => '\\',
+        '"' => '"',
+        '\'' => '\'',
+        '0' => '\0',
+        // For other escapes, just return the character as-is
+        // (unicode escapes are handled separately in the full unescape logic)
+        _ => c,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3285,5 +3530,56 @@ mod tests {
         assert_eq!(parse_integer_literal("0b1010"), Some(10));
         assert_eq!(parse_integer_literal("0o17"), Some(15));
         assert_eq!(parse_integer_literal("1_000_000"), Some(1000000));
+    }
+
+    #[test]
+    fn test_extract_interpolation_simple() {
+        let input = "name)";
+        let mut chars = input.char_indices().peekable();
+        let (expr, fmt, end) = extract_interpolation(&mut chars, input, 0);
+        assert_eq!(expr, "name");
+        assert_eq!(fmt, None);
+        assert_eq!(end, 5); // "name)" is 5 chars
+    }
+
+    #[test]
+    fn test_extract_interpolation_with_format() {
+        let input = "x:>8)";
+        let mut chars = input.char_indices().peekable();
+        let (expr, fmt, end) = extract_interpolation(&mut chars, input, 0);
+        assert_eq!(expr, "x");
+        assert_eq!(fmt, Some(">8".to_string()));
+        assert_eq!(end, 5);
+    }
+
+    #[test]
+    fn test_extract_interpolation_nested_parens() {
+        let input = "func(a, b))";
+        let mut chars = input.char_indices().peekable();
+        let (expr, fmt, end) = extract_interpolation(&mut chars, input, 0);
+        assert_eq!(expr, "func(a, b)");
+        assert_eq!(fmt, None);
+        assert_eq!(end, 11);
+    }
+
+    #[test]
+    fn test_extract_interpolation_with_string() {
+        let input = r#"greeting("hello"))rest"#;
+        let mut chars = input.char_indices().peekable();
+        let (expr, fmt, end) = extract_interpolation(&mut chars, input, 0);
+        assert_eq!(expr, r#"greeting("hello")"#);
+        assert_eq!(fmt, None);
+        assert_eq!(end, 18);
+    }
+
+    #[test]
+    fn test_extract_interpolation_with_colon_in_string() {
+        // Colon inside string should not be treated as format spec
+        let input = r#"f(":"))"#;
+        let mut chars = input.char_indices().peekable();
+        let (expr, fmt, end) = extract_interpolation(&mut chars, input, 0);
+        assert_eq!(expr, r#"f(":")"#);
+        assert_eq!(fmt, None);
+        assert_eq!(end, 7);
     }
 }

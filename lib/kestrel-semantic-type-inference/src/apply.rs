@@ -5,7 +5,7 @@
 
 use kestrel_semantic_tree::behavior::executable::CodeBlock;
 use kestrel_semantic_tree::expr::{
-    CallArgument, ElseBranch, ExprKind, Expression, PrimitiveMethod,
+    CallArgument, ElseBranch, ExprKind, Expression, InterpolationPart, PrimitiveMethod,
 };
 use kestrel_semantic_tree::pattern::Pattern;
 use kestrel_semantic_tree::stmt::{Statement, StatementKind};
@@ -105,6 +105,30 @@ fn apply_to_expression(expr: &Expression, solution: &Solution) -> Expression {
     let kind = match &expr.kind {
         // Simple cases - just clone the kind
         ExprKind::Literal(lit) => ExprKind::Literal(lit.clone()),
+        ExprKind::InterpolatedString { parts } => {
+            // Apply solution to interpolation expressions
+            let resolved_parts = parts
+                .iter()
+                .map(|part| match part {
+                    InterpolationPart::Literal { text, span } => InterpolationPart::Literal {
+                        text: text.clone(),
+                        span: span.clone(),
+                    },
+                    InterpolationPart::Interpolation {
+                        expr,
+                        format_spec,
+                        span,
+                    } => InterpolationPart::Interpolation {
+                        expr: Box::new(apply_to_expression(expr, solution)),
+                        format_spec: format_spec.clone(),
+                        span: span.clone(),
+                    },
+                })
+                .collect();
+            ExprKind::InterpolatedString {
+                parts: resolved_parts,
+            }
+        },
         ExprKind::LocalRef(id) => ExprKind::LocalRef(*id),
         ExprKind::SymbolRef(id) => ExprKind::SymbolRef(*id),
         ExprKind::OverloadedRef(ids) => ExprKind::OverloadedRef(ids.clone()),

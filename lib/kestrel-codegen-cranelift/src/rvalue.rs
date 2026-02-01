@@ -761,6 +761,13 @@ pub fn compile_rvalue(
                 delta_val,
             ))
         },
+
+        Rvalue::StrConcat { .. } => {
+            // TODO: String concatenation is not yet implemented
+            // This should allocate a buffer and copy strings into it
+            // For now, return an error value
+            Ok(builder.ins().iconst(cranelift_codegen::ir::types::I64, 0))
+        },
     }
 }
 

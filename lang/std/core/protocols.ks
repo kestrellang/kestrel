@@ -177,7 +177,9 @@ public protocol Defaultable {
 ///   "\(n:08x)"       "0000002a"
 ///   "\(pi:.2)"       "3.14"
 ///   "\(value:?)"     debug representation
+@builtin(.FormattableProtocol)
 public protocol Formattable {
     /// Returns this value formatted as a string with the given options.
+    @builtin(.FormattableFormat)
     func format() -> String
 }

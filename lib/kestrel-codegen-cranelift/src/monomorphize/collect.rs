@@ -460,6 +460,13 @@ impl<'a> CollectionContext<'a> {
                 self.scan_value(ptr, subst);
                 self.scan_value(delta, subst);
             },
+
+            // String concatenation
+            Rvalue::StrConcat { parts } => {
+                for part in parts {
+                    self.scan_value(part, subst);
+                }
+            },
         }
     }
 

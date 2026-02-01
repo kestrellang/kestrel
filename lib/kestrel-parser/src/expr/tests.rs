@@ -955,3 +955,60 @@ fn test_implicit_member_access_with_trailing_comma() {
     let expr = parse_expr_from_source(source);
     assert!(expr.is_implicit_member_access());
 }
+
+// ===== Interpolated String Tests =====
+
+#[test]
+fn test_simple_string_no_interpolation() {
+    let source = r#""hello world""#;
+    let expr = parse_expr_from_source(source);
+    assert!(expr.is_string());
+    assert!(!expr.is_interpolated_string());
+}
+
+#[test]
+fn test_string_with_escape_no_interpolation() {
+    let source = r#""hello\nworld""#;
+    let expr = parse_expr_from_source(source);
+    assert!(expr.is_string());
+    assert!(!expr.is_interpolated_string());
+}
+
+#[test]
+fn test_string_with_interpolation_basic() {
+    let source = r#""Hello \(name)!""#;
+    let expr = parse_expr_from_source(source);
+    assert!(!expr.is_string());
+    assert!(expr.is_interpolated_string());
+}
+
+#[test]
+fn test_string_with_interpolation_multiple() {
+    let source = r#""\(a) and \(b)""#;
+    let expr = parse_expr_from_source(source);
+    assert!(expr.is_interpolated_string());
+}
+
+#[test]
+fn test_string_with_format_spec() {
+    let source = r#""\(x:>8)""#;
+    let expr = parse_expr_from_source(source);
+    assert!(expr.is_interpolated_string());
+}
+
+#[test]
+fn test_string_with_nested_string() {
+    // This tests the lexer's ability to handle nested strings
+    let source = r#""\(dict["key"])""#;
+    let expr = parse_expr_from_source(source);
+    assert!(expr.is_interpolated_string());
+}
+
+#[test]
+fn test_escaped_backslash_not_interpolation() {
+    // \\( should not be interpolation
+    let source = r#""\\(not interpolation)""#;
+    let expr = parse_expr_from_source(source);
+    assert!(expr.is_string());
+    assert!(!expr.is_interpolated_string());
+}

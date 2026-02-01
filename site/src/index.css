@@ -2,6 +2,8 @@
 
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 :root {
   --font-serif: "Fraunces", Georgia, serif;
   --font-mono: "Fira Code", monospace;
@@ -67,11 +69,6 @@
 /* Dark mode version badge and forest/10 backgrounds */
 .dark .bg-\[var\(--color-forest\)\]\/10 { background-color: rgba(45, 90, 71, 0.25); }
 .dark .text-\[var\(--color-forest\)\] { color: #5da88a; }
-
-/* Dark mode hero image */
-.dark .scroll-section img[src*="kestrel"] {
-  filter: brightness(1.1) saturate(1.2);
-}
 
 /* Dark mode scrollbar */
 .dark::-webkit-scrollbar-thumb {

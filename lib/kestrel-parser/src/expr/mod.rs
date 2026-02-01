@@ -60,6 +60,11 @@ impl Expression {
         self.kind() == SyntaxKind::ExprString
     }
 
+    /// Check if this is an interpolated string literal
+    pub fn is_interpolated_string(&self) -> bool {
+        self.kind() == SyntaxKind::ExprInterpolatedString
+    }
+
     /// Check if this is a boolean literal
     pub fn is_bool(&self) -> bool {
         self.kind() == SyntaxKind::ExprBool
@@ -210,8 +215,11 @@ pub enum ExprVariant {
     Integer(Span),
     /// Float literal: 3.14, 1.0e10
     Float(Span),
-    /// String literal: "hello"
+    /// String literal: "hello" (no interpolation)
     String(Span),
+    /// Interpolated string literal: "Hello \(name)!"
+    /// Contains interpolation expressions. The parsing of parts is deferred to the semantic phase.
+    InterpolatedString(Span),
     /// Raw string literal: """hello"""
     RawString(Span),
     /// Character literal: 'a', '\n', '\u{1F600}'
@@ -2169,6 +2177,9 @@ pub fn emit_expr_variant(sink: &mut EventSink, variant: &ExprVariant) {
         ExprVariant::String(span) => {
             emit_string_expr(sink, span.clone());
         },
+        ExprVariant::InterpolatedString(span) => {
+            emit_interpolated_string_expr(sink, span.clone());
+        },
         ExprVariant::RawString(span) => {
             emit_raw_string_expr(sink, span.clone());
         },
@@ -2394,6 +2405,16 @@ fn emit_float_expr(sink: &mut EventSink, span: Span) {
 fn emit_string_expr(sink: &mut EventSink, span: Span) {
     sink.start_node(SyntaxKind::Expression);
     sink.start_node(SyntaxKind::ExprString);
+    sink.add_token(SyntaxKind::String, span);
+    sink.finish_node();
+    sink.finish_node();
+}
+
+fn emit_interpolated_string_expr(sink: &mut EventSink, span: Span) {
+    sink.start_node(SyntaxKind::Expression);
+    sink.start_node(SyntaxKind::ExprInterpolatedString);
+    // For now, we emit the entire string as a single token.
+    // The semantic phase (binder) will parse the interpolation parts.
     sink.add_token(SyntaxKind::String, span);
     sink.finish_node();
     sink.finish_node();
@@ -3076,6 +3097,48 @@ fn emit_implicit_member_access_expr(
     sink.finish_node();
 }
 
+/// Check if a string literal contains interpolation (`\(`)
+fn string_contains_interpolation(source: &str, span: &Span) -> bool {
+    if span.end > source.len() || span.start >= span.end {
+        return false;
+    }
+    let text = &source[span.start..span.end];
+    // Look for `\(` that is not escaped (i.e., not preceded by `\\`)
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            if let Some(&next) = chars.peek() {
+                if next == '(' {
+                    return true;
+                }
+                // Skip the escaped character
+                chars.next();
+            }
+        }
+    }
+    false
+}
+
+/// Transform an ExprVariant, converting String to InterpolatedString where source contains `\(`
+///
+/// This is a simple check - we only transform top-level strings in the parse result.
+/// Nested strings in complex expressions will be handled by the semantic phase which
+/// has full source access.
+fn maybe_convert_to_interpolated(source: &str, variant: ExprVariant) -> ExprVariant {
+    match variant {
+        ExprVariant::String(span) => {
+            if string_contains_interpolation(source, &span) {
+                ExprVariant::InterpolatedString(span)
+            } else {
+                ExprVariant::String(span)
+            }
+        },
+        // For other variants, we don't recursively transform here.
+        // The semantic phase will handle nested expressions.
+        other => other,
+    }
+}
+
 /// Parse an expression and emit events
 pub fn parse_expr<I>(source: &str, tokens: I, sink: &mut EventSink)
 where
@@ -3086,7 +3149,9 @@ where
 
     match expr_parser().parse(input).into_result() {
         Ok(variant) => {
-            emit_expr_variant(sink, &variant);
+            // Transform strings with interpolation to InterpolatedString variant
+            let transformed = maybe_convert_to_interpolated(source, variant);
+            emit_expr_variant(sink, &transformed);
         },
         Err(errors) => {
             // Even on error, we need to emit a valid tree structure

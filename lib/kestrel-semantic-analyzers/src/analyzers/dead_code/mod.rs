@@ -493,6 +493,7 @@ fn analyze_expression(expr: &Expression, errors: &mut Vec<UnreachableCodeWarning
         | ExprKind::AssociatedTypeRef
         | ExprKind::EnumCase { .. }
         | ExprKind::LangIntrinsicRef(_)
+        | ExprKind::InterpolatedString { .. }
         | ExprKind::Error => Divergence::None,
 
         // Match expressions - all arms must diverge for the match to diverge

@@ -182,6 +182,8 @@ pub enum Rvalue {
     StrFromParts { ptr: Value, len: Value },
     /// `int.to_string <value>` - convert integer to string
     IntToString(Value),
+    /// `str.concat [parts...]` - concatenate multiple strings
+    StrConcat { parts: Vec<Value> },
 
     // === Pointer operations ===
     /// `ptr.offset <ptr>, <offset>` - byte offset
@@ -801,6 +803,16 @@ impl fmt::Display for RvalueDisplay<'_> {
                     ptr.display(self.ctx),
                     delta.display(self.ctx)
                 )
+            },
+            Rvalue::StrConcat { parts } => {
+                write!(f, "str.concat [")?;
+                for (i, part) in parts.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", part.display(self.ctx))?;
+                }
+                write!(f, "]")
             },
         }
     }

@@ -458,6 +458,7 @@ fn find_assignments_to_locals(
         | ExprKind::Break { .. }
         | ExprKind::Continue { .. }
         | ExprKind::LangIntrinsicRef(_)
+        | ExprKind::InterpolatedString { .. }
         | ExprKind::Error => {},
 
         ExprKind::Match { scrutinee, arms } => {

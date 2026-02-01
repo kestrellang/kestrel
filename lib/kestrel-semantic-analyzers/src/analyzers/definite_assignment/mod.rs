@@ -398,6 +398,7 @@ fn analyze_expression(
         | ExprKind::AssociatedTypeRef
         | ExprKind::EnumCase { .. }
         | ExprKind::LangIntrinsicRef(_)
+        | ExprKind::InterpolatedString { .. }
         | ExprKind::Error
         | ExprKind::OverloadedRef(_)
         | ExprKind::Closure { .. } => {},

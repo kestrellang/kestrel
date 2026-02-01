@@ -1113,6 +1113,16 @@ fn collect_captures_recursive(
         | ExprKind::Break { .. }
         | ExprKind::Continue { .. }
         | ExprKind::Error => {},
+
+        // Interpolated strings - recurse into interpolation expressions
+        ExprKind::InterpolatedString { parts } => {
+            use kestrel_semantic_tree::expr::InterpolationPart;
+            for part in parts {
+                if let InterpolationPart::Interpolation { expr, .. } = part {
+                    collect_captures_recursive(expr, closure_entry_depth, local_scope, captures, seen_ids);
+                }
+            }
+        },
     }
 }
 

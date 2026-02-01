@@ -136,6 +136,10 @@ pub enum SyntaxKind {
     ExprFloat,                // 3.14, 1.0e10
     ExprString,               // "hello"
     ExprRawString,            // """hello""" (raw/multi-line string)
+    ExprInterpolatedString,   // "Hello \(name)!" - string with interpolations
+    StringLiteralPart,        // Literal text segment in interpolated string
+    StringInterpolation,      // \(expr) or \(expr:format) segment
+    FormatSpecifier,          // :format_spec in string interpolation
     ExprChar,                 // 'a', '\n', '\u{1F600}'
     ExprBool,                 // true, false
     ExprArray,                // [1, 2, 3]
@@ -530,6 +534,10 @@ impl Language for KestrelLanguage {
         const EXPR_INTEGER: u16 = SyntaxKind::ExprInteger as u16;
         const EXPR_FLOAT: u16 = SyntaxKind::ExprFloat as u16;
         const EXPR_STRING: u16 = SyntaxKind::ExprString as u16;
+        const EXPR_INTERPOLATED_STRING: u16 = SyntaxKind::ExprInterpolatedString as u16;
+        const STRING_LITERAL_PART: u16 = SyntaxKind::StringLiteralPart as u16;
+        const STRING_INTERPOLATION: u16 = SyntaxKind::StringInterpolation as u16;
+        const FORMAT_SPECIFIER: u16 = SyntaxKind::FormatSpecifier as u16;
         const EXPR_CHAR: u16 = SyntaxKind::ExprChar as u16;
         const EXPR_BOOL: u16 = SyntaxKind::ExprBool as u16;
         const EXPR_ARRAY: u16 = SyntaxKind::ExprArray as u16;
@@ -777,6 +785,10 @@ impl Language for KestrelLanguage {
             EXPR_INTEGER => SyntaxKind::ExprInteger,
             EXPR_FLOAT => SyntaxKind::ExprFloat,
             EXPR_STRING => SyntaxKind::ExprString,
+            EXPR_INTERPOLATED_STRING => SyntaxKind::ExprInterpolatedString,
+            STRING_LITERAL_PART => SyntaxKind::StringLiteralPart,
+            STRING_INTERPOLATION => SyntaxKind::StringInterpolation,
+            FORMAT_SPECIFIER => SyntaxKind::FormatSpecifier,
             EXPR_CHAR => SyntaxKind::ExprChar,
             EXPR_BOOL => SyntaxKind::ExprBool,
             EXPR_ARRAY => SyntaxKind::ExprArray,

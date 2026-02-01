@@ -13,7 +13,8 @@ use kestrel_semantic_tree::behavior::callable::{
     CallableBehavior, ParameterAccessMode, ReceiverKind,
 };
 use kestrel_semantic_tree::expr::{
-    CallArgument, ElseBranch, ExprKind, Expression, IfCondition, LiteralValue, PrimitiveMethod,
+    CallArgument, ElseBranch, ExprKind, Expression, IfCondition, InterpolationPart, LiteralValue,
+    PrimitiveMethod,
 };
 use kestrel_semantic_tree::symbol::field::FieldSymbol;
 use kestrel_semantic_tree::symbol::initializer::InitializerSymbol;
@@ -1601,11 +1602,320 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
             )
         },
 
+        ExprKind::InterpolatedString { parts } => {
+            lower_interpolated_string(ctx, parts, expr)
+        },
+
         ExprKind::Error => {
             // Error expression - return error value (error already reported)
             Value::Immediate(Immediate::error())
         },
     }
+}
+
+/// Lower an interpolated string expression.
+///
+/// Interpolated strings like `"Hello \(name)!"` are lowered to:
+/// 1. Create a DefaultStringInterpolation instance
+/// 2. For each part:
+///    - If literal: call appendLiteral(literal:)
+///    - If interpolation: call appendInterpolation(value:options:)
+/// 3. Call build() to get the final string
+fn lower_interpolated_string(
+    ctx: &mut LoweringContext,
+    parts: &[InterpolationPart],
+    expr: &Expression,
+) -> Value {
+    let span = expr.span.clone();
+    let result_ty = lower_type(ctx, &expr.ty);
+
+    // Count literal and interpolation parts for capacity hints
+    let mut literal_capacity: i64 = 0;
+    let mut interpolation_count: i64 = 0;
+    for part in parts {
+        match part {
+            InterpolationPart::Literal { text, .. } => {
+                literal_capacity += text.len() as i64;
+            },
+            InterpolationPart::Interpolation { .. } => {
+                interpolation_count += 1;
+            },
+        }
+    }
+
+    // Look up DefaultStringInterpolation struct
+    let Some(dsi_id) = ctx.model.builtin_registry().default_string_interpolation() else {
+        ctx.emit_error(LoweringError::internal(
+            "DefaultStringInterpolation not found in builtin registry",
+            Some(span.clone()),
+        ));
+        return Value::Immediate(Immediate::error());
+    };
+
+    let Some(dsi_symbol) = ctx.model.query(SymbolFor { id: dsi_id }) else {
+        ctx.emit_error(LoweringError::internal(
+            "DefaultStringInterpolation symbol not found",
+            Some(span.clone()),
+        ));
+        return Value::Immediate(Immediate::error());
+    };
+
+    // Get the DSI type
+    let dsi_struct_sym = dsi_symbol
+        .clone()
+        .downcast_arc::<kestrel_semantic_tree::symbol::r#struct::StructSymbol>()
+        .unwrap();
+    let dsi_ty = Ty::r#struct(dsi_struct_sym, span.clone());
+    let mir_dsi_ty = lower_type(ctx, &dsi_ty);
+
+    // Allocate space for the DefaultStringInterpolation instance
+    let dsi_local = ctx.create_temp("interpolation", mir_dsi_ty);
+    let dsi_place = Place::local(dsi_local);
+
+    // Create a mutable reference to the DSI
+    let ref_ty = ctx.mir.ty_ref_mut(mir_dsi_ty);
+    let dsi_ref_local = ctx.create_temp("interp_ref", ref_ty);
+    let dsi_ref_place = Place::local(dsi_ref_local);
+
+    // Emit: %dsi_ref = ref mut %dsi
+    ctx.emit_assign(dsi_ref_place.clone(), Rvalue::RefMut(dsi_place.clone()));
+
+    // Build qualified name for DefaultStringInterpolation
+    let dsi_name = qualified_name_for_symbol(ctx, &dsi_symbol);
+    let dsi_name_parts = ctx.mir.name(dsi_name).segments.clone();
+
+    // Call init(literalCapacity:interpolationCount:)
+    let init_name_parts = {
+        let mut parts = dsi_name_parts.clone();
+        parts.push("init$literalCapacity$interpolationCount".to_string());
+        parts
+    };
+    let init_name = ctx.mir.intern_name(QualifiedNameData::new(init_name_parts));
+
+    let unit_ty = ctx.mir.ty_unit();
+    let init_ret_local = ctx.create_temp("init_ret", unit_ty);
+    let init_ret_place = Place::local(init_ret_local);
+
+    let init_args = vec![
+        CallArg::mutating(Value::Place(dsi_ref_place.clone())),
+        CallArg::borrow(Value::Immediate(Immediate::i64(literal_capacity))),
+        CallArg::borrow(Value::Immediate(Immediate::i64(interpolation_count))),
+    ];
+
+    ctx.emit_call_with_modes(init_ret_place, Callee::direct(init_name), init_args);
+
+    // For each part, call the appropriate append method
+    for part in parts {
+        // Re-create the mutable reference (it may have been consumed)
+        let part_ref_local = ctx.create_temp("part_ref", ref_ty);
+        let part_ref_place = Place::local(part_ref_local);
+        ctx.emit_assign(part_ref_place.clone(), Rvalue::RefMut(dsi_place.clone()));
+
+        match part {
+            InterpolationPart::Literal { text, .. } => {
+                // Call appendLiteral(literal:)
+                let append_name_parts = {
+                    let mut parts = dsi_name_parts.clone();
+                    parts.push("appendLiteral$literal".to_string());
+                    parts
+                };
+                let append_name = ctx.mir.intern_name(QualifiedNameData::new(append_name_parts));
+
+                // Create a string immediate for the literal
+                let literal_ptr = Value::Immediate(Immediate::string_ptr(text.clone()));
+                let literal_len = Value::Immediate(Immediate::i64(text.len() as i64));
+
+                // Get String type and create a temp for it
+                let string_ty = lower_type(ctx, &Ty::string(span.clone()));
+                let string_local = ctx.create_temp("literal_str", string_ty);
+                let string_place = Place::local(string_local);
+
+                // Create mutable ref to string for init
+                let string_ref_ty = ctx.mir.ty_ref_mut(string_ty);
+                let string_ref_local = ctx.create_temp("string_ref", string_ref_ty);
+                let string_ref_place = Place::local(string_ref_local);
+                ctx.emit_assign(
+                    string_ref_place.clone(),
+                    Rvalue::RefMut(string_place.clone()),
+                );
+
+                // Call String.init(stringLiteral:length:)
+                let string_init_name =
+                    ctx.mir
+                        .intern_name(QualifiedNameData::new(vec![
+                            "std".to_string(),
+                            "text".to_string(),
+                            "String".to_string(),
+                            "init$stringLiteral$length".to_string(),
+                        ]));
+                let string_init_ret_local = ctx.create_temp("str_init_ret", unit_ty);
+                let string_init_ret_place = Place::local(string_init_ret_local);
+                ctx.emit_call_with_modes(
+                    string_init_ret_place,
+                    Callee::direct(string_init_name),
+                    vec![
+                        CallArg::mutating(Value::Place(string_ref_place)),
+                        CallArg::borrow(literal_ptr),
+                        CallArg::borrow(literal_len),
+                    ],
+                );
+
+                // Create borrow ref to string for appendLiteral
+                let string_borrow_ty = ctx.mir.ty_ref(string_ty);
+                let string_borrow_local = ctx.create_temp("string_borrow", string_borrow_ty);
+                let string_borrow_place = Place::local(string_borrow_local);
+                ctx.emit_assign(
+                    string_borrow_place.clone(),
+                    Rvalue::Ref(string_place.clone()),
+                );
+
+                let append_ret_local = ctx.create_temp("append_ret", unit_ty);
+                let append_ret_place = Place::local(append_ret_local);
+
+                ctx.emit_call_with_modes(
+                    append_ret_place,
+                    Callee::direct(append_name),
+                    vec![
+                        CallArg::mutating(Value::Place(part_ref_place)),
+                        CallArg::borrow(Value::Place(string_borrow_place)),
+                    ],
+                );
+            },
+            InterpolationPart::Interpolation {
+                expr: interp_expr, ..
+            } => {
+                // Lower the interpolation expression
+                let interp_value = lower_expression(ctx, interp_expr);
+
+                // Call appendInterpolation(value:options:)
+                // For simplicity, we call appendInterpolation(value:) without options
+                // which uses default FormatOptions
+                let append_name_parts = {
+                    let mut parts = dsi_name_parts.clone();
+                    parts.push("appendInterpolation$value$options".to_string());
+                    parts
+                };
+                let append_name = ctx.mir.intern_name(QualifiedNameData::new(append_name_parts));
+
+                // Get FormatOptions type - we just use a placeholder since the method
+                // will find the correct type from the parameter declaration
+                // For now, use unit type as a placeholder (the actual type will be
+                // determined by the function signature)
+                let format_opts_ty = ctx.mir.ty_unit();
+                let format_opts_local = ctx.create_temp("format_opts", format_opts_ty);
+                let format_opts_place = Place::local(format_opts_local);
+
+                // Create mutable ref for FormatOptions init
+                let format_opts_ref_ty = ctx.mir.ty_ref_mut(format_opts_ty);
+                let format_opts_ref_local = ctx.create_temp("format_opts_ref", format_opts_ref_ty);
+                let format_opts_ref_place = Place::local(format_opts_ref_local);
+                ctx.emit_assign(
+                    format_opts_ref_place.clone(),
+                    Rvalue::RefMut(format_opts_place.clone()),
+                );
+
+                // Call FormatOptions.init()
+                let format_opts_init_name = ctx.mir.intern_name(QualifiedNameData::new(vec![
+                    "std".to_string(),
+                    "core".to_string(),
+                    "FormatOptions".to_string(),
+                    "init".to_string(),
+                ]));
+                let format_opts_init_ret_local = ctx.create_temp("fmt_init_ret", unit_ty);
+                let format_opts_init_ret_place = Place::local(format_opts_init_ret_local);
+                ctx.emit_call_with_modes(
+                    format_opts_init_ret_place,
+                    Callee::direct(format_opts_init_name),
+                    vec![CallArg::mutating(Value::Place(format_opts_ref_place))],
+                );
+
+                // Get the expression's type for the generic call
+                let interp_ty = lower_type(ctx, &interp_expr.ty);
+
+                // Create a ref to the interpolation value
+                // If it's already a place, ref it. If it's an immediate, store it first.
+                let interp_ref_ty = ctx.mir.ty_ref(interp_ty);
+                let interp_ref_local = ctx.create_temp("interp_ref", interp_ref_ty);
+                let interp_ref_place = Place::local(interp_ref_local);
+
+                match interp_value {
+                    Value::Place(p) => {
+                        ctx.emit_assign(interp_ref_place.clone(), Rvalue::Ref(p));
+                    },
+                    Value::Immediate(imm) => {
+                        // Store the immediate in a temp, then ref it
+                        let temp_local = ctx.create_temp("interp_temp", interp_ty);
+                        let temp_place = Place::local(temp_local);
+                        ctx.emit_assign(temp_place.clone(), Rvalue::Use(imm));
+                        ctx.emit_assign(interp_ref_place.clone(), Rvalue::Ref(temp_place));
+                    },
+                    Value::Unreachable => {
+                        // Unreachable value - skip this interpolation
+                        continue;
+                    },
+                }
+
+                // Borrow FormatOptions
+                let format_opts_borrow_ty = ctx.mir.ty_ref(format_opts_ty);
+                let format_opts_borrow_local =
+                    ctx.create_temp("format_opts_borrow", format_opts_borrow_ty);
+                let format_opts_borrow_place = Place::local(format_opts_borrow_local);
+                ctx.emit_assign(
+                    format_opts_borrow_place.clone(),
+                    Rvalue::Ref(format_opts_place.clone()),
+                );
+
+                let append_ret_local = ctx.create_temp("append_ret", unit_ty);
+                let append_ret_place = Place::local(append_ret_local);
+
+                // Call as a generic method with type parameter
+                ctx.emit_call_with_modes(
+                    append_ret_place,
+                    Callee::direct_generic(append_name, vec![interp_ty]),
+                    vec![
+                        CallArg::mutating(Value::Place(part_ref_place)),
+                        CallArg::borrow(Value::Place(interp_ref_place)),
+                        CallArg::borrow(Value::Place(format_opts_borrow_place)),
+                    ],
+                );
+            },
+        }
+    }
+
+    // Call build() to get the final string
+    // First, borrow the DSI
+    let build_ref_ty = ctx.mir.ty_ref(mir_dsi_ty);
+    let build_ref_local = ctx.create_temp("build_ref", build_ref_ty);
+    let build_ref_place = Place::local(build_ref_local);
+    ctx.emit_assign(build_ref_place.clone(), Rvalue::Ref(dsi_place.clone()));
+
+    let build_name_parts = {
+        let mut parts = dsi_name_parts;
+        parts.push("build".to_string());
+        parts
+    };
+    let build_name = ctx.mir.intern_name(QualifiedNameData::new(build_name_parts));
+
+    // Allocate space for the result string
+    let result_local = ctx.create_temp("result", result_ty);
+    let result_place = Place::local(result_local);
+
+    // Create mutable ref to result for build
+    let result_ref_ty = ctx.mir.ty_ref_mut(result_ty);
+    let result_ref_local = ctx.create_temp("result_ref", result_ref_ty);
+    let result_ref_place = Place::local(result_ref_local);
+    ctx.emit_assign(
+        result_ref_place.clone(),
+        Rvalue::RefMut(result_place.clone()),
+    );
+
+    ctx.emit_call_with_modes(
+        result_ref_place,
+        Callee::direct(build_name),
+        vec![CallArg::borrow(Value::Place(build_ref_place))],
+    );
+
+    Value::Place(result_place)
 }
 
 /// Lower an array literal expression.

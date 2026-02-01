@@ -395,6 +395,29 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
             }
         },
 
+        // Interpolated strings: result is String, interpolated expressions must be Formattable
+        ExprKind::InterpolatedString { parts } => {
+            use kestrel_semantic_tree::expr::InterpolationPart;
+            use kestrel_semantic_tree::ty::Ty;
+
+            // The result type is String by default
+            // TODO: Support ExpressibleByStringInterpolation for custom types
+            let string_ty = Ty::string(expr.span.clone());
+            ctx.register_type(&string_ty);
+            ctx.equate(expr.ty.id(), string_ty.id(), expr.span.clone());
+
+            // Generate constraints for each interpolation expression
+            for part in parts {
+                if let InterpolationPart::Interpolation { expr: interp_expr, .. } = part {
+                    // Generate constraints for the interpolated expression
+                    generate_expression_constraints(ctx, interp_expr);
+
+                    // TODO: Add conformance constraint for Formattable protocol when it's registered
+                    // For now, the binder will check Formattable conformance
+                }
+            }
+        },
+
         // Arrays: type conforms to _ExpressibleByArrayLiteral, elements have Element type
         ExprKind::Array(elements) => {
             use kestrel_semantic_tree::builtins::LanguageFeature;

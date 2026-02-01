@@ -186,6 +186,7 @@ fn validate_assignment_target(
         | ExprKind::LangIntrinsic { .. }
         | ExprKind::LangIntrinsicRef(_)
         | ExprKind::SubscriptCall { .. }
+        | ExprKind::InterpolatedString { .. }
         | ExprKind::Error => {
             // Note: SubscriptCall could be a valid assignment target if the subscript
             // has a setter, but that validation is deferred to call resolution.

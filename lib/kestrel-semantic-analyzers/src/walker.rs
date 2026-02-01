@@ -399,6 +399,18 @@ fn walk_expression(
                     }
                 }
             },
+            // Interpolated strings - walk interpolation expressions
+            ExprKind::InterpolatedString { parts } => {
+                use kestrel_semantic_tree::expr::InterpolationPart;
+                for part in parts {
+                    if let InterpolationPart::Interpolation { expr, .. } = part {
+                        walk_expression(expr, analyzers, model, ctx);
+                        if ctx.stopped {
+                            return;
+                        }
+                    }
+                }
+            },
             // Leaf kinds or handled elsewhere
             ExprKind::Literal(_)
             | ExprKind::LocalRef(_)

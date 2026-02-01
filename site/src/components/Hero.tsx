@@ -36,13 +36,19 @@ export default function Hero() {
         <img
           src="/kestrel.webp"
           alt=""
-          className="max-w-[85%] max-h-[85%] object-contain"
+          className="max-w-[85%] max-h-[85%] object-contain dark:hidden"
+        />
+        <img
+          src="/kestrel-dark.jpeg"
+          alt=""
+          className="max-w-[85%] max-h-[85%] object-contain hidden dark:block mix-blend-lighten"
         />
       </div>
 
       {/* Gradient overlays for text readability */}
-      <div className="absolute inset-0 bg-gradient-to-r from-[#f8f6f1] via-[#f8f6f1]/80 to-transparent" />
-      <div className="absolute inset-0 bg-gradient-to-b from-[#f8f6f1]/50 via-transparent to-[#f8f6f1]/70" />
+      <div className="absolute inset-0 bg-gradient-to-r from-[#f8f6f1] via-[#f8f6f1]/80 to-transparent dark:hidden" />
+      <div className="absolute inset-0 bg-gradient-to-b from-[#f8f6f1]/50 via-transparent to-[#f8f6f1]/70 dark:hidden" />
+      <div className="absolute inset-0 hidden dark:block bg-gradient-to-r from-[#1c1916] via-[#1c1916]/60 to-transparent" />
 
       <div className="relative z-10 h-full flex flex-col justify-center px-6 md:px-12 lg:px-24">
         <div className="max-w-2xl">
@@ -64,7 +70,7 @@ export default function Hero() {
                 ? "opacity-100 translate-y-0"
                 : "opacity-0 translate-y-10"
             }`}>
-            You already know what you want. We just made it pleasant.
+            Systems programming, refined.
           </p>
 
           {/* Sub-tagline */}
@@ -74,7 +80,7 @@ export default function Hero() {
                 ? "opacity-100 translate-y-0"
                 : "opacity-0 translate-y-10"
             }`}>
-            All the power. None of the friction.
+            Bare metal power. Zero mental overhead.
           </p>
         </div>
 

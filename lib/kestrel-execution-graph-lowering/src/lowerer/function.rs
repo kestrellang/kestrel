@@ -1468,6 +1468,15 @@ fn collect_closure_local_ids_from_expr(expr: &Expression, ids: &mut HashSet<Loca
         | ExprKind::Continue { .. }
         | ExprKind::LangIntrinsicRef(_)
         | ExprKind::Error => {},
+
+        ExprKind::InterpolatedString { parts } => {
+            use kestrel_semantic_tree::expr::InterpolationPart;
+            for part in parts {
+                if let InterpolationPart::Interpolation { expr, .. } = part {
+                    collect_closure_local_ids_from_expr(expr, ids);
+                }
+            }
+        },
     }
 }
 

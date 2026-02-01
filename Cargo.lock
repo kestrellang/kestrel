@@ -607,6 +607,7 @@ version = "0.14.0"
 dependencies = [
  "downcast-rs",
  "kestrel-lexer",
+ "kestrel-parser",
  "kestrel-prelude",
  "kestrel-reporting",
  "kestrel-semantic-model",

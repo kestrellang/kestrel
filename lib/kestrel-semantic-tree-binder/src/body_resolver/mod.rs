@@ -19,6 +19,7 @@
 mod calls;
 pub(crate) mod context;
 mod expressions;
+pub mod format_spec;
 mod members;
 pub mod move_tracker;
 mod operators;
