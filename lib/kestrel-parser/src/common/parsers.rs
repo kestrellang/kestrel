@@ -610,48 +610,64 @@ fn computed_body_parser<'tokens>()
     // Protocol requirement: { get } or { get set }
     // These have no code block bodies, just keywords
     let protocol_requirement = skip_trivia()
-        .ignore_then(just(Token::LBrace))
-        .ignore_then(skip_trivia())
-        .ignore_then(just(Token::Get))
-        .ignore_then(
+        .ignore_then(just(Token::LBrace).map_with(|_, e| to_kestrel_span(e.span())))
+        .then_ignore(skip_trivia())
+        .then(just(Token::Get).map_with(|_, e| to_kestrel_span(e.span())))
+        .then(
             skip_trivia()
-                .ignore_then(just(Token::Set))
-                .map(|_| true)
-                .or(empty().to(false)),
+                .ignore_then(just(Token::Set).map_with(|_, e| to_kestrel_span(e.span())))
+                .map(Some)
+                .or(empty().to(None)),
         )
         .then_ignore(skip_trivia())
-        .then_ignore(just(Token::RBrace))
-        .map(|has_setter| ComputedBodyData::Accessors {
-            getter: None,
-            setter: if has_setter {
-                Some(CodeBlockData {
-                    lbrace: Span::new(0, 0..0),
-                    items: vec![],
-                    rbrace: Span::new(0, 0..0),
-                })
-            } else {
-                None
-            },
+        .then(just(Token::RBrace).map_with(|_, e| to_kestrel_span(e.span())))
+        .map(|(((lbrace_span, get_span), set_span_opt), rbrace_span)| {
+            ComputedBodyData::Accessors {
+                lbrace: lbrace_span,
+                get_span,
+                getter: None,
+                set_span: set_span_opt.clone(),
+                setter: if set_span_opt.is_some() {
+                    Some(CodeBlockData {
+                        lbrace: Span::new(0, 0..0),
+                        items: vec![],
+                        rbrace: Span::new(0, 0..0),
+                    })
+                } else {
+                    None
+                },
+                rbrace: rbrace_span,
+            }
         });
 
     // Explicit accessors: { get { body } set { body }? }
     // getter is required, setter is optional
     let explicit_accessors = skip_trivia()
-        .ignore_then(just(Token::LBrace))
-        .ignore_then(skip_trivia())
-        .ignore_then(just(Token::Get))
-        .ignore_then(code_block_parser())
+        .ignore_then(just(Token::LBrace).map_with(|_, e| to_kestrel_span(e.span())))
+        .then_ignore(skip_trivia())
+        .then(just(Token::Get).map_with(|_, e| to_kestrel_span(e.span())))
+        .then(code_block_parser())
         .then(
             skip_trivia()
-                .ignore_then(just(Token::Set))
-                .ignore_then(code_block_parser())
+                .ignore_then(just(Token::Set).map_with(|_, e| to_kestrel_span(e.span())))
+                .then(code_block_parser())
                 .or_not(),
         )
         .then_ignore(skip_trivia())
-        .then_ignore(just(Token::RBrace))
-        .map(|(getter_body, setter_body)| ComputedBodyData::Accessors {
-            getter: Some(getter_body),
-            setter: setter_body,
+        .then(just(Token::RBrace).map_with(|_, e| to_kestrel_span(e.span())))
+        .map(|((((lbrace_span, get_span), getter_body), setter_opt), rbrace_span)| {
+            let (set_span, setter_body) = match setter_opt {
+                Some((set_span, setter_body)) => (Some(set_span), Some(setter_body)),
+                None => (None, None),
+            };
+            ComputedBodyData::Accessors {
+                lbrace: lbrace_span,
+                get_span,
+                getter: Some(getter_body),
+                set_span,
+                setter: setter_body,
+                rbrace: rbrace_span,
+            }
         });
 
     // Shorthand: { expr } - parsed as a code block
@@ -822,48 +838,64 @@ fn subscript_body_parser<'tokens>()
     // Protocol requirement: { get } or { get set }
     // These have no code block bodies, just keywords
     let protocol_requirement = skip_trivia()
-        .ignore_then(just(Token::LBrace))
-        .ignore_then(skip_trivia())
-        .ignore_then(just(Token::Get))
-        .ignore_then(
+        .ignore_then(just(Token::LBrace).map_with(|_, e| to_kestrel_span(e.span())))
+        .then_ignore(skip_trivia())
+        .then(just(Token::Get).map_with(|_, e| to_kestrel_span(e.span())))
+        .then(
             skip_trivia()
-                .ignore_then(just(Token::Set))
-                .map(|_| true)
-                .or(empty().to(false)),
+                .ignore_then(just(Token::Set).map_with(|_, e| to_kestrel_span(e.span())))
+                .map(Some)
+                .or(empty().to(None)),
         )
         .then_ignore(skip_trivia())
-        .then_ignore(just(Token::RBrace))
-        .map(|has_setter| SubscriptBodyData::Accessors {
-            getter: None,
-            setter: if has_setter {
-                Some(CodeBlockData {
-                    lbrace: Span::new(0, 0..0),
-                    items: vec![],
-                    rbrace: Span::new(0, 0..0),
-                })
-            } else {
-                None
-            },
+        .then(just(Token::RBrace).map_with(|_, e| to_kestrel_span(e.span())))
+        .map(|(((lbrace_span, get_span), set_span_opt), rbrace_span)| {
+            SubscriptBodyData::Accessors {
+                lbrace: lbrace_span,
+                get_span,
+                getter: None,
+                set_span: set_span_opt.clone(),
+                setter: if set_span_opt.is_some() {
+                    Some(CodeBlockData {
+                        lbrace: Span::new(0, 0..0),
+                        items: vec![],
+                        rbrace: Span::new(0, 0..0),
+                    })
+                } else {
+                    None
+                },
+                rbrace: rbrace_span,
+            }
         });
 
     // Explicit accessors: { get { body } set { body }? }
     // getter is required, setter is optional
     let explicit_accessors = skip_trivia()
-        .ignore_then(just(Token::LBrace))
-        .ignore_then(skip_trivia())
-        .ignore_then(just(Token::Get))
-        .ignore_then(code_block_parser())
+        .ignore_then(just(Token::LBrace).map_with(|_, e| to_kestrel_span(e.span())))
+        .then_ignore(skip_trivia())
+        .then(just(Token::Get).map_with(|_, e| to_kestrel_span(e.span())))
+        .then(code_block_parser())
         .then(
             skip_trivia()
-                .ignore_then(just(Token::Set))
-                .ignore_then(code_block_parser())
+                .ignore_then(just(Token::Set).map_with(|_, e| to_kestrel_span(e.span())))
+                .then(code_block_parser())
                 .or_not(),
         )
         .then_ignore(skip_trivia())
-        .then_ignore(just(Token::RBrace))
-        .map(|(getter_body, setter_body)| SubscriptBodyData::Accessors {
-            getter: Some(getter_body),
-            setter: setter_body,
+        .then(just(Token::RBrace).map_with(|_, e| to_kestrel_span(e.span())))
+        .map(|((((lbrace_span, get_span), getter_body), setter_opt), rbrace_span)| {
+            let (set_span, setter_body) = match setter_opt {
+                Some((set_span, setter_body)) => (Some(set_span), Some(setter_body)),
+                None => (None, None),
+            };
+            SubscriptBodyData::Accessors {
+                lbrace: lbrace_span,
+                get_span,
+                getter: Some(getter_body),
+                set_span,
+                setter: setter_body,
+                rbrace: rbrace_span,
+            }
         });
 
     // Shorthand: { expr } - parsed as a code block

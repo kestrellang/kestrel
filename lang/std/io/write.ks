@@ -182,7 +182,7 @@ public struct Buffer: Write {
     ///     try buf.write(from: [1, 2, 3].asSlice())
     ///     buf.count()  // 3
     public func count() -> Int64 {
-        self.data.count()
+        self.data.count
     }
 
     /// Returns true if the buffer is empty.
@@ -193,7 +193,7 @@ public struct Buffer: Write {
     ///     try buf.write(from: [1].asSlice())
     ///     buf.isEmpty()  // false
     public func isEmpty() -> Bool {
-        self.data.count() == 0
+        self.data.count == 0
     }
 
     /// Clears all bytes from the buffer.
@@ -241,7 +241,7 @@ public struct Buffer: Write {
     public func toString() -> String {
         var result = String();
         var i: Int64 = 0;
-        let count = self.data.count();
+        let count = self.data.count;
         while i < count {
             result.appendByte(self.data.getUnchecked(i));
             i = i + 1
@@ -284,7 +284,7 @@ public func writeAll[W](writer: W, from buf: Slice[UInt8]) -> Result[(), Error] 
 public func writeByte[W](writer: W, byte: UInt8) -> Result[(), Error] where W: Write {
     var buf = Array[UInt8](capacity: 1);
     buf.append(byte);
-    let slice = Slice(pointer: buf.pointer(), count: 1);
+    let slice = Slice(pointer: buf.asPointer(), count: 1);
     writeAll(writer, from: slice)
 }
 

@@ -161,6 +161,21 @@ pub enum Constraint {
         /// Span for error reporting
         span: Span,
     },
+
+    /// Tuple index access constraint: tuple.index has type τ
+    ///
+    /// This constraint resolves tuple indexing when the tuple type isn't yet known
+    /// at constraint generation time (e.g., type parameters with tuple constraints).
+    TupleIndexAccess {
+        /// The tuple type being indexed
+        tuple: TyId,
+        /// The index being accessed
+        index: usize,
+        /// The result type of the index access
+        result: TyId,
+        /// Span for error reporting
+        span: Span,
+    },
 }
 
 impl Constraint {
@@ -205,6 +220,16 @@ impl Constraint {
         }
     }
 
+    /// Create a tuple index access constraint.
+    pub fn tuple_index_access(tuple: TyId, index: usize, result: TyId, span: Span) -> Self {
+        Constraint::TupleIndexAccess {
+            tuple,
+            index,
+            result,
+            span,
+        }
+    }
+
     /// Get the span associated with this constraint (for error reporting).
     pub fn span(&self) -> &Span {
         match self {
@@ -216,6 +241,7 @@ impl Constraint {
             Constraint::EnumPatternBinding { span, .. } => span,
             Constraint::StructPatternBinding { span, .. } => span,
             Constraint::Promotable { span, .. } => span,
+            Constraint::TupleIndexAccess { span, .. } => span,
         }
     }
 

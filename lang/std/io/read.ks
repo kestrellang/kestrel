@@ -79,7 +79,7 @@ public struct Cursor: Read {
 
     /// Reads bytes from the current position.
     public mutating func read(into buf: Slice[UInt8]) -> Result[Int64, Error] {
-        let available = self.data.count() - self.pos;
+        let available = self.data.count - self.pos;
         if available == 0 {
             return .Ok(0)
         }
@@ -102,7 +102,7 @@ public struct Cursor: Read {
 
     /// Sets the position, clamping to valid range.
     public mutating func setPosition(to pos: Int64) {
-        let count = self.data.count();
+        let count = self.data.count;
         if pos < 0 {
             self.pos = 0
         } else if pos > count {
@@ -123,7 +123,7 @@ public struct Cursor: Read {
 public func readByte[R](reader: R) -> Result[Optional[UInt8], Error] where R: Read {
     var buf = Array[UInt8](capacity: 1);
     buf.append(0);
-    let slice = Slice(pointer: buf.pointer(), count: 1);
+    let slice = Slice(pointer: buf.asPointer(), count: 1);
     let n = try reader.read(into: slice);
     if n == 0 {
         .Ok(.None)
@@ -146,7 +146,7 @@ public func readAll[R](reader: R, into buf: Array[UInt8]) -> Result[Int64, Error
     }
 
     loop {
-        let slice = Slice(pointer: chunk.pointer(), count: 4096);
+        let slice = Slice(pointer: chunk.asPointer(), count: 4096);
         let n = try reader.read(into: slice);
         if n == 0 {
             break

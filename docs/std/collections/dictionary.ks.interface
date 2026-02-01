@@ -1,68 +1,28 @@
 // Dictionary[K, V] - hash map with COW (Copy-on-Write) semantics
 
 // ============================================================================
-// DICTIONARY ENTRY
-// ============================================================================
-
-/// A key-value pair in a dictionary.
-///
-/// Entries are yielded when iterating over a dictionary. The key is immutable
-/// but the value can be accessed and modified through the entry.
-///
-/// Example:
-///     for entry in dict {
-///         print("\{entry.key}: \{entry.value}")
-///     }
-public struct DictionaryEntry[K, V] {
-    /// The key for this entry.
-    public var key: K { get };
-
-    /// The value for this entry.
-    public var value: V { get set };
-
-    /// Creates an entry with the given key and value.
-    public init(key: K, value: V);
-
-    /// Returns the entry as a tuple (key, value).
-    ///
-    /// Example:
-    ///     let (k, v) = entry.asTuple()
-    public func asTuple() -> (K, V);
-}
-
-/// Equatable conformance for entries when both K and V are Equatable.
-extend DictionaryEntry[K, V]: Equatable where K: Equatable, V: Equatable {
-    public func equals(other: DictionaryEntry[K, V]) -> Bool;
-}
-
-/// Formattable conformance for entries when both K and V are Formattable.
-extend DictionaryEntry[K, V]: Formattable where K: Formattable, V: Formattable {
-    public func format(options: FormatOptions = .default) -> String;
-}
-
-// ============================================================================
 // DICTIONARY ITERATOR
 // ============================================================================
 
-/// Iterator for Dictionary that yields entries sequentially.
+/// Iterator for Dictionary that yields key-value tuples sequentially.
 ///
 /// Obtained by calling `iter()` on a dictionary. Typically used implicitly
 /// via for-in loops or iterator methods.
 ///
 /// Example:
 ///     let dict = ["a": 1, "b": 2]
-///     for entry in dict {
-///         print("\{entry.key}: \{entry.value}")
+///     for (key, value) in dict {
+///         print("\{key}: \{value}")
 ///     }
 public struct DictionaryIterator[K, V]: Iterator {
-    type Item = DictionaryEntry[K, V]
+    type Item = (K, V)
 
     /// Creates an iterator over the dictionary's entries.
     /// Note: This is a low-level initializer; prefer using `dict.iter()`.
-    public init(entries: Pointer[DictionaryEntry[K, V]], capacity: Int64);
+    public init(buckets: Pointer[Bucket[K, V]], capacity: Int64);
 
-    /// Returns the next entry, or None if exhausted.
-    public mutating func next() -> DictionaryEntry[K, V]?;
+    /// Returns the next key-value tuple, or None if exhausted.
+    public mutating func next() -> (K, V)?;
 }
 
 // ============================================================================
@@ -100,7 +60,7 @@ struct DictionaryStorage[K, V, H]: Cloneable where K: Hash, H: Hasher, H: Defaul
 ///     let items = ["a": 1, "b": 2]
 @builtin(.DictionaryStruct)
 public struct Dictionary[K, V, H = DefaultHasher]: Iterable where K: Hash, H: Hasher, H: Defaultable {
-    type Item = DictionaryEntry[K, V]
+    type Item = (K, V)
     type Iter = DictionaryIterator[K, V]
 
     // ========================================================================
@@ -133,12 +93,6 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable where K: Hash, H: Ha
     ///     let pairs = [("a", 1), ("b", 2)]
     ///     let dict = Dictionary(from: pairs)  // ["a": 1, "b": 2]
     public init[I: Iterable](from pairs: I) where I.Item = (K, V);
-
-    /// Creates a dictionary from an iterable of key-value entries.
-    ///
-    /// Example:
-    ///     let dict = Dictionary(fromEntries: entries)
-    public init[I: Iterable](fromEntries entries: I) where I.Item = DictionaryEntry[K, V];
 
     /// Creates a dictionary by grouping elements by a key function.
     ///
@@ -267,16 +221,6 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable where K: Hash, H: Ha
     // ========================================================================
     // BASIC ACCESSORS
     // ========================================================================
-
-    /// Returns the value for the given key, or None if not present.
-    ///
-    /// Equivalent to using the subscript: `dict(key)`.
-    ///
-    /// Example:
-    ///     let dict = ["a": 1, "b": 2]
-    ///     dict.get(key: "a")  // Some(1)
-    ///     dict.get(key: "z")  // None
-    public func get(key: K) -> V?;
 
     /// Returns true if the dictionary contains the given key.
     ///
@@ -429,7 +373,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable where K: Hash, H: Ha
     /// Example:
     ///     let dict = ["a": 1, "b": 5, "c": 3]
     ///     dict.first(where: |k, v| v > 2)  // Some entry with v > 2
-    public func first(where predicate: (K, V) -> Bool) -> DictionaryEntry[K, V]?;
+    public func first(where predicate: (K, V) -> Bool) -> (K, V)?;
 
     /// Returns true if all entries satisfy the predicate.
     ///
@@ -637,7 +581,7 @@ public struct KeysView[K, V]: Iterable where K: Hash {
     type Iter = KeysIterator[K, V]
 
     /// Creates a view over the dictionary's keys.
-    public init(entries: Pointer[DictionaryEntry[K, V]], capacity: Int64);
+    public init(buckets: Pointer[Bucket[K, V]], capacity: Int64);
 
     /// Returns an iterator over the keys.
     public func iter() -> KeysIterator[K, V];
@@ -685,7 +629,7 @@ public struct ValuesView[K, V]: Iterable where K: Hash {
     type Iter = ValuesIterator[K, V]
 
     /// Creates a view over the dictionary's values.
-    public init(entries: Pointer[DictionaryEntry[K, V]], capacity: Int64);
+    public init(buckets: Pointer[Bucket[K, V]], capacity: Int64);
 
     /// Returns an iterator over the values.
     public func iter() -> ValuesIterator[K, V];
@@ -728,14 +672,14 @@ extend ValuesView[K, V] where V: Equatable {
 ///
 ///     // Without DirectIterable (explicit iterator):
 ///     let highScores = scores.iter().filter(|e| e.value > 100).collect()
-extend Dictionary[K, V, H]: DirectIterable[DictionaryEntry[K, V]] {
+extend Dictionary[K, V, H]: DirectIterable[(K, V)] {
 
-    /// Constructs a dictionary from an iterator of entries.
+    /// Constructs a dictionary from an iterator of key-value tuples.
     ///
     /// Example:
-    ///     let dict = Dictionary.collect(from: entryIterator)
+    ///     let dict = Dictionary.collect(from: tupleIterator)
     public static func collect[I: Iterator](from iter: I) -> Dictionary[K, V, H]
-        where I.Item = DictionaryEntry[K, V];
+        where I.Item = (K, V);
 }
 
 // ============================================================================

@@ -324,6 +324,12 @@ fn try_solve(
             expr_id,
             span,
         } => resolve_promotable(ctx, *from_ty, *to_ty, *expr_id, span),
+        Constraint::TupleIndexAccess {
+            tuple,
+            index,
+            result,
+            span,
+        } => resolve_tuple_index(ctx, *tuple, *index, *result, span),
     }
 }
 
@@ -1294,6 +1300,64 @@ fn normalize(
     }
 }
 
+/// Resolve a tuple index access.
+///
+/// This is called when tuple indexing is deferred because the tuple type
+/// wasn't known at constraint generation time (e.g., type parameter with
+/// a tuple constraint like `where Item = (A, B)`).
+fn resolve_tuple_index(
+    ctx: &mut InferenceContext<'_>,
+    tuple: TyId,
+    index: usize,
+    result: TyId,
+    span: &Span,
+) -> Result<SolveResult, InferenceError> {
+    let mut tuple_ty = resolve_type(ctx, tuple);
+
+    // Expand type aliases before tuple access
+    while matches!(tuple_ty.kind(), TyKind::TypeAlias { .. }) {
+        tuple_ty = ctx.oracle().expand_type_alias(&tuple_ty);
+        ctx.register_type(&tuple_ty);
+    }
+
+    // Normalize associated types using equality constraints from where clauses.
+    // This handles cases like `I.Item = (K, V)` where tuple indexing should work
+    // on values of type `I.Item`.
+    if matches!(tuple_ty.kind(), TyKind::AssociatedType { .. }) {
+        let normalized = ctx.oracle().normalize_with_constraints(&tuple_ty);
+        if normalized.to_string() != tuple_ty.to_string() {
+            tuple_ty = normalized;
+            ctx.register_type(&tuple_ty);
+        }
+    }
+
+    // If the tuple type is still an inference placeholder, defer
+    if matches!(tuple_ty.kind(), TyKind::Infer) {
+        return Ok(SolveResult::Deferred);
+    }
+
+    // Check if it's a tuple
+    match tuple_ty.as_tuple() {
+        Some(elements) => {
+            if index >= elements.len() {
+                return Err(InferenceError::tuple_index_out_of_bounds(
+                    index,
+                    elements.len(),
+                    span.clone(),
+                ));
+            }
+            let element_ty = elements[index].clone();
+            ctx.register_type(&element_ty);
+            ctx.equate(element_ty.id(), result, span.clone());
+            Ok(SolveResult::Solved)
+        },
+        None => Err(InferenceError::tuple_index_on_non_tuple(
+            tuple_ty.clone(),
+            span.clone(),
+        )),
+    }
+}
+
 /// Resolve a member access.
 fn resolve_member(
     ctx: &mut InferenceContext<'_>,
@@ -1313,6 +1377,20 @@ fn resolve_member(
     while matches!(receiver_ty.kind(), TyKind::TypeAlias { .. }) {
         receiver_ty = ctx.oracle().expand_type_alias(&receiver_ty);
         ctx.register_type(&receiver_ty);
+    }
+
+    // Normalize type parameters and associated types using equality constraints from where clauses.
+    // This handles cases like `where V = Array[E]` where methods should be callable on type
+    // parameter V by substituting it with Array[E].
+    if matches!(
+        receiver_ty.kind(),
+        TyKind::TypeParameter { .. } | TyKind::AssociatedType { .. }
+    ) {
+        let normalized = ctx.oracle().normalize_with_constraints(&receiver_ty);
+        if normalized.to_string() != receiver_ty.to_string() {
+            receiver_ty = normalized;
+            ctx.register_type(&receiver_ty);
+        }
     }
 
     // If the receiver type is still an inference placeholder, defer
@@ -1914,6 +1992,10 @@ fn check_fully_resolved(ctx: &mut InferenceContext<'_>) {
             Constraint::Promotable { from_ty, to_ty, .. } => {
                 check_resolved_id(*from_ty, ctx, &mut unresolved);
                 check_resolved_id(*to_ty, ctx, &mut unresolved);
+            },
+            Constraint::TupleIndexAccess { tuple, result, .. } => {
+                check_resolved_id(*tuple, ctx, &mut unresolved);
+                check_resolved_id(*result, ctx, &mut unresolved);
             },
         }
     }

@@ -191,6 +191,24 @@ pub enum InferenceError {
         /// Where the error is
         span: Span,
     },
+
+    /// Tuple index out of bounds (detected during inference).
+    TupleIndexOutOfBounds {
+        /// The index that was accessed
+        index: usize,
+        /// The tuple length
+        tuple_length: usize,
+        /// Where the index occurred
+        span: Span,
+    },
+
+    /// Tuple index on non-tuple type.
+    TupleIndexOnNonTuple {
+        /// The type that was indexed
+        ty: Ty,
+        /// Where the index occurred
+        span: Span,
+    },
 }
 
 impl InferenceError {
@@ -348,6 +366,8 @@ impl InferenceError {
             InferenceError::UnknownEnumCase { span, .. } => Some(span),
             InferenceError::TupleArityMismatch { span, .. } => Some(span),
             InferenceError::PrimitiveMethodNotCalled { span, .. } => Some(span),
+            InferenceError::TupleIndexOutOfBounds { span, .. } => Some(span),
+            InferenceError::TupleIndexOnNonTuple { span, .. } => Some(span),
         }
     }
 }
@@ -382,6 +402,20 @@ impl InferenceError {
             receiver_type,
             span,
         }
+    }
+
+    /// Create a tuple index out of bounds error.
+    pub fn tuple_index_out_of_bounds(index: usize, tuple_length: usize, span: Span) -> Self {
+        InferenceError::TupleIndexOutOfBounds {
+            index,
+            tuple_length,
+            span,
+        }
+    }
+
+    /// Create a tuple index on non-tuple error.
+    pub fn tuple_index_on_non_tuple(ty: Ty, span: Span) -> Self {
+        InferenceError::TupleIndexOnNonTuple { ty, span }
     }
 }
 
@@ -534,6 +568,20 @@ impl std::fmt::Display for InferenceError {
                     "primitive method '{}' on '{}' must be called",
                     method_name, receiver_type
                 )
+            },
+            InferenceError::TupleIndexOutOfBounds {
+                index,
+                tuple_length,
+                ..
+            } => {
+                write!(
+                    f,
+                    "tuple index {} is out of bounds for tuple with {} elements",
+                    index, tuple_length
+                )
+            },
+            InferenceError::TupleIndexOnNonTuple { ty, .. } => {
+                write!(f, "cannot index into non-tuple type '{}'", ty)
             },
         }
     }

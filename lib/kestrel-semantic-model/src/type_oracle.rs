@@ -27,7 +27,7 @@ use kestrel_semantic_type_inference::{MemberError, MemberResolution, TypeOracle}
 use semantic_tree::symbol::{Symbol, SymbolId};
 
 use crate::SemanticModel;
-use crate::queries::{ConformancesForSymbol, ExtensionsFor, ResolvedAliasedType};
+use crate::queries::{ConformancesForSymbol, ExtensionsFor, ResolvedAliasedType, SymbolFor};
 
 impl TypeOracle for SemanticModel {
     fn resolve_member(
@@ -654,7 +654,6 @@ impl TypeOracle for SemanticModel {
     }
 
     fn symbol_name(&self, symbol_id: SymbolId) -> Option<String> {
-        use crate::queries::SymbolFor;
         let symbol = self.query(SymbolFor { id: symbol_id })?;
         Some(symbol.metadata().name().value.clone())
     }
@@ -806,8 +805,6 @@ impl SemanticModel {
 // ContextualOracle: Oracle with function context for extension bound lookup
 // ============================================================================
 
-use crate::queries::SymbolFor;
-
 /// Oracle wrapper that has context about the current function being analyzed.
 ///
 /// This allows extension where clause bounds to be discovered when resolving
@@ -904,6 +901,10 @@ impl TypeOracle for ContextualOracle<'_> {
     ) -> Option<(SymbolId, Substitutions)> {
         self.model
             .check_from_value_conformance(target_ty, source_ty)
+    }
+
+    fn normalize_with_constraints(&self, ty: &Ty) -> Ty {
+        normalize_type_with_context(self.model, ty, self.context_symbol_id)
     }
 }
 
@@ -2065,6 +2066,371 @@ fn check_from_value_conformance_impl(
     }
 
     None
+}
+
+/// Normalize a type using equality constraints from the context.
+///
+/// This resolves associated types like `I.Item` to their constrained values
+/// when there's an equality constraint like `I.Item = (K, V)` in scope.
+///
+/// Also handles nested associated types like `I.Iter.Item` by:
+/// 1. First collecting derived equality constraints from protocol associated types
+/// 2. Then applying all equality constraints to normalize the type
+fn normalize_type_with_context(model: &SemanticModel, ty: &Ty, context_id: SymbolId) -> Ty {
+    // Collect where clauses by walking up the parent chain
+    let where_clauses = collect_where_clauses_for_context(model, context_id);
+
+    // Collect explicit equality constraints
+    let mut owned_equalities: Vec<(Ty, Ty)> = where_clauses
+        .iter()
+        .flat_map(|wc| wc.equality_constraints())
+        .map(|(l, r)| (l.clone(), r.clone()))
+        .collect();
+
+    // Also derive equality constraints from protocol associated type definitions.
+    // For example, if we have `I: Iterable` and Iterable defines
+    // `type Iter: Iterator where Iter.Item = Item`, we derive `I.Iter.Item = I.Item`.
+    derive_protocol_associated_type_constraints(model, &where_clauses, &mut owned_equalities);
+
+    if owned_equalities.is_empty() {
+        return ty.clone();
+    }
+
+    let equalities: Vec<(&Ty, &Ty)> = owned_equalities
+        .iter()
+        .map(|(l, r)| (l, r))
+        .collect();
+
+    normalize_type_inner(ty, &equalities)
+}
+
+/// Derive equality constraints from protocol associated type definitions.
+///
+/// For associated types like `type Iter: Iterator where Iter.Item = Item`,
+/// this derives constraints like `T.Iter.Item = T.Item` for type parameters `T: Iterable`.
+///
+/// Uses a heuristic: if an associated type has a protocol bound that also has an associated type
+/// with the same name as a sibling in the parent protocol, they are assumed equal.
+fn derive_protocol_associated_type_constraints(
+    _model: &SemanticModel,
+    where_clauses: &[WhereClause],
+    equalities: &mut Vec<(Ty, Ty)>,
+) {
+    use kestrel_semantic_tree::symbol::associated_type::AssociatedTypeSymbol;
+    use kestrel_semantic_tree::ty::Constraint;
+
+    for wc in where_clauses {
+        for constraint in wc.constraints() {
+            if let Constraint::TypeBound {
+                param: Some(param_id),
+                bounds,
+                ..
+            } = constraint
+            {
+                let Some(param_symbol) = _model.query(SymbolFor { id: *param_id }) else {
+                    continue;
+                };
+                let Ok(type_param) = param_symbol.downcast_arc::<TypeParameterSymbol>() else {
+                    continue;
+                };
+                let param_ty =
+                    Ty::type_parameter(type_param.clone(), type_param.metadata().span().clone());
+
+                for bound in bounds {
+                    if let TyKind::Protocol {
+                        symbol: proto_sym, ..
+                    } = bound.kind()
+                    {
+                        // For each associated type in the protocol (e.g., Iter in Iterable)
+                        for child in proto_sym.metadata().children() {
+                            if child.metadata().kind() == KestrelSymbolKind::AssociatedType {
+                                let Ok(assoc_type) = child.downcast_arc::<AssociatedTypeSymbol>()
+                                else {
+                                    continue;
+                                };
+
+                                // Check if this associated type has protocol bounds (e.g., Iter: Iterator)
+                                let assoc_bounds = assoc_type.bounds().unwrap_or_default();
+                                for assoc_bound in &assoc_bounds {
+                                    if let TyKind::Protocol {
+                                        symbol: bound_proto,
+                                        ..
+                                    } = assoc_bound.kind()
+                                    {
+                                        // For each associated type in the bound protocol (e.g., Item in Iterator)
+                                        for bound_child in bound_proto.metadata().children() {
+                                            if bound_child.metadata().kind()
+                                                == KestrelSymbolKind::AssociatedType
+                                            {
+                                                let bound_assoc_name =
+                                                    bound_child.metadata().name().value.clone();
+
+                                                // Look for a matching associated type in the parent protocol
+                                                // (e.g., Item in Iterable)
+                                                for sibling in proto_sym.metadata().children() {
+                                                    if sibling.metadata().kind()
+                                                        == KestrelSymbolKind::AssociatedType
+                                                        && sibling.metadata().name().value
+                                                            == bound_assoc_name
+                                                        && sibling.metadata().id()
+                                                            != assoc_type.metadata().id()
+                                                    {
+                                                        // Found a match! Create the constraint:
+                                                        // T.Assoc.BoundAssocType = T.SiblingAssocType
+                                                        // e.g., I.Iter.Item = I.Item
+
+                                                        let Ok(bound_assoc) = bound_child
+                                                            .clone()
+                                                            .downcast_arc::<AssociatedTypeSymbol>(
+                                                            )
+                                                        else {
+                                                            continue;
+                                                        };
+                                                        let Ok(sibling_assoc) = sibling
+                                                            .downcast_arc::<AssociatedTypeSymbol>(
+                                                            )
+                                                        else {
+                                                            continue;
+                                                        };
+
+                                                        // T.Assoc (e.g., I.Iter)
+                                                        let t_assoc = Ty::qualified_associated_type(
+                                                            assoc_type.clone(),
+                                                            param_ty.clone(),
+                                                            param_ty.span().clone(),
+                                                        );
+
+                                                        // T.Assoc.BoundAssocType (e.g., I.Iter.Item)
+                                                        let left = Ty::qualified_associated_type(
+                                                            bound_assoc,
+                                                            t_assoc,
+                                                            param_ty.span().clone(),
+                                                        );
+
+                                                        // T.SiblingAssocType (e.g., I.Item)
+                                                        let right = Ty::qualified_associated_type(
+                                                            sibling_assoc,
+                                                            param_ty.clone(),
+                                                            param_ty.span().clone(),
+                                                        );
+
+                                                        equalities.push((left, right));
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Collect all where clauses from the context by walking up the parent chain.
+fn collect_where_clauses_for_context(
+    model: &SemanticModel,
+    context_id: SymbolId,
+) -> Vec<WhereClause> {
+    let mut clauses = Vec::new();
+    let mut current_id = Some(context_id);
+
+    while let Some(id) = current_id {
+        let Some(symbol) = model.query(SymbolFor { id }) else {
+            break;
+        };
+
+        if let Some(generics_beh) = symbol.metadata().get_behavior::<GenericsBehavior>() {
+            let wc = generics_beh.where_clause();
+            if !wc.is_empty() {
+                clauses.push(wc.clone());
+            }
+        }
+
+        if let Some(target_beh) = symbol.metadata().get_behavior::<ExtensionTargetBehavior>() {
+            let wc = target_beh.where_clause();
+            if !wc.is_empty() {
+                clauses.push(wc.clone());
+            }
+        }
+
+        current_id = symbol.metadata().parent().map(|p| p.metadata().id());
+    }
+
+    clauses
+}
+
+/// Normalize a type using equality constraints (inner implementation).
+fn normalize_type_inner(ty: &Ty, equalities: &[(&Ty, &Ty)]) -> Ty {
+    let mut current = ty.clone();
+    let mut seen = HashSet::new();
+    seen.insert(current.to_string());
+
+    let mut changed = true;
+    let mut iterations = 0;
+    const MAX_ITERATIONS: usize = 10; // Safety cap
+
+    while changed && iterations < MAX_ITERATIONS {
+        changed = false;
+        iterations += 1;
+
+        // Try to apply equality constraints to the whole type
+        for (left, right) in equalities {
+            let matches_left = equality_types_match(&current, left);
+            let matches_right = equality_types_match(&current, right);
+
+            if matches_left || matches_right {
+                // We have a match. Prefer the "more concrete" type.
+                let next = if equality_is_more_concrete(left, right) {
+                    (*left).clone()
+                } else {
+                    (*right).clone()
+                };
+
+                let next_str = next.to_string();
+                if next_str != current.to_string() && !seen.contains(&next_str) {
+                    current = next;
+                    seen.insert(next_str);
+                    changed = true;
+                    break;
+                }
+            }
+        }
+
+        if changed {
+            continue;
+        }
+
+        // Try to normalize components
+        match current.kind().clone() {
+            TyKind::Tuple(elements) => {
+                let mut new_elements = Vec::new();
+                let mut inner_changed = false;
+                for e in elements {
+                    let normalized = normalize_type_inner(&e, equalities);
+                    if normalized.to_string() != e.to_string() {
+                        inner_changed = true;
+                    }
+                    new_elements.push(normalized);
+                }
+                if inner_changed {
+                    current = Ty::tuple(new_elements, current.span().clone());
+                    let current_str = current.to_string();
+                    if !seen.contains(&current_str) {
+                        seen.insert(current_str);
+                        changed = true;
+                    }
+                }
+            },
+            TyKind::Function {
+                params,
+                return_type,
+            } => {
+                let mut new_params = Vec::new();
+                let mut inner_changed = false;
+                for p in params {
+                    let normalized = normalize_type_inner(&p, equalities);
+                    if normalized.to_string() != p.to_string() {
+                        inner_changed = true;
+                    }
+                    new_params.push(normalized);
+                }
+                let normalized_return = normalize_type_inner(&return_type, equalities);
+                if normalized_return.to_string() != return_type.to_string() {
+                    inner_changed = true;
+                }
+                if inner_changed {
+                    current = Ty::function(new_params, normalized_return, current.span().clone());
+                    let current_str = current.to_string();
+                    if !seen.contains(&current_str) {
+                        seen.insert(current_str);
+                        changed = true;
+                    }
+                }
+            },
+            TyKind::AssociatedType { symbol, container } if container.is_some() => {
+                let cont = container.as_ref().unwrap();
+                let normalized_container = normalize_type_inner(cont, equalities);
+                if normalized_container.to_string() != cont.to_string() {
+                    current = Ty::qualified_associated_type(
+                        symbol.clone(),
+                        normalized_container,
+                        current.span().clone(),
+                    );
+                    let current_str = current.to_string();
+                    if !seen.contains(&current_str) {
+                        seen.insert(current_str);
+                        changed = true;
+                    }
+                }
+            },
+            _ => {},
+        }
+    }
+
+    current
+}
+
+/// Check if two types match for equality constraint purposes.
+fn equality_types_match(a: &Ty, b: &Ty) -> bool {
+    match (a.kind(), b.kind()) {
+        (TyKind::TypeParameter(a_param), TyKind::TypeParameter(b_param)) => {
+            a_param.metadata().id() == b_param.metadata().id()
+        },
+        (
+            TyKind::AssociatedType {
+                symbol: a_sym,
+                container: a_cont,
+            },
+            TyKind::AssociatedType {
+                symbol: b_sym,
+                container: b_cont,
+            },
+        ) => {
+            if a_sym.metadata().id() != b_sym.metadata().id() {
+                return false;
+            }
+            match (a_cont, b_cont) {
+                (Some(a_c), Some(b_c)) => equality_types_match(a_c, b_c),
+                (None, None) => true,
+                _ => false,
+            }
+        },
+        // If one is a type param/associated type and other isn't, they don't match
+        (TyKind::TypeParameter(_), _) | (_, TyKind::TypeParameter(_)) => false,
+        (TyKind::AssociatedType { .. }, _) | (_, TyKind::AssociatedType { .. }) => false,
+
+        _ => a.is_assignable_to(b) && b.is_assignable_to(a),
+    }
+}
+
+/// Determine which type is more concrete for equality constraints.
+fn equality_is_more_concrete(a: &Ty, b: &Ty) -> bool {
+    let a_score = equality_type_score(a);
+    let b_score = equality_type_score(b);
+    if a_score != b_score {
+        a_score > b_score
+    } else {
+        // Tie-breaker: use Display string
+        a.to_string() < b.to_string()
+    }
+}
+
+/// Score a type for concreteness (higher = more concrete).
+fn equality_type_score(ty: &Ty) -> i32 {
+    match ty.kind() {
+        TyKind::TypeParameter(_) => 0,
+        TyKind::AssociatedType { .. } => 1,
+        TyKind::SelfType => 2,
+        TyKind::Protocol { .. } => 3,
+        TyKind::Struct { .. } => 4,
+        TyKind::Int(_) | TyKind::Float(_) | TyKind::Bool | TyKind::String | TyKind::Unit => 5,
+        TyKind::Tuple(_) | TyKind::Function { .. } => 4, // Complex but concrete-ish
+        _ => -1,
+    }
 }
 
 #[cfg(test)]

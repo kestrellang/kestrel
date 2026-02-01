@@ -152,8 +152,16 @@ pub enum ComputedBodyData {
     Shorthand(CodeBlockData),
     /// Explicit: `{ get { } set { } }`
     Accessors {
+        /// Span of the opening brace (for property accessors block)
+        lbrace: Span,
+        /// Span of the "get" keyword
+        get_span: Span,
         getter: Option<CodeBlockData>, // None for protocol `{ get }`
+        /// Span of the "set" keyword (if present)
+        set_span: Option<Span>,
         setter: Option<CodeBlockData>, // None for protocol `{ get set }`
+        /// Span of the closing brace (for property accessors block)
+        rbrace: Span,
     },
 }
 
@@ -424,7 +432,15 @@ pub enum SubscriptBodyData {
     Shorthand(CodeBlockData),
     /// Explicit: `{ get { } set { } }` - with explicit getter and optional setter
     Accessors {
+        /// Span of the opening brace (for subscript body block)
+        lbrace: Span,
+        /// Span of the "get" keyword
+        get_span: Span,
         getter: Option<CodeBlockData>, // None for protocol `{ get }`
+        /// Span of the "set" keyword (if present)
+        set_span: Option<Span>,
         setter: Option<CodeBlockData>, // None for protocol `{ get set }` without body
+        /// Span of the closing brace (for subscript body block)
+        rbrace: Span,
     },
 }

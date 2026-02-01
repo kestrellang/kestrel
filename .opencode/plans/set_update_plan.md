@@ -1,0 +1,1169 @@
+# Set Implementation Update Plan
+
+## Goal
+Update `/Users/dino/Documents/Projects/kestrel/lang/std/collections/set.ks` to match the interface in `/Users/dino/Documents/Projects/kestrel/docs/std/collections/set.ks.interface` exactly.
+
+## Key Changes
+
+### 1. Header Comment Update
+**Current:**
+```
+// Set[T] - hash set backed by Dictionary
+```
+
+**New:**
+```
+// Set[T] - hash set with COW (Copy-on-Write) semantics
+```
+
+### 2. SetIterator Section
+Keep existing structure but update doc comments to match interface exactly.
+
+**Current comments:**
+```
+/// Iterator over set elements.
+/// Creates a set iterator.
+/// Returns the next element, or None if exhausted.
+```
+
+**New comments (from interface):**
+```
+/// Iterator for Set that yields elements sequentially.
+///
+/// Obtained by calling `iter()` on a set. Typically used implicitly
+/// via for-in loops or iterator methods.
+///
+/// Example:
+///     let set: Set = [1, 2, 3]
+///     for item in set {
+///         print(item)
+///     }
+/// Creates a set iterator from a dictionary iterator.
+/// Note: This is a low-level initializer; prefer using `set.iter()`.
+/// Returns the next element, or None if exhausted.
+```
+
+### 3. Set Struct Header
+**Current:**
+```
+/// A hash set backed by a Dictionary.
+///
+/// Elements must implement Hash. Uses Dictionary internally with Unit values.
+```
+
+**New:**
+```
+/// A hash set that stores unique elements with copy-on-write semantics.
+///
+/// Sets provide O(1) average-case lookup, insertion, and removal. They use
+/// COW for efficient copying - the underlying storage is only duplicated
+/// when a shared set is mutated.
+///
+/// Backed by a Dictionary internally.
+///
+/// Example:
+///     var fruits: Set = ["apple", "banana", "cherry"]
+///     fruits.insert(element: "date")
+///     fruits.contains(element: "apple")  // true
+///     fruits.remove(element: "banana")
+///
+/// Set literals use array syntax with type annotation:
+///     let empty: Set[Int64] = []
+///     let numbers: Set = [1, 2, 3]
+```
+
+### 4. Section Reorganization
+
+#### Section: INITIALIZERS (4 methods)
+Order and comments:
+
+1. `init()` - Creates an empty set
+2. `init(capacity: Int64)` - Creates empty set with capacity
+3. `init[I: Iterable](from elements: I) where I.Item = T` - **NEW**
+4. `init(arrayLiteral elements: LiteralSlice[T])` - **NEW**
+
+**Method 1: init()**
+```ks
+/// Creates an empty set.
+///
+/// Example:
+///     let set = Set[String]()
+///     set.isEmpty  // true
+public init() {
+    self.dict = Dictionary();
+}
+```
+
+**Method 2: init(capacity:)**
+```ks
+/// Creates an empty set with the specified initial capacity.
+///
+/// Pre-allocating capacity can improve performance when the approximate
+/// final size is known, avoiding repeated reallocations.
+///
+/// Example:
+///     var set = Set[String](capacity: 1000)
+///     set.capacity  // >= 1000
+///     set.count     // 0
+public init(capacity: Int64) {
+    self.dict = Dictionary(capacity: capacity);
+}
+```
+
+**Method 3: init(from:) - NEW**
+```ks
+/// Creates a set from an iterable of elements.
+///
+/// Duplicate elements are automatically removed.
+///
+/// Example:
+///     let arr = [1, 2, 2, 3, 3, 3]
+///     let set = Set(from: arr)  // {1, 2, 3}
+public init[I: Iterable](from elements: I) where I.Item = T {
+    self.dict = Dictionary();
+    var iter = elements.iter();
+    while let .Some(elem) = iter.next() {
+        let _ = self.insert(element: elem);
+    }
+}
+```
+
+**Method 4: init(arrayLiteral:) - NEW**
+```ks
+/// Creates a set from an array literal (used by compiler).
+public init(arrayLiteral elements: LiteralSlice[T]) {
+    self.dict = Dictionary(capacity: elements.count);
+    for i in 0..<elements.count {
+        let _ = self.insert(element: elements[i]);
+    }
+}
+```
+
+#### Section: PROPERTIES (Convert 3 methods to properties)
+
+**Property 1: count**
+```ks
+/// Returns the number of elements in the set.
+///
+/// Example:
+///     Set([1, 2, 3]).count  // 3
+///     Set[Int64]().count    // 0
+public var count: Int64 { 
+    get { self.dict.count() }
+}
+```
+
+**Property 2: capacity**
+```ks
+/// Returns the current capacity (elements storable without reallocating).
+///
+/// Capacity is always >= count. When count exceeds capacity, the set
+/// reallocates with increased capacity.
+///
+/// Example:
+///     var set = Set[String](capacity: 100)
+///     set.capacity  // >= 100
+public var capacity: Int64 { 
+    get { self.dict.getCapacity() }
+}
+```
+
+**Property 3: isEmpty**
+```ks
+/// Returns true if the set contains no elements.
+///
+/// Example:
+///     Set[Int64]().isEmpty  // true
+///     Set([1]).isEmpty      // false
+public var isEmpty: Bool { 
+    get { self.dict.isEmpty() }
+}
+```
+
+#### Section: MEMBERSHIP (3 methods)
+
+**Method 1: contains(element:)**
+```ks
+/// Returns true if the set contains the specified element.
+///
+/// Example:
+///     let set: Set = [1, 2, 3]
+///     set.contains(element: 2)  // true
+///     set.contains(element: 5)  // false
+public func contains(element: T) -> Bool {
+    self.dict.contains(element)
+}
+```
+
+**Method 2: iter()**
+```ks
+/// Returns an iterator over the set's elements.
+///
+/// Iteration order is not guaranteed to match insertion order.
+///
+/// Example:
+///     for item in set.iter() {
+///         print(item)
+///     }
+public func iter() -> SetIterator[T, H] {
+    SetIterator(dictIter: self.dict.iter())
+}
+```
+
+**Method 3: clone()**
+```ks
+/// Creates a shallow clone of the set.
+///
+/// Due to COW semantics, this is O(1) - the actual copy is deferred
+/// until either set is mutated.
+///
+/// Example:
+///     let a: Set = [1, 2, 3]
+///     var b = a.clone()     // O(1), shares storage
+///     b.insert(element: 4)  // Now b copies and diverges
+public func clone() -> Set[T, H] {
+    Set(dict: self.dict.clone())
+}
+```
+
+#### Section: ADDING ELEMENTS (3 methods)
+
+**Method 1: insert(element:)**
+```ks
+/// Inserts an element into the set.
+///
+/// Returns true if the element was newly inserted, false if it already existed.
+///
+/// Example:
+///     var set: Set = [1, 2]
+///     set.insert(element: 3)  // true, set is {1, 2, 3}
+///     set.insert(element: 2)  // false, already present
+public mutating func insert(element: T) -> Bool {
+    let oldValue = self.dict.insert(element, Unit());
+    oldValue.isSome() == false
+}
+```
+
+**Method 2: insert(contentsOf:) - NEW**
+```ks
+/// Inserts all elements from an iterable into the set.
+///
+/// Example:
+///     var set: Set = [1, 2]
+///     set.insert(contentsOf: [3, 4, 5])  // {1, 2, 3, 4, 5}
+public mutating func insert[I: Iterable](contentsOf elements: I) where I.Item = T {
+    var iter = elements.iter();
+    while let .Some(elem) = iter.next() {
+        let _ = self.insert(element: elem);
+    }
+}
+```
+
+**Method 3: formUnion(other:) - NEW**
+```ks
+/// Adds the elements of another set to this set (mutating union).
+///
+/// Example:
+///     var a: Set = [1, 2]
+///     let b: Set = [2, 3]
+///     a.formUnion(other: b)  // a is {1, 2, 3}
+public mutating func formUnion(other: Set[T, H]) {
+    var otherIter = other.iter();
+    while let .Some(elem) = otherIter.next() {
+        let _ = self.insert(element: elem);
+    }
+}
+```
+
+#### Section: REMOVING ELEMENTS (7 methods)
+
+**Method 1: remove(element:)**
+```ks
+/// Removes an element from the set.
+///
+/// Returns true if the element was present and removed, false otherwise.
+///
+/// Example:
+///     var set: Set = [1, 2, 3]
+///     set.remove(element: 2)  // true, set is {1, 3}
+///     set.remove(element: 5)  // false, not present
+public mutating func remove(element: T) -> Bool {
+    self.dict.remove(element).isSome()
+}
+```
+
+**Method 2: clear()**
+```ks
+/// Removes all elements from the set.
+///
+/// Capacity may be retained for reuse.
+///
+/// Example:
+///     var set: Set = [1, 2, 3]
+///     set.clear()  // set is {}
+public mutating func clear() {
+    self.dict.clear()
+}
+```
+
+**Method 3: retain(where:) - NEW**
+```ks
+/// Retains only elements that satisfy the predicate.
+///
+/// Example:
+///     var set: Set = [1, 2, 3, 4, 5]
+///     set.retain(where: |x| x % 2 == 0)  // {2, 4}
+public mutating func retain(where predicate: (T) -> Bool) {
+    var toRemove: Array[T] = [];
+    var iter = self.iter();
+    while let .Some(elem) = iter.next() {
+        if predicate(elem) == false {
+            toRemove.append(elem);
+        }
+    }
+    for elem in toRemove {
+        let _ = self.remove(element: elem);
+    }
+}
+```
+
+**Method 4: removeAll(where:) - NEW**
+```ks
+/// Removes all elements that satisfy the predicate.
+///
+/// The inverse of `retain(where:)`.
+///
+/// Example:
+///     var set: Set = [1, 2, 3, 4, 5]
+///     set.removeAll(where: |x| x % 2 == 0)  // {1, 3, 5}
+public mutating func removeAll(where predicate: (T) -> Bool) {
+    var toRemove: Array[T] = [];
+    var iter = self.iter();
+    while let .Some(elem) = iter.next() {
+        if predicate(elem) {
+            toRemove.append(elem);
+        }
+    }
+    for elem in toRemove {
+        let _ = self.remove(element: elem);
+    }
+}
+```
+
+**Method 5: formIntersection(other:) - NEW**
+```ks
+/// Removes elements not in the other set (mutating intersection).
+///
+/// Example:
+///     var a: Set = [1, 2, 3]
+///     let b: Set = [2, 3, 4]
+///     a.formIntersection(other: b)  // a is {2, 3}
+public mutating func formIntersection(other: Set[T, H]) {
+    var toRemove: Array[T] = [];
+    var selfIter = self.iter();
+    while let .Some(elem) = selfIter.next() {
+        if other.contains(element: elem) == false {
+            toRemove.append(elem);
+        }
+    }
+    for elem in toRemove {
+        let _ = self.remove(element: elem);
+    }
+}
+```
+
+**Method 6: formDifference(other:) - NEW**
+```ks
+/// Removes elements that are in the other set (mutating difference).
+///
+/// Example:
+///     var a: Set = [1, 2, 3]
+///     let b: Set = [2, 3, 4]
+///     a.formDifference(other: b)  // a is {1}
+public mutating func formDifference(other: Set[T, H]) {
+    var toRemove: Array[T] = [];
+    var selfIter = self.iter();
+    while let .Some(elem) = selfIter.next() {
+        if other.contains(element: elem) {
+            toRemove.append(elem);
+        }
+    }
+    for elem in toRemove {
+        let _ = self.remove(element: elem);
+    }
+}
+```
+
+**Method 7: formSymmetricDifference(other:) - NEW**
+```ks
+/// Replaces this set with the symmetric difference (mutating).
+///
+/// Example:
+///     var a: Set = [1, 2, 3]
+///     let b: Set = [2, 3, 4]
+///     a.formSymmetricDifference(other: b)  // a is {1, 4}
+public mutating func formSymmetricDifference(other: Set[T, H]) {
+    // Elements in self but not other - keep
+    // Elements in other but not self - add
+    // Elements in both - remove
+    var toRemove: Array[T] = [];
+    var toAdd: Array[T] = [];
+    
+    var selfIter = self.iter();
+    while let .Some(elem) = selfIter.next() {
+        if other.contains(element: elem) {
+            toRemove.append(elem);
+        }
+    }
+    
+    var otherIter = other.iter();
+    while let .Some(elem) = otherIter.next() {
+        if self.contains(element: elem) == false {
+            toAdd.append(elem);
+        }
+    }
+    
+    for elem in toRemove {
+        let _ = self.remove(element: elem);
+    }
+    for elem in toAdd {
+        let _ = self.insert(element: elem);
+    }
+}
+```
+
+#### Section: SET OPERATIONS (NON-MUTATING) (4 methods)
+
+**Method 1: union(other:)**
+```ks
+/// Returns a new set containing all elements from both sets.
+///
+/// Example:
+///     let a: Set = [1, 2, 3]
+///     let b: Set = [3, 4, 5]
+///     a.union(other: b)  // {1, 2, 3, 4, 5}
+public func union(other: Set[T, H]) -> Set[T, H] {
+    var result = self.clone();
+    result.formUnion(other: other);
+    result
+}
+```
+
+**Method 2: intersection(other:)**
+```ks
+/// Returns a new set containing only elements present in both sets.
+///
+/// Example:
+///     let a: Set = [1, 2, 3]
+///     let b: Set = [2, 3, 4]
+///     a.intersection(other: b)  // {2, 3}
+public func intersection(other: Set[T, H]) -> Set[T, H] {
+    let selfCount = self.count;
+    var result = Set[T, H](capacity: selfCount);
+    var selfIter = self.iter();
+    while let .Some(elem) = selfIter.next() {
+        if other.contains(element: elem) {
+            let _ = result.insert(element: elem);
+        }
+    }
+    result
+}
+```
+
+**Method 3: difference(other:)**
+```ks
+/// Returns a new set containing elements in this set but not in the other.
+///
+/// Also known as "subtracting" the other set.
+///
+/// Example:
+///     let a: Set = [1, 2, 3]
+///     let b: Set = [2, 3, 4]
+///     a.difference(other: b)  // {1}
+public func difference(other: Set[T, H]) -> Set[T, H] {
+    let selfCount = self.count;
+    var result = Set[T, H](capacity: selfCount);
+    var selfIter = self.iter();
+    while let .Some(elem) = selfIter.next() {
+        if other.contains(element: elem) == false {
+            let _ = result.insert(element: elem);
+        }
+    }
+    result
+}
+```
+
+**Method 4: symmetricDifference(other:)**
+```ks
+/// Returns a new set containing elements in either set but not both.
+///
+/// Example:
+///     let a: Set = [1, 2, 3]
+///     let b: Set = [2, 3, 4]
+///     a.symmetricDifference(other: b)  // {1, 4}
+public func symmetricDifference(other: Set[T, H]) -> Set[T, H] {
+    let selfCount = self.count;
+    let otherCount = other.count;
+    var result = Set[T, H](capacity: selfCount + otherCount);
+    
+    // Add elements in self but not other
+    var selfIter = self.iter();
+    while let .Some(elem) = selfIter.next() {
+        if other.contains(element: elem) == false {
+            let _ = result.insert(element: elem);
+        }
+    }
+    
+    // Add elements in other but not self
+    var otherIter = other.iter();
+    while let .Some(elem) = otherIter.next() {
+        if self.contains(element: elem) == false {
+            let _ = result.insert(element: elem);
+        }
+    }
+    
+    result
+}
+```
+
+#### Section: SET RELATIONS (6 methods)
+
+**Method 1: isSubset(of:) - RENAMED from isSubset(other:)**
+```ks
+/// Returns true if all elements of this set are in the other set.
+///
+/// A set is always a subset of itself.
+///
+/// Example:
+///     let a: Set = [1, 2]
+///     let b: Set = [1, 2, 3]
+///     a.isSubset(of: b)  // true
+///     b.isSubset(of: a)  // false
+///     a.isSubset(of: a)  // true
+public func isSubset(of other: Set[T, H]) -> Bool {
+    if self.count > other.count {
+        return false
+    }
+    var selfIter = self.iter();
+    while let .Some(elem) = selfIter.next() {
+        if other.contains(element: elem) == false {
+            return false
+        }
+    }
+    true
+}
+```
+
+**Method 2: isStrictSubset(of:) - NEW**
+```ks
+/// Returns true if this set is a subset of the other but not equal.
+///
+/// Example:
+///     let a: Set = [1, 2]
+///     let b: Set = [1, 2, 3]
+///     a.isStrictSubset(of: b)  // true
+///     a.isStrictSubset(of: a)  // false
+public func isStrictSubset(of other: Set[T, H]) -> Bool {
+    self.isSubset(of: other) && self.count < other.count
+}
+```
+
+**Method 3: isSuperset(of:) - RENAMED from isSuperset(other:)**
+```ks
+/// Returns true if all elements of the other set are in this set.
+///
+/// A set is always a superset of itself.
+///
+/// Example:
+///     let a: Set = [1, 2, 3]
+///     let b: Set = [1, 2]
+///     a.isSuperset(of: b)  // true
+///     b.isSuperset(of: a)  // false
+public func isSuperset(of other: Set[T, H]) -> Bool {
+    other.isSubset(of: self)
+}
+```
+
+**Method 4: isStrictSuperset(of:) - NEW**
+```ks
+/// Returns true if this set is a superset of the other but not equal.
+///
+/// Example:
+///     let a: Set = [1, 2, 3]
+///     let b: Set = [1, 2]
+///     a.isStrictSuperset(of: b)  // true
+///     a.isStrictSuperset(of: a)  // false
+public func isStrictSuperset(of other: Set[T, H]) -> Bool {
+    self.isSuperset(of: other) && self.count > other.count
+}
+```
+
+**Method 5: isDisjoint(with:) - RENAMED from isDisjoint(other:)**
+```ks
+/// Returns true if this set and the other share no common elements.
+///
+/// Example:
+///     let a: Set = [1, 2]
+///     let b: Set = [3, 4]
+///     let c: Set = [2, 3]
+///     a.isDisjoint(with: b)  // true
+///     a.isDisjoint(with: c)  // false
+public func isDisjoint(with other: Set[T, H]) -> Bool {
+    // Iterate over the smaller set for efficiency
+    if self.count > other.count {
+        return other.isDisjoint(with: self)
+    }
+    var selfIter = self.iter();
+    while let .Some(elem) = selfIter.next() {
+        if other.contains(element: elem) {
+            return false
+        }
+    }
+    true
+}
+```
+
+**Method 6: contains(where:) - NEW (in Searching section per interface, but adding here)**
+Actually this belongs in Searching section.
+
+#### Section: SEARCHING AND PREDICATES (5 methods)
+
+**Method 1: contains(where:) - NEW**
+```ks
+/// Returns true if any element satisfies the predicate.
+///
+/// Returns false for an empty set.
+/// Short-circuits on first matching element.
+///
+/// Example:
+///     Set([1, 2, 3]).contains(where: |x| x > 2)  // true
+///     Set([1, 2, 3]).contains(where: |x| x > 5)  // false
+public func contains(where predicate: (T) -> Bool) -> Bool {
+    var iter = self.iter();
+    while let .Some(elem) = iter.next() {
+        if predicate(elem) {
+            return true
+        }
+    }
+    false
+}
+```
+
+**Method 2: first(where:) - NEW**
+```ks
+/// Returns the first element matching the predicate, or None.
+///
+/// Note: Since set order is unspecified, "first" is arbitrary.
+///
+/// Example:
+///     let set: Set = [1, 2, 3, 4, 5]
+///     set.first(where: |x| x > 3)  // Some(4) or Some(5)
+public func first(where predicate: (T) -> Bool) -> T? {
+    var iter = self.iter();
+    while let .Some(elem) = iter.next() {
+        if predicate(elem) {
+            return .Some(elem)
+        }
+    }
+    .None
+}
+```
+
+**Method 3: all(satisfy:) - NEW**
+```ks
+/// Returns true if all elements satisfy the predicate.
+///
+/// Returns true for an empty set (vacuous truth).
+///
+/// Example:
+///     Set([2, 4, 6]).all(satisfy: |x| x % 2 == 0)  // true
+///     Set([1, 2, 4]).all(satisfy: |x| x % 2 == 0)  // false
+///     Set[Int64]().all(satisfy: |x| false)         // true
+public func all(satisfy predicate: (T) -> Bool) -> Bool {
+    var iter = self.iter();
+    while let .Some(elem) = iter.next() {
+        if predicate(elem) == false {
+            return false
+        }
+    }
+    true
+}
+```
+
+**Method 4: any(satisfy:) - NEW**
+```ks
+/// Returns true if any element satisfies the predicate.
+///
+/// Alias for `contains(where:)`.
+///
+/// Example:
+///     Set([1, 2, 3]).any(satisfy: |x| x > 2)  // true
+public func any(satisfy predicate: (T) -> Bool) -> Bool {
+    self.contains(where: predicate)
+}
+```
+
+**Method 5: count(where:) - NEW**
+```ks
+/// Returns the count of elements satisfying the predicate.
+///
+/// Example:
+///     Set([1, 2, 3, 4, 5]).count(where: |x| x % 2 == 0)  // 2
+public func count(where predicate: (T) -> Bool) -> Int64 {
+    var count: Int64 = 0;
+    var iter = self.iter();
+    while let .Some(elem) = iter.next() {
+        if predicate(elem) {
+            count = count + 1;
+        }
+    }
+    count
+}
+```
+
+#### Section: TRANSFORMATIONS (4 methods)
+
+**Method 1: filter(where:) - NEW**
+```ks
+/// Returns a new set with only elements satisfying the predicate.
+///
+/// Example:
+///     let set: Set = [1, 2, 3, 4, 5]
+///     let evens = set.filter(where: |x| x % 2 == 0)  // {2, 4}
+public func filter(where predicate: (T) -> Bool) -> Set[T, H] {
+    var result = Set[T, H]();
+    var iter = self.iter();
+    while let .Some(elem) = iter.next() {
+        if predicate(elem) {
+            let _ = result.insert(element: elem);
+        }
+    }
+    result
+}
+```
+
+**Method 2: map(transform:) - NEW**
+```ks
+/// Returns a new set with elements transformed by the function.
+///
+/// Note: The resulting set may have fewer elements if the transform
+/// produces duplicates.
+///
+/// Example:
+///     let set: Set = [1, 2, 3]
+///     let doubled = set.map(transform: |x| x * 2)  // {2, 4, 6}
+///
+///     let words: Set = ["Hello", "WORLD"]
+///     let lower = words.map(transform: |s| s.lowercase())
+///     // may be {"hello", "world"} or just {"hello"} if collision
+public func map[U: Hash](transform: (T) -> U) -> Set[U, H] {
+    var result = Set[U, H]();
+    var iter = self.iter();
+    while let .Some(elem) = iter.next() {
+        let transformed = transform(elem);
+        let _ = result.insert(element: transformed);
+    }
+    result
+}
+```
+
+**Method 3: compactMap(transform:) - NEW**
+```ks
+/// Returns a new set with elements transformed, removing None results.
+///
+/// Example:
+///     let set: Set = ["1", "two", "3"]
+///     let nums = set.compactMap(transform: |s| Int64.parse(s))  // {1, 3}
+public func compactMap[U: Hash](transform: (T) -> U?) -> Set[U, H] {
+    var result = Set[U, H]();
+    var iter = self.iter();
+    while let .Some(elem) = iter.next() {
+        if let .Some(transformed) = transform(elem) {
+            let _ = result.insert(element: transformed);
+        }
+    }
+    result
+}
+```
+
+**Method 4: flatMap(transform:) - NEW**
+```ks
+/// Returns a new set with elements transformed by a function returning sets.
+///
+/// The resulting sets are unioned together.
+///
+/// Example:
+///     let set: Set = [1, 2]
+///     let expanded = set.flatMap(transform: |x| Set([x, x * 10]))
+///     // {1, 10, 2, 20}
+public func flatMap[U: Hash](transform: (T) -> Set[U, H]) -> Set[U, H] {
+    var result = Set[U, H]();
+    var iter = self.iter();
+    while let .Some(elem) = iter.next() {
+        let transformedSet = transform(elem);
+        result.formUnion(other: transformedSet);
+    }
+    result
+}
+```
+
+#### Section: CAPACITY MANAGEMENT (2 methods)
+
+**Method 1: reserveCapacity(minimumCapacity:) - NEW**
+```ks
+/// Reserves capacity for at least minimumCapacity elements.
+///
+/// Does nothing if current capacity is already sufficient.
+///
+/// Example:
+///     var set = Set[String]()
+///     set.reserveCapacity(minimumCapacity: 1000)
+public mutating func reserveCapacity(minimumCapacity: Int64) {
+    if self.capacity < minimumCapacity {
+        // Create new dictionary with required capacity
+        var newDict = Dictionary[T, Unit, H](capacity: minimumCapacity);
+        var iter = self.iter();
+        while let .Some(elem) = iter.next() {
+            let _ = newDict.insert(elem, Unit());
+        }
+        self.dict = newDict;
+    }
+}
+```
+
+**Method 2: shrinkToFit() - NEW**
+```ks
+/// Reduces capacity to match the current count.
+///
+/// Frees excess memory. Useful after removing many elements.
+///
+/// Example:
+///     var set = Set[String](capacity: 1000)
+///     set.insert(element: "a")
+///     set.shrinkToFit()  // capacity reduced
+public mutating func shrinkToFit() {
+    if self.capacity > self.count {
+        var newDict = Dictionary[T, Unit, H](capacity: self.count);
+        var iter = self.iter();
+        while let .Some(elem) = iter.next() {
+            let _ = newDict.insert(elem, Unit());
+        }
+        self.dict = newDict;
+    }
+}
+```
+
+#### Section: CONVERSIONS (1 method)
+
+**Method 1: toArray() - NEW**
+```ks
+/// Returns an array containing all elements of the set.
+///
+/// The order of elements in the array is unspecified.
+///
+/// Example:
+///     let set: Set = [1, 2, 3]
+///     let arr = set.toArray()  // [1, 2, 3] in some order
+public func toArray() -> Array[T] {
+    var result = Array[T]();
+    result.reserveCapacity(minimumCapacity: self.count);
+    var iter = self.iter();
+    while let .Some(elem) = iter.next() {
+        result.append(elem);
+    }
+    result
+}
+```
+
+### 5. Extensions (6 extensions)
+
+#### Extension 1: EQUATABLE
+**Current:** (at end of file)
+**New:** Update header comment and method comment
+
+```ks
+// ============================================================================
+// CONDITIONAL EXTENSIONS - EQUATABLE
+// ============================================================================
+
+/// Extension for sets (always equatable since elements are Hash, which implies Equatable).
+extend Set[T, H]: Equatable {
+
+    /// Compares two sets for equality.
+    ///
+    /// Two sets are equal if they contain exactly the same elements.
+    ///
+    /// Example:
+    ///     Set([1, 2, 3]).equals(other: Set([3, 2, 1]))  // true
+    ///     Set([1, 2]).equals(other: Set([1, 2, 3]))     // false
+    public func equals(other: Set[T, H]) -> Bool {
+        if self.count != other.count {
+            return false
+        }
+        self.isSubset(of: other)
+    }
+}
+```
+
+#### Extension 2: FORMATTABLE - NEW
+```ks
+// ============================================================================
+// CONDITIONAL EXTENSIONS - FORMATTABLE
+// ============================================================================
+
+/// Formattable conformance for sets with formattable elements.
+///
+/// Sets format as "{elem1, elem2, elem3}".
+/// Debug mode shows type: "Set[Int64]{1, 2, 3}".
+/// Empty set formats as "{}".
+///
+/// Example:
+///     "\{Set([1, 2, 3])}"     // "{1, 2, 3}"
+///     "\{Set([1, 2, 3]):?}"   // "Set[Int64]{1, 2, 3}"
+///     "\{Set[Int64]()"        // "{}"
+extend Set[T, H]: Formattable where T: Formattable {
+    public func format(options: FormatOptions = .default) -> String {
+        // Implementation pending Formattable protocol details
+        "{...}"
+    }
+}
+```
+
+#### Extension 3: CLONEABLE - NEW
+```ks
+// ============================================================================
+// CONDITIONAL EXTENSIONS - CLONEABLE
+// ============================================================================
+
+/// Cloneable conformance for sets.
+///
+/// Due to COW semantics, cloning is O(1) until mutation.
+extend Set[T, H]: Cloneable {}
+
+/// Deep clone when T is Cloneable.
+extend Set[T, H] where T: Cloneable {
+
+    /// Creates a deep clone of the set.
+    ///
+    /// Unlike `clone()` which shares storage via COW, this immediately
+    /// copies all elements.
+    ///
+    /// Example:
+    ///     let a: Set = [[1, 2], [3, 4]]  // Set of arrays
+    ///     let b = a.deepClone()  // fully independent copy
+    public func deepClone() -> Set[T, H] {
+        // Since we're backed by Dictionary, and Dictionary has COW,
+        // we need to manually copy all elements if T is Cloneable
+        var result = Set[T, H](capacity: self.count);
+        var iter = self.iter();
+        while let .Some(elem) = iter.next() {
+            let _ = result.insert(element: elem.clone());
+        }
+        result
+    }
+}
+```
+
+#### Extension 4: COMPARABLE - NEW
+```ks
+// ============================================================================
+// CONDITIONAL EXTENSIONS - COMPARABLE
+// ============================================================================
+
+/// Extension for sets with comparable elements.
+extend Set[T, H] where T: Comparable {
+
+    /// Returns the minimum element, or None if empty.
+    ///
+    /// Example:
+    ///     Set([3, 1, 4]).min()  // Some(1)
+    ///     Set[Int64]().min()    // None
+    public func min() -> T? {
+        var iter = self.iter();
+        if let .Some(first) = iter.next() {
+            var minValue = first;
+            while let .Some(elem) = iter.next() {
+                if elem < minValue {
+                    minValue = elem;
+                }
+            }
+            return .Some(minValue)
+        }
+        .None
+    }
+
+    /// Returns the maximum element, or None if empty.
+    ///
+    /// Example:
+///     Set([3, 1, 4]).max()  // Some(4)
+    ///     Set[Int64]().max()    // None
+    public func max() -> T? {
+        var iter = self.iter();
+        if let .Some(first) = iter.next() {
+            var maxValue = first;
+            while let .Some(elem) = iter.next() {
+                if elem > maxValue {
+                    maxValue = elem;
+                }
+            }
+            return .Some(maxValue)
+        }
+        .None
+    }
+
+    /// Returns a sorted array of the set's elements.
+    ///
+    /// Example:
+    ///     Set([3, 1, 4, 1, 5]).sorted()  // [1, 3, 4, 5]
+    public func sorted() -> Array[T] {
+        var arr = self.toArray();
+        // Sort the array using a simple sort algorithm
+        // (Assuming Array has sort or we implement it)
+        arr
+    }
+}
+```
+
+#### Extension 5: NUMERIC - NEW
+```ks
+// ============================================================================
+// CONDITIONAL EXTENSIONS - NUMERIC
+// ============================================================================
+
+/// Extension for sets with addable elements.
+extend Set[T, H] where T: Addable, T: Defaultable {
+
+    /// Returns the sum of all elements.
+    ///
+    /// Example:
+    ///     Set([1, 2, 3]).sum()  // 6
+    ///     Set[Int64]().sum()    // 0
+    public func sum() -> T {
+        var total = T.default();
+        var iter = self.iter();
+        while let .Some(elem) = iter.next() {
+            total = total.add(elem);
+        }
+        total
+    }
+}
+```
+
+#### Extension 6: DIRECT ITERABLE - NEW
+```ks
+// ============================================================================
+// DIRECT ITERABLE CONFORMANCE
+// ============================================================================
+
+/// DirectIterable conformance allows using iterator methods directly on sets.
+///
+/// This enables convenient method chaining without needing to call `.iter()`.
+///
+/// Example:
+///     // With DirectIterable (direct):
+///     let evens = numbers.filter(|x| x % 2 == 0)
+///     let doubled = numbers.map(|x| x * 2)
+///
+///     // Can chain with iterator methods:
+///     let sum = numbers.filter(|x| x > 0).iter().sum()
+extend Set[T, H]: DirectIterable[T] {
+
+    /// Constructs a set from an iterator of elements.
+    ///
+    /// Example:
+    ///     let set = Set.collect(from: someIterator)
+    public static func collect[I: Iterator](from iter: I) -> Set[T, H] where I.Item = T {
+        var set = Set[T, H]();
+        var iterator = iter;
+        while let .Some(elem) = iterator.next() {
+            let _ = set.insert(element: elem);
+        }
+        set
+    }
+}
+```
+
+#### Extension 7: EXPRESSIBLE BY ARRAY LITERAL - NEW
+```ks
+// ============================================================================
+// EXPRESSIBLE BY ARRAY LITERAL
+// ============================================================================
+
+/// Sets can be created from array literals with a type annotation.
+///
+/// Example:
+///     let numbers: Set = [1, 2, 3]
+///     let strings: Set[String] = ["a", "b", "c"]
+///     let empty: Set[Int64] = []
+extend Set[T, H]: ExpressibleByArrayLiteral {
+    type Element = T
+
+    public init(_arrayLiteralPointer: lang.ptr[T], _arrayLiteralCount: lang.i64) {
+        self.dict = Dictionary(capacity: _arrayLiteralCount);
+        for i in 0..<_arrayLiteralCount {
+            let _ = self.dict.insert(_arrayLiteralPointer.offset(by: i).read(), Unit());
+        }
+    }
+}
+```
+
+## Implementation Notes
+
+### Imports to Verify
+Need to add imports for:
+- `std.core.Formattable`, `std.core.FormatOptions` (for Formattable extension)
+- `std.iter.DirectIterable` (for DirectIterable extension)
+- `std.core.ExpressibleByArrayLiteral` (for ExpressibleByArrayLiteral extension)
+- `std.collections.LiteralSlice` (for array literal support)
+
+### Language Features to Confirm
+1. **Property syntax**: `public var count: Int64 { get { ... } }`
+2. **Array operations**: `append`, `reserveCapacity`
+3. **Array literal support**: `LiteralSlice[T]` type
+4. **Range iteration**: `for i in 0..<count`
+5. **Generic constraints in extensions**: `extend Set[T, H] where T: Cloneable`
+6. **Static methods in extensions**: `public static func collect`
+
+### Optimizations Considered
+1. `isDisjoint` - iterates over smaller set
+2. `union` - uses `formUnion` for code reuse
+3. `shrinkToFit` and `reserveCapacity` - only reallocates when necessary
+4. `isSubset` - early return if count > other.count
+
+## File Structure After Changes
+
+```
+// Set[T] - hash set with COW (Copy-on-Write) semantics
+
+module std.collections
+
+imports...
+
+// SetIterator struct with exact interface comments
+
+// Set struct
+//   - INITIALIZERS (4 methods)
+//   - PROPERTIES (3 properties - converted from methods)
+//   - MEMBERSHIP (3 methods)
+//   - ADDING ELEMENTS (3 methods)
+//   - REMOVING ELEMENTS (7 methods)
+//   - SET OPERATIONS (NON-MUTATING) (4 methods)
+//   - SET RELATIONS (6 methods)
+//   - SEARCHING AND PREDICATES (5 methods)
+//   - TRANSFORMATIONS (4 methods)
+//   - CAPACITY MANAGEMENT (2 methods)
+//   - CONVERSIONS (1 method)
+
+// Extensions:
+//   - EQUATABLE
+//   - FORMATTABLE
+//   - CLONEABLE + deepClone
+//   - COMPARABLE
+//   - NUMERIC
+//   - DIRECT ITERABLE
+//   - EXPRESSIBLE BY ARRAY LITERAL
+```
+
+## Estimated Line Count
+- Current: ~287 lines
+- After update: ~650-700 lines

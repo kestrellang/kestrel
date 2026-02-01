@@ -224,4 +224,25 @@ pub trait TypeOracle {
         let _ = (target_ty, source_ty);
         None
     }
+
+    /// Normalize a type using equality constraints from the current context.
+    ///
+    /// This resolves associated types like `I.Item` to their constrained values
+    /// when there's an equality constraint like `I.Item = (K, V)` in scope.
+    ///
+    /// Used by tuple indexing and other operations that need to know the concrete
+    /// type behind an associated type.
+    ///
+    /// # Arguments
+    ///
+    /// * `ty` - The type to normalize
+    ///
+    /// # Returns
+    ///
+    /// The normalized type, or the original if no normalization applies.
+    fn normalize_with_constraints(&self, ty: &Ty) -> Ty {
+        // Default implementation returns the type unchanged.
+        // Implementors with access to where clause constraints can override.
+        ty.clone()
+    }
 }

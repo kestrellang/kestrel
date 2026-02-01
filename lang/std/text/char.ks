@@ -225,7 +225,7 @@ public struct Grapheme: Equatable {
 
     /// Returns the number of code points.
     public func charCount() -> Int64 {
-        self._chars.count()
+        self._chars.count
     }
 
     /// Returns the first code point, or None if empty.
@@ -235,7 +235,7 @@ public struct Grapheme: Equatable {
 
     /// Returns true if this is a single ASCII character.
     public func isAscii() -> Bool {
-        let count = self._chars.count();
+        let count = self._chars.count;
         if count == Int64(intLiteral: 1) {
             self._chars.getUnchecked(Int64(intLiteral: 0)).isAscii()
         } else {
@@ -246,7 +246,7 @@ public struct Grapheme: Equatable {
     /// Returns the byte length when encoded as UTF-8.
     public func utf8Length() -> Int64 {
         var len: Int64 = Int64(intLiteral: 0);
-        let count = self._chars.count();
+        let count = self._chars.count;
         for i in Int64(intLiteral: 0)..<count {
             len = len + self._chars.getUnchecked(i).utf8Length()
         }
@@ -259,8 +259,8 @@ public struct Grapheme: Equatable {
 
     /// Compares two graphemes for equality.
     public func equals(other: Grapheme) -> Bool {
-        let selfCount = self._chars.count();
-        let otherCount = other._chars.count();
+        let selfCount = self._chars.count;
+        let otherCount = other._chars.count;
         if selfCount != otherCount {
             return false
         }

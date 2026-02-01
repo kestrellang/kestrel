@@ -4,12 +4,13 @@ use kestrel_semantic_tree::behavior::attributes::AttributesBehavior;
 use kestrel_semantic_tree::behavior::callable::{
     CallableBehavior, ParameterAccessMode, ReceiverKind,
 };
+use kestrel_semantic_tree::behavior::extension_target::ExtensionTargetBehavior;
 use kestrel_semantic_tree::behavior::generics::GenericsBehavior;
 use kestrel_semantic_tree::builtins::{BuiltinKind, LanguageFeature};
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::function::Parameter;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
-use kestrel_semantic_tree::ty::Ty;
+use kestrel_semantic_tree::ty::{Ty, WhereClause};
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
@@ -546,10 +547,36 @@ fn resolve_function_body(
     }
 
     // Get the where clause from the function's generics behavior
-    let where_clause = symbol
+    let func_where_clause = symbol
         .metadata()
         .get_behavior::<GenericsBehavior>()
         .map(|g| g.where_clause().clone());
+
+    // If inside an extension, combine with extension's where clause.
+    // This ensures constraints like `T: Equatable` from `extend Array[T] where T: Equatable`
+    // are available when resolving the function body.
+    let where_clause = if let Some(parent) = symbol.metadata().parent()
+        && parent.metadata().kind() == KestrelSymbolKind::Extension
+        && let Some(target_beh) = parent.metadata().get_behavior::<ExtensionTargetBehavior>()
+    {
+        let ext_where = target_beh.where_clause();
+        match func_where_clause {
+            Some(func_wc) => {
+                // Combine function's constraints with extension's constraints
+                let combined_constraints: Vec<_> = func_wc
+                    .constraints()
+                    .iter()
+                    .chain(ext_where.constraints().iter())
+                    .cloned()
+                    .collect();
+                Some(WhereClause::with_constraints(combined_constraints))
+            }
+            None if !ext_where.is_empty() => Some(ext_where.clone()),
+            None => None,
+        }
+    } else {
+        func_where_clause
+    };
 
     // Create body resolution context early so we can use pattern resolution
     let mut body_ctx = BodyResolutionContext::new_with_scope(

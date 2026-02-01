@@ -145,7 +145,7 @@ public func readLine() -> Result[String, Error] {
     loop {
         var buf = Array[UInt8](capacity: 1);
         buf.append(0);
-        let slice = Slice(pointer: buf.pointer(), count: 1);
+        let slice = Slice(pointer: buf.asPointer(), count: 1);
         let n = try input.read(into: slice);
         if n == 0 {
             break  // EOF
@@ -158,7 +158,7 @@ public func readLine() -> Result[String, Error] {
     }
 
     // Strip trailing \r if present (Windows line endings)
-    let count = bytes.count();
+    let count = bytes.count;
     if count > 0 {
         let lastByte = bytes.getUnchecked(count - 1);
         if lastByte == 13 {

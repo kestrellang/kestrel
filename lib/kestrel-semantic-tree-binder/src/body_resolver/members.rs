@@ -35,7 +35,7 @@ use crate::diagnostics::{
     AmbiguousConstrainedMethodError, CannotAccessMemberOnTypeError,
     DelegatingInitOutsideInitializerError, MemberNotAccessibleError, MemberNotVisibleError,
     MethodNotInBoundsError, NoMatchingMethodError, NoSuchMemberError, NoSuchMethodError,
-    UnconstrainedTypeParameterMemberError,
+    UnconstrainedAssociatedTypeMemberError, UnconstrainedTypeParameterMemberError,
 };
 
 use super::calls::{
@@ -43,8 +43,9 @@ use super::calls::{
 };
 use super::context::BodyResolutionContext;
 use super::utils::{
-    find_type_directed_match, format_symbol_kind, get_callable_behavior, get_type_container,
-    get_type_parameter_bounds_by_id, get_type_parameter_bounds_from_context, infer_type_arguments,
+    find_type_directed_match, format_symbol_kind, get_associated_type_bounds_from_context,
+    get_callable_behavior, get_type_container, get_type_parameter_bounds_by_id,
+    get_type_parameter_bounds_from_context, infer_type_arguments,
     matches_signature, substitute_self, substitute_type, type_satisfies_bound,
 };
 
@@ -107,8 +108,9 @@ pub fn resolve_member_access(
     }
 
     // 0.5. Check if base is an AssociatedTypeRef (for chained access like T.Next.Next.method())
+    // This is for STATIC member access on associated types
     if let ExprKind::AssociatedTypeRef = &base.kind {
-        return resolve_associated_type_member_access(
+        return resolve_associated_type_static_member(
             &base,
             member_name,
             member_span,
@@ -126,12 +128,38 @@ pub fn resolve_member_access(
     }
 
     // 2. Handle type parameter specially - we can't access fields, only methods
-    // For type parameters, create a MethodRef that will be resolved when called
-    if let TyKind::TypeParameter(type_param) = base_ty.kind() {
-        let type_param = type_param.clone();
-        return resolve_constrained_member_access(
+    // First, check if the type parameter has an equality constraint (e.g., V = Array[E])
+    // If so, normalize it to the concrete type and continue with that type.
+    let base_ty = if let TyKind::TypeParameter(type_param) = base_ty.kind() {
+        // Try to normalize using equality constraints from the where clause
+        if let Some(normalized) =
+            normalize_type_param_with_equality(type_param.metadata().id(), ctx.where_clause())
+        {
+            // Update base expression type with normalized type
+            base.ty = normalized.clone();
+            &base.ty
+        } else {
+            // No equality constraint - use protocol bounds
+            let type_param = type_param.clone();
+            return resolve_constrained_member_access(
+                base,
+                &type_param,
+                member_name,
+                member_span,
+                full_span.clone(),
+                ctx,
+            );
+        }
+    } else {
+        base_ty
+    };
+
+    // 2.5. Handle associated type specially - similar to type parameters, use bounds
+    if let TyKind::AssociatedType { symbol, .. } = base_ty.kind() {
+        let symbol = symbol.clone();
+        return resolve_associated_type_member_access(
             base,
-            &type_param,
+            &symbol,
             member_name,
             member_span,
             full_span.clone(),
@@ -543,6 +571,100 @@ fn resolve_constrained_member_access(
     Expression::method_ref(base, method_ids, member_name.to_string(), full_span)
 }
 
+/// Resolve a member access on an associated type: iter.next where iter: I.Iter
+///
+/// Associated types (like `I.Iter` from `where I: Iterable`) can only have members
+/// from their protocol bounds (e.g., `type Iter: Iterator`).
+fn resolve_associated_type_member_access(
+    base: Expression,
+    assoc_type: &Arc<AssociatedTypeSymbol>,
+    member_name: &str,
+    _member_span: Span,
+    full_span: Span,
+    ctx: &mut BodyResolutionContext,
+) -> Expression {
+    let assoc_type_name = assoc_type.metadata().name().value.clone();
+
+    // Get protocol bounds from the associated type symbol AND context where clause
+    // This handles both:
+    // 1. Direct bounds: `type Item: Protocol` on the associated type definition
+    // 2. Context bounds: `where Item: Protocol` in the extension's where clause
+    let bounds = get_associated_type_bounds_from_context(assoc_type, ctx);
+
+    // If no bounds, report error
+    if bounds.is_empty() {
+        let error = UnconstrainedAssociatedTypeMemberError {
+            span: full_span.clone(),
+            member_name: member_name.to_string(),
+            assoc_type_name,
+        };
+        ctx.diagnostics.add_diagnostic(error.into_diagnostic());
+        return Expression::error(full_span);
+    }
+
+    // First, check if member_name is an instance property in any protocol bound
+    if let Some(property_expr) =
+        find_instance_property_in_bounds(base.clone(), &bounds, member_name, full_span.clone(), ctx)
+    {
+        return property_expr;
+    }
+
+    // Collect all method candidates from protocol bounds, tracking their source
+    let mut candidates: Vec<ProtocolMethodCandidate> = Vec::new();
+    let mut bound_names: Vec<String> = Vec::new();
+
+    for bound in &bounds {
+        if let TyKind::Protocol { symbol: proto, .. } = bound.kind() {
+            let proto_name = proto.metadata().name().value.clone();
+            bound_names.push(proto_name.clone());
+
+            // Collect method IDs from this protocol (including inherited)
+            collect_protocol_method_candidates(proto, member_name, &mut candidates, ctx);
+        }
+    }
+
+    if candidates.is_empty() {
+        // Reuse MethodNotInBoundsError - the message is generic enough
+        let error = MethodNotInBoundsError {
+            call_span: full_span.clone(),
+            method_name: member_name.to_string(),
+            type_param_name: assoc_type_name,
+            bound_names,
+        };
+        ctx.diagnostics.add_diagnostic(error.into_diagnostic());
+        return Expression::error(full_span);
+    }
+
+    // Check for ambiguity - multiple distinct protocols have a method with this name
+    let mut unique_protocols: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    for c in &candidates {
+        unique_protocols.insert(&c.protocol_name);
+    }
+
+    if unique_protocols.len() > 1 {
+        // Ambiguous - method found in multiple different protocols
+        let protocol_names: Vec<String> =
+            candidates.iter().map(|c| c.protocol_name.clone()).collect();
+        let definition_spans: Vec<(String, Span)> = candidates
+            .iter()
+            .map(|c| (c.protocol_name.clone(), c.definition_span.clone()))
+            .collect();
+
+        let error = AmbiguousConstrainedMethodError {
+            call_span: full_span.clone(),
+            method_name: member_name.to_string(),
+            protocol_names,
+            definition_spans,
+        };
+        ctx.diagnostics.add_diagnostic(error.into_diagnostic());
+        return Expression::error(full_span);
+    }
+
+    // Single protocol source - create MethodRef
+    let method_ids: Vec<SymbolId> = candidates.iter().map(|c| c.method_id).collect();
+    Expression::method_ref(base, method_ids, member_name.to_string(), full_span)
+}
+
 /// Collect method candidates from a protocol, including inherited protocols.
 /// Each candidate tracks which protocol it came from for ambiguity detection.
 fn collect_protocol_method_candidates(
@@ -647,6 +769,19 @@ pub fn resolve_member_call(
         return resolve_constrained_member_call(
             object,
             type_param,
+            member_name,
+            arguments,
+            arg_labels,
+            span,
+            ctx,
+        );
+    }
+
+    // Check if base type is an associated type - similar to type parameters, use bounds
+    if let TyKind::AssociatedType { symbol, .. } = base_ty.kind() {
+        return resolve_associated_type_member_call(
+            object,
+            symbol,
             member_name,
             arguments,
             arg_labels,
@@ -1108,6 +1243,173 @@ fn resolve_constrained_member_call(
     Expression::generic_call(method_ref, arguments, call_subs, return_ty, span)
 }
 
+/// Resolve a method call on an associated type.
+///
+/// When calling `iter.next()` where `iter: I.Iter` and `type Iter: Iterator`:
+/// 1. Look up the protocol bounds from the associated type symbol
+/// 2. Search for the method in each protocol bound
+/// 3. Substitute Self with the associated type in the method signature
+/// 4. Check for ambiguous methods
+/// 5. Return the resolved call expression
+fn resolve_associated_type_member_call(
+    object: &Expression,
+    assoc_type: &Arc<AssociatedTypeSymbol>,
+    member_name: &str,
+    arguments: Vec<CallArgument>,
+    arg_labels: &[Option<String>],
+    span: Span,
+    ctx: &mut BodyResolutionContext,
+) -> Expression {
+    let assoc_type_name = assoc_type.metadata().name().value.clone();
+    let receiver_ty = &object.ty;
+
+    // Get protocol bounds from the associated type symbol AND context where clause
+    // This handles both:
+    // 1. Direct bounds: `type Item: Protocol` on the associated type definition
+    // 2. Context bounds: `where Item: Protocol` in the extension's where clause
+    let bounds = get_associated_type_bounds_from_context(assoc_type, ctx);
+
+    // If no bounds, report error
+    if bounds.is_empty() {
+        let error = UnconstrainedAssociatedTypeMemberError {
+            span: span.clone(),
+            member_name: member_name.to_string(),
+            assoc_type_name,
+        };
+        ctx.diagnostics.add_diagnostic(error.into_diagnostic());
+        return Expression::error(span);
+    }
+
+    // Collect all matching methods from all protocol bounds
+    let mut candidates: Vec<ConstrainedMethodCandidate> = Vec::new();
+    let mut bound_names: Vec<String> = Vec::new();
+
+    for bound in &bounds {
+        if let TyKind::Protocol {
+            symbol: proto,
+            substitutions,
+        } = bound.kind()
+        {
+            let proto_name = proto.metadata().name().value.clone();
+            bound_names.push(proto_name.clone());
+
+            // Collect methods from this protocol (including inherited)
+            collect_protocol_methods(
+                proto,
+                member_name,
+                receiver_ty,
+                substitutions,
+                &mut candidates,
+                ctx,
+            );
+        }
+    }
+
+    if candidates.is_empty() {
+        // Reuse MethodNotInBoundsError - the message is generic enough
+        let error = MethodNotInBoundsError {
+            call_span: span.clone(),
+            method_name: member_name.to_string(),
+            type_param_name: assoc_type_name,
+            bound_names,
+        };
+        ctx.diagnostics.add_diagnostic(error.into_diagnostic());
+        return Expression::error(span);
+    }
+
+    // Find matching candidates by signature
+    let matching: Vec<&ConstrainedMethodCandidate> = candidates
+        .iter()
+        .filter(|c| matches_signature(&c.callable, arguments.len(), arg_labels))
+        .collect();
+
+    if matching.is_empty() {
+        // No matching signature - report error with available overloads
+        let method_ids: Vec<SymbolId> = candidates
+            .iter()
+            .map(|c| c.method.metadata().id())
+            .collect();
+        let available_overloads = collect_overload_descriptions(&method_ids, ctx.model);
+
+        let error = NoMatchingMethodError {
+            call_span: span.clone(),
+            method_name: member_name.to_string(),
+            receiver_type: assoc_type_name,
+            provided_labels: arg_labels.to_vec(),
+            provided_arity: arguments.len(),
+            available_overloads,
+        };
+        ctx.diagnostics.add_diagnostic(error.into_diagnostic());
+        return Expression::error(span);
+    }
+
+    // Check for ambiguity - multiple protocols have matching method with same signature
+    let mut seen_protocols: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let unique_matching: Vec<&ConstrainedMethodCandidate> = matching
+        .into_iter()
+        .filter(|c| seen_protocols.insert(c.protocol_name.clone()))
+        .collect();
+
+    if unique_matching.len() > 1 {
+        let protocol_names: Vec<String> = unique_matching
+            .iter()
+            .map(|c| c.protocol_name.clone())
+            .collect();
+        let definition_spans: Vec<(String, Span)> = unique_matching
+            .iter()
+            .map(|c| (c.protocol_name.clone(), c.definition_span.clone()))
+            .collect();
+
+        let error = AmbiguousConstrainedMethodError {
+            call_span: span.clone(),
+            method_name: member_name.to_string(),
+            protocol_names,
+            definition_spans,
+        };
+        ctx.diagnostics.add_diagnostic(error.into_diagnostic());
+        return Expression::error(span);
+    }
+
+    let matching = unique_matching;
+
+    // Single matching method found
+    let winner = matching[0];
+    let mut return_ty = winner.callable.return_type().clone();
+    let method_id = winner.method.metadata().id();
+
+    // Validate access modes for arguments
+    validate_argument_access_modes(&winner.callable, &arguments, &span, ctx);
+
+    // Build substitutions for the Call expression
+    let mut call_subs = Substitutions::new();
+
+    // Infer method's own type parameters from argument types
+    if let Some(generics) = winner.method.metadata().get_behavior::<GenericsBehavior>() {
+        let method_type_params = generics.type_parameters();
+        if !method_type_params.is_empty() {
+            let arg_types: Vec<Ty> = arguments.iter().map(|a| a.value.ty.clone()).collect();
+            let method_subs =
+                infer_type_arguments(method_type_params, &winner.callable, &arg_types);
+            for (key, ty) in method_subs.iter() {
+                call_subs.insert(*key, ty.clone());
+            }
+            // Also apply method substitutions to return type
+            return_ty = return_ty.apply_substitutions(&method_subs);
+        }
+    }
+
+    // Create method ref and call
+    let method_ref = Expression::method_ref(
+        object.clone(),
+        vec![method_id],
+        member_name.to_string(),
+        span.clone(),
+    );
+
+    // Use generic_call to store substitutions for type checking
+    Expression::generic_call(method_ref, arguments, call_subs, return_ty, span)
+}
+
 /// Collect methods from a protocol, including inherited protocols.
 ///
 /// The `protocol_substitutions` parameter contains the type arguments for the protocol
@@ -1470,12 +1772,12 @@ fn find_associated_type_in_bounds(
     None
 }
 
-/// Resolve member access on an associated type expression.
+/// Resolve static member access on an associated type expression.
 ///
 /// This handles chained associated type access like `T.Next.Next.baseValue()`.
 /// When the base is an `AssociatedTypeRef`, we look at the associated type's bounds
 /// to find either another associated type or a static method.
-fn resolve_associated_type_member_access(
+fn resolve_associated_type_static_member(
     base: &Expression,
     member_name: &str,
     _member_span: Span,
@@ -1900,16 +2202,30 @@ pub(super) fn filter_applicable_extensions(
             }
 
             // Check where clause constraints are satisfied
-            let where_clause = target_behavior.where_clause();
-            for constraint in where_clause.constraints() {
+            let ext_where_clause = target_behavior.where_clause();
+            for constraint in ext_where_clause.constraints() {
                 if let Some(param_id) = constraint.type_parameter_id() {
                     // Get the actual type for this parameter
                     if let Some(actual_type) = param_to_actual.get(&param_id) {
                         // Check each bound is satisfied
                         for bound in constraint.bounds() {
-                            if !type_satisfies_bound(actual_type, bound, ctx.model) {
-                                return None; // Constraint not satisfied
+                            // First check if type actually satisfies bound
+                            if type_satisfies_bound(actual_type, bound, ctx.model) {
+                                continue;
                             }
+                            // If actual_type is a type parameter, check if the bound is
+                            // declared in the current context's where clause
+                            if let TyKind::TypeParameter(tp_symbol) = actual_type.kind() {
+                                if type_param_has_bound_in_where_clause(
+                                    tp_symbol.metadata().id(),
+                                    bound,
+                                    ctx.where_clause(),
+                                ) {
+                                    continue;
+                                }
+                            }
+                            // Constraint not satisfied
+                            return None;
                         }
                     }
                     // If param_id not in map, it's a constraint on a type param that's not in scope
@@ -2015,6 +2331,79 @@ fn types_match_simple(a: &Ty, b: &Ty) -> bool {
         // Different kinds don't match
         _ => false,
     }
+}
+
+/// Normalize a type parameter using equality constraints from a where clause.
+///
+/// If the where clause contains a constraint like `V = Array[E]`, this function
+/// returns `Some(Array[E])` for type parameter `V`. Returns `None` if no equality
+/// constraint exists for the given type parameter.
+fn normalize_type_param_with_equality(
+    param_id: semantic_tree::symbol::SymbolId,
+    where_clause: &kestrel_semantic_tree::ty::WhereClause,
+) -> Option<Ty> {
+    for constraint in where_clause.constraints() {
+        if let kestrel_semantic_tree::ty::Constraint::TypeEquality { left, right, .. } =
+            constraint
+        {
+            // Check if left side is our type parameter
+            if let TyKind::TypeParameter(tp) = left.kind() {
+                if tp.metadata().id() == param_id {
+                    // Return the right side (the concrete type)
+                    return Some(right.clone());
+                }
+            }
+            // Also check if right side is our type parameter (constraints are symmetric)
+            if let TyKind::TypeParameter(tp) = right.kind() {
+                if tp.metadata().id() == param_id {
+                    // Return the left side (the concrete type)
+                    return Some(left.clone());
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Check if a type parameter has a specific protocol bound in a where clause.
+///
+/// This is used when checking extension applicability - if the actual type at a
+/// type parameter position is itself a type parameter with a matching bound in
+/// the current context's where clause, the extension should be considered applicable.
+fn type_param_has_bound_in_where_clause(
+    param_id: semantic_tree::symbol::SymbolId,
+    bound: &Ty,
+    where_clause: &kestrel_semantic_tree::ty::WhereClause,
+) -> bool {
+    let TyKind::Protocol {
+        symbol: required_proto,
+        ..
+    } = bound.kind()
+    else {
+        return false;
+    };
+
+    for constraint in where_clause.constraints() {
+        // Check if this constraint is for our type parameter
+        if let Some(constraint_param_id) = constraint.type_parameter_id() {
+            if constraint_param_id == param_id {
+                // Check if any of the bounds match
+                for constraint_bound in constraint.bounds() {
+                    if let TyKind::Protocol {
+                        symbol: bound_proto,
+                        ..
+                    } = constraint_bound.kind()
+                    {
+                        if bound_proto.metadata().id() == required_proto.metadata().id() {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    false
 }
 
 /// Resolve SelfType to the concrete type with substitutions.

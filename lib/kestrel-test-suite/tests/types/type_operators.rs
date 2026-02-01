@@ -112,7 +112,7 @@ mod array_operator {
                 arr.append(10);
                 arr.append(20);
                 arr.append(30);
-                let _ = println(arr.count());
+                let _ = println(arr.count);
                 0
             }
         "#,
@@ -158,8 +158,8 @@ mod array_operator {
                 inner.append(1);
                 inner.append(2);
                 outer.append(inner);
-                let _ = println(outer.count());
-                let _ = println(outer.first().unwrap().count());
+                let _ = println(outer.count);
+                let _ = println(outer.first().unwrap().count);
                 0
             }
         "#,
@@ -177,7 +177,7 @@ mod array_operator {
             import std.io.stdio.println
 
             func countExplicit(arr: std.collections.Array[std.num.Int64]) -> std.num.Int64 {
-                arr.count()
+                arr.count
             }
 
             func main() -> lang.i64 {
@@ -229,7 +229,7 @@ mod dictionary_operator {
                 var dict: [std.num.Int64: std.num.Int64] = std.collections.Dictionary[std.num.Int64, std.num.Int64]();
                 let _ = dict.insert(1, 100);
                 let _ = dict.insert(2, 200);
-                let _ = println(dict.count());
+                let _ = println(dict.count);
                 0
             }
         "#,
@@ -265,7 +265,7 @@ mod dictionary_operator {
             import std.io.stdio.println
 
             func countExplicit(dict: std.collections.Dictionary[std.num.Int64, std.num.Int64]) -> std.num.Int64 {
-                dict.count()
+                dict.count
             }
 
             func main() -> lang.i64 {
@@ -465,7 +465,7 @@ mod complex_composition {
                 arr.append(.Some(1));
                 arr.append(.None);
                 arr.append(.Some(3));
-                let _ = println(arr.count());
+                let _ = println(arr.count);
                 let _ = println(arr.first().unwrap().unwrap());
                 0
             }
@@ -490,7 +490,7 @@ mod complex_composition {
                 arr.append(.Ok(1));
                 arr.append(.Err(MyError()));
                 arr.append(.Ok(3));
-                let _ = println(arr.count());
+                let _ = println(arr.count);
                 let _ = println(arr.first().unwrap().unwrap());
                 0
             }
@@ -514,7 +514,7 @@ mod complex_composition {
                 arr.append(10);
                 arr.append(20);
                 let _ = dict.insert(1, arr);
-                let _ = println(dict.getValue(1).unwrap().count());
+                let _ = println(dict.getValue(1).unwrap().count);
                 0
             }
         "#,

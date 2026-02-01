@@ -108,7 +108,7 @@ public struct File: Read, Write, not Copyable {
         }
         pathBuf.append(0); // null terminator
 
-        let fd = libc.open(pathBuf.pointer(), libc.O_RDONLY(), 0);
+        let fd = libc.open(pathBuf.asPointer(), libc.O_RDONLY(), 0);
         if fd < 0 {
             return .Err(Error.last())
         }
@@ -134,7 +134,7 @@ public struct File: Read, Write, not Copyable {
         pathBuf.append(0);
 
         let flags = libc.O_WRONLY() | libc.O_CREAT() | libc.O_TRUNC();
-        let fd = libc.open(pathBuf.pointer(), flags, libc.MODE_DEFAULT());
+        let fd = libc.open(pathBuf.asPointer(), flags, libc.MODE_DEFAULT());
         if fd < 0 {
             return .Err(Error.last())
         }
@@ -161,7 +161,7 @@ public struct File: Read, Write, not Copyable {
         }
         pathBuf.append(0);
 
-        let fd = libc.open(pathBuf.pointer(), libc.O_RDWR(), 0);
+        let fd = libc.open(pathBuf.asPointer(), libc.O_RDWR(), 0);
         if fd < 0 {
             return .Err(Error.last())
         }
@@ -187,7 +187,7 @@ public struct File: Read, Write, not Copyable {
         pathBuf.append(0);
 
         let flags = libc.O_WRONLY() | libc.O_CREAT() | libc.O_APPEND();
-        let fd = libc.open(pathBuf.pointer(), flags, libc.MODE_DEFAULT());
+        let fd = libc.open(pathBuf.asPointer(), flags, libc.MODE_DEFAULT());
         if fd < 0 {
             return .Err(Error.last())
         }
@@ -215,7 +215,7 @@ public struct File: Read, Write, not Copyable {
         pathBuf.append(0);
 
         let flags = libc.O_WRONLY() | libc.O_CREAT() | libc.O_EXCL();
-        let fd = libc.open(pathBuf.pointer(), flags, libc.MODE_DEFAULT());
+        let fd = libc.open(pathBuf.asPointer(), flags, libc.MODE_DEFAULT());
         if fd < 0 {
             return .Err(Error.last())
         }
@@ -410,7 +410,7 @@ public func readFileString(path: String) -> Result[String, Error] {
     // Build string from bytes
     var result = String();
     var i: Int64 = 0;
-    let count = bytes.count();
+    let count = bytes.count;
     while i < count {
         result.appendByte(bytes.getUnchecked(i));
         i = i + 1

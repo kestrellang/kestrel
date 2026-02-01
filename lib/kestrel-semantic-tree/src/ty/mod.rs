@@ -1146,6 +1146,18 @@ impl Ty {
         }
     }
 
+    /// Check if this type could potentially be a tuple at runtime.
+    ///
+    /// Returns true for types that are not yet resolved but could become tuples
+    /// after type inference (e.g., type parameters with tuple constraints,
+    /// associated types, or inference placeholders).
+    pub fn could_be_tuple(&self) -> bool {
+        matches!(
+            &self.kind,
+            TyKind::Infer | TyKind::TypeParameter(_) | TyKind::AssociatedType { .. }
+        )
+    }
+
     // REMOVED: as_array() - use as_array_struct_element() with BuiltinRegistry instead
 
     /// Check if this is the Array[T] struct type (using builtin registry)

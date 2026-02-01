@@ -291,6 +291,16 @@ impl<'a> InferenceContext<'a> {
         ));
     }
 
+    /// Add a tuple index access constraint.
+    ///
+    /// This is used when the tuple type isn't yet known at constraint generation time
+    /// (e.g., type parameters with tuple constraints). The solver will resolve the
+    /// element type once the tuple type becomes known.
+    pub fn tuple_index_access(&mut self, tuple: TyId, index: usize, result: TyId, span: Span) {
+        self.constraints
+            .push(Constraint::tuple_index_access(tuple, index, result, span));
+    }
+
     /// Add a promotable constraint: the value may be promoted to the target type.
     ///
     /// This first tries unification. If that fails, it checks if the target type

@@ -17,14 +17,14 @@ mod array {
                 var arr = std.collections.Array[std.num.Int64]();
 
                 // Test isEmpty on empty array
-                if arr.isEmpty() == false { return 1 }
+                if arr.isEmpty == false { return 1 }
 
                 // Test append and count
                 arr.append(10);
                 arr.append(20);
                 arr.append(30);
-                if arr.count() != 3 { return 2 }
-                if arr.isEmpty() { return 3 }
+                if arr.count != 3 { return 2 }
+                if arr.isEmpty { return 3 }
 
                 // Test first and last
                 if arr.first().unwrap() != 10 { return 4 }
@@ -33,7 +33,7 @@ mod array {
                 // Test pop
                 let popped = arr.pop();
                 if popped.unwrap() != 30 { return 6 }
-                if arr.count() != 2 { return 7 }
+                if arr.count != 2 { return 7 }
 
                 0
             }
@@ -238,12 +238,12 @@ mod dictionary {
                 var dict = std.collections.Dictionary[std.num.Int64, std.num.Int64]();
 
                 // Test isEmpty initially
-                if dict.isEmpty() == false { return 1 }
+                if dict.isEmpty == false { return 1 }
 
                 // Test insert and count
                 let _ = dict.insert(1, 100);
                 let _ = dict.insert(2, 200);
-                if dict.count() != 2 { return 2 }
+                if dict.count != 2 { return 2 }
 
                 // Test contains
                 if dict.contains(1) == false { return 3 }
@@ -258,7 +258,7 @@ mod dictionary {
                 let removed = dict.remove(1);
                 if removed.isNone() { return 7 }
                 if removed.unwrap() != 100 { return 8 }
-                if dict.count() != 1 { return 9 }
+                if dict.count != 1 { return 9 }
 
                 0
             }
@@ -471,6 +471,319 @@ mod array_iteration {
                     }
                 }
                 if sum != 60 { return 1 }
+
+                0
+            }
+        "#,
+        )
+        .with_stdlib()
+        .expect(Compiles)
+        .expect(Runs);
+    }
+}
+
+mod iterator_adapters {
+    use super::*;
+
+    #[test]
+    fn map_filter_collect() {
+        Test::new(
+            r#"module Test
+
+            func main() -> lang.i64 {
+                var arr = std.collections.Array[std.num.Int64]();
+                arr.append(1);
+                arr.append(2);
+                arr.append(3);
+                arr.append(4);
+                arr.append(5);
+
+                // Test map
+                let doubled = arr.iter().map({ (x) in x * 2 }).collect();
+                if doubled.count != 5 { return 1 }
+                if doubled.getUnchecked(0) != 2 { return 2 }
+                if doubled.getUnchecked(4) != 10 { return 3 }
+
+                // Test filter
+                let evens = arr.iter().filter({ (x) in x % 2 == 0 }).collect();
+                if evens.count != 2 { return 4 }
+                if evens.getUnchecked(0) != 2 { return 5 }
+                if evens.getUnchecked(1) != 4 { return 6 }
+
+                // Test map + filter chain
+                let result = arr.iter().filter({ (x) in x > 2 }).map({ (x) in x * 10 }).collect();
+                if result.count != 3 { return 7 }
+                if result.getUnchecked(0) != 30 { return 8 }
+
+                0
+            }
+        "#,
+        )
+        .with_stdlib()
+        .expect(Compiles)
+        .expect(Runs);
+    }
+
+    #[test]
+    fn take_skip_methods() {
+        Test::new(
+            r#"module Test
+
+            func main() -> lang.i64 {
+                var arr = std.collections.Array[std.num.Int64]();
+                arr.append(1);
+                arr.append(2);
+                arr.append(3);
+                arr.append(4);
+                arr.append(5);
+
+                // Test take
+                let first3 = arr.iter().take(count: 3).collect();
+                if first3.count != 3 { return 1 }
+                if first3.getUnchecked(2) != 3 { return 2 }
+
+                // Test skip
+                let last3 = arr.iter().skip(count: 2).collect();
+                if last3.count != 3 { return 3 }
+                if last3.getUnchecked(0) != 3 { return 4 }
+
+                // Test takeWhile
+                let lessThan4 = arr.iter().takeWhile({ (x) in x < 4 }).collect();
+                if lessThan4.count != 3 { return 5 }
+                if lessThan4.getUnchecked(2) != 3 { return 6 }
+
+                // Test skipWhile
+                let from4 = arr.iter().skipWhile({ (x) in x < 4 }).collect();
+                if from4.count != 2 { return 7 }
+                if from4.getUnchecked(0) != 4 { return 8 }
+
+                0
+            }
+        "#,
+        )
+        .with_stdlib()
+        .expect(Compiles)
+        .expect(Runs);
+    }
+
+    #[test]
+    fn zip_chain_enumerate() {
+        Test::new(
+            r#"module Test
+
+            func main() -> lang.i64 {
+                var arr1 = std.collections.Array[std.num.Int64]();
+                arr1.append(1);
+                arr1.append(2);
+                arr1.append(3);
+
+                var arr2 = std.collections.Array[std.num.Int64]();
+                arr2.append(10);
+                arr2.append(20);
+                arr2.append(30);
+
+                // Test zip
+                let zipped = arr1.iter().zip(other: arr2.iter()).collect();
+                if zipped.count != 3 { return 1 }
+                let (a, b) = zipped.getUnchecked(0);
+                if a != 1 { return 2 }
+                if b != 10 { return 3 }
+
+                // Test enumerate
+                let enumerated = arr1.iter().enumerate().collect();
+                if enumerated.count != 3 { return 4 }
+                let (idx, val) = enumerated.getUnchecked(1);
+                if idx != 1 { return 5 }
+                if val != 2 { return 6 }
+
+                // Test chain
+                let chained = arr1.iter().chain(other: arr2.iter()).collect();
+                if chained.count != 6 { return 7 }
+                if chained.getUnchecked(3) != 10 { return 8 }
+
+                0
+            }
+        "#,
+        )
+        .with_stdlib()
+        .expect(Compiles)
+        .expect(Runs);
+    }
+
+    #[test]
+    fn terminal_operations() {
+        Test::new(
+            r#"module Test
+
+            func main() -> lang.i64 {
+                var arr = std.collections.Array[std.num.Int64]();
+                arr.append(1);
+                arr.append(2);
+                arr.append(3);
+                arr.append(4);
+                arr.append(5);
+
+                // Test count
+                if arr.iter().count() != 5 { return 1 }
+                if arr.iter().filter({ (x) in x % 2 == 0 }).count() != 2 { return 2 }
+
+                // Test fold (sum)
+                let sum = arr.iter().fold(initial: 0, combine: { (acc, x) in acc + x });
+                if sum != 15 { return 3 }
+
+                // Test any
+                if arr.iter().any({ (x) in x > 10 }) { return 4 }
+                if arr.iter().any({ (x) in x == 3 }) == false { return 5 }
+
+                // Test all
+                if arr.iter().all({ (x) in x < 10 }) == false { return 6 }
+                if arr.iter().all({ (x) in x % 2 == 0 }) { return 7 }
+
+                // Test find
+                let found = arr.iter().find({ (x) in x > 3 });
+                if found.isNone() { return 8 }
+                if found.unwrap() != 4 { return 9 }
+
+                // Test nth
+                let third = arr.iter().nth(n: 2);
+                if third.isNone() { return 10 }
+                if third.unwrap() != 3 { return 11 }
+
+                // Test first and last
+                if arr.iter().first().unwrap() != 1 { return 12 }
+                if arr.iter().last().unwrap() != 5 { return 13 }
+
+                // Test forEach
+                var total: std.num.Int64 = 0;
+                arr.iter().forEach({ (x) in total = total + x });
+                if total != 15 { return 14 }
+
+                0
+            }
+        "#,
+        )
+        .with_stdlib()
+        .expect(Compiles)
+        .expect(Runs);
+    }
+
+    #[test]
+    fn min_max_sorted() {
+        Test::new(
+            r#"module Test
+
+            func main() -> lang.i64 {
+                var arr = std.collections.Array[std.num.Int64]();
+                arr.append(3);
+                arr.append(1);
+                arr.append(4);
+                arr.append(1);
+                arr.append(5);
+
+                // Test min
+                let minVal = arr.iter().min();
+                if minVal.isNone() { return 1 }
+                if minVal.unwrap() != 1 { return 2 }
+
+                // Test max
+                let maxVal = arr.iter().max();
+                if maxVal.isNone() { return 3 }
+                if maxVal.unwrap() != 5 { return 4 }
+
+                // Test sorted
+                let sorted = arr.iter().sorted();
+                if sorted.count != 5 { return 5 }
+                if sorted.getUnchecked(0) != 1 { return 6 }
+                if sorted.getUnchecked(4) != 5 { return 7 }
+
+                // Test sum
+                let sum = arr.iter().sum();
+                if sum != 14 { return 8 }
+
+                // Test product
+                let product = [1, 2, 3].iter().product();
+                if product != 6 { return 9 }
+
+                0
+            }
+        "#,
+        )
+        .with_stdlib()
+        .expect(Compiles)
+        .expect(Runs);
+    }
+
+    #[test]
+    fn filter_map_flatten() {
+        Test::new(
+            r#"module Test
+
+            func main() -> lang.i64 {
+                // Test filterMap with optionals
+                var arr = std.collections.Array[std.result.Optional[std.num.Int64]]();
+                arr.append(.Some(1));
+                arr.append(.None);
+                arr.append(.Some(3));
+
+                let compacted = arr.iter().compactMap().collect();
+                if compacted.count != 2 { return 1 }
+                if compacted.getUnchecked(0) != 1 { return 2 }
+                if compacted.getUnchecked(1) != 3 { return 3 }
+
+                // Test flatMap
+                var nested = std.collections.Array[std.collections.Array[std.num.Int64]]();
+                var inner1 = std.collections.Array[std.num.Int64]();
+                inner1.append(1);
+                inner1.append(2);
+                var inner2 = std.collections.Array[std.num.Int64]();
+                inner2.append(3);
+                nested.append(inner1);
+                nested.append(inner2);
+
+                let flat = nested.iter().flatMap({ (arr) in arr.iter() }).collect();
+                if flat.count != 3 { return 4 }
+                if flat.getUnchecked(0) != 1 { return 5 }
+                if flat.getUnchecked(2) != 3 { return 6 }
+
+                0
+            }
+        "#,
+        )
+        .with_stdlib()
+        .expect(Compiles)
+        .expect(Runs);
+    }
+
+    #[test]
+    fn utility_adapters() {
+        Test::new(
+            r#"module Test
+
+            func main() -> lang.i64 {
+                var arr = std.collections.Array[std.num.Int64]();
+                arr.append(1);
+                arr.append(2);
+                arr.append(3);
+
+                // Test stepBy
+                let everyOther = [0, 1, 2, 3, 4, 5, 6].iter().stepBy(n: 2).collect();
+                if everyOther.count != 4 { return 1 }
+                if everyOther.getUnchecked(1) != 2 { return 2 }
+
+                // Test scan (running sum)
+                let running = arr.iter().scan(initial: 0, combine: { (acc, x) in acc + x }).collect();
+                if running.count != 3 { return 3 }
+                if running.getUnchecked(0) != 1 { return 4 }
+                if running.getUnchecked(2) != 6 { return 5 }
+
+                // Test position
+                let pos = arr.iter().position({ (x) in x == 2 });
+                if pos.isNone() { return 6 }
+                if pos.unwrap() != 1 { return 7 }
+
+                // Test contains
+                if arr.iter().contains(element: 2) == false { return 8 }
+                if arr.iter().contains(element: 10) { return 9 }
 
                 0
             }

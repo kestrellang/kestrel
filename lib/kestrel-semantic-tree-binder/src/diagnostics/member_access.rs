@@ -216,6 +216,46 @@ impl IntoDiagnostic for UnconstrainedTypeParameterMemberError {
     }
 }
 
+/// Error when accessing a member on an associated type with no protocol bounds.
+pub struct UnconstrainedAssociatedTypeMemberError {
+    /// Span of the member access expression
+    pub span: Span,
+    /// Name of the member being accessed
+    pub member_name: String,
+    /// Name of the associated type
+    pub assoc_type_name: String,
+}
+
+impl IntoDiagnostic for UnconstrainedAssociatedTypeMemberError {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
+        Diagnostic::error()
+            .with_message(format!(
+                "cannot call '{}' on type '{}'",
+                self.member_name, self.assoc_type_name
+            ))
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range()).with_message(format!(
+                    "cannot call '{}' on type '{}'",
+                    self.member_name, self.assoc_type_name
+                )),
+            ])
+            .with_notes(vec![
+                format!(
+                    "'{}' is an associated type with no bounds",
+                    self.assoc_type_name
+                ),
+                format!(
+                    "help: add bounds to the associated type definition: `type {}: SomeProtocol`",
+                    self.assoc_type_name
+                ),
+                format!(
+                    "  or: add a where clause constraint: `where {}: SomeProtocol`",
+                    self.assoc_type_name
+                ),
+            ])
+    }
+}
+
 /// Error when a method is not found in any of the type parameter's protocol bounds.
 pub struct MethodNotInBoundsError {
     /// Span of the method call

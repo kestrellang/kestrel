@@ -1916,14 +1916,22 @@ fn resolve_tuple_index_expression(
             Expression::tuple_index(base, index, element_ty, span)
         },
         None => {
-            // Not a tuple type
-            let error = TupleIndexOnNonTupleError {
-                span: span.clone(),
-                index,
-                base_type: base_ty.to_string(),
-            };
-            ctx.diagnostics.add_diagnostic(error.into_diagnostic());
-            Expression::error(span)
+            // Check if this could potentially be a tuple after type inference
+            // (e.g., type parameters with tuple constraints, associated types)
+            if base_ty.could_be_tuple() {
+                // Defer to type inference - use Infer type for the element
+                let element_ty = Ty::infer(span.clone());
+                Expression::tuple_index(base, index, element_ty, span)
+            } else {
+                // Definitely not a tuple type
+                let error = TupleIndexOnNonTupleError {
+                    span: span.clone(),
+                    index,
+                    base_type: base_ty.to_string(),
+                };
+                ctx.diagnostics.add_diagnostic(error.into_diagnostic());
+                Expression::error(span)
+            }
         },
     }
 }

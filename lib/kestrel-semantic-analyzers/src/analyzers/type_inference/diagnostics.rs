@@ -268,6 +268,27 @@ impl IntoDiagnostic for InferenceErrorDiagnostic {
                     Label::primary(span.file_id, span.range())
                         .with_message("add () to call this method"),
                 ]),
+
+            InferenceError::TupleIndexOutOfBounds {
+                index,
+                tuple_length,
+                span,
+            } => Diagnostic::error()
+                .with_message(format!(
+                    "tuple index {} is out of bounds for tuple with {} elements",
+                    index, tuple_length
+                ))
+                .with_labels(vec![
+                    Label::primary(span.file_id, span.range())
+                        .with_message(format!("tuple has only {} elements", tuple_length)),
+                ]),
+
+            InferenceError::TupleIndexOnNonTuple { ty, span } => Diagnostic::error()
+                .with_message(format!("cannot index into non-tuple type `{}`", ty))
+                .with_labels(vec![
+                    Label::primary(span.file_id, span.range())
+                        .with_message(format!("`{}` is not a tuple", ty)),
+                ]),
         }
     }
 }

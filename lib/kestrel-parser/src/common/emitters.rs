@@ -433,38 +433,40 @@ fn emit_property_accessors(sink: &mut EventSink, computed_body: &ComputedBodyDat
             // Shorthand: just emit the code block directly
             emit_code_block(sink, body);
         },
-        ComputedBodyData::Accessors { getter, setter } => {
+        ComputedBodyData::Accessors {
+            lbrace: _,
+            get_span,
+            getter,
+            set_span,
+            setter,
+            rbrace: _,
+        } => {
             // Emit getter
             if let Some(getter_body) = getter {
                 // Full getter with body: emit GetterClause containing Get token and code block
                 sink.start_node(SyntaxKind::GetterClause);
-                // Emit Get token - use the start of the code block as approximate span
-                let get_span = Span::new(
-                    getter_body.lbrace.file_id,
-                    getter_body.lbrace.start.saturating_sub(4)..getter_body.lbrace.start,
-                );
-                sink.add_token(SyntaxKind::Get, get_span);
+                sink.add_token(SyntaxKind::Get, get_span.clone());
                 emit_code_block(sink, getter_body);
                 sink.finish_node();
             } else {
-                // Protocol requirement: just emit Get token without body (no GetterClause wrapper)
-                sink.add_token(SyntaxKind::Get, Span::new(sink.file_id(), 0..3));
+                // Protocol requirement: emit Get token without body (no GetterClause wrapper)
+                sink.add_token(SyntaxKind::Get, get_span.clone());
             }
 
             // Emit setter
             if let Some(setter_body) = setter {
                 // Check if this is a real setter body or a placeholder for protocol requirement
                 if setter_body.lbrace.start == 0 && setter_body.lbrace.end == 0 {
-                    // Protocol requirement: just emit Set token without body (no SetterClause wrapper)
-                    sink.add_token(SyntaxKind::Set, Span::new(sink.file_id(), 0..3));
+                    // Protocol requirement: emit Set token without body
+                    if let Some(set_span) = set_span {
+                        sink.add_token(SyntaxKind::Set, set_span.clone());
+                    }
                 } else {
                     // Full setter with body: emit SetterClause containing Set token and code block
                     sink.start_node(SyntaxKind::SetterClause);
-                    let set_span = Span::new(
-                        setter_body.lbrace.file_id,
-                        setter_body.lbrace.start.saturating_sub(4)..setter_body.lbrace.start,
-                    );
-                    sink.add_token(SyntaxKind::Set, set_span);
+                    if let Some(set_span) = set_span {
+                        sink.add_token(SyntaxKind::Set, set_span.clone());
+                    }
                     emit_code_block(sink, setter_body);
                     sink.finish_node();
                 }
@@ -861,7 +863,14 @@ fn emit_subscript_body(sink: &mut EventSink, body: &SubscriptBodyData) {
             // Shorthand: just emit the code block directly
             emit_code_block(sink, code_block);
         },
-        SubscriptBodyData::Accessors { getter, setter } => {
+        SubscriptBodyData::Accessors {
+            lbrace: _,
+            get_span,
+            getter,
+            set_span,
+            setter,
+            rbrace: _,
+        } => {
             // Wrap accessors in PropertyAccessors node
             sink.start_node(SyntaxKind::PropertyAccessors);
 
@@ -869,33 +878,28 @@ fn emit_subscript_body(sink: &mut EventSink, body: &SubscriptBodyData) {
             if let Some(getter_body) = getter {
                 // Full getter with body: emit GetterClause containing Get token and code block
                 sink.start_node(SyntaxKind::GetterClause);
-                // Emit Get token - use the start of the code block as approximate span
-                let get_span = Span::new(
-                    getter_body.lbrace.file_id,
-                    getter_body.lbrace.start.saturating_sub(4)..getter_body.lbrace.start,
-                );
-                sink.add_token(SyntaxKind::Get, get_span);
+                sink.add_token(SyntaxKind::Get, get_span.clone());
                 emit_code_block(sink, getter_body);
                 sink.finish_node();
             } else {
-                // Protocol requirement: just emit Get token without body (no GetterClause wrapper)
-                sink.add_token(SyntaxKind::Get, Span::new(sink.file_id(), 0..3));
+                // Protocol requirement: emit Get token without body (no GetterClause wrapper)
+                sink.add_token(SyntaxKind::Get, get_span.clone());
             }
 
             // Emit setter
             if let Some(setter_body) = setter {
                 // Check if this is a real setter body or a placeholder for protocol requirement
                 if setter_body.lbrace.start == 0 && setter_body.lbrace.end == 0 {
-                    // Protocol requirement: just emit Set token without body (no SetterClause wrapper)
-                    sink.add_token(SyntaxKind::Set, Span::new(sink.file_id(), 0..3));
+                    // Protocol requirement: emit Set token without body
+                    if let Some(set_span) = set_span {
+                        sink.add_token(SyntaxKind::Set, set_span.clone());
+                    }
                 } else {
                     // Full setter with body: emit SetterClause containing Set token and code block
                     sink.start_node(SyntaxKind::SetterClause);
-                    let set_span = Span::new(
-                        setter_body.lbrace.file_id,
-                        setter_body.lbrace.start.saturating_sub(4)..setter_body.lbrace.start,
-                    );
-                    sink.add_token(SyntaxKind::Set, set_span);
+                    if let Some(set_span) = set_span {
+                        sink.add_token(SyntaxKind::Set, set_span.clone());
+                    }
                     emit_code_block(sink, setter_body);
                     sink.finish_node();
                 }

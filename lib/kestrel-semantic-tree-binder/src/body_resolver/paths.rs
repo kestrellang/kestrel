@@ -653,11 +653,29 @@ fn extract_path_segments_with_spans(
                 if let Some(token) = elem.as_token()
                     && token.kind() == SyntaxKind::Identifier
                 {
-                    let span = token.text_range();
-                    segments.push((
-                        token.text().to_string(),
-                        Span::new(file_id, span.start().into()..span.end().into()),
-                    ));
+                    let range = token.text_range();
+                    let name = token.text().to_string();
+                    let range_start: usize = range.start().into();
+                    let range_end: usize = range.end().into();
+
+                    // Validate span
+                    let span = if range_end <= source.len()
+                        && &source[range_start..range_end] == name
+                    {
+                        Span::new(file_id, range_start..range_end)
+                    } else {
+                        // Invalid span - use node range as fallback
+                        let node_range = node.text_range();
+                        let node_start: usize = node_range.start().into();
+                        let node_end: usize = node_range.end().into();
+                        if node_end <= source.len() {
+                            Span::new(file_id, node_start..node_end)
+                        } else {
+                            Span::new(file_id, 0..0)
+                        }
+                    };
+
+                    segments.push((name, span));
                 }
             }
         }
@@ -667,11 +685,40 @@ fn extract_path_segments_with_spans(
 }
 
 /// Extract the name and span from a PathElement node
+///
+/// Validates that the extracted span actually points to the token text in the source.
+/// If the span is invalid (out of bounds or mismatched text), uses a zero-length
+/// span at position 0 as a fallback to prevent incorrect error locations.
 fn extract_path_element_name_with_span(
     element: &SyntaxNode,
-    _source: &str,
+    source: &str,
     file_id: usize,
 ) -> Option<(String, Span)> {
+    // Helper to validate and potentially correct a span
+    let validate_span = |name: &str, range_start: usize, range_end: usize| -> Span {
+        // Check if span is within source bounds and matches the token text
+        if range_end <= source.len() {
+            let text_at_span = &source[range_start..range_end];
+            if text_at_span == name {
+                // Span is valid
+                return Span::new(file_id, range_start..range_end);
+            }
+        }
+        // Span is invalid - use a fallback based on the element's range
+        // This at least keeps the span in a reasonable location
+        let elem_range = element.text_range();
+        let elem_start: usize = elem_range.start().into();
+        let elem_end: usize = elem_range.end().into();
+        if elem_end <= source.len() {
+            Span::new(file_id, elem_start..elem_end)
+        } else {
+            // Last resort: use a zero-length span at a reasonable position
+            // Use source length as the position to at least point to end of file
+            let end_pos = source.len().saturating_sub(1);
+            Span::new(file_id, end_pos..end_pos)
+        }
+    };
+
     // PathElement contains Name or Identifier
     if let Some(name_node) = element.children().find(|c| c.kind() == SyntaxKind::Name) {
         return name_node
@@ -680,10 +727,9 @@ fn extract_path_element_name_with_span(
             .find(|t| t.kind() == SyntaxKind::Identifier)
             .map(|t| {
                 let range = t.text_range();
-                (
-                    t.text().to_string(),
-                    Span::new(file_id, range.start().into()..range.end().into()),
-                )
+                let name = t.text().to_string();
+                let span = validate_span(&name, range.start().into(), range.end().into());
+                (name, span)
             });
     }
 
@@ -694,10 +740,9 @@ fn extract_path_element_name_with_span(
         .find(|t| t.kind() == SyntaxKind::Identifier)
         .map(|t| {
             let range = t.text_range();
-            (
-                t.text().to_string(),
-                Span::new(file_id, range.start().into()..range.end().into()),
-            )
+            let name = t.text().to_string();
+            let span = validate_span(&name, range.start().into(), range.end().into());
+            (name, span)
         })
 }
 
@@ -756,7 +801,7 @@ fn find_nested_expression(node: &SyntaxNode) -> Option<SyntaxNode> {
 /// this extracts the identifiers that appear after the expression.
 fn extract_trailing_identifiers(
     node: &SyntaxNode,
-    _source: &str,
+    source: &str,
     file_id: usize,
 ) -> Vec<(String, Span)> {
     let mut identifiers = Vec::new();
@@ -772,10 +817,28 @@ fn extract_trailing_identifiers(
             // Only collect identifiers after the expression
             if found_expression && token.kind() == SyntaxKind::Identifier {
                 let range = token.text_range();
-                identifiers.push((
-                    token.text().to_string(),
-                    Span::new(file_id, range.start().into()..range.end().into()),
-                ));
+                let name = token.text().to_string();
+                let range_start: usize = range.start().into();
+                let range_end: usize = range.end().into();
+
+                // Validate span
+                let span = if range_end <= source.len()
+                    && &source[range_start..range_end] == name
+                {
+                    Span::new(file_id, range_start..range_end)
+                } else {
+                    // Invalid span - use node range as fallback
+                    let node_range = node.text_range();
+                    let node_start: usize = node_range.start().into();
+                    let node_end: usize = node_range.end().into();
+                    if node_end <= source.len() {
+                        Span::new(file_id, node_start..node_end)
+                    } else {
+                        Span::new(file_id, 0..0)
+                    }
+                };
+
+                identifiers.push((name, span));
             }
         }
     }

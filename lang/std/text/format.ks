@@ -67,7 +67,7 @@ public struct DefaultStringInterpolation: StringInterpolationProtocol {
     /// Build the final string by concatenating all parts.
     @builtin(.DefaultStringInterpolationBuild)
     public func build() -> String {
-        let partsCount = self.parts.count();
+        let partsCount = self.parts.count;
         if partsCount == 0 {
             return ""
         }

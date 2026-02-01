@@ -548,8 +548,20 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
         },
 
         // Tuple index: type is the element type
-        ExprKind::TupleIndex { tuple, .. } => {
+        ExprKind::TupleIndex { tuple, index } => {
             generate_expression_constraints(ctx, tuple);
+            // If the expression type is Infer, generate a tuple index constraint
+            // so the solver can resolve the element type once the tuple type is known
+            if matches!(expr.ty.kind(), TyKind::Infer) {
+                ctx.register_type(&tuple.ty);
+                ctx.register_type(&expr.ty);
+                ctx.tuple_index_access(
+                    tuple.ty.id(),
+                    *index,
+                    expr.ty.id(),
+                    expr.span.clone(),
+                );
+            }
         },
 
         // Method reference: process receiver and check for protocol conformance
