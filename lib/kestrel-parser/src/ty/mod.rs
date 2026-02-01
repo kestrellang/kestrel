@@ -121,7 +121,7 @@ impl TyExpression {
 fn is_trivia(token: &Token) -> bool {
     matches!(
         token,
-        Token::Whitespace | Token::LineComment | Token::BlockComment
+        Token::Whitespace | Token::Newline | Token::LineComment | Token::BlockComment
     )
 }
 

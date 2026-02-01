@@ -336,6 +336,7 @@ impl From<Token> for SyntaxKind {
         match token {
             // Trivia
             Token::Whitespace => SyntaxKind::Whitespace,
+            Token::Newline => SyntaxKind::Whitespace,
             Token::LineComment => SyntaxKind::LineComment,
             Token::BlockComment => SyntaxKind::BlockComment,
             // Literals

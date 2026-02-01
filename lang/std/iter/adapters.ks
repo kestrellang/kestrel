@@ -510,6 +510,8 @@ public struct FlatMapIterator[I, U]: Iterator where I: Iterator, U: Iterator {
                 return .None
             }
         }
+        // Unreachable - loop always returns
+        .None
     }
 }
 

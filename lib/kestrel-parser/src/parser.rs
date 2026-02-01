@@ -39,6 +39,7 @@ pub fn format_token_for_display(token: &Token) -> String {
     match token {
         // Trivia
         Token::Whitespace => "whitespace".to_string(),
+        Token::Newline => "newline".to_string(),
         Token::LineComment => "comment".to_string(),
         Token::BlockComment => "comment".to_string(),
 

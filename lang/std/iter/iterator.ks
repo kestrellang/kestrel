@@ -509,24 +509,26 @@ extend Iterator {
         count
     }
 
-    /// Splits an iterator of pairs into two arrays.
-    ///
-    /// Takes an iterator over pairs `(A, B)` and returns two arrays:
-    /// one containing all the first elements and one containing all the second elements.
-    ///
-    /// Example:
-    ///     let pairs = [(1, "a"), (2, "b"), (3, "c")];
-    ///     let (nums, strs) = pairs.iter().unzip();
-    ///     // nums = [1, 2, 3], strs = ["a", "b", "c"]
-    public func unzip[A, B]() -> (Array[A], Array[B]) where Item = (A, B) {
-        var left = Array[A]();
-        var right = Array[B]();
-        while let .Some(pair) = self.next() {
-            left.append(pair.0);
-            right.append(pair.1);
-        }
-        (left, right)
-    }
+    // TODO: Restore when method-level tuple constraints are supported.
+    // /// Splits an iterator of pairs into two arrays.
+    // ///
+    // /// Takes an iterator over pairs `(A, B)` and returns two arrays:
+    // /// one containing all the first elements and one containing all the second elements.
+    // ///
+    // /// Example:
+    // ///     let pairs = [(1, "a"), (2, "b"), (3, "c")];
+    // ///     let (nums, strs) = pairs.iter().unzip();
+    // ///     // nums = [1, 2, 3], strs = ["a", "b", "c"]
+    // public func unzip[A, B]() -> (Array[A], Array[B]) where Item = (A, B) {
+    //     var left = Array[A]();
+    //     var right = Array[B]();
+    //     while let .Some(pair) = self.next() {
+    //         let tuple: (A, B) = pair;
+    //         left.append(tuple.0);
+    //         right.append(tuple.1);
+    //     }
+    //     (left, right)
+    // }
 }
 
 // ============================================================================

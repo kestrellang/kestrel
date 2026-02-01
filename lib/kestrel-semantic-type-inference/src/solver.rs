@@ -344,6 +344,14 @@ fn unify(
     let ty_a = resolve_type(ctx, a);
     let ty_b = resolve_type(ctx, b);
 
+    // Normalize type parameters/associated types using equality constraints from where clauses.
+    // This helps unify types like `I.Iter.Item` with `T` when constraints equate them.
+    let norm_a = normalize_with_constraints_if_needed(ctx, &ty_a);
+    let norm_b = normalize_with_constraints_if_needed(ctx, &ty_b);
+    if norm_a.to_string() != ty_a.to_string() || norm_b.to_string() != ty_b.to_string() {
+        return unify(ctx, norm_a.id(), norm_b.id(), span);
+    }
+
     // Keep track of original IDs for closure metadata lookup
     let original_a = a;
     let original_b = b;
@@ -1060,25 +1068,52 @@ fn resolve_promotable(
         return unify(ctx, from_ty, to_ty, span);
     }
 
+    // Normalize type parameters/associated types using equality constraints before
+    // deciding whether the types can unify or should be promoted.
+    let from_normalized = normalize_with_constraints_if_needed(ctx, &from);
+    let to_normalized = normalize_with_constraints_if_needed(ctx, &to);
+
     // Check if types are potentially unifiable (same kind or compatible kinds).
     // If so, try to unify. If not, check for FromValue promotion.
-    if types_could_unify(&from, &to) {
+    if types_could_unify(&from_normalized, &to_normalized) {
         // Types could be unifiable - register the expanded types and try unify
-        ctx.register_type(&from);
-        ctx.register_type(&to);
-        return unify(ctx, from.id(), to.id(), span);
+        ctx.register_type(&from_normalized);
+        ctx.register_type(&to_normalized);
+        return unify(ctx, from_normalized.id(), to_normalized.id(), span);
     }
 
     // Types can't unify (different kinds). Check if target conforms to FromValue[source] for promotion.
-    if let Some((method_id, subs)) = ctx.oracle().check_from_value_conformance(&to, &from) {
+    if let Some((method_id, subs)) =
+        ctx.oracle()
+            .check_from_value_conformance(&to_normalized, &from_normalized)
+    {
         // Record promotion for apply_solution
         ctx.promotions_mut()
-            .insert(expr_id, PromotionInfo::new(to.clone(), method_id, subs));
+            .insert(expr_id, PromotionInfo::new(to_normalized.clone(), method_id, subs));
         return Ok(SolveResult::Solved);
     }
 
     // Neither direct unification nor promotion worked - report type mismatch
-    Err(InferenceError::type_mismatch(to, from, span.clone()))
+    Err(InferenceError::type_mismatch(
+        to_normalized,
+        from_normalized,
+        span.clone(),
+    ))
+}
+
+/// Normalize type parameters and associated types using equality constraints from context.
+fn normalize_with_constraints_if_needed(ctx: &mut InferenceContext<'_>, ty: &Ty) -> Ty {
+    if matches!(
+        ty.kind(),
+        TyKind::TypeParameter { .. } | TyKind::AssociatedType { .. }
+    ) {
+        let normalized = ctx.oracle().normalize_with_constraints(ty);
+        if normalized.to_string() != ty.to_string() {
+            ctx.register_type(&normalized);
+            return normalized;
+        }
+    }
+    ty.clone()
 }
 
 /// Check if a type is a potential promotion target (Optional or Result).

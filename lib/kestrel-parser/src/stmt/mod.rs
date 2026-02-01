@@ -97,7 +97,7 @@ fn skip_trivia<'tokens>()
         .filter(|token: &Token| {
             matches!(
                 token,
-                Token::Whitespace | Token::LineComment | Token::BlockComment
+                Token::Whitespace | Token::Newline | Token::LineComment | Token::BlockComment
             )
         })
         .repeated()

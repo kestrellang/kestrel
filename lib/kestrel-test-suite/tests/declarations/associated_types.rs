@@ -580,6 +580,44 @@ mod where_clause_equality {
         )
         .expect(Compiles);
     }
+
+    #[test]
+    fn iterable_iter_bound_propagates() {
+        Test::new(
+            r#"module Test
+            protocol Iterator {
+                type Item;
+                func next() -> Item
+            }
+            protocol Iterable {
+                type Item;
+                type Iter: Iterator where Iter.Item = Item
+                func iter() -> Iter
+            }
+            func useIter[I, T](iterable: I) -> T where I: Iterable, I.Item = T {
+                let iter = iterable.iter();
+                let item: T = iter.next();
+                item
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn where_clause_type_parameter_equals_generic_instantiation_method_arg() {
+        Test::new(
+            r#"module Test
+            struct Array[T] {
+                func append(element: T) { }
+            }
+            func pushOne[E, V](arr: V, elem: E) where V = Array[E] {
+                arr.append(elem);
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
 }
 
 // =============================================================================

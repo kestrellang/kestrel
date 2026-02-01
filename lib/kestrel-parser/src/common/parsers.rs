@@ -32,6 +32,14 @@ use crate::type_param::{type_parameter_list_parser, where_clause_parser};
 pub fn is_trivia(token: &Token) -> bool {
     matches!(
         token,
+        Token::Whitespace | Token::Newline | Token::LineComment | Token::BlockComment
+    )
+}
+
+/// Check if a token is inline trivia (whitespace/comments, excluding explicit newline tokens)
+pub fn is_inline_trivia(token: &Token) -> bool {
+    matches!(
+        token,
         Token::Whitespace | Token::LineComment | Token::BlockComment
     )
 }
@@ -41,6 +49,15 @@ pub fn skip_trivia<'tokens>()
 -> impl Parser<'tokens, ParserInput<'tokens>, (), ParserExtra<'tokens>> + Clone {
     any()
         .filter(|token: &Token| is_trivia(token))
+        .repeated()
+        .ignored()
+}
+
+/// Parser that skips inline trivia tokens (no newlines)
+pub fn skip_inline_trivia<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, (), ParserExtra<'tokens>> + Clone {
+    any()
+        .filter(|token: &Token| is_inline_trivia(token))
         .repeated()
         .ignored()
 }

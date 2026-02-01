@@ -343,8 +343,8 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     /// The generator receives the index (0 to count-1) for each element.
     ///
     /// Example:
-    ///     let squares = Array(count: 5, generator: |i| i * i)  // [0, 1, 4, 9, 16]
-    ///     let indices = Array(count: 3, generator: |i| i)  // [0, 1, 2]
+    ///     let squares = Array(count: 5, generator: { (i) in i * i })  // [0, 1, 4, 9, 16]
+    ///     let indices = Array(count: 3, generator: { (i) in i })  // [0, 1, 2]
     public init(count: Int64, generator: (Int64) -> T) {
         if count <= Int64(intLiteral: 0) {
             self.init()
@@ -536,16 +536,18 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
             .Some(self.ptr().offset(by: idx).read())
         }
         set {
-            let myLen = self.len();
-            if myLen == Int64(intLiteral: 0) {
-                return
+            if let .Some(value) = newValue {
+                let myLen = self.len();
+                if myLen == Int64(intLiteral: 0) {
+                    return
+                }
+                var idx = index % myLen;
+                if idx < Int64(intLiteral: 0) {
+                    idx = idx + myLen
+                }
+                self.makeUnique();
+                self.ptr().offset(by: idx).write(value)
             }
-            var idx = index % myLen;
-            if idx < Int64(intLiteral: 0) {
-                idx = idx + myLen
-            }
-            self.makeUnique();
-            self.ptr().offset(by: idx).write(newValue)
         }
     }
 
@@ -576,19 +578,21 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
             .Some(self.ptr().offset(by: idx).read())
         }
         set {
-            let myLen = self.len();
-            if myLen == Int64(intLiteral: 0) {
-                return
+            if let .Some(value) = newValue {
+                let myLen = self.len();
+                if myLen == Int64(intLiteral: 0) {
+                    return
+                }
+                var idx = index;
+                if idx < Int64(intLiteral: 0) {
+                    idx = Int64(intLiteral: 0)
+                }
+                if idx >= myLen {
+                    idx = myLen - Int64(intLiteral: 1)
+                }
+                self.makeUnique();
+                self.ptr().offset(by: idx).write(value)
             }
-            var idx = index;
-            if idx < Int64(intLiteral: 0) {
-                idx = Int64(intLiteral: 0)
-            }
-            if idx >= myLen {
-                idx = myLen - Int64(intLiteral: 1)
-            }
-            self.makeUnique();
-            self.ptr().offset(by: idx).write(newValue)
         }
     }
 
@@ -942,7 +946,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     ///
     /// Example:
     ///     var arr = [1, 2, 3, 4, 5]
-    ///     arr.retain(matching: |x| x % 2 == 0)  // arr is [2, 4]
+    ///     arr.retain(matching: { (x) in x % 2 == 0 })  // arr is [2, 4]
     public mutating func retain(matching predicate: (T) -> Bool) {
         self.makeUnique();
         var s = self.storage.getValue();
@@ -966,7 +970,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     ///
     /// Example:
     ///     var arr = [1, 2, 3, 4, 5]
-    ///     arr.removeAll(matching: |x| x % 2 == 0)  // arr is [1, 3, 5]
+    ///     arr.removeAll(matching: { (x) in x % 2 == 0 })  // arr is [1, 3, 5]
     ///
     ///     var names = ["Alice", "", "Bob", ""]
     ///     names.removeAll(matching: |s| s.isEmpty)  // ["Alice", "Bob"]
@@ -1149,7 +1153,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
         var i: Int64 = n - Int64(intLiteral: 1);
         while i > Int64(intLiteral: 0) {
             // Inline nextInt(below:) since extension methods may not be visible on generic R
-            let bound = UInt64(from: i + Int64(intLiteral: 1));
+            let bound = UInt64(from: i) + UInt64(intLiteral: 1);
             let rngValue = generator.nextUInt64();
             let j = Int64(from: rngValue.modulo(bound));
             // Swap elements at i and j
@@ -1305,7 +1309,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     ///
     /// Example:
     ///     for item in arr.iter() { ... }
-    ///     let doubled = arr.iter().map(|x| x * 2).collect()
+    ///     let doubled = arr.iter().map { it * 2 }.collect()
     public func iter() -> ArrayIterator[T] {
         ArrayIterator(ptr: self.ptr(), remaining: self.len())
     }
@@ -1388,9 +1392,9 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     /// Short-circuits on first non-matching element.
     ///
     /// Example:
-    ///     [2, 4, 6].all(satisfy: |x| x % 2 == 0)  // true
-    ///     [2, 3, 6].all(satisfy: |x| x % 2 == 0)  // false
-    ///     [].all(satisfy: |x| false)              // true (empty)
+    ///     [2, 4, 6].all(satisfy: { (x) in x % 2 == 0 })  // true
+    ///     [2, 3, 6].all(satisfy: { (x) in x % 2 == 0 })  // false
+    ///     [].all(satisfy: { (x) in false })              // true (empty)
     public func all(satisfy predicate: (T) -> Bool) -> Bool {
         let myLen = self.len();
         let myPtr = self.ptr();
@@ -1408,9 +1412,9 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     /// Short-circuits on first matching element.
     ///
     /// Example:
-    ///     [1, 2, 3].any(satisfy: |x| x > 2)  // true
-    ///     [1, 2, 3].any(satisfy: |x| x > 5)  // false
-    ///     [].any(satisfy: |x| true)          // false (empty)
+    ///     [1, 2, 3].any(satisfy: { (x) in x > 2 })  // true
+    ///     [1, 2, 3].any(satisfy: { (x) in x > 5 })  // false
+    ///     [].any(satisfy: { (x) in true })          // false (empty)
     public func any(satisfy predicate: (T) -> Bool) -> Bool {
         let myLen = self.len();
         let myPtr = self.ptr();
@@ -1551,7 +1555,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     ///
     /// Example:
     ///     var arr = [1, 2, 3, 4, 5]
-    ///     let pivot = arr.partition(by: |x| x % 2 == 0)
+    ///     let pivot = arr.partition(by: { (x) in x % 2 == 0 })
     ///     // arr might be [2, 4, 3, 1, 5] or similar
     ///     // pivot == 2 (first two elements satisfy predicate)
     public mutating func partition(by predicate: (T) -> Bool) -> Int64 {
@@ -1591,7 +1595,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     /// Preserves relative order within each resulting array.
     ///
     /// Example:
-    ///     let (evens, odds) = [1, 2, 3, 4, 5].partitioned(by: |x| x % 2 == 0)
+    ///     let (evens, odds) = [1, 2, 3, 4, 5].partitioned(by: { (x) in x % 2 == 0 })
     ///     // evens = [2, 4]
     ///     // odds = [1, 3, 5]
     public func partitioned(by predicate: (T) -> Bool) -> (Array[T], Array[T]) {
@@ -2006,7 +2010,7 @@ extend Array[T] {
     ///
     /// Example:
     ///     var arr = [1, 5, 3, 2, 4]
-    ///     arr.sort(by: |a, b| a > b)  // [5, 4, 3, 2, 1] descending
+    ///     arr.sort(by: { (a, b) in a > b })  // [5, 4, 3, 2, 1] descending
     public mutating func sort(by comparator: (T, T) -> Bool) {
         let n = self.count;
         if n <= Int64(intLiteral: 1) {
@@ -2029,7 +2033,7 @@ extend Array[T] {
     ///
     /// Example:
     ///     let arr = ["apple", "Banana", "cherry"]
-    ///     let sorted = arr.sorted(by: |a, b| a.lowercase() < b.lowercase())
+    ///     let sorted = arr.sorted(by: { (a, b) in a.lowercase() < b.lowercase() })
     public func sorted(by comparator: (T, T) -> Bool) -> Array[T] {
         var result = self.clone();
         result.sort(by: comparator);

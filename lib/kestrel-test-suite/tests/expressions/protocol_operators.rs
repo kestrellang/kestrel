@@ -249,6 +249,33 @@ mod comparison_protocols {
     }
 }
 
+mod stdlib_comparison_protocols {
+    use super::*;
+
+    #[test]
+    fn equatable_extension_binds_rhs_self_for_equals_operator() {
+        Test::new(
+            r#"module Test
+
+            enum LocalOrdering: std.core.Equatable {
+                case Less
+                case Equal
+
+                public func equals(other: LocalOrdering) -> std.core.Bool {
+                    true
+                }
+            }
+
+            public func test() -> std.core.Bool {
+                LocalOrdering.Less == LocalOrdering.Equal
+            }
+        "#,
+        )
+        .with_stdlib()
+        .expect(Compiles);
+    }
+}
+
 mod bitwise_protocols {
     use super::*;
 

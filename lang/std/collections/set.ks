@@ -2,7 +2,7 @@
 
 module std.collections
 
-import std.core.(Bool, Equatable, Cloneable, Hash, Hasher, Defaultable, Formattable, FormatOptions, Addable, Comparable)
+import std.core.(Bool, Equatable, Cloneable, Hash, Hasher, Defaultable, Formattable, Addable, Comparable)
 import std.num.(Int64)
 import std.result.(Optional)
 import std.iter.(Iterator, Iterable)
@@ -282,7 +282,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hash, H: H
     ///
     /// Example:
     ///     var set: Set = [1, 2, 3, 4, 5]
-    ///     set.retain(where: |x| x % 2 == 0)  // {2, 4}
+    ///     set.retain(where: { (x) in x % 2 == 0 })  // {2, 4}
     public mutating func retain(matching predicate: (T) -> Bool) {
         var toRemove: Array[T] = [];
         var iter = self.iter();
@@ -302,7 +302,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hash, H: H
     ///
     /// Example:
     ///     var set: Set = [1, 2, 3, 4, 5]
-    ///     set.removeAll(where: |x| x % 2 == 0)  // {1, 3, 5}
+    ///     set.removeAll(where: { (x) in x % 2 == 0 })  // {1, 3, 5}
     public mutating func removeAll(matching predicate: (T) -> Bool) {
         var toRemove: Array[T] = [];
         var iter = self.iter();
@@ -564,8 +564,8 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hash, H: H
     /// Short-circuits on first matching element.
     ///
     /// Example:
-    ///     Set([1, 2, 3]).contains(where: |x| x > 2)  // true
-    ///     Set([1, 2, 3]).contains(where: |x| x > 5)  // false
+    ///     Set([1, 2, 3]).contains(where: { (x) in x > 2 })  // true
+    ///     Set([1, 2, 3]).contains(where: { (x) in x > 5 })  // false
     public func contains(matching predicate: (T) -> Bool) -> Bool {
         var iter = self.iter();
         while let .Some(elem) = iter.next() {
@@ -582,7 +582,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hash, H: H
     ///
     /// Example:
     ///     let set: Set = [1, 2, 3, 4, 5]
-    ///     set.first(where: |x| x > 3)  // Some(4) or Some(5)
+    ///     set.first(where: { (x) in x > 3 })  // Some(4) or Some(5)
     public func first(matching predicate: (T) -> Bool) -> T? {
         var iter = self.iter();
         while let .Some(elem) = iter.next() {
@@ -598,9 +598,9 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hash, H: H
     /// Returns true for an empty set (vacuous truth).
     ///
     /// Example:
-    ///     Set([2, 4, 6]).all(satisfy: |x| x % 2 == 0)  // true
-    ///     Set([1, 2, 4]).all(satisfy: |x| x % 2 == 0)  // false
-    ///     Set[Int64]().all(satisfy: |x| false)         // true
+    ///     Set([2, 4, 6]).all(satisfy: { (x) in x % 2 == 0 })  // true
+    ///     Set([1, 2, 4]).all(satisfy: { (x) in x % 2 == 0 })  // false
+    ///     Set[Int64]().all(satisfy: { (x) in false })         // true
     public func all(satisfy predicate: (T) -> Bool) -> Bool {
         var iter = self.iter();
         while let .Some(elem) = iter.next() {
@@ -616,7 +616,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hash, H: H
     /// Alias for `contains(where:)`.
     ///
     /// Example:
-    ///     Set([1, 2, 3]).any(satisfy: |x| x > 2)  // true
+    ///     Set([1, 2, 3]).any(satisfy: { (x) in x > 2 })  // true
     public func any(satisfy predicate: (T) -> Bool) -> Bool {
         self.contains(matching: predicate)
     }
@@ -624,7 +624,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hash, H: H
     /// Returns the count of elements satisfying the predicate.
     ///
     /// Example:
-    ///     Set([1, 2, 3, 4, 5]).countWhere(|x| x % 2 == 0)  // 2
+    ///     Set([1, 2, 3, 4, 5]).countWhere({ (x) in x % 2 == 0 })  // 2
     public func countWhere(predicate: (T) -> Bool) -> Int64 {
         var count: Int64 = 0;
         var iter = self.iter();
@@ -644,7 +644,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hash, H: H
     ///
     /// Example:
     ///     let set: Set = [1, 2, 3, 4, 5]
-    ///     let evens = set.filter(where: |x| x % 2 == 0)  // {2, 4}
+    ///     let evens = set.filter(where: { (x) in x % 2 == 0 })  // {2, 4}
     public func filter(matching predicate: (T) -> Bool) -> Set[T, H] {
         var result = Set[T, H]();
         var iter = self.iter();
@@ -663,10 +663,10 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hash, H: H
     ///
     /// Example:
     ///     let set: Set = [1, 2, 3]
-    ///     let doubled = set.map(transform: |x| x * 2)  // {2, 4, 6}
+    ///     let doubled = set.map(transform: { (x) in x * 2 })  // {2, 4, 6}
     ///
     ///     let words: Set = ["Hello", "WORLD"]
-    ///     let lower = words.map(transform: |s| s.lowercase())
+    ///     let lower = words.map(transform: { (s) in s.lowercase() })
     ///     // may be {"hello", "world"} or just {"hello"} if collision
     public func map[U](transform: (T) -> U) -> Set[U, H] where U: Hash {
         var result = Set[U, H]();
@@ -682,7 +682,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hash, H: H
     ///
     /// Example:
     ///     let set: Set = ["1", "two", "3"]
-    ///     let nums = set.compactMap(transform: |s| Int64.parse(s))  // {1, 3}
+    ///     let nums = set.compactMap(transform: { (s) in Int64.parse(s) })  // {1, 3}
     public func compactMap[U](transform: (T) -> U?) -> Set[U, H] where U: Hash {
         var result = Set[U, H]();
         var iter = self.iter();
@@ -700,7 +700,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hash, H: H
     ///
     /// Example:
     ///     let set: Set = [1, 2]
-    ///     let expanded = set.flatMap(transform: |x| Set([x, x * 10]))
+    ///     let expanded = set.flatMap(transform: { (x) in Set([x, x * 10]) })
     ///     // {1, 10, 2, 20}
     public func flatMap[U](transform: (T) -> Set[U, H]) -> Set[U, H] where U: Hash {
         var result = Set[U, H]();
@@ -817,15 +817,13 @@ extend Set[T, H]: Equatable where T: Hash, H: Hasher, H: Defaultable {
 /// Formattable conformance for sets with formattable elements.
 ///
 /// Sets format as "{elem1, elem2, elem3}".
-/// Debug mode shows type: "Set[Int64]{1, 2, 3}".
 /// Empty set formats as "{}".
 ///
 /// Example:
-///     "\{Set([1, 2, 3])}"     // "{1, 2, 3}"
-///     "\{Set([1, 2, 3]):?}"   // "Set[Int64]{1, 2, 3}"
-///     "\{Set[Int64]()"        // "{}"
+///     "\{Set([1, 2, 3])}"  // "{1, 2, 3}"
+///     "\{Set[Int64]()"     // "{}"
 extend Set[T, H]: Formattable where T: Formattable, T: Hash, H: Hasher, H: Defaultable {
-    public func format(options: FormatOptions = .default) -> String {
+    public func format() -> String {
         // Implementation: build string representation
         var result = "{";
         var first = true;
@@ -931,23 +929,24 @@ extend Set[T, H] where T: Hash, T: Comparable, H: Hasher, H: Defaultable {
 // CONDITIONAL EXTENSIONS - NUMERIC
 // ============================================================================
 
-/// Extension for sets with addable elements.
-extend Set[T, H] where T: Hash, T: Addable, T: Defaultable, H: Hasher, H: Defaultable {
-
-    /// Returns the sum of all elements.
-    ///
-    /// Example:
-    ///     Set([1, 2, 3]).sum()  // 6
-    ///     Set[Int64]().sum()    // 0
-    public func sum() -> T {
-        var total = T();
-        var iter = self.iter();
-        while let .Some(elem) = iter.next() {
-            total = total.add(elem);
-        }
-        total
-    }
-}
+// TODO: Restore once associated type equality constraints are supported.
+// /// Extension for sets with addable elements.
+// extend Set[T, H] where T: Hash, T: Addable, T: Defaultable, H: Hasher, H: Defaultable {
+//
+//     /// Returns the sum of all elements.
+//     ///
+//     /// Example:
+//     ///     Set([1, 2, 3]).sum()  // 6
+//     ///     Set[Int64]().sum()    // 0
+//     public func sum() -> T {
+//         var total = T();
+//         var iter = self.iter();
+//         while let .Some(elem) = iter.next() {
+//             total = total.add(elem);
+//         }
+//         total
+//     }
+// }
 
 // ============================================================================
 // DIRECT ITERABLE CONFORMANCE

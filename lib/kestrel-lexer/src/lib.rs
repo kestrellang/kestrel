@@ -346,8 +346,11 @@ pub enum Token {
     // ===== Trivia =====
     // Whitespace and comments are emitted as tokens so rowan can calculate
     // correct source positions. The parser treats these as trivia.
-    #[regex(r"[ \t\n\f]+")]
+    #[regex(r"[ \t\f]+")]
     Whitespace,
+
+    #[regex(r"\r\n|\n|\r")]
+    Newline,
 
     #[regex(r"//[^\n]*", allow_greedy = true)]
     LineComment,
@@ -708,7 +711,7 @@ mod tests {
             .filter(|t| {
                 !matches!(
                     t.value,
-                    Token::Whitespace | Token::LineComment | Token::BlockComment
+                    Token::Whitespace | Token::Newline | Token::LineComment | Token::BlockComment
                 )
             })
             .collect()

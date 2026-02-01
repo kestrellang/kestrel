@@ -305,7 +305,14 @@ fn resolve_type_equality(
     let right_ty = if let Some(ty_path_node) =
         ty_node.children().find(|c| c.kind() == SyntaxKind::TyPath)
     {
-        if let Some(path_node) = ty_path_node
+        if ty_path_node
+            .children()
+            .any(|c| c.kind() == SyntaxKind::TypeArgumentList)
+        {
+            let mut type_ctx =
+                TypeSyntaxContext::new(ctx.model, ctx.diagnostics, source, file_id, context_id);
+            resolve_type_from_ty_node(&ty_node, &mut type_ctx)
+        } else if let Some(path_node) = ty_path_node
             .children()
             .find(|c| c.kind() == SyntaxKind::Path)
         {

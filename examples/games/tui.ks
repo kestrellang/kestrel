@@ -70,7 +70,7 @@ public enum StyleOption {
 //        print(style("Hello"))
 // ============================================
 
-public struct Style: ExpressibleByArrayLiteral, _ExpressibleByArrayLiteral {
+public struct Style: ExpressibleByArrayLiteral, _ExpressibleByArrayLiteral, Cloneable {
     type Element = StyleOption
 
     private var options: Array[StyleOption]
@@ -107,6 +107,12 @@ public struct Style: ExpressibleByArrayLiteral, _ExpressibleByArrayLiteral {
             self.codes() + value.format() + "\x1b[0m"
         }
     }
+
+    public func clone() -> Style {
+        var result = Style();
+        result.options = self.options.clone();
+        result
+    }
 }
 
 // ============================================
@@ -140,7 +146,7 @@ public func reset() -> String { "\x1b[0m" }
 // Box Drawing
 // ============================================
 
-public struct Box {
+public struct Box: Cloneable {
     public var x: Int64
     public var y: Int64
     public var width: Int64
@@ -217,6 +223,16 @@ public struct Box {
             print(moveTo(x: self.x, y: self.y + row) + self.style("║"));
             print(moveTo(x: self.x + self.width - 1, y: self.y + row) + self.style("║"));
         }
+    }
+
+    public func clone() -> Box {
+        Box(
+            x: self.x,
+            y: self.y,
+            width: self.width,
+            height: self.height,
+            style: self.style.clone()
+        )
     }
 }
 

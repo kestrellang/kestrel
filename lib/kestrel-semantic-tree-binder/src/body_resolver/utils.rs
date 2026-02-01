@@ -553,6 +553,32 @@ pub fn get_associated_type_bounds_from_context(
                 }
             }
         }
+        if let Constraint::InheritedAssociatedTypeBound { path, bounds: assoc_bounds, .. } =
+            constraint
+        {
+            if path.split('.').last() == Some(assoc_name.as_str()) {
+                for bound in assoc_bounds {
+                    if matches!(bound.kind(), TyKind::Protocol { .. }) {
+                        bounds.push(bound.clone());
+                    }
+                }
+            }
+        }
+        if let Constraint::TypeBound {
+            param: None,
+            param_name,
+            bounds: param_bounds,
+            ..
+        } = constraint
+        {
+            if param_name == &assoc_name {
+                for bound in param_bounds {
+                    if matches!(bound.kind(), TyKind::Protocol { .. }) {
+                        bounds.push(bound.clone());
+                    }
+                }
+            }
+        }
     }
 
     // 3. Also check function's parent (extension) where clause
@@ -580,6 +606,59 @@ pub fn get_associated_type_bounds_from_context(
                                 for bound in self_bounds {
                                     if let TyKind::Protocol { symbol, .. } = bound.kind() {
                                         // Check if this protocol is already in bounds
+                                        let already_present = bounds.iter().any(|b| {
+                                            if let TyKind::Protocol {
+                                                symbol: existing, ..
+                                            } = b.kind()
+                                            {
+                                                existing.metadata().id() == symbol.metadata().id()
+                                            } else {
+                                                false
+                                            }
+                                        });
+                                        if !already_present {
+                                            bounds.push(bound.clone());
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        if let Constraint::InheritedAssociatedTypeBound {
+                            path,
+                            bounds: assoc_bounds,
+                            ..
+                        } = constraint
+                        {
+                            if path.split('.').last() == Some(assoc_name.as_str()) {
+                                for bound in assoc_bounds {
+                                    if let TyKind::Protocol { symbol, .. } = bound.kind() {
+                                        let already_present = bounds.iter().any(|b| {
+                                            if let TyKind::Protocol {
+                                                symbol: existing, ..
+                                            } = b.kind()
+                                            {
+                                                existing.metadata().id() == symbol.metadata().id()
+                                            } else {
+                                                false
+                                            }
+                                        });
+                                        if !already_present {
+                                            bounds.push(bound.clone());
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        if let Constraint::TypeBound {
+                            param: None,
+                            param_name,
+                            bounds: param_bounds,
+                            ..
+                        } = constraint
+                        {
+                            if param_name == &assoc_name {
+                                for bound in param_bounds {
+                                    if let TyKind::Protocol { symbol, .. } = bound.kind() {
                                         let already_present = bounds.iter().any(|b| {
                                             if let TyKind::Protocol {
                                                 symbol: existing, ..
