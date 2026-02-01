@@ -7,7 +7,7 @@ import std.ffi.(FFISafe)
 import std.core.(
     Equatable, Comparable, Ordering, Bool, Formattable,
     Addable, Subtractable, Multipliable, Divisible, Negatable,
-    ExpressibleByFloatLiteral, ExpressibleByIntLiteral, Convertible
+    ExpressibleByFloatLiteral, ExpressibleByIntLiteral, Convertible, Defaultable
 )
 import std.text.(String)
 import std.num.(Int64, Float32)
@@ -35,6 +35,7 @@ public struct Float64:
     Negatable,
     ExpressibleByFloatLiteral,
     ExpressibleByIntLiteral,
+    Defaultable,
     Convertible[Int64],
     Convertible[Float32],
     FFISafe
@@ -106,6 +107,11 @@ public struct Float64:
     /// Creates a Float64 from a floating-point literal.
     public init(floatLiteral value: lang.f64) {
         self.raw = value
+    }
+
+    /// Creates a Float64 with the default value (zero).
+    public init() {
+        self.init(floatLiteral: 0.0)
     }
 
     /// Creates a Float64 from an integer literal.

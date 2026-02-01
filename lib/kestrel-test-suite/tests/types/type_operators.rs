@@ -226,7 +226,7 @@ mod dictionary_operator {
             import std.io.stdio.println
 
             func main() -> lang.i64 {
-                var dict: [std.num.Int64: std.num.Int64] = std.collections.Dictionary[std.num.Int64, std.num.Int64](0, 0);
+                var dict: [std.num.Int64: std.num.Int64] = std.collections.Dictionary[std.num.Int64, std.num.Int64]();
                 let _ = dict.insert(1, 100);
                 let _ = dict.insert(2, 200);
                 let _ = println(dict.count());
@@ -246,7 +246,7 @@ mod dictionary_operator {
             import std.io.stdio.println
 
             func main() -> lang.i64 {
-                var dict: [std.num.Int64: std.num.Int64] = std.collections.Dictionary[std.num.Int64, std.num.Int64](0, 0);
+                var dict: [std.num.Int64: std.num.Int64] = std.collections.Dictionary[std.num.Int64, std.num.Int64]();
                 let _ = dict.insert(42, 123);
                 let _ = println(dict.getValue(42).unwrap());
                 0
@@ -269,7 +269,7 @@ mod dictionary_operator {
             }
 
             func main() -> lang.i64 {
-                var dict: [std.num.Int64: std.num.Int64] = std.collections.Dictionary[std.num.Int64, std.num.Int64](0, 0);
+                var dict: [std.num.Int64: std.num.Int64] = std.collections.Dictionary[std.num.Int64, std.num.Int64]();
                 let _ = dict.insert(1, 1);
                 let _ = println(countExplicit(dict));
                 0
@@ -289,7 +289,7 @@ mod dictionary_operator {
             import std.io.stdio.println
 
             func main() -> lang.i64 {
-                let some: [std.num.Int64: std.num.Int64]? = .Some(std.collections.Dictionary[std.num.Int64, std.num.Int64](0, 0));
+                let some: [std.num.Int64: std.num.Int64]? = .Some(std.collections.Dictionary[std.num.Int64, std.num.Int64]());
                 let none: [std.num.Int64: std.num.Int64]? = .None;
                 let _ = println(some.isSome());
                 let _ = println(none.isNone());

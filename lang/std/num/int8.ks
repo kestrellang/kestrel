@@ -10,7 +10,7 @@ import std.core.(
     BitwiseAnd, BitwiseOr, BitwiseXor, BitwiseNot, LeftShift, RightShift,
     AddAssign, SubtractAssign, MultiplyAssign, DivideAssign, ModuloAssign,
     BitwiseAndAssign, BitwiseOrAssign, BitwiseXorAssign, LeftShiftAssign, RightShiftAssign,
-    ExpressibleByIntLiteral, Convertible,
+    ExpressibleByIntLiteral, Convertible, Defaultable,
     RangeConstructible, ClosedRangeConstructible, Range, ClosedRange
 )
 import std.text.(String)
@@ -61,6 +61,7 @@ public struct Int8:
     LeftShiftAssign[lang.i64],
     RightShiftAssign[lang.i64],
     ExpressibleByIntLiteral,
+    Defaultable,
     FFISafe,
     RangeConstructible,
     ClosedRangeConstructible,
@@ -108,6 +109,11 @@ public struct Int8:
     /// This initializer is called implicitly when using integer literals.
     public init(intLiteral value: lang.i64) {
         self.raw = lang.cast_i64_i8(value)
+    }
+
+    /// Creates a Int8 with the default value (zero).
+    public init() {
+        self.init(intLiteral: 0)
     }
 
     /// Creates a Int8 from a raw `lang.i8` value.

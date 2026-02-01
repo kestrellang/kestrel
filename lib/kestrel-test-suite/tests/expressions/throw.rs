@@ -146,7 +146,7 @@ mod throw_errors {
             throw Error()
         "#,
         )
-        .expect(HasError("Throw"));
+        .expect(HasError("found 'throw'"));
     }
 
     #[test]

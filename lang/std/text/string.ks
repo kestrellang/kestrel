@@ -2,7 +2,7 @@
 
 module std.text
 
-import std.core.(Bool, Equatable, Comparable, Cloneable, Ordering, Addable, ExpressibleByStringLiteral, Hash, Hasher)
+import std.core.(Bool, Equatable, Comparable, Cloneable, Ordering, Addable, ExpressibleByStringLiteral, Hash, Hasher, Defaultable)
 import std.core.(Formattable)
 import std.num.(Int64, UInt8)
 import std.result.(Optional)
@@ -259,7 +259,7 @@ struct StringStorage: Cloneable {
 /// A UTF-8 encoded, dynamically sized string with copy-on-write semantics.
 ///
 /// Strings are immutable by default; mutations create a new copy if shared.
-public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, Addable, ExpressibleByStringLiteral, Hash {
+public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, Addable, ExpressibleByStringLiteral, Hash, Defaultable {
     type Item = Char
     type Iter = StringIterator
     type Output = String

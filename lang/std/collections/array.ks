@@ -2,7 +2,7 @@
 
 module std.collections
 
-import std.core.(Bool, Equatable, Comparable, Cloneable, ArrayMatchable)
+import std.core.(Bool, Equatable, Comparable, Cloneable, ArrayMatchable, Defaultable)
 import std.num.(Int64)
 import std.result.(Optional)
 import std.memory.(Layout, Pointer, Slice, RawPointer, SystemAllocator, LiteralSlice, RcBox)
@@ -97,7 +97,7 @@ struct ArrayStorage[T]: Cloneable {
 /// Arrays automatically grow when elements are added and use COW
 /// to efficiently share data between copies until mutation occurs.
 @builtin(.ArrayStruct)
-public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArrayLiteral, Cloneable {
+public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArrayLiteral, Cloneable, Defaultable {
     type Item = T
     type Iter = ArrayIterator[T]
     type Element = T

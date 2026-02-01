@@ -2079,9 +2079,19 @@ pub fn expr_parser<'tokens>()
 
         // Unary expression - binds tighter than binary operators
         // so `not false or x` parses as `(not false) or x`, not `not (false or x)`
+        // Collect all consecutive unary operators, then fold right-to-left to support `--42`, `!!x`
         let unary = unary_op
+            .repeated()
+            .at_least(1)
+            .collect::<Vec<_>>()
             .then(postfix.clone())
-            .map(|((tok, span), operand)| ExprVariant::Unary(tok, span, Box::new(operand)));
+            .map(|(ops, operand)| {
+                ops.into_iter()
+                    .rev()
+                    .fold(operand, |acc, (tok, span)| {
+                        ExprVariant::Unary(tok, span, Box::new(acc))
+                    })
+            });
 
         // Try expression: try expr (high precedence - binds to postfix)
         let try_expr = try_keyword

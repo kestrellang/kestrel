@@ -235,7 +235,7 @@ mod dictionary {
             r#"module Test
 
             func main() -> lang.i64 {
-                var dict = std.collections.Dictionary[std.num.Int64, std.num.Int64](0, 0);
+                var dict = std.collections.Dictionary[std.num.Int64, std.num.Int64]();
 
                 // Test isEmpty initially
                 if dict.isEmpty() == false { return 1 }

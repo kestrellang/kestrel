@@ -6,7 +6,7 @@ import std.core.(Bool, Equatable, Cloneable, Hash, Hasher, Defaultable)
 import std.num.(Int64)
 import std.result.(Optional)
 import std.iter.(Iterator, Iterable)
-import std.collections.(Dictionary, DictionaryEntry, DictionaryIterator, DefaultHasher)
+import std.collections.(Dictionary, DictionaryIterator, DefaultHasher)
 
 // ============================================================================
 // INTERNAL TYPES
@@ -37,9 +37,9 @@ public struct SetIterator[T, H = DefaultHasher]: Iterator where T: Hash, H: Hash
 
     /// Returns the next element, or None if exhausted.
     public mutating func next() -> T? {
-        let maybeEntry = self.dictIter.next();
-        if let .Some(entry) = maybeEntry {
-            .Some(entry.key)
+        let maybePair = self.dictIter.next();
+        if let .Some(pair) = maybePair {
+            .Some(pair.0)
         } else {
             .None
         }
@@ -58,24 +58,19 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hash, H: H
     type Iter = SetIterator[T, H]
 
     var dict: Dictionary[T, Unit, H]
-    var placeholder: T
 
     // ========================================================================
     // CONSTRUCTORS
     // ========================================================================
 
     /// Creates an empty set.
-    ///
-    /// Requires placeholder element for internal dictionary storage.
-    public init(placeholder placeholder: T) {
-        self.dict = Dictionary(placeholder, Unit());
-        self.placeholder = placeholder;
+    public init() {
+        self.dict = Dictionary();
     }
 
     /// Creates an empty set with initial capacity.
-    public init(capacity capacity: Int64, placeholder placeholder: T) {
-        self.dict = Dictionary(capacity: capacity, placeholderKey: placeholder, placeholderValue: Unit());
-        self.placeholder = placeholder;
+    public init(capacity capacity: Int64) {
+        self.dict = Dictionary(capacity: capacity);
     }
 
     // ========================================================================
@@ -132,9 +127,6 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hash, H: H
     /// Returns the internal dictionary (for extensions).
     func getDict() -> Dictionary[T, Unit, H] { self.dict }
 
-    /// Returns the placeholder (for creating new sets).
-    func getPlaceholder() -> T { self.placeholder }
-
     // ========================================================================
     // SET OPERATIONS
     // ========================================================================
@@ -144,7 +136,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hash, H: H
         let selfCount = self.count();
         let otherCount = other.count();
 
-        var result = Set(capacity: selfCount + otherCount, placeholder: self.placeholder);
+        var result = Set(capacity: selfCount + otherCount);
 
         // Add all from self
         var selfIter = self.iter();
@@ -165,7 +157,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hash, H: H
     public func intersection(other: Set[T, H]) -> Set[T, H] {
         let selfCount = self.count();
 
-        var result = Set(capacity: selfCount, placeholder: self.placeholder);
+        var result = Set(capacity: selfCount);
 
         // Add elements that are in both
         var selfIter = self.iter();
@@ -182,7 +174,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hash, H: H
     public func difference(other: Set[T, H]) -> Set[T, H] {
         let selfCount = self.count();
 
-        var result = Set(capacity: selfCount, placeholder: self.placeholder);
+        var result = Set(capacity: selfCount);
 
         // Add elements not in other
         var selfIter = self.iter();
@@ -200,7 +192,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hash, H: H
         let selfCount = self.count();
         let otherCount = other.count();
 
-        var result = Set(capacity: selfCount + otherCount, placeholder: self.placeholder);
+        var result = Set(capacity: selfCount + otherCount);
 
         // Add elements in self but not other
         var selfIter = self.iter();
@@ -258,13 +250,12 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hash, H: H
 
     /// Creates a shallow clone (COW - copy deferred until mutation).
     public func clone() -> Set[T, H] {
-        Set(dict: self.dict.clone(), placeholder: self.placeholder)
+        Set(dict: self.dict.clone())
     }
 
     /// Private init for clone.
-    private init(dict dict: Dictionary[T, Unit, H], placeholder placeholder: T) {
+    private init(dict dict: Dictionary[T, Unit, H]) {
         self.dict = dict;
-        self.placeholder = placeholder;
     }
 }
 
