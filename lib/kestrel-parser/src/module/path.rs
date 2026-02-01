@@ -90,11 +90,8 @@ where
             crate::common::emit_module_path(sink, &segments);
         },
         Err(errors) => {
-            // Emit error events for each parse error
             for error in errors {
-                // Chumsky errors have span information
-                let span = error.span();
-                sink.error_at(format!("Parse error: {:?}", error), *span);
+                sink.error_from_rich(&error);
             }
         },
     }

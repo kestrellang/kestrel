@@ -85,6 +85,8 @@ impl Compilation {
                 let error_diag = ParseErrorDiagnostic {
                     message: error.message.clone(),
                     span: error.span.clone(),
+                    expected: error.expected.clone(),
+                    found: error.found.clone(),
                 };
                 diagnostics.throw(error_diag);
             }
@@ -406,6 +408,8 @@ impl IntoDiagnostic for LexError {
 struct ParseErrorDiagnostic {
     message: String,
     span: Option<Span>,
+    expected: Vec<String>,
+    found: Option<String>,
 }
 
 impl IntoDiagnostic for ParseErrorDiagnostic {
@@ -414,9 +418,35 @@ impl IntoDiagnostic for ParseErrorDiagnostic {
 
         // Add span label if available
         if let Some(span) = &self.span {
+            // Create a more specific label based on what we know
+            let label_message = if !self.expected.is_empty() {
+                if self.expected.len() == 1 {
+                    format!("expected {}", self.expected[0])
+                } else if self.expected.len() <= 3 {
+                    format!("expected one of: {}", self.expected.join(", "))
+                } else {
+                    format!(
+                        "expected one of: {}, or {} others",
+                        self.expected[..2].join(", "),
+                        self.expected.len() - 2
+                    )
+                }
+            } else if self.found.is_some() {
+                "unexpected token".to_string()
+            } else {
+                "error occurred here".to_string()
+            };
+
             diagnostic = diagnostic.with_labels(vec![
-                Label::primary(span.file_id, span.range()).with_message("error occurred here"),
+                Label::primary(span.file_id, span.range()).with_message(label_message),
             ]);
+        }
+
+        // Add suggestion as a note if we can generate one
+        if let Some(suggestion) =
+            kestrel_parser::suggest_fix(self.found.as_deref(), &self.expected)
+        {
+            diagnostic = diagnostic.with_notes(vec![format!("help: {}", suggestion)]);
         }
 
         diagnostic

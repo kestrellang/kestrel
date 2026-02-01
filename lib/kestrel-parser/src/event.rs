@@ -18,6 +18,8 @@
 //! - Follows proven rust-analyzer architecture
 
 use crate::input::ChumskySpan;
+use crate::parser::ParseError;
+use kestrel_lexer::Token;
 use kestrel_span::Span;
 use kestrel_syntax_tree::{GreenNodeBuilder, SyntaxKind, SyntaxNode};
 
@@ -101,6 +103,20 @@ impl EventSink {
         self.events.push(Event::Error {
             message,
             span: None,
+        });
+    }
+
+    /// Record a parse error from a chumsky Rich<Token> error
+    ///
+    /// This is the preferred method for recording errors from chumsky parsers
+    /// as it properly formats the token and extracts expected tokens.
+    pub fn error_from_rich(&mut self, error: &chumsky::error::Rich<'_, Token>) {
+        let parse_error = ParseError::from_token_error(error);
+        // Fix the file_id in the span (chumsky spans don't carry file_id)
+        let span = parse_error.span.map(|s| Span::new(self.file_id, s.start..s.end));
+        self.events.push(Event::Error {
+            message: parse_error.message,
+            span,
         });
     }
 

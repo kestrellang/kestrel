@@ -1208,7 +1208,7 @@ func test(x: lang.i64) -> lang.i64 {
 "#,
         )
         .expect(Fails)
-        .expect(HasError("At")); // Parser error reports token name 'At' for the @ symbol
+        .expect(HasError("'@'")); // Parser error shows '@' symbol
     }
 
     #[test]

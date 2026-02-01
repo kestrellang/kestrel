@@ -122,8 +122,7 @@ where
         },
         Err(errors) => {
             for error in errors {
-                let span = error.span();
-                sink.error_at(format!("Parse error: {:?}", error), *span);
+                sink.error_from_rich(&error);
             }
         },
     }

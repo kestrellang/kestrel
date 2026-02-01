@@ -1081,8 +1081,7 @@ where
             sink.start_node(SyntaxKind::Pattern);
             sink.start_node(SyntaxKind::ErrorPattern);
             for error in errors {
-                let span = error.span();
-                sink.error_at(format!("Parse error: {:?}", error), *span);
+                sink.error_from_rich(&error);
             }
             sink.finish_node(); // ErrorPattern
             sink.finish_node(); // Pattern

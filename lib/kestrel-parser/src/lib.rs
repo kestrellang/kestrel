@@ -122,7 +122,9 @@ pub use ty::parse_ty;
 pub use type_alias::parse_type_alias_declaration;
 
 // Re-export Parser API
-pub use parser::{ParseError, ParseErrorKind, ParseResult, Parser};
+pub use parser::{
+    format_token_for_display, suggest_fix, ParseError, ParseErrorKind, ParseResult, Parser,
+};
 
 /// Extract file_id from the first token, defaulting to 0 if no tokens
 fn extract_file_id<I>(tokens: &I) -> usize

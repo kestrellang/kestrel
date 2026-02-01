@@ -612,7 +612,7 @@ See [docs/memory-model/implementation-plan.md](docs/memory-model/implementation-
 - [x] Range Operators (`..=`, `..<`)
 - [x] Compound Assignment Operators
 - [x] Character Literals
-- [ ] String Interpolation
+- [x] String Interpolation
 - [x] Null Literals
 - [x] Dictionary Literals
 
@@ -655,8 +655,6 @@ See [docs/memory-model/implementation-plan.md](docs/memory-model/implementation-
 ### Documentation
 
 - [ ] Doc comments - `///` with structured sections
-  - Parameter, Returns, Throws documentation
-  - Testable code examples (future)
 
 ## Phase 16+ Advanced Types & Runtime
 
