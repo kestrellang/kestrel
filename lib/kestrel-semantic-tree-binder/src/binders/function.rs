@@ -20,7 +20,8 @@ use crate::binders::utils::attributes::{
 use crate::declaration_binder::{BindingContext, DeclarationBinder};
 use crate::diagnostics::{
     BuiltinMethodNotInProtocolError, BuiltinMethodWrongSignatureError, BuiltinWrongKindError,
-    DuplicateBuiltinError, ExternFunctionCannotBeGenericError, ExternFunctionCannotHaveBodyError,
+    DefaultValueReferencesParameterError, DefaultValueTypeMismatchError, DuplicateBuiltinError,
+    ExternFunctionCannotBeGenericError, ExternFunctionCannotHaveBodyError,
     ExternParameterNotConsumingError, TypeNotFFISafeError,
 };
 use crate::resolution::LocalScope;
@@ -390,6 +391,12 @@ impl DeclarationBinder for FunctionBinder {
             syntax, &source, file_id, symbol_id, context, false,
         );
 
+        // Validate parameter ordering: required parameters cannot follow default parameters
+        crate::binders::utils::parameters::validate_default_parameter_order(
+            &resolved_params,
+            context.diagnostics,
+        );
+
         // Extract and resolve return type from syntax (T.Item will work)
         let resolved_return =
             resolve_return_type_from_syntax(syntax, &source, file_id, symbol_id, context);
@@ -494,7 +501,7 @@ fn resolve_function_body(
 ) {
     use crate::body_resolver::BodyResolutionContext;
     use crate::body_resolver::context::{
-        create_local_scope_for_body, resolve_body_and_attach_executable_with_patterns,
+        create_local_scope_for_body, resolve_body_and_attach_executable_with_defaults,
     };
     use crate::body_resolver::patterns::resolve_pattern_with_mutability;
     use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
@@ -654,11 +661,19 @@ fn resolve_function_body(
         parameter_patterns.push(pattern);
     }
 
-    resolve_body_and_attach_executable_with_patterns(
+    // Resolve and validate default value expressions before resolving body
+    let default_values = resolve_default_values(
+        &param_syntax_nodes,
+        params,
+        &mut body_ctx,
+    );
+
+    resolve_body_and_attach_executable_with_defaults(
         symbol,
         body_node,
         &mut body_ctx,
         parameter_patterns,
+        default_values,
     );
 }
 
@@ -798,5 +813,207 @@ fn determine_receiver_kind(
         (true, _) => Some(ReceiverKind::Mutating),
         (_, true) => Some(ReceiverKind::Consuming),
         _ => Some(ReceiverKind::Borrowing), // Default for instance methods
+    }
+}
+
+/// Validate default value expressions for parameters.
+///
+/// Resolve default value expressions and validate them.
+///
+/// Returns a Vec of Option<Expression> for each parameter (None if no default).
+/// Also validates:
+/// 1. Default value type matches parameter type
+/// 2. Default value does not reference other parameters
+fn resolve_default_values(
+    param_syntax_nodes: &[SyntaxNode],
+    params: &[Parameter],
+    ctx: &mut crate::body_resolver::BodyResolutionContext,
+) -> Vec<Option<kestrel_semantic_tree::expr::Expression>> {
+    use crate::body_resolver::resolve_expression;
+    use kestrel_semantic_tree::symbol::local::LocalId;
+    use std::collections::HashSet;
+
+    // Collect parameter names and their LocalIds for reference checking
+    let param_names: HashSet<String> = params.iter().map(|p| p.bind_name.value.clone()).collect();
+    let param_local_ids: HashSet<LocalId> = param_names
+        .iter()
+        .filter_map(|name| ctx.local_scope.lookup(name))
+        .collect();
+
+    let mut default_values = Vec::with_capacity(params.len());
+
+    for (i, param) in params.iter().enumerate() {
+        // Skip parameters without defaults
+        if !param.has_default {
+            default_values.push(None);
+            continue;
+        }
+
+        // Find the DefaultValue syntax node
+        let Some(param_syntax) = param_syntax_nodes.get(i) else {
+            default_values.push(None);
+            continue;
+        };
+
+        let Some(default_node) = param_syntax
+            .children()
+            .find(|c| c.kind() == SyntaxKind::DefaultValue)
+        else {
+            default_values.push(None);
+            continue;
+        };
+
+        // Find the Expression inside DefaultValue
+        let Some(expr_node) = default_node
+            .children()
+            .find(|c| c.kind() == SyntaxKind::Expression)
+        else {
+            default_values.push(None);
+            continue;
+        };
+
+        // Resolve the default expression
+        let default_expr = resolve_expression(&expr_node, ctx);
+
+        // Check 1: Type compatibility
+        let param_ty = &param.ty;
+        let default_ty = &default_expr.ty;
+
+        if !default_ty.is_assignable_to(param_ty) {
+            ctx.diagnostics.throw(DefaultValueTypeMismatchError {
+                param_name: param.bind_name.value.clone(),
+                expected_type: format!("{}", param_ty),
+                actual_type: format!("{}", default_ty),
+                default_span: default_expr.span.clone(),
+                param_type_span: param_ty.span().clone(),
+            });
+        }
+
+        // Check 2: No references to other parameters
+        check_expr_for_param_refs(&default_expr, &param_local_ids, &param.bind_name.value, ctx);
+
+        default_values.push(Some(default_expr));
+    }
+
+    default_values
+}
+
+/// Recursively check an expression for references to parameter LocalIds.
+fn check_expr_for_param_refs(
+    expr: &kestrel_semantic_tree::expr::Expression,
+    param_local_ids: &std::collections::HashSet<kestrel_semantic_tree::symbol::local::LocalId>,
+    current_param_name: &str,
+    ctx: &mut crate::body_resolver::BodyResolutionContext,
+) {
+    use kestrel_semantic_tree::expr::ExprKind;
+
+    match &expr.kind {
+        ExprKind::LocalRef(local_id) => {
+            if param_local_ids.contains(local_id) {
+                // Find the parameter name for better error message
+                let referenced_name = ctx
+                    .local_scope
+                    .get_local(*local_id)
+                    .map(|local| local.name().to_string())
+                    .unwrap_or_else(|| "unknown".to_string());
+                ctx.diagnostics.throw(DefaultValueReferencesParameterError {
+                    param_name: current_param_name.to_string(),
+                    referenced_param: referenced_name,
+                    reference_span: expr.span.clone(),
+                });
+            }
+        }
+        // Grouping
+        ExprKind::Grouping(inner) => {
+            check_expr_for_param_refs(inner, param_local_ids, current_param_name, ctx);
+        }
+        // Calls
+        ExprKind::Call { callee, arguments, .. } => {
+            check_expr_for_param_refs(callee, param_local_ids, current_param_name, ctx);
+            for arg in arguments {
+                check_expr_for_param_refs(&arg.value, param_local_ids, current_param_name, ctx);
+            }
+        }
+        // Field access
+        ExprKind::FieldAccess { object, .. } => {
+            check_expr_for_param_refs(object, param_local_ids, current_param_name, ctx);
+        }
+        // Tuple/Array
+        ExprKind::Tuple(elements) | ExprKind::Array(elements) => {
+            for elem in elements {
+                check_expr_for_param_refs(elem, param_local_ids, current_param_name, ctx);
+            }
+        }
+        // If expression
+        ExprKind::If { conditions, then_branch, then_value, else_branch } => {
+            // Check conditions
+            for cond in conditions {
+                match cond {
+                    kestrel_semantic_tree::expr::IfCondition::Expr(e) => {
+                        check_expr_for_param_refs(e, param_local_ids, current_param_name, ctx);
+                    }
+                    kestrel_semantic_tree::expr::IfCondition::Let { value, .. } => {
+                        check_expr_for_param_refs(value, param_local_ids, current_param_name, ctx);
+                    }
+                }
+            }
+            // Check then branch statements
+            for stmt in then_branch {
+                check_stmt_for_param_refs(stmt, param_local_ids, current_param_name, ctx);
+            }
+            if let Some(val) = then_value {
+                check_expr_for_param_refs(val, param_local_ids, current_param_name, ctx);
+            }
+            // Check else branch
+            if let Some(else_br) = else_branch {
+                check_else_branch_for_param_refs(else_br, param_local_ids, current_param_name, ctx);
+            }
+        }
+        // Other expression kinds - literals, type refs, etc. don't contain LocalRefs
+        _ => {}
+    }
+}
+
+/// Check a statement for parameter references
+fn check_stmt_for_param_refs(
+    stmt: &kestrel_semantic_tree::stmt::Statement,
+    param_local_ids: &std::collections::HashSet<kestrel_semantic_tree::symbol::local::LocalId>,
+    current_param_name: &str,
+    ctx: &mut crate::body_resolver::BodyResolutionContext,
+) {
+    use kestrel_semantic_tree::stmt::StatementKind;
+    match &stmt.kind {
+        StatementKind::Binding { value, .. } => {
+            if let Some(val) = value {
+                check_expr_for_param_refs(val, param_local_ids, current_param_name, ctx);
+            }
+        }
+        StatementKind::Expr(expr) => {
+            check_expr_for_param_refs(expr, param_local_ids, current_param_name, ctx);
+        }
+        _ => {}
+    }
+}
+
+/// Check an else branch for parameter references
+fn check_else_branch_for_param_refs(
+    else_br: &kestrel_semantic_tree::expr::ElseBranch,
+    param_local_ids: &std::collections::HashSet<kestrel_semantic_tree::symbol::local::LocalId>,
+    current_param_name: &str,
+    ctx: &mut crate::body_resolver::BodyResolutionContext,
+) {
+    use kestrel_semantic_tree::expr::ElseBranch;
+    match else_br {
+        ElseBranch::Block { statements, value } => {
+            for stmt in statements {
+                check_stmt_for_param_refs(stmt, param_local_ids, current_param_name, ctx);
+            }
+            if let Some(val) = value {
+                check_expr_for_param_refs(val, param_local_ids, current_param_name, ctx);
+            }
+        }
+        ElseBranch::ElseIf(if_expr) => {
+            check_expr_for_param_refs(if_expr, param_local_ids, current_param_name, ctx);
+        }
     }
 }

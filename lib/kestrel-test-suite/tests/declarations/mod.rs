@@ -14,6 +14,7 @@
 
 mod associated_types;
 mod computed_properties;
+mod default_parameters;
 mod delegating_initializers;
 mod enums;
 mod extensions;

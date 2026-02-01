@@ -380,7 +380,24 @@ pub(crate) fn parameter_pattern_parser<'tokens>()
     })
 }
 
-/// Parser for a single parameter: `(access_mode)? (label)? pattern: Type`
+/// Parser for optional default value: `= expression`
+///
+/// # Returns
+/// - `Some((equals_span, expression))` if default value is present
+/// - `None` if no default value
+fn default_value_parser<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, Option<(Span, crate::expr::ExprVariant)>, ParserExtra<'tokens>>
++ Clone {
+    // Parse optional default value: = expression
+    // The trivia combinator handles whitespace before =
+    // .or_not() makes the entire thing optional
+    trivia(just(Token::Equals).map_with(|_, e| to_kestrel_span(e.span())))
+        .then(expr_parser())
+        .or_not()
+        .boxed()
+}
+
+/// Parser for a single parameter: `(access_mode)? (label)? pattern: Type (= default)?`
 ///
 /// # Examples
 /// - `x: Int` → access_mode=None, label=None, pattern=Binding(x)
@@ -390,6 +407,7 @@ pub(crate) fn parameter_pattern_parser<'tokens>()
 /// - `point (x, y): Point` → access_mode=None, label="point", pattern=Tuple
 /// - `Point { x, y }: Point` → access_mode=None, label=None, pattern=Struct
 /// - `_: Int` → access_mode=None, label=None, pattern=Wildcard
+/// - `x: Int = 0` → access_mode=None, label=None, pattern=Binding(x), default=Some(0)
 pub(crate) fn parameter_parser<'tokens>()
 -> impl Parser<'tokens, ParserInput<'tokens>, ParameterData, ParserExtra<'tokens>> + Clone {
     // Parse identifier (with trivia skipping)
@@ -399,7 +417,7 @@ pub(crate) fn parameter_parser<'tokens>()
 
     let param_pattern = parameter_pattern_parser();
 
-    // Labeled parameter: (access_mode)? label pattern: Type
+    // Labeled parameter: (access_mode)? label pattern: Type (= default)?
     // The label is always a simple identifier, followed by a pattern
     let labeled = parameter_access_mode_parser()
         .then(ident.clone())
@@ -408,29 +426,33 @@ pub(crate) fn parameter_parser<'tokens>()
             just(Token::Colon).map_with(|_, e| to_kestrel_span(e.span())),
         ))
         .then(ty_parser())
+        .then(default_value_parser())
         .map(
-            |((((access_mode, label), pattern), colon), ty)| ParameterData {
+            |(((((access_mode, label), pattern), colon), ty), default)| ParameterData {
                 access_mode,
                 label: Some(label),
                 pattern,
                 colon,
                 ty,
+                default,
             },
         );
 
-    // Unlabeled parameter: (access_mode)? pattern: Type
+    // Unlabeled parameter: (access_mode)? pattern: Type (= default)?
     let unlabeled = parameter_access_mode_parser()
         .then(param_pattern)
         .then(trivia(
             just(Token::Colon).map_with(|_, e| to_kestrel_span(e.span())),
         ))
         .then(ty_parser())
-        .map(|(((access_mode, pattern), colon), ty)| ParameterData {
+        .then(default_value_parser())
+        .map(|((((access_mode, pattern), colon), ty), default)| ParameterData {
             access_mode,
             label: None,
             pattern,
             colon,
             ty,
+            default,
         });
 
     // Try labeled first (more specific), then unlabeled

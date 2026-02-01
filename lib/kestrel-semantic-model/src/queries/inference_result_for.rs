@@ -2,7 +2,9 @@
 
 use kestrel_semantic_tree::behavior::callable::CallableBehavior;
 use kestrel_semantic_tree::behavior::executable::ExecutableBehavior;
-use kestrel_semantic_type_inference::{InferenceContext, Solution, generate_constraints};
+use kestrel_semantic_type_inference::{
+    InferenceContext, Solution, generate_constraints, generate_default_value_constraints,
+};
 use semantic_tree::symbol::SymbolId;
 
 use crate::SemanticModel;
@@ -31,11 +33,13 @@ impl Query for InferenceResultFor {
         // Get the executable behavior (body)
         let executable = symbol.metadata().get_behavior::<ExecutableBehavior>()?;
 
-        // Get the return type from CallableBehavior if present
-        let return_type = symbol
-            .metadata()
-            .get_behavior::<CallableBehavior>()
-            .map(|c| c.return_type().clone());
+        // Get CallableBehavior for return type and parameter types
+        let callable = symbol.metadata().get_behavior::<CallableBehavior>();
+        let return_type = callable.as_ref().map(|c| c.return_type().clone());
+        let param_types: Vec<_> = callable
+            .as_ref()
+            .map(|c| c.parameters().iter().map(|p| p.ty.clone()).collect())
+            .unwrap_or_default();
 
         // Create a contextual oracle that knows which function we're analyzing.
         // This allows extension where clause bounds to be discovered when resolving
@@ -45,6 +49,12 @@ impl Query for InferenceResultFor {
 
         // Generate constraints from the code block
         generate_constraints(&mut ctx, executable.body(), return_type.as_ref());
+
+        // Generate constraints for default value expressions
+        let default_values = executable.default_values();
+        if !default_values.is_empty() {
+            generate_default_value_constraints(&mut ctx, default_values, &param_types);
+        }
 
         // Solve and return the solution
         Some(ctx.solve())

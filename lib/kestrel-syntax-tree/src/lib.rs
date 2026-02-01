@@ -85,7 +85,8 @@ pub enum SyntaxKind {
     TypeParameterList, // [T, U, V]
     TypeParameter,     // T or T = Default
     TypeArgumentList,  // [Int, String] in type use position
-    DefaultType,       // = SomeType
+    DefaultType,       // = SomeType (for type parameters)
+    DefaultValue,      // = expression (for function parameters)
 
     // Where clause nodes
     WhereClause,         // where T: Proto, U: Other
@@ -495,6 +496,7 @@ impl Language for KestrelLanguage {
         const TYPE_PARAMETER: u16 = SyntaxKind::TypeParameter as u16;
         const TYPE_ARGUMENT_LIST: u16 = SyntaxKind::TypeArgumentList as u16;
         const DEFAULT_TYPE: u16 = SyntaxKind::DefaultType as u16;
+        const DEFAULT_VALUE: u16 = SyntaxKind::DefaultValue as u16;
         const WHERE_CLAUSE: u16 = SyntaxKind::WhereClause as u16;
         const TYPE_BOUND: u16 = SyntaxKind::TypeBound as u16;
         const TYPE_EQUALITY: u16 = SyntaxKind::TypeEquality as u16;
@@ -740,6 +742,7 @@ impl Language for KestrelLanguage {
             TYPE_PARAMETER => SyntaxKind::TypeParameter,
             TYPE_ARGUMENT_LIST => SyntaxKind::TypeArgumentList,
             DEFAULT_TYPE => SyntaxKind::DefaultType,
+            DEFAULT_VALUE => SyntaxKind::DefaultValue,
             WHERE_CLAUSE => SyntaxKind::WhereClause,
             TYPE_BOUND => SyntaxKind::TypeBound,
             TYPE_EQUALITY => SyntaxKind::TypeEquality,

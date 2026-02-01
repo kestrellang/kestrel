@@ -5,7 +5,9 @@ use kestrel_span::Spanned;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use crate::declaration_binder::BindingContext;
+use crate::diagnostics::RequiredParameterAfterDefaultError;
 use crate::resolution::type_resolver::{TypeSyntaxContext, resolve_type_from_ty_node};
+use kestrel_reporting::DiagnosticContext;
 use kestrel_syntax_tree::utils::{extract_identifier_from_name, find_child, get_node_span};
 
 pub(crate) fn resolve_parameters_from_syntax(
@@ -225,10 +227,44 @@ fn resolve_single_parameter(
         Ty::infer(get_node_span(param_node, file_id))
     };
 
+    // Check if there's a DefaultValue child node
+    let has_default = param_node
+        .children()
+        .any(|c| c.kind() == SyntaxKind::DefaultValue);
+
     Some(Parameter {
         access_mode,
         label,
         bind_name,
         ty,
+        has_default,
     })
+}
+
+/// Validates that required parameters do not follow parameters with default values.
+///
+/// Once a parameter has a default value, all subsequent parameters must also have defaults.
+/// This ensures call-site argument matching is unambiguous.
+pub(crate) fn validate_default_parameter_order(
+    params: &[Parameter],
+    diagnostics: &mut DiagnosticContext,
+) {
+    let mut first_default_param: Option<&Parameter> = None;
+
+    for param in params {
+        if param.has_default {
+            // Track the first parameter with a default
+            if first_default_param.is_none() {
+                first_default_param = Some(param);
+            }
+        } else if let Some(default_param) = first_default_param {
+            // Error: required parameter after a default parameter
+            diagnostics.throw(RequiredParameterAfterDefaultError {
+                required_name: param.bind_name.value.clone(),
+                required_span: param.bind_name.span.clone(),
+                default_param_name: default_param.bind_name.value.clone(),
+                default_param_span: default_param.bind_name.span.clone(),
+            });
+        }
+    }
 }

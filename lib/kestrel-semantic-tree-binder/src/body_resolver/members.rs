@@ -1213,6 +1213,7 @@ pub fn substitute_callable_self(callable: &CallableBehavior, receiver_ty: &Ty) -
                 ty: new_ty,
                 label: p.label.clone(),
                 bind_name: p.bind_name.clone(),
+                has_default: p.has_default,
             }
         })
         .collect();
@@ -1254,6 +1255,7 @@ fn substitute_callable(
             ty: substitute_type(&p.ty, substitutions),
             label: p.label.clone(),
             bind_name: p.bind_name.clone(),
+            has_default: p.has_default,
         })
         .collect();
 

@@ -585,6 +585,23 @@ pub(crate) fn resolve_body_and_attach_executable_with_patterns(
     ctx: &mut BodyResolutionContext,
     parameter_patterns: Vec<kestrel_semantic_tree::pattern::Pattern>,
 ) {
+    resolve_body_and_attach_executable_with_defaults(
+        function_symbol,
+        body_syntax,
+        ctx,
+        parameter_patterns,
+        Vec::new(),
+    );
+}
+
+/// Resolve a function's body and attach ExecutableBehavior with parameter patterns and default values.
+pub(crate) fn resolve_body_and_attach_executable_with_defaults(
+    function_symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+    body_syntax: &SyntaxNode,
+    ctx: &mut BodyResolutionContext,
+    parameter_patterns: Vec<kestrel_semantic_tree::pattern::Pattern>,
+    default_values: Vec<Option<kestrel_semantic_tree::expr::Expression>>,
+) {
     let code_block = resolve_function_body(body_syntax, ctx);
 
     // Check for escaping capturing closure in tail expression (implicit return)
@@ -605,7 +622,7 @@ pub(crate) fn resolve_body_and_attach_executable_with_patterns(
         }
     }
 
-    let executable = ExecutableBehavior::with_parameter_patterns(code_block, parameter_patterns);
+    let executable = ExecutableBehavior::with_defaults(code_block, parameter_patterns, default_values);
     function_symbol.metadata().add_behavior(executable);
 }
 

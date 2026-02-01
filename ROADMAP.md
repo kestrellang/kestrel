@@ -596,19 +596,12 @@ See [docs/memory-model/implementation-plan.md](docs/memory-model/implementation-
 
 ### Type Promotion
 
-- [ ] Optional Promotion - Implicit wrapping of values into Optional
-  - `let x: Int? = 5` desugars to `Optional.Some(5)`
-  - Works in variable declarations, returns, and assignments
-- [ ] Result Promotion - Implicit wrapping of values into Result
-  - `let r: Int throws Error = 42` desugars to `Result.Ok(42)`
-  - Complements the `try` operator for ergonomic error handling
+- [x] Optional Promotion - Implicit wrapping of values into Optional
+- [x] Result Promotion - Implicit wrapping of values into Result
 
 ### Error Handling
 
 - [x] Throw Expression - Early return with error value
-  - `throw error` desugars to `return R.fromResidual(error)` in functions with FromResidual
-  - Works with `T throws E` type syntax for ergonomic error propagation
-  - Type is Never (diverging expression like return)
 
 ### Expressions
 

@@ -52,6 +52,38 @@ pub fn generate_constraints(
     }
 }
 
+/// Generate type inference constraints for default value expressions.
+///
+/// For each default value, generates constraints and ensures the expression
+/// type is promotable to the parameter type.
+///
+/// # Arguments
+/// * `ctx` - The inference context to add constraints to
+/// * `default_values` - The default value expressions (None if parameter has no default)
+/// * `param_types` - The expected parameter types, in the same order
+pub fn generate_default_value_constraints(
+    ctx: &mut InferenceContext<'_>,
+    default_values: &[Option<Expression>],
+    param_types: &[Ty],
+) {
+    for (default_opt, param_ty) in default_values.iter().zip(param_types.iter()) {
+        if let Some(default_expr) = default_opt {
+            // Generate constraints for the default expression
+            generate_expression_constraints(ctx, default_expr);
+
+            // Constrain the default expression type to be promotable to parameter type
+            ctx.register_type(param_ty);
+            ctx.register_type(&default_expr.ty);
+            ctx.promotable(
+                default_expr.ty.id(),
+                param_ty.id(),
+                default_expr.id,
+                default_expr.span.clone(),
+            );
+        }
+    }
+}
+
 /// Generate constraints for a statement.
 fn generate_statement_constraints(ctx: &mut InferenceContext<'_>, stmt: &Statement) {
     match &stmt.kind {

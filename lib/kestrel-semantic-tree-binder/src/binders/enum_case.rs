@@ -147,6 +147,8 @@ fn resolve_enum_case_parameter(
         label,
         bind_name: Spanned::new(bind_name, bind_span),
         ty: resolved_ty,
+        // Enum case parameters don't support defaults
+        has_default: false,
     })
 }
 

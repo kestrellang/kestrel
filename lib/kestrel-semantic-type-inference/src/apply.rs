@@ -47,6 +47,19 @@ pub fn apply_solution_to_patterns(patterns: &[Pattern], solution: &Solution) -> 
         .collect()
 }
 
+/// Apply a solution to default value expressions, resolving all inference placeholders.
+///
+/// Returns a new Vec where each Some contains a resolved expression.
+pub fn apply_solution_to_defaults(
+    defaults: &[Option<Expression>],
+    solution: &Solution,
+) -> Vec<Option<Expression>> {
+    defaults
+        .iter()
+        .map(|opt| opt.as_ref().map(|expr| apply_to_expression(expr, solution)))
+        .collect()
+}
+
 /// Apply solution to a statement.
 fn apply_to_statement(stmt: &Statement, solution: &Solution) -> Statement {
     let kind = match &stmt.kind {

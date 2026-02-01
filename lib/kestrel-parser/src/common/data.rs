@@ -81,11 +81,12 @@ pub enum ParameterAccessMode {
 
 /// Raw parsed data for a single parameter
 ///
-/// Parameter syntax: `(access_mode)? (label)? pattern: Type`
+/// Parameter syntax: `(access_mode)? (label)? pattern: Type (= default)?`
 /// - `access_mode` is an optional access mode (mutating/consuming)
 /// - `label` is an optional external parameter name (used by callers)
 /// - `pattern` is the binding pattern (identifier, tuple, struct, or wildcard)
 /// - If only one identifier is provided (no label), it's used as both label and pattern
+/// - `default` is an optional default value expression
 ///
 /// # Examples
 /// - `x: Int` → access_mode=None, label=None, pattern=Binding(x)
@@ -95,6 +96,7 @@ pub enum ParameterAccessMode {
 /// - `point (x, y): Point` → access_mode=None, label="point", pattern=Tuple
 /// - `Point { x, y }: Point` → access_mode=None, label=None, pattern=Struct
 /// - `_: Int` → access_mode=None, label=None, pattern=Wildcard
+/// - `x: Int = 0` → access_mode=None, label=None, pattern=Binding(x), default=Some(0)
 #[derive(Debug, Clone)]
 pub struct ParameterData {
     /// Optional access mode (mutating/consuming)
@@ -109,6 +111,8 @@ pub struct ParameterData {
     pub colon: Span,
     /// The parameter type
     pub ty: TyVariant,
+    /// Optional default value (equals_span, expression)
+    pub default: Option<(Span, ExprVariant)>,
 }
 
 /// Receiver modifier for instance methods

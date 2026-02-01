@@ -97,7 +97,11 @@ pub fn validate_not_standalone_type_param(
     expr
 }
 
-/// Check if a callable signature matches the given arity and labels
+/// Check if a callable signature matches the given arity and labels.
+///
+/// For parameters with default values, callers may omit trailing arguments.
+/// The arity must be between the number of required parameters (those without
+/// defaults) and the total number of parameters.
 pub fn matches_signature(
     callable: &CallableBehavior,
     arity: usize,
@@ -105,14 +109,20 @@ pub fn matches_signature(
 ) -> bool {
     let params = callable.parameters();
 
-    // Check arity
-    if params.len() != arity {
+    // Count required parameters (those without defaults)
+    let required_count = params.iter().filter(|p| !p.has_default()).count();
+
+    // Check arity: must be at least required_count and at most total params
+    if arity < required_count || arity > params.len() {
         return false;
     }
 
-    // Check labels match
-    for (param, label) in params.iter().zip(labels.iter()) {
-        let param_label = param.external_label();
+    // Check labels for provided arguments only (first `arity` parameters)
+    for (i, label) in labels.iter().enumerate() {
+        if i >= params.len() {
+            return false; // More labels than params - shouldn't happen
+        }
+        let param_label = params[i].external_label();
         let label_ref = label.as_deref();
         if param_label != label_ref {
             return false;

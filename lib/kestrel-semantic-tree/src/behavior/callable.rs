@@ -61,6 +61,7 @@ pub enum ParameterAccessMode {
 /// - `with x: Int` -> access_mode=Borrow, label="with", bind_name="x"
 /// - `mutating x: Int` -> access_mode=Mutating, label=None, bind_name="x"
 /// - `consuming point p: Point` -> access_mode=Consuming, label="point", bind_name="p"
+/// - `x: Int = 0` -> has_default=true
 #[derive(Debug, Clone)]
 pub struct CallableParameter {
     /// Access mode for this parameter (borrow/mutating/consuming)
@@ -71,40 +72,45 @@ pub struct CallableParameter {
     pub bind_name: Name,
     /// The parameter's type
     pub ty: Ty,
+    /// Whether this parameter has a default value
+    pub has_default: bool,
 }
 
 impl CallableParameter {
-    /// Create a new parameter without a label (default borrow mode)
+    /// Create a new parameter without a label (default borrow mode, no default value)
     pub fn new(bind_name: Name, ty: Ty) -> Self {
         Self {
             access_mode: ParameterAccessMode::Borrow,
             label: None,
             bind_name,
             ty,
+            has_default: false,
         }
     }
 
-    /// Create a new parameter with a label (default borrow mode)
+    /// Create a new parameter with a label (default borrow mode, no default value)
     pub fn with_label(label: Name, bind_name: Name, ty: Ty) -> Self {
         Self {
             access_mode: ParameterAccessMode::Borrow,
             label: Some(label),
             bind_name,
             ty,
+            has_default: false,
         }
     }
 
-    /// Create a new parameter with access mode and no label
+    /// Create a new parameter with access mode and no label (no default value)
     pub fn with_access_mode(access_mode: ParameterAccessMode, bind_name: Name, ty: Ty) -> Self {
         Self {
             access_mode,
             label: None,
             bind_name,
             ty,
+            has_default: false,
         }
     }
 
-    /// Create a new parameter with access mode and label
+    /// Create a new parameter with access mode and label (no default value)
     pub fn with_access_mode_and_label(
         access_mode: ParameterAccessMode,
         label: Name,
@@ -116,7 +122,14 @@ impl CallableParameter {
             label: Some(label),
             bind_name,
             ty,
+            has_default: false,
         }
+    }
+
+    /// Set whether this parameter has a default value
+    pub fn with_default(mut self, has_default: bool) -> Self {
+        self.has_default = has_default;
+        self
     }
 
     /// Get the access mode for this parameter
@@ -150,6 +163,11 @@ impl CallableParameter {
     /// Check if this parameter is consuming
     pub fn is_consuming(&self) -> bool {
         self.access_mode == ParameterAccessMode::Consuming
+    }
+
+    /// Check if this parameter has a default value
+    pub fn has_default(&self) -> bool {
+        self.has_default
     }
 }
 

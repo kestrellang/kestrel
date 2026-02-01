@@ -312,6 +312,14 @@ pub fn emit_parameter(sink: &mut EventSink, param: ParameterData) {
     sink.add_token(SyntaxKind::Colon, param.colon);
     emit_ty_variant(sink, &param.ty);
 
+    // Emit default value if present
+    if let Some((equals_span, ref default_expr)) = param.default {
+        sink.start_node(SyntaxKind::DefaultValue);
+        sink.add_token(SyntaxKind::Equals, equals_span);
+        emit_expr_variant(sink, default_expr);
+        sink.finish_node();
+    }
+
     sink.finish_node();
 }
 

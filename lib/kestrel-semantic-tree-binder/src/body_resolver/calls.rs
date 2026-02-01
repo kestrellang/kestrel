@@ -730,6 +730,8 @@ fn find_matching_subscript(
 }
 
 /// Check if a subscript's parameter signature matches the given arguments.
+///
+/// For parameters with default values, callers may omit trailing arguments.
 fn matches_subscript_signature(
     subscript: &SubscriptSymbol,
     arguments: &[CallArgument],
@@ -742,8 +744,11 @@ fn matches_subscript_signature(
 
     let params = behavior.parameters();
 
-    // Check argument count
-    if arguments.len() != params.len() {
+    // Count required parameters (those without defaults)
+    let required_count = params.iter().filter(|p| !p.has_default()).count();
+
+    // Check arity: must be at least required_count and at most total params
+    if arguments.len() < required_count || arguments.len() > params.len() {
         return false;
     }
 
@@ -2302,6 +2307,7 @@ fn substitute_callable_with_substitutions(
             ty: substitute_type(&p.ty, substitutions),
             label: p.label.clone(),
             bind_name: p.bind_name.clone(),
+            has_default: p.has_default,
         })
         .collect();
 

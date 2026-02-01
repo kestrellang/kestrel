@@ -104,6 +104,7 @@ impl DeclarationBinder for SubscriptBinder {
                 label: p.label.clone(),
                 bind_name: p.bind_name.clone(),
                 ty: p.ty.clone(),
+                has_default: p.has_default,
             })
             .collect();
 
@@ -215,6 +216,7 @@ fn bind_getter_signature(
             label: p.label.clone(),
             bind_name: p.bind_name.clone(),
             ty: p.ty.clone(),
+            has_default: p.has_default,
         })
         .collect();
 
@@ -252,6 +254,7 @@ fn bind_setter_signature(
             label: p.label.clone(),
             bind_name: p.bind_name.clone(),
             ty: p.ty.clone(),
+            has_default: p.has_default,
         })
         .collect();
 
