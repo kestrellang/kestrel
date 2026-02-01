@@ -369,7 +369,12 @@ impl<'a> InferenceContext<'a> {
     }
 
     pub(crate) fn into_solution(self) -> Solution {
-        Solution::with_promotions(self.substitutions, self.values, self.promotions, self.errors)
+        Solution::with_promotions(
+            self.substitutions,
+            self.values,
+            self.promotions,
+            self.errors,
+        )
     }
 
     pub(crate) fn type_registry(&self) -> &HashMap<TyId, Ty> {

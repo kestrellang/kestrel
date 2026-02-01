@@ -113,7 +113,9 @@ impl EventSink {
     pub fn error_from_rich(&mut self, error: &chumsky::error::Rich<'_, Token>) {
         let parse_error = ParseError::from_token_error(error);
         // Fix the file_id in the span (chumsky spans don't carry file_id)
-        let span = parse_error.span.map(|s| Span::new(self.file_id, s.start..s.end));
+        let span = parse_error
+            .span
+            .map(|s| Span::new(self.file_id, s.start..s.end));
         self.events.push(Event::Error {
             message: parse_error.message,
             span,

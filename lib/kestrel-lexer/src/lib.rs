@@ -118,7 +118,7 @@ fn scan_nested_string(chars: &mut std::iter::Peekable<std::str::Chars>, remainde
             '"' => {
                 // End of nested string
                 return offset;
-            }
+            },
             '\\' => {
                 // Escape sequence - consume the next character
                 if let Some(&next) = chars.peek() {
@@ -130,8 +130,8 @@ fn scan_nested_string(chars: &mut std::iter::Peekable<std::str::Chars>, remainde
                         offset += scan_interpolation(chars, remainder);
                     }
                 }
-            }
-            _ => {}
+            },
+            _ => {},
         }
     }
 
@@ -141,10 +141,7 @@ fn scan_nested_string(chars: &mut std::iter::Peekable<std::str::Chars>, remainde
 /// Scan an interpolation expression `\(...)`.
 /// We've already consumed the `\(`. This scans until the matching `)`.
 /// Returns the number of additional bytes consumed.
-fn scan_interpolation(
-    chars: &mut std::iter::Peekable<std::str::Chars>,
-    remainder: &str,
-) -> usize {
+fn scan_interpolation(chars: &mut std::iter::Peekable<std::str::Chars>, remainder: &str) -> usize {
     let mut offset = 0;
     let mut paren_depth = 1; // We've already seen one '('
     let mut bracket_depth = 0;
@@ -162,27 +159,27 @@ fn scan_interpolation(
                     // End of interpolation
                     return offset;
                 }
-            }
+            },
             '[' => bracket_depth += 1,
             ']' => {
                 if bracket_depth > 0 {
                     bracket_depth -= 1;
                 }
-            }
+            },
             '{' => brace_depth += 1,
             '}' => {
                 if brace_depth > 0 {
                     brace_depth -= 1;
                 }
-            }
+            },
             '"' => {
                 // Nested string within interpolation
                 offset += scan_nested_string(chars, remainder);
-            }
+            },
             '\'' => {
                 // Character literal within interpolation - scan it
                 offset += scan_char_literal(chars);
-            }
+            },
             '/' => {
                 // Possible comment - check for // or /*
                 if let Some(&next) = chars.peek() {
@@ -204,8 +201,8 @@ fn scan_interpolation(
                         offset += scan_block_comment_in_interpolation(chars);
                     }
                 }
-            }
-            _ => {}
+            },
+            _ => {},
         }
     }
 
@@ -230,8 +227,8 @@ fn scan_char_literal(chars: &mut std::iter::Peekable<std::str::Chars>) -> usize 
                     chars.next();
                     offset += next.len_utf8();
                 }
-            }
-            _ => {}
+            },
+            _ => {},
         }
     }
 
@@ -296,7 +293,7 @@ fn parse_string(lex: &mut logos::Lexer<Token>) -> bool {
                 // End of string
                 lex.bump(offset);
                 return true;
-            }
+            },
             '\\' => {
                 // Escape sequence
                 if let Some(&next) = chars.peek() {
@@ -308,8 +305,8 @@ fn parse_string(lex: &mut logos::Lexer<Token>) -> bool {
                         offset += scan_interpolation(&mut chars, remainder);
                     }
                 }
-            }
-            _ => {}
+            },
+            _ => {},
         }
     }
 

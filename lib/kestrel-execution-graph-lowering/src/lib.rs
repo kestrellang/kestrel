@@ -143,8 +143,11 @@ fn generate_static_init_function(
                     let field_ty = ty::lower_type(ctx, field.field_type());
 
                     // Check if static already exists, if not add it
-                    let static_exists =
-                        ctx.mir.statics.iter().any(|(_, def)| def.name == static_name);
+                    let static_exists = ctx
+                        .mir
+                        .statics
+                        .iter()
+                        .any(|(_, def)| def.name == static_name);
                     if !static_exists {
                         ctx.mir.add_static(static_name, field_ty);
                     }
@@ -194,7 +197,10 @@ fn collect_static_fields_with_initializers(
 
             if is_static_field
                 && !field.is_computed()
-                && symbol.metadata().get_behavior::<ExecutableBehavior>().is_some()
+                && symbol
+                    .metadata()
+                    .get_behavior::<ExecutableBehavior>()
+                    .is_some()
             {
                 result.push(symbol.clone());
             }

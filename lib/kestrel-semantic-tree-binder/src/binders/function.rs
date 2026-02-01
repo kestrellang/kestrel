@@ -478,7 +478,7 @@ impl DeclarationBinder for FunctionBinder {
         if let Some(body_node) = find_child(syntax, SyntaxKind::FunctionBody) {
             resolve_function_body(
                 symbol,
-                syntax,  // Pass full syntax for parameter pattern access
+                syntax, // Pass full syntax for parameter pattern access
                 &body_node,
                 &resolved_params,
                 context,
@@ -492,7 +492,7 @@ impl DeclarationBinder for FunctionBinder {
 /// Resolve a function's body and attach ExecutableBehavior to the symbol
 fn resolve_function_body(
     symbol: &Arc<dyn Symbol<KestrelLanguage>>,
-    func_syntax: &SyntaxNode,  // Full function syntax for parameter pattern access
+    func_syntax: &SyntaxNode, // Full function syntax for parameter pattern access
     body_node: &SyntaxNode,
     params: &[Parameter],
     context: &mut BindingContext,
@@ -625,7 +625,8 @@ fn resolve_function_body(
                 for child in name_node.children_with_tokens() {
                     if let Some(token) = child.as_token() {
                         if token.kind() == SyntaxKind::Identifier {
-                            let span = kestrel_syntax_tree::utils::get_node_span(&name_node, file_id);
+                            let span =
+                                kestrel_syntax_tree::utils::get_node_span(&name_node, file_id);
                             let local_id = body_ctx.local_scope.bind(
                                 token.text().to_string(),
                                 param_ty.clone(),
@@ -652,21 +653,19 @@ fn resolve_function_body(
         // Final fallback: use bind_name from semantic parameter data
         let param_name = param.bind_name.value.clone();
         let param_span = param.bind_name.span.clone();
-        let local_id =
-            body_ctx
-                .local_scope
-                .bind(param_name.clone(), param_ty.clone(), is_mutable, param_span.clone());
+        let local_id = body_ctx.local_scope.bind(
+            param_name.clone(),
+            param_ty.clone(),
+            is_mutable,
+            param_span.clone(),
+        );
         // Create simple binding pattern for lowering
         let pattern = Pattern::local(local_id, mutability, param_name, param_ty, param_span);
         parameter_patterns.push(pattern);
     }
 
     // Resolve and validate default value expressions before resolving body
-    let default_values = resolve_default_values(
-        &param_syntax_nodes,
-        params,
-        &mut body_ctx,
-    );
+    let default_values = resolve_default_values(&param_syntax_nodes, params, &mut body_ctx);
 
     resolve_body_and_attach_executable_with_defaults(
         symbol,
@@ -922,39 +921,46 @@ fn check_expr_for_param_refs(
                     reference_span: expr.span.clone(),
                 });
             }
-        }
+        },
         // Grouping
         ExprKind::Grouping(inner) => {
             check_expr_for_param_refs(inner, param_local_ids, current_param_name, ctx);
-        }
+        },
         // Calls
-        ExprKind::Call { callee, arguments, .. } => {
+        ExprKind::Call {
+            callee, arguments, ..
+        } => {
             check_expr_for_param_refs(callee, param_local_ids, current_param_name, ctx);
             for arg in arguments {
                 check_expr_for_param_refs(&arg.value, param_local_ids, current_param_name, ctx);
             }
-        }
+        },
         // Field access
         ExprKind::FieldAccess { object, .. } => {
             check_expr_for_param_refs(object, param_local_ids, current_param_name, ctx);
-        }
+        },
         // Tuple/Array
         ExprKind::Tuple(elements) | ExprKind::Array(elements) => {
             for elem in elements {
                 check_expr_for_param_refs(elem, param_local_ids, current_param_name, ctx);
             }
-        }
+        },
         // If expression
-        ExprKind::If { conditions, then_branch, then_value, else_branch } => {
+        ExprKind::If {
+            conditions,
+            then_branch,
+            then_value,
+            else_branch,
+        } => {
             // Check conditions
             for cond in conditions {
                 match cond {
                     kestrel_semantic_tree::expr::IfCondition::Expr(e) => {
                         check_expr_for_param_refs(e, param_local_ids, current_param_name, ctx);
-                    }
+                    },
                     kestrel_semantic_tree::expr::IfCondition::Let { value, .. } => {
                         check_expr_for_param_refs(value, param_local_ids, current_param_name, ctx);
-                    }
+                    },
                 }
             }
             // Check then branch statements
@@ -968,9 +974,9 @@ fn check_expr_for_param_refs(
             if let Some(else_br) = else_branch {
                 check_else_branch_for_param_refs(else_br, param_local_ids, current_param_name, ctx);
             }
-        }
+        },
         // Other expression kinds - literals, type refs, etc. don't contain LocalRefs
-        _ => {}
+        _ => {},
     }
 }
 
@@ -987,11 +993,11 @@ fn check_stmt_for_param_refs(
             if let Some(val) = value {
                 check_expr_for_param_refs(val, param_local_ids, current_param_name, ctx);
             }
-        }
+        },
         StatementKind::Expr(expr) => {
             check_expr_for_param_refs(expr, param_local_ids, current_param_name, ctx);
-        }
-        _ => {}
+        },
+        _ => {},
     }
 }
 
@@ -1011,9 +1017,9 @@ fn check_else_branch_for_param_refs(
             if let Some(val) = value {
                 check_expr_for_param_refs(val, param_local_ids, current_param_name, ctx);
             }
-        }
+        },
         ElseBranch::ElseIf(if_expr) => {
             check_expr_for_param_refs(if_expr, param_local_ids, current_param_name, ctx);
-        }
+        },
     }
 }

@@ -645,14 +645,12 @@ fn ctor_to_witness(ctor: &Constructor, _ty: &Ty) -> Witness {
             }
         },
         Constructor::CharLiteral(c) => Witness::Literal(format!("'{}'", c)),
-        Constructor::CharRange { start, end } => {
-            match start {
-                Some(s) => Witness::Literal(format!("'{}'", s)),
-                None => match end {
-                    Some(e) => Witness::Literal(format!("'{}'", e)),
-                    None => Witness::any(),
-                },
-            }
+        Constructor::CharRange { start, end } => match start {
+            Some(s) => Witness::Literal(format!("'{}'", s)),
+            None => match end {
+                Some(e) => Witness::Literal(format!("'{}'", e)),
+                None => Witness::any(),
+            },
         },
         Constructor::StringLiteral(s) => Witness::string(s),
         Constructor::Unit => Witness::tuple(vec![]),

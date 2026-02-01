@@ -1081,8 +1081,12 @@ fn wrap_with_promotion(inner: Expression, promo: &PromotionInfo) -> Expression {
     let type_ref = Expression::type_ref(type_symbol_id, promo.target_ty.clone(), span.clone());
 
     // Create a MethodRef with the from() method symbol
-    let method_ref =
-        Expression::method_ref(type_ref, vec![promo.from_method], "from".to_string(), span.clone());
+    let method_ref = Expression::method_ref(
+        type_ref,
+        vec![promo.from_method],
+        "from".to_string(),
+        span.clone(),
+    );
 
     // Create the argument for from(value:)
     let arg = CallArgument::labeled("value".to_string(), inner, span.clone());

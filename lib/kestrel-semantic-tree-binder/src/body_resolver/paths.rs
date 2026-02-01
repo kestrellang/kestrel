@@ -458,10 +458,17 @@ pub fn resolve_path_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContex
                         let parent_id = parent.metadata().id();
 
                         // Try to create parent type - handle both struct and enum
-                        let parent_ty = if let Ok(struct_sym) = parent.clone().downcast_arc::<StructSymbol>() {
+                        let parent_ty = if let Ok(struct_sym) =
+                            parent.clone().downcast_arc::<StructSymbol>()
+                        {
                             // Parent is a struct
                             create_struct_type_with_type_args(
-                                &(struct_sym as std::sync::Arc<dyn Symbol<kestrel_semantic_tree::language::KestrelLanguage>>),
+                                &(struct_sym
+                                    as std::sync::Arc<
+                                        dyn Symbol<
+                                            kestrel_semantic_tree::language::KestrelLanguage,
+                                        >,
+                                    >),
                                 &[],
                                 span.clone(),
                                 ctx,
@@ -494,9 +501,11 @@ pub fn resolve_path_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContex
                             .unwrap_or(false);
 
                         return Expression::field_access(
-                            type_ref, field_name,
+                            type_ref,
+                            field_name,
                             field_mutable, // use actual mutability of the field
-                            field_ty, span,
+                            field_ty,
+                            span,
                         );
                     }
                 }

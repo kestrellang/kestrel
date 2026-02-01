@@ -1686,21 +1686,25 @@ fn emit_matchable_switch(
                         }
                     } else {
                         // Not a struct type - fall back to direct assignment
-                        ctx.emit_assign(
-                            char_place.clone(),
-                            Rvalue::Use(Immediate::i32(c as i32)),
-                        );
+                        ctx.emit_assign(char_place.clone(), Rvalue::Use(Immediate::i32(c as i32)));
                     }
 
                     char_place
                 };
 
                 // Get the RangeMatchable protocol for witness calls
-                let range_matchable_protocol_name = if let Some(rm_id) =
-                    ctx.model.builtin_registry().range_matchable_protocol()
-                {
-                    if let Some(rm_symbol) = ctx.model.query(SymbolFor { id: rm_id }) {
-                        qualified_name_for_symbol(ctx, &rm_symbol)
+                let range_matchable_protocol_name =
+                    if let Some(rm_id) = ctx.model.builtin_registry().range_matchable_protocol() {
+                        if let Some(rm_symbol) = ctx.model.query(SymbolFor { id: rm_id }) {
+                            qualified_name_for_symbol(ctx, &rm_symbol)
+                        } else {
+                            // Fallback to manual construction
+                            ctx.mir.intern_name(QualifiedNameData::new(vec![
+                                "std".to_string(),
+                                "core".to_string(),
+                                "RangeMatchable".to_string(),
+                            ]))
+                        }
                     } else {
                         // Fallback to manual construction
                         ctx.mir.intern_name(QualifiedNameData::new(vec![
@@ -1708,15 +1712,7 @@ fn emit_matchable_switch(
                             "core".to_string(),
                             "RangeMatchable".to_string(),
                         ]))
-                    }
-                } else {
-                    // Fallback to manual construction
-                    ctx.mir.intern_name(QualifiedNameData::new(vec![
-                        "std".to_string(),
-                        "core".to_string(),
-                        "RangeMatchable".to_string(),
-                    ]))
-                };
+                    };
 
                 // Handle optional bounds
                 match (start, end) {

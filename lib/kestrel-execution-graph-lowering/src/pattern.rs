@@ -15,7 +15,10 @@
 //! Refutable patterns (enum variants, literals, ranges) are handled by
 //! match/if-let/guard-let lowering, which uses decision trees.
 
-use kestrel_execution_graph::{BinOp, CallArg, Callee, Id, Place, QualifiedName, QualifiedNameData, Rvalue, Ty as MirTyMarker, Value};
+use kestrel_execution_graph::{
+    BinOp, CallArg, Callee, Id, Place, QualifiedName, QualifiedNameData, Rvalue, Ty as MirTyMarker,
+    Value,
+};
 use kestrel_semantic_model::SymbolFor;
 use kestrel_semantic_tree::pattern::{
     EnumPatternBinding, Pattern, PatternKind, StructPatternField,
@@ -378,7 +381,10 @@ fn lower_array_pattern(
             );
             let slice_args = vec![
                 CallArg::borrow(Value::Place(array_place.clone())),
-                CallArg::copy(Value::Immediate(make_int_immediate(IntBits::I64, prefix_len as i64))),
+                CallArg::copy(Value::Immediate(make_int_immediate(
+                    IntBits::I64,
+                    prefix_len as i64,
+                ))),
                 CallArg::copy(Value::Place(end_place)),
             ];
             ctx.emit_call_with_modes(rest_place, slice_callee, slice_args);
@@ -438,7 +444,10 @@ fn get_rest_slice_type(
         // Get the element type from the Array[T] substitutions
         if let Some((_, elem_ty)) = substitutions.iter().next() {
             // Create Slice[elem_ty] using the model
-            if let Some(slice_ty) = ctx.model.make_slice_type(elem_ty.clone(), array_ty.span().clone()) {
+            if let Some(slice_ty) = ctx
+                .model
+                .make_slice_type(elem_ty.clone(), array_ty.span().clone())
+            {
                 return lower_type(ctx, &slice_ty);
             }
         }

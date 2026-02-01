@@ -19,7 +19,8 @@ use kestrel_semantic_tree::symbol::local::LocalContainer;
 use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
 use kestrel_semantic_tree::ty::{Substitutions, Ty};
 use kestrel_semantic_type_inference::{
-    apply_solution, apply_solution_to_defaults, apply_solution_to_locals, apply_solution_to_patterns,
+    apply_solution, apply_solution_to_defaults, apply_solution_to_locals,
+    apply_solution_to_patterns,
 };
 use semantic_tree::symbol::Symbol;
 
@@ -164,8 +165,7 @@ impl Analyzer for TypeInferenceAnalyzer {
             apply_solution_to_patterns(executable.parameter_patterns(), &solution);
 
         // Apply solution to default value expressions
-        let resolved_defaults =
-            apply_solution_to_defaults(executable.default_values(), &solution);
+        let resolved_defaults = apply_solution_to_defaults(executable.default_values(), &solution);
 
         // Update local variables in the container with resolved types.
         // This is necessary because pattern-bound locals are created with Ty::infer()
@@ -193,10 +193,12 @@ impl Analyzer for TypeInferenceAnalyzer {
         }
 
         // Add ResolvedExecutableBehavior to the symbol with parameter patterns and defaults
-        symbol.metadata().add_behavior(ResolvedExecutableBehavior::with_defaults(
-            resolved_body,
-            resolved_patterns,
-            resolved_defaults,
-        ));
+        symbol
+            .metadata()
+            .add_behavior(ResolvedExecutableBehavior::with_defaults(
+                resolved_body,
+                resolved_patterns,
+                resolved_defaults,
+            ));
     }
 }

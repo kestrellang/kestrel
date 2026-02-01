@@ -610,8 +610,7 @@ pub(crate) fn resolve_body_and_attach_executable_with_defaults(
         use kestrel_semantic_tree::expr::ExprKind;
         if let ExprKind::Closure { captures, .. } = &tail.kind {
             if !captures.is_empty() {
-                let captured_names: Vec<String> =
-                    captures.iter().map(|c| c.name.clone()).collect();
+                let captured_names: Vec<String> = captures.iter().map(|c| c.name.clone()).collect();
                 let error = CapturingClosureEscapeError {
                     closure_span: tail.span.clone(),
                     return_span: tail.span.clone(), // Use closure span as return span for implicit returns
@@ -622,7 +621,8 @@ pub(crate) fn resolve_body_and_attach_executable_with_defaults(
         }
     }
 
-    let executable = ExecutableBehavior::with_defaults(code_block, parameter_patterns, default_values);
+    let executable =
+        ExecutableBehavior::with_defaults(code_block, parameter_patterns, default_values);
     function_symbol.metadata().add_behavior(executable);
 }
 

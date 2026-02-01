@@ -60,8 +60,14 @@ fn extract_access_mode(param_node: &SyntaxNode) -> ParameterAccessMode {
 /// For simple binding patterns like `x`, returns the identifier.
 /// For complex patterns like `(a, b)`, returns the first binding name found.
 /// For wildcards `_`, returns None.
-fn extract_primary_name_from_pattern(pattern_node: &SyntaxNode, file_id: usize) -> Option<(String, kestrel_span::Span)> {
-    fn extract_recursive(node: &SyntaxNode, file_id: usize) -> Option<(String, kestrel_span::Span)> {
+fn extract_primary_name_from_pattern(
+    pattern_node: &SyntaxNode,
+    file_id: usize,
+) -> Option<(String, kestrel_span::Span)> {
+    fn extract_recursive(
+        node: &SyntaxNode,
+        file_id: usize,
+    ) -> Option<(String, kestrel_span::Span)> {
         match node.kind() {
             SyntaxKind::Pattern => {
                 // Pattern wrapper - recurse into first child
@@ -71,7 +77,7 @@ fn extract_primary_name_from_pattern(pattern_node: &SyntaxNode, file_id: usize) 
                     }
                 }
                 None
-            }
+            },
             SyntaxKind::BindingPattern => {
                 // Extract the identifier from the binding pattern
                 for child in node.children_with_tokens() {
@@ -83,7 +89,7 @@ fn extract_primary_name_from_pattern(pattern_node: &SyntaxNode, file_id: usize) 
                     }
                 }
                 None
-            }
+            },
             SyntaxKind::TuplePattern => {
                 // Return first binding in the tuple
                 for child in node.children() {
@@ -92,7 +98,7 @@ fn extract_primary_name_from_pattern(pattern_node: &SyntaxNode, file_id: usize) 
                     }
                 }
                 None
-            }
+            },
             SyntaxKind::TuplePatternElement => {
                 // Recurse into element
                 for child in node.children() {
@@ -101,7 +107,7 @@ fn extract_primary_name_from_pattern(pattern_node: &SyntaxNode, file_id: usize) 
                     }
                 }
                 None
-            }
+            },
             SyntaxKind::StructPattern => {
                 // Return first field binding
                 for child in node.children() {
@@ -112,7 +118,7 @@ fn extract_primary_name_from_pattern(pattern_node: &SyntaxNode, file_id: usize) 
                     }
                 }
                 None
-            }
+            },
             SyntaxKind::StructPatternField => {
                 // Check for explicit binding or shorthand
                 for inner in node.children() {
@@ -136,7 +142,7 @@ fn extract_primary_name_from_pattern(pattern_node: &SyntaxNode, file_id: usize) 
                     }
                 }
                 None
-            }
+            },
             SyntaxKind::WildcardPattern => None, // Wildcards have no binding name
             _ => {
                 // For other nodes, recurse into children
@@ -146,7 +152,7 @@ fn extract_primary_name_from_pattern(pattern_node: &SyntaxNode, file_id: usize) 
                     }
                 }
                 None
-            }
+            },
         }
     }
 
@@ -186,8 +192,8 @@ fn resolve_single_parameter(
         };
 
         // Extract primary name from pattern for the bind_name field
-        let (name, span) = extract_primary_name_from_pattern(pattern, file_id)
-            .unwrap_or_else(|| {
+        let (name, span) =
+            extract_primary_name_from_pattern(pattern, file_id).unwrap_or_else(|| {
                 // Fallback for wildcards or unparseable patterns
                 ("_".to_string(), get_node_span(pattern, file_id))
             });

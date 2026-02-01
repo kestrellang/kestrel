@@ -1119,7 +1119,13 @@ fn collect_captures_recursive(
             use kestrel_semantic_tree::expr::InterpolationPart;
             for part in parts {
                 if let InterpolationPart::Interpolation { expr, .. } = part {
-                    collect_captures_recursive(expr, closure_entry_depth, local_scope, captures, seen_ids);
+                    collect_captures_recursive(
+                        expr,
+                        closure_entry_depth,
+                        local_scope,
+                        captures,
+                        seen_ids,
+                    );
                 }
             }
         },

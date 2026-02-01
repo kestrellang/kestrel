@@ -7,7 +7,7 @@ use kestrel_execution_graph_lowering::LoweringResult;
 use kestrel_lexer::lex;
 use kestrel_parser::{Parser, parse_source_file};
 use kestrel_reporting::{Diagnostic, DiagnosticContext, IntoDiagnostic, Label};
-use kestrel_semantic_analyzers::{Analyzer, AnalysisContext, run_all};
+use kestrel_semantic_analyzers::{AnalysisContext, Analyzer, run_all};
 use kestrel_semantic_model::SemanticModel;
 use kestrel_semantic_tree_binder::SemanticBinder;
 use kestrel_semantic_tree_builder::SemanticModelBuilder;
@@ -145,13 +145,12 @@ impl Compilation {
             ConstraintCycleAnalyzer, DeadCodeAnalyzer, DefiniteAssignmentAnalyzer,
             DuplicateCallableAnalyzer, DuplicateCaseAnalyzer, DuplicateLabelAnalyzer,
             DuplicateSymbolAnalyzer, ExhaustiveReturnAnalyzer, ExhaustivenessAnalyzer,
-            ExtensionConflictAnalyzer, FieldAnalyzer, ForLoopPatternAnalyzer,
-            FunctionBodyAnalyzer, GenericsAnalyzer, GuardLetDivergenceAnalyzer,
-            ImportAnalyzer, InitializerVerificationAnalyzer, IrrefutablePatternAnalyzer,
-            ProtocolMethodAnalyzer, RecursiveEnumAnalyzer, RefutablePatternAnalyzer,
-            StaticContextAnalyzer, StructCycleAnalyzer, SubscriptValidationAnalyzer,
-            TypeAliasCycleAnalyzer, TypeCheckAnalyzer, TypeInferenceAnalyzer,
-            VisibilityConsistencyAnalyzer,
+            ExtensionConflictAnalyzer, FieldAnalyzer, ForLoopPatternAnalyzer, FunctionBodyAnalyzer,
+            GenericsAnalyzer, GuardLetDivergenceAnalyzer, ImportAnalyzer,
+            InitializerVerificationAnalyzer, IrrefutablePatternAnalyzer, ProtocolMethodAnalyzer,
+            RecursiveEnumAnalyzer, RefutablePatternAnalyzer, StaticContextAnalyzer,
+            StructCycleAnalyzer, SubscriptValidationAnalyzer, TypeAliasCycleAnalyzer,
+            TypeCheckAnalyzer, TypeInferenceAnalyzer, VisibilityConsistencyAnalyzer,
         };
 
         // Phase 1: Pre-inference analyzers (cycle detection, conformance, validation)
@@ -170,8 +169,8 @@ impl Compilation {
             let mut a11 = GuardLetDivergenceAnalyzer::new();
             let mut a12 = ClosureAnalyzer::new();
             let mut analyzers: Vec<&mut dyn Analyzer> = vec![
-                &mut a0, &mut a1, &mut a2, &mut a3, &mut a4, &mut a5, &mut a6,
-                &mut a7, &mut a8, &mut a9, &mut a10, &mut a11, &mut a12,
+                &mut a0, &mut a1, &mut a2, &mut a3, &mut a4, &mut a5, &mut a6, &mut a7, &mut a8,
+                &mut a9, &mut a10, &mut a11, &mut a12,
             ];
             let mut ctx = AnalysisContext::new(&model, &mut diagnostics);
             run_all(&mut analyzers, &model, &mut ctx);
@@ -221,8 +220,8 @@ impl Compilation {
             let mut a8 = GenericsAnalyzer::new();
             let mut a9 = ImportAnalyzer::new();
             let mut analyzers: Vec<&mut dyn Analyzer> = vec![
-                &mut a0, &mut a1, &mut a2, &mut a3, &mut a4,
-                &mut a5, &mut a6, &mut a7, &mut a8, &mut a9,
+                &mut a0, &mut a1, &mut a2, &mut a3, &mut a4, &mut a5, &mut a6, &mut a7, &mut a8,
+                &mut a9,
             ];
             let mut ctx = AnalysisContext::new(&model, &mut diagnostics);
             run_all(&mut analyzers, &model, &mut ctx);
@@ -443,8 +442,7 @@ impl IntoDiagnostic for ParseErrorDiagnostic {
         }
 
         // Add suggestion as a note if we can generate one
-        if let Some(suggestion) =
-            kestrel_parser::suggest_fix(self.found.as_deref(), &self.expected)
+        if let Some(suggestion) = kestrel_parser::suggest_fix(self.found.as_deref(), &self.expected)
         {
             diagnostic = diagnostic.with_notes(vec![format!("help: {}", suggestion)]);
         }

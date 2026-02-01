@@ -225,9 +225,7 @@ impl fmt::Display for Ty {
                     write!(f, ") -> {}", return_type)
                 },
             },
-            TyKind::UnresolvedPath { segments } => {
-                f.write_str(&segments.join("."))
-            },
+            TyKind::UnresolvedPath { segments } => f.write_str(&segments.join(".")),
         }
     }
 }

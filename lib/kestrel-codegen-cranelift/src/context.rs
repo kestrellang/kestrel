@@ -101,11 +101,16 @@ impl<'a> CodegenContext<'a> {
     ///
     /// This creates global data entries for each static variable in the MIR.
     fn define_all_statics(&mut self) -> Result<(), CodegenError> {
-        use crate::types::translate_type_with_subst;
         use crate::monomorphize::Substitution;
+        use crate::types::translate_type_with_subst;
 
         // Collect statics to avoid borrow issues
-        let statics: Vec<_> = self.mir.statics.iter().map(|(id, def)| (id, def.name, def.ty)).collect();
+        let statics: Vec<_> = self
+            .mir
+            .statics
+            .iter()
+            .map(|(id, def)| (id, def.name, def.ty))
+            .collect();
 
         for (_static_id, name_id, ty) in statics {
             let name = self.mir.name(name_id);
@@ -124,11 +129,19 @@ impl<'a> CodegenContext<'a> {
             let data_id = self
                 .module
                 .declare_data(&mangled_name, Linkage::Export, true, false)
-                .map_err(|e| CodegenError::DataSection(format!("failed to declare static '{}': {}", mangled_name, e)))?;
+                .map_err(|e| {
+                    CodegenError::DataSection(format!(
+                        "failed to declare static '{}': {}",
+                        mangled_name, e
+                    ))
+                })?;
 
-            self.module
-                .define_data(data_id, &desc)
-                .map_err(|e| CodegenError::DataSection(format!("failed to define static '{}': {}", mangled_name, e)))?;
+            self.module.define_data(data_id, &desc).map_err(|e| {
+                CodegenError::DataSection(format!(
+                    "failed to define static '{}': {}",
+                    mangled_name, e
+                ))
+            })?;
         }
 
         Ok(())

@@ -147,8 +147,11 @@ impl IntoDiagnostic for RequiredParameterAfterDefaultError {
                 self.required_name, self.default_param_name
             ))
             .with_labels(vec![
-                Label::secondary(self.default_param_span.file_id, self.default_param_span.range())
-                    .with_message("parameter with default value"),
+                Label::secondary(
+                    self.default_param_span.file_id,
+                    self.default_param_span.range(),
+                )
+                .with_message("parameter with default value"),
                 Label::primary(self.required_span.file_id, self.required_span.range())
                     .with_message("required parameter cannot come after default parameter"),
             ])
@@ -172,8 +175,12 @@ impl IntoDiagnostic for DefaultValueTypeMismatchError {
                 self.actual_type, self.param_name, self.expected_type
             ))
             .with_labels(vec![
-                Label::primary(self.default_span.file_id, self.default_span.range())
-                    .with_message(format!("expected '{}', found '{}'", self.expected_type, self.actual_type)),
+                Label::primary(self.default_span.file_id, self.default_span.range()).with_message(
+                    format!(
+                        "expected '{}', found '{}'",
+                        self.expected_type, self.actual_type
+                    ),
+                ),
                 Label::secondary(self.param_type_span.file_id, self.param_type_span.range())
                     .with_message("parameter type declared here"),
             ])

@@ -631,10 +631,7 @@ impl<'a> TypeResolver<'a> {
         //
         // Calculate minimum required args (parameters without defaults).
         // Defaults must be at the end, so count parameters until we hit one with a default.
-        let min_args = type_params
-            .iter()
-            .take_while(|p| !p.has_default())
-            .count();
+        let min_args = type_params.iter().take_while(|p| !p.has_default()).count();
 
         if actual < min_args {
             self.diagnostics.throw(TooFewTypeArgumentsError {

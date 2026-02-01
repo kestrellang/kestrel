@@ -20,9 +20,9 @@ use kestrel_semantic_tree::behavior::visibility::VisibilityBehavior;
 use kestrel_semantic_tree::expr::{CallArgument, ExprKind, Expression, PrimitiveMethod};
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::associated_type::AssociatedTypeSymbol;
+use kestrel_semantic_tree::symbol::field::FieldSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::symbol::local::LocalId;
-use kestrel_semantic_tree::symbol::field::FieldSymbol;
 use kestrel_semantic_tree::symbol::protocol::FlattenedProtocolBehavior;
 use kestrel_semantic_tree::symbol::protocol::ProtocolSymbol;
 use kestrel_semantic_tree::symbol::type_parameter::TypeParameterSymbol;
@@ -482,13 +482,9 @@ fn resolve_constrained_member_access(
     }
 
     // First, check if member_name is an instance property in any protocol bound
-    if let Some(property_expr) = find_instance_property_in_bounds(
-        base.clone(),
-        &bounds,
-        member_name,
-        full_span.clone(),
-        ctx,
-    ) {
+    if let Some(property_expr) =
+        find_instance_property_in_bounds(base.clone(), &bounds, member_name, full_span.clone(), ctx)
+    {
         return property_expr;
     }
 

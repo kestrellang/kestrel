@@ -136,7 +136,9 @@ public static var globalStaticComputedVar: std.num.Int64 { 0 }
 "#,
         )
         .with_stdlib()
-        .expect(HasError("computed properties in global context are already static"));
+        .expect(HasError(
+            "computed properties in global context are already static",
+        ));
     }
 }
 

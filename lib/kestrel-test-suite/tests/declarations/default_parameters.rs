@@ -369,4 +369,3 @@ func first[T](items: T, fallback: T = items) -> T {
         .expect(HasError("cannot reference"));
     }
 }
-

@@ -5,9 +5,7 @@ use semantic_tree::behavior::Behavior;
 use semantic_tree::symbol::Symbol;
 
 use crate::{
-    behavior::KestrelBehaviorKind,
-    language::KestrelLanguage,
-    symbol::protocol::ProtocolSymbol,
+    behavior::KestrelBehaviorKind, language::KestrelLanguage, symbol::protocol::ProtocolSymbol,
     ty::Ty,
 };
 
@@ -306,9 +304,9 @@ impl SignatureType {
                 // Try to get the protocol name from the container or the symbol's parent
                 let protocol_name = match container {
                     Some(container_ty) => match container_ty.kind() {
-                        TyKind::Protocol { symbol: proto_sym, .. } => {
-                            Some(proto_sym.metadata().name().value.clone())
-                        },
+                        TyKind::Protocol {
+                            symbol: proto_sym, ..
+                        } => Some(proto_sym.metadata().name().value.clone()),
                         TyKind::SelfType => {
                             // For Self type, look up the associated type's defining protocol
                             symbol

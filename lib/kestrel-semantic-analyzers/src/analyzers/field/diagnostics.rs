@@ -31,12 +31,10 @@ impl IntoDiagnostic for GlobalPropertyStaticModifierError {
             "properties in global context are already static"
         };
 
-        Diagnostic::error()
-            .with_message(message)
-            .with_labels(vec![
-                Label::primary(self.span.file_id, self.span.range())
-                    .with_message("'static' modifier used in global context"),
-            ])
+        Diagnostic::error().with_message(message).with_labels(vec![
+            Label::primary(self.span.file_id, self.span.range())
+                .with_message("'static' modifier used in global context"),
+        ])
     }
 }
 
@@ -67,8 +65,10 @@ impl IntoDiagnostic for GenericTypeStaticStoredPropertyError {
         Diagnostic::error()
             .with_message("static stored properties not supported in generic types")
             .with_labels(vec![
-                Label::primary(self.span.file_id, self.span.range())
-                    .with_message(format!("static stored property in generic type '{}'", self.type_name)),
+                Label::primary(self.span.file_id, self.span.range()).with_message(format!(
+                    "static stored property in generic type '{}'",
+                    self.type_name
+                )),
             ])
     }
 }

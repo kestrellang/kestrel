@@ -673,15 +673,11 @@ pub enum LangIntrinsic {
 
     /// Fused multiply-add (ternary, arity 3).
     /// `lang.f64_fma(a, b, c)` computes `a * b + c` with a single rounding.
-    FloatFma {
-        primitive: LangPrimitive,
-    },
+    FloatFma { primitive: LangPrimitive },
 
     /// Copy sign (binary, arity 2).
     /// `lang.f64_copysign(magnitude, sign)` returns magnitude with sign from sign.
-    FloatCopysign {
-        primitive: LangPrimitive,
-    },
+    FloatCopysign { primitive: LangPrimitive },
 
     // === Pointer intrinsics ===
     /// `lang.ptr_null[T]()` - Create null pointer of type T
@@ -961,10 +957,7 @@ impl LangIntrinsic {
 #[derive(Debug, Clone)]
 pub enum InterpolationPart {
     /// A literal text segment (already unescaped)
-    Literal {
-        text: String,
-        span: Span,
-    },
+    Literal { text: String, span: Span },
     /// An interpolation expression `\(expr)` or `\(expr:format)`
     Interpolation {
         /// The expression to be formatted
@@ -1646,13 +1639,15 @@ impl Expression {
                         .iter()
                         .map(|p| match p {
                             InterpolationPart::Literal { text, .. } => format!("\"{}\"", text),
-                            InterpolationPart::Interpolation { expr, format_spec, .. } => {
+                            InterpolationPart::Interpolation {
+                                expr, format_spec, ..
+                            } => {
                                 if let Some(spec) = format_spec {
                                     format!("\\({}:{})", format_expr(expr), spec)
                                 } else {
                                     format!("\\({})", format_expr(expr))
                                 }
-                            }
+                            },
                         })
                         .collect();
                     format!("interpolated_string[{}]", parts_str.join(", "))
@@ -1882,8 +1877,10 @@ impl Expression {
                 } => {
                     let params_str = match params {
                         Some(ps) => {
-                            let p: Vec<_> =
-                                ps.iter().map(|p| format!("{:?}: {}", p.pattern, p.ty)).collect();
+                            let p: Vec<_> = ps
+                                .iter()
+                                .map(|p| format!("{:?}: {}", p.pattern, p.ty))
+                                .collect();
                             format!("({}) in ", p.join(", "))
                         },
                         None => String::new(),
@@ -3172,7 +3169,11 @@ impl Expression {
             LangIntrinsic::FloatCopysign { primitive } => {
                 // (T, T) -> T (magnitude, sign_source)
                 let prim_ty = primitive.to_ty(span.clone());
-                Ty::function(vec![prim_ty.clone(), prim_ty.clone()], prim_ty, span.clone())
+                Ty::function(
+                    vec![prim_ty.clone(), prim_ty.clone()],
+                    prim_ty,
+                    span.clone(),
+                )
             },
             // Pointer intrinsics
             LangIntrinsic::PtrNull { pointee_ty } => {

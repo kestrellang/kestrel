@@ -80,10 +80,7 @@ impl fmt::Display for MonomorphizeError {
                     .as_ref()
                     .map(|s| s.as_str())
                     .unwrap_or("unknown");
-                let type_display = type_name
-                    .as_ref()
-                    .map(|s| s.as_str())
-                    .unwrap_or("unknown");
+                let type_display = type_name.as_ref().map(|s| s.as_str()).unwrap_or("unknown");
                 write!(
                     f,
                     "method '{}' not found in witness: protocol {} ({:?}) for type {} ({:?})",

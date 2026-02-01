@@ -1068,10 +1068,8 @@ fn resolve_promotable(
     // Types can't unify (different kinds). Check if target conforms to FromValue[source] for promotion.
     if let Some((method_id, subs)) = ctx.oracle().check_from_value_conformance(&to, &from) {
         // Record promotion for apply_solution
-        ctx.promotions_mut().insert(
-            expr_id,
-            PromotionInfo::new(to.clone(), method_id, subs),
-        );
+        ctx.promotions_mut()
+            .insert(expr_id, PromotionInfo::new(to.clone(), method_id, subs));
         return Ok(SolveResult::Solved);
     }
 
@@ -1121,14 +1119,12 @@ fn contains_unresolved_infer(ty: &Ty) -> bool {
         TyKind::Function {
             params,
             return_type,
-        } => {
-            params.iter().any(contains_unresolved_infer) || contains_unresolved_infer(return_type)
-        },
+        } => params.iter().any(contains_unresolved_infer) || contains_unresolved_infer(return_type),
         TyKind::Struct { substitutions, .. }
         | TyKind::Enum { substitutions, .. }
-        | TyKind::Protocol { substitutions, .. } => {
-            substitutions.iter().any(|(_, t)| contains_unresolved_infer(t))
-        },
+        | TyKind::Protocol { substitutions, .. } => substitutions
+            .iter()
+            .any(|(_, t)| contains_unresolved_infer(t)),
         TyKind::UnresolvedFunction {
             param_info,
             return_type,
@@ -1144,9 +1140,9 @@ fn contains_unresolved_infer(ty: &Ty) -> bool {
                 ParamInfo::Unconstrained => false,
             }
         },
-        TyKind::AssociatedType { container, .. } => {
-            container.as_ref().map_or(false, |c| contains_unresolved_infer(c))
-        },
+        TyKind::AssociatedType { container, .. } => container
+            .as_ref()
+            .map_or(false, |c| contains_unresolved_infer(c)),
         _ => false,
     }
 }
@@ -1917,9 +1913,7 @@ fn check_fully_resolved(ctx: &mut InferenceContext<'_>) {
                     check_resolved_id(*binding_ty, ctx, &mut unresolved);
                 }
             },
-            Constraint::Promotable {
-                from_ty, to_ty, ..
-            } => {
+            Constraint::Promotable { from_ty, to_ty, .. } => {
                 check_resolved_id(*from_ty, ctx, &mut unresolved);
                 check_resolved_id(*to_ty, ctx, &mut unresolved);
             },

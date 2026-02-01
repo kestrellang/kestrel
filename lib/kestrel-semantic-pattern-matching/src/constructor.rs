@@ -215,9 +215,7 @@ impl Constructor {
                         _ => return Constructor::NonExhaustive, // Mismatched types
                     };
                     let end_val = match end {
-                        Some(RangeBound::Integer(e)) => {
-                            Some(if *inclusive { *e } else { e - 1 })
-                        },
+                        Some(RangeBound::Integer(e)) => Some(if *inclusive { *e } else { e - 1 }),
                         None => None,
                         _ => return Constructor::NonExhaustive, // Mismatched types
                     };
@@ -232,13 +230,11 @@ impl Constructor {
                         _ => return Constructor::NonExhaustive, // Mismatched types
                     };
                     let end_val = match end {
-                        Some(RangeBound::Char(e)) => {
-                            Some(if *inclusive {
-                                *e
-                            } else {
-                                char::from_u32(*e as u32 - 1).unwrap_or(*e)
-                            })
-                        },
+                        Some(RangeBound::Char(e)) => Some(if *inclusive {
+                            *e
+                        } else {
+                            char::from_u32(*e as u32 - 1).unwrap_or(*e)
+                        }),
                         None => None,
                         _ => return Constructor::NonExhaustive, // Mismatched types
                     };

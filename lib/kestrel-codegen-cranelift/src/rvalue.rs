@@ -509,12 +509,9 @@ pub fn compile_rvalue(
         Rvalue::FloatFma { bits, a, b, c } => {
             use kestrel_execution_graph::function::FloatBits;
 
-            let a_val =
-                compile_value(ctx, func_def, subst, a, builder, local_map, stack_locals)?;
-            let b_val =
-                compile_value(ctx, func_def, subst, b, builder, local_map, stack_locals)?;
-            let c_val =
-                compile_value(ctx, func_def, subst, c, builder, local_map, stack_locals)?;
+            let a_val = compile_value(ctx, func_def, subst, a, builder, local_map, stack_locals)?;
+            let b_val = compile_value(ctx, func_def, subst, b, builder, local_map, stack_locals)?;
+            let c_val = compile_value(ctx, func_def, subst, c, builder, local_map, stack_locals)?;
 
             match bits {
                 FloatBits::F16 => Err(CodegenError::Unsupported("f16 not supported".into())),
@@ -529,10 +526,24 @@ pub fn compile_rvalue(
         } => {
             use kestrel_execution_graph::function::FloatBits;
 
-            let mag_val =
-                compile_value(ctx, func_def, subst, magnitude, builder, local_map, stack_locals)?;
-            let sign_val =
-                compile_value(ctx, func_def, subst, sign_source, builder, local_map, stack_locals)?;
+            let mag_val = compile_value(
+                ctx,
+                func_def,
+                subst,
+                magnitude,
+                builder,
+                local_map,
+                stack_locals,
+            )?;
+            let sign_val = compile_value(
+                ctx,
+                func_def,
+                subst,
+                sign_source,
+                builder,
+                local_map,
+                stack_locals,
+            )?;
 
             match bits {
                 FloatBits::F16 => Err(CodegenError::Unsupported("f16 not supported".into())),
@@ -1588,13 +1599,18 @@ fn compile_ref(
             // Look up the global symbol
             let global_ref = ctx
                 .module
-                .declare_data(&mangled_name, cranelift_module::Linkage::Import, false, false)
-                .map_err(|e| CodegenError::Unsupported(format!("failed to declare global: {}", e)))?;
+                .declare_data(
+                    &mangled_name,
+                    cranelift_module::Linkage::Import,
+                    false,
+                    false,
+                )
+                .map_err(|e| {
+                    CodegenError::Unsupported(format!("failed to declare global: {}", e))
+                })?;
 
             // Get the global address
-            let global_addr = ctx
-                .module
-                .declare_data_in_func(global_ref, builder.func);
+            let global_addr = ctx.module.declare_data_in_func(global_ref, builder.func);
 
             // Return the address of the global
             Ok(builder.ins().global_value(ptr_type, global_addr))
@@ -2827,7 +2843,9 @@ pub fn compile_call(
             method_type_args,
         } => {
             // First apply substitution to for_type
-            let substituted_for_type = subst.apply_ty_readonly(ctx.mir, *for_type).unwrap_or(*for_type);
+            let substituted_for_type = subst
+                .apply_ty_readonly(ctx.mir, *for_type)
+                .unwrap_or(*for_type);
 
             // If substituted type uses SelfType, we need to resolve it further
             let concrete_for_type = if type_uses_self(ctx.mir, substituted_for_type) {

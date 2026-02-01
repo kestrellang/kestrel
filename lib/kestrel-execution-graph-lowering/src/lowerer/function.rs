@@ -238,7 +238,9 @@ pub fn lower_function(ctx: &mut LoweringContext, func_symbol: &Arc<FunctionSymbo
             continue;
         }
         let mir_param_local = ctx.mir.function(func_id).locals[mir_param_index];
-        let param_value = kestrel_execution_graph::Value::Place(kestrel_execution_graph::Place::local(mir_param_local));
+        let param_value = kestrel_execution_graph::Value::Place(
+            kestrel_execution_graph::Place::local(mir_param_local),
+        );
 
         // Lower the pattern to generate decomposition code
         crate::pattern::lower_pattern(ctx, pattern, param_value);
@@ -1487,9 +1489,7 @@ fn collect_closure_local_ids_from_pattern(pattern: &Pattern, ids: &mut HashSet<L
             ids.insert(*local_id);
         },
         PatternKind::Wildcard => {},
-        PatternKind::Tuple {
-            prefix, suffix, ..
-        } => {
+        PatternKind::Tuple { prefix, suffix, .. } => {
             for elem in prefix.iter().chain(suffix.iter()) {
                 collect_closure_local_ids_from_pattern(elem, ids);
             }
@@ -1537,4 +1537,3 @@ fn collect_closure_local_ids_from_pattern(pattern: &Pattern, ids: &mut HashSet<L
         PatternKind::Rest | PatternKind::Error => {},
     }
 }
-

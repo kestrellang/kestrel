@@ -902,7 +902,8 @@ impl TypeOracle for ContextualOracle<'_> {
         target_ty: &Ty,
         source_ty: &Ty,
     ) -> Option<(SymbolId, Substitutions)> {
-        self.model.check_from_value_conformance(target_ty, source_ty)
+        self.model
+            .check_from_value_conformance(target_ty, source_ty)
     }
 }
 
@@ -1462,7 +1463,11 @@ fn filter_applicable_extensions_for_conformance<'a>(
                 // Still need to check where clause even without type arguments
                 if let Some(model) = model {
                     if let Some(actual_subs) = actual_subs {
-                        return check_where_clause_satisfied(model, target_behavior.where_clause(), actual_subs);
+                        return check_where_clause_satisfied(
+                            model,
+                            target_behavior.where_clause(),
+                            actual_subs,
+                        );
                     }
                 }
                 return true;
@@ -1481,7 +1486,8 @@ fn filter_applicable_extensions_for_conformance<'a>(
 
             // Check where clause constraints (for conditional conformances)
             if let Some(model) = model {
-                if !check_where_clause_satisfied(model, target_behavior.where_clause(), actual_subs) {
+                if !check_where_clause_satisfied(model, target_behavior.where_clause(), actual_subs)
+                {
                     return false;
                 }
             }
@@ -1524,10 +1530,10 @@ fn check_where_clause_satisfied(
                         }
                     }
                 }
-            }
+            },
             // Other constraint types (NegativeBound, InheritedAssociatedTypeBound,
             // TypeEquality, SelfBound) are not relevant for basic conformance filtering
-            _ => {}
+            _ => {},
         }
     }
 
@@ -1965,7 +1971,9 @@ fn check_from_value_conformance_impl(
     let from_value_protocol_id = model.builtin_protocol(LanguageFeature::FromValueProtocol)?;
 
     // Get the FromValueMethod ID
-    let from_value_method_id = model.builtin_registry().method(LanguageFeature::FromValueMethod)?;
+    let from_value_method_id = model
+        .builtin_registry()
+        .method(LanguageFeature::FromValueMethod)?;
 
     // Expand type aliases before checking
     let target_ty = target_ty.expand_aliases();

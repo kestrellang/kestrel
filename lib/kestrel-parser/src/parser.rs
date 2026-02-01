@@ -173,7 +173,11 @@ pub fn suggest_fix(found: Option<&str>, expected: &[String]) -> Option<String> {
     }
 
     // Wrong variable keyword
-    if found == "const" && expected.iter().any(|e| e.contains("let") || e.contains("var")) {
+    if found == "const"
+        && expected
+            .iter()
+            .any(|e| e.contains("let") || e.contains("var"))
+    {
         return Some("use 'let' for immutable bindings or 'var' for mutable bindings".to_string());
     }
 
@@ -212,7 +216,7 @@ fn build_error_message(expected: &[String], found: Option<&str>) -> String {
         (1, None) => format!("expected {} before end of file", expected[0]),
         (n, Some(found)) if n <= 3 => {
             format!("expected one of {}, found {}", expected.join(", "), found)
-        }
+        },
         (n, Some(found)) => {
             format!(
                 "expected {}, or {} others, found {}",
@@ -220,17 +224,17 @@ fn build_error_message(expected: &[String], found: Option<&str>) -> String {
                 n - 2,
                 found
             )
-        }
+        },
         (n, None) if n <= 3 => {
             format!("expected one of {} before end of file", expected.join(", "))
-        }
+        },
         (n, None) => {
             format!(
                 "expected {}, or {} others before end of file",
                 expected[..2].join(", "),
                 n - 2
             )
-        }
+        },
     }
 }
 

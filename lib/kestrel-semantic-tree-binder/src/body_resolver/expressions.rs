@@ -2031,12 +2031,9 @@ fn expression_references_local(
             .iter()
             .any(|e| expression_references_local(e, local_id)),
 
-        ExprKind::Dictionary(pairs) => pairs
-            .iter()
-            .any(|(k, v)| {
-                expression_references_local(k, local_id)
-                    || expression_references_local(v, local_id)
-            }),
+        ExprKind::Dictionary(pairs) => pairs.iter().any(|(k, v)| {
+            expression_references_local(k, local_id) || expression_references_local(v, local_id)
+        }),
 
         ExprKind::Grouping(inner) => expression_references_local(inner, local_id),
 
@@ -3347,7 +3344,10 @@ fn parse_interpolated_string_parts(
                     if !literal.is_empty() {
                         parts.push(InterpolationPart::Literal {
                             text: literal.clone(),
-                            span: Span::new(file_id, (base_offset + literal_start)..(base_offset + i)),
+                            span: Span::new(
+                                file_id,
+                                (base_offset + literal_start)..(base_offset + i),
+                            ),
                         });
                         literal.clear();
                     }
@@ -3361,7 +3361,8 @@ fn parse_interpolated_string_parts(
                         extract_interpolation(&mut chars, input, i + 2);
 
                     // Parse and resolve the expression
-                    let resolved_expr = parse_and_resolve_expression(&expr_text, file_id, base_offset + i + 2, ctx);
+                    let resolved_expr =
+                        parse_and_resolve_expression(&expr_text, file_id, base_offset + i + 2, ctx);
 
                     parts.push(InterpolationPart::Interpolation {
                         expr: Box::new(resolved_expr),
@@ -3390,7 +3391,10 @@ fn parse_interpolated_string_parts(
     if !literal.is_empty() {
         parts.push(InterpolationPart::Literal {
             text: literal,
-            span: Span::new(file_id, (base_offset + literal_start)..(base_offset + input.len())),
+            span: Span::new(
+                file_id,
+                (base_offset + literal_start)..(base_offset + input.len()),
+            ),
         });
     }
 
@@ -3504,7 +3508,12 @@ fn parse_and_resolve_expression(
 }
 
 /// Unescape a single escape character (simplified version for interpolation parsing).
-fn unescape_char(c: char, _file_id: usize, _offset: usize, _ctx: &mut BodyResolutionContext) -> char {
+fn unescape_char(
+    c: char,
+    _file_id: usize,
+    _offset: usize,
+    _ctx: &mut BodyResolutionContext,
+) -> char {
     match c {
         'n' => '\n',
         'r' => '\r',

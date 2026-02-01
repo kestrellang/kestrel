@@ -107,7 +107,8 @@ impl Query for AssociatedTypeBindingsForStruct {
                     all_protocol_ids.push(proto_id);
 
                     // Add inherited protocols
-                    if let Some(inherited) = symbol.metadata().get_behavior::<ConformancesBehavior>()
+                    if let Some(inherited) =
+                        symbol.metadata().get_behavior::<ConformancesBehavior>()
                     {
                         for inherited_conf in inherited.conformances() {
                             to_check.push(inherited_conf.clone());
@@ -119,7 +120,9 @@ impl Query for AssociatedTypeBindingsForStruct {
 
         // For each protocol, get its extensions and collect type alias bindings
         for proto_id in all_protocol_ids {
-            let proto_extensions = model.query(ExtensionsFor { target_id: proto_id });
+            let proto_extensions = model.query(ExtensionsFor {
+                target_id: proto_id,
+            });
             for ext in proto_extensions {
                 let ext_dyn: std::sync::Arc<dyn Symbol<KestrelLanguage>> = ext.clone();
                 // Collect type aliases from this protocol extension

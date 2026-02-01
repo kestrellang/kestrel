@@ -123,7 +123,7 @@ pub use type_alias::parse_type_alias_declaration;
 
 // Re-export Parser API
 pub use parser::{
-    format_token_for_display, suggest_fix, ParseError, ParseErrorKind, ParseResult, Parser,
+    ParseError, ParseErrorKind, ParseResult, Parser, format_token_for_display, suggest_fix,
 };
 
 /// Extract file_id from the first token, defaulting to 0 if no tokens

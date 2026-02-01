@@ -49,13 +49,18 @@ pub fn compile_place_read(
             // Look up the global symbol
             let global_ref = ctx
                 .module
-                .declare_data(&mangled_name, cranelift_module::Linkage::Import, false, false)
-                .map_err(|e| CodegenError::Unsupported(format!("failed to declare global: {}", e)))?;
+                .declare_data(
+                    &mangled_name,
+                    cranelift_module::Linkage::Import,
+                    false,
+                    false,
+                )
+                .map_err(|e| {
+                    CodegenError::Unsupported(format!("failed to declare global: {}", e))
+                })?;
 
             // Get the global address
-            let global_addr = ctx
-                .module
-                .declare_data_in_func(global_ref, builder.func);
+            let global_addr = ctx.module.declare_data_in_func(global_ref, builder.func);
 
             // Find the static definition to get its type
             let static_def = ctx
@@ -65,7 +70,10 @@ pub fn compile_place_read(
                 .find(|(_, def)| def.name == *name_id)
                 .map(|(_, def)| def)
                 .ok_or_else(|| {
-                    CodegenError::Unsupported(format!("static variable not found: {}", mangled_name))
+                    CodegenError::Unsupported(format!(
+                        "static variable not found: {}",
+                        mangled_name
+                    ))
                 })?;
 
             let static_ty = static_def.ty;
@@ -718,13 +726,18 @@ pub fn compile_place_write(
             // Look up the global symbol
             let global_ref = ctx
                 .module
-                .declare_data(&mangled_name, cranelift_module::Linkage::Import, true, false)
-                .map_err(|e| CodegenError::Unsupported(format!("failed to declare global: {}", e)))?;
+                .declare_data(
+                    &mangled_name,
+                    cranelift_module::Linkage::Import,
+                    true,
+                    false,
+                )
+                .map_err(|e| {
+                    CodegenError::Unsupported(format!("failed to declare global: {}", e))
+                })?;
 
             // Get the global address
-            let global_addr = ctx
-                .module
-                .declare_data_in_func(global_ref, builder.func);
+            let global_addr = ctx.module.declare_data_in_func(global_ref, builder.func);
 
             // Find the static definition to get its type
             let static_def = ctx
@@ -899,13 +912,18 @@ pub fn compile_place_addr(
             // Look up the global symbol
             let global_ref = ctx
                 .module
-                .declare_data(&mangled_name, cranelift_module::Linkage::Import, false, false)
-                .map_err(|e| CodegenError::Unsupported(format!("failed to declare global: {}", e)))?;
+                .declare_data(
+                    &mangled_name,
+                    cranelift_module::Linkage::Import,
+                    false,
+                    false,
+                )
+                .map_err(|e| {
+                    CodegenError::Unsupported(format!("failed to declare global: {}", e))
+                })?;
 
             // Get the global address
-            let global_addr = ctx
-                .module
-                .declare_data_in_func(global_ref, builder.func);
+            let global_addr = ctx.module.declare_data_in_func(global_ref, builder.func);
 
             // Return the address of the global
             Ok(builder.ins().global_value(ptr_type, global_addr))

@@ -230,9 +230,11 @@ pub fn parse_format_spec(spec: &str) -> Result<FormatSpec, FormatSpecError> {
     }
     if pos > width_start {
         let width_str: String = chars[width_start..pos].iter().collect();
-        result.width = Some(width_str.parse().map_err(|_| {
-            FormatSpecError::InvalidWidth(width_str)
-        })?);
+        result.width = Some(
+            width_str
+                .parse()
+                .map_err(|_| FormatSpecError::InvalidWidth(width_str))?,
+        );
     }
 
     // Parse [.precision]
@@ -246,9 +248,11 @@ pub fn parse_format_spec(spec: &str) -> Result<FormatSpec, FormatSpecError> {
             return Err(FormatSpecError::EmptyPrecision);
         }
         let precision_str: String = chars[precision_start..pos].iter().collect();
-        result.precision = Some(precision_str.parse().map_err(|_| {
-            FormatSpecError::InvalidPrecision(precision_str)
-        })?);
+        result.precision = Some(
+            precision_str
+                .parse()
+                .map_err(|_| FormatSpecError::InvalidPrecision(precision_str))?,
+        );
     }
 
     // Parse [type]

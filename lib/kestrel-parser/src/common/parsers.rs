@@ -315,7 +315,10 @@ pub(crate) fn parameter_pattern_parser<'tokens>()
             .then(trivia(select! {
                 Token::Identifier = e => to_kestrel_span(e.span()),
             }))
-            .map(|(var_span, name_span)| PatternVariant::Binding { var_span, name_span });
+            .map(|(var_span, name_span)| PatternVariant::Binding {
+                var_span,
+                name_span,
+            });
 
         // Tuple pattern: (p1, p2, ...)
         let tuple = skip_trivia()
@@ -327,7 +330,9 @@ pub(crate) fn parameter_pattern_parser<'tokens>()
                     .allow_trailing()
                     .collect::<Vec<_>>(),
             )
-            .then(trivia(just(Token::RParen).map_with(|_, e| to_kestrel_span(e.span()))))
+            .then(trivia(
+                just(Token::RParen).map_with(|_, e| to_kestrel_span(e.span())),
+            ))
             .map(|((lparen, elements), rparen)| PatternVariant::Tuple {
                 lparen,
                 elements,
@@ -344,14 +349,19 @@ pub(crate) fn parameter_pattern_parser<'tokens>()
                 .map(|(colon, pattern)| Some((colon, pattern)))
                 .or(empty().to(None)),
         )
-        .map(|(field_name, binding)| StructPatternFieldData { field_name, binding });
+        .map(|(field_name, binding)| StructPatternFieldData {
+            field_name,
+            binding,
+        });
 
         let struct_rest = trivia(just(Token::DotDot).map_with(|_, e| to_kestrel_span(e.span())));
 
         let struct_pattern = trivia(select! {
             Token::Identifier = e => to_kestrel_span(e.span()),
         })
-        .then(trivia(just(Token::LBrace).map_with(|_, e| to_kestrel_span(e.span()))))
+        .then(trivia(
+            just(Token::LBrace).map_with(|_, e| to_kestrel_span(e.span())),
+        ))
         .then(
             struct_field
                 .separated_by(trivia(just(Token::Comma)))
@@ -363,7 +373,9 @@ pub(crate) fn parameter_pattern_parser<'tokens>()
                 .or_not()
                 .ignore_then(struct_rest.or_not()),
         )
-        .then(trivia(just(Token::RBrace).map_with(|_, e| to_kestrel_span(e.span()))))
+        .then(trivia(
+            just(Token::RBrace).map_with(|_, e| to_kestrel_span(e.span())),
+        ))
         .map(
             |((((struct_name, lbrace), fields), rest), rbrace)| PatternVariant::Struct {
                 struct_name,
@@ -385,9 +397,12 @@ pub(crate) fn parameter_pattern_parser<'tokens>()
 /// # Returns
 /// - `Some((equals_span, expression))` if default value is present
 /// - `None` if no default value
-fn default_value_parser<'tokens>()
--> impl Parser<'tokens, ParserInput<'tokens>, Option<(Span, crate::expr::ExprVariant)>, ParserExtra<'tokens>>
-+ Clone {
+fn default_value_parser<'tokens>() -> impl Parser<
+    'tokens,
+    ParserInput<'tokens>,
+    Option<(Span, crate::expr::ExprVariant)>,
+    ParserExtra<'tokens>,
+> + Clone {
     // Parse optional default value: = expression
     // The trivia combinator handles whitespace before =
     // .or_not() makes the entire thing optional
@@ -446,14 +461,16 @@ pub(crate) fn parameter_parser<'tokens>()
         ))
         .then(ty_parser())
         .then(default_value_parser())
-        .map(|((((access_mode, pattern), colon), ty), default)| ParameterData {
-            access_mode,
-            label: None,
-            pattern,
-            colon,
-            ty,
-            default,
-        });
+        .map(
+            |((((access_mode, pattern), colon), ty), default)| ParameterData {
+                access_mode,
+                label: None,
+                pattern,
+                colon,
+                ty,
+                default,
+            },
+        );
 
     // Try labeled first (more specific), then unlabeled
     labeled.or(unlabeled).boxed()

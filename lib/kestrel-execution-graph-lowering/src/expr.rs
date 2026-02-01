@@ -513,7 +513,8 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
 
                         // Register the static in MIR if not already registered
                         // Check if this static already exists
-                        let static_exists = ctx.mir.statics.iter().any(|(_, def)| def.name == name_id);
+                        let static_exists =
+                            ctx.mir.statics.iter().any(|(_, def)| def.name == name_id);
                         if !static_exists {
                             // Get the field type and lower it
                             let field_ty = &expr.ty;
@@ -1353,10 +1354,7 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
 
                     let result_ty = lower_type(ctx, &expr.ty);
                     let result = ctx.create_temp("float_fma", result_ty);
-                    ctx.emit_assign(
-                        Place::local(result),
-                        Rvalue::FloatFma { bits, a, b, c },
-                    );
+                    ctx.emit_assign(Place::local(result), Rvalue::FloatFma { bits, a, b, c });
                     Value::Place(Place::local(result))
                 },
                 LangIntrinsic::FloatCopysign { primitive } => {
@@ -1602,9 +1600,7 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
             )
         },
 
-        ExprKind::InterpolatedString { parts } => {
-            lower_interpolated_string(ctx, parts, expr)
-        },
+        ExprKind::InterpolatedString { parts } => lower_interpolated_string(ctx, parts, expr),
 
         ExprKind::Error => {
             // Error expression - return error value (error already reported)
@@ -1719,7 +1715,9 @@ fn lower_interpolated_string(
                     parts.push("appendLiteral$literal".to_string());
                     parts
                 };
-                let append_name = ctx.mir.intern_name(QualifiedNameData::new(append_name_parts));
+                let append_name = ctx
+                    .mir
+                    .intern_name(QualifiedNameData::new(append_name_parts));
 
                 // Create a string immediate for the literal
                 let literal_ptr = Value::Immediate(Immediate::string_ptr(text.clone()));
@@ -1740,14 +1738,12 @@ fn lower_interpolated_string(
                 );
 
                 // Call String.init(stringLiteral:length:)
-                let string_init_name =
-                    ctx.mir
-                        .intern_name(QualifiedNameData::new(vec![
-                            "std".to_string(),
-                            "text".to_string(),
-                            "String".to_string(),
-                            "init$stringLiteral$length".to_string(),
-                        ]));
+                let string_init_name = ctx.mir.intern_name(QualifiedNameData::new(vec![
+                    "std".to_string(),
+                    "text".to_string(),
+                    "String".to_string(),
+                    "init$stringLiteral$length".to_string(),
+                ]));
                 let string_init_ret_local = ctx.create_temp("str_init_ret", unit_ty);
                 let string_init_ret_place = Place::local(string_init_ret_local);
                 ctx.emit_call_with_modes(
@@ -1795,7 +1791,9 @@ fn lower_interpolated_string(
                     parts.push("appendInterpolation$value$options".to_string());
                     parts
                 };
-                let append_name = ctx.mir.intern_name(QualifiedNameData::new(append_name_parts));
+                let append_name = ctx
+                    .mir
+                    .intern_name(QualifiedNameData::new(append_name_parts));
 
                 // Get FormatOptions type - we just use a placeholder since the method
                 // will find the correct type from the parameter declaration
@@ -1894,7 +1892,9 @@ fn lower_interpolated_string(
         parts.push("build".to_string());
         parts
     };
-    let build_name = ctx.mir.intern_name(QualifiedNameData::new(build_name_parts));
+    let build_name = ctx
+        .mir
+        .intern_name(QualifiedNameData::new(build_name_parts));
 
     // Allocate space for the result string
     let result_local = ctx.create_temp("result", result_ty);
@@ -2243,10 +2243,7 @@ fn lower_dictionary_literal(
 
     // Write each pair to the buffer
     let sizeof_local = ctx.create_temp("pair_size", i64_ty);
-    ctx.emit_assign(
-        Place::local(sizeof_local),
-        Rvalue::SizeOf { ty: pair_ty },
-    );
+    ctx.emit_assign(Place::local(sizeof_local), Rvalue::SizeOf { ty: pair_ty });
 
     let unit_ty = ctx.mir.ty_unit();
 
@@ -2298,9 +2295,14 @@ fn lower_dictionary_literal(
 
     // Call init(_dictionaryLiteralPointer:_dictionaryLiteralCount:) on the target type
     match target_ty.kind() {
-        TyKind::Struct { symbol, .. } => {
-            lower_dictionary_literal_init_call(ctx, expr, &target_ty, symbol, ptr_place, count_value)
-        },
+        TyKind::Struct { symbol, .. } => lower_dictionary_literal_init_call(
+            ctx,
+            expr,
+            &target_ty,
+            symbol,
+            ptr_place,
+            count_value,
+        ),
         _ => {
             ctx.emit_error(LoweringError::internal(
                 "unexpected dictionary literal target type",
