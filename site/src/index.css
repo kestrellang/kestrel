@@ -24,16 +24,16 @@
   --text-secondary: #4a6274;
 }
 
-/* Dark mode */
+/* Dark mode - warm undertones to complement Kestrel brand */
 .dark {
-  --color-cream: #1a1a1a;
-  --color-slate: #e8e8e8;
-  --color-slate-light: #b0b0b0;
-  --bg-primary: #121212;
-  --bg-secondary: #1a1a1a;
-  --bg-tertiary: #242424;
-  --text-primary: #e8e8e8;
-  --text-secondary: #b0b0b0;
+  --color-cream: #1c1916;
+  --color-slate: #f0ebe6;
+  --color-slate-light: #b8b0a8;
+  --bg-primary: #141210;
+  --bg-secondary: #1c1916;
+  --bg-tertiary: #252220;
+  --text-primary: #f0ebe6;
+  --text-secondary: #b8b0a8;
 }
 
 .dark body {
@@ -41,18 +41,18 @@
   color: var(--text-primary);
 }
 
-/* Dark mode section backgrounds */
-.dark .bg-\[\#f8f6f1\] { background-color: #1a1a1a; }
-.dark .bg-\[\#f0ebe3\] { background-color: #1f1f1f; }
-.dark .bg-\[\#e8f0ec\] { background-color: #1a2420; }
-.dark .bg-\[\#faf3f0\] { background-color: #221a18; }
-.dark .bg-\[\#faf8f0\] { background-color: #22201a; }
-.dark .bg-\[\#f0f2f4\] { background-color: #1a1c1e; }
+/* Dark mode section backgrounds - richer tinted colors */
+.dark .bg-\[\#f8f6f1\] { background-color: #1c1916; }
+.dark .bg-\[\#f0ebe3\] { background-color: #211e1a; }
+.dark .bg-\[\#e8f0ec\] { background-color: #182822; }
+.dark .bg-\[\#faf3f0\] { background-color: #261c18; }
+.dark .bg-\[\#faf8f0\] { background-color: #262218; }
+.dark .bg-\[\#f0f2f4\] { background-color: #1e2024; }
 
 /* Dark mode gradient overlays */
-.dark .from-\[\#f8f6f1\] { --tw-gradient-from: #1a1a1a; }
-.dark .via-\[\#f8f6f1\]\/80 { --tw-gradient-via: rgba(26, 26, 26, 0.8); }
-.dark .to-\[\#f8f6f1\]\/70 { --tw-gradient-to: rgba(26, 26, 26, 0.7); }
+.dark .from-\[\#f8f6f1\] { --tw-gradient-from: #1c1916; }
+.dark .via-\[\#f8f6f1\]\/80 { --tw-gradient-via: rgba(28, 25, 22, 0.8); }
+.dark .to-\[\#f8f6f1\]\/70 { --tw-gradient-to: rgba(28, 25, 22, 0.7); }
 
 /* Dark mode text adjustments */
 .dark .text-\[var\(--color-slate\)\] { color: #e8e8e8; }
@@ -102,6 +102,22 @@ body {
 html {
   scrollbar-width: thin;
   scrollbar-color: var(--color-rust) transparent;
+  transition: background-color 0.2s ease;
+}
+
+/* Smooth theme transitions */
+body,
+.scroll-section,
+.token-keyword,
+.token-type,
+.token-function,
+.token-string,
+.token-number,
+.token-comment,
+.token-punctuation,
+.token-operator,
+.token-property {
+  transition: background-color 0.2s ease, color 0.2s ease;
 }
 
 /* Scroll container with sticky stacking + snap */
@@ -170,6 +186,37 @@ html {
 }
 .token-property {
   color: #268bd2;
+}
+
+/* Dark mode code syntax highlighting */
+.dark .token-keyword {
+  color: #e07b5c;
+  font-weight: 600;
+}
+.dark .token-type {
+  color: #e8c56c;
+}
+.dark .token-function {
+  color: #5da88a;
+}
+.dark .token-string {
+  color: #9acd68;
+}
+.dark .token-number {
+  color: #dbb33a;
+}
+.dark .token-comment {
+  color: #6b7c7c;
+  font-style: italic;
+}
+.dark .token-punctuation {
+  color: #8a9a9a;
+}
+.dark .token-operator {
+  color: #e07b5c;
+}
+.dark .token-property {
+  color: #6aafde;
 }
 
 /* Animations */
