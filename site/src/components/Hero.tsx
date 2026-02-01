@@ -1,5 +1,6 @@
-import { ChevronDown, Github } from "lucide-react";
+import { BookOpen, ChevronDown, Github } from "lucide-react";
 import { useEffect, useState } from "react";
+import ThemeToggle from "./ThemeToggle";
 
 export default function Hero() {
   const [isVisible, setIsVisible] = useState(false);
@@ -10,17 +11,30 @@ export default function Hero() {
 
   return (
     <section className="scroll-section bg-[#f8f6f1]">
-      {/* GitHub icon in top right */}
-      <a
-        href="https://github.com/jkpdino/kestrel"
-        className="absolute top-6 right-6 z-20 p-3 rounded-full text-[var(--color-slate)] hover:text-[#f5deb3] hover:bg-[var(--color-rust)]">
-        <Github className="w-6 h-6" />
-      </a>
+      {/* Top right controls */}
+      <div className="absolute top-6 right-6 z-20 flex items-center gap-2">
+        <span className="hidden sm:inline-flex items-center px-3 py-1.5 rounded-full bg-[var(--color-forest)]/10 text-[var(--color-forest)] font-mono text-xs font-medium">
+          v0.14
+        </span>
+        <a
+          href="https://github.com/jkpdino/kestrel/tree/main/docs"
+          className="p-3 rounded-full text-[var(--color-slate)] hover:text-[#f5deb3] hover:bg-[var(--color-rust)] transition-colors"
+          title="Documentation">
+          <BookOpen className="w-5 h-5" />
+        </a>
+        <ThemeToggle />
+        <a
+          href="https://github.com/jkpdino/kestrel"
+          className="p-3 rounded-full text-[var(--color-slate)] hover:text-[#f5deb3] hover:bg-[var(--color-rust)] transition-colors"
+          title="GitHub">
+          <Github className="w-6 h-6" />
+        </a>
+      </div>
 
       {/* Full background image - scaled down to show more of the trail */}
       <div className="absolute inset-0 flex items-center justify-center">
         <img
-          src="/kestrel.jpeg"
+          src="/kestrel.webp"
           alt=""
           className="max-w-[85%] max-h-[85%] object-contain"
         />

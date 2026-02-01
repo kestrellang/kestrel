@@ -633,7 +633,9 @@ See [docs/memory-model/implementation-plan.md](docs/memory-model/implementation-
 - [x] Irrefutable patterns in function parameters
 - [x] Refactor Matchable for range patterns and array patterns
 - [x] Let/var static variable consistency
-- [ ] Default function parameters
+- [x] Default function parameters
+- [ ] End compilation when there are errors
+- [ ] Improve parser errors
 
 ## Phase 15 Compiler Infrastructure
 

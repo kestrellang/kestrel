@@ -4,7 +4,7 @@
 module std.core
 
 import std.core.(Less, LessOrEqual, Greater, GreaterOrEqual, NotEqual, Equal)
-import std.text.(String)
+import std.text.(String, FormatOptions)
 import std.memory.(Slice, Pointer)
 import std.num.(UInt64, Int64)
 
@@ -165,7 +165,19 @@ public protocol Defaultable {
 }
 
 /// Protocol for types that can be formatted as a string.
+/// Used by print functions and string interpolation.
+///
+/// String interpolation syntax:
+///   "\(expr)"        uses default formatting
+///   "\(expr:spec)"   uses format spec (parsed into FormatOptions)
+///
+/// Examples:
+///   "\(name)"        "Alice"
+///   "\(name:>10)"    "     Alice"
+///   "\(n:08x)"       "0000002a"
+///   "\(pi:.2)"       "3.14"
+///   "\(value:?)"     debug representation
 public protocol Formattable {
-    /// Returns this value formatted as a string.
+    /// Returns this value formatted as a string with the given options.
     func format() -> String
 }

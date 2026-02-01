@@ -41,7 +41,7 @@ public protocol FromResidual[Early] {
 
 /// Protocol that enables value promotion.
 /// Types conforming to FromValue can be constructed from a success value,
-/// allowing implicit promotion from T to Optional[T] or Result[T, E].
+/// allowing implicit promotion from T to T? or T throws E.
 @builtin(.FromValueProtocol)
 protocol FromValue[Output] {
     /// Creates an instance from a success value.

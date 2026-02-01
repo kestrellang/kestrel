@@ -20,7 +20,7 @@ public protocol Read {
     /// Reads bytes into the buffer.
     ///
     /// Returns the number of bytes read, or 0 on EOF.
-    mutating func read(into buf: Slice[UInt8]) -> Result[Int64, Error]
+    mutating func read(into buf: Slice[UInt8]) -> Int64 throws Error
 }
 
 // ============================================================================
@@ -33,8 +33,8 @@ public struct Empty: Read {
     public init() {}
 
     /// Always returns 0 (EOF).
-    public mutating func read(into buf: Slice[UInt8]) -> Result[Int64, Error] {
-        .Ok(0)
+    public mutating func read(into buf: Slice[UInt8]) -> Int64 throws Error {
+        0
     }
 }
 
@@ -52,13 +52,13 @@ public struct Repeat: Read {
     }
 
     /// Fills the entire buffer with the repeated byte.
-    public mutating func read(into buf: Slice[UInt8]) -> Result[Int64, Error] {
+    public mutating func read(into buf: Slice[UInt8]) -> Int64 throws Error {
         var i: Int64 = 0;
         while i < buf.count {
             buf.pointer.offset(by: i).write(self.byte);
             i = i + 1
         }
-        .Ok(buf.count)
+        buf.count
     }
 }
 
@@ -68,20 +68,20 @@ public struct Repeat: Read {
 
 /// A reader that reads from a byte array with a movable position.
 public struct Cursor: Read {
-    var data: Array[UInt8]
+    var data: [UInt8]
     var pos: Int64
 
     /// Creates a cursor that reads from the given data.
-    public init(data: Array[UInt8]) {
+    public init(data: [UInt8]) {
         self.data = data;
         self.pos = 0;
     }
 
     /// Reads bytes from the current position.
-    public mutating func read(into buf: Slice[UInt8]) -> Result[Int64, Error] {
+    public mutating func read(into buf: Slice[UInt8]) -> Int64 throws Error {
         let available = self.data.count() - self.pos;
         if available == 0 {
-            return .Ok(0)
+            return 0
         }
 
         var n: Int64 = buf.count;
@@ -94,7 +94,7 @@ public struct Cursor: Read {
             i = i + 1
         }
         self.pos = self.pos + n;
-        .Ok(n)
+        n
     }
 
     /// Returns the current position.
@@ -120,29 +120,24 @@ public struct Cursor: Read {
 /// Reads a single byte from a reader.
 ///
 /// Returns None on EOF.
-public func readByte[R](reader: R) -> Result[Optional[UInt8], Error] where R: Read {
-    var buf = Array[UInt8](capacity: 1);
+public func readByte[R](reader: R) -> UInt8? throws Error where R: Read {
+    var buf = [UInt8](capacity: 1);
     buf.append(0);
     let slice = Slice(pointer: buf.pointer(), count: 1);
-    // TODO: add try back
-    match reader.read(into: slice) {
-        .Ok(n) => {
-            if n == 0 {
-                .Ok(.None)
-            } else {
-                .Ok(.Some(buf.getUnchecked(0)))
-            }
-        },
-        .Err(e) => .Err(e)
+    let n = try reader.read(into: slice);
+    if n == 0 {
+        .None
+    } else {
+        .Some(buf.getUnchecked(0))
     }
 }
 
 /// Reads all bytes from a reader into an array.
 ///
 /// Returns the total number of bytes read.
-public func readAll[R](reader: R, into buf: Array[UInt8]) -> Result[Int64, Error] where R: Read {
+public func readAll[R](reader: R, into buf: [UInt8]) -> Int64 throws Error where R: Read {
     var total: Int64 = 0;
-    var chunk = Array[UInt8](capacity: 4096);
+    var chunk = [UInt8](capacity: 4096);
     // Initialize chunk with zeros
     var i: Int64 = 0;
     while i < 4096 {
@@ -150,33 +145,18 @@ public func readAll[R](reader: R, into buf: Array[UInt8]) -> Result[Int64, Error
         i = i + 1
     }
 
-    var done: Bool = false;
-    var errorResult: Optional[Error] = .None;
-    while done == false {
+    loop {
         let slice = Slice(pointer: chunk.pointer(), count: 4096);
-        // TODO: add try back
-        let readResult = reader.read(into: slice);
-        match readResult {
-            .Ok(n) => {
-                if n == 0 {
-                    done = true
-                } else {
-                    var j: Int64 = 0;
-                    while j < n {
-                        buf.append(chunk.getUnchecked(j));
-                        j = j + 1
-                    }
-                    total = total + n
-                }
-            },
-            .Err(e) => {
-                errorResult = .Some(e);
-                done = true
-            }
+        let n = try reader.read(into: slice);
+        if n == 0 {
+            break
         }
+        var j: Int64 = 0;
+        while j < n {
+            buf.append(chunk.getUnchecked(j));
+            j = j + 1
+        }
+        total = total + n
     }
-    match errorResult {
-        .Some(e) => .Err(e),
-        .None => .Ok(total)
-    }
+    total
 }

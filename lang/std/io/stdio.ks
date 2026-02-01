@@ -23,12 +23,12 @@ public struct Stdin: Read {
     public init() {}
 
     /// Reads bytes from standard input.
-    public mutating func read(into buf: Slice[UInt8]) -> Result[Int64, Error] {
+    public mutating func read(into buf: Slice[UInt8]) -> Int64 throws Error {
         let n = libc.read(libc.STDIN(), buf.pointer, buf.count);
         if n < 0 {
-            return .Err(Error.last())
+            throw Error.last()
         }
-        .Ok(n)
+        n
     }
 }
 
@@ -42,17 +42,17 @@ public struct Stdout: Write {
     public init() {}
 
     /// Writes bytes to standard output.
-    public mutating func write(from buf: Slice[UInt8]) -> Result[Int64, Error] {
+    public mutating func write(from buf: Slice[UInt8]) -> Int64 throws Error {
         let n = libc.write(libc.STDOUT(), buf.pointer, buf.count);
         if n < 0 {
-            return .Err(Error.last())
+            throw Error.last()
         }
-        .Ok(n)
+        n
     }
 
     /// Flushes standard output.
-    public mutating func flush() -> Result[(), Error] {
-        .Ok(())
+    public mutating func flush() -> () throws Error {
+        ()
     }
 }
 
@@ -66,17 +66,17 @@ public struct Stderr: Write {
     public init() {}
 
     /// Writes bytes to standard error.
-    public mutating func write(from buf: Slice[UInt8]) -> Result[Int64, Error] {
+    public mutating func write(from buf: Slice[UInt8]) -> Int64 throws Error {
         let n = libc.write(libc.STDERR(), buf.pointer, buf.count);
         if n < 0 {
-            return .Err(Error.last())
+            throw Error.last()
         }
-        .Ok(n)
+        n
     }
 
     /// Flushes standard error.
-    public mutating func flush() -> Result[(), Error] {
-        .Ok(())
+    public mutating func flush() -> () throws Error {
+        ()
     }
 }
 
@@ -104,33 +104,33 @@ public func stderr() -> Stderr {
 // ============================================================================
 
 /// Prints a value to stdout (no newline).
-public func print[F](value: F) -> Result[(), Error] where F: Formattable {
+public func print[F](value: F) -> () throws Error where F: Formattable {
     var out = stdout();
-    writeStr(out, value.format())
+    try writeStr(out, value.format())
 }
 
 /// Prints a value to stdout with a newline.
-public func println[F](value: F) -> Result[(), Error] where F: Formattable {
+public func println[F](value: F) -> () throws Error where F: Formattable {
     var out = stdout();
-    writeLine(out, value.format())
+    try writeLine(out, value.format())
 }
 
 /// Prints an empty line to stdout.
-public func printlnEmpty() -> Result[(), Error] {
+public func printlnEmpty() -> () throws Error {
     var out = stdout();
-    writeByte(out, 10)
+    try writeByte(out, 10)
 }
 
 /// Prints a value to stderr (no newline).
-public func eprint[F](value: F) -> Result[(), Error] where F: Formattable {
+public func eprint[F](value: F) -> () throws Error where F: Formattable {
     var err = stderr();
-    writeStr(err, value.format())
+    try writeStr(err, value.format())
 }
 
 /// Prints a value to stderr with a newline.
-public func eprintln[F](value: F) -> Result[(), Error] where F: Formattable {
+public func eprintln[F](value: F) -> () throws Error where F: Formattable {
     var err = stderr();
-    writeLine(err, value.format())
+    try writeLine(err, value.format())
 }
 
 // ============================================================================
@@ -138,32 +138,23 @@ public func eprintln[F](value: F) -> Result[(), Error] where F: Formattable {
 // ============================================================================
 
 /// Reads a line from stdin (without the newline).
-public func readLine() -> Result[String, Error] {
+public func readLine() -> String throws Error {
     var input = stdin();
-    var bytes = Array[UInt8]();
+    var bytes = [UInt8]();
 
-    var done: Bool = false;
-    while done == false {
-        var buf = Array[UInt8](capacity: 1);
+    loop {
+        var buf = [UInt8](capacity: 1);
         buf.append(0);
         let slice = Slice(pointer: buf.pointer(), count: 1);
-        // TODO: add try back
-        let readResult = input.read(into: slice);
-        match readResult {
-            .Ok(n) => {
-                if n == 0 {
-                    done = true  // EOF
-                } else {
-                    let b = buf.getUnchecked(0);
-                    if b == 10 {  // newline
-                        done = true
-                    } else {
-                        bytes.append(b)
-                    }
-                }
-            },
-            .Err(e) => return .Err(e)
+        let n = try input.read(into: slice);
+        if n == 0 {
+            break  // EOF
         }
+        let b = buf.getUnchecked(0);
+        if b == 10 {  // newline
+            break
+        }
+        bytes.append(b)
     }
 
     // Strip trailing \r if present (Windows line endings)
@@ -178,21 +169,13 @@ public func readLine() -> Result[String, Error] {
     // Build string from bytes (inefficient but works)
     // TODO: Add proper String.fromUtf8Bytes()
     var result = "";
-    .Ok(result)
+    result
 }
 
 /// Prints a prompt message and reads a line from stdin.
-public func prompt(message: String) -> Result[String, Error] {
+public func prompt(message: String) -> String throws Error {
     var out = stdout();
-    // TODO: add try back
-    match writeStr(out, message) {
-        .Ok(_) => {
-            // TODO: add try back
-            match out.flush() {
-                .Ok(_) => readLine(),
-                .Err(e) => .Err(e)
-            }
-        },
-        .Err(e) => .Err(e)
-    }
+    try writeStr(out, message);
+    try out.flush();
+    try readLine()
 }

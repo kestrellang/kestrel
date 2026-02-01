@@ -23,8 +23,8 @@ public struct Buffer[T, A]: not Copyable where A: Allocator {
         self.cap = capacity;
         let layout = Layout.array[T](capacity);
         let result = self.allocator.allocate(layout);
-        if result.isSome() {
-            self.ptr = result.unwrap().cast[T]()
+        if let .Some(rawPtr) = result {
+            self.ptr = rawPtr.cast[T]()
         } else {
             lang.panic("Buffer allocation failed")
         }
@@ -63,7 +63,7 @@ public struct Buffer[T, A]: not Copyable where A: Allocator {
 
     /// Reads the element at the given index with bounds checking.
     /// Returns None if index is out of bounds.
-    public func read(at index: Int64) -> Optional[T] {
+    public func read(at index: Int64) -> T? {
         if index >= 0 and index < self.cap {
             .Some(self.ptr.offset(by: index).read())
         } else {
@@ -111,8 +111,8 @@ public struct Buffer[T, A]: not Copyable where A: Allocator {
         let newLayout = Layout.array[T](newCapacity);
 
         let result = self.allocator.reallocate(self.ptr.asRaw(), oldLayout, newLayout);
-        if result.isSome() {
-            self.ptr = result.unwrap().cast[T]();
+        if let .Some(rawPtr) = result {
+            self.ptr = rawPtr.cast[T]();
             self.cap = newCapacity
         } else {
             lang.panic("Buffer resize failed")
@@ -126,7 +126,7 @@ public struct Buffer[T, A]: not Copyable where A: Allocator {
 
     /// Returns a slice view of a portion of the buffer.
     /// Returns None if the range is out of bounds.
-    public func slice(from start: Int64, to end: Int64) -> Optional[Slice[T]] {
+    public func slice(from start: Int64, to end: Int64) -> Slice[T]? {
         if start >= 0 and end <= self.cap and start <= end {
             .Some(Slice(pointer: self.ptr.offset(by: start), count: end - start))
         } else {

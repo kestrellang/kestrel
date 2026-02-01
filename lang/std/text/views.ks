@@ -29,7 +29,7 @@ public struct BytesIterator: Iterator {
     }
 
     /// Returns the next byte, or None if exhausted.
-    public mutating func next() -> Optional[UInt8] {
+    public mutating func next() -> UInt8? {
         if self.index < self.length {
             let rawOffset: lang.i64 = self.index.raw;
             let bytePtr: lang.ptr[lang.i8] = lang.ptr_offset[lang.i8](self.ptr, rawOffset);
@@ -68,7 +68,7 @@ public struct BytesView: Iterable {
     public func asRaw() -> lang.ptr[lang.i8] { self.ptr }
 
     /// Returns the byte at the given index, or None if out of bounds.
-    public func byteAt(index: Int64) -> Optional[UInt8] {
+    public func byteAt(index: Int64) -> UInt8? {
         if index >= Int64(intLiteral: 0) and index < self.length {
             let rawOffset: lang.i64 = index.raw;
             let bytePtr: lang.ptr[lang.i8] = lang.ptr_offset[lang.i8](self.ptr, rawOffset);
@@ -113,14 +113,13 @@ public struct CharsIterator: Iterator {
     }
 
     /// Returns the next character, or None if exhausted.
-    public mutating func next() -> Optional[Char] {
+    public mutating func next() -> Char? {
         if self.byteIndex >= self.length {
             return .None
         }
 
         let result = decodeUtf8(self.ptr, self.length, at: self.byteIndex);
-        if result.isSome() {
-            let decoded = result.unwrap();
+        if let .Some(decoded) = result {
             self.byteIndex = self.byteIndex + decoded.bytesConsumed;
             .Some(decoded.char)
         } else {
@@ -156,8 +155,7 @@ public struct CharsView: Iterable {
     /// Returns the number of characters (O(n) - must decode all).
     public func count() -> Int64 {
         var n: Int64 = Int64(intLiteral: 0);
-        var i: Int64 = Int64(intLiteral: 0);
-        while i < self.length {
+        for i in Int64(intLiteral: 0)..<self.length {
             // Count leading bytes only (not continuation bytes 10xxxxxx)
             let rawOffset: lang.i64 = i.raw;
             let bytePtr: lang.ptr[lang.i8] = lang.ptr_offset[lang.i8](self.ptr, rawOffset);
@@ -166,7 +164,6 @@ public struct CharsView: Iterable {
             if lang.i32_ne(lang.i32_and(byteVal, 0xC0), 0x80) {
                 n = n + Int64(intLiteral: 1)
             }
-            i = i + Int64(intLiteral: 1)
         }
         n
     }
@@ -188,12 +185,12 @@ public struct GraphemesIterator: Iterator {
     }
 
     /// Returns the next grapheme cluster, or None if exhausted.
-    public mutating func next() -> Optional[Grapheme] {
+    public mutating func next() -> Grapheme? {
         // Simplified: treat each char as a grapheme
         // Full implementation would need grapheme cluster segmentation
         let maybeChar = self.charsIter.next();
-        if maybeChar.isSome() {
-            .Some(Grapheme(char: maybeChar.unwrap()))
+        if let .Some(char) = maybeChar {
+            .Some(Grapheme(char: char))
         } else {
             .None
         }
@@ -225,8 +222,7 @@ public struct GraphemesView: Iterable {
     public func count() -> Int64 {
         // Simplified: same as char count
         var n: Int64 = Int64(intLiteral: 0);
-        var i: Int64 = Int64(intLiteral: 0);
-        while i < self.length {
+        for i in Int64(intLiteral: 0)..<self.length {
             let rawOffset: lang.i64 = i.raw;
             let bytePtr: lang.ptr[lang.i8] = lang.ptr_offset[lang.i8](self.ptr, rawOffset);
             let signedByte: lang.i8 = lang.ptr_read(bytePtr);
@@ -234,7 +230,6 @@ public struct GraphemesView: Iterable {
             if lang.i32_ne(lang.i32_and(byteVal, 0xC0), 0x80) {
                 n = n + Int64(intLiteral: 1)
             }
-            i = i + Int64(intLiteral: 1)
         }
         n
     }
@@ -262,7 +257,7 @@ public struct LinesIterator: Iterator {
     }
 
     /// Returns the next line, or None if exhausted.
-    public mutating func next() -> Optional[String] {
+    public mutating func next() -> String? {
         if self.done or self.byteIndex >= self.length {
             return .None
         }
@@ -315,7 +310,7 @@ public struct LinesIterator: Iterator {
             return .Some(self.createSubstring(start, self.length))
         }
 
-        let none: Optional[String] = .None;
+        let none: String? = .None;
         none
     }
 
@@ -327,13 +322,11 @@ public struct LinesIterator: Iterator {
         }
         // Create string from bytes
         var result = String(capacity: count);
-        var currentIndex: Int64 = start;
-        while currentIndex < end {
+        for currentIndex in start..<end {
             let rawOffset: lang.i64 = currentIndex.raw;
             let bytePtr: lang.ptr[lang.i8] = lang.ptr_offset[lang.i8](self.ptr, rawOffset);
             let byte: lang.i8 = lang.ptr_read(bytePtr);
-            result.appendByte(UInt8(raw: byte));
-            currentIndex = currentIndex + Int64(intLiteral: 1)
+            result.appendByte(UInt8(raw: byte))
         }
         result
     }

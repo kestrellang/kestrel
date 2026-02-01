@@ -24,9 +24,9 @@ public struct RcBox[T] {
     public init(value: T) {
         let layout: Layout = Layout.of[RcBoxStorage[T]]();
         var allocator: SystemAllocator = SystemAllocator();
-        let result: Optional[RawPointer] = allocator.allocate(layout);
-        if result.isSome() {
-            self.ptr = result.unwrap().cast[RcBoxStorage[T]]();
+        let result: RawPointer? = allocator.allocate(layout);
+        if let .Some(rawPtr) = result {
+            self.ptr = rawPtr.cast[RcBoxStorage[T]]();
             self.ptr.write(RcBoxStorage(refCount: Int64(intLiteral: 1), value: value));
         } else {
             lang.panic("RcBox allocation failed")

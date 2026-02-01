@@ -44,7 +44,7 @@ public struct RangeIterator[T]: Iterator where T: Steppable, T: Comparable {
     }
 
     /// Returns the next value in the range, or None if exhausted.
-    public mutating func next() -> Optional[T] {
+    public mutating func next() -> T? {
         if self.current < self.end {
             let value = self.current;
             self.current = self.current.successor();
@@ -109,7 +109,7 @@ public struct ClosedRangeIterator[T]: Iterator where T: Steppable, T: Comparable
     }
 
     /// Returns the next value in the range, or None if exhausted.
-    public mutating func next() -> Optional[T] {
+    public mutating func next() -> T? {
         if self.finished {
             .None
         } else if self.current == self.end {

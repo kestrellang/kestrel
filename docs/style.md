@@ -20,6 +20,32 @@ let max = UInt64(intLiteral: 1000000)
 
 This works because Kestrel infers the literal type from the annotated variable type.
 
+## Types
+
+### Type Operators
+
+Use type operators instead of explicit generic type names:
+
+```kestrel
+// GOOD
+let name: String? = .None
+let numbers: [Int64] = [1, 2, 3]
+let ages: [String: Int64] = [:]
+func parse(input: String) -> Int64 throws ParseError { ... }
+
+// INSTEAD OF
+let name: Optional[String] = .None
+let numbers: Array[Int64] = [1, 2, 3]
+let ages: Dictionary[String, Int64] = [:]
+func parse(input: String) -> Result[Int64, ParseError] { ... }
+```
+
+Type operator reference:
+- `T?` → `Optional[T]`
+- `[T]` → `Array[T]`
+- `[K: V]` → `Dictionary[K, V]`
+- `T throws E` → `Result[T, E]`
+
 ## Error Handling
 
 ### Try Operator
@@ -47,7 +73,7 @@ Use `if let` for unwrapping Optionals:
 
 ```kestrel
 // GOOD
-if let value = maybeValue {
+if let .Some(value) = maybeValue {
     // value is unwrapped here
 }
 
@@ -64,8 +90,8 @@ Use `guard let` for early exit when unwrapping fails:
 
 ```kestrel
 // GOOD
-func process(maybeValue: Optional[Int]) -> Int {
-    guard let value = maybeValue else {
+func process(maybeValue: Int?) -> Int {
+    guard let .Some(value) = maybeValue else {
         return 0
     }
     // value is unwrapped here, no nesting needed
@@ -73,8 +99,8 @@ func process(maybeValue: Optional[Int]) -> Int {
 }
 
 // INSTEAD OF
-func process(maybeValue: Optional[Int]) -> Int {
-    if let value = maybeValue {
+func process(maybeValue: Int?) -> Int {
+    if let .Some(value) = maybeValue {
         return value * 2
     } else {
         return 0

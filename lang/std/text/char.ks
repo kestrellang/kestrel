@@ -131,7 +131,7 @@ public struct Char: Equatable, Comparable, Matchable, ExpressibleByCharLiteral, 
     // ========================================================================
 
     /// Returns the digit value (0-9) if this is a digit, otherwise None.
-    public func digitValue() -> Optional[UInt32] {
+    public func digitValue() -> UInt32? {
         if self.isDigit() {
             let zero: Char = '0';
             .Some(self.value() - zero.value())
@@ -141,7 +141,7 @@ public struct Char: Equatable, Comparable, Matchable, ExpressibleByCharLiteral, 
     }
 
     /// Creates a Char from a digit value (0-9).
-    public static func fromDigit(d: UInt32) -> Optional[Char] {
+    public static func fromDigit(d: UInt32) -> Char? {
         if d <= UInt32(intLiteral: 9) {
             let zero: Char = '0';
             .Some(Char(d + zero.value()))
@@ -199,7 +199,7 @@ public struct Char: Equatable, Comparable, Matchable, ExpressibleByCharLiteral, 
 ///
 /// May consist of multiple code points (e.g., emoji sequences).
 public struct Grapheme: Equatable {
-    private var _chars: Array[Char]
+    private var _chars: [Char]
 
     // ========================================================================
     // CONSTRUCTORS
@@ -212,7 +212,7 @@ public struct Grapheme: Equatable {
     }
 
     /// Creates a Grapheme from multiple Chars.
-    public init(chars chars: Array[Char]) {
+    public init(chars chars: [Char]) {
         self._chars = chars;
     }
 
@@ -221,7 +221,7 @@ public struct Grapheme: Equatable {
     // ========================================================================
 
     /// Returns the code points in this grapheme.
-    public func chars() -> Array[Char] { self._chars }
+    public func chars() -> [Char] { self._chars }
 
     /// Returns the number of code points.
     public func charCount() -> Int64 {
@@ -229,7 +229,7 @@ public struct Grapheme: Equatable {
     }
 
     /// Returns the first code point, or None if empty.
-    public func firstChar() -> Optional[Char] {
+    public func firstChar() -> Char? {
         self._chars.first()
     }
 
@@ -246,11 +246,9 @@ public struct Grapheme: Equatable {
     /// Returns the byte length when encoded as UTF-8.
     public func utf8Length() -> Int64 {
         var len: Int64 = Int64(intLiteral: 0);
-        var i: Int64 = Int64(intLiteral: 0);
         let count = self._chars.count();
-        while i < count {
-            len = len + self._chars.getUnchecked(i).utf8Length();
-            i = i + Int64(intLiteral: 1)
+        for i in Int64(intLiteral: 0)..<count {
+            len = len + self._chars.getUnchecked(i).utf8Length()
         }
         len
     }
@@ -266,13 +264,11 @@ public struct Grapheme: Equatable {
         if selfCount != otherCount {
             return false
         }
-        var i: Int64 = Int64(intLiteral: 0);
         var equal: Bool = true;
-        while i < selfCount and equal {
+        for i in Int64(intLiteral: 0)..<selfCount {
             if self._chars.getUnchecked(i).equals(other._chars.getUnchecked(i)) == false {
                 equal = false
             }
-            i = i + Int64(intLiteral: 1)
         }
         equal
     }
@@ -366,7 +362,7 @@ func writeByteAt(ptr: lang.ptr[lang.i8], offset: Int64, byte: lang.i8) {
 /// Decodes a single UTF-8 character from raw bytes.
 ///
 /// Returns None if the encoding is invalid.
-public func decodeUtf8(ptr: lang.ptr[lang.i8], length: Int64, at index: Int64) -> Optional[Utf8DecodeResult] {
+public func decodeUtf8(ptr: lang.ptr[lang.i8], length: Int64, at index: Int64) -> Utf8DecodeResult? {
     if index >= length {
         return .None
     }

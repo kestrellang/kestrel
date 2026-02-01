@@ -34,7 +34,7 @@ public protocol Iterator {
     ///
     /// Once None is returned, subsequent calls should continue to return None.
     @builtin(.IteratorNextMethod)
-    mutating func next() -> Optional[Item]
+    mutating func next() -> Item?
 }
 
 /// Protocol for types that can produce an iterator.

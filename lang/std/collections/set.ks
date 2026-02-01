@@ -36,10 +36,10 @@ public struct SetIterator[T, H = DefaultHasher]: Iterator where T: Hash, H: Hash
     }
 
     /// Returns the next element, or None if exhausted.
-    public mutating func next() -> Optional[T] {
+    public mutating func next() -> T? {
         let maybeEntry = self.dictIter.next();
-        if maybeEntry.isSome() {
-            .Some(maybeEntry.unwrap().key)
+        if let .Some(entry) = maybeEntry {
+            .Some(entry.key)
         } else {
             .None
         }
@@ -148,18 +148,14 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hash, H: H
 
         // Add all from self
         var selfIter = self.iter();
-        var maybeElem = selfIter.next();
-        while maybeElem.isSome() {
-            let _ = result.insert(maybeElem.unwrap());
-            maybeElem = selfIter.next()
+        while let .Some(elem) = selfIter.next() {
+            let _ = result.insert(elem);
         }
 
         // Add all from other
         var otherIter = other.iter();
-        maybeElem = otherIter.next();
-        while maybeElem.isSome() {
-            let _ = result.insert(maybeElem.unwrap());
-            maybeElem = otherIter.next()
+        while let .Some(elem) = otherIter.next() {
+            let _ = result.insert(elem);
         }
 
         result
@@ -173,13 +169,10 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hash, H: H
 
         // Add elements that are in both
         var selfIter = self.iter();
-        var maybeElem = selfIter.next();
-        while maybeElem.isSome() {
-            let elem = maybeElem.unwrap();
+        while let .Some(elem) = selfIter.next() {
             if other.contains(elem) {
                 let _ = result.insert(elem);
             }
-            maybeElem = selfIter.next()
         }
 
         result
@@ -193,13 +186,10 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hash, H: H
 
         // Add elements not in other
         var selfIter = self.iter();
-        var maybeElem = selfIter.next();
-        while maybeElem.isSome() {
-            let elem = maybeElem.unwrap();
+        while let .Some(elem) = selfIter.next() {
             if other.contains(elem) == false {
                 let _ = result.insert(elem);
             }
-            maybeElem = selfIter.next()
         }
 
         result
@@ -214,24 +204,18 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hash, H: H
 
         // Add elements in self but not other
         var selfIter = self.iter();
-        var maybeElem = selfIter.next();
-        while maybeElem.isSome() {
-            let elem = maybeElem.unwrap();
+        while let .Some(elem) = selfIter.next() {
             if other.contains(elem) == false {
                 let _ = result.insert(elem);
             }
-            maybeElem = selfIter.next()
         }
 
         // Add elements in other but not self
         var otherIter = other.iter();
-        maybeElem = otherIter.next();
-        while maybeElem.isSome() {
-            let elem = maybeElem.unwrap();
+        while let .Some(elem) = otherIter.next() {
             if self.contains(elem) == false {
                 let _ = result.insert(elem);
             }
-            maybeElem = otherIter.next()
         }
 
         result
@@ -243,16 +227,13 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hash, H: H
 
     /// Returns true if all elements of self are in other.
     public func isSubset(other: Set[T, H]) -> Bool {
-        var allFound: Bool = true;
         var selfIter = self.iter();
-        var maybeElem = selfIter.next();
-        while maybeElem.isSome() and allFound {
-            if other.contains(maybeElem.unwrap()) == false {
-                allFound = false
+        while let .Some(elem) = selfIter.next() {
+            if other.contains(elem) == false {
+                return false
             }
-            maybeElem = selfIter.next()
         }
-        allFound
+        true
     }
 
     /// Returns true if all elements of other are in self.
@@ -262,16 +243,13 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hash, H: H
 
     /// Returns true if the sets have no common elements.
     public func isDisjoint(other: Set[T, H]) -> Bool {
-        var noCommon: Bool = true;
         var selfIter = self.iter();
-        var maybeElem = selfIter.next();
-        while maybeElem.isSome() and noCommon {
-            if other.contains(maybeElem.unwrap()) {
-                noCommon = false
+        while let .Some(elem) = selfIter.next() {
+            if other.contains(elem) {
+                return false
             }
-            maybeElem = selfIter.next()
         }
-        noCommon
+        true
     }
 
     // ========================================================================
@@ -305,16 +283,13 @@ extend Set[T, H]: Equatable where T: Hash, H: Hasher, H: Defaultable {
         }
 
         // Check all elements in self exist in other
-        var equal: Bool = true;
         var selfIter = self.iter();
-        var maybeElem = selfIter.next();
-        while maybeElem.isSome() and equal {
-            if other.contains(maybeElem.unwrap()) == false {
-                equal = false
+        while let .Some(elem) = selfIter.next() {
+            if other.contains(elem) == false {
+                return false
             }
-            maybeElem = selfIter.next()
         }
-        equal
+        true
     }
 }
 

@@ -21,7 +21,7 @@ public struct LiteralSliceIterator[T]: Iterator {
     }
 
     /// Returns the next element, or None if exhausted.
-    public mutating func next() -> Optional[T] {
+    public mutating func next() -> T? {
         if lang.i64_signed_gt(self.remaining, 0) {
             let value = lang.ptr_read(self.ptr);
             self.ptr = lang.ptr_offset[T](self.ptr, lang.sizeof[T]());

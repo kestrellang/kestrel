@@ -73,7 +73,7 @@ public enum Seek {
 ///
 ///     // Read entire file
 ///     var file = try File.open(path: "input.txt")
-///     var contents = Array[UInt8]()
+///     var contents = [UInt8]()
 ///     try readAll(reader: file, into: contents)
 public struct File: Read, Write, not Copyable {
     var fd: libc.Fd
@@ -94,13 +94,13 @@ public struct File: Read, Write, not Copyable {
     ///
     /// Example:
     ///     var file = try File.open(path: "existing.txt")
-    ///     var buf = Array[UInt8](repeating: 0, count: 100)
+    ///     var buf = [UInt8](repeating: 0, count: 100)
     ///     let n = try file.read(into: buf.asSlice())
-    public static func open(path: String) -> Result[File, Error] {
+    public static func open(path: String) -> File throws Error {
         // Get pointer to string bytes (need null-terminated for libc)
         // For now, we'll copy to a buffer with null terminator
         let len = path.byteCount;
-        var pathBuf = Array[UInt8](capacity: len + 1);
+        var pathBuf = [UInt8](capacity: len + 1);
         var i: Int64 = 0;
         while i < len {
             pathBuf.append(path.byteAtUnchecked(i));
@@ -110,9 +110,9 @@ public struct File: Read, Write, not Copyable {
 
         let fd = libc.open(pathBuf.pointer(), libc.O_RDONLY(), 0);
         if fd < 0 {
-            return .Err(Error.last())
+            throw Error.last()
         }
-        .Ok(File(fd))
+        File(fd)
     }
 
     /// Creates a file for writing, truncating if it exists.
@@ -123,9 +123,9 @@ public struct File: Read, Write, not Copyable {
     /// Example:
     ///     var file = try File.create(path: "output.txt")
     ///     try writeStr(writer: file, s: "New content")
-    public static func create(path: String) -> Result[File, Error] {
+    public static func create(path: String) -> File throws Error {
         let len = path.byteCount;
-        var pathBuf = Array[UInt8](capacity: len + 1);
+        var pathBuf = [UInt8](capacity: len + 1);
         var i: Int64 = 0;
         while i < len {
             pathBuf.append(path.byteAtUnchecked(i));
@@ -136,9 +136,9 @@ public struct File: Read, Write, not Copyable {
         let flags = libc.O_WRONLY() | libc.O_CREAT() | libc.O_TRUNC();
         let fd = libc.open(pathBuf.pointer(), flags, libc.MODE_DEFAULT());
         if fd < 0 {
-            return .Err(Error.last())
+            throw Error.last()
         }
-        .Ok(File(fd))
+        File(fd)
     }
 
     /// Opens a file for both reading and writing.
@@ -147,13 +147,13 @@ public struct File: Read, Write, not Copyable {
     ///
     /// Example:
     ///     var file = try File.openReadWrite(path: "data.bin")
-    ///     var header = Array[UInt8](repeating: 0, count: 16)
+    ///     var header = [UInt8](repeating: 0, count: 16)
     ///     try file.read(into: header.asSlice())
     ///     try file.seek(to: .Start(0))
     ///     try file.write(from: newHeader.asSlice())
-    public static func openReadWrite(path: String) -> Result[File, Error] {
+    public static func openReadWrite(path: String) -> File throws Error {
         let len = path.byteCount;
-        var pathBuf = Array[UInt8](capacity: len + 1);
+        var pathBuf = [UInt8](capacity: len + 1);
         var i: Int64 = 0;
         while i < len {
             pathBuf.append(path.byteAtUnchecked(i));
@@ -163,9 +163,9 @@ public struct File: Read, Write, not Copyable {
 
         let fd = libc.open(pathBuf.pointer(), libc.O_RDWR(), 0);
         if fd < 0 {
-            return .Err(Error.last())
+            throw Error.last()
         }
-        .Ok(File(fd))
+        File(fd)
     }
 
     /// Opens a file for appending, creating if it doesn't exist.
@@ -176,9 +176,9 @@ public struct File: Read, Write, not Copyable {
     /// Example:
     ///     var log = try File.openAppend(path: "app.log")
     ///     try writeLine(writer: log, s: "Application started")
-    public static func openAppend(path: String) -> Result[File, Error] {
+    public static func openAppend(path: String) -> File throws Error {
         let len = path.byteCount;
-        var pathBuf = Array[UInt8](capacity: len + 1);
+        var pathBuf = [UInt8](capacity: len + 1);
         var i: Int64 = 0;
         while i < len {
             pathBuf.append(path.byteAtUnchecked(i));
@@ -189,9 +189,9 @@ public struct File: Read, Write, not Copyable {
         let flags = libc.O_WRONLY() | libc.O_CREAT() | libc.O_APPEND();
         let fd = libc.open(pathBuf.pointer(), flags, libc.MODE_DEFAULT());
         if fd < 0 {
-            return .Err(Error.last())
+            throw Error.last()
         }
-        .Ok(File(fd))
+        File(fd)
     }
 
     /// Creates a new file, failing if it already exists.
@@ -204,9 +204,9 @@ public struct File: Read, Write, not Copyable {
     ///         case .Ok(file) => // we have the lock
     ///         case .Err(e) => // another process has the lock
     ///     }
-    public static func createNew(path: String) -> Result[File, Error] {
+    public static func createNew(path: String) -> File throws Error {
         let len = path.byteCount;
-        var pathBuf = Array[UInt8](capacity: len + 1);
+        var pathBuf = [UInt8](capacity: len + 1);
         var i: Int64 = 0;
         while i < len {
             pathBuf.append(path.byteAtUnchecked(i));
@@ -217,9 +217,9 @@ public struct File: Read, Write, not Copyable {
         let flags = libc.O_WRONLY() | libc.O_CREAT() | libc.O_EXCL();
         let fd = libc.open(pathBuf.pointer(), flags, libc.MODE_DEFAULT());
         if fd < 0 {
-            return .Err(Error.last())
+            throw Error.last()
         }
-        .Ok(File(fd))
+        File(fd)
     }
 
     // ========================================================================
@@ -241,18 +241,18 @@ public struct File: Read, Write, not Copyable {
     ///
     /// Example:
     ///     var file = try File.open(path: "data.bin")
-    ///     var buf = Array[UInt8](repeating: 0, count: 4096)
+    ///     var buf = [UInt8](repeating: 0, count: 4096)
     ///     while true {
     ///         let n = try file.read(into: buf.asSlice())
     ///         if n == 0 { break }  // EOF
     ///         // process buf[0..n]
     ///     }
-    public mutating func read(into buf: Slice[UInt8]) -> Result[Int64, Error] {
+    public mutating func read(into buf: Slice[UInt8]) -> Int64 throws Error {
         let n = libc.read(self.fd, buf.pointer, buf.count);
         if n < 0 {
-            return .Err(Error.last())
+            throw Error.last()
         }
-        .Ok(n)
+        n
     }
 
     /// Writes bytes from the buffer to the file.
@@ -272,12 +272,12 @@ public struct File: Read, Write, not Copyable {
     ///     var file = try File.create(path: "output.bin")
     ///     let data: [UInt8] = [0x00, 0x01, 0x02, 0x03]
     ///     try writeAll(writer: file, from: data.asSlice())
-    public mutating func write(from buf: Slice[UInt8]) -> Result[Int64, Error] {
+    public mutating func write(from buf: Slice[UInt8]) -> Int64 throws Error {
         let n = libc.write(self.fd, buf.pointer, buf.count);
         if n < 0 {
-            return .Err(Error.last())
+            throw Error.last()
         }
-        .Ok(n)
+        n
     }
 
     /// Flushes buffered writes to the underlying file.
@@ -290,8 +290,8 @@ public struct File: Read, Write, not Copyable {
     ///     var file = try File.create(path: "important.dat")
     ///     try writeAll(writer: file, from: data.asSlice())
     ///     try file.flush()  // ensure data reaches OS
-    public mutating func flush() -> Result[(), Error] {
-        .Ok(())
+    public mutating func flush() -> () throws Error {
+        ()
     }
 
     // ========================================================================
@@ -315,7 +315,7 @@ public struct File: Read, Write, not Copyable {
     ///
     ///     // Go to end and get file size
     ///     let size = try file.seek(to: .End(0))
-    public mutating func seek(to pos: Seek) -> Result[Int64, Error] {
+    public mutating func seek(to pos: Seek) -> Int64 throws Error {
         let pair = match pos {
             .Start(o) => (o, libc.SEEK_SET()),
             .Current(o) => (o, libc.SEEK_CUR()),
@@ -325,9 +325,9 @@ public struct File: Read, Write, not Copyable {
         let whence = pair.1;
         let result = libc.lseek(self.fd, offset, whence);
         if result < 0 {
-            return .Err(Error.last())
+            throw Error.last()
         }
-        .Ok(result)
+        result
     }
 
     /// Returns the current position in the file.
@@ -339,8 +339,8 @@ public struct File: Read, Write, not Copyable {
     ///     let start = try file.position()  // 0
     ///     try file.read(into: buf.asSlice())
     ///     let after = try file.position()  // advanced by bytes read
-    public func position() -> Result[Int64, Error] {
-        self.seek(to: .Current(0))
+    public func position() -> Int64 throws Error {
+        try self.seek(to: .Current(0))
     }
 
     /// Seeks to the beginning of the file.
@@ -352,9 +352,9 @@ public struct File: Read, Write, not Copyable {
     ///     // read some data...
     ///     try file.rewind()  // back to start
     ///     // read again from beginning
-    public mutating func rewind() -> Result[(), Error] {
+    public mutating func rewind() -> () throws Error {
         try self.seek(to: .Start(0));
-        .Ok(())
+        ()
     }
 
     // ========================================================================
@@ -403,9 +403,9 @@ public struct File: Read, Write, not Copyable {
 /// Example:
 ///     let config = try readFileString(path: "config.json")
 ///     let readme = try readFileString(path: "/etc/hosts")
-public func readFileString(path: String) -> Result[String, Error] {
+public func readFileString(path: String) -> String throws Error {
     var file = try File.open(path);
-    var bytes = Array[UInt8]();
+    var bytes = [UInt8]();
     try readAll(file, into: bytes);
     // Build string from bytes
     var result = String();
@@ -415,7 +415,7 @@ public func readFileString(path: String) -> Result[String, Error] {
         result.appendByte(bytes.getUnchecked(i));
         i = i + 1
     }
-    .Ok(result)
+    result
 }
 
 /// Reads an entire file into a byte array.
@@ -425,11 +425,11 @@ public func readFileString(path: String) -> Result[String, Error] {
 ///
 /// Example:
 ///     let bytes = try readFileBytes(path: "image.png")
-public func readFileBytes(path: String) -> Result[Array[UInt8], Error] {
+public func readFileBytes(path: String) -> [UInt8] throws Error {
     var file = try File.open(path);
-    var bytes = Array[UInt8]();
+    var bytes = [UInt8]();
     try readAll(file, into: bytes);
-    .Ok(bytes)
+    bytes
 }
 
 /// Writes a string to a file, creating or truncating as needed.
@@ -439,9 +439,9 @@ public func readFileBytes(path: String) -> Result[Array[UInt8], Error] {
 ///
 /// Example:
 ///     try writeFileString(path: "output.txt", content: "Hello, World!")
-public func writeFileString(path: String, content: String) -> Result[(), Error] {
+public func writeFileString(path: String, content: String) -> () throws Error {
     var file = try File.create(path);
-    writeStr(file, content)
+    try writeStr(file, content)
 }
 
 /// Writes bytes to a file, creating or truncating as needed.
@@ -451,9 +451,9 @@ public func writeFileString(path: String, content: String) -> Result[(), Error] 
 /// Example:
 ///     let data: [UInt8] = [0x89, 0x50, 0x4E, 0x47]  // PNG header
 ///     try writeFileBytes(path: "header.bin", content: data)
-public func writeFileBytes(path: String, content: Array[UInt8]) -> Result[(), Error] {
+public func writeFileBytes(path: String, content: [UInt8]) -> () throws Error {
     var file = try File.create(path);
-    writeAll(file, from: content.asSlice())
+    try writeAll(file, from: content.asSlice())
 }
 
 /// Appends a string to a file, creating if it doesn't exist.
@@ -463,16 +463,16 @@ public func writeFileBytes(path: String, content: Array[UInt8]) -> Result[(), Er
 ///
 /// Example:
 ///     try appendFileString(path: "log.txt", content: "Event occurred\n")
-public func appendFileString(path: String, content: String) -> Result[(), Error] {
+public func appendFileString(path: String, content: String) -> () throws Error {
     var file = try File.openAppend(path);
-    writeStr(file, content)
+    try writeStr(file, content)
 }
 
 /// Appends bytes to a file, creating if it doesn't exist.
 ///
 /// Example:
 ///     try appendFileBytes(path: "data.bin", content: newData)
-public func appendFileBytes(path: String, content: Array[UInt8]) -> Result[(), Error] {
+public func appendFileBytes(path: String, content: [UInt8]) -> () throws Error {
     var file = try File.openAppend(path);
-    writeAll(file, from: content.asSlice())
+    try writeAll(file, from: content.asSlice())
 }

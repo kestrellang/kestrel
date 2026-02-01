@@ -108,11 +108,14 @@ function tokenize(code: string): React.ReactNode[] {
   const keywords = [
     "struct", "enum", "case", "protocol", "func", "let", "var",
     "if", "else", "for", "in", "while", "return", "match",
-    "extend", "it", "self", "deinit", "true", "false",
+    "extend", "extension", "it", "self", "Self", "deinit", "init",
+    "true", "false", "type", "import", "module", "public", "internal",
+    "private", "guard", "loop", "break", "continue", "try", "where",
+    "mutating", "static", "as", "throw", "throws",
   ];
   const types = [
-    "Int", "String", "Bool", "Array", "Option", "User", "File",
-    "FileHandle", "T", "U",
+    "Int", "String", "Bool", "Array", "Option", "Result", "User", "File",
+    "FileHandle", "T", "U", "E", "Error", "Float64", "Float32", "Void",
   ];
 
   const tokens: React.ReactNode[] = [];
@@ -346,7 +349,7 @@ function FeatureSection({ feature, index }: { feature: Feature; index: number })
   return (
     <section
       ref={sectionRef}
-      className={`scroll-section ${colors.bg}`}
+      className={`scroll-section ${colors.bg} overflow-y-auto`}
     >
       {/* Subtle pattern overlay */}
       <div className="absolute inset-0 opacity-[0.03]">
@@ -359,8 +362,8 @@ function FeatureSection({ feature, index }: { feature: Feature; index: number })
         />
       </div>
 
-      <div className="relative z-10 h-full flex items-center px-6 md:px-12 lg:px-24">
-        <div className="w-full max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-12 lg:gap-16 items-center">
+      <div className="relative z-10 min-h-full flex items-center px-6 md:px-12 lg:px-24 py-12 lg:py-0">
+        <div className="w-full max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-16 items-center">
           {/* Text content */}
           <div className="space-y-6">
             {/* Icon + label */}
@@ -418,7 +421,7 @@ function FeatureSection({ feature, index }: { feature: Feature; index: number })
 
           {/* Code visual */}
           <div
-            className={`hidden lg:block transition-all duration-700 delay-300 ${
+            className={`mt-8 lg:mt-0 transition-all duration-700 delay-300 ${
               isVisible ? "opacity-100 translate-x-0" : "opacity-0 translate-x-10"
             }`}
           >

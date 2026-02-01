@@ -27,7 +27,7 @@ public struct ArrayIterator[T]: Iterator {
     }
 
     /// Returns the next element, or None if exhausted.
-    public mutating func next() -> Optional[T] {
+    public mutating func next() -> T? {
         if self.remaining > Int64(intLiteral: 0) {
             let value = self.ptr.read();
             self.ptr = self.ptr.offset(by: Int64(intLiteral: 1));
@@ -67,13 +67,11 @@ struct ArrayStorage[T]: Cloneable {
         let layout = Layout.array[T](self.len);
         var allocator = SystemAllocator();
         let result = allocator.allocate(layout);
-        if result.isSome() {
-            let newPtr = result.unwrap().cast[T]();
+        if let .Some(rawPtr) = result {
+            let newPtr = rawPtr.cast[T]();
             // Copy elements
-            var i: Int64 = Int64(intLiteral: 0);
-            while i < self.len {
+            for i in 0..<self.len {
                 newPtr.offset(by: i).write(self.ptr.offset(by: i).read());
-                i = i + Int64(intLiteral: 1)
             }
             ArrayStorage(ptr: newPtr, len: self.len, cap: self.len)
         } else {
@@ -142,9 +140,9 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
             let layout = Layout.array[T](capacity);
             var allocator = SystemAllocator();
             let result = allocator.allocate(layout);
-            if result.isSome() {
+            if let .Some(rawPtr) = result {
                 self.storage = RcBox(ArrayStorage(
-                    ptr: result.unwrap().cast[T](),
+                    ptr: rawPtr.cast[T](),
                     len: Int64(intLiteral: 0),
                     cap: capacity
                 ))
@@ -172,20 +170,14 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
             let layout = Layout.array[T](elementCount);
             var allocator = SystemAllocator();
             let result = allocator.allocate(layout);
-            if result.isSome() {
-                let newPtr = result.unwrap().cast[T]();
+            if let .Some(rawPtr) = result {
+                let newPtr = rawPtr.cast[T]();
                 var currentLen: Int64 = Int64(intLiteral: 0);
                 // Copy elements from literal slice
                 var iter = elements.iter();
-                var done: Bool = false;
-                while done == false {
-                    let item = iter.next();
-                    if item.isSome() {
-                        newPtr.offset(by: currentLen).write(item.unwrap());
-                        currentLen = currentLen + Int64(intLiteral: 1)
-                    } else {
-                        done = true
-                    }
+                while let .Some(item) = iter.next() {
+                    newPtr.offset(by: currentLen).write(item);
+                    currentLen = currentLen + Int64(intLiteral: 1)
                 }
                 self.storage = RcBox(ArrayStorage(
                     ptr: newPtr,
@@ -251,14 +243,12 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
         let newLayout = Layout.array[T](newCap);
         var allocator = SystemAllocator();
         let result = allocator.allocate(newLayout);
-        if result.isSome() {
-            let newPtr = result.unwrap().cast[T]();
+        if let .Some(rawPtr) = result {
+            let newPtr = rawPtr.cast[T]();
             let oldStorage = self.storage.getValue();
             // Copy existing elements
-            var i: Int64 = Int64(intLiteral: 0);
-            while i < oldStorage.len {
+            for i in 0..<oldStorage.len {
                 newPtr.offset(by: i).write(oldStorage.ptr.offset(by: i).read());
-                i = i + Int64(intLiteral: 1)
             }
             // Free old buffer
             if oldStorage.cap > Int64(intLiteral: 0) {
@@ -287,7 +277,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     }
 
     /// Returns the element at the given index, or None if out of bounds.
-    public func getValue(at index: Int64) -> Optional[T] {
+    public func getValue(at index: Int64) -> T? {
         let myLen = self.len();
         if index >= Int64(intLiteral: 0) and index < myLen {
             .Some(self.ptr().offset(by: index).read())
@@ -312,7 +302,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     }
 
     /// Removes and returns the last element, or None if empty.
-    public mutating func pop() -> Optional[T] {
+    public mutating func pop() -> T? {
         let myLen = self.len();
         if myLen > Int64(intLiteral: 0) {
             self.makeUnique();
@@ -335,7 +325,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     }
 
     /// Returns the first element, or None if empty.
-    public func first() -> Optional[T] {
+    public func first() -> T? {
         if self.len() > Int64(intLiteral: 0) {
             .Some(self.ptr().read())
         } else {
@@ -344,7 +334,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     }
 
     /// Returns the last element, or None if empty.
-    public func last() -> Optional[T] {
+    public func last() -> T? {
         let myLen = self.len();
         if myLen > Int64(intLiteral: 0) {
             .Some(self.ptr().offset(by: myLen - Int64(intLiteral: 1)).read())

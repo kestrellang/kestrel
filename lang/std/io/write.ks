@@ -21,7 +21,7 @@ import std.io.error.(Error, brokenPipe)
 ///
 /// Example implementation:
 ///     struct MyWriter: Write {
-///         var buffer: Array[UInt8] = []
+///         var buffer: [UInt8] = []
 ///
 ///         mutating func write(from buf: Slice[UInt8]) -> Result[Int64, Error] {
 ///             buffer.append(contentsOf: buf)
@@ -50,7 +50,7 @@ public protocol Write {
     ///     let data: [UInt8] = [1, 2, 3, 4, 5]
     ///     let n = try writer.write(from: data.asSlice())
     ///     // n bytes written, may be less than 5
-    mutating func write(from buf: Slice[UInt8]) -> Result[Int64, Error]
+    mutating func write(from buf: Slice[UInt8]) -> Int64 throws Error
 
     /// Flushes any buffered data to the underlying destination.
     ///
@@ -62,7 +62,7 @@ public protocol Write {
     /// Example:
     ///     try writer.write(from: data.asSlice())
     ///     try writer.flush()  // ensure data is committed
-    mutating func flush() -> Result[(), Error]
+    mutating func flush() -> () throws Error
 }
 
 // ============================================================================
@@ -92,8 +92,8 @@ public struct Sink: Write {
     /// Example:
     ///     var sink = Sink()
     ///     let n = try sink.write(from: data.asSlice())  // n == data.count
-    public mutating func write(from buf: Slice[UInt8]) -> Result[Int64, Error] {
-        .Ok(buf.count)
+    public mutating func write(from buf: Slice[UInt8]) -> Int64 throws Error {
+        buf.count
     }
 
     /// No-op flush, always succeeds.
@@ -101,8 +101,8 @@ public struct Sink: Write {
     /// Example:
     ///     var sink = Sink()
     ///     try sink.flush()  // Ok(())
-    public mutating func flush() -> Result[(), Error] {
-        .Ok(())
+    public mutating func flush() -> () throws Error {
+        ()
     }
 }
 
@@ -121,14 +121,14 @@ public struct Sink: Write {
 ///     try writeStr(writer: buf, s: "World!")
 ///     let result = buf.toString()  // "Hello, World!"
 public struct Buffer: Write {
-    var data: Array[UInt8]
+    var data: [UInt8]
 
     /// Creates an empty buffer writer.
     ///
     /// Example:
     ///     var buf = Buffer()
     public init() {
-        self.data = Array[UInt8]()
+        self.data = [UInt8]()
     }
 
     /// Creates a buffer writer with the specified initial capacity.
@@ -151,13 +151,13 @@ public struct Buffer: Write {
     ///     let data: [UInt8] = [1, 2, 3]
     ///     try buf.write(from: data.asSlice())
     ///     buf.count()  // 3
-    public mutating func write(from buf: Slice[UInt8]) -> Result[Int64, Error] {
+    public mutating func write(from buf: Slice[UInt8]) -> Int64 throws Error {
         var i: Int64 = 0;
         while i < buf.count {
             self.data.append(buf.pointer.offset(by: i).read());
             i = i + 1
         }
-        .Ok(buf.count)
+        buf.count
     }
 
     /// No-op flush, always succeeds.
@@ -167,8 +167,8 @@ public struct Buffer: Write {
     /// Example:
     ///     var buf = Buffer()
     ///     try buf.flush()  // Ok(())
-    public mutating func flush() -> Result[(), Error] {
-        .Ok(())
+    public mutating func flush() -> () throws Error {
+        ()
     }
 
     // ========================================================================
@@ -225,7 +225,7 @@ public struct Buffer: Write {
     ///     var buf = Buffer()
     ///     try buf.write(from: [1, 2, 3].asSlice())
     ///     let arr = buf.toArray()  // [1, 2, 3]
-    public func toArray() -> Array[UInt8] {
+    public func toArray() -> [UInt8] {
         self.data.clone()
     }
 
@@ -263,29 +263,16 @@ public struct Buffer: Write {
 ///     var file = try File.create(path: "output.bin")
 ///     try writeAll(writer: file, from: data.asSlice())
 ///     // all bytes guaranteed written (or error)
-public func writeAll[W](writer: W, from buf: Slice[UInt8]) -> Result[(), Error] where W: Write {
+public func writeAll[W](writer: W, from buf: Slice[UInt8]) -> () throws Error where W: Write {
     var written: Int64 = 0;
-    var errorResult: Result[(), Error] = .Ok(());
-    var done: Bool = false;
-    while written < buf.count and done == false {
+    while written < buf.count {
         let remaining = Slice(pointer: buf.pointer.offset(by: written), count: buf.count - written);
-        // TODO: add try back
-        match writer.write(from: remaining) {
-            .Ok(n) => {
-                if n == 0 {
-                    errorResult = .Err(brokenPipe());
-                    done = true
-                } else {
-                    written = written + n
-                }
-            },
-            .Err(e) => {
-                errorResult = .Err(e);
-                done = true
-            }
+        let n = try writer.write(from: remaining);
+        if n == 0 {
+            throw brokenPipe()
         }
+        written = written + n
     }
-    errorResult
 }
 
 /// Writes a single byte to a writer.
@@ -293,11 +280,11 @@ public func writeAll[W](writer: W, from buf: Slice[UInt8]) -> Result[(), Error] 
 /// Example:
 ///     var file = try File.create(path: "output.bin")
 ///     try writeByte(writer: file, byte: 0xFF)
-public func writeByte[W](writer: W, byte: UInt8) -> Result[(), Error] where W: Write {
-    var buf = Array[UInt8](capacity: 1);
+public func writeByte[W](writer: W, byte: UInt8) -> () throws Error where W: Write {
+    var buf = [UInt8](capacity: 1);
     buf.append(byte);
     let slice = Slice(pointer: buf.pointer(), count: 1);
-    writeAll(writer, from: slice)
+    try writeAll(writer, from: slice)
 }
 
 /// Writes a string as UTF-8 bytes to a writer.
@@ -305,29 +292,20 @@ public func writeByte[W](writer: W, byte: UInt8) -> Result[(), Error] where W: W
 /// Example:
 ///     var file = try File.create(path: "greeting.txt")
 ///     try writeStr(writer: file, s: "Hello, World!")
-public func writeStr[W](writer: W, s: String) -> Result[(), Error] where W: Write {
+public func writeStr[W](writer: W, s: String) -> () throws Error where W: Write {
     // Get the byte count and pointer from string
     let byteCount = s.byteCount;
     if byteCount == 0 {
-        return .Ok(())
+        return
     }
     // Create a slice from the string's internal bytes
     // Note: String stores bytes internally, we need to access them
     var i: Int64 = 0;
-    var errorResult: Result[(), Error] = .Ok(());
-    var done: Bool = false;
-    while i < byteCount and done == false {
+    while i < byteCount {
         let byte = s.byteAtUnchecked(i);
-        // TODO: add try back
-        match writeByte(writer, byte) {
-            .Ok(_) => i = i + 1,
-            .Err(e) => {
-                errorResult = .Err(e);
-                done = true
-            }
-        }
+        try writeByte(writer, byte);
+        i = i + 1
     }
-    errorResult
 }
 
 /// Writes a string followed by a newline to a writer.
@@ -338,10 +316,7 @@ public func writeStr[W](writer: W, s: String) -> Result[(), Error] where W: Writ
 ///     var file = try File.create(path: "lines.txt")
 ///     try writeLine(writer: file, s: "First line")
 ///     try writeLine(writer: file, s: "Second line")
-public func writeLine[W](writer: W, s: String) -> Result[(), Error] where W: Write {
-    // TODO: add try back
-    match writeStr(writer, s) {
-        .Ok(_) => writeByte(writer, 10),  // '\n'
-        .Err(e) => .Err(e)
-    }
+public func writeLine[W](writer: W, s: String) -> () throws Error where W: Write {
+    try writeStr(writer, s);
+    try writeByte(writer, 10)  // '\n'
 }

@@ -29,12 +29,12 @@ public enum Result[T, E]: Tryable {
     // ========================================================================
 
     /// Creates an Ok containing the value.
-    public static func ok(value: T) -> Result[T, E] {
+    public static func ok(value: T) -> T throws E {
         .Ok(value)
     }
 
     /// Creates an Err containing the error.
-    public static func err(error: E) -> Result[T, E] {
+    public static func err(error: E) -> T throws E {
         .Err(error)
     }
 
@@ -127,7 +127,7 @@ public enum Result[T, E]: Tryable {
     /// Transforms the success value using the function.
     ///
     /// Returns Err unchanged if this is Err.
-    public func map[U](transform: (T) -> U) -> Result[U, E] {
+    public func map[U](transform: (T) -> U) -> U throws E {
         match self {
             .Ok(value) => .Ok(transform(value)),
             .Err(error) => .Err(error)
@@ -137,7 +137,7 @@ public enum Result[T, E]: Tryable {
     /// Transforms the success value, flattening the result.
     ///
     /// Use when your transform function returns a Result.
-    public func flatMap[U](transform: (T) -> Result[U, E]) -> Result[U, E] {
+    public func flatMap[U](transform: (T) -> U throws E) -> U throws E {
         match self {
             .Ok(value) => transform(value),
             .Err(error) => .Err(error)
@@ -151,7 +151,7 @@ public enum Result[T, E]: Tryable {
     /// Transforms the error value using the function.
     ///
     /// Returns Ok unchanged if this is Ok.
-    public func mapErr[F](transform: (E) -> F) -> Result[T, F] {
+    public func mapErr[F](transform: (E) -> F) -> T throws F {
         match self {
             .Ok(value) => .Ok(value),
             .Err(error) => .Err(transform(error))
@@ -161,7 +161,7 @@ public enum Result[T, E]: Tryable {
     /// Transforms the error value, flattening the result.
     ///
     /// Use when your transform function returns a Result.
-    public func flatMapErr[F](transform: (E) -> Result[T, F]) -> Result[T, F] {
+    public func flatMapErr[F](transform: (E) -> T throws F) -> T throws F {
         match self {
             .Ok(value) => .Ok(value),
             .Err(error) => transform(error)
@@ -198,7 +198,7 @@ public enum Result[T, E]: Tryable {
 
     /// Returns other if this is Ok, otherwise returns the Err.
     /// Note: 'and' is a keyword, so we use 'andValue'.
-    public func andValue[U](other: Result[U, E]) -> Result[U, E] {
+    public func andValue[U](other: U throws E) -> U throws E {
         match self {
             .Ok(_) => other,
             .Err(error) => .Err(error)
@@ -206,7 +206,7 @@ public enum Result[T, E]: Tryable {
     }
 
     /// Alias for flatMap - chains result operations.
-    public func andThen[U](transform: (T) -> Result[U, E]) -> Result[U, E] {
+    public func andThen[U](transform: (T) -> U throws E) -> U throws E {
         match self {
             .Ok(value) => transform(value),
             .Err(error) => .Err(error)
@@ -215,7 +215,7 @@ public enum Result[T, E]: Tryable {
 
     /// Returns this if Ok, otherwise returns other.
     /// Note: 'or' is a keyword, so we use 'orValue'.
-    public func orValue(other: Result[T, E]) -> Result[T, E] {
+    public func orValue(other: T throws E) -> T throws E {
         match self {
             .Ok(value) => .Ok(value),
             .Err(_) => other
@@ -225,7 +225,7 @@ public enum Result[T, E]: Tryable {
     /// Returns this if Ok, otherwise calls alternative with the error.
     ///
     /// The function receives the error and can attempt recovery.
-    public func orElse[F](alternative: (E) -> Result[T, F]) -> Result[T, F] {
+    public func orElse[F](alternative: (E) -> T throws F) -> T throws F {
         match self {
             .Ok(value) => .Ok(value),
             .Err(error) => alternative(error)
@@ -248,7 +248,7 @@ public enum Result[T, E]: Tryable {
 
 /// FromResidual extension enabling early return propagation.
 extend Result[T, E]: FromResidual[E] {
-    public static func fromResidual(residual: E) -> Result[T, E] {
+    public static func fromResidual(residual: E) -> T throws E {
         .Err(residual)
     }
 }
@@ -256,7 +256,7 @@ extend Result[T, E]: FromResidual[E] {
 /// FromValue extension enabling value promotion.
 /// Allows: let r: Int throws Error = 42
 extend Result[T, E]: FromValue[T] {
-    public static func from(value: T) -> Result[T, E] {
+    public static func from(value: T) -> T throws E {
         .Ok(value)
     }
 }

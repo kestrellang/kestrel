@@ -11,7 +11,7 @@ import std.ffi.(malloc, free, realloc)
 public protocol Allocator {
     /// Allocates memory matching the given layout.
     /// Returns None on allocation failure.
-    mutating func allocate(layout: Layout) -> Optional[RawPointer]
+    mutating func allocate(layout: Layout) -> RawPointer?
 
     /// Deallocates memory previously allocated with this allocator.
     /// The layout must match the layout used for allocation.
@@ -19,7 +19,7 @@ public protocol Allocator {
 
     /// Reallocates memory to a new size.
     /// Returns None on reallocation failure (original memory unchanged).
-    mutating func reallocate(ptr: RawPointer, oldLayout: Layout, newLayout: Layout) -> Optional[RawPointer]
+    mutating func reallocate(ptr: RawPointer, oldLayout: Layout, newLayout: Layout) -> RawPointer?
 }
 
 /// System allocator that wraps malloc/free from libc.
@@ -30,7 +30,7 @@ public struct SystemAllocator: Allocator {
 
     /// Allocates memory using malloc.
     /// Note: Alignment beyond natural alignment is not guaranteed.
-    public mutating func allocate(layout: Layout) -> Optional[RawPointer] {
+    public mutating func allocate(layout: Layout) -> RawPointer? {
         let ptr = malloc(layout.size.raw);
         if lang.ptr_is_null(ptr) {
             .None
@@ -45,7 +45,7 @@ public struct SystemAllocator: Allocator {
     }
 
     /// Reallocates memory using realloc.
-    public mutating func reallocate(ptr: RawPointer, oldLayout: Layout, newLayout: Layout) -> Optional[RawPointer] {
+    public mutating func reallocate(ptr: RawPointer, oldLayout: Layout, newLayout: Layout) -> RawPointer? {
         let newPtr = realloc(ptr.raw, newLayout.size.raw);
         if lang.ptr_is_null(newPtr) {
             .None
