@@ -38,10 +38,3 @@ public protocol FromResidual[Early] {
     @builtin(.FromResidualMethod)
     static func fromResidual(residual: Early) -> Self
 }
-
-/// Protocol that enables `return value` in result-returning contexts.
-/// Allows wrapping a success value into the return type.
-public protocol Returnable[Output] {
-    /// Creates an instance from a success value.
-    static func fromOutput(value: Output) -> Self
-}

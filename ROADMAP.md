@@ -640,6 +640,7 @@ See [docs/memory-model/implementation-plan.md](docs/memory-model/implementation-
 - [x] Irrefutable patterns in function parameters
 - [x] Refactor Matchable for range patterns and array patterns
 - [x] Let/var static variable consistency
+- [ ] Default function parameters
 
 ## Phase 15 Compiler Infrastructure
 
@@ -654,6 +655,12 @@ See [docs/memory-model/implementation-plan.md](docs/memory-model/implementation-
 - [ ] Web Server
 - [ ] Flock package manager
 - [ ] Jessup version manager
+
+### Documentation
+
+- [ ] Doc comments - `///` with structured sections
+  - Parameter, Returns, Throws documentation
+  - Testable code examples (future)
 
 ## Phase 16+ Advanced Types & Runtime
 
@@ -684,6 +691,15 @@ See [docs/memory-model/implementation-plan.md](docs/memory-model/implementation-
 ### Syntax & Sugar
 
 - [ ] Optional Chaining
+
+### Properties
+
+- [ ] Lazy properties - `lazy let expensive = compute()`
+- [ ] Property observers - `willSet` / `didSet` blocks
+
+### Metaprogramming
+
+- [ ] Auto-derived protocols - `@derive(Equatable, Hashable)`
 
 ### Standard Library
 

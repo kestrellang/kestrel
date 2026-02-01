@@ -2,7 +2,7 @@
 
 module std.result
 
-import std.core.(Equatable, Formattable, Bool, ControlFlow, Tryable, FromResidual, Returnable)
+import std.core.(Equatable, Formattable, Bool, ControlFlow, Tryable, FromResidual)
 import std.text.(String)
 import std.result.(Optional)
 
@@ -13,7 +13,7 @@ import std.result.(Optional)
 ///
 /// Syntactic sugar:
 ///     T throws E   desugars to  Result[T, E]
-public enum Result[T, E]: Tryable, Returnable[T] {
+public enum Result[T, E]: Tryable {
     /// Contains a success value.
     case Ok(T)
 
@@ -68,11 +68,6 @@ public enum Result[T, E]: Tryable, Returnable[T] {
             .Ok(value) => .Continue(value),
             .Err(error) => .Break(error)
         }
-    }
-
-    /// Creates Ok from a value for the return statement.
-    public static func fromOutput(value: T) -> Result[T, E] {
-        .Ok(value)
     }
 
     // ========================================================================
