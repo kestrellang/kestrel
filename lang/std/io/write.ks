@@ -50,7 +50,7 @@ public protocol Write {
     ///     let data: [UInt8] = [1, 2, 3, 4, 5]
     ///     let n = try writer.write(from: data.asSlice())
     ///     // n bytes written, may be less than 5
-    mutating func write(from buf: Slice[UInt8]) -> Int64 throws Error
+    mutating func write(from buf: Slice[UInt8]) -> Result[Int64, Error]
 
     /// Flushes any buffered data to the underlying destination.
     ///
@@ -62,7 +62,7 @@ public protocol Write {
     /// Example:
     ///     try writer.write(from: data.asSlice())
     ///     try writer.flush()  // ensure data is committed
-    mutating func flush() -> () throws Error
+    mutating func flush() -> Result[(), Error]
 }
 
 // ============================================================================
@@ -92,8 +92,8 @@ public struct Sink: Write {
     /// Example:
     ///     var sink = Sink()
     ///     let n = try sink.write(from: data.asSlice())  // n == data.count
-    public mutating func write(from buf: Slice[UInt8]) -> Int64 throws Error {
-        buf.count
+    public mutating func write(from buf: Slice[UInt8]) -> Result[Int64, Error] {
+        .Ok(buf.count)
     }
 
     /// No-op flush, always succeeds.
@@ -101,8 +101,8 @@ public struct Sink: Write {
     /// Example:
     ///     var sink = Sink()
     ///     try sink.flush()  // Ok(())
-    public mutating func flush() -> () throws Error {
-        ()
+    public mutating func flush() -> Result[(), Error] {
+        .Ok(())
     }
 }
 
@@ -121,14 +121,14 @@ public struct Sink: Write {
 ///     try writeStr(writer: buf, s: "World!")
 ///     let result = buf.toString()  // "Hello, World!"
 public struct Buffer: Write {
-    var data: [UInt8]
+    var data: Array[UInt8]
 
     /// Creates an empty buffer writer.
     ///
     /// Example:
     ///     var buf = Buffer()
     public init() {
-        self.data = [UInt8]()
+        self.data = Array[UInt8]()
     }
 
     /// Creates a buffer writer with the specified initial capacity.
@@ -151,13 +151,13 @@ public struct Buffer: Write {
     ///     let data: [UInt8] = [1, 2, 3]
     ///     try buf.write(from: data.asSlice())
     ///     buf.count()  // 3
-    public mutating func write(from buf: Slice[UInt8]) -> Int64 throws Error {
+    public mutating func write(from buf: Slice[UInt8]) -> Result[Int64, Error] {
         var i: Int64 = 0;
         while i < buf.count {
             self.data.append(buf.pointer.offset(by: i).read());
             i = i + 1
         }
-        buf.count
+        .Ok(buf.count)
     }
 
     /// No-op flush, always succeeds.
@@ -167,8 +167,8 @@ public struct Buffer: Write {
     /// Example:
     ///     var buf = Buffer()
     ///     try buf.flush()  // Ok(())
-    public mutating func flush() -> () throws Error {
-        ()
+    public mutating func flush() -> Result[(), Error] {
+        .Ok(())
     }
 
     // ========================================================================
@@ -225,7 +225,7 @@ public struct Buffer: Write {
     ///     var buf = Buffer()
     ///     try buf.write(from: [1, 2, 3].asSlice())
     ///     let arr = buf.toArray()  // [1, 2, 3]
-    public func toArray() -> [UInt8] {
+    public func toArray() -> Array[UInt8] {
         self.data.clone()
     }
 
@@ -263,16 +263,17 @@ public struct Buffer: Write {
 ///     var file = try File.create(path: "output.bin")
 ///     try writeAll(writer: file, from: data.asSlice())
 ///     // all bytes guaranteed written (or error)
-public func writeAll[W](writer: W, from buf: Slice[UInt8]) -> () throws Error where W: Write {
+public func writeAll[W](writer: W, from buf: Slice[UInt8]) -> Result[(), Error] where W: Write {
     var written: Int64 = 0;
     while written < buf.count {
         let remaining = Slice(pointer: buf.pointer.offset(by: written), count: buf.count - written);
         let n = try writer.write(from: remaining);
         if n == 0 {
-            throw brokenPipe()
+            return .Err(brokenPipe())
         }
         written = written + n
-    }
+    };
+    .Ok(())
 }
 
 /// Writes a single byte to a writer.
@@ -280,11 +281,11 @@ public func writeAll[W](writer: W, from buf: Slice[UInt8]) -> () throws Error wh
 /// Example:
 ///     var file = try File.create(path: "output.bin")
 ///     try writeByte(writer: file, byte: 0xFF)
-public func writeByte[W](writer: W, byte: UInt8) -> () throws Error where W: Write {
-    var buf = [UInt8](capacity: 1);
+public func writeByte[W](writer: W, byte: UInt8) -> Result[(), Error] where W: Write {
+    var buf = Array[UInt8](capacity: 1);
     buf.append(byte);
     let slice = Slice(pointer: buf.pointer(), count: 1);
-    try writeAll(writer, from: slice)
+    writeAll(writer, from: slice)
 }
 
 /// Writes a string as UTF-8 bytes to a writer.
@@ -292,11 +293,11 @@ public func writeByte[W](writer: W, byte: UInt8) -> () throws Error where W: Wri
 /// Example:
 ///     var file = try File.create(path: "greeting.txt")
 ///     try writeStr(writer: file, s: "Hello, World!")
-public func writeStr[W](writer: W, s: String) -> () throws Error where W: Write {
+public func writeStr[W](writer: W, s: String) -> Result[(), Error] where W: Write {
     // Get the byte count and pointer from string
     let byteCount = s.byteCount;
     if byteCount == 0 {
-        return
+        return .Ok(())
     }
     // Create a slice from the string's internal bytes
     // Note: String stores bytes internally, we need to access them
@@ -305,7 +306,8 @@ public func writeStr[W](writer: W, s: String) -> () throws Error where W: Write 
         let byte = s.byteAtUnchecked(i);
         try writeByte(writer, byte);
         i = i + 1
-    }
+    };
+    .Ok(())
 }
 
 /// Writes a string followed by a newline to a writer.
@@ -316,7 +318,7 @@ public func writeStr[W](writer: W, s: String) -> () throws Error where W: Write 
 ///     var file = try File.create(path: "lines.txt")
 ///     try writeLine(writer: file, s: "First line")
 ///     try writeLine(writer: file, s: "Second line")
-public func writeLine[W](writer: W, s: String) -> () throws Error where W: Write {
+public func writeLine[W](writer: W, s: String) -> Result[(), Error] where W: Write {
     try writeStr(writer, s);
-    try writeByte(writer, 10)  // '\n'
+    writeByte(writer, 10)  // '\n'
 }

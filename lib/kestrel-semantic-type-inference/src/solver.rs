@@ -1398,6 +1398,13 @@ fn resolve_implicit_member(
         return Ok(SolveResult::Deferred);
     }
 
+    // If still a TypeAlias after expansion, the alias hasn't been bound yet.
+    // This happens during bootstrap (e.g., result.ks using T throws E before
+    // ResultTypeOperator is fully bound). Defer to allow binding to complete.
+    if matches!(resolved_ty.kind(), TyKind::TypeAlias { .. }) {
+        return Ok(SolveResult::Deferred);
+    }
+
     // Must be an enum type
     let TyKind::Enum {
         symbol: enum_symbol,

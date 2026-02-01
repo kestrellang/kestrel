@@ -1,10 +1,10 @@
-@import url("https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400..900;1,400..900&family=Source+Code+Pro:ital,wght@0,200..900;1,200..900&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Fira+Code:wght@300..700&family=Fraunces:ital,opsz,wght@0,9..144,100..900;1,9..144,100..900&display=swap");
 
 @import "tailwindcss";
 
 :root {
-  --font-serif: "Playfair Display", Georgia, serif;
-  --font-mono: "Source Code Pro", monospace;
+  --font-serif: "Fraunces", Georgia, serif;
+  --font-mono: "Fira Code", monospace;
 
   /* Kestrel brand colors - warm earth tones inspired by the bird */
   --color-rust: #c45a3b;
@@ -49,14 +49,29 @@
 .dark .bg-\[\#faf8f0\] { background-color: #262218; }
 .dark .bg-\[\#f0f2f4\] { background-color: #1e2024; }
 
-/* Dark mode gradient overlays */
-.dark .from-\[\#f8f6f1\] { --tw-gradient-from: #1c1916; }
-.dark .via-\[\#f8f6f1\]\/80 { --tw-gradient-via: rgba(28, 25, 22, 0.8); }
-.dark .to-\[\#f8f6f1\]\/70 { --tw-gradient-to: rgba(28, 25, 22, 0.7); }
+/* Dark mode - hide gradient overlays (not needed with multiply blend) */
+.dark .from-\[\#f8f6f1\] { opacity: 0; }
+.dark .via-\[\#f8f6f1\]\/80 { opacity: 0; }
+.dark .from-\[\#f8f6f1\]\/50 { opacity: 0; }
 
 /* Dark mode text adjustments */
-.dark .text-\[var\(--color-slate\)\] { color: #e8e8e8; }
-.dark .text-\[var\(--color-slate-light\)\] { color: #b0b0b0; }
+.dark .text-\[var\(--color-slate\)\] { color: #f0ebe6; }
+.dark .text-\[var\(--color-slate-light\)\] { color: #b8b0a8; }
+
+/* Dark mode footer - keep slate dark as background */
+.dark .bg-\[var\(--color-slate\)\] { background-color: #1a1816; }
+
+/* Dark mode feature pills */
+.dark .bg-white\/60 { background-color: rgba(40, 36, 32, 0.8); }
+
+/* Dark mode version badge and forest/10 backgrounds */
+.dark .bg-\[var\(--color-forest\)\]\/10 { background-color: rgba(45, 90, 71, 0.25); }
+.dark .text-\[var\(--color-forest\)\] { color: #5da88a; }
+
+/* Dark mode hero image */
+.dark .scroll-section img[src*="kestrel"] {
+  filter: brightness(1.1) saturate(1.2);
+}
 
 /* Dark mode scrollbar */
 .dark::-webkit-scrollbar-thumb {

@@ -4,7 +4,7 @@
 module std.core
 
 import std.core.(Less, LessOrEqual, Greater, GreaterOrEqual, NotEqual, Equal)
-import std.text.(String, FormatOptions)
+import std.text.(String)
 import std.memory.(Slice, Pointer)
 import std.num.(UInt64, Int64)
 

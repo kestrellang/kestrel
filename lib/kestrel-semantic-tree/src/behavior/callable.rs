@@ -4,7 +4,12 @@ use kestrel_span::{Name, Span};
 use semantic_tree::behavior::Behavior;
 use semantic_tree::symbol::Symbol;
 
-use crate::{behavior::KestrelBehaviorKind, language::KestrelLanguage, ty::Ty};
+use crate::{
+    behavior::KestrelBehaviorKind,
+    language::KestrelLanguage,
+    symbol::protocol::ProtocolSymbol,
+    ty::Ty,
+};
 
 /// Describes how a method receives its instance (self).
 ///
@@ -292,9 +297,43 @@ impl SignatureType {
                 // (could also resolve to underlying type)
                 SignatureType::Named(vec![symbol.metadata().name().value.clone()])
             },
-            TyKind::AssociatedType { symbol, .. } => {
-                // For associated types, use the associated type name
-                SignatureType::Named(vec![symbol.metadata().name().value.clone()])
+            TyKind::AssociatedType { symbol, container } => {
+                // For associated types, include the protocol qualification to distinguish
+                // between protocols with the same associated type name (e.g., Addable.Output
+                // vs RangeConstructible.Output)
+                let assoc_name = symbol.metadata().name().value.clone();
+
+                // Try to get the protocol name from the container or the symbol's parent
+                let protocol_name = match container {
+                    Some(container_ty) => match container_ty.kind() {
+                        TyKind::Protocol { symbol: proto_sym, .. } => {
+                            Some(proto_sym.metadata().name().value.clone())
+                        },
+                        TyKind::SelfType => {
+                            // For Self type, look up the associated type's defining protocol
+                            symbol
+                                .metadata()
+                                .parent()
+                                .and_then(|p| p.downcast_arc::<ProtocolSymbol>().ok())
+                                .map(|p| p.metadata().name().value.clone())
+                        },
+                        _ => None,
+                    },
+                    None => {
+                        // No container - associated type used within its defining protocol
+                        // Look up the parent protocol
+                        symbol
+                            .metadata()
+                            .parent()
+                            .and_then(|p| p.downcast_arc::<ProtocolSymbol>().ok())
+                            .map(|p| p.metadata().name().value.clone())
+                    },
+                };
+
+                match protocol_name {
+                    Some(proto) => SignatureType::Named(vec![proto, assoc_name]),
+                    None => SignatureType::Named(vec![assoc_name]),
+                }
             },
             TyKind::UnresolvedFunction { return_type, .. } => {
                 // Treat as a function type with unknown params

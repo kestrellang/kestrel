@@ -199,7 +199,7 @@ public struct Char: Equatable, Comparable, Matchable, ExpressibleByCharLiteral, 
 ///
 /// May consist of multiple code points (e.g., emoji sequences).
 public struct Grapheme: Equatable {
-    private var _chars: [Char]
+    private var _chars: Array[Char]
 
     // ========================================================================
     // CONSTRUCTORS
@@ -207,12 +207,12 @@ public struct Grapheme: Equatable {
 
     /// Creates a Grapheme from a single Char.
     public init(char char: Char) {
-        self._chars = Array();
+        self._chars = Array[Char]();
         self._chars.append(char);
     }
 
     /// Creates a Grapheme from multiple Chars.
-    public init(chars chars: [Char]) {
+    public init(chars chars: Array[Char]) {
         self._chars = chars;
     }
 
@@ -221,7 +221,7 @@ public struct Grapheme: Equatable {
     // ========================================================================
 
     /// Returns the code points in this grapheme.
-    public func chars() -> [Char] { self._chars }
+    public func chars() -> Array[Char] { self._chars }
 
     /// Returns the number of code points.
     public func charCount() -> Int64 {

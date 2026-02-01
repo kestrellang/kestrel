@@ -10,7 +10,8 @@ import std.core.(
     BitwiseAnd, BitwiseOr, BitwiseXor, BitwiseNot, LeftShift, RightShift,
     AddAssign, SubtractAssign, MultiplyAssign, DivideAssign, ModuloAssign,
     BitwiseAndAssign, BitwiseOrAssign, BitwiseXorAssign, LeftShiftAssign, RightShiftAssign,
-    ExpressibleByIntLiteral, Convertible
+    ExpressibleByIntLiteral, Convertible,
+    RangeConstructible, ClosedRangeConstructible, Range, ClosedRange
 )
 import std.text.(String)
 import std.memory.(Slice, Pointer)
@@ -61,6 +62,8 @@ public struct Int32:
     RightShiftAssign[lang.i64],
     ExpressibleByIntLiteral,
     FFISafe,
+    RangeConstructible,
+    ClosedRangeConstructible,
     Convertible[Int8],
     Convertible[Int16],
     Convertible[Int64],
@@ -240,6 +243,16 @@ public struct Int32:
     /// Returns the previous value (self - 1).
     public func predecessor() -> Int32 { self.subtract(Int32.one) }
 
+    /// Creates an exclusive range from self to end (self..<end).
+    public func exclusiveRange(to end: Int32) -> Range[Int32] {
+        Range[Int32](self, end)
+    }
+
+    /// Creates an inclusive range from self to end (self..=end).
+    public func inclusiveRange(to end: Int32) -> ClosedRange[Int32] {
+        ClosedRange[Int32](self, end)
+    }
+
     // ========================================================================
     // HASHING
     // ========================================================================
@@ -266,6 +279,8 @@ public struct Int32:
     type BitwiseNot.Output = Int32
     type LeftShift.Output = Int32
     type RightShift.Output = Int32
+    type RangeConstructible.Output = Range[Int32]
+    type ClosedRangeConstructible.Output = ClosedRange[Int32]
 
     // ========================================================================
     // ARITHMETIC (Wrapping - Default)

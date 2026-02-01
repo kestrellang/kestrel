@@ -41,16 +41,11 @@ print(user.toJson())`,
     description: "Exhaustive matching, no forgotten cases",
     code: `// Exhaustive matching, no forgotten cases
 
-enum Result[T, E] {
-    case Ok(T)
-    case Err(E)
-}
-
-func divide(a: Int, b: Int) -> Result[Int, String] {
+func divide(a: Int, b: Int) -> Int throws String {
     if b == 0 {
-        return .Err("division by zero")
+        throw "division by zero"
     }
-    .Ok(a / b)
+    a / b  // automatically promoted to .Ok
 }
 
 match divide(a: 10, b: 2) {
@@ -66,13 +61,13 @@ match divide(a: 10, b: 2) {
     code: `// Full parametric polymorphism
 
 struct Stack[T] {
-    var items: Array[T]
+    var items: [T]
 
     mutating func push(item: T) {
         self.items.append(item)
     }
 
-    mutating func pop() -> Option[T] {
+    mutating func pop() -> T? {
         self.items.pop()
     }
 }
@@ -371,7 +366,7 @@ export default function CodeDemo() {
             Expressive <span className="text-[var(--color-gold)]">by Default.</span>
           </h2>
           <p className="mt-4 text-xl text-white/60 font-mono">
-            Clean syntax that reveals intent.
+            Reads like pseudocode. Runs like C.
           </p>
         </div>
 

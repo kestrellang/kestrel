@@ -64,7 +64,7 @@ export default function Hero() {
                 ? "opacity-100 translate-y-0"
                 : "opacity-0 translate-y-10"
             }`}>
-            Systems programming, refined.
+            You already know what you want. We just made it pleasant.
           </p>
 
           {/* Sub-tagline */}
@@ -74,7 +74,7 @@ export default function Hero() {
                 ? "opacity-100 translate-y-0"
                 : "opacity-0 translate-y-10"
             }`}>
-            Bare metal power. Zero mental overhead.
+            All the power. None of the friction.
           </p>
         </div>
 

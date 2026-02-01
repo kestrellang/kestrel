@@ -930,3 +930,79 @@ mod protocol_inheritance {
         .expect(HasError("does not satisfy bound"));
     }
 }
+
+// =============================================================================
+// MULTIPLE PROTOCOLS WITH SAME ASSOCIATED TYPE NAME
+// =============================================================================
+
+mod multiple_protocols_same_associated_type {
+    use super::*;
+
+    #[test]
+    fn qualified_bindings_for_different_protocols() {
+        // When a type conforms to multiple protocols that each have an associated type
+        // with the same name, qualified bindings should correctly distinguish them.
+        Test::new(
+            r#"module Test
+            protocol Addable[Rhs = Self] {
+                type Output;
+                func add(other: Rhs) -> Output
+            }
+
+            protocol RangeConstructible[Rhs = Self] {
+                type Output;
+                func exclusiveRange(to end: Rhs) -> Output
+            }
+
+            struct Range[T] {
+                init() { }
+            }
+
+            struct MyInt: Addable, RangeConstructible {
+                type Addable.Output = MyInt;
+                type RangeConstructible.Output = Range[MyInt];
+
+                init() { }
+
+                func add(other: MyInt) -> MyInt { self }
+                func exclusiveRange(to end: MyInt) -> Range[MyInt] { Range[MyInt]() }
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn mismatched_return_type_with_qualified_bindings() {
+        // Verify that using the wrong type for a method is caught even with qualified bindings
+        Test::new(
+            r#"module Test
+            protocol Addable[Rhs = Self] {
+                type Output;
+                func add(other: Rhs) -> Output
+            }
+
+            protocol RangeConstructible[Rhs = Self] {
+                type Output;
+                func exclusiveRange(to end: Rhs) -> Output
+            }
+
+            struct Range[T] {
+                init() { }
+            }
+
+            struct MyInt: Addable, RangeConstructible {
+                type Addable.Output = MyInt;
+                type RangeConstructible.Output = Range[MyInt];
+
+                init() { }
+
+                // Wrong: returns Range[MyInt] but Addable.Output = MyInt
+                func add(other: MyInt) -> Range[MyInt] { Range[MyInt]() }
+                func exclusiveRange(to end: MyInt) -> Range[MyInt] { Range[MyInt]() }
+            }
+        "#,
+        )
+        .expect(HasError("wrong return type"));
+    }
+}

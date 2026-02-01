@@ -362,7 +362,7 @@ def generate_integer_format_method(type_name: str, bits: int, signed: bool) -> s
 
         // Reverse the string
         var reversed = String();
-        var i = result.byteCount() - 1;
+        var i = result.byteCount - 1;
         while i >= 0 {{
             reversed.appendByte(result.byteAtUnchecked(i));
             i = i - 1
@@ -389,7 +389,7 @@ def generate_integer_format_method(type_name: str, bits: int, signed: bool) -> s
 
         // Reverse the string
         var reversed = String();
-        var i = result.byteCount() - 1;
+        var i = result.byteCount - 1;
         while i >= 0 {{
             reversed.appendByte(result.byteAtUnchecked(i));
             i = i - 1
@@ -432,7 +432,7 @@ def generate_integer_parse_method(type_name: str, bits: int, signed: bool) -> st
     # For signed types, handle negative numbers
     if signed:
         return f'''    public static func parse(string: String) -> {type_name}? {{
-        let len = string.byteCount();
+        let len = string.byteCount;
         if len == 0 {{
             return .None
         }}
@@ -504,7 +504,7 @@ def generate_integer_parse_method(type_name: str, bits: int, signed: bool) -> st
         max_before_multiply = "1844674407370955161"  # UInt64.maxValue / 10
 
         return f'''    public static func parse(string: String) -> {type_name}? {{
-        let len = string.byteCount();
+        let len = string.byteCount;
         if len == 0 {{
             return .None
         }}
@@ -721,7 +721,7 @@ def generate_float_parse_method(type_name: str, bits: int) -> str:
     lang_type = f"f{bits}"
 
     return f'''    public static func parse(string: String) -> {type_name}? {{
-        let len = string.byteCount();
+        let len = string.byteCount;
         if len == 0 {{
             return .None
         }}
@@ -988,7 +988,7 @@ def generate_float_format_method(type_name: str, bits: int) -> str:
                 intVal = intVal / 10
             }}
             // Reverse digits
-            var i = digits.byteCount() - 1;
+            var i = digits.byteCount - 1;
             while i >= 0 {{
                 result.appendByte(digits.byteAtUnchecked(i));
                 i = i - 1

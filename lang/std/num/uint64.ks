@@ -10,7 +10,8 @@ import std.core.(
     BitwiseAnd, BitwiseOr, BitwiseXor, BitwiseNot, LeftShift, RightShift,
     AddAssign, SubtractAssign, MultiplyAssign, DivideAssign, ModuloAssign,
     BitwiseAndAssign, BitwiseOrAssign, BitwiseXorAssign, LeftShiftAssign, RightShiftAssign,
-    ExpressibleByIntLiteral, Convertible
+    ExpressibleByIntLiteral, Convertible,
+    RangeConstructible, ClosedRangeConstructible, Range, ClosedRange
 )
 import std.text.(String)
 import std.memory.(Slice, Pointer)
@@ -61,6 +62,8 @@ public struct UInt64:
     RightShiftAssign[lang.i64],
     ExpressibleByIntLiteral,
     FFISafe,
+    RangeConstructible,
+    ClosedRangeConstructible,
     Convertible[Int8],
     Convertible[Int16],
     Convertible[Int32],
@@ -240,6 +243,16 @@ public struct UInt64:
     /// Returns the previous value (self - 1).
     public func predecessor() -> UInt64 { self.subtract(UInt64.one) }
 
+    /// Creates an exclusive range from self to end (self..<end).
+    public func exclusiveRange(to end: UInt64) -> Range[UInt64] {
+        Range[UInt64](self, end)
+    }
+
+    /// Creates an inclusive range from self to end (self..=end).
+    public func inclusiveRange(to end: UInt64) -> ClosedRange[UInt64] {
+        ClosedRange[UInt64](self, end)
+    }
+
     // ========================================================================
     // HASHING
     // ========================================================================
@@ -266,6 +279,8 @@ public struct UInt64:
     type BitwiseNot.Output = UInt64
     type LeftShift.Output = UInt64
     type RightShift.Output = UInt64
+    type RangeConstructible.Output = Range[UInt64]
+    type ClosedRangeConstructible.Output = ClosedRange[UInt64]
 
     // ========================================================================
     // ARITHMETIC (Wrapping - Default)

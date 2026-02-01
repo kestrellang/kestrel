@@ -7,7 +7,7 @@ use kestrel_execution_graph_lowering::LoweringResult;
 use kestrel_lexer::lex;
 use kestrel_parser::{Parser, parse_source_file};
 use kestrel_reporting::{Diagnostic, DiagnosticContext, IntoDiagnostic, Label};
-use kestrel_semantic_analyzers::{AnalysisContext, run_all};
+use kestrel_semantic_analyzers::{Analyzer, AnalysisContext, run_all};
 use kestrel_semantic_model::SemanticModel;
 use kestrel_semantic_tree_binder::SemanticBinder;
 use kestrel_semantic_tree_builder::SemanticModelBuilder;
@@ -137,18 +137,93 @@ impl Compilation {
             };
         }
 
-        // Run each analyzer individually, stopping on first error
-        let mut owned = kestrel_semantic_analyzers::default_analyzers();
-        for analyzer in owned.iter_mut() {
+        // Run analyzers in phases, stopping if errors occur after each phase
+        use kestrel_semantic_analyzers::analyzers::{
+            AssignmentValidationAnalyzer, ClosureAnalyzer, ConformanceAnalyzer,
+            ConstraintCycleAnalyzer, DeadCodeAnalyzer, DefiniteAssignmentAnalyzer,
+            DuplicateCallableAnalyzer, DuplicateCaseAnalyzer, DuplicateLabelAnalyzer,
+            DuplicateSymbolAnalyzer, ExhaustiveReturnAnalyzer, ExhaustivenessAnalyzer,
+            ExtensionConflictAnalyzer, FieldAnalyzer, ForLoopPatternAnalyzer,
+            FunctionBodyAnalyzer, GenericsAnalyzer, GuardLetDivergenceAnalyzer,
+            ImportAnalyzer, InitializerVerificationAnalyzer, IrrefutablePatternAnalyzer,
+            ProtocolMethodAnalyzer, RecursiveEnumAnalyzer, RefutablePatternAnalyzer,
+            StaticContextAnalyzer, StructCycleAnalyzer, SubscriptValidationAnalyzer,
+            TypeAliasCycleAnalyzer, TypeCheckAnalyzer, TypeInferenceAnalyzer,
+            VisibilityConsistencyAnalyzer,
+        };
+
+        // Phase 1: Pre-inference analyzers (cycle detection, conformance, validation)
+        {
+            let mut a0 = TypeAliasCycleAnalyzer::new();
+            let mut a1 = StructCycleAnalyzer::new();
+            let mut a2 = ConstraintCycleAnalyzer::new();
+            let mut a3 = ConformanceAnalyzer::new();
+            let mut a4 = ExtensionConflictAnalyzer::new();
+            let mut a5 = FieldAnalyzer::new();
+            let mut a6 = InitializerVerificationAnalyzer::new();
+            let mut a7 = AssignmentValidationAnalyzer::new();
+            let mut a8 = DefiniteAssignmentAnalyzer::new();
+            let mut a9 = DeadCodeAnalyzer::new();
+            let mut a10 = ExhaustiveReturnAnalyzer::new();
+            let mut a11 = GuardLetDivergenceAnalyzer::new();
+            let mut a12 = ClosureAnalyzer::new();
+            let mut analyzers: Vec<&mut dyn Analyzer> = vec![
+                &mut a0, &mut a1, &mut a2, &mut a3, &mut a4, &mut a5, &mut a6,
+                &mut a7, &mut a8, &mut a9, &mut a10, &mut a11, &mut a12,
+            ];
             let mut ctx = AnalysisContext::new(&model, &mut diagnostics);
-            run_all(&mut [analyzer.as_mut()], &model, &mut ctx);
-            if diagnostics.has_errors() {
-                return Self {
-                    source_files,
-                    semantic_model: Some(model),
-                    diagnostics,
-                };
-            }
+            run_all(&mut analyzers, &model, &mut ctx);
+        }
+        if diagnostics.has_errors() {
+            return Self {
+                source_files,
+                semantic_model: Some(model),
+                diagnostics,
+            };
+        }
+
+        // Phase 2: Type resolution (inference, pattern matching, type checking)
+        {
+            let mut a0 = TypeInferenceAnalyzer::new();
+            let mut a1 = RefutablePatternAnalyzer::new();
+            let mut a2 = ForLoopPatternAnalyzer::new();
+            let mut a3 = IrrefutablePatternAnalyzer::new();
+            let mut a4 = ExhaustivenessAnalyzer::new();
+            let mut a5 = TypeCheckAnalyzer::new();
+            let mut a6 = FunctionBodyAnalyzer::new();
+            let mut a7 = SubscriptValidationAnalyzer::new();
+            let mut analyzers: Vec<&mut dyn Analyzer> = vec![
+                &mut a0, &mut a1, &mut a2, &mut a3, &mut a4, &mut a5, &mut a6, &mut a7,
+            ];
+            let mut ctx = AnalysisContext::new(&model, &mut diagnostics);
+            run_all(&mut analyzers, &model, &mut ctx);
+        }
+        if diagnostics.has_errors() {
+            return Self {
+                source_files,
+                semantic_model: Some(model),
+                diagnostics,
+            };
+        }
+
+        // Phase 3: Post-checking validators (duplicates, visibility, etc.)
+        {
+            let mut a0 = ProtocolMethodAnalyzer::new();
+            let mut a1 = StaticContextAnalyzer::new();
+            let mut a2 = DuplicateSymbolAnalyzer::new();
+            let mut a3 = DuplicateCallableAnalyzer::new();
+            let mut a4 = DuplicateCaseAnalyzer::new();
+            let mut a5 = DuplicateLabelAnalyzer::new();
+            let mut a6 = RecursiveEnumAnalyzer::new();
+            let mut a7 = VisibilityConsistencyAnalyzer::new();
+            let mut a8 = GenericsAnalyzer::new();
+            let mut a9 = ImportAnalyzer::new();
+            let mut analyzers: Vec<&mut dyn Analyzer> = vec![
+                &mut a0, &mut a1, &mut a2, &mut a3, &mut a4,
+                &mut a5, &mut a6, &mut a7, &mut a8, &mut a9,
+            ];
+            let mut ctx = AnalysisContext::new(&model, &mut diagnostics);
+            run_all(&mut analyzers, &model, &mut ctx);
         }
 
         Self {

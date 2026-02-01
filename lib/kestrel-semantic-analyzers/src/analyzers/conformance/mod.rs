@@ -523,11 +523,26 @@ fn substitute_associated_types_recursive(
 
     match sig_type {
         SignatureType::Named(path) if path.len() == 1 => {
+            // Simple name - direct lookup
             if let Some(replacement) = bindings.get(&path[0]) {
                 // Recursively substitute the replacement to handle chains like Rhs -> Self -> UInt8
                 substitute_associated_types_recursive(replacement, bindings, depth + 1)
             } else {
                 sig_type.clone()
+            }
+        },
+        SignatureType::Named(path) if path.len() == 2 => {
+            // Qualified name like ["Addable", "Output"] - join and lookup
+            let qualified_key = format!("{}.{}", path[0], path[1]);
+            if let Some(replacement) = bindings.get(&qualified_key) {
+                substitute_associated_types_recursive(replacement, bindings, depth + 1)
+            } else {
+                // Fall back to simple name lookup (for backward compatibility)
+                if let Some(replacement) = bindings.get(&path[1]) {
+                    substitute_associated_types_recursive(replacement, bindings, depth + 1)
+                } else {
+                    sig_type.clone()
+                }
             }
         },
         SignatureType::Tuple(elements) => SignatureType::Tuple(

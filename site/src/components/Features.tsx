@@ -12,6 +12,7 @@ interface Feature {
   tagline: string;
   points: FeaturePoint[];
   code: string;
+  filename: string;
   color: "forest" | "rust" | "gold" | "slate";
 }
 
@@ -26,8 +27,9 @@ const features: Feature[] = [
       { text: "Extend types you didn't write, even from dependencies" },
     ],
     color: "forest",
-    code: `func map[T, U](array: Array[T], transform: (T) -> U) -> Array[U] {
-    var result = Array[U]()
+    filename: "map.ks",
+    code: `func map[T, U](array: [T], transform: (T) -> U) -> [U] {
+    var result: [U] = []
     for item in array {
         result.append(transform(item))
     }
@@ -48,6 +50,7 @@ let names = users.map { it.name }`,
       { text: "No hidden overhead—pay only for what you use" },
     ],
     color: "rust",
+    filename: "orders.ks",
     code: `// High-level code...
 let total = orders
     .filter { it.status == .Completed }
@@ -68,7 +71,8 @@ let total = orders
       { text: "The compiler won't let you forget a case" },
     ],
     color: "gold",
-    code: `func findUser(id: Int) -> Option[User] {
+    filename: "user.ks",
+    code: `func findUser(id: Int) -> User? {
     users.first { it.id == id }
 }
 
@@ -88,6 +92,7 @@ match findUser(id: 42) {
       { text: "Safe defaults; opt into manual control when you need it" },
     ],
     color: "forest",
+    filename: "file.ks",
     code: `struct File {
     let handle: FileHandle
 
@@ -295,10 +300,10 @@ function FeaturesIntro() {
             Why Kestrel?
           </span>
           <h2 className="font-serif text-5xl md:text-6xl lg:text-7xl font-black text-[var(--color-slate)] mt-4 tracking-tight">
-            Fundamentals, <span className="text-[var(--color-rust)]">Done Right.</span>
+            Systems Programming, <span className="text-[var(--color-rust)]">Refined.</span>
           </h2>
           <p className="mt-6 text-xl md:text-2xl text-[var(--color-slate-light)] font-mono max-w-2xl">
-            Four pillars that let you write code that's safe, fast, and clear—without compromise.
+            The good parts, without the baggage.
           </p>
         </div>
 
@@ -427,15 +432,17 @@ function FeatureSection({ feature, index }: { feature: Feature; index: number })
           >
             <div className="bg-[#1a2a3a] rounded-2xl shadow-2xl overflow-hidden border border-[#0d1a24]">
               {/* Window chrome */}
-              <div className="flex items-center gap-2 px-4 py-3 bg-[#0d1a24]">
-                <div className="w-3 h-3 rounded-full bg-[#ff5f57]" />
-                <div className="w-3 h-3 rounded-full bg-[#febc2e]" />
-                <div className="w-3 h-3 rounded-full bg-[#28c840]" />
-                <span className="ml-3 font-mono text-xs text-white/40">example.ks</span>
+              <div className="flex items-center pl-4 pr-3 py-2">
+                <div className="flex gap-2 mr-3">
+                  <div className="w-3.5 h-3.5 rounded-full bg-[#ff5f57]" />
+                  <div className="w-3.5 h-3.5 rounded-full bg-[#febc2e]" />
+                  <div className="w-3.5 h-3.5 rounded-full bg-[#28c840]" />
+                </div>
+                <span className="px-3.5 py-2 font-mono text-sm text-white/40">{feature.filename}</span>
               </div>
 
               {/* Code */}
-              <div className="p-5 font-mono text-sm leading-relaxed overflow-x-auto">
+              <div className="px-6 pb-6 font-mono text-sm leading-relaxed overflow-x-auto">
                 <pre className="text-gray-300 whitespace-pre">
                   {tokenize(feature.code)}
                 </pre>
@@ -445,21 +452,6 @@ function FeatureSection({ feature, index }: { feature: Feature; index: number })
         </div>
       </div>
 
-      {/* Progress indicator */}
-      <div className="absolute right-8 top-1/2 -translate-y-1/2 hidden md:flex flex-col gap-3">
-        {features.map((_, i) => (
-          <div
-            key={i}
-            className={`w-2 h-2 rounded-full transition-all duration-300 ${
-              i === index
-                ? 'bg-[var(--color-rust)] scale-150'
-                : i < index
-                  ? 'bg-[var(--color-forest)]'
-                  : 'bg-[var(--color-slate)]/20'
-            }`}
-          />
-        ))}
-      </div>
     </section>
   );
 }
