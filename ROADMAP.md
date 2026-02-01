@@ -634,7 +634,7 @@ See [docs/memory-model/implementation-plan.md](docs/memory-model/implementation-
 - [x] Refactor Matchable for range patterns and array patterns
 - [x] Let/var static variable consistency
 - [x] Default function parameters
-- [ ] End compilation when there are errors
+- [x] End compilation when there are errors
 - [ ] Improve parser errors
 
 ## Phase 15 Compiler Infrastructure

@@ -7,7 +7,7 @@ use kestrel_execution_graph_lowering::LoweringResult;
 use kestrel_lexer::lex;
 use kestrel_parser::{Parser, parse_source_file};
 use kestrel_reporting::{Diagnostic, DiagnosticContext, IntoDiagnostic, Label};
-use kestrel_semantic_analyzers::{AnalysisContext, Analyzer, run_all};
+use kestrel_semantic_analyzers::{AnalysisContext, run_all};
 use kestrel_semantic_model::SemanticModel;
 use kestrel_semantic_tree_binder::SemanticBinder;
 use kestrel_semantic_tree_builder::SemanticModelBuilder;
@@ -104,22 +104,51 @@ impl Compilation {
             source_files.push(source_file);
         }
 
+        // Stop if there are lex/parse errors
+        if diagnostics.has_errors() {
+            return Self {
+                source_files,
+                semantic_model: None,
+                diagnostics,
+            };
+        }
+
         // Build the semantic model (lowering)
         let model = builder.build();
+
+        // Stop if there are semantic tree building errors
+        if diagnostics.has_errors() {
+            return Self {
+                source_files,
+                semantic_model: Some(model),
+                diagnostics,
+            };
+        }
 
         // Run binding phase on the built model
         let model = SemanticBinder::bind(model, &mut diagnostics);
 
-        // Run extracted analyzers after binding (keeps output consistent during migration)
-        {
-            // Build default analyzers; expand as more validators migrate
-            let mut owned = kestrel_semantic_analyzers::default_analyzers();
-            let mut analyzers: Vec<&mut dyn Analyzer> = Vec::new();
-            for a in owned.iter_mut() {
-                analyzers.push(a.as_mut());
-            }
+        // Stop if there are binding errors
+        if diagnostics.has_errors() {
+            return Self {
+                source_files,
+                semantic_model: Some(model),
+                diagnostics,
+            };
+        }
+
+        // Run each analyzer individually, stopping on first error
+        let mut owned = kestrel_semantic_analyzers::default_analyzers();
+        for analyzer in owned.iter_mut() {
             let mut ctx = AnalysisContext::new(&model, &mut diagnostics);
-            run_all(&mut analyzers, &model, &mut ctx);
+            run_all(&mut [analyzer.as_mut()], &model, &mut ctx);
+            if diagnostics.has_errors() {
+                return Self {
+                    source_files,
+                    semantic_model: Some(model),
+                    diagnostics,
+                };
+            }
         }
 
         Self {
