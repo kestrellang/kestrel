@@ -145,6 +145,22 @@ pub enum Constraint {
         /// Span for error reporting
         span: Span,
     },
+
+    /// A value may be promoted to a target type via `FromValue`.
+    ///
+    /// First tries unification. If that fails, checks if the target type
+    /// conforms to `FromValue[source]` and records a promotion if so.
+    /// Used for assignments, returns, and function arguments.
+    Promotable {
+        /// The source expression's type (the value being assigned)
+        from_ty: TyId,
+        /// The target type to assign to (e.g., `Optional[T]`)
+        to_ty: TyId,
+        /// The expression that may need wrapping
+        expr_id: ExprId,
+        /// Span for error reporting
+        span: Span,
+    },
 }
 
 impl Constraint {
@@ -199,6 +215,7 @@ impl Constraint {
             Constraint::ImplicitMember { span, .. } => span,
             Constraint::EnumPatternBinding { span, .. } => span,
             Constraint::StructPatternBinding { span, .. } => span,
+            Constraint::Promotable { span, .. } => span,
         }
     }
 
@@ -247,6 +264,16 @@ impl Constraint {
             struct_name,
             field_bindings,
             has_rest,
+            span,
+        }
+    }
+
+    /// Create a promotable constraint.
+    pub fn promotable(from_ty: TyId, to_ty: TyId, expr_id: ExprId, span: Span) -> Self {
+        Constraint::Promotable {
+            from_ty,
+            to_ty,
+            expr_id,
             span,
         }
     }

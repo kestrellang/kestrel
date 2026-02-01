@@ -763,6 +763,14 @@ impl TypeOracle for SemanticModel {
         // Delegate to the existing make_array_type method on SemanticModel
         self.make_array_type(element_ty, span)
     }
+
+    fn check_from_value_conformance(
+        &self,
+        target_ty: &Ty,
+        source_ty: &Ty,
+    ) -> Option<(SymbolId, Substitutions)> {
+        check_from_value_conformance_impl(self, target_ty, source_ty)
+    }
 }
 
 impl SemanticModel {
@@ -887,6 +895,14 @@ impl TypeOracle for ContextualOracle<'_> {
 
     fn default_array_type(&self, element_ty: Ty, span: kestrel_span::Span) -> Option<Ty> {
         self.model.default_array_type(element_ty, span)
+    }
+
+    fn check_from_value_conformance(
+        &self,
+        target_ty: &Ty,
+        source_ty: &Ty,
+    ) -> Option<(SymbolId, Substitutions)> {
+        self.model.check_from_value_conformance(target_ty, source_ty)
     }
 }
 
@@ -1930,6 +1946,116 @@ fn get_where_clause_from_symbol(symbol: &dyn Symbol<KestrelLanguage>) -> Option<
             return Some(generics.where_clause().clone());
         }
     }
+    None
+}
+
+/// Check if target_ty conforms to FromValue[source_ty].
+///
+/// This is used by the Promotable constraint to determine if a value can be
+/// implicitly wrapped. For example, `Optional[Int]` conforms to `FromValue[Int]`,
+/// allowing `let x: Int? = 5` to be automatically promoted.
+///
+/// Returns the from() method symbol and substitutions if conformance exists.
+fn check_from_value_conformance_impl(
+    model: &SemanticModel,
+    target_ty: &Ty,
+    source_ty: &Ty,
+) -> Option<(SymbolId, Substitutions)> {
+    // Get the FromValueProtocol ID
+    let from_value_protocol_id = model.builtin_protocol(LanguageFeature::FromValueProtocol)?;
+
+    // Get the FromValueMethod ID
+    let from_value_method_id = model.builtin_registry().method(LanguageFeature::FromValueMethod)?;
+
+    // Expand type aliases before checking
+    let target_ty = target_ty.expand_aliases();
+    let source_ty = source_ty.expand_aliases();
+
+    // Handle special types that shouldn't be promoted
+    if matches!(
+        target_ty.kind(),
+        TyKind::Infer | TyKind::Error | TyKind::Never | TyKind::Unit
+    ) {
+        return None;
+    }
+    if matches!(
+        source_ty.kind(),
+        TyKind::Infer | TyKind::Error | TyKind::Never
+    ) {
+        return None;
+    }
+
+    // Get the target type's symbol ID
+    let target_symbol_id = get_type_symbol_id(&target_ty)?;
+
+    // Get all conformances for the target type (direct + extensions)
+    let mut conformances = model.query(ConformancesForSymbol {
+        symbol_id: target_symbol_id,
+    });
+
+    // Also check extensions for conformances
+    let actual_subs = get_type_substitutions(&target_ty);
+    let extensions = model.query(ExtensionsFor {
+        target_id: target_symbol_id,
+    });
+    let applicable_extensions =
+        filter_applicable_extensions_for_conformance(Some(model), &extensions, &actual_subs);
+
+    for extension in &applicable_extensions {
+        let ext_conformances = model.query(ConformancesForSymbol {
+            symbol_id: extension.metadata().id(),
+        });
+        conformances.extend(ext_conformances);
+    }
+
+    // Look for a FromValue[X] conformance where X matches source_ty
+    for conformance in &conformances {
+        if let TyKind::Protocol {
+            symbol,
+            substitutions,
+        } = conformance.kind()
+        {
+            if symbol.metadata().id() != from_value_protocol_id {
+                continue;
+            }
+
+            // Found a FromValue conformance - check if the Output type matches source_ty
+            // FromValue has one type parameter "Output"
+            for type_param in symbol.type_parameters() {
+                if type_param.metadata().name().value == "Output" {
+                    let param_id = type_param.metadata().id();
+                    if let Some(output_ty) = substitutions.get(param_id) {
+                        // Apply the target type's substitutions to get the concrete Output type
+                        let concrete_output = if let Some(target_subs) = &actual_subs {
+                            output_ty.apply_substitutions(target_subs)
+                        } else {
+                            output_ty.clone()
+                        };
+
+                        // Check if the concrete Output type matches the source type
+                        if types_match_for_conformance(&concrete_output, &source_ty) {
+                            // Build the substitutions for calling from()
+                            // The from() method needs: Output -> source_ty
+                            let mut method_subs = Substitutions::new();
+                            method_subs.insert(param_id, source_ty.clone());
+
+                            // Also add the target type's substitutions (e.g., T for Optional[T])
+                            if let Some(target_subs) = &actual_subs {
+                                for (id, ty) in target_subs.iter() {
+                                    if !method_subs.contains(*id) {
+                                        method_subs.insert(*id, ty.clone());
+                                    }
+                                }
+                            }
+
+                            return Some((from_value_method_id, method_subs));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     None
 }
 

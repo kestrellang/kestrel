@@ -18,7 +18,7 @@ use crate::constraint::Constraint;
 use crate::context::InferenceContext;
 use crate::error::InferenceError;
 use crate::oracle::MemberError;
-use crate::solution::{Solution, ValueResolution};
+use crate::solution::{PromotionInfo, Solution, ValueResolution};
 
 /// Result of attempting to solve a single constraint.
 enum SolveResult {
@@ -33,6 +33,40 @@ enum SolveResult {
 /// Errors are accumulated in the solution rather than failing fast,
 /// allowing multiple type errors to be reported in a single pass.
 pub fn solve(mut ctx: InferenceContext<'_>) -> Solution {
+    // Pre-scan constraints to identify literal types that have default types
+    // (integer, float, string, bool, char). We need to defer Promotable constraints
+    // for these literals until their defaults are applied.
+    // Note: Null and array literals do NOT have defaults and need type context,
+    // so we don't mark them - they should unify immediately.
+    let literal_ty_ids: Vec<TyId> = ctx
+        .constraints()
+        .iter()
+        .filter_map(|constraint| {
+            if let Constraint::Conforms { ty, protocol } = constraint {
+                if let Some(feature) = get_literal_feature_for_protocol(&ctx, protocol.symbol_id) {
+                    // Only mark literals that have defaults
+                    match feature {
+                        LanguageFeature::ExpressibleByIntLiteral
+                        | LanguageFeature::ExpressibleByFloatLiteral
+                        | LanguageFeature::ExpressibleByStringLiteral
+                        | LanguageFeature::ExpressibleByBoolLiteral
+                        | LanguageFeature::ExpressibleByCharLiteral => return Some(*ty),
+                        // Null, array, and dictionary literals need context, don't defer
+                        LanguageFeature::ExpressibleByNullLiteral
+                        | LanguageFeature::_ExpressibleByArrayLiteral
+                        | LanguageFeature::_ExpressibleByDictionaryLiteral => {},
+                        _ => {},
+                    }
+                }
+            }
+            None
+        })
+        .collect();
+
+    for ty_id in literal_ty_ids {
+        ctx.mark_literal_ty(ty_id);
+    }
+
     // Iterate until fixpoint (no progress)
     loop {
         let progress = solve_round(&mut ctx);
@@ -197,6 +231,7 @@ fn get_literal_feature_for_protocol(
         LanguageFeature::ExpressibleByCharLiteral,
         LanguageFeature::ExpressibleByNullLiteral,
         LanguageFeature::_ExpressibleByArrayLiteral,
+        LanguageFeature::_ExpressibleByDictionaryLiteral,
     ];
 
     for feature in features {
@@ -285,6 +320,12 @@ fn try_solve(
             *has_rest,
             span,
         ),
+        Constraint::Promotable {
+            from_ty,
+            to_ty,
+            expr_id,
+            span,
+        } => resolve_promotable(ctx, *from_ty, *to_ty, *expr_id, span),
     }
 }
 
@@ -963,17 +1004,245 @@ fn unify(
     }
 }
 
+/// Resolve a promotable constraint.
+///
+/// A promotable constraint first tries unification. If that fails, it checks if
+/// the target type conforms to `FromValue[source]` and records a promotion if so.
+/// This enables implicit wrapping of values in Optional or Result types.
+fn resolve_promotable(
+    ctx: &mut InferenceContext<'_>,
+    from_ty: TyId,
+    to_ty: TyId,
+    expr_id: kestrel_semantic_tree::expr::ExprId,
+    span: &Span,
+) -> Result<SolveResult, InferenceError> {
+    let from = resolve_type(ctx, from_ty);
+    let to = resolve_type(ctx, to_ty);
+
+    // Expand type aliases for both types to get the underlying types
+    let from = from.expand_aliases();
+    let to = to.expand_aliases();
+
+    // If both types have unresolved variables, unify to link them.
+    if contains_unresolved_infer(&from) && contains_unresolved_infer(&to) {
+        return unify(ctx, from_ty, to_ty, span);
+    }
+
+    // If the source type is a pure Infer placeholder, we need to decide:
+    // - If it's a literal AND target is Infer or a promotion target (Optional/Result),
+    //   defer so the literal type resolves first, then we can try promotion.
+    //   Example: `let x: Int? = 5` - the literal 5 should resolve to Int64 first.
+    //   Example: When target is Infer, it might become Optional later via type annotation.
+    // - Otherwise, unify to propagate type context from the target.
+    //   Example: `return .Ok(value)` needs the Result type from the return type.
+    //   Example: `Int64(intLiteral: 0)` - the literal 0 should take type I64 from context.
+    if matches!(from.kind(), TyKind::Infer) {
+        if ctx.is_literal_ty(from_ty) {
+            // For literals, defer if target is Infer (might become Optional later)
+            // or if target is a known promotion target
+            if matches!(to.kind(), TyKind::Infer) || is_potential_promotion_target(&to) {
+                return Ok(SolveResult::Deferred);
+            }
+            // Target is concrete and not a promotion target - unify to propagate context
+            return unify(ctx, from_ty, to_ty, span);
+        } else {
+            // Not a literal - unify to propagate type context
+            return unify(ctx, from_ty, to_ty, span);
+        }
+    }
+
+    // If the target type has unresolved variables (but source is resolved), unify.
+    if contains_unresolved_infer(&to) {
+        return unify(ctx, from_ty, to_ty, span);
+    }
+
+    // Check if types are potentially unifiable (same kind or compatible kinds).
+    // If so, try to unify. If not, check for FromValue promotion.
+    if types_could_unify(&from, &to) {
+        // Types could be unifiable - register the expanded types and try unify
+        ctx.register_type(&from);
+        ctx.register_type(&to);
+        return unify(ctx, from.id(), to.id(), span);
+    }
+
+    // Types can't unify (different kinds). Check if target conforms to FromValue[source] for promotion.
+    if let Some((method_id, subs)) = ctx.oracle().check_from_value_conformance(&to, &from) {
+        // Record promotion for apply_solution
+        ctx.promotions_mut().insert(
+            expr_id,
+            PromotionInfo::new(to.clone(), method_id, subs),
+        );
+        return Ok(SolveResult::Solved);
+    }
+
+    // Neither direct unification nor promotion worked - report type mismatch
+    Err(InferenceError::type_mismatch(to, from, span.clone()))
+}
+
+/// Check if a type is a potential promotion target (Optional or Result).
+///
+/// These are the types that implement FromValue and thus could accept promoted values.
+/// For literals, we only defer when the target is one of these types.
+fn is_potential_promotion_target(ty: &Ty) -> bool {
+    use kestrel_semantic_tree::language::KestrelLanguage;
+    use semantic_tree::symbol::Symbol;
+
+    let ty = ty.expand_aliases();
+    match ty.kind() {
+        TyKind::Struct { symbol, .. } => {
+            let name = &Symbol::<KestrelLanguage>::metadata(symbol.as_ref())
+                .name()
+                .value;
+            name == "Optional" || name == "Result"
+        },
+        TyKind::Enum { symbol, .. } => {
+            let name = &Symbol::<KestrelLanguage>::metadata(symbol.as_ref())
+                .name()
+                .value;
+            name == "Optional" || name == "Result"
+        },
+        // Handle type aliases that might not be expanded yet
+        TyKind::TypeAlias { symbol, .. } => {
+            let name = &Symbol::<KestrelLanguage>::metadata(symbol.as_ref())
+                .name()
+                .value;
+            name == "OptionalTypeOperator" || name == "ResultTypeOperator"
+        },
+        _ => false,
+    }
+}
+
+/// Check if a type contains any unresolved inference variables.
+fn contains_unresolved_infer(ty: &Ty) -> bool {
+    match ty.kind() {
+        TyKind::Infer => true,
+        TyKind::Tuple(elements) => elements.iter().any(contains_unresolved_infer),
+        TyKind::Pointer(elem) => contains_unresolved_infer(elem),
+        TyKind::Function {
+            params,
+            return_type,
+        } => {
+            params.iter().any(contains_unresolved_infer) || contains_unresolved_infer(return_type)
+        },
+        TyKind::Struct { substitutions, .. }
+        | TyKind::Enum { substitutions, .. }
+        | TyKind::Protocol { substitutions, .. } => {
+            substitutions.iter().any(|(_, t)| contains_unresolved_infer(t))
+        },
+        TyKind::UnresolvedFunction {
+            param_info,
+            return_type,
+        } => {
+            if contains_unresolved_infer(return_type) {
+                return true;
+            }
+            match param_info {
+                ParamInfo::ImplicitIt { it_type } => contains_unresolved_infer(it_type),
+                ParamInfo::Explicit { param_types } => {
+                    param_types.iter().any(contains_unresolved_infer)
+                },
+                ParamInfo::Unconstrained => false,
+            }
+        },
+        TyKind::AssociatedType { container, .. } => {
+            container.as_ref().map_or(false, |c| contains_unresolved_infer(c))
+        },
+        _ => false,
+    }
+}
+
+/// Check if two types could potentially unify (are of compatible kinds).
+/// This is used by Promotable to decide whether to try unification or promotion.
+fn types_could_unify(a: &Ty, b: &Ty) -> bool {
+    use kestrel_semantic_tree::language::KestrelLanguage;
+    use semantic_tree::symbol::Symbol;
+
+    // Handle special types that unify with anything
+    if matches!(a.kind(), TyKind::Infer | TyKind::Error | TyKind::Never) {
+        return true;
+    }
+    if matches!(b.kind(), TyKind::Infer | TyKind::Error | TyKind::Never) {
+        return true;
+    }
+
+    // Check if types are of compatible kinds
+    match (a.kind(), b.kind()) {
+        // Same kind with same symbol - can unify
+        (TyKind::Struct { symbol: sym_a, .. }, TyKind::Struct { symbol: sym_b, .. }) => {
+            let id_a = Symbol::<KestrelLanguage>::metadata(sym_a.as_ref()).id();
+            let id_b = Symbol::<KestrelLanguage>::metadata(sym_b.as_ref()).id();
+            id_a == id_b
+        },
+        (TyKind::Enum { symbol: sym_a, .. }, TyKind::Enum { symbol: sym_b, .. }) => {
+            let id_a = Symbol::<KestrelLanguage>::metadata(sym_a.as_ref()).id();
+            let id_b = Symbol::<KestrelLanguage>::metadata(sym_b.as_ref()).id();
+            id_a == id_b
+        },
+        (TyKind::Protocol { symbol: sym_a, .. }, TyKind::Protocol { symbol: sym_b, .. }) => {
+            let id_a = Symbol::<KestrelLanguage>::metadata(sym_a.as_ref()).id();
+            let id_b = Symbol::<KestrelLanguage>::metadata(sym_b.as_ref()).id();
+            id_a == id_b
+        },
+        // Struct/Enum to Protocol - might conform
+        (TyKind::Struct { .. }, TyKind::Protocol { .. }) => true,
+        (TyKind::Enum { .. }, TyKind::Protocol { .. }) => true,
+        (TyKind::Protocol { .. }, TyKind::Struct { .. }) => true,
+        (TyKind::Protocol { .. }, TyKind::Enum { .. }) => true,
+        // Primitive types
+        (TyKind::Unit, TyKind::Unit) => true,
+        (TyKind::Bool, TyKind::Bool) => true,
+        (TyKind::String, TyKind::String) => true,
+        (TyKind::Int(bits_a), TyKind::Int(bits_b)) => bits_a == bits_b,
+        (TyKind::Float(bits_a), TyKind::Float(bits_b)) => bits_a == bits_b,
+        // Structural types
+        (TyKind::Tuple(_), TyKind::Tuple(_)) => true,
+        (TyKind::Pointer(_), TyKind::Pointer(_)) => true,
+        (TyKind::Function { .. }, TyKind::Function { .. }) => true,
+        (TyKind::UnresolvedFunction { .. }, TyKind::Function { .. }) => true,
+        (TyKind::Function { .. }, TyKind::UnresolvedFunction { .. }) => true,
+        (TyKind::UnresolvedFunction { .. }, TyKind::UnresolvedFunction { .. }) => true,
+        // Type parameters
+        (TyKind::TypeParameter(param_a), TyKind::TypeParameter(param_b)) => {
+            let id_a = Symbol::<KestrelLanguage>::metadata(param_a.as_ref()).id();
+            let id_b = Symbol::<KestrelLanguage>::metadata(param_b.as_ref()).id();
+            id_a == id_b
+        },
+        // Self type
+        (TyKind::SelfType, TyKind::SelfType) => true,
+        (TyKind::SelfType, TyKind::Struct { .. }) => true,
+        (TyKind::Struct { .. }, TyKind::SelfType) => true,
+        (TyKind::SelfType, TyKind::Protocol { .. }) => true,
+        (TyKind::Protocol { .. }, TyKind::SelfType) => true,
+        // Associated types need deferred resolution
+        (TyKind::AssociatedType { .. }, _) => true,
+        (_, TyKind::AssociatedType { .. }) => true,
+        // Type aliases should have been expanded - if we get here, treat as potentially unifiable
+        (TyKind::TypeAlias { .. }, _) => true,
+        (_, TyKind::TypeAlias { .. }) => true,
+        // Different kinds - can't unify directly
+        _ => false,
+    }
+}
+
 /// Check if a type conforms to a protocol.
 fn check_conforms(
     ctx: &mut InferenceContext<'_>,
     ty: TyId,
     protocol: &crate::constraint::ProtocolRef,
 ) -> Result<SolveResult, InferenceError> {
-    let resolved = resolve_type(ctx, ty);
+    let mut resolved = resolve_type(ctx, ty);
 
     // If the type is still an inference placeholder, defer
     if matches!(resolved.kind(), TyKind::Infer) {
         return Ok(SolveResult::Deferred);
+    }
+
+    // Expand type aliases before conformance checking.
+    // Type aliases like DictionaryTypeOperator -> Dictionary need to be expanded
+    // so we can check conformance on the actual underlying type.
+    while matches!(resolved.kind(), TyKind::TypeAlias { .. }) {
+        resolved = ctx.oracle().expand_type_alias(&resolved);
+        ctx.register_type(&resolved);
     }
 
     // Check conformance via the oracle
@@ -1640,6 +1909,12 @@ fn check_fully_resolved(ctx: &mut InferenceContext<'_>) {
                 for (_, binding_ty) in field_bindings {
                     check_resolved_id(*binding_ty, ctx, &mut unresolved);
                 }
+            },
+            Constraint::Promotable {
+                from_ty, to_ty, ..
+            } => {
+                check_resolved_id(*from_ty, ctx, &mut unresolved);
+                check_resolved_id(*to_ty, ctx, &mut unresolved);
             },
         }
     }

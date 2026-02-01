@@ -38,3 +38,13 @@ public protocol FromResidual[Early] {
     @builtin(.FromResidualMethod)
     static func fromResidual(residual: Early) -> Self
 }
+
+/// Protocol that enables value promotion.
+/// Types conforming to FromValue can be constructed from a success value,
+/// allowing implicit promotion from T to Optional[T] or Result[T, E].
+@builtin(.FromValueProtocol)
+protocol FromValue[Output] {
+    /// Creates an instance from a success value.
+    @builtin(.FromValueMethod)
+    static func from(value: Output) -> Self
+}

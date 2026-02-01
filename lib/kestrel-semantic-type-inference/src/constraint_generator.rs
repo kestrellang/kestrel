@@ -42,12 +42,12 @@ pub fn generate_constraints(
     if let Some(yield_expr) = block.yield_expr() {
         generate_expression_constraints(ctx, yield_expr);
 
-        // Equate yield expression type with return type
-        // ret_ty is expected, yield_expr.ty is found
+        // Constrain yield expression type to be promotable to return type
+        // (allows implicit promotion from T to Optional[T] or Result[T, E])
         if let Some(ret_ty) = return_type {
             ctx.register_type(ret_ty);
             ctx.register_type(&yield_expr.ty);
-            ctx.equate(ret_ty.id(), yield_expr.ty.id(), yield_expr.span.clone());
+            ctx.promotable(yield_expr.ty.id(), ret_ty.id(), yield_expr.id, yield_expr.span.clone());
         }
     }
 }
@@ -59,11 +59,12 @@ fn generate_statement_constraints(ctx: &mut InferenceContext<'_>, stmt: &Stateme
             // Generate constraints for the pattern
             generate_pattern_constraints(ctx, pattern);
 
-            // If there's an initializer, equate its type with the pattern type
+            // If there's an initializer, constrain it to be promotable to the pattern type
+            // (allows implicit promotion from T to Optional[T] or Result[T, E])
             if let Some(init) = value {
                 generate_expression_constraints(ctx, init);
                 ctx.register_type(&init.ty);
-                ctx.equate(pattern.ty.id(), init.ty.id(), stmt.span.clone());
+                ctx.promotable(init.ty.id(), pattern.ty.id(), init.id, stmt.span.clone());
             }
         },
         StatementKind::Expr(expr) => {
@@ -532,12 +533,13 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
 
             // Generate constraints between argument types and parameter types
             // This enables bidirectional type inference for closures passed as arguments
+            // and allows implicit promotion from T to Optional[T] or Result[T, E]
             match callee.ty.kind() {
                 TyKind::Function { params, .. } => {
                     for (arg, param_ty) in arguments.iter().zip(params.iter()) {
                         ctx.register_type(&arg.value.ty);
                         ctx.register_type(param_ty);
-                        ctx.equate(arg.value.ty.id(), param_ty.id(), arg.span.clone());
+                        ctx.promotable(arg.value.ty.id(), param_ty.id(), arg.value.id, arg.span.clone());
                     }
                 },
                 TyKind::UnresolvedFunction { .. } => {
@@ -697,7 +699,8 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
                     .filter_map(|c| c.downcast_arc::<FieldSymbol>().ok())
                     .collect();
 
-                // Equate each argument type with its corresponding field type
+                // Constrain each argument type to be promotable to its corresponding field type
+                // (allows implicit promotion from T to Optional[T] or Result[T, E])
                 for (arg, field) in arguments.iter().zip(fields.iter()) {
                     // Get field type from TypedBehavior (resolved type) or fallback to field_type
                     let raw_field_ty = field
@@ -708,7 +711,7 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
                     let field_ty = raw_field_ty.apply_substitutions(substitutions);
                     ctx.register_type(&arg.value.ty);
                     ctx.register_type(&field_ty);
-                    ctx.equate(arg.value.ty.id(), field_ty.id(), arg.span.clone());
+                    ctx.promotable(arg.value.ty.id(), field_ty.id(), arg.value.id, arg.span.clone());
                 }
             }
         },
@@ -721,10 +724,11 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
         },
 
         // Assignment
+        // (allows implicit promotion from T to Optional[T] or Result[T, E])
         ExprKind::Assignment { target, value } => {
             generate_expression_constraints(ctx, target);
             generate_expression_constraints(ctx, value);
-            ctx.equate(target.ty.id(), value.ty.id(), expr.span.clone());
+            ctx.promotable(value.ty.id(), target.ty.id(), value.id, expr.span.clone());
         },
 
         // Control flow
@@ -745,10 +749,11 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
             }
             if let Some(then_val) = then_value {
                 generate_expression_constraints(ctx, then_val);
-                // Only equate then value type with expression type when there's an else branch.
+                // Only constrain then value type with expression type when there's an else branch.
                 // Without else, the if expression type is () and the then value is discarded.
+                // (allows implicit promotion from T to Optional[T] or Result[T, E])
                 if else_branch.is_some() {
-                    ctx.equate(expr.ty.id(), then_val.ty.id(), then_val.span.clone());
+                    ctx.promotable(then_val.ty.id(), expr.ty.id(), then_val.id, then_val.span.clone());
                 }
             }
 
@@ -761,14 +766,16 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
                         }
                         if let Some(else_val) = value {
                             generate_expression_constraints(ctx, else_val);
-                            // Else branch value type equals expression type
-                            ctx.equate(expr.ty.id(), else_val.ty.id(), else_val.span.clone());
+                            // Else branch value type must be promotable to expression type
+                            // (allows implicit promotion from T to Optional[T] or Result[T, E])
+                            ctx.promotable(else_val.ty.id(), expr.ty.id(), else_val.id, else_val.span.clone());
                         }
                     },
                     kestrel_semantic_tree::expr::ElseBranch::ElseIf(else_if) => {
                         generate_expression_constraints(ctx, else_if);
-                        // Else-if expression type equals this expression type
-                        ctx.equate(expr.ty.id(), else_if.ty.id(), else_if.span.clone());
+                        // Else-if expression type must be promotable to expression type
+                        // (allows implicit promotion from T to Optional[T] or Result[T, E])
+                        ctx.promotable(else_if.ty.id(), expr.ty.id(), else_if.id, else_if.span.clone());
                     },
                 }
             }
@@ -813,11 +820,12 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
             if let Some(val) = value {
                 generate_expression_constraints(ctx, val);
 
-                // Equate return value type with function return type
+                // Constrain return value type to be promotable to function return type
+                // (allows implicit promotion from T to Optional[T] or Result[T, E])
                 if let Some(ret_ty) = ctx.return_type().cloned() {
                     ctx.register_type(&ret_ty);
                     ctx.register_type(&val.ty);
-                    ctx.equate(ret_ty.id(), val.ty.id(), val.span.clone());
+                    ctx.promotable(val.ty.id(), ret_ty.id(), val.id, val.span.clone());
                 }
             } else {
                 // Return with no value - equate Unit with return type
@@ -1055,7 +1063,8 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
 
                 // Body type contributes to match expression type
                 // All arms should have compatible types
-                ctx.equate(expr.ty.id(), arm.body.ty.id(), arm.body.span.clone());
+                // (allows implicit promotion from T to Optional[T] or Result[T, E])
+                ctx.promotable(arm.body.ty.id(), expr.ty.id(), arm.body.id, arm.body.span.clone());
             }
         },
 

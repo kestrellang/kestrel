@@ -4,7 +4,7 @@
 //! It collects constraints during expression resolution and then solves
 //! them to produce a [`Solution`].
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use kestrel_semantic_tree::expr::ExprId;
 use kestrel_semantic_tree::ty::{ParamInfo, Ty, TyId, TyKind};
@@ -13,7 +13,7 @@ use kestrel_span::Span;
 use crate::constraint::{Constraint, ProtocolRef};
 use crate::error::InferenceError;
 use crate::oracle::TypeOracle;
-use crate::solution::{Solution, ValueResolution};
+use crate::solution::{PromotionInfo, Solution, ValueResolution};
 
 /// Metadata about a closure expression for error reporting.
 #[derive(Debug, Clone)]
@@ -61,6 +61,8 @@ pub struct InferenceContext<'a> {
     substitutions: HashMap<TyId, Ty>,
     /// Current value resolutions (ExprId -> ValueResolution)
     values: HashMap<ExprId, ValueResolution>,
+    /// Promotions for expressions that need FromValue.from() wrapping
+    promotions: HashMap<ExprId, PromotionInfo>,
     /// Map from TyId to its original Ty (for looking up spans and kinds)
     type_registry: HashMap<TyId, Ty>,
     /// Accumulated errors during solving
@@ -69,6 +71,9 @@ pub struct InferenceContext<'a> {
     closure_metadata: HashMap<TyId, ClosureMetadata>,
     /// The expected return type for the current function/method body
     return_type: Option<Ty>,
+    /// TyIds that have ExpressibleBy* constraints (i.e., literals)
+    /// Used by Promotable solver to decide whether to defer
+    literal_ty_ids: HashSet<TyId>,
 }
 
 impl<'a> InferenceContext<'a> {
@@ -79,10 +84,12 @@ impl<'a> InferenceContext<'a> {
             constraints: Vec::new(),
             substitutions: HashMap::new(),
             values: HashMap::new(),
+            promotions: HashMap::new(),
             type_registry: HashMap::new(),
             errors: Vec::new(),
             closure_metadata: HashMap::new(),
             return_type: None,
+            literal_ty_ids: HashSet::new(),
         }
     }
 
@@ -284,6 +291,18 @@ impl<'a> InferenceContext<'a> {
         ));
     }
 
+    /// Add a promotable constraint: the value may be promoted to the target type.
+    ///
+    /// This first tries unification. If that fails, it checks if the target type
+    /// conforms to `FromValue[source]` and records a promotion if so.
+    ///
+    /// Used for assignments, returns, and function arguments to enable implicit
+    /// wrapping of values in Optional or Result types.
+    pub fn promotable(&mut self, from_ty: TyId, to_ty: TyId, expr_id: ExprId, span: Span) {
+        self.constraints
+            .push(Constraint::promotable(from_ty, to_ty, expr_id, span));
+    }
+
     /// Register metadata for a closure expression.
     ///
     /// This should be called during constraint generation for closures
@@ -345,8 +364,12 @@ impl<'a> InferenceContext<'a> {
         &mut self.values
     }
 
+    pub(crate) fn promotions_mut(&mut self) -> &mut HashMap<ExprId, PromotionInfo> {
+        &mut self.promotions
+    }
+
     pub(crate) fn into_solution(self) -> Solution {
-        Solution::with_errors(self.substitutions, self.values, self.errors)
+        Solution::with_promotions(self.substitutions, self.values, self.promotions, self.errors)
     }
 
     pub(crate) fn type_registry(&self) -> &HashMap<TyId, Ty> {
@@ -364,6 +387,16 @@ impl<'a> InferenceContext<'a> {
 
     pub(crate) fn closure_metadata(&self) -> &HashMap<TyId, ClosureMetadata> {
         &self.closure_metadata
+    }
+
+    /// Mark a TyId as being from a literal (has ExpressibleBy* constraint).
+    pub(crate) fn mark_literal_ty(&mut self, ty_id: TyId) {
+        self.literal_ty_ids.insert(ty_id);
+    }
+
+    /// Check if a TyId is from a literal.
+    pub(crate) fn is_literal_ty(&self, ty_id: TyId) -> bool {
+        self.literal_ty_ids.contains(&ty_id)
     }
 }
 

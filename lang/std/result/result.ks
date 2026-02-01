@@ -2,7 +2,7 @@
 
 module std.result
 
-import std.core.(Equatable, Formattable, Bool, ControlFlow, Tryable, FromResidual)
+import std.core.(Equatable, Formattable, Bool, ControlFlow, Tryable, FromResidual, FromValue)
 import std.text.(String)
 import std.result.(Optional)
 
@@ -250,6 +250,14 @@ public enum Result[T, E]: Tryable {
 extend Result[T, E]: FromResidual[E] {
     public static func fromResidual(residual: E) -> Result[T, E] {
         .Err(residual)
+    }
+}
+
+/// FromValue extension enabling value promotion.
+/// Allows: let r: Int throws Error = 42
+extend Result[T, E]: FromValue[T] {
+    public static func from(value: T) -> Result[T, E] {
+        .Ok(value)
     }
 }
 

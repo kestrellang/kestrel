@@ -198,4 +198,30 @@ pub trait TypeOracle {
     /// Creates `Array[element_ty]` struct type. Returns None if the Array struct
     /// is not available (e.g., stdlib not loaded).
     fn default_array_type(&self, element_ty: Ty, span: Span) -> Option<Ty>;
+
+    /// Check if target_ty conforms to FromValue[source_ty].
+    ///
+    /// Used by the Promotable constraint to determine if a value can be
+    /// implicitly wrapped. Returns the from() method symbol and substitutions
+    /// if the conformance exists.
+    ///
+    /// # Arguments
+    ///
+    /// * `target_ty` - The target type (e.g., `Optional[Int]`)
+    /// * `source_ty` - The source type (e.g., `Int`)
+    ///
+    /// # Returns
+    ///
+    /// If target_ty conforms to FromValue[source_ty], returns (method_id, substitutions).
+    /// Otherwise returns None.
+    fn check_from_value_conformance(
+        &self,
+        target_ty: &Ty,
+        source_ty: &Ty,
+    ) -> Option<(SymbolId, Substitutions)> {
+        // Default implementation returns None.
+        // Implementors with access to conformance checking can override.
+        let _ = (target_ty, source_ty);
+        None
+    }
 }

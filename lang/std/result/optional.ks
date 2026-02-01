@@ -2,7 +2,7 @@
 
 module std.result
 
-import std.core.(Equatable, Formattable, Bool, ControlFlow, Tryable, FromResidual, ExpressibleByNullLiteral, Coalesce)
+import std.core.(Equatable, Formattable, Bool, ControlFlow, Tryable, FromResidual, FromValue, ExpressibleByNullLiteral, Coalesce)
 import std.text.(String)
 // Note: Iterator import creates circular dependency - Iterator imports Optional
 // import std.iter.(Iterator)
@@ -254,6 +254,14 @@ extend Optional[T]: Tryable {
 extend Optional[T]: FromResidual[()] {
     public static func fromResidual(residual: ()) -> Optional[T] {
         .None
+    }
+}
+
+/// FromValue extension enabling value promotion.
+/// Allows: let x: Int? = 5
+extend Optional[T]: FromValue[T] {
+    public static func from(value: T) -> Optional[T] {
+        .Some(value)
     }
 }
 

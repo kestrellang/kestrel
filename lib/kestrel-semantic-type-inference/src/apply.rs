@@ -13,7 +13,7 @@ use kestrel_semantic_tree::symbol::local::LocalContainer;
 use kestrel_semantic_tree::ty::{ParamInfo, Substitutions, Ty, TyKind};
 use semantic_tree::symbol::Symbol;
 
-use crate::solution::Solution;
+use crate::solution::{PromotionInfo, Solution};
 
 /// Apply a solution to a code block, resolving all inference placeholders.
 ///
@@ -617,7 +617,14 @@ fn apply_to_expression(expr: &Expression, solution: &Solution) -> Expression {
         },
     };
 
-    Expression::new(kind, resolved_ty, expr.span.clone(), expr.mutable)
+    let processed = Expression::new(kind, resolved_ty.clone(), expr.span.clone(), expr.mutable);
+
+    // Check if this expression needs promotion wrapping (FromValue.from())
+    if let Some(promo) = solution.get_promotion(expr.id) {
+        wrap_with_promotion(processed, promo)
+    } else {
+        processed
+    }
 }
 
 /// Apply solution to a call argument.
@@ -1013,6 +1020,44 @@ fn resolve_intrinsic(
         LangIntrinsic::AtomicAdd => LangIntrinsic::AtomicAdd,
         LangIntrinsic::AtomicSub => LangIntrinsic::AtomicSub,
     }
+}
+
+/// Wrap an expression with a `FromValue.from()` call for promotion.
+///
+/// This is used when an expression needs to be implicitly promoted from `T` to
+/// `Optional[T]` or `Result[T, E]`. The expression is wrapped in a static method
+/// call: `TargetType.from(inner)`.
+fn wrap_with_promotion(inner: Expression, promo: &PromotionInfo) -> Expression {
+    let span = inner.span.clone();
+
+    // Get the type symbol ID for the target type (for creating a TypeRef)
+    let type_symbol_id = match promo.target_ty.kind() {
+        TyKind::Struct { symbol, .. } => symbol.metadata().id(),
+        TyKind::Enum { symbol, .. } => symbol.metadata().id(),
+        _ => {
+            // Shouldn't happen for Optional/Result, but fall back to unchanged
+            return inner;
+        },
+    };
+
+    // Create a TypeRef expression for the target type
+    let type_ref = Expression::type_ref(type_symbol_id, promo.target_ty.clone(), span.clone());
+
+    // Create a MethodRef with the from() method symbol
+    let method_ref =
+        Expression::method_ref(type_ref, vec![promo.from_method], "from".to_string(), span.clone());
+
+    // Create the argument for from(value:)
+    let arg = CallArgument::labeled("value".to_string(), inner, span.clone());
+
+    // Create a Call expression: TargetType.from(inner)
+    Expression::generic_call(
+        method_ref,
+        vec![arg],
+        promo.substitutions.clone(),
+        promo.target_ty.clone(),
+        span,
+    )
 }
 
 /// Update all locals in the container with their resolved types from the solution.

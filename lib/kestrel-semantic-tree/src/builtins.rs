@@ -127,6 +127,10 @@ pub enum LanguageFeature {
     FromResidualProtocol,
     FromResidualMethod,
 
+    // Value promotion
+    FromValueProtocol,
+    FromValueMethod,
+
     // Iterator protocol
     IteratorProtocol,
     IteratorNextMethod,
@@ -271,6 +275,9 @@ impl LanguageFeature {
             "TryExtractMethod" => Some(Self::TryExtractMethod),
             "FromResidualProtocol" => Some(Self::FromResidualProtocol),
             "FromResidualMethod" => Some(Self::FromResidualMethod),
+            // Value promotion
+            "FromValueProtocol" => Some(Self::FromValueProtocol),
+            "FromValueMethod" => Some(Self::FromValueMethod),
             // Iterator protocol
             "IteratorProtocol" => Some(Self::IteratorProtocol),
             "IteratorNextMethod" => Some(Self::IteratorNextMethod),
@@ -410,6 +417,9 @@ impl LanguageFeature {
             Self::TryExtractMethod => "TryExtractMethod",
             Self::FromResidualProtocol => "FromResidualProtocol",
             Self::FromResidualMethod => "FromResidualMethod",
+            // Value promotion
+            Self::FromValueProtocol => "FromValueProtocol",
+            Self::FromValueMethod => "FromValueMethod",
             // Iterator protocol
             Self::IteratorProtocol => "IteratorProtocol",
             Self::IteratorNextMethod => "IteratorNextMethod",
@@ -882,15 +892,17 @@ impl LanguageFeature {
                 feature: *self,
                 kind: BuiltinKind::Enum,
             },
-            Self::TryableProtocol | Self::FromResidualProtocol => BuiltinDefinition {
-                feature: *self,
-                kind: BuiltinKind::Protocol {
-                    implicit_conformance: false,
-                    must_be_marker: false,
-                    tuple_conformance_propagation: false,
-                    requires_fields_conform: false,
-                    disallow_enum_conformance: false,
-                },
+            Self::TryableProtocol | Self::FromResidualProtocol | Self::FromValueProtocol => {
+                BuiltinDefinition {
+                    feature: *self,
+                    kind: BuiltinKind::Protocol {
+                        implicit_conformance: false,
+                        must_be_marker: false,
+                        tuple_conformance_propagation: false,
+                        requires_fields_conform: false,
+                        disallow_enum_conformance: false,
+                    },
+                }
             },
             Self::TryExtractMethod => BuiltinDefinition {
                 feature: *self,
@@ -902,6 +914,12 @@ impl LanguageFeature {
                 feature: *self,
                 kind: BuiltinKind::ProtocolMethod {
                     protocol_feature: LanguageFeature::FromResidualProtocol,
+                },
+            },
+            Self::FromValueMethod => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::ProtocolMethod {
+                    protocol_feature: LanguageFeature::FromValueProtocol,
                 },
             },
             // Iterator protocol
