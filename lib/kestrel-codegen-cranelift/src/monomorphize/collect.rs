@@ -872,12 +872,20 @@ impl<'a> CollectionContext<'a> {
             return None;
         }
 
+        // If we're already in a Self-typed context, reuse it.
+        if let Some(existing_st) = subst.get_self_type() {
+            return Some(existing_st);
+        }
+
         // Extract the concrete type from the first argument
         let first_arg = &args[0];
         let arg_ty = self.get_value_type(&first_arg.value, subst)?;
 
-        // Unwrap references to get the underlying type
-        self.extract_concrete_type_from_arg(arg_ty)
+        // Apply substitution to resolve any SelfType in the argument's type
+        if let Ok(substituted_ty) = subst.apply_ty_readonly(self.mir, arg_ty) {
+            return self.extract_concrete_type_from_arg(substituted_ty);
+        }
+        None
     }
 
     /// Check if a type contains Self or is a Named type that's a protocol (stands for Self in protocol extensions)
@@ -896,6 +904,9 @@ impl<'a> CollectionContext<'a> {
             },
             MirTy::Ref(inner) | MirTy::RefMut(inner) | MirTy::Pointer(inner) => {
                 self.type_contains_self(self.mir.ty(*inner))
+            },
+            MirTy::AssociatedTypeProjection { base, .. } => {
+                self.type_contains_self(self.mir.ty(*base))
             },
             _ => false,
         }
@@ -952,6 +963,9 @@ impl<'a> CollectionContext<'a> {
             MirTy::Named { type_args, .. } => type_args
                 .iter()
                 .any(|a| self.type_needs_self(self.mir.ty(*a))),
+            MirTy::AssociatedTypeProjection { base, .. } => {
+                self.type_needs_self(self.mir.ty(*base))
+            },
             MirTy::FuncThin { params, ret } | MirTy::FuncThick { params, ret } => {
                 params.iter().any(|p| self.type_needs_self(self.mir.ty(*p)))
                     || self.type_needs_self(self.mir.ty(*ret))

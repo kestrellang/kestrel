@@ -1309,7 +1309,7 @@ extend Dictionary[K, V, H] where K: Hash, K: Cloneable, V: Cloneable, H: Hasher,
 }
 
 /// Extension for dictionaries with numeric values.
-extend Dictionary[K, V, H] where K: Hash, V: Addable, V: Defaultable, H: Hasher, H: Defaultable {
+extend Dictionary[K, V, H] where K: Hash, V: Addable, V.Output = V, V: Defaultable, H: Hasher, H: Defaultable {
 
     /// Returns the sum of all values.
     ///

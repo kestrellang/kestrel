@@ -1487,6 +1487,28 @@ func test() {
     }
 
     #[test]
+    fn tuple_index_with_associated_type_equality() {
+        Test::new(
+            r#"
+module Main
+
+protocol Iterable {
+    type Item
+}
+
+extend Iterable {
+    func split[A, B](pair: Item) -> (A, B) where Item = (A, B) {
+        let first: A = pair.0;
+        let second: B = pair.1;
+        return (first, second);
+    }
+}
+"#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
     fn large_tuple_index() {
         Test::new(
             r#"

@@ -2743,6 +2743,20 @@ fn normalize_type_with_context(model: &SemanticModel, ty: &Ty, context_id: Symbo
     // `type Iter: Iterator where Iter.Item = Item`, we derive `I.Iter.Item = I.Item`.
     derive_protocol_associated_type_constraints(model, &where_clauses, &mut owned_equalities);
 
+    // In protocol/protocol-extension contexts, implicitly qualify unqualified associated
+    // types with `Self` so constraints like `Item = (A, B)` apply to `Self.Item`.
+    if !owned_equalities.is_empty() && !self_protocol_bounds(model, context_id).is_empty() {
+        let mut qualified = Vec::with_capacity(owned_equalities.len());
+        for (left, right) in owned_equalities.into_iter() {
+            let self_ty = Ty::self_type(left.span().clone());
+            qualified.push((
+                left.substitute_self(&self_ty),
+                right.substitute_self(&self_ty),
+            ));
+        }
+        owned_equalities = qualified;
+    }
+
     if owned_equalities.is_empty() {
         return ty.clone();
     }
@@ -3149,6 +3163,24 @@ fn equality_types_match(a: &Ty, b: &Ty) -> bool {
 
 /// Determine which type is more concrete for equality constraints.
 fn equality_is_more_concrete(a: &Ty, b: &Ty) -> bool {
+    // Avoid normalizing a type parameter to an associated type that depends on itself
+    // (e.g., T.Output = T). Prefer the type parameter in that case to prevent
+    // recursive expansion like T.Output.Output...
+    if let (TyKind::AssociatedType { container: Some(cont), .. }, TyKind::TypeParameter(param)) =
+        (a.kind(), b.kind())
+    {
+        if type_contains_param(cont, param.metadata().id()) {
+            return false;
+        }
+    }
+    if let (TyKind::TypeParameter(param), TyKind::AssociatedType { container: Some(cont), .. }) =
+        (a.kind(), b.kind())
+    {
+        if type_contains_param(cont, param.metadata().id()) {
+            return true;
+        }
+    }
+
     let a_score = equality_type_score(a);
     let b_score = equality_type_score(b);
     if a_score != b_score {
@@ -3171,6 +3203,46 @@ fn equality_type_score(ty: &Ty) -> i32 {
         TyKind::Tuple(_) | TyKind::Function { .. } => 4, // Complex but concrete-ish
         _ => -1,
     }
+}
+
+/// Check whether a type contains a specific type parameter (recursively).
+fn type_contains_param(ty: &Ty, param_id: SymbolId) -> bool {
+    use kestrel_semantic_tree::ty::TyId;
+
+    fn inner(ty: &Ty, param_id: SymbolId, visited: &mut HashSet<TyId>) -> bool {
+        let ty_id = ty.id();
+        if !visited.insert(ty_id) {
+            return false;
+        }
+
+        match ty.kind() {
+            TyKind::TypeParameter(tp) => tp.metadata().id() == param_id,
+            TyKind::AssociatedType {
+                container: Some(cont),
+                ..
+            } => inner(cont, param_id, visited),
+            TyKind::Tuple(elements) => elements
+                .iter()
+                .any(|elem| inner(elem, param_id, visited)),
+            TyKind::Pointer(element) => inner(element, param_id, visited),
+            TyKind::Function {
+                params,
+                return_type,
+            } => params
+                .iter()
+                .any(|p| inner(p, param_id, visited))
+                || inner(return_type, param_id, visited),
+            TyKind::Struct { substitutions, .. }
+            | TyKind::Enum { substitutions, .. }
+            | TyKind::Protocol { substitutions, .. }
+            | TyKind::TypeAlias { substitutions, .. } => substitutions
+                .iter()
+                .any(|(_, sub_ty)| inner(sub_ty, param_id, visited)),
+            _ => false,
+        }
+    }
+
+    inner(ty, param_id, &mut HashSet::new())
 }
 
 #[cfg(test)]

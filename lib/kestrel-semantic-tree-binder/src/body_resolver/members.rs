@@ -2342,6 +2342,17 @@ fn normalize_type_param_with_equality(
     param_id: semantic_tree::symbol::SymbolId,
     where_clause: &kestrel_semantic_tree::ty::WhereClause,
 ) -> Option<Ty> {
+    fn is_concrete_for_member_access(ty: &Ty) -> bool {
+        !matches!(
+            ty.kind(),
+            TyKind::TypeParameter(_)
+                | TyKind::AssociatedType { .. }
+                | TyKind::Infer
+                | TyKind::SelfType
+                | TyKind::Error
+        )
+    }
+
     for constraint in where_clause.constraints() {
         if let kestrel_semantic_tree::ty::Constraint::TypeEquality { left, right, .. } =
             constraint
@@ -2349,15 +2360,19 @@ fn normalize_type_param_with_equality(
             // Check if left side is our type parameter
             if let TyKind::TypeParameter(tp) = left.kind() {
                 if tp.metadata().id() == param_id {
-                    // Return the right side (the concrete type)
-                    return Some(right.clone());
+                    // Return the right side if it's concrete enough for member access
+                    if is_concrete_for_member_access(right) {
+                        return Some(right.clone());
+                    }
                 }
             }
             // Also check if right side is our type parameter (constraints are symmetric)
             if let TyKind::TypeParameter(tp) = right.kind() {
                 if tp.metadata().id() == param_id {
-                    // Return the left side (the concrete type)
-                    return Some(left.clone());
+                    // Return the left side if it's concrete enough for member access
+                    if is_concrete_for_member_access(left) {
+                        return Some(left.clone());
+                    }
                 }
             }
         }

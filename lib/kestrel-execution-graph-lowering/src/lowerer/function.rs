@@ -331,6 +331,16 @@ pub fn lower_initializer(ctx: &mut LoweringContext, init_symbol: &Arc<Initialize
         ctx.map_type_param(tp.metadata().id(), tp_id);
     }
 
+    // Then register the initializer's own type parameters
+    for tp in init_symbol.type_parameters() {
+        let tp_name = tp.metadata().name().value.clone();
+        let tp_def =
+            kestrel_execution_graph::TypeParamDef::new(tp_name, TypeParamOwner::Function(func_id));
+        let tp_id = ctx.mir.type_params.alloc(tp_def);
+        ctx.mir.function_mut(func_id).type_params.push(tp_id);
+        ctx.map_type_param(tp.metadata().id(), tp_id);
+    }
+
     // NOW we can lower types with type parameters in scope
 
     // Prepare self parameter type
@@ -982,9 +992,29 @@ fn compute_getter_self_param_type(
     getter_symbol: &Arc<GetterSymbol>,
     parent_type_params: &[Arc<TypeParameterSymbol>],
 ) -> Option<kestrel_execution_graph::Id<kestrel_execution_graph::Ty>> {
+    use kestrel_semantic_tree::symbol::extension::ExtensionSymbol;
+    use kestrel_semantic_tree::ty::TyKind;
+
     // Getter's grandparent is the type (Getter -> Field -> Type)
     let field = getter_symbol.metadata().parent()?;
     let type_parent = field.metadata().parent()?;
+
+    if let Ok(extension_symbol) = type_parent.clone().downcast_arc::<ExtensionSymbol>() {
+        let is_protocol_extension = extension_symbol
+            .target_type()
+            .as_ref()
+            .is_some_and(|ty| matches!(ty.expand_aliases().kind(), TyKind::Protocol { .. }));
+        if is_protocol_extension {
+            let base_self = ctx.mir.ty_self();
+            let self_ty = match receiver {
+                ReceiverKind::Borrowing => ctx.mir.ty_ref(base_self),
+                ReceiverKind::Mutating => ctx.mir.ty_ref_mut(base_self),
+                ReceiverKind::Consuming => base_self,
+                ReceiverKind::Initializing => ctx.mir.ty_ref_mut(base_self),
+            };
+            return Some(self_ty);
+        }
+    }
 
     let parent_name = qualified_name_for_symbol(ctx, &type_parent);
 
@@ -1019,9 +1049,29 @@ fn compute_setter_self_param_type(
     setter_symbol: &Arc<SetterSymbol>,
     parent_type_params: &[Arc<TypeParameterSymbol>],
 ) -> Option<kestrel_execution_graph::Id<kestrel_execution_graph::Ty>> {
+    use kestrel_semantic_tree::symbol::extension::ExtensionSymbol;
+    use kestrel_semantic_tree::ty::TyKind;
+
     // Setter's grandparent is the type (Setter -> Field -> Type)
     let field = setter_symbol.metadata().parent()?;
     let type_parent = field.metadata().parent()?;
+
+    if let Ok(extension_symbol) = type_parent.clone().downcast_arc::<ExtensionSymbol>() {
+        let is_protocol_extension = extension_symbol
+            .target_type()
+            .as_ref()
+            .is_some_and(|ty| matches!(ty.expand_aliases().kind(), TyKind::Protocol { .. }));
+        if is_protocol_extension {
+            let base_self = ctx.mir.ty_self();
+            let self_ty = match receiver {
+                ReceiverKind::Borrowing => ctx.mir.ty_ref(base_self),
+                ReceiverKind::Mutating => ctx.mir.ty_ref_mut(base_self),
+                ReceiverKind::Consuming => base_self,
+                ReceiverKind::Initializing => ctx.mir.ty_ref_mut(base_self),
+            };
+            return Some(self_ty);
+        }
+    }
 
     let parent_name = qualified_name_for_symbol(ctx, &type_parent);
 
@@ -1056,8 +1106,28 @@ fn compute_self_param_type(
     func_symbol: &Arc<FunctionSymbol>,
     parent_type_params: &[Arc<TypeParameterSymbol>],
 ) -> Option<kestrel_execution_graph::Id<kestrel_execution_graph::Ty>> {
+    use kestrel_semantic_tree::symbol::extension::ExtensionSymbol;
+    use kestrel_semantic_tree::ty::TyKind;
+
     // Get the parent type for self
     let parent = func_symbol.metadata().parent()?;
+
+    if let Ok(extension_symbol) = parent.clone().downcast_arc::<ExtensionSymbol>() {
+        let is_protocol_extension = extension_symbol
+            .target_type()
+            .as_ref()
+            .is_some_and(|ty| matches!(ty.expand_aliases().kind(), TyKind::Protocol { .. }));
+        if is_protocol_extension {
+            let base_self = ctx.mir.ty_self();
+            let self_ty = match receiver {
+                ReceiverKind::Borrowing => ctx.mir.ty_ref(base_self),
+                ReceiverKind::Mutating => ctx.mir.ty_ref_mut(base_self),
+                ReceiverKind::Consuming => base_self,
+                ReceiverKind::Initializing => ctx.mir.ty_ref_mut(base_self),
+            };
+            return Some(self_ty);
+        }
+    }
 
     let parent_name = qualified_name_for_symbol(ctx, &parent);
 

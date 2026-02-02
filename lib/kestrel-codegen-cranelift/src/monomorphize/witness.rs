@@ -255,8 +255,28 @@ pub fn resolve_witness(
     method: &str,
     for_type: Id<Ty>,
 ) -> Result<(Id<QualifiedName>, Vec<Id<Ty>>), MonomorphizeError> {
+    // Resolve associated type projections before witness lookup.
+    let mut resolved_for_type = for_type;
+    loop {
+        match mir.ty(resolved_for_type) {
+            MirTy::AssociatedTypeProjection {
+                base,
+                protocol,
+                associated,
+            } => {
+                resolved_for_type = resolve_associated_type(
+                    mir,
+                    *base,
+                    *protocol,
+                    associated,
+                )?;
+            },
+            _ => break,
+        }
+    }
+
     // Find the witness
-    let witness_match = find_witness(mir, protocol, for_type)?;
+    let witness_match = find_witness(mir, protocol, resolved_for_type)?;
     let witness_def = &mir.witnesses[witness_match.witness_id];
 
     // Look up the method binding
@@ -265,9 +285,9 @@ pub fn resolve_witness(
             MonomorphizeError::MethodNotFoundInWitness {
                 protocol,
                 method: method.to_string(),
-                for_type,
+                for_type: resolved_for_type,
                 protocol_name: Some(mir.name(protocol).to_string()),
-                type_name: Some(format!("{}", mir.ty(for_type).display(mir))),
+                type_name: Some(format!("{}", mir.ty(resolved_for_type).display(mir))),
             }
         })?;
 

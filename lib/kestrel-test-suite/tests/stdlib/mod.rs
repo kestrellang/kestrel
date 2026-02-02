@@ -78,6 +78,34 @@ mod array {
     }
 }
 
+mod set {
+    use super::*;
+
+    #[test]
+    fn init_from_iterable() {
+        Test::new(
+            r#"module Test
+
+            func main() -> lang.i64 {
+                var arr = std.collections.Array[std.num.Int64]();
+                arr.append(1);
+                arr.append(2);
+                arr.append(2);
+                arr.append(3);
+
+                let set = std.collections.Set[std.num.Int64](from: arr);
+                if set.count != 3 { return 1 }
+
+                0
+            }
+        "#,
+        )
+        .with_stdlib()
+        .expect(Compiles)
+        .expect(Runs);
+    }
+}
+
 mod string {
     use super::*;
 

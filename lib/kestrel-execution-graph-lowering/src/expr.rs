@@ -19,7 +19,7 @@ use kestrel_semantic_tree::expr::{
 use kestrel_semantic_tree::symbol::field::FieldSymbol;
 use kestrel_semantic_tree::symbol::initializer::InitializerSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
-use kestrel_semantic_tree::ty::{Ty, TyKind};
+use kestrel_semantic_tree::ty::{Substitutions, Ty, TyKind};
 use semantic_tree::symbol::SymbolId;
 
 use crate::context::LoweringContext;
@@ -239,6 +239,166 @@ fn build_call_args(
             // No behavior available - default to Ref for all arguments
             arg_values.into_iter().map(CallArg::borrow).collect()
         },
+    }
+}
+
+/// Infer method type parameter substitutions by matching parameter types against argument types.
+///
+/// This supplements explicit substitutions with inferred mappings for method-level type params,
+/// using the call site's argument types.
+fn infer_type_param_substitutions_from_call(
+    base_subs: &Substitutions,
+    callable: &CallableBehavior,
+    arg_types: &[&Ty],
+    is_instance_method: bool,
+    receiver_ty: Option<&Ty>,
+    method_param_ids: &[SymbolId],
+) -> Substitutions {
+    use std::collections::HashSet;
+
+    if method_param_ids.is_empty() {
+        return base_subs.clone();
+    }
+
+    let mut subs = base_subs.clone();
+    let method_param_set: HashSet<SymbolId> = method_param_ids.iter().copied().collect();
+    let param_offset = if is_instance_method { 1 } else { 0 };
+
+    for (param_index, param) in callable.parameters().iter().enumerate() {
+        let arg_index = param_index + param_offset;
+        let Some(arg_ty) = arg_types.get(arg_index).copied() else {
+            continue;
+        };
+
+        let mut param_ty = param.ty.apply_substitutions(&subs);
+        if let Some(self_ty) = receiver_ty {
+            param_ty = param_ty.substitute_self(self_ty);
+        }
+
+        collect_type_param_substitutions(
+            &param_ty,
+            arg_ty,
+            &method_param_set,
+            &mut subs,
+        );
+    }
+
+    subs
+}
+
+fn collect_type_param_substitutions(
+    param_ty: &Ty,
+    arg_ty: &Ty,
+    method_param_ids: &std::collections::HashSet<SymbolId>,
+    subs: &mut Substitutions,
+) {
+    use semantic_tree::symbol::Symbol;
+
+    match param_ty.kind() {
+        TyKind::TypeParameter(param_symbol) => {
+            let param_id = Symbol::metadata(param_symbol.as_ref()).id();
+            if method_param_ids.contains(&param_id) && !subs.contains(param_id) {
+                subs.insert(param_id, arg_ty.clone());
+            }
+        },
+        TyKind::Tuple(param_elems) => {
+            if let Some(arg_elems) = arg_ty.as_tuple() {
+                for (p, a) in param_elems.iter().zip(arg_elems.iter()) {
+                    collect_type_param_substitutions(p, a, method_param_ids, subs);
+                }
+            }
+        },
+        TyKind::Function {
+            params: param_params,
+            return_type: param_ret,
+        } => {
+            if let TyKind::Function {
+                params: arg_params,
+                return_type: arg_ret,
+            } = arg_ty.kind()
+            {
+                if param_params.len() == arg_params.len() {
+                    for (p, a) in param_params.iter().zip(arg_params.iter()) {
+                        collect_type_param_substitutions(p, a, method_param_ids, subs);
+                    }
+                    collect_type_param_substitutions(param_ret, arg_ret, method_param_ids, subs);
+                }
+            }
+        },
+        TyKind::Pointer(param_inner) => {
+            if let TyKind::Pointer(arg_inner) = arg_ty.kind() {
+                collect_type_param_substitutions(param_inner, arg_inner, method_param_ids, subs);
+            }
+        },
+        TyKind::Struct {
+            symbol: param_sym,
+            substitutions: param_subs,
+        } => {
+            if let TyKind::Struct {
+                symbol: arg_sym,
+                substitutions: arg_subs,
+            } = arg_ty.kind()
+                && param_sym.metadata().id() == arg_sym.metadata().id()
+            {
+                for (key, p_sub) in param_subs.iter() {
+                    if let Some(a_sub) = arg_subs.get(*key) {
+                        collect_type_param_substitutions(p_sub, a_sub, method_param_ids, subs);
+                    }
+                }
+            }
+        },
+        TyKind::Enum {
+            symbol: param_sym,
+            substitutions: param_subs,
+        } => {
+            if let TyKind::Enum {
+                symbol: arg_sym,
+                substitutions: arg_subs,
+            } = arg_ty.kind()
+                && param_sym.metadata().id() == arg_sym.metadata().id()
+            {
+                for (key, p_sub) in param_subs.iter() {
+                    if let Some(a_sub) = arg_subs.get(*key) {
+                        collect_type_param_substitutions(p_sub, a_sub, method_param_ids, subs);
+                    }
+                }
+            }
+        },
+        TyKind::Protocol {
+            symbol: param_sym,
+            substitutions: param_subs,
+        } => {
+            if let TyKind::Protocol {
+                symbol: arg_sym,
+                substitutions: arg_subs,
+            } = arg_ty.kind()
+                && param_sym.metadata().id() == arg_sym.metadata().id()
+            {
+                for (key, p_sub) in param_subs.iter() {
+                    if let Some(a_sub) = arg_subs.get(*key) {
+                        collect_type_param_substitutions(p_sub, a_sub, method_param_ids, subs);
+                    }
+                }
+            }
+        },
+        TyKind::TypeAlias {
+            symbol: param_sym,
+            substitutions: param_subs,
+        } => {
+            if let TyKind::TypeAlias {
+                symbol: arg_sym,
+                substitutions: arg_subs,
+            } = arg_ty.kind()
+                && param_sym.metadata().id() == arg_sym.metadata().id()
+            {
+                for (key, p_sub) in param_subs.iter() {
+                    if let Some(a_sub) = arg_subs.get(*key) {
+                        collect_type_param_substitutions(p_sub, a_sub, method_param_ids, subs);
+                    }
+                }
+            }
+        },
+        _ => {},
     }
 }
 
@@ -748,32 +908,70 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
 
         ExprKind::While {
             loop_id,
-            label: _,
+            label,
             condition,
             body,
-        } => lower_while(ctx, *loop_id, condition, body, expr),
+        } => lower_while(
+            ctx,
+            *loop_id,
+            label.as_ref().map(|l| l.name.clone()),
+            condition,
+            body,
+            expr,
+        ),
 
         ExprKind::Loop {
             loop_id,
-            label: _,
+            label,
             body,
-        } => lower_loop(ctx, *loop_id, body, expr),
+        } => lower_loop(
+            ctx,
+            *loop_id,
+            label.as_ref().map(|l| l.name.clone()),
+            body,
+            expr,
+        ),
 
         ExprKind::WhileLet {
             loop_id,
+            label,
             conditions,
             body,
             ..
-        } => lower_while_let(ctx, *loop_id, conditions, body),
+        } => lower_while_let(
+            ctx,
+            *loop_id,
+            label.as_ref().map(|l| l.name.clone()),
+            conditions,
+            body,
+        ),
 
-        ExprKind::Break { loop_id, label: _ } => {
+        ExprKind::Break { loop_id, label } => {
             // Find the target loop and jump to its exit block
-            if let Some(loop_info) = ctx.find_loop(*loop_id) {
+            let loop_info = ctx.find_loop(*loop_id).or_else(|| {
+                label
+                    .as_ref()
+                    .and_then(|l| ctx.find_loop_by_label(l.name.as_str()))
+                    .or_else(|| ctx.innermost_loop())
+            });
+            if let Some(loop_info) = loop_info {
                 let exit_block = loop_info.exit_block;
                 // Emit deinits for scopes between current and target loop
-                ctx.emit_deinits_to_loop(*loop_id);
+                ctx.emit_deinits_to_loop(loop_info.loop_id);
                 ctx.emit_jump(exit_block);
             } else {
+                if std::env::var("KESTREL_DEBUG_LOOPS").is_ok() {
+                    let func_name = ctx
+                        .current_function()
+                        .map(|fid| ctx.mir.name(ctx.mir.function(fid).name).to_string())
+                        .unwrap_or_else(|| "<none>".to_string());
+                    eprintln!(
+                        "break loop not found in {}: {:?}, stack={:?}",
+                        func_name,
+                        loop_id,
+                        ctx.loop_stack_ids()
+                    );
+                }
                 ctx.emit_error(LoweringError::internal(
                     "break: loop not found in loop stack",
                     Some(expr.span.clone()),
@@ -783,12 +981,18 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
             Value::Unreachable
         },
 
-        ExprKind::Continue { loop_id, label: _ } => {
+        ExprKind::Continue { loop_id, label } => {
             // Find the target loop and jump to its header block
-            if let Some(loop_info) = ctx.find_loop(*loop_id) {
+            let loop_info = ctx.find_loop(*loop_id).or_else(|| {
+                label
+                    .as_ref()
+                    .and_then(|l| ctx.find_loop_by_label(l.name.as_str()))
+                    .or_else(|| ctx.innermost_loop())
+            });
+            if let Some(loop_info) = loop_info {
                 let header_block = loop_info.header_block;
                 // Emit deinits for scopes between current and target loop
-                ctx.emit_deinits_to_loop(*loop_id);
+                ctx.emit_deinits_to_loop(loop_info.loop_id);
                 ctx.emit_jump(header_block);
             } else {
                 ctx.emit_error(LoweringError::internal(
@@ -3181,13 +3385,19 @@ fn lower_call(
     // Helper to get ordered type args from a symbol's type parameters
     let get_ordered_type_args =
         |ctx: &mut LoweringContext,
-         sym: &std::sync::Arc<dyn Symbol<kestrel_semantic_tree::language::KestrelLanguage>>|
+         sym: &std::sync::Arc<dyn Symbol<kestrel_semantic_tree::language::KestrelLanguage>>,
+         callable: Option<&CallableBehavior>,
+         call_arg_types: &[&Ty],
+         is_instance_method: bool,
+         receiver_ty: Option<&Ty>|
          -> Option<Vec<kestrel_execution_graph::Id<kestrel_execution_graph::Ty>>> {
             use kestrel_semantic_tree::symbol::EnumSymbol;
+            use kestrel_semantic_tree::symbol::extension::ExtensionSymbol;
             use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
             use semantic_tree::symbol::SymbolId;
 
             // Try to get type parameters from different symbol types
+            let mut method_param_ids: Vec<SymbolId> = Vec::new();
             let param_ids: Option<Vec<SymbolId>> = if let Some(func_sym) =
                 sym.as_ref().downcast_ref::<FunctionSymbol>()
             {
@@ -3196,7 +3406,7 @@ fn lower_call(
                 // functions are lowered in lowerer/function.rs)
                 let mut all_params: Vec<SymbolId> = Vec::new();
 
-                // First, collect parent type parameters (from struct/enum)
+                // First, collect parent type parameters (from struct/enum/extension)
                 if let Some(parent) = func_sym.metadata().parent() {
                     if let Some(struct_sym) = parent.as_ref().downcast_ref::<StructSymbol>() {
                         for tp in struct_sym.type_parameters() {
@@ -3206,12 +3416,25 @@ fn lower_call(
                         for tp in enum_sym.type_parameters() {
                             all_params.push(Symbol::metadata(tp.as_ref()).id());
                         }
+                    } else if let Some(ext_sym) = parent.as_ref().downcast_ref::<ExtensionSymbol>() {
+                        let is_protocol_extension = ext_sym
+                            .target_type()
+                            .as_ref()
+                            .is_some_and(|ty| is_protocol_type(ty));
+                        for tp in ext_sym.referenced_type_parameters() {
+                            if is_protocol_extension && tp.metadata().name().value == "Self" {
+                                continue;
+                            }
+                            all_params.push(Symbol::metadata(tp.as_ref()).id());
+                        }
                     }
                 }
 
                 // Then, collect function's own type parameters
                 for tp in func_sym.type_parameters() {
-                    all_params.push(Symbol::metadata(tp.as_ref()).id());
+                    let tp_id = Symbol::metadata(tp.as_ref()).id();
+                    all_params.push(tp_id);
+                    method_param_ids.push(tp_id);
                 }
 
                 Some(all_params)
@@ -3231,8 +3454,8 @@ fn lower_call(
                         .map(|tp| Symbol::metadata(tp.as_ref()).id())
                         .collect(),
                 )
-            } else if sym.as_ref().downcast_ref::<InitializerSymbol>().is_some() {
-                // Initializers inherit type parameters from their parent struct/enum
+            } else if let Some(init_sym) = sym.as_ref().downcast_ref::<InitializerSymbol>() {
+                // Initializers inherit type parameters from their parent struct/enum/extension
                 let mut all_params: Vec<SymbolId> = Vec::new();
                 if let Some(parent) = sym.metadata().parent() {
                     if let Some(struct_sym) = parent.as_ref().downcast_ref::<StructSymbol>() {
@@ -3243,7 +3466,24 @@ fn lower_call(
                         for tp in enum_sym.type_parameters() {
                             all_params.push(Symbol::metadata(tp.as_ref()).id());
                         }
+                    } else if let Some(ext_sym) = parent.as_ref().downcast_ref::<ExtensionSymbol>() {
+                        let is_protocol_extension = ext_sym
+                            .target_type()
+                            .as_ref()
+                            .is_some_and(|ty| is_protocol_type(ty));
+                        for tp in ext_sym.referenced_type_parameters() {
+                            if is_protocol_extension && tp.metadata().name().value == "Self" {
+                                continue;
+                            }
+                            all_params.push(Symbol::metadata(tp.as_ref()).id());
+                        }
                     }
+                }
+                // Then, collect initializer's own type parameters
+                for tp in init_sym.type_parameters() {
+                    let tp_id = Symbol::metadata(tp.as_ref()).id();
+                    all_params.push(tp_id);
+                    method_param_ids.push(tp_id);
                 }
                 Some(all_params)
             } else {
@@ -3251,9 +3491,52 @@ fn lower_call(
                 None
             };
 
+            let mut effective_subs = if !method_param_ids.is_empty() && callable.is_some() {
+                infer_type_param_substitutions_from_call(
+                    substitutions,
+                    callable.unwrap(),
+                    call_arg_types,
+                    is_instance_method,
+                    receiver_ty,
+                    &method_param_ids,
+                )
+            } else {
+                substitutions.clone()
+            };
+
             if let Some(ids) = param_ids {
+                // If the extension introduced a synthetic `Self` type parameter,
+                // map it to the receiver type (or SelfType for protocol receivers).
+                if let Some(self_ty) = receiver_ty {
+                    let self_sub =
+                        if is_protocol_type(self_ty) || matches!(self_ty.kind(), TyKind::SelfType)
+                        {
+                        Ty::self_type(self_ty.span().clone())
+                    } else {
+                        self_ty.clone()
+                    };
+                    for param_id in &ids {
+                        if effective_subs.contains(*param_id) {
+                            continue;
+                        }
+                        if let Some(sym) = ctx.model.query(SymbolFor { id: *param_id })
+                            && sym.metadata().name().value == "Self"
+                        {
+                            effective_subs.insert(*param_id, self_sub.clone());
+                        }
+                    }
+                }
+
+                let mut filtered_subs = Substitutions::new();
+                for param_id in &ids {
+                    if let Some(sub_ty) = effective_subs.get(*param_id) {
+                        filtered_subs.insert(*param_id, sub_ty.clone());
+                    }
+                }
+                effective_subs = filtered_subs;
+
                 if ids.is_empty() {
-                    if substitutions.is_empty() {
+                    if effective_subs.is_empty() {
                         return Some(Vec::new());
                     }
                     ctx.emit_error(LoweringError::internal(
@@ -3265,7 +3548,7 @@ fn lower_call(
                     ));
                     return None;
                 }
-                if let Some(ordered_types) = substitutions.types_in_order(&ids) {
+                if let Some(ordered_types) = effective_subs.types_in_order(&ids) {
                     return Some(
                         ordered_types
                             .into_iter()
@@ -3282,7 +3565,7 @@ fn lower_call(
                 ));
                 return None;
             }
-            if substitutions.is_empty() {
+            if effective_subs.is_empty() {
                 return Some(Vec::new());
             }
             ctx.emit_error(LoweringError::internal(
@@ -3354,7 +3637,7 @@ fn lower_call(
                         let mut call_args = vec![CallArg::mutating(Value::Place(self_ref_place))];
 
                         // Add user-provided arguments with their access modes
-                        if let Some(beh) = callable_beh {
+                        if let Some(ref beh) = callable_beh {
                             let params = beh.parameters();
                             for (i, value) in arg_values.into_iter().enumerate() {
                                 if let Some(param) = params.get(i) {
@@ -3418,7 +3701,14 @@ fn lower_call(
                         } else {
                             // Regular initializer call
                             let func_name = qualified_name_for_symbol(ctx, &sym);
-                            let type_args = match get_ordered_type_args(ctx, &sym) {
+                            let type_args = match get_ordered_type_args(
+                                ctx,
+                                &sym,
+                                callable_beh.as_deref(),
+                                &arg_types,
+                                false,
+                                None,
+                            ) {
                                 Some(args) => args,
                                 None => return Value::Immediate(Immediate::error()),
                             };
@@ -3434,7 +3724,15 @@ fn lower_call(
                     } else {
                         // Regular function call
                         let func_name = qualified_name_for_symbol(ctx, &sym);
-                        let type_args = match get_ordered_type_args(ctx, &sym) {
+                        let callable_beh = sym.metadata().get_behavior::<CallableBehavior>();
+                        let type_args = match get_ordered_type_args(
+                            ctx,
+                            &sym,
+                            callable_beh.as_deref(),
+                            &arg_types,
+                            false,
+                            None,
+                        ) {
                             Some(args) => args,
                             None => return Value::Immediate(Immediate::error()),
                         };
@@ -3445,7 +3743,6 @@ fn lower_call(
                         };
 
                         // Look up CallableBehavior to get parameter access modes
-                        let callable_beh = sym.metadata().get_behavior::<CallableBehavior>();
                         let call_args = build_call_args(
                             ctx,
                             arg_values,
@@ -3511,7 +3808,7 @@ fn lower_call(
 
             // Check if this is a call on a protocol type (protocol extension methods)
             // When inside a protocol extension, `self` has type `Protocol` which also needs witness dispatch
-            let is_protocol_type_call = matches!(receiver.ty.kind(), TyKind::Protocol { .. });
+            let is_protocol_type_call = is_protocol_type(&receiver.ty);
 
             // Check if this is a static call on a concrete type (Type.staticMethod())
             // This happens when deferred static calls are resolved during type inference
@@ -3590,15 +3887,16 @@ fn lower_call(
                         );
 
                         // Check if this requires witness dispatch:
-                        // 1. Receiver type requires witness dispatch (type parameter, associated type, Self, or protocol type)
-                        // 2. Method comes from a protocol extension on a non-builtin type
-                        let needs_witness_dispatch = (is_type_param_call
-                            || is_static_type_param_call
-                            || is_assoc_type_call
-                            || is_static_assoc_type_call
-                            || is_self_type_call
-                            || is_protocol_type_call)
-                            || (protocol_symbol.is_some() && !is_builtin_type);
+                        // - Only protocol methods (protocol_symbol.is_some()) can be dispatched via witnesses.
+                        // - For protocol-typed receivers calling extension-only methods, use direct calls.
+                        let needs_witness_dispatch = protocol_symbol.is_some()
+                            && ((is_type_param_call
+                                || is_static_type_param_call
+                                || is_assoc_type_call
+                                || is_static_assoc_type_call
+                                || is_self_type_call
+                                || is_protocol_type_call)
+                                || !is_builtin_type);
 
                         if needs_witness_dispatch {
                             if let Some(protocol_sym) = protocol_symbol {
@@ -3624,15 +3922,32 @@ fn lower_call(
 
                                     if method_param_ids.is_empty() {
                                         vec![]
-                                    } else if let Some(ordered_types) =
-                                        substitutions.types_in_order(&method_param_ids)
-                                    {
-                                        ordered_types
-                                            .into_iter()
-                                            .map(|ty| lower_type(ctx, ty))
-                                            .collect()
                                     } else {
-                                        vec![]
+                                        let effective_subs = if let Some(callable) =
+                                            callable_beh.as_deref()
+                                        {
+                                            infer_type_param_substitutions_from_call(
+                                                substitutions,
+                                                callable,
+                                                &all_arg_types,
+                                                is_instance,
+                                                Some(&receiver.ty),
+                                                &method_param_ids,
+                                            )
+                                        } else {
+                                            substitutions.clone()
+                                        };
+
+                                        if let Some(ordered_types) =
+                                            effective_subs.types_in_order(&method_param_ids)
+                                        {
+                                            ordered_types
+                                                .into_iter()
+                                                .map(|ty| lower_type(ctx, ty))
+                                                .collect()
+                                        } else {
+                                            vec![]
+                                        }
                                     }
                                 } else {
                                     vec![]
@@ -3663,7 +3978,14 @@ fn lower_call(
                         } else {
                             // Regular direct method call (concrete type, non-protocol method)
                             let func_name = qualified_name_for_symbol(ctx, &sym);
-                            let type_args = match get_ordered_type_args(ctx, &sym) {
+                            let type_args = match get_ordered_type_args(
+                                ctx,
+                                &sym,
+                                callable_beh.as_deref(),
+                                &all_arg_types,
+                                is_instance,
+                                Some(&receiver.ty),
+                            ) {
                                 Some(args) => args,
                                 None => return Value::Immediate(Immediate::error()),
                             };
@@ -3791,7 +4113,14 @@ fn lower_call(
                     let unit_place = Place::local(unit_local);
 
                     // Call the init function
-                    let type_args = match get_ordered_type_args(ctx, &sym) {
+                    let type_args = match get_ordered_type_args(
+                        ctx,
+                        &sym,
+                        init_beh.as_deref(),
+                        &arg_types,
+                        false,
+                        None,
+                    ) {
                         Some(args) => args,
                         None => return Value::Immediate(Immediate::error()),
                     };
@@ -5853,6 +6182,7 @@ fn emit_if_let_string_switch(
 fn lower_while(
     ctx: &mut LoweringContext,
     loop_id: kestrel_semantic_tree::expr::LoopId,
+    label: Option<String>,
     condition: &Expression,
     body: &[kestrel_semantic_tree::stmt::Statement],
     _expr: &Expression,
@@ -5863,7 +6193,7 @@ fn lower_while(
     let exit_block = ctx.create_block();
 
     // Push loop info for break/continue
-    ctx.push_loop(loop_id, header_block, exit_block);
+    ctx.push_loop(loop_id, header_block, exit_block, label);
 
     // Jump to header
     ctx.emit_jump(header_block);
@@ -5906,6 +6236,7 @@ fn lower_while(
 fn lower_loop(
     ctx: &mut LoweringContext,
     loop_id: kestrel_semantic_tree::expr::LoopId,
+    label: Option<String>,
     body: &[kestrel_semantic_tree::stmt::Statement],
     _expr: &Expression,
 ) -> Value {
@@ -5915,7 +6246,7 @@ fn lower_loop(
     let exit_block = ctx.create_block();
 
     // Push loop info for break/continue
-    ctx.push_loop(loop_id, header_block, exit_block);
+    ctx.push_loop(loop_id, header_block, exit_block, label);
 
     // Jump to header (body entry)
     ctx.emit_jump(header_block);
@@ -5979,6 +6310,7 @@ fn lower_loop(
 fn lower_while_let(
     ctx: &mut LoweringContext,
     loop_id: kestrel_semantic_tree::expr::LoopId,
+    label: Option<String>,
     conditions: &[IfCondition],
     body: &[kestrel_semantic_tree::stmt::Statement],
 ) -> Value {
@@ -5989,7 +6321,7 @@ fn lower_while_let(
 
     // Push loop info for break/continue
     // Note: continue should jump to header_block to re-evaluate the condition
-    ctx.push_loop(loop_id, header_block, exit_block);
+    ctx.push_loop(loop_id, header_block, exit_block, label);
 
     // Jump to header
     ctx.emit_jump(header_block);
@@ -6733,6 +7065,10 @@ fn determine_cast_kind(
 
     // Default: truncate (should not happen with valid casts)
     CastKind::IntTruncate
+}
+
+fn is_protocol_type(ty: &Ty) -> bool {
+    matches!(ty.expand_aliases().kind(), TyKind::Protocol { .. })
 }
 
 /// Find the protocol that an extension method belongs to.

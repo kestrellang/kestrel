@@ -365,9 +365,13 @@ fn create_closure_function(
     // Save current context
     let saved_func = ctx.current_function();
     let saved_local_map = ctx.save_local_map();
+    let saved_loop_stack = ctx.save_loop_stack();
+    let saved_scope_stack = ctx.save_scope_stack();
+    let saved_statement_temps = ctx.save_statement_temps();
     let saved_block = ctx.current_block();
     let saved_closure_counter = ctx.get_closure_counter();
     let saved_temp_counter = ctx.get_temp_counter();
+    let saved_deinit_flag_counter = ctx.get_deinit_flag_counter();
 
     // Get the parent function's type parameters - closures inherit these so that
     // type parameter references in the closure body can be properly substituted
@@ -516,8 +520,12 @@ fn create_closure_function(
     ctx.exit_function();
     ctx.set_current_function(saved_func);
     ctx.restore_local_map(saved_local_map);
+    ctx.restore_loop_stack(saved_loop_stack);
+    ctx.restore_scope_stack(saved_scope_stack);
+    ctx.restore_statement_temps(saved_statement_temps);
     ctx.set_closure_counter(saved_closure_counter);
     ctx.set_temp_counter(saved_temp_counter);
+    ctx.set_deinit_flag_counter(saved_deinit_flag_counter);
     if let Some(block) = saved_block {
         ctx.set_current_block(block);
     }

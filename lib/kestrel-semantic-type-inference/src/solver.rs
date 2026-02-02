@@ -1355,16 +1355,10 @@ fn resolve_tuple_index(
         ctx.register_type(&tuple_ty);
     }
 
-    // Normalize associated types using equality constraints from where clauses.
-    // This handles cases like `I.Item = (K, V)` where tuple indexing should work
-    // on values of type `I.Item`.
-    if matches!(tuple_ty.kind(), TyKind::AssociatedType { .. }) {
-        let normalized = ctx.oracle().normalize_with_constraints(&tuple_ty);
-        if normalized.to_string() != tuple_ty.to_string() {
-            tuple_ty = normalized;
-            ctx.register_type(&tuple_ty);
-        }
-    }
+    // Normalize type parameters and associated types using equality constraints.
+    // This handles cases like `Item = (K, V)` and `I.Item = (K, V)` where tuple
+    // indexing should work on values of the constrained type.
+    tuple_ty = normalize_with_constraints_if_needed(ctx, &tuple_ty);
 
     // If the tuple type is still an inference placeholder, defer
     if matches!(tuple_ty.kind(), TyKind::Infer) {

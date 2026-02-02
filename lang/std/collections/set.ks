@@ -929,24 +929,23 @@ extend Set[T, H] where T: Hash, T: Comparable, H: Hasher, H: Defaultable {
 // CONDITIONAL EXTENSIONS - NUMERIC
 // ============================================================================
 
-// TODO: Restore once associated type equality constraints are supported.
-// /// Extension for sets with addable elements.
-// extend Set[T, H] where T: Hash, T: Addable, T: Defaultable, H: Hasher, H: Defaultable {
-//
-//     /// Returns the sum of all elements.
-//     ///
-//     /// Example:
-//     ///     Set([1, 2, 3]).sum()  // 6
-//     ///     Set[Int64]().sum()    // 0
-//     public func sum() -> T {
-//         var total = T();
-//         var iter = self.iter();
-//         while let .Some(elem) = iter.next() {
-//             total = total.add(elem);
-//         }
-//         total
-//     }
-// }
+/// Extension for sets with addable elements.
+extend Set[T, H] where T: Hash, T: Addable, T.Output = T, T: Defaultable, H: Hasher, H: Defaultable {
+
+    /// Returns the sum of all elements.
+    ///
+    /// Example:
+    ///     Set([1, 2, 3]).sum()  // 6
+    ///     Set[Int64]().sum()    // 0
+    public func sum() -> T {
+        var total = T();
+        var iter = self.iter();
+        while let .Some(elem) = iter.next() {
+            total = total.add(elem);
+        }
+        total
+    }
+}
 
 // ============================================================================
 // DIRECT ITERABLE CONFORMANCE
