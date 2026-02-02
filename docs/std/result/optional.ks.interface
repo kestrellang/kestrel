@@ -87,9 +87,9 @@ public enum Optional[T] {
     /// Returns true if this is Some and the value satisfies the predicate.
     ///
     /// Example:
-    ///     Some(42).isSomeAnd(|x| x > 0)   // true
-    ///     Some(-1).isSomeAnd(|x| x > 0)   // false
-    ///     None.isSomeAnd(|x| x > 0)       // false
+    ///     Some(42).isSomeAnd({ it > 0 })   // true
+    ///     Some(-1).isSomeAnd({ it > 0 })   // false
+    ///     None.isSomeAnd({ it > 0 })       // false
     public func isSomeAnd(predicate: (T) -> Bool) -> Bool;
 
     // ========================================================================
@@ -144,9 +144,9 @@ public enum Optional[T] {
     /// contained value and wraps the result in Some.
     ///
     /// Example:
-    ///     Some(2).map(|x| x * 2)        // Some(4)
-    ///     None.map(|x| x * 2)           // None
-    ///     Some("hello").map(|s| s.len)  // Some(5)
+    ///     Some(2).map({ it * 2 })        // Some(4)
+    ///     None.map({ it * 2 })           // None
+    ///     Some("hello").map({ it.len })  // Some(5)
     public func map[U](transform: (T) -> U) -> Optional[U];
 
     /// Transforms the contained value, flattening the result.
@@ -175,9 +175,9 @@ public enum Optional[T] {
     /// Returns Some if predicate returns true, otherwise None.
     ///
     /// Example:
-    ///     Some(4).filter(|x| x % 2 == 0)  // Some(4)
-    ///     Some(3).filter(|x| x % 2 == 0)  // None
-    ///     None.filter(|x| x % 2 == 0)     // None
+    ///     Some(4).filter({ it % 2 == 0 })  // Some(4)
+    ///     Some(3).filter({ it % 2 == 0 })  // None
+    ///     None.filter({ it % 2 == 0 })     // None
     public func filter(predicate: (T) -> Bool) -> Optional[T];
 
     /// Calls the function with the contained value for side effects.
@@ -186,8 +186,8 @@ public enum Optional[T] {
     ///
     /// Example:
     ///     getUser(id)
-    ///         .inspect(|u| print("Found: \{u.name}"))
-    ///         .map(|u| u.email)
+    ///         .inspect({ print("Found: \{it.name}") })
+    ///         .map({ it.email })
     public func inspect(fn: (T) -> Void) -> Optional[T];
 
     // ========================================================================
@@ -288,10 +288,10 @@ public enum Optional[T] {
     ///
     /// Example:
     ///     var opt = Some(42)
-    ///     opt.takeIf(|x| x > 0)   // Some(42), opt is now None
+    ///     opt.takeIf({ it > 0 })   // Some(42), opt is now None
     ///
     ///     var opt2 = Some(42)
-    ///     opt2.takeIf(|x| x < 0)  // None, opt2 is still Some(42)
+    ///     opt2.takeIf({ it < 0 })  // None, opt2 is still Some(42)
     public mutating func takeIf(predicate: (T) -> Bool) -> Optional[T];
 
     // ========================================================================

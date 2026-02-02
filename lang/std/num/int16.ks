@@ -1,11 +1,11 @@
 // Int16 - 16-bit signed integer
-// Generated from integer.ks.template - DO NOT EDIT
+// Generated from integer.ks.template (docs synced from .ks.interface) - DO NOT EDIT
 
 module std.num
 
 import std.ffi.(FFISafe)
 import std.core.(
-    Equatable, Comparable, Ordering, Bool, Matchable, Formattable, Hash, Hasher,
+    Equatable, Comparable, Ordering, Bool, Matchable, Formattable, FormatOptions, Hash, Hasher,
     Addable, Subtractable, Multipliable, Divisible, Modulo, Negatable,
     BitwiseAnd, BitwiseOr, BitwiseXor, BitwiseNot, LeftShift, RightShift,
     AddAssign, SubtractAssign, MultiplyAssign, DivideAssign, ModuloAssign,
@@ -15,21 +15,10 @@ import std.core.(
 )
 import std.text.(String)
 import std.memory.(Slice, Pointer)
-import std.num.(UInt8, Int64)
+import std.num.(UInt8, Int64, UInt64)
 
 /// A 16-bit signed integer type.
-///
-/// Int16 supports arithmetic, bitwise, comparison, and formatting operations.
-/// It is FFI-safe for interoperability with C code.
-///
-/// Arithmetic operations wrap on overflow (two's complement) by default.
-/// Use checked methods for overflow detection or saturating methods for
-/// clamping behavior.
-///
-/// Example:
-///     let a: Int16 = 100
-///     let b = a + 50
-///     let c = a * 2
+/// Supports arithmetic, bitwise, comparison, and formatting operations.
 public struct Int16:
     SignedInteger,
     Steppable,
@@ -661,7 +650,7 @@ public struct Int16:
     // ========================================================================
 
     // Formattable
-    public func format() -> String {
+    public func format(options: FormatOptions = FormatOptions.default()) -> String {
         if self == Int16.zero {
             return "0"
         }

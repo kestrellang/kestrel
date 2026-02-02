@@ -243,7 +243,7 @@ public struct Buffer: Write {
         var i: Int64 = 0;
         let count = self.data.count;
         while i < count {
-            result.appendByte(self.data.getUnchecked(i));
+            result.appendByte(self.data(unchecked: i));
             i = i + 1
         }
         result

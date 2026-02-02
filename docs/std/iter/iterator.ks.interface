@@ -75,7 +75,7 @@ public protocol Iterable {
 /// This allows iterators to be used directly in for-in loops.
 ///
 /// Example:
-///     let iter = [1, 2, 3].iter().filter(|x| x > 1)
+///     let iter = [1, 2, 3].iter().filter({ it > 1 })
 ///     for item in iter {
 ///         // works because FilterIterator is Iterable
 ///     }
@@ -169,7 +169,7 @@ extend DoubleEndedIterator {
     ///     [1, 2, 3, 4, 5].iter().rev().take(count: 3).collect()  // [5, 4, 3]
     ///
     ///     // Find last matching element
-    ///     [1, 2, 3, 4, 5].iter().rev().find(|x| x % 2 == 0)  // Some(4)
+    ///     [1, 2, 3, 4, 5].iter().rev().find({ it % 2 == 0 })  // Some(4)
     func rev() -> RevIterator[Self];
 }
 
@@ -197,8 +197,8 @@ extend Iterator {
     /// Lazy - transformation happens as elements are consumed.
     ///
     /// Example:
-    ///     [1, 2, 3].iter().map(|x| x * 2).collect()  // [2, 4, 6]
-    ///     ["hello", "world"].iter().map(|s| s.count).collect()  // [5, 5]
+    ///     [1, 2, 3].iter().map({ it * 2 }).collect()  // [2, 4, 6]
+    ///     ["hello", "world"].iter().map({ it.count }).collect()  // [5, 5]
     func map[U](transform: (Item) -> U) -> MapIterator[Self, U];
 
     /// Yields only elements satisfying the predicate.
@@ -206,8 +206,8 @@ extend Iterator {
     /// Lazy - elements are tested as they are consumed.
     ///
     /// Example:
-    ///     [1, 2, 3, 4, 5].iter().filter(|x| x % 2 == 0).collect()  // [2, 4]
-    ///     ["", "a", "", "b"].iter().filter(|s| !s.isEmpty).collect()  // ["a", "b"]
+    ///     [1, 2, 3, 4, 5].iter().filter({ it % 2 == 0 }).collect()  // [2, 4]
+    ///     ["", "a", "", "b"].iter().filter({ !it.isEmpty }).collect()  // ["a", "b"]
     func filter(predicate: (Item) -> Bool) -> FilterIterator[Self];
 
     /// Transforms elements and filters out None results in one step.
@@ -216,13 +216,13 @@ extend Iterator {
     ///
     /// Example:
     ///     ["1", "two", "3"].iter()
-    ///         .filterMap(|s| Int64.parse(s))
+    ///         .filterMap({ Int64.parse(it) })
     ///         .collect()  // [1, 3]
     func filterMap[U](transform: (Item) -> U?) -> FilterMapIterator[Self, U];
 
     /// Filters out None values and unwraps the Some values.
     ///
-    /// Equivalent to `filterMap(|x| x)` but more readable when the elements
+    /// Equivalent to `filterMap({ it })` but more readable when the elements
     /// are already optionals.
     ///
     /// Example:
@@ -231,7 +231,7 @@ extend Iterator {
     ///
     ///     // With transformation
     ///     ["1", "two", "3"].iter()
-    ///         .map(|s| Int64.parse(s))  // [Some(1), None, Some(3)]
+    ///         .map({ Int64.parse(it) })  // [Some(1), None, Some(3)]
     ///         .compactMap()              // [1, 3]
     func compactMap() -> FilterMapIterator[Self, Item.Wrapped] where Item: Optional;
 
@@ -253,17 +253,17 @@ extend Iterator {
     ///
     /// Example:
     ///     [[1, 2], [3, 4], [5]].iter()
-    ///         .flatMap(|arr| arr.iter())
+    ///         .flatMap({ it.iter() })
     ///         .collect()  // [1, 2, 3, 4, 5]
     ///
     ///     // Get all characters from all words
     ///     ["hello", "world"].iter()
-    ///         .flatMap(|s| s.chars())
+    ///         .flatMap({ it.chars() })
     ///         .collect()  // ['h', 'e', 'l', 'l', 'o', 'w', 'o', 'r', 'l', 'd']
     ///
     ///     // Filter and expand in one step
     ///     [1, 2, 3].iter()
-    ///         .flatMap(|x| if x % 2 == 0 { [x, x].iter() } else { [].iter() })
+    ///         .flatMap({ if it % 2 == 0 { [it, it].iter() } else { [].iter() } })
     ///         .collect()  // [2, 2]
     func flatMap[U: Iterator](transform: (Item) -> U) -> FlatMapIterator[Self, U];
 
@@ -305,7 +305,7 @@ extend Iterator where Item = Ref[T], T: Copyable {
     ///
     ///     // Useful when working with borrowed data
     ///     fn process(data: Ref[Array[Int64]]) -> Array[Int64] {
-    ///         data.iter().copied().filter(|x| x > 0).collect()
+    ///         data.iter().copied().filter({ it } > 0).collect()
     ///     }
     func copied() -> CopiedIterator[Self, T];
 }
@@ -348,7 +348,7 @@ extend Iterator {
     ///
     /// Example:
     ///     [1, 2, 3, 4, 1, 2].iter()
-    ///         .takeWhile(|x| x < 4)
+    ///         .takeWhile({ it } < 4)
     ///         .collect()  // [1, 2, 3] - stops at 4
     func takeWhile(predicate: (Item) -> Bool) -> TakeWhileIterator[Self];
 
@@ -366,7 +366,7 @@ extend Iterator {
     ///
     /// Example:
     ///     [1, 2, 3, 4, 1, 2].iter()
-    ///         .skipWhile(|x| x < 3)
+    ///         .skipWhile({ it } < 3)
     ///         .collect()  // [3, 4, 1, 2] - note 1, 2 at end included
     func skipWhile(predicate: (Item) -> Bool) -> SkipWhileIterator[Self];
 }
@@ -439,9 +439,9 @@ extend Iterator {
     ///
     /// Example:
     ///     [1, 2, 3].iter()
-    ///         .inspect(|x| print("before filter: \(x)"))
-    ///         .filter(|x| x > 1)
-    ///         .inspect(|x| print("after filter: \(x)"))
+    ///         .inspect({ print("before filter: \(it)") })
+    ///         .filter({ it > 1 })
+    ///         .inspect({ print("after filter: \(it)") })
     ///         .collect()
     ///     // Prints: before filter: 1
     ///     //         before filter: 2
@@ -530,8 +530,8 @@ extend Iterator {
     /// Consumes the entire iterator.
     ///
     /// Example:
-    ///     [1, 2, 3].iter().filter(|x| x > 1).collect()  // [2, 3]
-    ///     (1..5).iter().map(|x| x * x).collect()  // [1, 4, 9, 16]
+    ///     [1, 2, 3].iter().filter({ it > 1 }).collect()  // [2, 3]
+    ///     (1..5).iter().map({ it } * x).collect()  // [1, 4, 9, 16]
     func collect() -> Array[Item];
 
     /// Returns the number of elements.
@@ -539,7 +539,7 @@ extend Iterator {
     /// Consumes the entire iterator.
     ///
     /// Example:
-    ///     [1, 2, 3, 4, 5].iter().filter(|x| x % 2 == 0).count()  // 2
+    ///     [1, 2, 3, 4, 5].iter().filter({ it % 2 == 0 }).count()  // 2
     func count() -> Int64;
 
     /// Splits an iterator of pairs into a pair of arrays.
@@ -626,7 +626,7 @@ extend Iterator {
     /// Like `forEach`, but the action returns a Result. Stops on first Err.
     ///
     /// Example:
-    ///     files.iter().tryForEach(|path| {
+    ///     files.iter().tryForEach({ (path) in
     ///         File.delete(path)  // Returns Result[Void, IoError]
     ///     })  // Stops on first deletion failure
     func tryForEach[E](action: (Item) -> Result[Void, E]) -> Result[Void, E];
@@ -644,7 +644,7 @@ extend Iterator {
     /// Consumes the entire iterator. Use when you need side effects.
     ///
     /// Example:
-    ///     [1, 2, 3].iter().forEach(|x| print(x))
+    ///     [1, 2, 3].iter().forEach({ print(it) })
     func forEach(action: (Item) -> Void);
 }
 
@@ -661,9 +661,9 @@ extend Iterator {
     /// Returns false for an empty iterator.
     ///
     /// Example:
-    ///     [1, 2, 3, 4].iter().any(|x| x > 3)  // true (stops at 4)
-    ///     [1, 2, 3].iter().any(|x| x > 10)    // false
-    ///     [].iter().any(|x| true)             // false
+    ///     [1, 2, 3, 4].iter().any({ it } > 3)  // true (stops at 4)
+    ///     [1, 2, 3].iter().any({ it > 1 }0)    // false
+    ///     [].iter().any({ true })             // false
     func any(predicate: (Item) -> Bool) -> Bool;
 
     /// Returns true if all elements satisfy the predicate.
@@ -672,9 +672,9 @@ extend Iterator {
     /// Returns true for an empty iterator (vacuous truth).
     ///
     /// Example:
-    ///     [2, 4, 6].iter().all(|x| x % 2 == 0)  // true
-    ///     [2, 3, 4].iter().all(|x| x % 2 == 0)  // false (stops at 3)
-    ///     [].iter().all(|x| false)              // true (empty)
+    ///     [2, 4, 6].iter().all({ it % 2 == 0 })  // true
+    ///     [2, 3, 4].iter().all({ it % 2 == 0 })  // false (stops at 3)
+    ///     [].iter().all({ false })              // true (empty)
     func all(predicate: (Item) -> Bool) -> Bool;
 }
 
@@ -690,8 +690,8 @@ extend Iterator {
     /// Short-circuits on first match.
     ///
     /// Example:
-    ///     [1, 2, 3, 4, 5].iter().find(|x| x > 3)   // Some(4)
-    ///     [1, 2, 3].iter().find(|x| x > 10)        // None
+    ///     [1, 2, 3, 4, 5].iter().find({ it } > 3)   // Some(4)
+    ///     [1, 2, 3].iter().find({ it > 1 }0)        // None
     func find(predicate: (Item) -> Bool) -> Item?;
 
     /// Returns the position of the first element satisfying the predicate, or None.
@@ -699,8 +699,8 @@ extend Iterator {
     /// Short-circuits on first match.
     ///
     /// Example:
-    ///     ["a", "b", "c"].iter().position(|s| s == "b")  // Some(1)
-    ///     [1, 2, 3].iter().position(|x| x > 10)         // None
+    ///     ["a", "b", "c"].iter().position({ it == "b" })  // Some(1)
+    ///     [1, 2, 3].iter().position({ it > 1 }0)         // None
     func position(predicate: (Item) -> Bool) -> Int64?;
 
     /// Returns the nth element (zero-indexed), or None if out of bounds.
@@ -780,7 +780,7 @@ extend Iterator where Item: Comparable {
     ///
     /// Example:
     ///     [3, 1, 4, 1, 5].iter().sorted()  // [1, 1, 3, 4, 5]
-    ///     [3, 1, 2].iter().filter(|x| x > 1).sorted()  // [2, 3]
+    ///     [3, 1, 2].iter().filter({ it > 1 }).sorted()  // [2, 3]
     func sorted() -> Array[Item];
 
     /// Returns the element with the minimum value of the key function.
@@ -790,12 +790,12 @@ extend Iterator where Item: Comparable {
     ///
     /// Example:
     ///     let people = [("Alice", 30), ("Bob", 25), ("Charlie", 35)]
-    ///     people.iter().minBy(key: |p| p.1)  // Some(("Bob", 25))
+    ///     people.iter().minBy(key: { it.1 })  // Some(("Bob", 25))
     ///
     ///     let words = ["hello", "hi", "hey"]
-    ///     words.iter().minBy(key: |w| w.count)  // Some("hi")
+    ///     words.iter().minBy(key: { it.count })  // Some("hi")
     ///
-    ///     [].iter().minBy(key: |x| x)  // None
+    ///     [].iter().minBy(key: { it })  // None
     func minBy[K: Comparable](key: (Item) -> K) -> Item?;
 
     /// Returns the element with the maximum value of the key function.
@@ -805,12 +805,12 @@ extend Iterator where Item: Comparable {
     ///
     /// Example:
     ///     let people = [("Alice", 30), ("Bob", 25), ("Charlie", 35)]
-    ///     people.iter().maxBy(key: |p| p.1)  // Some(("Charlie", 35))
+    ///     people.iter().maxBy(key: { it.1 })  // Some(("Charlie", 35))
     ///
     ///     let words = ["hello", "hi", "hey"]
-    ///     words.iter().maxBy(key: |w| w.count)  // Some("hello")
+    ///     words.iter().maxBy(key: { it.count })  // Some("hello")
     ///
-    ///     [].iter().maxBy(key: |x| x)  // None
+    ///     [].iter().maxBy(key: { it })  // None
     func maxBy[K: Comparable](key: (Item) -> K) -> Item?;
 
     /// Returns true if the iterator yields elements in sorted (ascending) order.
@@ -861,10 +861,10 @@ extend Iterator {
     ///
     /// Example:
     ///     let people = [("Alice", 25), ("Bob", 30), ("Charlie", 35)]
-    ///     people.iter().isSortedBy(key: |p| p.1)  // true (sorted by age)
+    ///     people.iter().isSortedBy(key: { it.1 })  // true (sorted by age)
     ///
     ///     let words = ["a", "bb", "ccc"]
-    ///     words.iter().isSortedBy(key: |w| w.count)  // true (sorted by length)
+    ///     words.iter().isSortedBy(key: { it.count })  // true (sorted by length)
     func isSortedBy[K: Comparable](key: (Item) -> K) -> Bool;
 }
 
@@ -886,7 +886,7 @@ extend Iterator where Item: Addable {
     ///     [].iter().sum()               // 0
     ///
     ///     // With filtering
-    ///     [1, 2, 3, 4, 5].iter().filter(|x| x % 2 == 0).sum()  // 6
+    ///     [1, 2, 3, 4, 5].iter().filter({ it % 2 == 0 }).sum()  // 6
     func sum() -> Item;
 }
 
@@ -920,7 +920,7 @@ extend Iterator where Item: Iterator {
     /// Each inner iterator is fully consumed before moving to the next.
     ///
     /// Example:
-    ///     let nested = [[1, 2], [3, 4], [5]].iter().map(|arr| arr.iter())
+    ///     let nested = [[1, 2], [3, 4], [5]].iter().map({ it.iter() })
     ///     nested.flatten().collect()  // [1, 2, 3, 4, 5]
     ///
     ///     // Equivalent to flatMap when you already have iterators

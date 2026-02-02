@@ -4,6 +4,7 @@ module std.core
 
 import std.ffi.(FFISafe)
 import std.text.(String)
+import std.core.(FormatOptions)
 import std.num.(UInt8)
 import std.memory.(Slice, Pointer)
 
@@ -102,7 +103,10 @@ public struct Bool:
     // ========================================================================
 
     /// Formats this Bool as a string.
-    public func format() -> String {
-        if self.value { "true" } else { "false" }
+    /// Default: "true" or "false".
+    /// Debug: "Bool(true)" or "Bool(false)".
+    public func format(options: FormatOptions = FormatOptions.default()) -> String {
+        let value = if self.value { "true" } else { "false" };
+        if options.debug { "Bool(" + value + ")" } else { value }
     }
 }

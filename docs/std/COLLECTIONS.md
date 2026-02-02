@@ -5,9 +5,9 @@
 Collections use copy-on-write (COW) semantics. Copies are O(1) until mutation:
 
 ```kestrel
-let a = [1, 2, 3]
-var b = a.clone()  // O(1), shares storage
-b.append(element: 4)  // Now copies, O(n)
+let a = [1, 2, 3];
+var b = a.clone();  // O(1), shares storage
+b.append(element: 4);  // Now copies, O(n)
 ```
 
 ## Dual Iteration Model
@@ -21,10 +21,10 @@ Two ways to process collections:
 
 ```kestrel
 // Lazy - nothing happens until collect()
-let lazy = numbers.iter().map(|x| x * 2).filter(|x| x > 10).collect()
+let lazy = numbers.iter().map { it * 2 }.filter { it > 10 }.collect();
 
 // Eager - executes immediately, returns Array
-let eager = numbers.map(|x| x * 2).filter(|x| x > 10)
+let eager = numbers.map { it * 2 }.filter { it > 10 };
 ```
 
 ## Subscript Modes
@@ -34,7 +34,7 @@ Five access patterns for different needs:
 | Mode | Behavior | Use When |
 |------|----------|----------|
 | `arr(i)` | Panics if out of bounds | Index is known valid |
-| `arr(checked: i)` | Returns `Optional` | Index might be invalid |
+| `arr(checked: i)` | Returns `Option[T]` | Index might be invalid |
 | `arr(unchecked: i)` | No bounds check | Performance-critical, already validated |
 | `arr(wrapping: i)` | Wraps around (`-1` = last) | Circular access patterns |
 | `arr(clamping: i)` | Clamps to valid range | Edge values acceptable |
@@ -69,8 +69,8 @@ Methods appear based on element capabilities:
 
 ```kestrel
 // Available on all arrays
-arr.map(|x| ...)
-arr.filter(|x| ...)
+arr.map { ... }
+arr.filter { ... }
 
 // Only when T: Equatable
 arr.contains(element: x)

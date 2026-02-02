@@ -412,7 +412,7 @@ public func readFileString(path: String) -> Result[String, Error] {
     var i: Int64 = 0;
     let count = bytes.count;
     while i < count {
-        result.appendByte(bytes.getUnchecked(i));
+        result.appendByte(bytes(unchecked: i));
         i = i + 1
     }
     .Ok(result)

@@ -181,7 +181,7 @@ struct BrickGrid {
         if row < 0 or row >= Config.brickRows or col < 0 or col >= Config.brickCols {
             return false
         }
-        self.bricks.getUnchecked(row * Config.brickCols + col)
+        self.bricks(unchecked: row * Config.brickCols + col)
     }
 
     // Remove brick and return points earned
@@ -191,7 +191,7 @@ struct BrickGrid {
         }
 
         let idx = row * Config.brickCols + col;
-        if self.bricks.getUnchecked(idx) {
+        if self.bricks(unchecked: idx) {
             self.bricks.setUnchecked(idx, false);
             self.remaining = self.remaining - 1;
             return Config.brickPoints(row: row)

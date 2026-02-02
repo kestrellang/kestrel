@@ -725,25 +725,10 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     // ELEMENT ACCESS
     // ========================================================================
 
-    /// Returns the element at the given index without bounds checking.
-    public func getUnchecked(index: Int64) -> T {
-        self.ptr().offset(by: index).read()
-    }
-
     /// Sets the element at the given index without bounds checking.
     public mutating func setUnchecked(index: Int64, value: T) {
         self.makeUnique();
         self.ptr().offset(by: index).write(value)
-    }
-
-    /// Returns the element at the given index, or None if out of bounds.
-    public func getValue(at index: Int64) -> T? {
-        let myLen = self.len();
-        if index >= Int64(intLiteral: 0) and index < myLen {
-            .Some(self.ptr().offset(by: index).read())
-        } else {
-            .None
-        }
     }
 
     // ========================================================================
@@ -1125,7 +1110,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
 
         // Copy replacement
         for i in 0..<insertCount {
-            s.ptr.offset(by: start + i).write(replacement.getUnchecked(i))
+            s.ptr.offset(by: start + i).write(replacement(unchecked: i))
         }
 
         s.len = newLen;
@@ -1363,7 +1348,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     ///     arr.first(matching: { (x) in x > 3 })  // Some(4)
     public func first(matching predicate: (T) -> Bool) -> T? {
         if let .Some(idx) = self.firstIndex(matching: predicate) {
-            .Some(self.getUnchecked(idx))
+            .Some(self(unchecked: idx))
         } else {
             .None
         }
@@ -1376,7 +1361,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     ///     arr.last(matching: { (x) in x > 1 })  // Some(2) - the second 2
     public func last(matching predicate: (T) -> Bool) -> T? {
         if let .Some(idx) = self.lastIndex(matching: predicate) {
-            .Some(self.getUnchecked(idx))
+            .Some(self(unchecked: idx))
         } else {
             .None
         }
@@ -1648,7 +1633,7 @@ extend Array[T]: Equatable where T: Equatable {
         var i: Int64 = Int64(intLiteral: 0);
         var equal: Bool = true;
         while i < selfCount and equal {
-            if self.getUnchecked(i).equals(other.getUnchecked(i)) == false {
+            if self(unchecked: i).equals(other(unchecked: i)) == false {
                 equal = false
             }
             i = i + Int64(intLiteral: 1)
@@ -1696,7 +1681,7 @@ extend Array[T]: Equatable where T: Equatable {
             return false
         }
         for i in 0..<prefixLen {
-            if self.getUnchecked(i).equals(prefix.getUnchecked(i)) == false {
+            if self(unchecked: i).equals(prefix(unchecked: i)) == false {
                 return false
             }
         }
@@ -1717,7 +1702,7 @@ extend Array[T]: Equatable where T: Equatable {
         }
         let offset = myLen - suffixLen;
         for i in 0..<suffixLen {
-            if self.getUnchecked(offset + i).equals(suffix.getUnchecked(i)) == false {
+            if self(unchecked: offset + i).equals(suffix(unchecked: i)) == false {
                 return false
             }
         }
@@ -1746,7 +1731,7 @@ extend Array[T]: Equatable where T: Equatable {
         let myLen = self.count;
         var start: Int64 = Int64(intLiteral: 0);
         for i in 0..<myLen {
-            if self.getUnchecked(i).equals(separator) {
+            if self(unchecked: i).equals(separator) {
                 result.append( Slice(pointer: self.asPointer().offset(by: start), count: i - start));
                 start = i + Int64(intLiteral: 1)
             }
@@ -1832,7 +1817,7 @@ extend Array[T]: ArrayMatchable {
 
     /// Returns the element at the given index (unchecked).
     public func matchGet(index: Int64) -> T {
-        self.getUnchecked(index)
+        self(unchecked: index)
     }
 
     /// Returns a slice from `from` (inclusive) to `to` (exclusive).
@@ -1877,9 +1862,9 @@ extend Array[T] where T: Comparable {
         if self.count == Int64(intLiteral: 0) {
             return .None
         }
-        var result = self.getUnchecked(Int64(intLiteral: 0));
+        var result = self(unchecked: Int64(intLiteral: 0));
         for i in 1..<self.count {
-            let element = self.getUnchecked(i);
+            let element = self(unchecked: i);
             if element < result {
                 result = element
             }
@@ -1896,9 +1881,9 @@ extend Array[T] where T: Comparable {
         if self.count == Int64(intLiteral: 0) {
             return .None
         }
-        var result = self.getUnchecked(Int64(intLiteral: 0));
+        var result = self(unchecked: Int64(intLiteral: 0));
         for i in 1..<self.count {
-            let element = self.getUnchecked(i);
+            let element = self(unchecked: i);
             if element > result {
                 result = element
             }
@@ -1920,7 +1905,7 @@ extend Array[T] where T: Comparable {
             return true
         }
         for i in 1..<self.count {
-            if self.getUnchecked(i) < self.getUnchecked(i - Int64(intLiteral: 1)) {
+            if self(unchecked: i) < self(unchecked: i - Int64(intLiteral: 1)) {
                 return false
             }
         }
@@ -1941,7 +1926,7 @@ extend Array[T] where T: Comparable {
         var hi: Int64 = self.count;
         while lo < hi {
             let mid = lo + (hi - lo) / Int64(intLiteral: 2);
-            let midVal = self.getUnchecked(mid);
+            let midVal = self(unchecked: mid);
             if midVal < element {
                 lo = mid + Int64(intLiteral: 1)
             } else if midVal > element {
@@ -1971,10 +1956,10 @@ extend Array[T] where T: Hash {
         var result = Array[T]();
         let myLen = self.count;
         for i in 0..<myLen {
-            let element = self.getUnchecked(i);
+            let element = self(unchecked: i);
             var found = false;
             for j in 0..<result.count {
-                if result.getUnchecked(j).equals(element) {
+                if result(unchecked: j).equals(element) {
                     found = true
                 }
             }
@@ -2019,10 +2004,10 @@ extend Array[T] {
         self.makeUnique();
         // Insertion sort (simple and stable)
         for i in 1..<n {
-            let key = self.getUnchecked(i);
+            let key = self(unchecked: i);
             var j = i - Int64(intLiteral: 1);
-            while j >= Int64(intLiteral: 0) and comparator(key, self.getUnchecked(j)) {
-                self.setUnchecked(j + Int64(intLiteral: 1), self.getUnchecked(j));
+            while j >= Int64(intLiteral: 0) and comparator(key, self(unchecked: j)) {
+                self.setUnchecked(j + Int64(intLiteral: 1), self(unchecked: j));
                 j = j - Int64(intLiteral: 1)
             }
             self.setUnchecked(j + Int64(intLiteral: 1), key)
@@ -2076,7 +2061,7 @@ extend Array[T] where T: Iterable {
     public func flatten() -> Array[T.Item] {
         var result = Array[T.Item]();
         for i in 0..<self.count {
-            var iter = self.getUnchecked(i).iter();
+            var iter = self(unchecked: i).iter();
             while let .Some(item) = iter.next() {
                 result.append( item)
             }
@@ -2100,10 +2085,10 @@ extend Array[T] where T: Formattable {
         if self.count == Int64(intLiteral: 0) {
             return ""
         }
-        var result = self.getUnchecked(Int64(intLiteral: 0)).format();
+        var result = self(unchecked: Int64(intLiteral: 0)).format();
         for i in 1..<self.count {
             result = result + separator;
-            result = result + self.getUnchecked(i).format()
+            result = result + self(unchecked: i).format()
         }
         result
     }
@@ -2127,7 +2112,7 @@ extend Array[T]: Formattable where T: Formattable {
             if i > Int64(intLiteral: 0) {
                 result = result + ", "
             }
-            result = result + self.getUnchecked(i).format()
+            result = result + self(unchecked: i).format()
         }
         result = result + "]";
         result

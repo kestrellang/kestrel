@@ -5,9 +5,12 @@ Run from this directory: python generate.py
 """
 
 import os
+import re
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).parent
+REPO_ROOT = SCRIPT_DIR.parents[2]
+DOCS_DIR = REPO_ROOT / "docs" / "std" / "num"
 
 # Integer type configurations
 INTEGERS = [
@@ -52,6 +55,73 @@ def get_cast(from_bits: int, to_bits: int) -> str:
         return "other.raw"
     else:
         return f"lang.cast_i{from_bits}_i{to_bits}(other.raw)"
+
+
+def normalize_signature(line: str) -> str:
+    line = line.strip()
+    if "{" in line:
+        line = line.split("{", 1)[0].rstrip()
+    if line.endswith(";"):
+        line = line[:-1].rstrip()
+    # Remove default argument values to match implementation signatures.
+    line = re.sub(r"=\s*[^,)]+", "", line)
+    # Normalize module qualifiers that differ between interface and impl.
+    line = line.replace("std.collections.", "")
+    # Cleanup whitespace and stray parens introduced by default removal.
+    line = re.sub(r"\)\)", ")", line)
+    line = re.sub(r"\s+", " ", line)
+    return line
+
+
+def extract_interface_docs(interface_path: Path) -> dict[str, list[str]]:
+    lines = interface_path.read_text().splitlines()
+    docs: dict[str, list[str]] = {}
+    doc_buffer: list[str] = []
+
+    for line in lines:
+        stripped = line.lstrip()
+        if stripped.startswith("///"):
+            doc_buffer.append(stripped)
+            continue
+        if stripped.startswith("@"):
+            # Keep doc_buffer for the following declaration.
+            continue
+        if stripped.startswith("public "):
+            sig = normalize_signature(stripped)
+            if doc_buffer:
+                docs[sig] = doc_buffer[:]
+            doc_buffer = []
+            continue
+        if stripped != "":
+            doc_buffer = []
+
+    return docs
+
+
+def apply_interface_docs(content: str, docs_map: dict[str, list[str]]) -> str:
+    lines = content.splitlines()
+    i = 0
+    while i < len(lines):
+        stripped = lines[i].lstrip()
+        if stripped.startswith("public "):
+            sig = normalize_signature(stripped)
+            if sig in docs_map:
+                # Find existing doc comment block directly above.
+                j = i - 1
+                while j >= 0 and lines[j].lstrip().startswith("///"):
+                    j -= 1
+                indent = lines[i][: len(lines[i]) - len(stripped)]
+                new_docs = [indent + doc for doc in docs_map[sig]]
+                if j + 1 <= i - 1:
+                    lines[j + 1 : i] = new_docs
+                    current_index = j + 1 + len(new_docs)
+                else:
+                    lines[i:i] = new_docs
+                    current_index = i + len(new_docs)
+                i = current_index + 1
+                continue
+        i += 1
+    return "\n".join(lines) + "\n"
 
 
 def generate_sign_properties(type_name: str, bits: int, signed: bool, lang_type: str, signed_prefix: str) -> str:
@@ -336,7 +406,7 @@ def generate_integer_format_method(type_name: str, bits: int, signed: bool) -> s
     # For signed types, we need to handle negative numbers
     if signed:
         return f'''    // Formattable
-    public func format() -> String {{
+    public func format(options: FormatOptions = FormatOptions.default()) -> String {{
         if self == {type_name}.zero {{
             return "0"
         }}
@@ -371,7 +441,7 @@ def generate_integer_format_method(type_name: str, bits: int, signed: bool) -> s
     }}'''
     else:
         return f'''    // Formattable
-    public func format() -> String {{
+    public func format(options: FormatOptions = FormatOptions.default()) -> String {{
         if self == {type_name}.zero {{
             return "0"
         }}
@@ -431,7 +501,7 @@ def generate_integer_parse_method(type_name: str, bits: int, signed: bool) -> st
 
     # For signed types, handle negative numbers
     if signed:
-        return f'''    public static func parse(string: String) -> {type_name}? {{
+        base_parse = f'''    public static func parse(string: String) -> {type_name}? {{
         let len = string.byteCount;
         if len == 0 {{
             return .None
@@ -499,6 +569,90 @@ def generate_integer_parse_method(type_name: str, bits: int, signed: bool) -> st
 
         .Some({return_expr})
     }}'''
+        if type_name == "Int64":
+            radix_parse = f'''
+    /// Parses an integer from a string in the given radix (base).
+    ///
+    /// Radix must be between 2 and 36 inclusive. For radix > 10, letters
+    /// a-z (case insensitive) represent values 10-35.
+    ///
+    /// Example:
+    ///     Int64.parse(string: "ff", radix: 16)    // Some(255)
+    ///     Int64.parse(string: "FF", radix: 16)    // Some(255)
+    ///     Int64.parse(string: "101010", radix: 2) // Some(42)
+    ///     Int64.parse(string: "z", radix: 36)     // Some(35)
+    public static func parse(string: String, radix: Int64) -> Int64? {{
+        if radix < 2 or radix > 36 {{
+            return .None
+        }}
+
+        let len = string.byteCount;
+        if len == 0 {{
+            return .None
+        }}
+
+        var index: Int64 = 0;
+        var isNegative = false;
+
+        // Check for sign
+        let firstByte: UInt8 = string.byteAtUnchecked(0);
+        let firstByteVal = Int64(from: firstByte);
+        if firstByteVal == 45 {{  // '-'
+            isNegative = true;
+            index = 1
+        }} else if firstByteVal == 43 {{  // '+'
+            index = 1
+        }}
+
+        // Must have at least one digit
+        if index >= len {{
+            return .None
+        }}
+
+        let radixU: UInt64 = UInt64(from: radix);
+        let maxMagnitude: UInt64 = if isNegative {{
+            UInt64(from: Int64.maxValue) + UInt64(intLiteral: 1)
+        }} else {{
+            UInt64(from: Int64.maxValue)
+        }};
+
+        var result: UInt64 = 0;
+
+        while index < len {{
+            let byte: UInt8 = string.byteAtUnchecked(index);
+            let byteVal = Int64(from: byte);
+
+            let digit: Int64 = if byteVal >= 48 and byteVal <= 57 {{
+                byteVal - 48
+            }} else if byteVal >= 65 and byteVal <= 90 {{
+                byteVal - 55
+            }} else if byteVal >= 97 and byteVal <= 122 {{
+                byteVal - 87
+            }} else {{
+                return .None
+            }};
+
+            if digit >= radix {{
+                return .None
+            }}
+
+            let digitU: UInt64 = UInt64(from: digit);
+            if result > (maxMagnitude - digitU) / radixU {{
+                return .None
+            }}
+            result = result * radixU + digitU;
+            index = index + 1
+        }}
+
+        let signedResult = Int64(from: result);
+        if isNegative {{
+            .Some(signedResult.negate())
+        }} else {{
+            .Some(signedResult)
+        }}
+    }}'''
+            return base_parse + radix_parse
+        return base_parse
     else:
         # Unsigned - no negative numbers allowed
         max_before_multiply = "1844674407370955161"  # UInt64.maxValue / 10
@@ -563,6 +717,142 @@ def generate_integer_parse_method(type_name: str, bits: int, signed: bool) -> st
 
         .Some({return_expr})
     }}'''
+
+
+def generate_integer_byte_conversion_method(type_name: str, bits: int, signed: bool) -> str:
+    if type_name != "Int64":
+        return f'''    // TODO: implement byte conversion methods
+    // These require Array from std.collections which creates circular import issues
+    // public func toBytes() -> Array[UInt8]
+    // public func toBytesBigEndian() -> Array[UInt8]
+    // public func toBytesLittleEndian() -> Array[UInt8]
+    // public static func fromBytes(bytes: Array[UInt8]) -> {type_name}?
+    // public static func fromBytesBigEndian(bytes: Array[UInt8]) -> {type_name}?
+    // public static func fromBytesLittleEndian(bytes: Array[UInt8]) -> {type_name}?'''
+
+    return '''    /// Returns this integer as an array of 8 bytes in native byte order.
+    ///
+    /// Example:
+    ///     let bytes = (0x0102030405060708).toBytes()
+    ///     // On little-endian: [0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01]
+    ///     // On big-endian: [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08]
+    public func toBytes() -> std.collections.Array[UInt8] {
+        var result = std.collections.Array[UInt8](capacity: 8);
+        let value = self;
+        let ptr = Pointer(to: value).asRaw().cast[UInt8]();
+        var i: Int64 = 0;
+        while i < 8 {
+            result.append(ptr.offset(by: i).read());
+            i = i + 1
+        }
+        result
+    }
+
+    /// Returns this integer as an array of 8 bytes in big-endian order.
+    ///
+    /// Big-endian: most significant byte first (network byte order).
+    ///
+    /// Example:
+    ///     (0x0102030405060708).toBytesBigEndian()
+    ///     // [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08]
+    public func toBytesBigEndian() -> std.collections.Array[UInt8] {
+        var result = std.collections.Array[UInt8](capacity: 8);
+        let value = UInt64(raw: self.raw);
+        let mask = UInt64(intLiteral: 255);
+        var i: Int64 = 0;
+        while i < 8 {
+            let shift = (Int64(intLiteral: 7) - i) * Int64(intLiteral: 8);
+            let byteVal = value.shiftRight(by: shift.raw).bitwiseAnd(mask);
+            result.append(UInt8(from: byteVal));
+            i = i + 1
+        }
+        result
+    }
+
+    /// Returns this integer as an array of 8 bytes in little-endian order.
+    ///
+    /// Little-endian: least significant byte first.
+    ///
+    /// Example:
+    ///     (0x0102030405060708).toBytesLittleEndian()
+    ///     // [0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01]
+    public func toBytesLittleEndian() -> std.collections.Array[UInt8] {
+        var result = std.collections.Array[UInt8](capacity: 8);
+        let value = UInt64(raw: self.raw);
+        let mask = UInt64(intLiteral: 255);
+        var i: Int64 = 0;
+        while i < 8 {
+            let shift = i * Int64(intLiteral: 8);
+            let byteVal = value.shiftRight(by: shift.raw).bitwiseAnd(mask);
+            result.append(UInt8(from: byteVal));
+            i = i + 1
+        }
+        result
+    }
+
+    /// Creates an Int64 from an array of 8 bytes in native byte order.
+    ///
+    /// Returns None if the array doesn't have exactly 8 bytes.
+    ///
+    /// Example:
+    ///     Int64.fromBytes(bytes: [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08])
+    public static func fromBytes(bytes: std.collections.Array[UInt8]) -> Int64? {
+        if bytes.count != Int64(intLiteral: 8) {
+            return .None
+        }
+
+        var value = Int64(intLiteral: 0);
+        let ptr = Pointer(to: value).asRaw().cast[UInt8]();
+        var i: Int64 = 0;
+        while i < 8 {
+            ptr.offset(by: i).write(bytes(unchecked: i));
+            i = i + 1
+        }
+        .Some(value)
+    }
+
+    /// Creates an Int64 from an array of 8 bytes in big-endian order.
+    ///
+    /// Returns None if the array doesn't have exactly 8 bytes.
+    ///
+    /// Example:
+    ///     Int64.fromBytesBigEndian(bytes: [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08])
+    public static func fromBytesBigEndian(bytes: std.collections.Array[UInt8]) -> Int64? {
+        if bytes.count != Int64(intLiteral: 8) {
+            return .None
+        }
+
+        var result = UInt64(intLiteral: 0);
+        var i: Int64 = 0;
+        while i < 8 {
+            let byteVal = UInt64(from: bytes(unchecked: i));
+            result = result.shiftLeft(by: Int64(intLiteral: 8).raw).bitwiseOr(byteVal);
+            i = i + 1
+        }
+        .Some(Int64(from: result))
+    }
+
+    /// Creates an Int64 from an array of 8 bytes in little-endian order.
+    ///
+    /// Returns None if the array doesn't have exactly 8 bytes.
+    ///
+    /// Example:
+    ///     Int64.fromBytesLittleEndian(bytes: [0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01])
+    public static func fromBytesLittleEndian(bytes: std.collections.Array[UInt8]) -> Int64? {
+        if bytes.count != Int64(intLiteral: 8) {
+            return .None
+        }
+
+        var result = UInt64(intLiteral: 0);
+        var i: Int64 = 0;
+        while i < 8 {
+            let shift = i * Int64(intLiteral: 8);
+            let byteVal = UInt64(from: bytes(unchecked: i));
+            result = result.bitwiseOr(byteVal.shiftLeft(by: shift.raw));
+            i = i + 1
+        }
+        .Some(Int64(from: result))
+    }'''
 
 
 def generate_integer(type_name: str, bits: int, signed: bool, is_default: bool) -> str:
@@ -643,14 +933,15 @@ def generate_integer(type_name: str, bits: int, signed: bool, is_default: bool) 
     # Type alias for platform defaults
     if is_default:
         if signed:
-            type_alias = f"\n// Int - platform-sized signed integer (alias to Int64 on 64-bit platforms)\npublic type Int = {type_name}"
+            type_alias = f"\n/// Platform-sized signed integer (alias to Int64 on 64-bit platforms).\npublic type Int = {type_name}"
         else:
-            type_alias = f"\n// UInt - platform-sized unsigned integer (alias to UInt64 on 64-bit platforms)\npublic type UInt = {type_name}"
+            type_alias = f"\n/// Platform-sized unsigned integer (alias to UInt64 on 64-bit platforms).\npublic type UInt = {type_name}"
     else:
         type_alias = ""
 
     # Generate format method
     format_method = generate_integer_format_method(type_name, bits, signed)
+    byte_conversion = generate_integer_byte_conversion_method(type_name, bits, signed)
 
     # Generate sign properties
     sign_properties = generate_sign_properties(type_name, bits, signed, lang_type, signed_prefix)
@@ -699,6 +990,7 @@ def generate_integer(type_name: str, bits: int, signed: bool, is_default: bool) 
     result = result.replace("{{CONVERTIBLE_CONFORMANCES}}", convertible_conformances)
     result = result.replace("{{CONVERTIBLE_INITS}}", convertible_inits)
     result = result.replace("{{FORMAT_METHOD}}", format_method)
+    result = result.replace("{{BYTE_CONVERSION}}", byte_conversion)
     result = result.replace("{{SIGN_PROPERTIES}}", sign_properties)
     result = result.replace("{{IS_POWER_OF_TWO}}", is_power_of_two)
     result = result.replace("{{COUNT_ONES_IMPL}}", count_ones_impl)
@@ -713,6 +1005,11 @@ def generate_integer(type_name: str, bits: int, signed: bool, is_default: bool) 
     result = result.replace("{{LCM_ABS_OTHER}}", lcm_abs_other)
     result = result.replace("{{PARSE_METHOD}}", parse_method)
 
+    interface_path = DOCS_DIR / f"{type_name.lower()}.ks.interface"
+    if interface_path.exists():
+        docs_map = extract_interface_docs(interface_path)
+        result = apply_interface_docs(result, docs_map)
+
     return result
 
 
@@ -720,7 +1017,23 @@ def generate_float_parse_method(type_name: str, bits: int) -> str:
     """Generate the parse() method for float types."""
     lang_type = f"f{bits}"
 
-    return f'''    public static func parse(string: String) -> {type_name}? {{
+    method = '''    /// Parses a float from a string.
+    ///
+    /// Accepts:
+    /// - Decimal notation: "3.14", "-0.5", "+2.0"
+    /// - Scientific notation: "1.5e10", "2.5E-3"
+    /// - Special values: "inf", "-inf", "nan" (case insensitive)
+    ///
+    /// Returns None if the string is not a valid float.
+    ///
+    /// Example:
+    ///     __TYPE_NAME__.parse(string: "3.14")      // Some(3.14)
+    ///     __TYPE_NAME__.parse(string: "-2.5e10")   // Some(-2.5e10)
+    ///     __TYPE_NAME__.parse(string: "inf")       // Some(infinity)
+    ///     __TYPE_NAME__.parse(string: "nan")       // Some(nan)
+    ///     __TYPE_NAME__.parse(string: "abc")       // None
+    ///     __TYPE_NAME__.parse(string: "")          // None
+    public static func parse(string: String) -> __TYPE_NAME__? {{
         let len = string.byteCount;
         if len == 0 {{
             return .None
@@ -738,7 +1051,7 @@ def generate_float_parse_method(type_name: str, bits: int) -> str:
             let isA1 = Int64(from: b1) == 97 or Int64(from: b1) == 65;
             let isN2 = Int64(from: b2) == 110 or Int64(from: b2) == 78;
             if isN0 and isA1 and isN2 {{
-                return .Some({type_name}.nan)
+                return .Some(__TYPE_NAME__.nan)
             }}
         }}
 
@@ -754,7 +1067,7 @@ def generate_float_parse_method(type_name: str, bits: int) -> str:
             let isN = Int64(from: b1) == 110 or Int64(from: b1) == 78;
             let isF = Int64(from: b2) == 102 or Int64(from: b2) == 70;
             if isI and isN and isF {{
-                return .Some({type_name}.infinity)
+                return .Some(__TYPE_NAME__.infinity)
             }}
         }}
 
@@ -769,7 +1082,7 @@ def generate_float_parse_method(type_name: str, bits: int) -> str:
             let isN = Int64(from: b2) == 110 or Int64(from: b2) == 78;
             let isF = Int64(from: b3) == 102 or Int64(from: b3) == 70;
             if isMinus and isI and isN and isF {{
-                return .Some({type_name}(raw: lang.{lang_type}_neg(lang.{lang_type}_infinity())))
+                return .Some(__TYPE_NAME__(raw: lang.__LANG_TYPE___neg(lang.__LANG_TYPE___infinity())))
             }}
         }}
 
@@ -784,7 +1097,7 @@ def generate_float_parse_method(type_name: str, bits: int) -> str:
             let isN = Int64(from: b2) == 110 or Int64(from: b2) == 78;
             let isF = Int64(from: b3) == 102 or Int64(from: b3) == 70;
             if isPlus and isI and isN and isF {{
-                return .Some({type_name}.infinity)
+                return .Some(__TYPE_NAME__.infinity)
             }}
         }}
 
@@ -808,7 +1121,7 @@ def generate_float_parse_method(type_name: str, bits: int) -> str:
             let isT6 = Int64(from: b6) == 116 or Int64(from: b6) == 84;
             let isY7 = Int64(from: b7) == 121 or Int64(from: b7) == 89;
             if isI0 and isN1 and isF2 and isI3 and isN4 and isI5 and isT6 and isY7 {{
-                return .Some({type_name}.infinity)
+                return .Some(__TYPE_NAME__.infinity)
             }}
         }}
 
@@ -832,12 +1145,12 @@ def generate_float_parse_method(type_name: str, bits: int) -> str:
         }}
 
         // Parse integer part - inline digit check (48='0', 57='9')
-        var integerPart: {type_name} = 0.0;
+        var integerPart: __TYPE_NAME__ = 0.0;
         var hasIntegerPart = false;
         var currentByte: Int64 = Int64(from: string.byteAtUnchecked(index));
 
         while index < len and currentByte >= 48 and currentByte <= 57 {{
-            let digit = {type_name}(from: currentByte - 48);
+            let digit = __TYPE_NAME__(from: currentByte - 48);
             integerPart = integerPart * 10.0 + digit;
             hasIntegerPart = true;
             index = index + 1;
@@ -847,17 +1160,17 @@ def generate_float_parse_method(type_name: str, bits: int) -> str:
         }}
 
         // Parse fractional part
-        var fractionalPart: {type_name} = 0.0;
+        var fractionalPart: __TYPE_NAME__ = 0.0;
         var hasFractionalPart = false;
 
         if index < len and currentByte == 46 {{  // '.'
             index = index + 1;
-            var divisor: {type_name} = 10.0;
+            var divisor: __TYPE_NAME__ = 10.0;
 
             if index < len {{
                 currentByte = Int64(from: string.byteAtUnchecked(index));
                 while index < len and currentByte >= 48 and currentByte <= 57 {{
-                    let digit = {type_name}(from: currentByte - 48);
+                    let digit = __TYPE_NAME__(from: currentByte - 48);
                     fractionalPart = fractionalPart + digit / divisor;
                     divisor = divisor * 10.0;
                     hasFractionalPart = true;
@@ -921,8 +1234,8 @@ def generate_float_parse_method(type_name: str, bits: int) -> str:
             }}
 
             // Apply exponent using pow
-            let expFloat = {type_name}(from: exponent);
-            let ten: {type_name} = 10.0;
+            let expFloat = __TYPE_NAME__(from: exponent);
+            let ten: __TYPE_NAME__ = 10.0;
             if expNegative {{
                 result = result / ten.pow(expFloat)
             }} else {{
@@ -943,78 +1256,344 @@ def generate_float_parse_method(type_name: str, bits: int) -> str:
         .Some(result)
     }}'''
 
+    return method.replace("__TYPE_NAME__", type_name).replace("__LANG_TYPE__", lang_type)
+
 
 def generate_float_format_method(type_name: str, bits: int) -> str:
     """Generate the format() method for float types."""
     lang_type = f"f{bits}"
 
-    return f'''    // Formattable
-    public func format() -> String {{
-        // Handle special cases
-        if self.isNaN {{
-            return "NaN"
-        }}
-        if self.isInfinite {{
-            if self < 0.0 {{
-                return "-Infinity"
-            }} else {{
-                return "Infinity"
-            }}
-        }}
+    method = '''    /// Formats this float as a string.
+    ///
+    /// Supports various formatting options including precision, width,
+    /// padding, alignment, sign display, and float style.
+    ///
+    /// Format options:
+    /// - `precision`: Number of digits after decimal point. Default: 6
+    /// - `width`: Minimum output width. Default: 0
+    /// - `fill`: Padding character. Default: ' '
+    /// - `alignment`: .left, .right, or .center. Default: .right
+    /// - `sign`: .negative (default), .always, or .space
+    /// - `floatStyle`: .fixed, .scientific, .general, or .percent
+    ///
+    /// Float styles:
+    /// - `.fixed`: Always use decimal notation (e.g., "3.14")
+    /// - `.scientific`: Always use exponential notation (e.g., "3.14e0")
+    /// - `.general`: Choose notation based on magnitude (default)
+    /// - `.percent`: Multiply by 100 and add % (e.g., 0.5 -> "50%")
+    ///
+    /// Example:
+    ///     (3.14159).format()  // "3.14159"
+    ///
+    ///     // Precision control
+    ///     (3.14159).format(options: .{precision: 2})  // "3.14"
+    ///     (3.14159).format(options: .{precision: 0})  // "3"
+    ///
+    ///     // Scientific notation
+    ///     (1234.5).format(options: .{floatStyle: .scientific})  // "1.2345e3"
+    ///     (0.00123).format(options: .{floatStyle: .scientific, precision: 2})  // "1.23e-3"
+    ///
+    ///     // Percentage
+    ///     (0.756).format(options: .{floatStyle: .percent})  // "75.6%"
+    ///     (0.756).format(options: .{floatStyle: .percent, precision: 0})  // "76%"
+    ///
+    ///     // Padding and alignment
+    ///     (3.14).format(options: .{width: 8})  // "    3.14"
+    ///     (3.14).format(options: .{width: 8, fill: '0'})  // "00003.14"
+    ///     (3.14).format(options: .{width: 8, alignment: .left})  // "3.14    "
+    ///
+    ///     // Sign display
+    ///     (3.14).format(options: .{sign: .always})  // "+3.14"
+    ///
+    ///     // String interpolation
+    ///     "\\{value}"       // general format
+    ///     "\\{value:.2}"    // 2 decimal places
+    ///     "\\{value:.2e}"   // scientific with 2 decimal places
+    ///     "\\{value:%}"     // percentage
+    public func format(options: FormatOptions = FormatOptions.default()) -> String {
+        var precision: Int64 = 6;
+        var precisionProvided = false;
+        if let .Some(p) = options.precision {
+            precisionProvided = true;
+            if p < 0 {
+                precision = 0
+            } else {
+                precision = p
+            }
+        }
 
-        var result = String();
+        var number = String();
+        var isNegative = false;
+        var allowSign = true;
+        var suffixPercent = false;
+        var trimTrailingZeros = false;
         var value = self;
 
-        // Handle negative
-        let isNegative = value < 0.0;
-        if isNegative {{
-            result.appendByte(45);  // '-'
-            value = value.negate()
-        }}
+        if self.isNaN {
+            number = "NaN";
+            allowSign = false;
+        } else if self.isInfinite {
+            number = "Infinity";
+            isNegative = self < 0.0;
+        } else {
+            isNegative = value < 0.0;
+            if value.isZero {
+                let inverse = __TYPE_NAME__.one.divide(other: value);
+                if inverse < 0.0 {
+                    isNegative = true
+                }
+            }
+            if isNegative {
+                value = value.negate()
+            }
 
-        // Get integer part
-        let intPart = value.trunc();
-        var intVal: Int64 = Int64(raw: lang.cast_{lang_type}_i64(intPart.raw));
+            var style = options.floatStyle;
+            if style == .percent {
+                value = value.multiply(other: 100.0);
+                suffixPercent = true;
+                style = .fixed
+            }
 
-        // Format integer part
-        if intVal == 0 {{
-            result.appendByte(48)  // '0'
-        }} else {{
-            var digits = String();
-            while intVal > 0 {{
-                let digit: Int64 = intVal % 10;
-                let charCode: Int64 = digit + 48;
-                digits.appendByte(UInt8(from: charCode));
-                intVal = intVal / 10
-            }}
-            // Reverse digits
-            var i = digits.byteCount - 1;
-            while i >= 0 {{
-                result.appendByte(digits.byteAtUnchecked(i));
-                i = i - 1
-            }}
-        }}
+            if style == .auto {
+                if precisionProvided == false {
+                    trimTrailingZeros = true
+                }
+                if value.isZero {
+                    style = .fixed
+                } else {
+                    let expVal = value.log10().floor();
+                    let expInt: Int64 = Int64(raw: lang.cast___LANG_TYPE___i64(expVal.raw));
+                    if expInt < -4 or expInt >= precision {
+                        style = .scientific
+                    } else {
+                        style = .fixed
+                    }
+                }
+            }
 
-        // Add decimal point
-        result.appendByte(46);  // '.'
+            if style == .scientific or style == .scientificUpper {
+                var exponent: Int64 = 0;
+                var mantissa = value;
+                if value.isZero == false {
+                    let expVal = value.log10().floor();
+                    exponent = Int64(raw: lang.cast___LANG_TYPE___i64(expVal.raw));
+                    let pow10 = __TYPE_NAME__(floatLiteral: 10.0).powi(exponent);
+                    mantissa = value.divide(other: pow10);
+                }
 
-        // Get fractional part (6 digits of precision)
-        var fracPart = value - intPart;
-        var digitCount: Int64 = 0;
-        let maxDigits: Int64 = 6;
-        let ten: {type_name} = 10.0;
+                let scale = __TYPE_NAME__(floatLiteral: 10.0).powi(precision);
+                mantissa = mantissa.multiply(other: scale).round().divide(other: scale);
+                if mantissa >= 10.0 {
+                    mantissa = mantissa.divide(other: 10.0);
+                    exponent = exponent + 1
+                }
 
-        while digitCount < maxDigits {{
-            fracPart = fracPart * ten;
-            let digit: Int64 = Int64(raw: lang.cast_{lang_type}_i64(fracPart.trunc().raw));
-            let charCode: Int64 = digit + 48;
-            result.appendByte(UInt8(from: charCode));
-            fracPart = fracPart - {type_name}(raw: lang.cast_i64_{lang_type}(digit.raw));
-            digitCount = digitCount + 1
-        }}
+                let intPart = mantissa.trunc();
+                var intVal: Int64 = Int64(raw: lang.cast___LANG_TYPE___i64(intPart.raw));
+
+                if intVal == 0 {
+                    number.appendByte(48)
+                } else {
+                    var digits = String();
+                    while intVal > 0 {
+                        let digit: Int64 = intVal % 10;
+                        let charCode: Int64 = digit + 48;
+                        digits.appendByte(UInt8(from: charCode));
+                        intVal = intVal / 10
+                    }
+                    var i = digits.byteCount - 1;
+                    while i >= 0 {
+                        number.appendByte(digits.byteAtUnchecked(i));
+                        i = i - 1
+                    }
+                }
+
+                if precision > 0 {
+                    number.appendByte(46);
+                    var fracPart = mantissa - intPart;
+                    var digitCount: Int64 = 0;
+                    let ten: __TYPE_NAME__ = 10.0;
+                    while digitCount < precision {
+                        fracPart = fracPart * ten;
+                        let digit: Int64 = Int64(raw: lang.cast___LANG_TYPE___i64(fracPart.trunc().raw));
+                        let charCode: Int64 = digit + 48;
+                        number.appendByte(UInt8(from: charCode));
+                        fracPart = fracPart - __TYPE_NAME__(raw: lang.cast_i64___LANG_TYPE__(digit.raw));
+                        digitCount = digitCount + 1
+                    }
+                }
+
+                if style == .scientificUpper {
+                    number.appendByte(69)  // 'E'
+                } else {
+                    number.appendByte(101)  // 'e'
+                }
+
+                var expVal: Int64 = exponent;
+                if expVal < 0 {
+                    number.appendByte(45);  // '-'
+                    expVal = expVal.negate()
+                }
+                if expVal == 0 {
+                    number.appendByte(48)  // '0'
+                } else {
+                    var digits = String();
+                    while expVal > 0 {
+                        let digit: Int64 = expVal % 10;
+                        let charCode: Int64 = digit + 48;
+                        digits.appendByte(UInt8(from: charCode));
+                        expVal = expVal / 10
+                    }
+                    var i = digits.byteCount - 1;
+                    while i >= 0 {
+                        number.appendByte(digits.byteAtUnchecked(i));
+                        i = i - 1
+                    }
+                }
+            } else {
+                let scale = if precision > 0 {
+                    __TYPE_NAME__(floatLiteral: 10.0).powi(precision)
+                } else {
+                    __TYPE_NAME__(floatLiteral: 1.0)
+                };
+
+                var rounded = value;
+                if precision >= 0 {
+                    rounded = rounded.multiply(other: scale).round().divide(other: scale)
+                }
+
+                let intPart = rounded.trunc();
+                var intVal: Int64 = Int64(raw: lang.cast___LANG_TYPE___i64(intPart.raw));
+
+                if intVal == 0 {
+                    number.appendByte(48)
+                } else {
+                    var digits = String();
+                    while intVal > 0 {
+                        let digit: Int64 = intVal % 10;
+                        let charCode: Int64 = digit + 48;
+                        digits.appendByte(UInt8(from: charCode));
+                        intVal = intVal / 10
+                    }
+                    var i = digits.byteCount - 1;
+                    while i >= 0 {
+                        number.appendByte(digits.byteAtUnchecked(i));
+                        i = i - 1
+                    }
+                }
+
+                if precision > 0 {
+                    number.appendByte(46);
+                    var fracPart = rounded - intPart;
+                    var digitCount: Int64 = 0;
+                    let ten: __TYPE_NAME__ = 10.0;
+                    while digitCount < precision {
+                        fracPart = fracPart * ten;
+                        let digit: Int64 = Int64(raw: lang.cast___LANG_TYPE___i64(fracPart.trunc().raw));
+                        let charCode: Int64 = digit + 48;
+                        number.appendByte(UInt8(from: charCode));
+                        fracPart = fracPart - __TYPE_NAME__(raw: lang.cast_i64___LANG_TYPE__(digit.raw));
+                        digitCount = digitCount + 1
+                    }
+                }
+            }
+
+            if suffixPercent and precisionProvided == false {
+                trimTrailingZeros = true
+            }
+        }
+
+        var result = String();
+        if allowSign {
+            if isNegative {
+                result.appendByte(45)  // '-'
+            } else if options.sign == .always {
+                result.appendByte(43)  // '+'
+            } else if options.sign == .space {
+                result.appendByte(32)  // ' '
+            }
+        }
+        if trimTrailingZeros {
+            let len = number.byteCount;
+            var dotIndex: Int64 = -1;
+            var expIndex: Int64 = -1;
+            var i: Int64 = 0;
+            while i < len {
+                let b = number.byteAtUnchecked(i);
+                let v = Int64(from: b);
+                if v == 46 {  // '.'
+                    dotIndex = i
+                } else if v == 101 or v == 69 {  // 'e' or 'E'
+                    expIndex = i;
+                    break
+                }
+                i = i + 1
+            }
+
+            if dotIndex >= 0 {
+                let endIndex: Int64 = if expIndex >= 0 { expIndex } else { len };
+                var trimEnd = endIndex;
+                while trimEnd > dotIndex + 1 {
+                    let b = number.byteAtUnchecked(trimEnd - 1);
+                    if Int64(from: b) == 48 {
+                        trimEnd = trimEnd - 1
+                    } else {
+                        break
+                    }
+                }
+                if trimEnd == dotIndex + 1 {
+                    trimEnd = dotIndex
+                }
+                if trimEnd != endIndex {
+                    var trimmed = String();
+                    if trimEnd > 0 {
+                        trimmed.append(number.substringBytes(from: 0, to: trimEnd))
+                    }
+                    if expIndex >= 0 {
+                        trimmed.append(number.substringBytes(from: expIndex, to: len))
+                    }
+                    number = trimmed
+                }
+            }
+        }
+
+        result.append(number);
+        if suffixPercent {
+            result.appendByte(37)  // '%'
+        }
+
+        if let .Some(width) = options.width {
+            if width > result.byteCount {
+                var padLeft: Int64 = 0;
+                var padRight: Int64 = 0;
+                let padding = width - result.byteCount;
+                if options.alignment == .left {
+                    padRight = padding
+                } else if options.alignment == .right {
+                    padLeft = padding
+                } else {
+                    padLeft = padding / 2;
+                    padRight = padding - padLeft
+                }
+
+                var padded = String();
+                while padLeft > 0 {
+                    padded.appendChar(options.fill);
+                    padLeft = padLeft - 1
+                }
+                padded.append(result);
+                while padRight > 0 {
+                    padded.appendChar(options.fill);
+                    padRight = padRight - 1
+                }
+                return padded
+            }
+        }
 
         result
-    }}'''
+    }'''
+
+    return method.replace("__TYPE_NAME__", type_name).replace("__LANG_TYPE__", lang_type)
 
 
 def generate_float(type_name: str, bits: int, is_default: bool) -> str:
@@ -1034,7 +1613,21 @@ def generate_float(type_name: str, bits: int, is_default: bool) -> str:
 
     # Type alias for platform default
     if is_default:
-        type_alias = f"\n// Float - alias to Float64\npublic type Float = {type_name}"
+        type_alias = f"""
+
+// ============================================================================
+// TYPE ALIASES
+// ============================================================================
+
+/// Default floating-point type.
+///
+/// Float is an alias for {type_name}. This is the recommended floating-point
+/// type for most use cases, offering good precision and performance.
+///
+/// Example:
+///     let pi: Float = 3.14159
+///     let area = pi * radius * radius
+public type Float = {type_name}"""
     else:
         type_alias = ""
 
@@ -1049,12 +1642,25 @@ def generate_float(type_name: str, bits: int, is_default: bool) -> str:
     if bits == 64:
         # min_value is -(max_value) - we'll construct it differently in the template
         max_value = "1.7976931348623157e308"
+        min_value = "-1.7976931348623157e308"
         min_positive = "2.2250738585072014e-308"
         epsilon = "2.220446049250313e-16"
+        precision_kind = "double-precision"
+        precision_kind_header = "double precision"
+        range_approx = "1.8×10^308"
+        sig_digits = "15-17"
     else:
         max_value = "3.4028235e38"
+        min_value = "-3.4028235e38"
         min_positive = "1.17549435e-38"
         epsilon = "1.1920929e-7"
+        precision_kind = "single-precision"
+        precision_kind_header = "single precision"
+        range_approx = "3.4×10^38"
+        sig_digits = "6-9"
+
+    default_float = "Float64"
+    type_name_upper = type_name.upper()
 
     # Conversion to other float type
     if bits == 64:
@@ -1066,6 +1672,7 @@ def generate_float(type_name: str, bits: int, is_default: bool) -> str:
 
     result = template
     result = result.replace("{{TYPE_NAME}}", type_name)
+    result = result.replace("{{TYPE_NAME_UPPER}}", type_name_upper)
     result = result.replace("{{BITS}}", str(bits))
     result = result.replace("{{LANG_TYPE}}", lang_type)
     result = result.replace("{{OTHER_FLOAT}}", other_float)
@@ -1074,9 +1681,15 @@ def generate_float(type_name: str, bits: int, is_default: bool) -> str:
     result = result.replace("{{ZERO_LITERAL}}", zero_literal)
     result = result.replace("{{TYPE_ALIAS}}", type_alias)
     result = result.replace("{{FORMAT_METHOD}}", format_method)
+    result = result.replace("{{MIN_VALUE}}", min_value)
     result = result.replace("{{MAX_VALUE}}", max_value)
     result = result.replace("{{MIN_POSITIVE}}", min_positive)
     result = result.replace("{{EPSILON}}", epsilon)
+    result = result.replace("{{PRECISION_KIND}}", precision_kind)
+    result = result.replace("{{PRECISION_KIND_HEADER}}", precision_kind_header)
+    result = result.replace("{{RANGE_APPROX}}", range_approx)
+    result = result.replace("{{SIG_DIGITS}}", sig_digits)
+    result = result.replace("{{DEFAULT_FLOAT}}", default_float)
     result = result.replace("{{TO_OTHER_FLOAT}}", to_other_float)
     result = result.replace("{{LIBM_SUFFIX}}", libm_suffix)
     result = result.replace("{{PARSE_METHOD}}", parse_method)

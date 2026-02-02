@@ -7,7 +7,7 @@ import std.result.(Result, Optional)
 import std.memory.(Slice, Pointer)
 import std.collections.(Array)
 import std.core.(Bool)
-import std.io.error.(Error)
+import std.io.error.(Error, invalidInput)
 
 // ============================================================================
 // READ PROTOCOL
@@ -90,7 +90,7 @@ public struct Cursor: Read {
         }
         var i: Int64 = 0;
         while i < n {
-            buf.pointer.offset(by: i).write(self.data.getUnchecked(self.pos + i));
+            buf.pointer.offset(by: i).write(self.data(unchecked: self.pos + i));
             i = i + 1
         }
         self.pos = self.pos + n;
@@ -128,7 +128,7 @@ public func readByte[R](reader: R) -> Result[Optional[UInt8], Error] where R: Re
     if n == 0 {
         .Ok(.None)
     } else {
-        .Ok(.Some(buf.getUnchecked(0)))
+        .Ok(.Some(buf(unchecked: 0)))
     }
 }
 
@@ -153,10 +153,32 @@ public func readAll[R](reader: R, into buf: Array[UInt8]) -> Result[Int64, Error
         }
         var j: Int64 = 0;
         while j < n {
-            buf.append(chunk.getUnchecked(j));
+            buf.append(chunk(unchecked: j));
             j = j + 1
         }
         total = total + n
     }
     .Ok(total)
+}
+
+/// Reads exactly count bytes from a reader.
+///
+/// Returns Err if EOF is reached before count bytes are read.
+/// Use when you need a specific number of bytes and a short read is an error.
+///
+/// Example:
+///     var file = try File.open(path: "header.bin")
+///     var header = Array[UInt8](repeating: 0, count: 16)
+///     try readExact(reader: file, into: header.asSlice())  // must read 16 bytes
+public func readExact[R](reader: R, into buf: Slice[UInt8]) -> Result[(), Error] where R: Read {
+    var filled: Int64 = 0;
+    while filled < buf.count {
+        let remaining = Slice(pointer: buf.pointer.offset(by: filled), count: buf.count - filled);
+        let n = try reader.read(into: remaining);
+        if n == 0 {
+            return .Err(invalidInput())
+        }
+        filled = filled + n
+    }
+    .Ok(())
 }

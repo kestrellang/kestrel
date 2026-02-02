@@ -1,11 +1,11 @@
 // {{TYPE_NAME}} - {{BITS}}-bit {{SIGNEDNESS}} integer
-// Generated from integer.ks.template - DO NOT EDIT
+// Generated from integer.ks.template (docs synced from .ks.interface) - DO NOT EDIT
 
 module std.num
 
 import std.ffi.(FFISafe)
 import std.core.(
-    Equatable, Comparable, Ordering, Bool, Matchable, Formattable, Hash, Hasher,
+    Equatable, Comparable, Ordering, Bool, Matchable, Formattable, FormatOptions, Hash, Hasher,
     Addable, Subtractable, Multipliable, Divisible, Modulo, Negatable,
     BitwiseAnd, BitwiseOr, BitwiseXor, BitwiseNot, LeftShift, RightShift,
     AddAssign, SubtractAssign, MultiplyAssign, DivideAssign, ModuloAssign,
@@ -15,7 +15,7 @@ import std.core.(
 )
 import std.text.(String)
 import std.memory.(Slice, Pointer)
-import std.num.(UInt8, Int64)
+import std.num.(UInt8, Int64, UInt64)
 
 /// A {{BITS}}-bit {{SIGNEDNESS}} integer type.
 ///
@@ -436,14 +436,7 @@ public struct {{TYPE_NAME}}:
     // BYTE CONVERSION
     // ========================================================================
 
-    // TODO: implement byte conversion methods
-    // These require Array from std.collections which creates circular import issues
-    // public func toBytes() -> Array[UInt8]
-    // public func toBytesBigEndian() -> Array[UInt8]
-    // public func toBytesLittleEndian() -> Array[UInt8]
-    // public static func fromBytes(bytes: Array[UInt8]) -> {{TYPE_NAME}}?
-    // public static func fromBytesBigEndian(bytes: Array[UInt8]) -> {{TYPE_NAME}}?
-    // public static func fromBytesLittleEndian(bytes: Array[UInt8]) -> {{TYPE_NAME}}?
+{{BYTE_CONVERSION}}
 
     // ========================================================================
     // PARSING

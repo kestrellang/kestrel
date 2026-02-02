@@ -3,6 +3,7 @@
 module std.core
 
 import std.text.(String)
+import std.core.(FormatOptions)
 
 /// Represents the result of comparing two values.
 /// Used by the Comparable protocol to express total ordering.
@@ -57,11 +58,12 @@ public enum Ordering: Equatable, Formattable {
     }
 
     /// Formats this ordering as a string.
-    public func format() -> String {
-        match self {
+    public func format(options: FormatOptions = FormatOptions.default()) -> String {
+        let value = match self {
             .Less => "Less",
             .Equal => "Equal",
             .Greater => "Greater"
-        }
+        };
+        if options.debug { "Ordering." + value } else { value }
     }
 }

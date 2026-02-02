@@ -150,7 +150,7 @@ public func readLine() -> Result[String, Error] {
         if n == 0 {
             break  // EOF
         }
-        let b = buf.getUnchecked(0);
+        let b = buf(unchecked: 0);
         if b == 10 {  // newline
             break
         }
@@ -160,7 +160,7 @@ public func readLine() -> Result[String, Error] {
     // Strip trailing \r if present (Windows line endings)
     let count = bytes.count;
     if count > 0 {
-        let lastByte = bytes.getUnchecked(count - 1);
+        let lastByte = bytes(unchecked: count - 1);
         if lastByte == 13 {
             let _ = bytes.pop();
         }

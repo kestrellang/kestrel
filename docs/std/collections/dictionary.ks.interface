@@ -22,7 +22,7 @@ public struct DictionaryIterator[K, V]: Iterator {
     public init(buckets: Pointer[Bucket[K, V]], capacity: Int64);
 
     /// Returns the next key-value tuple, or None if exhausted.
-    public mutating func next() -> (K, V)?;
+    public mutating func next() -> Option[(K, V)];
 }
 
 // ============================================================================
@@ -100,7 +100,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable where K: Hash, H: Ha
     ///
     /// Example:
     ///     let words = ["apple", "apricot", "banana", "blueberry"]
-    ///     let grouped = Dictionary(grouping: words, by: |w| w(0))
+    ///     let grouped = Dictionary(grouping: words, by: { it(0) })
     ///     // ["a": ["apple", "apricot"], "b": ["banana", "blueberry"]]
     public init[I: Iterable, E](grouping elements: I, by keyFunc: (E) -> K)
         where I.Item = E, V = Array[E];
@@ -183,7 +183,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable where K: Hash, H: Ha
     ///     dict("z")           // None
     ///     dict("c") = 3       // inserts "c": 3
     ///     dict("a") = None    // removes "a"
-    public subscript(key: K) -> V? { get set };
+    public subscript(key: K) -> Option[V] { get set };
 
     /// Accesses the value for the given key, returning a default if missing.
     ///
@@ -263,7 +263,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable where K: Hash, H: Ha
     ///     var dict = ["a": 1]
     ///     dict.insert(key: "b", value: 2)  // None (new key)
     ///     dict.insert(key: "a", value: 10) // Some(1) (replaced)
-    public mutating func insert(key: K, value: V) -> V?;
+    public mutating func insert(key: K, value: V) -> Option[V];
 
     /// Updates the value for an existing key using a transform function.
     ///
@@ -271,16 +271,16 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable where K: Hash, H: Ha
     ///
     /// Example:
     ///     var dict = ["a": 1, "b": 2]
-    ///     dict.update(key: "a", with: |v| v * 10)  // true, dict["a"] = 10
-    ///     dict.update(key: "z", with: |v| v * 10)  // false, no change
+    ///     dict.update(key: "a", with: { it * 10 })  // true, dict["a"] = 10
+    ///     dict.update(key: "z", with: { it * 10 })  // false, no change
     public mutating func update(key: K, with transform: (V) -> V) -> Bool;
 
     /// Updates or inserts: applies transform if key exists, otherwise inserts default.
     ///
     /// Example:
     ///     var counts: [String: Int64] = [:]
-    ///     counts.upsert(key: "apple", default: 0, with: |n| n + 1)
-    ///     counts.upsert(key: "apple", default: 0, with: |n| n + 1)
+    ///     counts.upsert(key: "apple", default: 0, with: { it + 1 })
+    ///     counts.upsert(key: "apple", default: 0, with: { it + 1 })
     ///     counts("apple")  // Some(2)
     public mutating func upsert(key: K, default defaultValue: V, with transform: (V) -> V);
 
@@ -325,7 +325,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable where K: Hash, H: Ha
     ///     var dict = ["a": 1, "b": 2]
     ///     dict.remove(key: "a")  // Some(1), dict is now ["b": 2]
     ///     dict.remove(key: "z")  // None, dict unchanged
-    public mutating func remove(key: K) -> V?;
+    public mutating func remove(key: K) -> Option[V];
 
     /// Removes all key-value pairs from the dictionary.
     ///
@@ -373,7 +373,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable where K: Hash, H: Ha
     /// Example:
     ///     let dict = ["a": 1, "b": 5, "c": 3]
     ///     dict.first(where: |k, v| v > 2)  // Some entry with v > 2
-    public func first(where predicate: (K, V) -> Bool) -> (K, V)?;
+    public func first(where predicate: (K, V) -> Bool) -> Option[(K, V)];
 
     /// Returns true if all entries satisfy the predicate.
     ///
@@ -409,14 +409,14 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable where K: Hash, H: Ha
     ///
     /// Example:
     ///     let dict = ["a": 1, "b": 2]
-    ///     let doubled = dict.mapValues(|v| v * 2)  // ["a": 2, "b": 4]
+    ///     let doubled = dict.mapValues({ it * 2 })  // ["a": 2, "b": 4]
     public func mapValues[U](transform: (V) -> U) -> Dictionary[K, U, H];
 
     /// Returns a new dictionary with transformed values, removing None results.
     ///
     /// Example:
     ///     let dict = ["a": "1", "b": "two", "c": "3"]
-    ///     let parsed = dict.compactMapValues(|v| Int64.parse(v))
+    ///     let parsed = dict.compactMapValues({ Int64.parse(it) })
     ///     // ["a": 1, "c": 3] - "two" couldn't be parsed
     public func compactMapValues[U](transform: (V) -> U?) -> Dictionary[K, U, H];
 
@@ -488,7 +488,7 @@ extend Dictionary[K, V, H] where V: Equatable {
     /// Example:
     ///     ["a": 1, "b": 2].firstKey(forValue: 2)  // Some("b")
     ///     ["a": 1, "b": 2].firstKey(forValue: 5)  // None
-    public func firstKey(forValue value: V) -> K?;
+    public func firstKey(forValue value: V) -> Option[K];
 
     /// Returns all keys mapping to the given value.
     ///
@@ -563,7 +563,7 @@ public struct KeysIterator[K, V]: Iterator where K: Hash {
     public init(dictIter: DictionaryIterator[K, V]);
 
     /// Returns the next key, or None if exhausted.
-    public mutating func next() -> K?;
+    public mutating func next() -> Option[K];
 }
 
 /// A lazy view of a dictionary's keys.
@@ -613,7 +613,7 @@ public struct ValuesIterator[K, V]: Iterator where K: Hash {
     public init(dictIter: DictionaryIterator[K, V]);
 
     /// Returns the next value, or None if exhausted.
-    public mutating func next() -> V?;
+    public mutating func next() -> Option[V];
 }
 
 /// A lazy view of a dictionary's values.
@@ -671,7 +671,7 @@ extend ValuesView[K, V] where V: Equatable {
 ///     let entries = scores.map(|k, v| "\{k}: \{v}")
 ///
 ///     // Without DirectIterable (explicit iterator):
-///     let highScores = scores.iter().filter(|e| e.value > 100).collect()
+///     let highScores = scores.iter().filter({ it.value > 100 }).collect()
 extend Dictionary[K, V, H]: DirectIterable[(K, V)] {
 
     /// Constructs a dictionary from an iterator of key-value tuples.

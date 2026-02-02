@@ -14,7 +14,7 @@ import std.collections.(DefaultHasher, Array)
 // ============================================================================
 
 /// Represents a slot in the hash table.
-public enum Bucket[K, V] {
+enum Bucket[K, V] {
     /// Empty slot - never been used.
     case Empty
 
@@ -57,7 +57,7 @@ public struct DictionaryIterator[K, V]: Iterator {
     private var index: Int64
 
     /// Creates a dictionary iterator.
-    public init(buckets buckets: Pointer[Bucket[K, V]], capacity capacity: Int64) {
+    init(buckets buckets: Pointer[Bucket[K, V]], capacity capacity: Int64) {
         self.buckets = buckets;
         self.capacity = capacity;
         self.index = Int64(intLiteral: 0);
@@ -904,7 +904,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     }
 
     /// Returns the internal buckets pointer for views.
-    public func getBuckets() -> Pointer[Bucket[K, V]] { self.buckets() }
+    fileprivate func getBuckets() -> Pointer[Bucket[K, V]] { self.buckets() }
 
     // ========================================================================
     // SEARCHING AND PREDICATES
@@ -1370,7 +1370,7 @@ public struct KeysView[K, V]: Iterable where K: Hash {
     private var capacity: Int64
 
     /// Creates a keys view.
-    public init(buckets buckets: Pointer[Bucket[K, V]], capacity capacity: Int64) {
+    init(buckets buckets: Pointer[Bucket[K, V]], capacity capacity: Int64) {
         self.buckets = buckets;
         self.capacity = capacity;
     }
@@ -1416,7 +1416,7 @@ public struct ValuesView[K, V]: Iterable where K: Hash {
     private var capacity: Int64
 
     /// Creates a values view.
-    public init(buckets buckets: Pointer[Bucket[K, V]], capacity capacity: Int64) {
+    init(buckets buckets: Pointer[Bucket[K, V]], capacity capacity: Int64) {
         self.buckets = buckets;
         self.capacity = capacity;
     }

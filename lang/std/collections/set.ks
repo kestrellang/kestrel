@@ -80,7 +80,7 @@ public struct SetIterator[T, H = DefaultHasher]: Iterator where T: Hash, H: Hash
 /// Set literals use array syntax with type annotation:
 ///     let empty: Set[Int64] = []
 ///     let numbers: Set = [1, 2, 3]
-public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hash, H: Hasher, H: Defaultable {
+public struct Set[T, H = DefaultHasher]: Iterable where T: Hash, H: Hasher, H: Defaultable {
     type Item = T
     type Iter = SetIterator[T, H]
 
@@ -844,8 +844,10 @@ extend Set[T, H]: Formattable where T: Formattable, T: Hash, H: Hasher, H: Defau
 // CONDITIONAL EXTENSIONS - CLONEABLE
 // ============================================================================
 
-// Note: Set already conforms to Cloneable in its struct declaration
-// with clone() defined directly on the struct.
+/// Cloneable conformance for sets.
+///
+/// Due to COW semantics, cloning is O(1) until mutation.
+extend Set[T, H]: Cloneable {}
 
 /// Deep clone when T is Cloneable.
 extend Set[T, H] where T: Hash, T: Cloneable, H: Hasher, H: Defaultable {

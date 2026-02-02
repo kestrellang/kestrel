@@ -158,8 +158,8 @@ struct SnakeGame: not Copyable {
     func isBody(x x: Int64, y y: Int64) -> Bool {
         var i: Int64 = 0;
         while i < self.length {
-            let bx = self.bodyX.getUnchecked(i);
-            let by = self.bodyY.getUnchecked(i);
+            let bx = self.bodyX(unchecked: i);
+            let by = self.bodyY(unchecked: i);
             if bx == x and by == y {
                 return true;
             }
@@ -267,8 +267,8 @@ struct SnakeGame: not Copyable {
                     // Move body: shift all segments, add old head at front
                     var i = self.length - 1;
                     while i > 0 {
-                        let prevX = self.bodyX.getUnchecked(i - 1);
-                        let prevY = self.bodyY.getUnchecked(i - 1);
+                        let prevX = self.bodyX(unchecked: i - 1);
+                        let prevY = self.bodyY(unchecked: i - 1);
                         self.bodyX.setUnchecked(i, prevX);
                         self.bodyY.setUnchecked(i, prevY);
                         i = i - 1;

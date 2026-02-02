@@ -77,17 +77,17 @@ public enum Result[T, E] {
     /// Returns true if this is Ok and the value satisfies the predicate.
     ///
     /// Example:
-    ///     Ok(42).isOkAnd(|x| x > 0)    // true
-    ///     Ok(-1).isOkAnd(|x| x > 0)    // false
-    ///     Err("e").isOkAnd(|x| x > 0)  // false
+    ///     Ok(42).isOkAnd({ it > 0 })    // true
+    ///     Ok(-1).isOkAnd({ it > 0 })    // false
+    ///     Err("e").isOkAnd({ it > 0 })  // false
     public func isOkAnd(predicate: (T) -> Bool) -> Bool;
 
     /// Returns true if this is Err and the error satisfies the predicate.
     ///
     /// Example:
-    ///     Err("not found").isErrAnd(|e| e.contains("not"))  // true
-    ///     Err("timeout").isErrAnd(|e| e.contains("not"))    // false
-    ///     Ok(42).isErrAnd(|e| true)                         // false
+    ///     Err("not found").isErrAnd({ it.contains("not") })  // true
+    ///     Err("timeout").isErrAnd({ it.contains("not") })    // false
+    ///     Ok(42).isErrAnd({ true })                         // false
     public func isErrAnd(predicate: (E) -> Bool) -> Bool;
 
     // ========================================================================
@@ -128,9 +128,9 @@ public enum Result[T, E] {
     /// The function receives the error and can use it to compute a default.
     ///
     /// Example:
-    ///     Ok(42).unwrap(orElse: |e| fallback(e))       // 42, no call
-    ///     Err("oops").unwrap(orElse: |e| e.count)      // 4
-    ///     Err(err).unwrap(orElse: |e| recoverFrom(e))  // calls function
+    ///     Ok(42).unwrap(orElse: { fallback(it) })       // 42, no call
+    ///     Err("oops").unwrap(orElse: { it.count })      // 4
+    ///     Err(err).unwrap(orElse: { recoverFrom(it) })  // calls function
     public func unwrap(orElse defaultFn: (E) -> T) -> T;
 
     // ========================================================================
@@ -162,9 +162,9 @@ public enum Result[T, E] {
     /// Returns Err unchanged if this is Err.
     ///
     /// Example:
-    ///     Ok(2).map(|x| x * 2)       // Ok(4)
-    ///     Err("e").map(|x| x * 2)    // Err("e")
-    ///     Ok("hi").map(|s| s.len)    // Ok(2)
+    ///     Ok(2).map({ it * 2 })       // Ok(4)
+    ///     Err("e").map({ it * 2 })    // Err("e")
+    ///     Ok("hi").map({ it.len })    // Ok(2)
     public func map[U](transform: (T) -> U) -> Result[U, E];
 
     /// Transforms the success value, flattening the result.
@@ -195,8 +195,8 @@ public enum Result[T, E] {
     ///
     /// Example:
     ///     fetchData()
-    ///         .inspect(|data| log("Received \{data.len} bytes"))
-    ///         .map(|data| process(data))
+    ///         .inspect({ log("Received \{it.len} bytes") })
+    ///         .map({ process(it) })
     public func inspect(fn: (T) -> Void) -> Result[T, E];
 
     // ========================================================================
@@ -208,8 +208,8 @@ public enum Result[T, E] {
     /// Returns Ok unchanged if this is Ok.
     ///
     /// Example:
-    ///     Ok(42).mapErr(|e| "Error: \{e}")       // Ok(42)
-    ///     Err("oops").mapErr(|e| "Error: \{e}")  // Err("Error: oops")
+    ///     Ok(42).mapErr({ "Error: \{it}" })       // Ok(42)
+    ///     Err("oops").mapErr({ "Error: \{it}" })  // Err("Error: oops")
     public func mapErr[F](transform: (E) -> F) -> Result[T, F];
 
     /// Transforms the error value, flattening the result.
@@ -217,8 +217,8 @@ public enum Result[T, E] {
     /// Use when your transform function returns a Result.
     ///
     /// Example:
-    ///     Ok(42).flatMapErr(|e| recover(e))   // Ok(42)
-    ///     Err(e).flatMapErr(|e| recover(e))   // result of recover(e)
+    ///     Ok(42).flatMapErr({ recover(it) })   // Ok(42)
+    ///     Err(e).flatMapErr({ recover(it) })   // result of recover(e)
     public func flatMapErr[F](transform: (E) -> Result[T, F]) -> Result[T, F];
 
     /// Calls the function with the error value for side effects.
@@ -227,7 +227,7 @@ public enum Result[T, E] {
     ///
     /// Example:
     ///     fetchData()
-    ///         .inspectErr(|e| log("Failed: \{e}"))
+    ///         .inspectErr({ log("Failed: \{it}") })
     ///         .unwrapOr(default: defaultData)
     public func inspectErr(fn: (E) -> Void) -> Result[T, E];
 
@@ -295,9 +295,9 @@ public enum Result[T, E] {
     /// The error type may change.
     ///
     /// Example:
-    ///     Ok(1).orElse(|e| Ok(0))           // Ok(1), no call
-    ///     Err("e").orElse(|e| Ok(0))        // Ok(0)
-    ///     Err(e).orElse(|e| tryBackup(e))   // attempts backup
+    ///     Ok(1).orElse({ Ok(0) })           // Ok(1), no call
+    ///     Err("e").orElse({ Ok(0) })        // Ok(0)
+    ///     Err(e).orElse({ tryBackup(it) })   // attempts backup
     public func orElse[F](alternative: (E) -> Result[T, F]) -> Result[T, F];
 
     /// Combines two Results into a Result of a tuple.

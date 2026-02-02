@@ -181,5 +181,5 @@ public protocol Defaultable {
 public protocol Formattable {
     /// Returns this value formatted as a string with the given options.
     @builtin(.FormattableFormat)
-    func format() -> String
+    func format(options: FormatOptions = FormatOptions.default()) -> String
 }

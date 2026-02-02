@@ -237,7 +237,7 @@ public struct Grapheme: Equatable {
     public func isAscii() -> Bool {
         let count = self._chars.count;
         if count == Int64(intLiteral: 1) {
-            self._chars.getUnchecked(Int64(intLiteral: 0)).isAscii()
+            self._chars(unchecked: Int64(intLiteral: 0)).isAscii()
         } else {
             false
         }
@@ -248,7 +248,7 @@ public struct Grapheme: Equatable {
         var len: Int64 = Int64(intLiteral: 0);
         let count = self._chars.count;
         for i in Int64(intLiteral: 0)..<count {
-            len = len + self._chars.getUnchecked(i).utf8Length()
+            len = len + self._chars(unchecked: i).utf8Length()
         }
         len
     }
@@ -266,7 +266,7 @@ public struct Grapheme: Equatable {
         }
         var equal: Bool = true;
         for i in Int64(intLiteral: 0)..<selfCount {
-            if self._chars.getUnchecked(i).equals(other._chars.getUnchecked(i)) == false {
+            if self._chars(unchecked: i).equals(other._chars(unchecked: i)) == false {
                 equal = false
             }
         }

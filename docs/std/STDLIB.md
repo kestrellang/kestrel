@@ -25,13 +25,13 @@ extend MyType: Iterable { ... }   // Now works with for-in loops
 | Pattern | Use When |
 |---------|----------|
 | `func x() -> T` | Failure is a bug (panic) |
-| `func x() -> T?` | Failure is normal (Optional) |
+| `func x() -> Option[T]` | Failure is normal (Option) |
 | `func x() -> Result[T, E]` | Caller needs error details |
 | `func tryX() -> Result[T, E]` | Variant of X with early exit |
 
 ```kestrel
 arr(0)           // Panics if empty
-arr.first()      // Returns Optional
+arr.first()      // Returns Option[T]
 file.read()      // Returns Result[String, IoError]
 iter.tryFold()   // Folds with early exit on error
 ```
@@ -62,4 +62,4 @@ High-level constructs compile to efficient code:
 - Iterators inline to loops
 - Generics monomorphize (no boxing)
 - COW avoids copies until mutation
-- Optionals have no overhead vs nullable pointers
+- Options have no overhead vs nullable pointers

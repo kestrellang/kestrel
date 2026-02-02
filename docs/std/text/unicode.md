@@ -74,7 +74,11 @@ enum GraphemeBreakProperty {
     case RegionalIndicator
     case Prepend
     case SpacingMark
-    case L, V, T, LV, LVT  // Hangul syllables
+    case L   // Hangul syllables
+    case V
+    case T
+    case LV
+    case LVT
 }
 ```
 
@@ -106,7 +110,7 @@ To update to a new Unicode version:
 
 ```kestrel
 /// The Unicode version these tables were generated from.
-public let unicodeVersion: String = "15.1.0"
+public let unicodeVersion: String = "15.1.0";
 ```
 
 ## API
@@ -115,15 +119,15 @@ Once tables are embedded, full Unicode methods become available:
 
 ```kestrel
 // Full Unicode case conversion
-let s = "MÜNCHEN"
-s.lowercased()  // "münchen"
+let s = "MÜNCHEN";
+s.lowercased();  // "münchen"
 
 // Case-insensitive comparison
-"straße".equalsCaseInsensitive("STRASSE")  // true
+"straße".equalsCaseInsensitive("STRASSE");  // true
 
 // Proper grapheme iteration
-let emoji = "👨‍👩‍👧"
-emoji.graphemes.count()  // 1 (not 5)
+let emoji = "👨‍👩‍👧";
+emoji.graphemes.count();  // 1 (not 5)
 ```
 
 ## Future Work

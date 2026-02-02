@@ -1,11 +1,11 @@
 // UInt8 - 8-bit unsigned integer
-// Generated from integer.ks.template - DO NOT EDIT
+// Generated from integer.ks.template (docs synced from .ks.interface) - DO NOT EDIT
 
 module std.num
 
 import std.ffi.(FFISafe)
 import std.core.(
-    Equatable, Comparable, Ordering, Bool, Matchable, Formattable, Hash, Hasher,
+    Equatable, Comparable, Ordering, Bool, Matchable, Formattable, FormatOptions, Hash, Hasher,
     Addable, Subtractable, Multipliable, Divisible, Modulo, Negatable,
     BitwiseAnd, BitwiseOr, BitwiseXor, BitwiseNot, LeftShift, RightShift,
     AddAssign, SubtractAssign, MultiplyAssign, DivideAssign, ModuloAssign,
@@ -15,21 +15,11 @@ import std.core.(
 )
 import std.text.(String)
 import std.memory.(Slice, Pointer)
-import std.num.(UInt8, Int64)
+import std.num.(UInt8, Int64, UInt64)
 
-/// A 8-bit unsigned integer type.
-///
-/// UInt8 supports arithmetic, bitwise, comparison, and formatting operations.
-/// It is FFI-safe for interoperability with C code.
-///
-/// Arithmetic operations wrap on overflow (two's complement) by default.
-/// Use checked methods for overflow detection or saturating methods for
-/// clamping behavior.
-///
-/// Example:
-///     let a: UInt8 = 100
-///     let b = a + 50
-///     let c = a * 2
+/// An 8-bit unsigned integer type.
+/// Commonly used for byte-level operations and raw memory access.
+/// Supports arithmetic, bitwise, comparison, and formatting operations.
 public struct UInt8:
     UnsignedInteger,
     Steppable,
@@ -608,7 +598,7 @@ public struct UInt8:
     // ========================================================================
 
     // Formattable
-    public func format() -> String {
+    public func format(options: FormatOptions = FormatOptions.default()) -> String {
         if self == UInt8.zero {
             return "0"
         }

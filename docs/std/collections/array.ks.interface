@@ -10,9 +10,9 @@
 /// via for-in loops or iterator methods.
 ///
 /// Example:
-///     let arr = [1, 2, 3]
+///     let arr = [1, 2, 3];
 ///     for item in arr {
-///         print(item)
+///         print(item);
 ///     }
 public struct ArrayIterator[T]: Iterator {
     type Item = T
@@ -22,7 +22,7 @@ public struct ArrayIterator[T]: Iterator {
     public init(ptr ptr: Pointer[T], remaining remaining: Int64);
 
     /// Returns the next element, or None if exhausted.
-    public mutating func next() -> T?;
+    public mutating func next() -> Option[T];
 }
 
 // ============================================================================
@@ -36,15 +36,15 @@ public struct ArrayIterator[T]: Iterator {
 /// mutated.
 ///
 /// Example:
-///     var numbers = [1, 2, 3]
-///     numbers.append(element: 4)
-///     let first = numbers(0)  // 1
-///     let safe = numbers(checked: 100)  // None
+///     var numbers = [1, 2, 3];
+///     numbers.append(element: 4);
+///     let first = numbers(0);  // 1
+///     let safe = numbers(checked: 100);  // None
 ///
 /// Array literals:
-///     let empty: [Int64] = []
-///     let items = [1, 2, 3]
-///     let nested = [[1, 2], [3, 4]]
+///     let empty: [Int64] = [];
+///     let items = [1, 2, 3];
+///     let nested = [[1, 2], [3, 4]];
 @builtin(.ArrayStruct)
 public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArrayLiteral {
     type Item = T
@@ -58,8 +58,8 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     /// Creates an empty array.
     ///
     /// Example:
-    ///     let arr = Array[Int64]()
-    ///     arr.isEmpty  // true
+    ///     let arr = Array[Int64]();
+    ///     arr.isEmpty;  // true
     public init();
 
     /// Creates an empty array with the specified initial capacity.
@@ -68,23 +68,23 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     /// final size is known, avoiding repeated reallocations.
     ///
     /// Example:
-    ///     var arr = Array[String](capacity: 1000)
-    ///     arr.capacity  // >= 1000
-    ///     arr.count     // 0
+    ///     var arr = Array[String](capacity: 1000);
+    ///     arr.capacity;  // >= 1000
+    ///     arr.count;     // 0
     public init(capacity capacity: Int64);
 
     /// Creates an array by repeating a value count times.
     ///
     /// Example:
-    ///     let zeros = Array(repeating: 0, count: 5)  // [0, 0, 0, 0, 0]
-    ///     let empty = Array(repeating: "x", count: 0)  // []
+    ///     let zeros = Array(repeating: 0, count: 5);  // [0, 0, 0, 0, 0]
+    ///     let empty = Array(repeating: "x", count: 0);  // []
     public init(repeating value: T, count: Int64) where T: Cloneable;
 
     /// Creates an array from any iterable source.
     ///
     /// Example:
-    ///     let fromRange = Array(from: 1..5)  // [1, 2, 3, 4]
-    ///     let fromSet = Array(from: mySet)
+    ///     let fromRange = Array(from: 1..5);  // [1, 2, 3, 4]
+    ///     let fromSet = Array(from: mySet);
     public init[I: Iterable](from iterable: I) where I.Item = T;
 
     /// Creates an array of count elements using a generator function.
@@ -92,8 +92,8 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     /// The generator receives the index (0 to count-1) for each element.
     ///
     /// Example:
-    ///     let squares = Array(count: 5, generator: |i| i * i)  // [0, 1, 4, 9, 16]
-    ///     let indices = Array(count: 3, generator: |i| i)  // [0, 1, 2]
+    ///     let squares = Array(count: 5, generator: { it * it });  // [0, 1, 4, 9, 16]
+    ///     let indices = Array(count: 3, generator: { it });  // [0, 1, 2]
     public init(count: Int64, generator: (Int64) -> T);
 
     /// Creates an array from a raw pointer and count (used by compiler for array literals).
@@ -109,8 +109,8 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     /// Returns the number of elements in the array.
     ///
     /// Example:
-    ///     [1, 2, 3].count  // 3
-    ///     [].count         // 0
+    ///     [1, 2, 3].count;  // 3
+    ///     [].count;         // 0
     public var count: Int64 { get };
 
     /// Returns the current capacity (elements storable without reallocating).
@@ -174,7 +174,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     ///     arr(checked: 0)   // Some(10)
     ///     arr(checked: 5)   // None
     ///     arr(checked: -1)  // None
-    public subscript(checked index: Int64) -> T? { get };
+    public subscript(checked index: Int64) -> Option[T] { get };
 
     /// Accesses the element at the given index without bounds checking.
     ///
@@ -201,7 +201,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     ///     arr(wrapping: 3)   // Some(10) - wraps to index 0
     ///     arr(wrapping: 4)   // Some(20) - wraps to index 1
     ///     [](wrapping: 0)    // None - empty array
-    public subscript(wrapping index: Int64) -> T? { get set };
+    public subscript(wrapping index: Int64) -> Option[T] { get set };
 
     /// Accesses element at index, clamping to valid bounds.
     ///
@@ -214,7 +214,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     ///     arr(clamping: 100)  // Some(30) - clamped to last
     ///     arr(clamping: 1)    // Some(20) - normal access
     ///     [](clamping: 0)     // None - empty array
-    public subscript(clamping index: Int64) -> T? { get set };
+    public subscript(clamping index: Int64) -> Option[T] { get set };
 
     // ========================================================================
     // RANGE SUBSCRIPTS
@@ -239,7 +239,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     ///     arr(checked: 0..2)   // Some(Slice[10, 20])
     ///     arr(checked: 0..10)  // None - end out of bounds
     ///     arr(checked: -1..2)  // None - start out of bounds
-    public subscript(checked range: Range[Int64]) -> Slice[T]? { get };
+    public subscript(checked range: Range[Int64]) -> Option[Slice[T]] { get };
 
     /// Returns a slice view without bounds checking.
     ///
@@ -273,20 +273,20 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     /// Example:
     ///     [1, 2, 3].first()  // Some(1)
     ///     [].first()         // None
-    public func first() -> T?;
+    public func first() -> Option[T];
 
     /// Returns the last element, or None if empty.
     ///
     /// Example:
     ///     [1, 2, 3].last()  // Some(3)
     ///     [].last()         // None
-    public func last() -> T?;
+    public func last() -> Option[T];
 
     /// Returns an iterator over the array's elements.
     ///
     /// Example:
     ///     for item in arr.iter() { ... }
-    ///     let doubled = arr.iter().map(|x| x * 2).collect()
+    ///     let doubled = arr.iter().map { it * 2 }.collect();
     public func iter() -> ArrayIterator[T];
 
     /// Creates a shallow clone of the array.
@@ -295,9 +295,9 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     /// until either array is mutated.
     ///
     /// Example:
-    ///     let a = [1, 2, 3]
-    ///     var b = a.clone()  // O(1), shares storage
-    ///     b.append(element: 4)  // Now b copies and diverges
+    ///     let a = [1, 2, 3];
+    ///     var b = a.clone();  // O(1), shares storage
+    ///     b.append(element: 4);  // Now b copies and diverges
     public func clone() -> Array[T];
 
     /// Returns a raw pointer to the array's element storage.
@@ -373,7 +373,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     ///     arr.pop()  // Some(2), arr is [1]
     ///     arr.pop()  // Some(1), arr is []
     ///     arr.pop()  // None, arr is still []
-    public mutating func pop() -> T?;
+    public mutating func pop() -> Option[T];
 
     /// Removes and returns the first element, or None if empty.
     ///
@@ -382,7 +382,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     /// Example:
     ///     var arr = [1, 2, 3]
     ///     arr.popFirst()  // Some(1), arr is [2, 3]
-    public mutating func popFirst() -> T?;
+    public mutating func popFirst() -> Option[T];
 
     /// Removes and returns the element at the specified index.
     ///
@@ -417,7 +417,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     ///
     /// Example:
     ///     var arr = [1, 2, 3, 4, 5]
-    ///     arr.retain(where: |x| x % 2 == 0)  // arr is [2, 4]
+    ///     arr.retain { it % 2 == 0 };  // arr is [2, 4]
     public mutating func retain(where predicate: (T) -> Bool);
 
     /// Removes all elements that satisfy the predicate.
@@ -426,10 +426,10 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     ///
     /// Example:
     ///     var arr = [1, 2, 3, 4, 5]
-    ///     arr.removeAll(where: |x| x % 2 == 0)  // arr is [1, 3, 5]
+    ///     arr.removeAll { it % 2 == 0 };  // arr is [1, 3, 5]
     ///
-    ///     var names = ["Alice", "", "Bob", ""]
-    ///     names.removeAll(where: |s| s.isEmpty)  // ["Alice", "Bob"]
+    ///     var names = ["Alice", "", "Bob", ""];
+    ///     names.removeAll { it.isEmpty };  // ["Alice", "Bob"]
     public mutating func removeAll(where predicate: (T) -> Bool);
 
     // ========================================================================
@@ -554,30 +554,30 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     ///
     /// Example:
     ///     let arr = [1, 2, 3, 4, 5]
-    ///     arr.firstIndex(where: |x| x > 3)   // Some(3) - index of 4
-    ///     arr.firstIndex(where: |x| x > 10)  // None
-    public func firstIndex(where predicate: (T) -> Bool) -> Int64?;
+    ///     arr.firstIndex(where: { it } > 3)   // Some(3) - index of 4
+    ///     arr.firstIndex(where: { it } > 10)  // None
+    public func firstIndex(where predicate: (T) -> Bool) -> Option[Int64];
 
     /// Returns the index of the last element matching the predicate, or None.
     ///
     /// Example:
     ///     let arr = [1, 2, 3, 2, 1]
-    ///     arr.lastIndex(where: |x| x == 2)  // Some(3)
-    public func lastIndex(where predicate: (T) -> Bool) -> Int64?;
+    ///     arr.lastIndex { it == 2 };  // Some(3)
+    public func lastIndex(where predicate: (T) -> Bool) -> Option[Int64];
 
     /// Returns the first element matching the predicate, or None.
     ///
     /// Example:
     ///     let arr = [1, 2, 3, 4, 5]
-    ///     arr.first(where: |x| x > 3)  // Some(4)
-    public func first(where predicate: (T) -> Bool) -> T?;
+    ///     arr.first { it > 3 };  // Some(4)
+    public func first(where predicate: (T) -> Bool) -> Option[T];
 
     /// Returns the last element matching the predicate, or None.
     ///
     /// Example:
     ///     let arr = [1, 2, 3, 2, 1]
-    ///     arr.last(where: |x| x > 1)  // Some(2) - the second 2
-    public func last(where predicate: (T) -> Bool) -> T?;
+    ///     arr.last { it > 1 };  // Some(2) - the second 2
+    public func last(where predicate: (T) -> Bool) -> Option[T];
 
     // ========================================================================
     // PREDICATES
@@ -589,9 +589,9 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     /// Short-circuits on first non-matching element.
     ///
     /// Example:
-    ///     [2, 4, 6].all(satisfy: |x| x % 2 == 0)  // true
-    ///     [2, 3, 6].all(satisfy: |x| x % 2 == 0)  // false
-    ///     [].all(satisfy: |x| false)              // true (empty)
+    ///     [2, 4, 6].all(satisfy: { it } % 2 == 0)  // true
+    ///     [2, 3, 6].all(satisfy: { it } % 2 == 0)  // false
+    ///     [].all(satisfy: { false })              // true (empty)
     public func all(satisfy predicate: (T) -> Bool) -> Bool;
 
     /// Returns true if any element satisfies the predicate.
@@ -600,15 +600,15 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     /// Short-circuits on first matching element.
     ///
     /// Example:
-    ///     [1, 2, 3].any(satisfy: |x| x > 2)  // true
-    ///     [1, 2, 3].any(satisfy: |x| x > 5)  // false
-    ///     [].any(satisfy: |x| true)          // false (empty)
+    ///     [1, 2, 3].any(satisfy: { it } > 2)  // true
+    ///     [1, 2, 3].any(satisfy: { it } > 5)  // false
+    ///     [].any(satisfy: { true })          // false (empty)
     public func any(satisfy predicate: (T) -> Bool) -> Bool;
 
     /// Returns the number of elements satisfying the predicate.
     ///
     /// Example:
-    ///     [1, 2, 3, 4, 5].count(where: |x| x % 2 == 0)  // 2
+    ///     [1, 2, 3, 4, 5].count(where: { it } % 2 == 0)  // 2
     public func count(where predicate: (T) -> Bool) -> Int64;
 
     // ========================================================================
@@ -660,7 +660,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     ///
     /// Example:
     ///     var arr = [1, 2, 3, 4, 5]
-    ///     let pivot = arr.partition(by: |x| x % 2 == 0)
+    ///     let pivot = arr.partition(by: { it } % 2 == 0)
     ///     // arr might be [2, 4, 3, 1, 5] or similar
     ///     // pivot == 2 (first two elements satisfy predicate)
     public mutating func partition(by predicate: (T) -> Bool) -> Int64;
@@ -670,7 +670,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     /// Preserves relative order within each resulting array.
     ///
     /// Example:
-    ///     let (evens, odds) = [1, 2, 3, 4, 5].partitioned(by: |x| x % 2 == 0)
+    ///     let (evens, odds) = [1, 2, 3, 4, 5].partitioned(by: { it } % 2 == 0)
     ///     // evens = [2, 4]
     ///     // odds = [1, 3, 5]
     public func partitioned(by predicate: (T) -> Bool) -> (Array[T], Array[T]);
@@ -733,13 +733,13 @@ extend Array[T]: Equatable where T: Equatable {
     /// Example:
     ///     [1, 2, 3, 2].firstIndex(of: 2)  // Some(1)
     ///     [1, 2, 3].firstIndex(of: 5)     // None
-    public func firstIndex(of element: T) -> Int64?;
+    public func firstIndex(of element: T) -> Option[Int64];
 
     /// Returns the index of the last occurrence of element, or None.
     ///
     /// Example:
     ///     [1, 2, 3, 2].lastIndex(of: 2)  // Some(3)
-    public func lastIndex(of element: T) -> Int64?;
+    public func lastIndex(of element: T) -> Option[Int64];
 
     /// Returns true if the array starts with the given prefix.
     ///
@@ -840,14 +840,14 @@ extend Array[T] where T: Comparable {
     /// Example:
     ///     [3, 1, 4].min()  // Some(1)
     ///     [].min()         // None
-    public func min() -> T?;
+    public func min() -> Option[T];
 
     /// Returns the maximum element, or None if empty.
     ///
     /// Example:
     ///     [3, 1, 4].max()  // Some(4)
     ///     [].max()         // None
-    public func max() -> T?;
+    public func max() -> Option[T];
 
     /// Returns true if the array is sorted in ascending order.
     ///
@@ -869,7 +869,7 @@ extend Array[T] where T: Comparable {
     ///     let arr = [1, 2, 3, 4, 5]
     ///     arr.binarySearch(element: 3)  // Some(2)
     ///     arr.binarySearch(element: 6)  // None
-    public func binarySearch(element: T) -> Int64?;
+    public func binarySearch(element: T) -> Option[Int64];
 }
 
 // ============================================================================
@@ -926,14 +926,14 @@ extend Array[T] {
     ///
     /// Example:
     ///     var people = [Person("Alice", 30), Person("Bob", 25)]
-    ///     people.sort(by: |p| p.age)  // sorted by age ascending
+    ///     people.sort(by: { it.age })  // sorted by age ascending
     public mutating func sort[K: Comparable](by key: (T) -> K);
 
     /// Returns a new array sorted by a key extracted from each element.
     ///
     /// Example:
     ///     let words = ["hi", "hello", "hey"]
-    ///     let byLength = words.sorted(by: |w| w.count)  // ["hi", "hey", "hello"]
+    ///     let byLength = words.sorted(by: { it.count })  // ["hi", "hey", "hello"]
     public func sorted[K: Comparable](by key: (T) -> K) -> Array[T];
 }
 
@@ -1014,12 +1014,12 @@ public type ArrayTypeOperator[T] = Array[T];
 ///
 /// Example:
 ///     // With DirectIterable (direct, returns Array):
-///     let doubled = numbers.map(|x| x * 2)
-///     let evens = numbers.filter(|x| x % 2 == 0)
+///     let doubled = numbers.map({ it } * 2)
+///     let evens = numbers.filter({ it } % 2 == 0)
 ///     let sum = numbers.sum()
 ///
 ///     // Without DirectIterable (explicit iterator):
-///     let doubled = numbers.iter().map(|x| x * 2).collect()
+///     let doubled = numbers.iter().map { it * 2 }.collect();
 ///
 /// All iterator methods are available directly on arrays, including:
 /// - Transformations: map, filter, filterMap, flatMap, take, skip, etc.

@@ -65,8 +65,8 @@ mod array {
                 if oob.isSome() { return 3 }
 
                 // Test getUnchecked
-                if arr.getUnchecked(0) != 10 { return 4 }
-                if arr.getUnchecked(2) != 30 { return 5 }
+                if arr(unchecked: 0) != 10 { return 4 }
+                if arr(unchecked: 2) != 30 { return 5 }
 
                 0
             }
@@ -529,19 +529,19 @@ mod iterator_adapters {
                 // Test map
                 let doubled = arr.iter().map({ (x) in x * 2 }).collect();
                 if doubled.count != 5 { return 1 }
-                if doubled.getUnchecked(0) != 2 { return 2 }
-                if doubled.getUnchecked(4) != 10 { return 3 }
+                if doubled(unchecked: 0) != 2 { return 2 }
+                if doubled(unchecked: 4) != 10 { return 3 }
 
                 // Test filter
                 let evens = arr.iter().filter({ (x) in x % 2 == 0 }).collect();
                 if evens.count != 2 { return 4 }
-                if evens.getUnchecked(0) != 2 { return 5 }
-                if evens.getUnchecked(1) != 4 { return 6 }
+                if evens(unchecked: 0) != 2 { return 5 }
+                if evens(unchecked: 1) != 4 { return 6 }
 
                 // Test map + filter chain
                 let result = arr.iter().filter({ (x) in x > 2 }).map({ (x) in x * 10 }).collect();
                 if result.count != 3 { return 7 }
-                if result.getUnchecked(0) != 30 { return 8 }
+                if result(unchecked: 0) != 30 { return 8 }
 
                 0
             }
@@ -568,22 +568,22 @@ mod iterator_adapters {
                 // Test take
                 let first3 = arr.iter().take(count: 3).collect();
                 if first3.count != 3 { return 1 }
-                if first3.getUnchecked(2) != 3 { return 2 }
+                if first3(unchecked: 2) != 3 { return 2 }
 
                 // Test skip
                 let last3 = arr.iter().skip(count: 2).collect();
                 if last3.count != 3 { return 3 }
-                if last3.getUnchecked(0) != 3 { return 4 }
+                if last3(unchecked: 0) != 3 { return 4 }
 
                 // Test takeWhile
                 let lessThan4 = arr.iter().takeWhile({ (x) in x < 4 }).collect();
                 if lessThan4.count != 3 { return 5 }
-                if lessThan4.getUnchecked(2) != 3 { return 6 }
+                if lessThan4(unchecked: 2) != 3 { return 6 }
 
                 // Test skipWhile
                 let from4 = arr.iter().skipWhile({ (x) in x < 4 }).collect();
                 if from4.count != 2 { return 7 }
-                if from4.getUnchecked(0) != 4 { return 8 }
+                if from4(unchecked: 0) != 4 { return 8 }
 
                 0
             }
@@ -613,21 +613,21 @@ mod iterator_adapters {
                 // Test zip
                 let zipped = arr1.iter().zip(other: arr2.iter()).collect();
                 if zipped.count != 3 { return 1 }
-                let (a, b) = zipped.getUnchecked(0);
+                let (a, b) = zipped(unchecked: 0);
                 if a != 1 { return 2 }
                 if b != 10 { return 3 }
 
                 // Test enumerate
                 let enumerated = arr1.iter().enumerate().collect();
                 if enumerated.count != 3 { return 4 }
-                let (idx, val) = enumerated.getUnchecked(1);
+                let (idx, val) = enumerated(unchecked: 1);
                 if idx != 1 { return 5 }
                 if val != 2 { return 6 }
 
                 // Test chain
                 let chained = arr1.iter().chain(other: arr2.iter()).collect();
                 if chained.count != 6 { return 7 }
-                if chained.getUnchecked(3) != 10 { return 8 }
+                if chained(unchecked: 3) != 10 { return 8 }
 
                 0
             }
@@ -721,8 +721,8 @@ mod iterator_adapters {
                 // Test sorted
                 let sorted = arr.iter().sorted();
                 if sorted.count != 5 { return 5 }
-                if sorted.getUnchecked(0) != 1 { return 6 }
-                if sorted.getUnchecked(4) != 5 { return 7 }
+                if sorted(unchecked: 0) != 1 { return 6 }
+                if sorted(unchecked: 4) != 5 { return 7 }
 
                 // Test sum
                 let sum = arr.iter().sum();
@@ -755,8 +755,8 @@ mod iterator_adapters {
 
                 let compacted = arr.iter().compactMap().collect();
                 if compacted.count != 2 { return 1 }
-                if compacted.getUnchecked(0) != 1 { return 2 }
-                if compacted.getUnchecked(1) != 3 { return 3 }
+                if compacted(unchecked: 0) != 1 { return 2 }
+                if compacted(unchecked: 1) != 3 { return 3 }
 
                 // Test flatMap
                 var nested = std.collections.Array[std.collections.Array[std.num.Int64]]();
@@ -770,8 +770,8 @@ mod iterator_adapters {
 
                 let flat = nested.iter().flatMap({ (arr) in arr.iter() }).collect();
                 if flat.count != 3 { return 4 }
-                if flat.getUnchecked(0) != 1 { return 5 }
-                if flat.getUnchecked(2) != 3 { return 6 }
+                if flat(unchecked: 0) != 1 { return 5 }
+                if flat(unchecked: 2) != 3 { return 6 }
 
                 0
             }
@@ -796,13 +796,13 @@ mod iterator_adapters {
                 // Test stepBy
                 let everyOther = [0, 1, 2, 3, 4, 5, 6].iter().stepBy(n: 2).collect();
                 if everyOther.count != 4 { return 1 }
-                if everyOther.getUnchecked(1) != 2 { return 2 }
+                if everyOther(unchecked: 1) != 2 { return 2 }
 
                 // Test scan (running sum)
                 let running = arr.iter().scan(initial: 0, combine: { (acc, x) in acc + x }).collect();
                 if running.count != 3 { return 3 }
-                if running.getUnchecked(0) != 1 { return 4 }
-                if running.getUnchecked(2) != 6 { return 5 }
+                if running(unchecked: 0) != 1 { return 4 }
+                if running(unchecked: 2) != 6 { return 5 }
 
                 // Test position
                 let pos = arr.iter().position({ (x) in x == 2 });

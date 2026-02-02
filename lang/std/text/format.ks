@@ -74,7 +74,7 @@ public struct DefaultStringInterpolation: StringInterpolationProtocol {
         var result = "";
         var i: Int64 = 0;
         while i < partsCount {
-            let part = self.parts.getValue(at: i).unwrap();
+            let part = self.parts(unchecked: i);
             result = result + part;
             i = i + 1;
         }
