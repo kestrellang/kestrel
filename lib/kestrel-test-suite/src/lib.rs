@@ -314,7 +314,10 @@ pub use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind as SymbolKind;
 /// 2. `lang/std` relative to the Cargo manifest directory (for tests)
 /// 3. `lang/std` relative to current directory (development)
 /// 4. `lib/std` relative to executable (installed)
-fn load_stdlib() -> Result<Vec<(String, String)>, String> {
+///
+/// Returns (name, content, directory) tuples where directory is the parent
+/// directory of each source file (for @fileconstant path resolution).
+fn load_stdlib() -> Result<Vec<(String, String, std::path::PathBuf)>, String> {
     use kestrel_compiler::stdlib::{StdLib, StdLibConfig};
     use std::path::PathBuf;
 
@@ -336,7 +339,15 @@ fn load_stdlib() -> Result<Vec<(String, String)>, String> {
     };
 
     match StdLib::load(&config) {
-        Ok(Some(stdlib)) => Ok(stdlib.sources.into_iter().map(|(name, content, _path)| (name, content)).collect()),
+        Ok(Some(stdlib)) => Ok(stdlib
+            .sources
+            .into_iter()
+            .map(|(name, content, full_path)| {
+                // Get the parent directory for @fileconstant path resolution
+                let dir = full_path.parent().map(|p| p.to_path_buf()).unwrap_or_default();
+                (name, content, dir)
+            })
+            .collect()),
         Ok(None) => Ok(Vec::new()), // Stdlib disabled
         Err(e) => Err(e.to_string()),
     }
@@ -371,6 +382,8 @@ pub struct TestContext {
     mir_result: OnceCell<kestrel_execution_graph_lowering::LoweringResult>,
     /// Lazily computed run result
     run_result: OnceCell<Result<RunResult, String>>,
+    /// Maps file_id to directory for @fileconstant path resolution
+    file_paths: std::collections::HashMap<usize, std::path::PathBuf>,
 }
 
 impl TestContext {
@@ -378,7 +391,11 @@ impl TestContext {
     pub fn mir(&self) -> &kestrel_execution_graph_lowering::LoweringResult {
         self.mir_result.get_or_init(|| {
             let root = self.semantic_model.root();
-            kestrel_execution_graph_lowering::lower_module(&self.semantic_model, root)
+            kestrel_execution_graph_lowering::lower_module_with_file_paths(
+                &self.semantic_model,
+                root,
+                self.file_paths.clone(),
+            )
         })
     }
 
@@ -535,9 +552,11 @@ impl Test {
         let mut builder = SemanticModelBuilder::new();
         let mut diagnostics = DiagnosticContext::new();
         let mut has_parse_errors = false;
+        let mut file_paths: std::collections::HashMap<usize, std::path::PathBuf> =
+            std::collections::HashMap::new();
 
-        // Load stdlib files if enabled
-        let stdlib_files: Vec<(String, String)> = if self.include_stdlib {
+        // Load stdlib files if enabled (with directories for @fileconstant)
+        let stdlib_files: Vec<(String, String, std::path::PathBuf)> = if self.include_stdlib {
             builder.enable_std_auto_import();
             match load_stdlib() {
                 Ok(files) => files,
@@ -552,6 +571,7 @@ impl Test {
                         has_errors: true,
                         mir_result: OnceCell::new(),
                         run_result: OnceCell::new(),
+                        file_paths: std::collections::HashMap::new(),
                     });
                     return;
                 },
@@ -562,20 +582,27 @@ impl Test {
 
         // Collect all files to compile (stdlib first if enabled, then prelude if not using stdlib, then test files)
         // Note: When using stdlib, we don't include the prelude since stdlib has its own protocol definitions
-        let mut all_files: Vec<(&str, &str)> = Vec::new();
-        for (name, content) in &stdlib_files {
-            all_files.push((name.as_str(), content.as_str()));
+        // Each entry is (name, content, optional_directory)
+        let mut all_files: Vec<(&str, &str, Option<&std::path::PathBuf>)> = Vec::new();
+        for (name, content, dir) in &stdlib_files {
+            all_files.push((name.as_str(), content.as_str(), Some(dir)));
         }
         if self.include_prelude && !self.include_stdlib {
-            all_files.push((PRELUDE_SOURCE.0, PRELUDE_SOURCE.1));
+            all_files.push((PRELUDE_SOURCE.0, PRELUDE_SOURCE.1, None));
         }
         for (name, content) in &self.files {
-            all_files.push((name.as_str(), content.as_str()));
+            all_files.push((name.as_str(), content.as_str(), None));
         }
 
         // Parse and add all files
-        for (file_name, content) in all_files {
+        for (file_name, content, dir) in all_files {
             let file_id = diagnostics.add_file(file_name.to_string(), content.to_string());
+
+            // Track file directory for @fileconstant path resolution
+            if let Some(directory) = dir {
+                file_paths.insert(file_id, directory.clone());
+            }
+
             let tokens: Vec<_> = lex(content, file_id)
                 .filter_map(|t| t.ok())
                 .map(|spanned| (spanned.value, spanned.span))
@@ -629,6 +656,7 @@ impl Test {
             has_errors,
             mir_result: OnceCell::new(),
             run_result: OnceCell::new(),
+            file_paths,
         });
     }
 

@@ -403,11 +403,10 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
         // Interpolated strings: result is String, interpolated expressions must be Formattable
         ExprKind::InterpolatedString { parts } => {
             use kestrel_semantic_tree::expr::InterpolationPart;
-            use kestrel_semantic_tree::ty::Ty;
 
-            // The result type is String by default
+            // The result type is the default string type (String, not primitive str)
             // TODO: Support ExpressibleByStringInterpolation for custom types
-            let string_ty = Ty::string(expr.span.clone());
+            let string_ty = ctx.oracle().default_string_type(expr.span.clone());
             ctx.register_type(&string_ty);
             ctx.equate(expr.ty.id(), string_ty.id(), expr.span.clone());
 

@@ -598,29 +598,134 @@ public struct UInt8:
     // ========================================================================
 
     // Formattable
+    /// Formats this integer as a string with the given options.
+    ///
+    /// Supports various formatting options including radix (base), width,
+    /// padding, alignment, sign display, and alternate forms.
+    ///
+    /// Format options:
+    /// - `radix`: Number base (2, 8, 10, 16). Default: 10
+    /// - `width`: Minimum output width. Default: None
+    /// - `fill`: Padding character. Default: ' '
+    /// - `alignment`: .Left, .Right, or .Center. Default: .Left
+    /// - `sign`: .Negative (default), .Always, or .Space
+    /// - `uppercase`: Use uppercase for hex digits. Default: false
+    /// - `alternate`: Include prefix (0b, 0o, 0x). Default: false
+    ///
+    /// Example:
+    ///     (42).format()  // "42"
+    ///
+    ///     // Hexadecimal
+    ///     (255).format(options: .{radix: 16})  // "ff"
+    ///     (255).format(options: .{radix: 16, uppercase: true})  // "FF"
+    ///     (255).format(options: .{radix: 16, alternate: true})  // "0xff"
+    ///
+    ///     // Binary
+    ///     (42).format(options: .{radix: 2})  // "101010"
+    ///     (42).format(options: .{radix: 2, alternate: true})  // "0b101010"
+    ///
+    ///     // Padding and alignment
+    ///     (42).format(options: .{width: .Some(5)})  // "   42"
+    ///     (42).format(options: .{width: .Some(5), fill: '0'})  // "00042"
+    ///     (42).format(options: .{width: .Some(5), alignment: .Left})  // "42   "
+    ///
+    ///     // Sign display
+    ///     (42).format(options: .{sign: .Always})  // "+42"
+    ///     (-42).format(options: .{sign: .Always})  // "-42"
     public func format(options: FormatOptions = FormatOptions.default()) -> String {
-        if self == UInt8.zero {
-            return "0"
-        }
-
-        var result = String();
         var n = self;
+        let isNegative = false;
 
-        let ten: UInt8 = 10;
-        while n != UInt8.zero {
-            let digit: UInt8 = n % ten;
-            let charCode: Int64 = Int64(from: digit) + 48;
-            result.appendByte(UInt8(from: charCode));
-            n = n / ten
+        // Get radix (default 10)
+        var radix: Int64 = options.radix;
+        if radix < 2 or radix > 36 {
+            radix = 10
         }
 
-        // Reverse the string
-        var reversed = String();
-        var i = result.byteCount - 1;
+        // Build digits in reverse order
+        var digits = String();
+        if n == UInt8.zero {
+            digits.appendByte(48)  // '0'
+        } else {
+            let radixVal: UInt8 = UInt8(from: radix);
+            while n != UInt8.zero {
+                let digit: UInt8 = n % radixVal;
+                let digitVal: Int64 = Int64(from: digit);
+                let charCode: Int64 = if digitVal < 10 {
+                    digitVal + 48  // '0'-'9'
+                } else if options.uppercase {
+                    digitVal - 10 + 65  // 'A'-'Z'
+                } else {
+                    digitVal - 10 + 97  // 'a'-'z'
+                };
+                digits.appendByte(UInt8(from: charCode));
+                n = n / radixVal
+            }
+        }
+
+        // Build result string
+        var result = String();
+
+        // Add sign prefix (unsigned types only show + if requested)
+        if options.sign == .Always {
+            result.appendByte(43)  // '+'
+        } else if options.sign == .Space {
+            result.appendByte(32)  // ' '
+        }
+
+        // Add alternate form prefix (always lowercase, even with uppercase digits)
+        if options.alternate {
+            if radix == 2 {
+                result.appendByte(48);  // '0'
+                result.appendByte(98)   // 'b'
+            } else if radix == 8 {
+                result.appendByte(48);  // '0'
+                result.appendByte(111)  // 'o'
+            } else if radix == 16 {
+                result.appendByte(48);  // '0'
+                result.appendByte(120)  // 'x'
+            }
+        }
+
+        // Append digits in correct order (reverse)
+        var i = digits.byteCount - 1;
         while i >= 0 {
-            reversed.appendByte(result.byteAtUnchecked(i));
+            result.appendByte(digits.byteAtUnchecked(i));
             i = i - 1
         }
-        reversed
+
+        // Apply width and alignment padding
+        if let .Some(width) = options.width {
+            let currentLen = result.byteCount;
+            if width > currentLen {
+                let padding = width - currentLen;
+                var padLeft: Int64 = 0;
+                var padRight: Int64 = 0;
+
+                if options.alignment == .Left {
+                    padRight = padding
+                } else if options.alignment == .Right {
+                    padLeft = padding
+                } else {
+                    // Center
+                    padLeft = padding / 2;
+                    padRight = padding - padLeft
+                }
+
+                var padded = String();
+                while padLeft > 0 {
+                    padded.appendChar(options.fill);
+                    padLeft = padLeft - 1
+                }
+                padded.append(result);
+                while padRight > 0 {
+                    padded.appendChar(options.fill);
+                    padRight = padRight - 1
+                }
+                return padded
+            }
+        }
+
+        result
     }}
 

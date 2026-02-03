@@ -21,6 +21,7 @@ mod closure;
 mod context;
 mod error;
 mod expr;
+mod format_spec;
 mod lowerer;
 mod match_lowering;
 mod name;

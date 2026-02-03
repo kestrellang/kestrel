@@ -399,74 +399,170 @@ def generate_saturating_arithmetic(type_name: str, bits: int, signed: bool, lang
 def generate_integer_format_method(type_name: str, bits: int, signed: bool) -> str:
     """Generate the format() method for integer types."""
 
-    # For converting digit to Int64 for UInt8 conversion
+    # For converting values between types
     if bits == 64 and signed:
+        # Int64: radix is already Int64, digit is already Int64
         digit_as_i64 = "digit"
+        radix_as_type = "radix"  # radix is Int64, self is Int64, no conversion needed
+    elif bits == 64:
+        # UInt64: radix is Int64, need to convert to UInt64; digit is UInt64, need to convert to Int64
+        digit_as_i64 = "Int64(from: digit)"
+        radix_as_type = "UInt64(from: radix)"
     else:
+        # Smaller types: radix is Int64, need to convert to type; digit is type, need to convert to Int64
         digit_as_i64 = f"Int64(from: digit)"
+        radix_as_type = f"{type_name}(from: radix)"
 
     # For signed types, we need to handle negative numbers
     if signed:
-        return f'''    // Formattable
-    public func format(options: FormatOptions = FormatOptions.default()) -> String {{
-        if self == {type_name}.zero {{
-            return "0"
-        }}
-
-        var result = String();
-        var n = self;
+        sign_handling = f'''
         let isNegative = n < 0;
         if isNegative {{
             n = n.negate()
-        }}
-
-        let ten: {type_name} = 10;
-        while n != {type_name}.zero {{
-            let digit: {type_name} = n % ten;
-            let charCode: Int64 = {digit_as_i64} + 48;
-            result.appendByte(UInt8(from: charCode));
-            n = n / ten
-        }}
-
-        if isNegative {{
+        }}'''
+        sign_prefix = '''
+        // Add sign prefix
+        if isNegative {
             result.appendByte(45)  // '-'
-        }}
-
-        // Reverse the string
-        var reversed = String();
-        var i = result.byteCount - 1;
-        while i >= 0 {{
-            reversed.appendByte(result.byteAtUnchecked(i));
-            i = i - 1
-        }}
-        reversed
-    }}'''
+        } else if options.sign == .Always {
+            result.appendByte(43)  // '+'
+        } else if options.sign == .Space {
+            result.appendByte(32)  // ' '
+        }'''
     else:
-        return f'''    // Formattable
+        sign_handling = '''
+        let isNegative = false;'''
+        sign_prefix = '''
+        // Add sign prefix (unsigned types only show + if requested)
+        if options.sign == .Always {
+            result.appendByte(43)  // '+'
+        } else if options.sign == .Space {
+            result.appendByte(32)  // ' '
+        }'''
+
+    return f'''    // Formattable
+    /// Formats this integer as a string with the given options.
+    ///
+    /// Supports various formatting options including radix (base), width,
+    /// padding, alignment, sign display, and alternate forms.
+    ///
+    /// Format options:
+    /// - `radix`: Number base (2, 8, 10, 16). Default: 10
+    /// - `width`: Minimum output width. Default: None
+    /// - `fill`: Padding character. Default: ' '
+    /// - `alignment`: .Left, .Right, or .Center. Default: .Left
+    /// - `sign`: .Negative (default), .Always, or .Space
+    /// - `uppercase`: Use uppercase for hex digits. Default: false
+    /// - `alternate`: Include prefix (0b, 0o, 0x). Default: false
+    ///
+    /// Example:
+    ///     (42).format()  // "42"
+    ///
+    ///     // Hexadecimal
+    ///     (255).format(options: .{{radix: 16}})  // "ff"
+    ///     (255).format(options: .{{radix: 16, uppercase: true}})  // "FF"
+    ///     (255).format(options: .{{radix: 16, alternate: true}})  // "0xff"
+    ///
+    ///     // Binary
+    ///     (42).format(options: .{{radix: 2}})  // "101010"
+    ///     (42).format(options: .{{radix: 2, alternate: true}})  // "0b101010"
+    ///
+    ///     // Padding and alignment
+    ///     (42).format(options: .{{width: .Some(5)}})  // "   42"
+    ///     (42).format(options: .{{width: .Some(5), fill: '0'}})  // "00042"
+    ///     (42).format(options: .{{width: .Some(5), alignment: .Left}})  // "42   "
+    ///
+    ///     // Sign display
+    ///     (42).format(options: .{{sign: .Always}})  // "+42"
+    ///     (-42).format(options: .{{sign: .Always}})  // "-42"
     public func format(options: FormatOptions = FormatOptions.default()) -> String {{
-        if self == {type_name}.zero {{
-            return "0"
+        var n = self;{sign_handling}
+
+        // Get radix (default 10)
+        var radix: Int64 = options.radix;
+        if radix < 2 or radix > 36 {{
+            radix = 10
         }}
 
+        // Build digits in reverse order
+        var digits = String();
+        if n == {type_name}.zero {{
+            digits.appendByte(48)  // '0'
+        }} else {{
+            let radixVal: {type_name} = {radix_as_type};
+            while n != {type_name}.zero {{
+                let digit: {type_name} = n % radixVal;
+                let digitVal: Int64 = {digit_as_i64};
+                let charCode: Int64 = if digitVal < 10 {{
+                    digitVal + 48  // '0'-'9'
+                }} else if options.uppercase {{
+                    digitVal - 10 + 65  // 'A'-'Z'
+                }} else {{
+                    digitVal - 10 + 97  // 'a'-'z'
+                }};
+                digits.appendByte(UInt8(from: charCode));
+                n = n / radixVal
+            }}
+        }}
+
+        // Build result string
         var result = String();
-        var n = self;
+{sign_prefix}
 
-        let ten: {type_name} = 10;
-        while n != {type_name}.zero {{
-            let digit: {type_name} = n % ten;
-            let charCode: Int64 = {digit_as_i64} + 48;
-            result.appendByte(UInt8(from: charCode));
-            n = n / ten
+        // Add alternate form prefix (always lowercase, even with uppercase digits)
+        if options.alternate {{
+            if radix == 2 {{
+                result.appendByte(48);  // '0'
+                result.appendByte(98)   // 'b'
+            }} else if radix == 8 {{
+                result.appendByte(48);  // '0'
+                result.appendByte(111)  // 'o'
+            }} else if radix == 16 {{
+                result.appendByte(48);  // '0'
+                result.appendByte(120)  // 'x'
+            }}
         }}
 
-        // Reverse the string
-        var reversed = String();
-        var i = result.byteCount - 1;
+        // Append digits in correct order (reverse)
+        var i = digits.byteCount - 1;
         while i >= 0 {{
-            reversed.appendByte(result.byteAtUnchecked(i));
+            result.appendByte(digits.byteAtUnchecked(i));
             i = i - 1
         }}
-        reversed
+
+        // Apply width and alignment padding
+        if let .Some(width) = options.width {{
+            let currentLen = result.byteCount;
+            if width > currentLen {{
+                let padding = width - currentLen;
+                var padLeft: Int64 = 0;
+                var padRight: Int64 = 0;
+
+                if options.alignment == .Left {{
+                    padRight = padding
+                }} else if options.alignment == .Right {{
+                    padLeft = padding
+                }} else {{
+                    // Center
+                    padLeft = padding / 2;
+                    padRight = padding - padLeft
+                }}
+
+                var padded = String();
+                while padLeft > 0 {{
+                    padded.appendChar(options.fill);
+                    padLeft = padLeft - 1
+                }}
+                padded.append(result);
+                while padRight > 0 {{
+                    padded.appendChar(options.fill);
+                    padRight = padRight - 1
+                }}
+                return padded
+            }}
+        }}
+
+        result
     }}'''
 
 

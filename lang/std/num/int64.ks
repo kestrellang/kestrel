@@ -1371,37 +1371,105 @@ public struct Int64:
     ///     "\{value:#x}"        // hexadecimal with 0x prefix
     ///     "\{value:08}"        // zero-padded to 8 digits
     public func format(options: FormatOptions = FormatOptions.default()) -> String {
-        if self == Int64.zero {
-            return "0"
-        }
-
-        var result = String();
         var n = self;
         let isNegative = n < 0;
         if isNegative {
             n = n.negate()
         }
 
-        let ten: Int64 = 10;
-        while n != Int64.zero {
-            let digit: Int64 = n % ten;
-            let charCode: Int64 = digit + 48;
-            result.appendByte(UInt8(from: charCode));
-            n = n / ten
+        // Get radix (default 10)
+        var radix: Int64 = options.radix;
+        if radix < 2 or radix > 36 {
+            radix = 10
         }
 
+        // Build digits in reverse order
+        var digits = String();
+        if n == Int64.zero {
+            digits.appendByte(48)  // '0'
+        } else {
+            let radixVal: Int64 = radix;
+            while n != Int64.zero {
+                let digit: Int64 = n % radixVal;
+                let digitVal: Int64 = digit;
+                let charCode: Int64 = if digitVal < 10 {
+                    digitVal + 48  // '0'-'9'
+                } else if options.uppercase {
+                    digitVal - 10 + 65  // 'A'-'Z'
+                } else {
+                    digitVal - 10 + 97  // 'a'-'z'
+                };
+                digits.appendByte(UInt8(from: charCode));
+                n = n / radixVal
+            }
+        }
+
+        // Build result string
+        var result = String();
+
+        // Add sign prefix
         if isNegative {
             result.appendByte(45)  // '-'
+        } else if options.sign == .Always {
+            result.appendByte(43)  // '+'
+        } else if options.sign == .Space {
+            result.appendByte(32)  // ' '
         }
 
-        // Reverse the string
-        var reversed = String();
-        var i = result.byteCount - 1;
+        // Add alternate form prefix (always lowercase, even with uppercase digits)
+        if options.alternate {
+            if radix == 2 {
+                result.appendByte(48);  // '0'
+                result.appendByte(98)   // 'b'
+            } else if radix == 8 {
+                result.appendByte(48);  // '0'
+                result.appendByte(111)  // 'o'
+            } else if radix == 16 {
+                result.appendByte(48);  // '0'
+                result.appendByte(120)  // 'x'
+            }
+        }
+
+        // Append digits in correct order (reverse)
+        var i = digits.byteCount - 1;
         while i >= 0 {
-            reversed.appendByte(result.byteAtUnchecked(i));
+            result.appendByte(digits.byteAtUnchecked(i));
             i = i - 1
         }
-        reversed
+
+        // Apply width and alignment padding
+        if let .Some(width) = options.width {
+            let currentLen = result.byteCount;
+            if width > currentLen {
+                let padding = width - currentLen;
+                var padLeft: Int64 = 0;
+                var padRight: Int64 = 0;
+
+                if options.alignment == .Left {
+                    padRight = padding
+                } else if options.alignment == .Right {
+                    padLeft = padding
+                } else {
+                    // Center
+                    padLeft = padding / 2;
+                    padRight = padding - padLeft
+                }
+
+                var padded = String();
+                while padLeft > 0 {
+                    padded.appendChar(options.fill);
+                    padLeft = padLeft - 1
+                }
+                padded.append(result);
+                while padRight > 0 {
+                    padded.appendChar(options.fill);
+                    padRight = padRight - 1
+                }
+                return padded
+            }
+        }
+
+        result
     }}
 
 /// Platform-sized signed integer.

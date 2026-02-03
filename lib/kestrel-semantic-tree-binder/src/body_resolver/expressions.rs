@@ -66,6 +66,21 @@ pub fn resolve_expression(expr_node: &SyntaxNode, ctx: &mut BodyResolutionContex
         },
 
         SyntaxKind::ExprString => {
+            // Check if this string contains interpolation syntax `\(`
+            // This handles nested strings that the parser didn't transform
+            if let Some(token) = expr_node
+                .children_with_tokens()
+                .filter_map(|e| e.into_token())
+                .find(|t| t.kind() == SyntaxKind::String)
+            {
+                let text = token.text();
+                if text.len() >= 2 {
+                    let inner = &text[1..text.len() - 1];
+                    if string_contains_interpolation(inner) {
+                        return resolve_interpolated_string_expression(expr_node, ctx);
+                    }
+                }
+            }
             let value = extract_string_value(expr_node, ctx);
             // Use inference type so literal protocols can be applied
             Expression::string_infer(value, span)
@@ -182,6 +197,22 @@ fn extract_float_value(node: &SyntaxNode) -> f64 {
         .find(|t| t.kind() == SyntaxKind::Float)
         .and_then(|t| t.text().replace('_', "").parse().ok())
         .unwrap_or(0.0)
+}
+
+/// Check if a string literal contains interpolation (`\(`)
+fn string_contains_interpolation(text: &str) -> bool {
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            if let Some(&next) = chars.peek() {
+                if next == '(' {
+                    return true;
+                }
+                chars.next(); // Skip escaped character
+            }
+        }
+    }
+    false
 }
 
 /// Extract string value from an ExprString node (strips quotes and processes escapes)
@@ -3488,31 +3519,32 @@ fn parse_and_resolve_expression(
     use kestrel_parser::event::{EventSink, TreeBuilder};
     use kestrel_parser::parse_expr;
 
-    // Lex the expression text
+    // Lex the expression text - keep spans relative to expr_text (starting at 0)
     let tokens: Vec<_> = lex(expr_text, file_id)
         .filter_map(|t| t.ok())
-        .map(|spanned| {
-            // Adjust spans to be relative to the original file
-            let adjusted_span = Span::new(
-                file_id,
-                (spanned.span.start + offset)..(spanned.span.end + offset),
-            );
-            (spanned.value, adjusted_span)
-        })
+        .map(|spanned| (spanned.value, spanned.span))
         .collect();
 
     if tokens.is_empty() {
         return Expression::error(Span::new(file_id, offset..(offset + expr_text.len())));
     }
 
-    // Parse the expression
+    // Parse the expression with local spans
     let mut sink = EventSink::new(file_id);
     parse_expr(expr_text, tokens.into_iter(), &mut sink);
     let tree = TreeBuilder::new(expr_text, sink.into_events()).build();
 
     // Resolve the parsed expression
     // The tree's root should be an Expression node
-    resolve_expression(&tree, ctx)
+    let mut resolved = resolve_expression(&tree, ctx);
+
+    // Adjust the resolved expression's span to be relative to the original file
+    resolved.span = Span::new(
+        file_id,
+        (resolved.span.start + offset)..(resolved.span.end + offset),
+    );
+
+    resolved
 }
 
 /// Unescape a single escape character (simplified version for interpolation parsing).

@@ -22,11 +22,13 @@ use kestrel_semantic_tree::symbol::field::FieldSymbol;
 use kestrel_semantic_tree::symbol::getter::GetterSymbol;
 use kestrel_semantic_tree::symbol::initializer::InitializerSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
+use semantic_tree::symbol::Symbol;
 use kestrel_semantic_tree::ty::{Substitutions, Ty, TyKind};
 use semantic_tree::symbol::SymbolId;
 
 use crate::context::LoweringContext;
 use crate::error::LoweringError;
+use crate::format_spec::{parse_format_spec, Alignment, FormatSpec, FormatType};
 use crate::lowerer::get_subscript_type_parameters;
 use crate::name::qualified_name_for_symbol;
 use crate::stmt::lower_statement;
@@ -1936,6 +1938,192 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
     }
 }
 
+/// Build FormatOptions struct fields from a parsed format spec.
+///
+/// Maps parsed format spec values to FormatOptions struct field values.
+fn build_format_options_fields(
+    ctx: &mut LoweringContext,
+    spec: &FormatSpec,
+    _span: &kestrel_span::Span,
+) -> Vec<(String, Value)> {
+
+
+    let mut fields: Vec<(String, Value)> = Vec::new();
+
+    // Get type IDs needed for construction
+    let i64_ty = ctx.mir.ty_i64();
+
+    // Build Optional[Int64] type for width and precision fields
+    let optional_name = ctx.mir.intern_name(QualifiedNameData::new(vec![
+        "std".to_string(),
+        "result".to_string(),
+        "Optional".to_string(),
+    ]));
+    let optional_i64_ty = ctx.mir.ty_named(optional_name, vec![i64_ty]);
+
+    // width: Int64?
+    let width_value = if let Some(w) = spec.width {
+        // Create Some(w)
+        let some_local = ctx.create_temp("width_some", optional_i64_ty);
+        let some_place = Place::local(some_local);
+        let width_imm = Value::Immediate(Immediate::i64(w as i64));
+        ctx.emit_assign(
+            some_place.clone(),
+            Rvalue::EnumVariant {
+                enum_ty: optional_i64_ty,
+                variant: "Some".to_string(),
+                payload: vec![width_imm],
+            },
+        );
+        Value::Place(some_place)
+    } else {
+        // Create None
+        let none_local = ctx.create_temp("width_none", optional_i64_ty);
+        let none_place = Place::local(none_local);
+        ctx.emit_assign(
+            none_place.clone(),
+            Rvalue::EnumVariant {
+                enum_ty: optional_i64_ty,
+                variant: "None".to_string(),
+                payload: vec![],
+            },
+        );
+        Value::Place(none_place)
+    };
+    fields.push(("width".to_string(), width_value));
+
+    // precision: Int64?
+    let precision_value = if let Some(p) = spec.precision {
+        // Create Some(p)
+        let some_local = ctx.create_temp("precision_some", optional_i64_ty);
+        let some_place = Place::local(some_local);
+        let precision_imm = Value::Immediate(Immediate::i64(p as i64));
+        ctx.emit_assign(
+            some_place.clone(),
+            Rvalue::EnumVariant {
+                enum_ty: optional_i64_ty,
+                variant: "Some".to_string(),
+                payload: vec![precision_imm],
+            },
+        );
+        Value::Place(some_place)
+    } else {
+        // Create None
+        let none_local = ctx.create_temp("precision_none", optional_i64_ty);
+        let none_place = Place::local(none_local);
+        ctx.emit_assign(
+            none_place.clone(),
+            Rvalue::EnumVariant {
+                enum_ty: optional_i64_ty,
+                variant: "None".to_string(),
+                payload: vec![],
+            },
+        );
+        Value::Place(none_place)
+    };
+    fields.push(("precision".to_string(), precision_value));
+
+    // alignment: Alignment
+    let alignment_name = ctx.mir.intern_name(QualifiedNameData::new(vec![
+        "std".to_string(),
+        "text".to_string(),
+        "Alignment".to_string(),
+    ]));
+    let alignment_ty = ctx.mir.ty_named(alignment_name, vec![]);
+    let alignment_local = ctx.create_temp("alignment", alignment_ty);
+    let alignment_place = Place::local(alignment_local);
+    let alignment_variant = match spec.alignment {
+        Alignment::Left => "Left",
+        Alignment::Right => "Right",
+        Alignment::Center => "Center",
+    };
+    ctx.emit_assign(
+        alignment_place.clone(),
+        Rvalue::EnumVariant {
+            enum_ty: alignment_ty,
+            variant: alignment_variant.to_string(),
+            payload: vec![],
+        },
+    );
+    fields.push(("alignment".to_string(), Value::Place(alignment_place)));
+
+    // fill: Char (represented as i32 in MIR)
+    let fill_value = Value::Immediate(Immediate::i32(spec.fill as i32));
+    fields.push(("fill".to_string(), fill_value));
+
+    // radix: Int64 - determined by format type
+    let radix: i64 = match spec.format_type {
+        FormatType::Binary => 2,
+        FormatType::Octal => 8,
+        FormatType::Hex | FormatType::HexUpper => 16,
+        _ => 10,
+    };
+    fields.push(("radix".to_string(), Value::Immediate(Immediate::i64(radix))));
+
+    // uppercase: Bool
+    let uppercase = matches!(spec.format_type, FormatType::HexUpper);
+    fields.push(("uppercase".to_string(), Value::Immediate(Immediate::bool(uppercase))));
+
+    // sign: Sign
+    let sign_name = ctx.mir.intern_name(QualifiedNameData::new(vec![
+        "std".to_string(),
+        "text".to_string(),
+        "Sign".to_string(),
+    ]));
+    let sign_ty = ctx.mir.ty_named(sign_name, vec![]);
+    let sign_local = ctx.create_temp("sign", sign_ty);
+    let sign_place = Place::local(sign_local);
+    let sign_variant = match spec.sign {
+        crate::format_spec::SignMode::Negative => "Negative",
+        crate::format_spec::SignMode::Always => "Always",
+        crate::format_spec::SignMode::Space => "Space",
+    };
+    ctx.emit_assign(
+        sign_place.clone(),
+        Rvalue::EnumVariant {
+            enum_ty: sign_ty,
+            variant: sign_variant.to_string(),
+            payload: vec![],
+        },
+    );
+    fields.push(("sign".to_string(), Value::Place(sign_place)));
+
+    // alternate: Bool
+    fields.push(("alternate".to_string(), Value::Immediate(Immediate::bool(spec.alternate))));
+
+    // floatStyle: FloatStyle
+    let float_style_name = ctx.mir.intern_name(QualifiedNameData::new(vec![
+        "std".to_string(),
+        "text".to_string(),
+        "FloatStyle".to_string(),
+    ]));
+    let float_style_ty = ctx.mir.ty_named(float_style_name, vec![]);
+    let float_style_local = ctx.create_temp("float_style", float_style_ty);
+    let float_style_place = Place::local(float_style_local);
+    let float_style_variant = match spec.format_type {
+        FormatType::Fixed => "Fixed",
+        FormatType::Scientific => "Scientific",
+        FormatType::ScientificUpper => "ScientificUpper",
+        FormatType::Percent => "Percent",
+        _ => "Auto",
+    };
+    ctx.emit_assign(
+        float_style_place.clone(),
+        Rvalue::EnumVariant {
+            enum_ty: float_style_ty,
+            variant: float_style_variant.to_string(),
+            payload: vec![],
+        },
+    );
+    fields.push(("floatStyle".to_string(), Value::Place(float_style_place)));
+
+    // debug: Bool
+    let debug = matches!(spec.format_type, FormatType::Debug);
+    fields.push(("debug".to_string(), Value::Immediate(Immediate::bool(debug))));
+
+    fields
+}
+
 /// Lower an interpolated string expression.
 ///
 /// Interpolated strings like `"Hello \(name)!"` are lowered to:
@@ -2105,54 +2293,25 @@ fn lower_interpolated_string(
                 );
             },
             InterpolationPart::Interpolation {
-                expr: interp_expr, ..
+                expr: interp_expr,
+                format_spec,
+                ..
             } => {
                 // Lower the interpolation expression
                 let interp_value = lower_expression(ctx, interp_expr);
 
                 // Call appendInterpolation(value:options:)
-                // For simplicity, we call appendInterpolation(value:) without options
-                // which uses default FormatOptions
+                // The function name only includes 'value' because 'options' has a default
+                // (parameters with defaults are excluded from the qualified name)
+                // But we still need to pass the options argument to the function
                 let append_name_parts = {
                     let mut parts = dsi_name_parts.clone();
-                    parts.push("appendInterpolation$value$options".to_string());
+                    parts.push("appendInterpolation$value".to_string());
                     parts
                 };
                 let append_name = ctx
                     .mir
                     .intern_name(QualifiedNameData::new(append_name_parts));
-
-                // Get FormatOptions type - we just use a placeholder since the method
-                // will find the correct type from the parameter declaration
-                // For now, use unit type as a placeholder (the actual type will be
-                // determined by the function signature)
-                let format_opts_ty = ctx.mir.ty_unit();
-                let format_opts_local = ctx.create_temp("format_opts", format_opts_ty);
-                let format_opts_place = Place::local(format_opts_local);
-
-                // Create mutable ref for FormatOptions init
-                let format_opts_ref_ty = ctx.mir.ty_ref_mut(format_opts_ty);
-                let format_opts_ref_local = ctx.create_temp("format_opts_ref", format_opts_ref_ty);
-                let format_opts_ref_place = Place::local(format_opts_ref_local);
-                ctx.emit_assign(
-                    format_opts_ref_place.clone(),
-                    Rvalue::RefMut(format_opts_place.clone()),
-                );
-
-                // Call FormatOptions.init()
-                let format_opts_init_name = ctx.mir.intern_name(QualifiedNameData::new(vec![
-                    "std".to_string(),
-                    "core".to_string(),
-                    "FormatOptions".to_string(),
-                    "init".to_string(),
-                ]));
-                let format_opts_init_ret_local = ctx.create_temp("fmt_init_ret", unit_ty);
-                let format_opts_init_ret_place = Place::local(format_opts_init_ret_local);
-                ctx.emit_call_with_modes(
-                    format_opts_init_ret_place,
-                    Callee::direct(format_opts_init_name),
-                    vec![CallArg::mutating(Value::Place(format_opts_ref_place))],
-                );
 
                 // Get the expression's type for the generic call
                 let interp_ty = lower_type(ctx, &interp_expr.ty);
@@ -2180,14 +2339,62 @@ fn lower_interpolated_string(
                     },
                 }
 
-                // Borrow FormatOptions
+                // Look up FormatOptions type from the model
+                let format_opts_name = ctx.mir.intern_name(QualifiedNameData::new(vec![
+                    "std".to_string(),
+                    "text".to_string(),
+                    "FormatOptions".to_string(),
+                ]));
+                let format_opts_ty = ctx.mir.ty_named(format_opts_name, vec![]);
+                let format_opts_local = ctx.create_temp("format_opts", format_opts_ty);
+                let format_opts_place = Place::local(format_opts_local);
+
+                // Parse format spec and create FormatOptions with parsed values
+                if let Some(spec_str) = format_spec {
+                    if let Ok(spec) = parse_format_spec(spec_str) {
+                        // Build FormatOptions struct with parsed values
+                        let fields = build_format_options_fields(ctx, &spec, &span);
+                        ctx.emit_assign(
+                            format_opts_place.clone(),
+                            Rvalue::Construct { ty: format_opts_ty, fields },
+                        );
+                    } else {
+                        // Failed to parse format spec, use defaults
+                        let format_opts_default_name = ctx.mir.intern_name(QualifiedNameData::new(vec![
+                            "std".to_string(),
+                            "text".to_string(),
+                            "FormatOptions".to_string(),
+                            "default".to_string(),
+                        ]));
+                        ctx.emit_call_with_modes(
+                            format_opts_place.clone(),
+                            Callee::direct(format_opts_default_name),
+                            vec![],
+                        );
+                    }
+                } else {
+                    // No format spec, use FormatOptions.default()
+                    let format_opts_default_name = ctx.mir.intern_name(QualifiedNameData::new(vec![
+                        "std".to_string(),
+                        "text".to_string(),
+                        "FormatOptions".to_string(),
+                        "default".to_string(),
+                    ]));
+                    ctx.emit_call_with_modes(
+                        format_opts_place.clone(),
+                        Callee::direct(format_opts_default_name),
+                        vec![],
+                    );
+                }
+
+                // Borrow FormatOptions for passing to appendInterpolation
                 let format_opts_borrow_ty = ctx.mir.ty_ref(format_opts_ty);
                 let format_opts_borrow_local =
                     ctx.create_temp("format_opts_borrow", format_opts_borrow_ty);
                 let format_opts_borrow_place = Place::local(format_opts_borrow_local);
                 ctx.emit_assign(
                     format_opts_borrow_place.clone(),
-                    Rvalue::Ref(format_opts_place.clone()),
+                    Rvalue::Ref(format_opts_place),
                 );
 
                 let append_ret_local = ctx.create_temp("append_ret", unit_ty);
@@ -2227,17 +2434,9 @@ fn lower_interpolated_string(
     let result_local = ctx.create_temp("result", result_ty);
     let result_place = Place::local(result_local);
 
-    // Create mutable ref to result for build
-    let result_ref_ty = ctx.mir.ty_ref_mut(result_ty);
-    let result_ref_local = ctx.create_temp("result_ref", result_ref_ty);
-    let result_ref_place = Place::local(result_ref_local);
-    ctx.emit_assign(
-        result_ref_place.clone(),
-        Rvalue::RefMut(result_place.clone()),
-    );
-
+    // Call build() - returns String by value
     ctx.emit_call_with_modes(
-        result_ref_place,
+        result_place.clone(),
         Callee::direct(build_name),
         vec![CallArg::borrow(Value::Place(build_ref_place))],
     );
@@ -4426,7 +4625,7 @@ fn lower_subscript_call(
             // Add type arguments for subscript's own type parameters (e.g., subscript[F](value: F))
             // We infer these from the argument types by matching parameter types to argument types
             if let Ok(getter_sym) = sym.clone().downcast_arc::<GetterSymbol>() {
-                use semantic_tree::symbol::Symbol;
+
                 let subscript_type_params = get_subscript_type_parameters(&getter_sym);
                 if !subscript_type_params.is_empty() {
                     // Get the callable behavior to find parameter types

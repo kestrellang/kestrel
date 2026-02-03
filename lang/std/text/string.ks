@@ -1439,8 +1439,46 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
         String(storage: self.storage.clone())
     }
 
-    /// Returns the string representation (itself).
+    /// Returns the string formatted with the given options.
+    ///
+    /// Supports width and alignment formatting.
+    ///
+    /// Example:
+    ///     "test".format(options: .{width: .Some(10), alignment: .Left})   // "test      "
+    ///     "test".format(options: .{width: .Some(10), alignment: .Right})  // "      test"
+    ///     "test".format(options: .{width: .Some(10), alignment: .Center}) // "   test   "
     public func format(options: FormatOptions = FormatOptions.default()) -> String {
+        // Apply width and alignment padding
+        if let .Some(width) = options.width {
+            let currentLen = self.count;
+            if width > currentLen {
+                let padding = width - currentLen;
+                var padLeft: Int64 = 0;
+                var padRight: Int64 = 0;
+
+                if options.alignment == .Left {
+                    padRight = padding
+                } else if options.alignment == .Right {
+                    padLeft = padding
+                } else {
+                    // Center
+                    padLeft = padding / 2;
+                    padRight = padding - padLeft
+                }
+
+                var result = String();
+                while padLeft > 0 {
+                    result.appendChar(options.fill);
+                    padLeft = padLeft - 1
+                }
+                result.append(self);
+                while padRight > 0 {
+                    result.appendChar(options.fill);
+                    padRight = padRight - 1
+                }
+                return result
+            }
+        }
         self.clone()
     }
 }

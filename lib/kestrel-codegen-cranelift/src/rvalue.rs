@@ -907,8 +907,17 @@ fn compile_construct(
                 .unwrap_or(field_ty)
         };
 
-        // Check if this is a nested aggregate - if so, copy its data
-        if is_aggregate_value_type(ctx.mir, concrete_field_ty) {
+        // Check if this is a nested aggregate that needs to be copied.
+        // We need to check both:
+        // 1. The MIR type is an aggregate (Named, Tuple, etc.)
+        // 2. The MIR value is a Place, not an Immediate
+        //
+        // Immediates (including enum discriminants and primitives in Named types)
+        // should be stored directly. Only Place values that point to aggregate
+        // memory need copy_aggregate_value.
+        let is_place_value = matches!(field_value, Value::Place(_));
+
+        if is_aggregate_value_type(ctx.mir, concrete_field_ty) && is_place_value {
             let dest_ptr = if *offset == 0 {
                 ptr
             } else {
