@@ -877,6 +877,18 @@ pub fn substitute_type(ty: &Ty, substitutions: &Substitutions) -> Ty {
             }
             Ty::generic_enum(symbol.clone(), new_subs, ty.span().clone())
         },
+        TyKind::TypeAlias {
+            symbol,
+            substitutions: inner_subs,
+        } => {
+            // Apply our substitutions to the inner substitutions
+            // This is important for type aliases like T? (OptionalTypeOperator[T])
+            let mut new_subs = Substitutions::new();
+            for (id, inner_ty) in inner_subs.iter() {
+                new_subs.insert(*id, substitute_type(inner_ty, substitutions));
+            }
+            Ty::generic_type_alias(symbol.clone(), new_subs, ty.span().clone())
+        },
         // For simple types, just return a clone
         _ => ty.clone(),
     }

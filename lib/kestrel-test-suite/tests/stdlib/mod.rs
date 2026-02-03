@@ -55,13 +55,13 @@ mod array {
                 arr.append(20);
                 arr.append(30);
 
-                // Test getValue (safe access)
-                let val = arr.getValue(at: 1);
+                // Test checked subscript (safe access)
+                let val = arr(checked: 1);
                 if val.isNone() { return 1 }
                 if val.unwrap() != 20 { return 2 }
 
                 // Test out of bounds returns None
-                let oob = arr.getValue(at: 100);
+                let oob = arr(checked: 100);
                 if oob.isSome() { return 3 }
 
                 // Test getUnchecked
@@ -277,8 +277,8 @@ mod dictionary {
                 if dict.contains(1) == false { return 3 }
                 if dict.contains(999) { return 4 }
 
-                // Test getValue
-                let val = dict.getValue(2);
+                // Test subscript access
+                let val = dict(2);
                 if val.isNone() { return 5 }
                 if val.unwrap() != 200 { return 6 }
 
@@ -381,16 +381,16 @@ mod optional {
                 let none: std.result.Optional[std.num.Int64] = .None;
                 let other: std.result.Optional[std.num.Int64] = .Some(20);
 
-                // Test andValue
-                let andResult = some.andValue(other);
+                // Test then (and combinator)
+                let andResult = some.then(other);
                 if andResult.unwrap() != 20 { return 1 }
-                let andNone = none.andValue(other);
+                let andNone = none.then(other);
                 if andNone.isSome() { return 2 }
 
-                // Test orValue
-                let orResult = none.orValue(other);
-                if orResult.unwrap() != 20 { return 3 }
-                let orSome = some.orValue(other);
+                // Test orElse (without closure capture to avoid codegen bug)
+                let orResult: std.result.Optional[std.num.Int64] = none.orElse({ () in .Some(99) });
+                if orResult.unwrap() != 99 { return 3 }
+                let orSome: std.result.Optional[std.num.Int64] = some.orElse({ () in .Some(99) });
                 if orSome.unwrap() != 10 { return 4 }
 
                 0

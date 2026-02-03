@@ -1683,6 +1683,8 @@ fn collect_protocol_conformances_for_type(model: &SemanticModel, ty: &Ty) -> Vec
         symbol_id: type_symbol_id,
     });
     for conformance in conformances {
+        // Apply default type parameters first (so Self gets substituted properly)
+        let conformance = apply_protocol_defaults(conformance);
         let applied = if actual_subs.is_empty() {
             conformance.clone()
         } else {
@@ -1707,6 +1709,8 @@ fn collect_protocol_conformances_for_type(model: &SemanticModel, ty: &Ty) -> Vec
             symbol_id: extension.metadata().id(),
         });
         for conformance in ext_conformances {
+            // Apply default type parameters first (so Self gets substituted properly)
+            let conformance = apply_protocol_defaults(conformance);
             let applied = if actual_subs.is_empty() {
                 conformance.clone()
             } else {
@@ -1746,6 +1750,8 @@ fn collect_protocol_conformances_for_type(model: &SemanticModel, ty: &Ty) -> Vec
                 continue;
             };
             for ext_conf in conformances.conformances() {
+                // Apply default type parameters first (so Self gets substituted properly)
+                let ext_conf = apply_protocol_defaults(ext_conf.clone());
                 // Apply protocol substitutions (for protocol type params), then Self -> concrete
                 let applied = if proto_subs.is_empty() {
                     ext_conf.clone()
@@ -2180,6 +2186,44 @@ fn collect_protocols_with_inherited_impl(
                 );
             }
         }
+    }
+}
+
+/// Apply default type parameter values to a protocol type.
+///
+/// This fills in any missing type parameters with their default values.
+/// For example, `NotEqual` (with default `Rhs = Self`) becomes `NotEqual[Rhs = Self]`.
+fn apply_protocol_defaults(ty: Ty) -> Ty {
+    let TyKind::Protocol {
+        symbol,
+        substitutions,
+    } = ty.kind()
+    else {
+        return ty;
+    };
+
+    let type_params = symbol.type_parameters();
+    if type_params.is_empty() {
+        return ty;
+    }
+
+    let mut new_subs = substitutions.clone();
+    let mut changed = false;
+
+    for param in &type_params {
+        let param_id = param.metadata().id();
+        if !new_subs.contains(param_id) {
+            if let Some(default_ty) = param.default() {
+                new_subs.insert(param_id, default_ty.clone());
+                changed = true;
+            }
+        }
+    }
+
+    if changed {
+        Ty::generic_protocol(symbol.clone(), new_subs, ty.span().clone())
+    } else {
+        ty
     }
 }
 

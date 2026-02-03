@@ -66,7 +66,7 @@ mod execution {
     fn generic_subscript_executes() {
         Test::new(
             r#"module Test
-            import std.core.Formattable
+            import std.text.Formattable
             import std.text.String
 
             struct Formatter {
