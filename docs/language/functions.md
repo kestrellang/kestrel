@@ -40,6 +40,53 @@ func divide(a: lang.i64, b: lang.i64) -> lang.i64 {
 }
 ```
 
+### Expression-Bodied Functions
+
+For functions whose body is a single expression, you can use the shorthand `= expression` syntax instead of a block:
+
+```kestrel
+// Expression body (shorthand)
+func add(a: lang.i64, b: lang.i64) -> lang.i64 = lang.i64_add(a, b)
+
+// Equivalent block body
+func add(a: lang.i64, b: lang.i64) -> lang.i64 {
+    lang.i64_add(a, b)
+}
+```
+
+Expression bodies are semantically equivalent to a block with a single trailing expression. They work with all function features:
+
+```kestrel
+// With generics
+func identity[T](x: T) -> T = x
+
+// With where clauses
+func double[T](x: T) -> T where T: Addable = x.add(x)
+
+// Instance methods
+struct Point {
+    let x: lang.i64
+    let y: lang.i64
+
+    func sum() -> lang.i64 = lang.i64_add(self.x, self.y)
+}
+
+// Static methods
+struct Factory {
+    static func zero() -> lang.i64 = 0
+}
+
+// Multiline expressions
+func max(a: lang.i64, b: lang.i64) -> lang.i64 =
+    if lang.i64_gt(a, b) { a }
+    else { b }
+```
+
+**Rules:**
+- Expression bodies require an explicit return type (no type inference)
+- Cannot be used with extern functions (which cannot have any body)
+- The expression's type must match the declared return type
+
 ## Parameters
 
 ### Basic Parameters
@@ -440,9 +487,9 @@ WhereClause ::= 'where' Constraint (',' Constraint)*
 
 Constraint ::= IDENTIFIER ':' ProtocolBound ('and' ProtocolBound)*
 
-FunctionBody ::= Block | ';'
+FunctionBody ::= Block | '=' Expression
 
-Method ::= MethodModifier? 'func' IDENTIFIER TypeParameterList? '(' ParameterList? ')' ('->' Type)? (WhereClause)? Block
+Method ::= MethodModifier? 'func' IDENTIFIER TypeParameterList? '(' ParameterList? ')' ('->' Type)? (WhereClause)? (Block | '=' Expression)?
 
 MethodModifier ::= 'mutating' | 'consuming' | 'static'
 

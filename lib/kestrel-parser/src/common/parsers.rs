@@ -16,9 +16,9 @@ use kestrel_lexer::Token;
 use kestrel_span::Span;
 
 use super::data::{
-    ComputedBodyData, DeinitDeclarationData, FieldDeclarationData, FunctionDeclarationData,
-    InitializerDeclarationData, ParameterAccessMode, ParameterData, ReceiverModifier,
-    SubscriptBodyData, SubscriptDeclarationData,
+    ComputedBodyData, DeinitDeclarationData, FieldDeclarationData, FunctionBodyData,
+    FunctionDeclarationData, InitializerDeclarationData, ParameterAccessMode, ParameterData,
+    ReceiverModifier, SubscriptBodyData, SubscriptDeclarationData,
 };
 use crate::attribute::attribute_list_parser;
 use crate::block::{CodeBlockData, code_block_parser};
@@ -522,12 +522,44 @@ pub(crate) fn return_type_parser<'tokens>()
         .boxed()
 }
 
-/// Parser for optional function body (code block)
+/// Parser for optional function body (block or expression)
+///
+/// # Syntax
+/// - Block body: `{ statements; expr }`
+/// - Expression body: `= expr`
+/// - No body (protocol methods)
+///
+/// # Returns
+/// - `Some(FunctionBodyData::Block(..))` if block body present
+/// - `Some(FunctionBodyData::Expression(..))` if expression body present
+/// - `None` if no body (e.g., protocol method declarations)
+pub fn function_body_parser<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, Option<FunctionBodyData>, ParserExtra<'tokens>> + Clone
+{
+    // Expression body: `= expr`
+    let expression_body = token(Token::Equals)
+        .then(expr_parser())
+        .map(|(eq_span, expr)| FunctionBodyData::Expression(eq_span, expr));
+
+    // Block body: `{ ... }`
+    let block_body = code_block_parser().map(FunctionBodyData::Block);
+
+    // Try expression body first, then block body, then nothing
+    expression_body
+        .or(block_body)
+        .map(Some)
+        .or(empty().to(None))
+        .boxed()
+}
+
+/// Parser for optional block-only body (code block)
+///
+/// Used by initializers which only support block bodies, not expression bodies.
 ///
 /// # Returns
 /// - `Some(CodeBlockData)` if body is present
-/// - `None` if no body (e.g., protocol method declarations)
-pub fn function_body_parser<'tokens>()
+/// - `None` if no body (e.g., protocol initializer declarations)
+pub fn block_body_parser<'tokens>()
 -> impl Parser<'tokens, ParserInput<'tokens>, Option<CodeBlockData>, ParserExtra<'tokens>> + Clone {
     code_block_parser().map(Some).or(empty().to(None)).boxed()
 }
@@ -538,7 +570,7 @@ pub fn function_body_parser<'tokens>()
 
 /// Parser for a function declaration
 ///
-/// Syntax: `(@attr)* (visibility)? (static)? (mutating|consuming)? func name[T, U]?(params) (-> Type)? (where ...)? ({ })?`
+/// Syntax: `(@attr)* (visibility)? (static)? (mutating|consuming)? func name[T, U]?(params) (-> Type)? (where ...)? ({ } | = expr)?`
 ///
 /// This is the single source of truth for function declaration parsing.
 pub fn function_declaration_parser_internal<'tokens>()
@@ -794,7 +826,7 @@ pub fn initializer_declaration_parser_internal<'tokens>()
         .then(parameter_list_parser())
         .then(token(Token::RParen))
         .then(where_clause_parser().or_not())
-        .then(function_body_parser())
+        .then(block_body_parser())
         .map(
             |(
                 (

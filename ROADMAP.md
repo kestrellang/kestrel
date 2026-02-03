@@ -636,7 +636,7 @@ See [docs/memory-model/implementation-plan.md](docs/memory-model/implementation-
 - [x] Default function parameters
 - [x] End compilation when there are errors
 - [x] Improve parser errors
-- [ ] Expression bodied functions
+- [x] Expression bodied functions
 
 ## Phase 15 Compiler Infrastructure
 

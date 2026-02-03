@@ -30,8 +30,11 @@ func add(x: Int, y: Int) -> Int {
     x + y  // Implicit return
 }
 
+// Expression-bodied function (shorthand for single expressions)
+func add(x: Int, y: Int) -> Int = x + y
+
 // Generic function
-func identity[T](value: T) -> T { value }
+func identity[T](value: T) -> T = value
 
 // With constraints
 func compare[T](a: T, b: T) -> Bool where T: Comparable { }

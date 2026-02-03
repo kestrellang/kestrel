@@ -12,10 +12,10 @@ use super::data::{
     AssociatedTypeBoundsData, AssociatedTypeTargetData, AttributeArgData, AttributeArgValue,
     AttributeArgsData, AttributeData, ComputedBodyData, DeinitDeclarationData,
     EnumCaseDeclarationData, EnumDeclarationData, ExtensionBodyItem, ExtensionDeclarationData,
-    FieldDeclarationData, FunctionDeclarationData, InitializerDeclarationData, ParameterAccessMode,
-    ParameterData, ProtocolBodyItem, ProtocolDeclarationData, ReceiverModifier,
-    StructDeclarationData, SubscriptBodyData, SubscriptDeclarationData, TypeAliasDeclarationData,
-    TypeDeclarationBodyItem,
+    FieldDeclarationData, FunctionBodyData, FunctionDeclarationData, InitializerDeclarationData,
+    ParameterAccessMode, ParameterData, ProtocolBodyItem, ProtocolDeclarationData,
+    ReceiverModifier, StructDeclarationData, SubscriptBodyData, SubscriptDeclarationData,
+    TypeAliasDeclarationData, TypeDeclarationBodyItem,
 };
 use crate::block::emit_code_block;
 use crate::event::EventSink;
@@ -331,10 +331,20 @@ pub fn emit_return_type(sink: &mut EventSink, arrow_span: Span, return_ty: crate
     sink.finish_node();
 }
 
-/// Emit events for a function body (wraps a code block)
-pub fn emit_function_body(sink: &mut EventSink, block: &crate::block::CodeBlockData) {
+/// Emit events for a function body (block or expression)
+pub fn emit_function_body(sink: &mut EventSink, body: &FunctionBodyData) {
     sink.start_node(SyntaxKind::FunctionBody);
-    emit_code_block(sink, block);
+    match body {
+        FunctionBodyData::Block(block) => {
+            emit_code_block(sink, block);
+        },
+        FunctionBodyData::Expression(eq_span, expr) => {
+            sink.add_token(SyntaxKind::Equals, eq_span.clone());
+            sink.start_node(SyntaxKind::Expression);
+            emit_expr_variant(sink, expr);
+            sink.finish_node();
+        },
+    }
     sink.finish_node();
 }
 
@@ -378,8 +388,8 @@ pub fn emit_function_declaration(sink: &mut EventSink, data: FunctionDeclaration
         emit_where_clause(sink, wc);
     }
 
-    if let Some(ref block) = data.body {
-        emit_function_body(sink, block);
+    if let Some(ref body) = data.body {
+        emit_function_body(sink, body);
     }
 
     sink.finish_node();
@@ -498,7 +508,7 @@ pub fn emit_initializer_declaration(sink: &mut EventSink, data: InitializerDecla
     }
 
     if let Some(ref block) = data.body {
-        emit_function_body(sink, block);
+        emit_function_body(sink, &FunctionBodyData::Block(block.clone()));
     }
 
     sink.finish_node();
@@ -510,7 +520,7 @@ pub fn emit_initializer_declaration(sink: &mut EventSink, data: InitializerDecla
 pub fn emit_deinit_declaration(sink: &mut EventSink, data: DeinitDeclarationData) {
     sink.start_node(SyntaxKind::DeinitDeclaration);
     sink.add_token(SyntaxKind::Deinit, data.deinit_span);
-    emit_function_body(sink, &data.body);
+    emit_function_body(sink, &FunctionBodyData::Block(data.body));
     sink.finish_node();
 }
 

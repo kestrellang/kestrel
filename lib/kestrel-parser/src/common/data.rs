@@ -124,6 +124,16 @@ pub enum ReceiverModifier {
     Consuming,
 }
 
+/// Body data for functions - either a block `{ ... }` or expression `= expr`
+#[derive(Debug, Clone)]
+pub enum FunctionBodyData {
+    /// Block body: `{ statements; expr }`
+    Block(CodeBlockData),
+    /// Expression body: `= expr`
+    /// Contains the equals span and the expression
+    Expression(Span, ExprVariant),
+}
+
 /// Raw parsed data for function declaration internals
 ///
 /// Used by both function declarations and protocol method declarations.
@@ -142,7 +152,7 @@ pub struct FunctionDeclarationData {
     pub rparen: Span,
     pub return_type: Option<(Span, TyVariant)>, // (arrow_span, return_ty)
     pub where_clause: Option<WhereClauseData>,
-    pub body: Option<CodeBlockData>, // Optional code block - None for protocol methods
+    pub body: Option<FunctionBodyData>, // Optional body - None for protocol methods
 }
 
 /// Body data for computed properties

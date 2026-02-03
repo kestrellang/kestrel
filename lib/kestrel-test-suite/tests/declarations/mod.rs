@@ -17,6 +17,7 @@ mod computed_properties;
 mod default_parameters;
 mod delegating_initializers;
 mod enums;
+mod expression_bodied_functions;
 mod extensions;
 mod extern_functions;
 mod functions;
