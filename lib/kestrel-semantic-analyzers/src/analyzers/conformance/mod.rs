@@ -370,6 +370,7 @@ fn check_struct_conformance(
                 struct_name,
                 protocol_name,
                 &required_properties,
+                &effective_bindings,
                 model,
                 ctx,
             );
@@ -793,6 +794,7 @@ fn check_property_requirements(
     struct_name: &str,
     protocol_name: &str,
     required_properties: &[PropertyRequirement],
+    effective_bindings: &HashMap<String, SignatureType>,
     model: &SemanticModel,
     ctx: &mut AnalysisContext,
 ) {
@@ -845,19 +847,21 @@ fn check_property_requirements(
                 });
             },
             Some(field_info) => {
-                // Check type compatibility
-                // TODO: More sophisticated type comparison with substitutions
-                let field_type_str = format!("{}", field_info.ty);
-                let required_type_str = format!("{}", requirement.property_type);
-                if field_type_str != required_type_str {
+                // Check type compatibility using SignatureType with Self substitution
+                let field_sig_type = SignatureType::from_ty(&field_info.ty);
+                let required_sig_type = SignatureType::from_ty(&requirement.property_type);
+                let substituted_required =
+                    substitute_associated_types(&required_sig_type, effective_bindings);
+
+                if field_sig_type != substituted_required {
                     let span = struct_sym.metadata().declaration_span().clone();
                     ctx.report(ProtocolPropertyTypeMismatchError {
                         span,
                         struct_name: struct_name.to_string(),
                         protocol_name: protocol_name.to_string(),
                         property_name: requirement.name.clone(),
-                        expected_type: required_type_str,
-                        actual_type: field_type_str,
+                        expected_type: format!("{:?}", substituted_required),
+                        actual_type: format!("{:?}", field_sig_type),
                     });
                     continue;
                 }

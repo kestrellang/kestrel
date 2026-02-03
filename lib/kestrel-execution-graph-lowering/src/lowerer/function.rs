@@ -875,7 +875,7 @@ fn get_getter_parent_type_parameters(
 }
 
 /// Get type parameters from the subscript itself (for subscript getters/setters).
-fn get_subscript_type_parameters(
+pub fn get_subscript_type_parameters(
     getter_symbol: &Arc<GetterSymbol>,
 ) -> Vec<Arc<TypeParameterSymbol>> {
     use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;

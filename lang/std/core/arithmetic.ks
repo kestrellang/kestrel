@@ -9,6 +9,10 @@ module std.core
 public protocol Addable[Rhs = Self] {
     type Output
 
+    /// The additive identity (zero).
+    /// Used as the starting value for sum operations.
+    static var zero: Self { get }
+
     /// Adds this value to another and returns the result.
     @builtin(.AddOperatorMethod)
     func add(other: Rhs) -> Output
@@ -28,6 +32,10 @@ public protocol Subtractable[Rhs = Self] {
 @builtin(.MultiplyOperatorProtocol)
 public protocol Multipliable[Rhs = Self] {
     type Output
+
+    /// The multiplicative identity (one).
+    /// Used as the starting value for product operations.
+    static var one: Self { get }
 
     /// Multiplies this value by another and returns the result.
     @builtin(.MultiplyOperatorMethod)

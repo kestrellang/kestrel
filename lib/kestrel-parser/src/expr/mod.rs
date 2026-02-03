@@ -1279,6 +1279,45 @@ pub fn expr_parser<'tokens>()
                     .boxed()
             };
 
+        // Implicit member access: .Case or .Case(args)
+        // Defined early so it can be used in condition expressions
+        let implicit_member_access = {
+            let implicit_arg_list = skip_inline_trivia()
+                .ignore_then(just(Token::LParen).map_with(|_, e| to_kestrel_span(e.span())))
+                .then(
+                    argument
+                        .clone()
+                        .separated_by(skip_trivia().ignore_then(
+                            just(Token::Comma).map_with(|_, e| to_kestrel_span(e.span())),
+                        ))
+                        .allow_trailing()
+                        .collect::<Vec<_>>(),
+                )
+                .then(skip_trivia().ignore_then(
+                    just(Token::RParen).map_with(|_, e| to_kestrel_span(e.span())),
+                ))
+                .map(|((lparen, arguments), rparen)| ArgumentListData {
+                    lparen,
+                    arguments,
+                    commas: vec![],
+                    rparen,
+                });
+
+            skip_trivia()
+                .ignore_then(just(Token::Dot).map_with(|_, e| to_kestrel_span(e.span())))
+                .then(skip_trivia().ignore_then(
+                    select! { Token::Identifier = e => to_kestrel_span(e.span()) },
+                ))
+                .then(implicit_arg_list.or_not())
+                .map(
+                    |((dot, member), arguments)| ExprVariant::ImplicitMemberAccess {
+                        dot,
+                        member,
+                        arguments,
+                    },
+                )
+        };
+
         // Condition expression (simplified, no block expressions like if/while/loop/match/closures)
         let condition_primary = float
             .clone()
@@ -1288,6 +1327,7 @@ pub fn expr_parser<'tokens>()
             .or(null.clone())
             .or(array_or_dict.clone())
             .or(paren_expr.clone())
+            .or(implicit_member_access.clone())
             .or(path.clone());
 
         let condition_postfix_op = arg_list
@@ -1934,45 +1974,6 @@ pub fn expr_parser<'tokens>()
                 .ignore_then(just(Token::LBrace).map_with(|_, e| to_kestrel_span(e.span())))
                 .boxed(),
         );
-
-        // Implicit member access: .Case or .Case(args)
-        let implicit_member_access =
-            {
-                let implicit_arg_list = skip_inline_trivia()
-                    .ignore_then(just(Token::LParen).map_with(|_, e| to_kestrel_span(e.span())))
-                    .then(
-                        argument
-                            .clone()
-                            .separated_by(skip_trivia().ignore_then(
-                                just(Token::Comma).map_with(|_, e| to_kestrel_span(e.span())),
-                            ))
-                            .allow_trailing()
-                            .collect::<Vec<_>>(),
-                    )
-                    .then(skip_trivia().ignore_then(
-                        just(Token::RParen).map_with(|_, e| to_kestrel_span(e.span())),
-                    ))
-                    .map(|((lparen, arguments), rparen)| ArgumentListData {
-                        lparen,
-                        arguments,
-                        commas: vec![],
-                        rparen,
-                    });
-
-                skip_trivia()
-                    .ignore_then(just(Token::Dot).map_with(|_, e| to_kestrel_span(e.span())))
-                    .then(skip_trivia().ignore_then(
-                        select! { Token::Identifier = e => to_kestrel_span(e.span()) },
-                    ))
-                    .then(implicit_arg_list.or_not())
-                    .map(
-                        |((dot, member), arguments)| ExprVariant::ImplicitMemberAccess {
-                            dot,
-                            member,
-                            arguments,
-                        },
-                    )
-            };
 
         // Trailing closure argument
         // Can be either:

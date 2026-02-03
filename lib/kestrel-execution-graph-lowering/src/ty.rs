@@ -223,11 +223,6 @@ pub fn lower_type(ctx: &mut LoweringContext, ty: &Ty) -> Id<MirTyMarker> {
         // === Inference Placeholder ===
         TyKind::Infer => {
             // This shouldn't appear after type inference
-            eprintln!(
-                "[DEBUG] Lowering TyKind::Infer - ty.id={:?} span={:?}",
-                ty.id(),
-                ty.span()
-            );
             ctx.emit_error(LoweringError::unsupported_type(
                 "unresolved inference type",
                 ty.span().clone(),

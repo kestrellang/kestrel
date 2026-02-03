@@ -18,7 +18,8 @@ use semantic_tree::symbol::{Symbol, SymbolId};
 
 use crate::diagnostics::{
     AmbiguousTypeError, LangPtrArityError, NotATypeError, NotGenericError,
-    TooFewTypeArgumentsError, TooManyTypeArgumentsError, UnresolvedTypeError,
+    TooFewTypeArgumentsError, TooManyTypeArgumentsError, TypeOperatorInvalidSymbolError,
+    TypeOperatorNotDefinedError, TypeOperatorSymbolNotFoundError, UnresolvedTypeError,
 };
 use kestrel_syntax_tree::utils::{extract_path_segments, get_node_span};
 
@@ -240,23 +241,34 @@ impl<'a> TypeResolver<'a> {
         feature: LanguageFeature,
         type_args: Vec<Ty>,
         span: Span,
-        _operator_name: &str,
+        operator_name: &str,
     ) -> Ty {
         // Look up the builtin type alias
         let builtin_registry = self.model.builtin_registry();
         let Some(symbol_id) = builtin_registry.type_alias(feature) else {
-            // Type operator not defined - this means the stdlib is not properly imported
-            // For now, return error type (could add a diagnostic)
+            // Type operator not defined - the stdlib is not properly imported
+            self.diagnostics.throw(TypeOperatorNotDefinedError {
+                span: span.clone(),
+                operator_name: operator_name.to_string(),
+            });
             return Ty::error(span);
         };
 
         // Get the type alias symbol from the symbol registry
         let Some(symbol) = self.model.registry().get(symbol_id) else {
+            self.diagnostics.throw(TypeOperatorSymbolNotFoundError {
+                span: span.clone(),
+                operator_name: operator_name.to_string(),
+            });
             return Ty::error(span);
         };
 
         // Downcast Arc<dyn Symbol> to Arc<TypeAliasSymbol>
         let Ok(type_alias_arc) = symbol.into_any_arc().downcast::<TypeAliasSymbol>() else {
+            self.diagnostics.throw(TypeOperatorInvalidSymbolError {
+                span: span.clone(),
+                operator_name: operator_name.to_string(),
+            });
             return Ty::error(span);
         };
 

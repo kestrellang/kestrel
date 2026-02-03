@@ -110,6 +110,16 @@ impl Query for ResolveValuePath {
             };
         }
 
+        // Special case: if first segment is an associated type, return it
+        // The remaining segments are member accesses that the caller should handle
+        // (e.g., Item.zero where Item is an associated type constrained to Addable)
+        if current_symbol.metadata().kind() == KestrelSymbolKind::AssociatedType {
+            return ValuePathResolution::AssociatedType {
+                symbol_id: current_symbol.metadata().id(),
+                container: None, // Top-level associated type (from where clause)
+            };
+        }
+
         // Special case: if first segment is a type alias, resolve through to the underlying type
         // This allows `MyInt.init()` where `type MyInt = Int64`
         let mut current_symbol = if current_symbol.metadata().kind() == KestrelSymbolKind::TypeAlias
@@ -259,6 +269,14 @@ fn extract_value_from_symbols(
     if symbol.metadata().kind() == KestrelSymbolKind::TypeParameter {
         return ValuePathResolution::TypeParameter {
             symbol_id: symbol.metadata().id(),
+        };
+    }
+
+    // Check if this is an associated type (for static member access like Item.zero)
+    if symbol.metadata().kind() == KestrelSymbolKind::AssociatedType {
+        return ValuePathResolution::AssociatedType {
+            symbol_id: symbol.metadata().id(),
+            container: None,
         };
     }
 

@@ -8,6 +8,7 @@ use kestrel_semantic_model::{
     ResolveTypePath, ResolveValuePath, SymbolFor, TypePathResolution, ValuePathResolution,
 };
 use kestrel_semantic_tree::expr::Expression;
+use kestrel_semantic_tree::symbol::associated_type::AssociatedTypeSymbol;
 use kestrel_semantic_tree::symbol::function::FunctionSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
@@ -556,6 +557,40 @@ pub fn resolve_path_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContex
             };
 
             let base = Expression::type_parameter_ref(symbol_id, type_param_ty, first_span.clone());
+
+            // If there are more segments, resolve them as member accesses
+            if path_with_spans.len() > 1 {
+                resolve_member_chain(base, &path_with_spans[1..], ctx)
+            } else {
+                base
+            }
+        },
+        ValuePathResolution::AssociatedType { symbol_id, container } => {
+            // This is an associated type reference (e.g., Item in `Item.zero`)
+            // For multi-segment paths like Item.zero, the db returns AssociatedType
+            // for just the first segment, and we need to handle the rest as member accesses
+            // This enables accessing static members from protocol bounds (e.g., Addable.zero)
+
+            // Look up the associated type symbol to create proper type
+            let assoc_type_ty = if let Some(symbol) = ctx.model.query(SymbolFor { id: symbol_id }) {
+                if let Ok(assoc_type_arc) = symbol.clone().downcast_arc::<AssociatedTypeSymbol>() {
+                    // Create the associated type with its container
+                    match container {
+                        Some(container_ty) => Ty::qualified_associated_type(
+                            assoc_type_arc,
+                            container_ty,
+                            first_span.clone(),
+                        ),
+                        None => Ty::associated_type(assoc_type_arc, first_span.clone()),
+                    }
+                } else {
+                    Ty::infer(first_span.clone())
+                }
+            } else {
+                Ty::infer(first_span.clone())
+            };
+
+            let base = Expression::associated_type_ref(assoc_type_ty, first_span.clone());
 
             // If there are more segments, resolve them as member accesses
             if path_with_spans.len() > 1 {

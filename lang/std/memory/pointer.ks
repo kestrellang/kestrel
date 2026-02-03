@@ -6,7 +6,8 @@ import std.ffi.(FFISafe)
 import std.core.(Equatable, Bool, Hash, Hasher, ArrayMatchable)
 import std.num.(Int64, UInt64, UInt8)
 import std.memory.(Slice)
-// Note: Optional comes in Phase 11, Iterator/Iterable in Phase 10
+import std.result.(Optional)
+import std.iter.(Iterator)
 
 /// An untyped (void) pointer to raw memory.
 /// FFI-safe and can be cast to typed pointers.
@@ -79,7 +80,7 @@ public struct Pointer[T]: Equatable, Hash {
     }
 
     /// Returns a null typed pointer.
-    public static func nilPointer() -> Pointer[T] {
+    public static func nullPointer() -> Pointer[T] {
         Pointer(raw: lang.ptr_null[T]())
     }
 
@@ -166,53 +167,53 @@ public struct Slice[T]: Equatable {
     /// A pointer to the first element.
     public var pointer: Pointer[T] { self.ptr }
 
-    // Safe access - requires Optional (Phase 11)
-    // public subscript(safe index: Int) -> Optional[T] {
-    //     get {
-    //         if index >= 0 and index < self.len {
-    //             .Some(self.ptr.offset(by: index).read())
-    //         } else {
-    //             .None
-    //         }
-    //     }
-    // }
+    // Safe access
+    public subscript(safe index: Int64) -> Optional[T] {
+        get {
+            if index >= 0 and index < self.len {
+                .Some(self.ptr.offset(by: index).read())
+            } else {
+                .None
+            }
+        }
+    }
 
     // Unchecked access
-    // public subscript(unchecked index: Int) -> T {
-    //     get { self.ptr.offset(by: index).read() }
-    //     set { self.ptr.offset(by: index).write(newValue) }
-    // }
+    public subscript(unchecked index: Int64) -> T {
+        get { self.ptr.offset(by: index).read() }
+        set { self.ptr.offset(by: index).write(newValue) }
+    }
 
-    // Slicing - requires Optional (Phase 11)
-    // public func slice(from start: Int, to end: Int) -> Optional[Slice[T]] {
-    //     if start >= 0 and end <= self.len and start <= end {
-    //         .Some(Slice(pointer: self.ptr.offset(by: start), count: end - start))
-    //     } else {
-    //         .None
-    //     }
-    // }
+    // Slicing
+    public func slice(from start: Int64, to end: Int64) -> Optional[Slice[T]] {
+        if start >= 0 and end <= self.len and start <= end {
+            .Some(Slice(pointer: self.ptr.offset(by: start), count: end - start))
+        } else {
+            .None
+        }
+    }
 
-    // Iteration - requires Iterator (Phase 10)
-    // public func iter() -> SliceIterator[T] {
-    //     SliceIterator(ptr: self.ptr, remaining: self.len)
-    // }
+    // Iteration
+    public func iter() -> SliceIterator[T] {
+        SliceIterator(ptr: self.ptr, remaining: self.len)
+    }
 
     // First and last - require Optional (Phase 11)
-    // public func first() -> Optional[T] {
-    //     if self.len > 0 {
-    //         .Some(self.ptr.read())
-    //     } else {
-    //         .None
-    //     }
-    // }
+    public func first() -> Optional[T] {
+        if self.len > 0 {
+            .Some(self.ptr.read())
+        } else {
+            .None
+        }
+    }
 
-    // public func last() -> Optional[T] {
-    //     if self.len > 0 {
-    //         .Some(self.ptr.offset(by: self.len - 1).read())
-    //     } else {
-    //         .None
-    //     }
-    // }
+    public func last() -> Optional[T] {
+        if self.len > 0 {
+            .Some(self.ptr.offset(by: self.len - 1).read())
+        } else {
+            .None
+        }
+    }
 
     /// Compares two slices for equality.
     public func equals(other: Slice[T]) -> Bool {
@@ -246,26 +247,26 @@ extend Slice[T]: ArrayMatchable {
     }
 }
 
-// SliceIterator - requires Iterator protocol (Phase 10)
-// public struct SliceIterator[T]: Iterator {
-//     type Item = T
-//
-//     private var ptr: Pointer[T]
-//     private var remaining: Int
-//
-//     public init(ptr: Pointer[T], remaining: Int) {
-//         self.ptr = ptr;
-//         self.remaining = remaining;
-//     }
-//
-//     public mutating func next() -> Optional[T] {
-//         if self.remaining > 0 {
-//             let value = self.ptr.read();
-//             self.ptr = self.ptr.offset(by: 1);
-//             self.remaining = self.remaining - 1;
-//             .Some(value)
-//         } else {
-//             .None
-//         }
-//     }
-// }
+/// Iterator over the elements of a Slice.
+public struct SliceIterator[T]: Iterator {
+    type Item = T
+
+    private var ptr: Pointer[T]
+    private var remaining: Int64
+
+    public init(ptr ptr: Pointer[T], remaining remaining: Int64) {
+        self.ptr = ptr;
+        self.remaining = remaining;
+    }
+
+    public mutating func next() -> Optional[T] {
+        if self.remaining > 0 {
+            let value = self.ptr.read();
+            self.ptr = self.ptr.offset(by: 1);
+            self.remaining = self.remaining - 1;
+            .Some(value)
+        } else {
+            .None
+        }
+    }
+}

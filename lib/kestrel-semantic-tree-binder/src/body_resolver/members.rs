@@ -585,11 +585,18 @@ fn resolve_associated_type_member_access(
 ) -> Expression {
     let assoc_type_name = assoc_type.metadata().name().value.clone();
 
+    // Extract container from the base type for path matching in where clauses
+    let container = if let TyKind::AssociatedType { container, .. } = base.ty.kind() {
+        container.as_ref().map(|c| c.as_ref())
+    } else {
+        None
+    };
+
     // Get protocol bounds from the associated type symbol AND context where clause
     // This handles both:
     // 1. Direct bounds: `type Item: Protocol` on the associated type definition
-    // 2. Context bounds: `where Item: Protocol` in the extension's where clause
-    let bounds = get_associated_type_bounds_from_context(assoc_type, ctx);
+    // 2. Context bounds: `where Item: Protocol` or `where I.Item: Protocol`
+    let bounds = get_associated_type_bounds_from_context(assoc_type, container, ctx);
 
     // If no bounds, report error
     if bounds.is_empty() {
@@ -1263,11 +1270,18 @@ fn resolve_associated_type_member_call(
     let assoc_type_name = assoc_type.metadata().name().value.clone();
     let receiver_ty = &object.ty;
 
+    // Extract container from the object type for path matching in where clauses
+    let container = if let TyKind::AssociatedType { container, .. } = receiver_ty.kind() {
+        container.as_ref().map(|c| c.as_ref())
+    } else {
+        None
+    };
+
     // Get protocol bounds from the associated type symbol AND context where clause
     // This handles both:
     // 1. Direct bounds: `type Item: Protocol` on the associated type definition
-    // 2. Context bounds: `where Item: Protocol` in the extension's where clause
-    let bounds = get_associated_type_bounds_from_context(assoc_type, ctx);
+    // 2. Context bounds: `where Item: Protocol` or `where I.Item: Protocol`
+    let bounds = get_associated_type_bounds_from_context(assoc_type, container, ctx);
 
     // If no bounds, report error
     if bounds.is_empty() {
@@ -1794,20 +1808,14 @@ fn resolve_associated_type_static_member(
         return Expression::error(full_span);
     };
 
-    // Get the bounds of the associated type (e.g., `type Next: Level2` has bounds [Level2])
-    let Some(bounds) = assoc_type.bounds() else {
-        // No bounds - cannot access members on unconstrained associated type
-        // This is similar to an unconstrained type parameter
-        let error = UnconstrainedTypeParameterMemberError {
-            span: full_span.clone(),
-            member_name: member_name.to_string(),
-            type_param_name: assoc_type.metadata().name().value.clone(),
-        };
-        ctx.diagnostics.add_diagnostic(error.into_diagnostic());
-        return Expression::error(full_span);
-    };
+    // Get the bounds of the associated type from both:
+    // 1. Direct bounds on the type definition (e.g., `type Item: Protocol`)
+    // 2. Where clause constraints (e.g., `where Item: Addable` or `where I.Item: Protocol`)
+    let container_ref = container.as_ref().map(|c| c.as_ref());
+    let bounds = get_associated_type_bounds_from_context(assoc_type, container_ref, ctx);
 
     if bounds.is_empty() {
+        // No bounds - cannot access members on unconstrained associated type
         let error = UnconstrainedTypeParameterMemberError {
             span: full_span.clone(),
             member_name: member_name.to_string(),
@@ -1831,6 +1839,19 @@ fn resolve_associated_type_static_member(
         find_associated_type_in_bounds(&bounds, member_name, &container_ty, full_span.clone(), ctx)
     {
         return assoc_type_expr;
+    }
+
+    // Second, check if member_name is a static property in any protocol bound
+    // (e.g., Addable.zero, Multipliable.one)
+    if let Some(property_expr) = find_static_property_in_bounds_for_assoc_type(
+        base,
+        &bounds,
+        member_name,
+        &container_ty,
+        full_span.clone(),
+        ctx,
+    ) {
+        return property_expr;
     }
 
     // Collect static methods from all protocol bounds
@@ -2027,6 +2048,76 @@ fn find_static_property_in_bounds(
 
                     return Some(Expression::protocol_property_access(
                         receiver,
+                        field.metadata().id(),
+                        property_name.to_string(),
+                        proto.metadata().id(),
+                        true, // is_static
+                        field.setter().is_some(),
+                        prop_ty,
+                        span,
+                    ));
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Find a static property in protocol bounds for an associated type.
+///
+/// Similar to `find_static_property_in_bounds` but works with associated types
+/// instead of type parameters. Returns a ProtocolPropertyAccess expression if found.
+fn find_static_property_in_bounds_for_assoc_type(
+    base: &Expression,
+    bounds: &[Ty],
+    property_name: &str,
+    assoc_type_ty: &Ty,
+    span: Span,
+    _ctx: &BodyResolutionContext,
+) -> Option<Expression> {
+    for bound in bounds {
+        if let TyKind::Protocol { symbol: proto, .. } = bound.kind() {
+            // Use flattened behavior if available
+            if let Some(flattened) = proto.metadata().get_behavior::<FlattenedProtocolBehavior>()
+                && let Some(prop) = flattened.properties().get(property_name)
+                && prop.is_static
+            {
+                // Get the property type from the field's TypedBehavior
+                let prop_ty = prop
+                    .symbol
+                    .metadata()
+                    .get_behavior::<TypedBehavior>()
+                    .map(|tb| substitute_self(tb.ty(), assoc_type_ty))
+                    .unwrap_or_else(|| Ty::error(span.clone()));
+
+                return Some(Expression::protocol_property_access(
+                    base.clone(),
+                    prop.symbol.metadata().id(),
+                    property_name.to_string(),
+                    proto.metadata().id(),
+                    true, // is_static
+                    prop.has_setter,
+                    prop_ty,
+                    span,
+                ));
+            }
+
+            // FALLBACK: Direct search in protocol children
+            for child in proto.metadata().children() {
+                if child.metadata().kind() == KestrelSymbolKind::Field
+                    && child.metadata().name().value == property_name
+                    && let Ok(field) = child.clone().downcast_arc::<FieldSymbol>()
+                    && field.is_computed()
+                    && field.is_static()
+                {
+                    let prop_ty = field
+                        .metadata()
+                        .get_behavior::<TypedBehavior>()
+                        .map(|tb| substitute_self(tb.ty(), assoc_type_ty))
+                        .unwrap_or_else(|| Ty::error(span.clone()));
+
+                    return Some(Expression::protocol_property_access(
+                        base.clone(),
                         field.metadata().id(),
                         property_name.to_string(),
                         proto.metadata().id(),

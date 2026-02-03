@@ -6,6 +6,8 @@ import std.core.(Equatable, Comparable, Ordering, Bool, Matchable, ExpressibleBy
 import std.num.(Int64, UInt8, UInt32)
 import std.result.(Optional)
 import std.collections.(Array)
+import std.text.(String)
+import std.text.unicode as unicode
 
 // ============================================================================
 // TYPE ALIASES
@@ -90,27 +92,59 @@ public struct Char: Equatable, Comparable, Matchable, ExpressibleByCharLiteral, 
     }
 
     // ========================================================================
-    // CASE CONVERSION
+    // CASE CONVERSION (Unicode)
     // ========================================================================
 
     /// Returns the uppercase version of this character.
+    /// Uses full Unicode case mapping tables.
+    /// For characters with multi-char expansions (e.g., ß → SS), returns the first char.
+    /// Use hasUppercaseExpansion() and uppercaseExpansion() for full support.
     public func toUppercase() -> Char {
-        if self.isLowercase() {
-            // 'a' - 'A' = 32
-            Char(self.value() - UInt32(intLiteral: 32))
-        } else {
-            self
-        }
+        unicode.toUppercase(self)
     }
 
     /// Returns the lowercase version of this character.
+    /// Uses full Unicode case mapping tables.
     public func toLowercase() -> Char {
-        if self.isUppercase() {
-            // 'a' - 'A' = 32
-            Char(self.value() + UInt32(intLiteral: 32))
-        } else {
-            self
-        }
+        unicode.toLowercase(self)
+    }
+
+    /// Returns the titlecase version of this character.
+    /// Titlecase differs from uppercase for some characters (e.g., ligatures).
+    public func toTitlecase() -> Char {
+        unicode.toTitlecase(self)
+    }
+
+    /// Returns true if this character has a multi-char uppercase expansion.
+    /// For example, German ß uppercases to "SS" (two characters).
+    public func hasUppercaseExpansion() -> Bool {
+        unicode.hasUppercaseExpansion(self)
+    }
+
+    /// Returns the multi-character uppercase expansion for this character.
+    /// Returns empty string if no expansion exists.
+    public func uppercaseExpansion() -> String {
+        unicode.uppercaseExpansion(self)
+    }
+
+    /// Returns true if this character has a multi-char lowercase expansion.
+    public func hasLowercaseExpansion() -> Bool {
+        unicode.hasLowercaseExpansion(self)
+    }
+
+    /// Returns the multi-character lowercase expansion for this character.
+    public func lowercaseExpansion() -> String {
+        unicode.lowercaseExpansion(self)
+    }
+
+    /// Returns true if this character has a multi-char titlecase expansion.
+    public func hasTitlecaseExpansion() -> Bool {
+        unicode.hasTitlecaseExpansion(self)
+    }
+
+    /// Returns the multi-character titlecase expansion for this character.
+    public func titlecaseExpansion() -> String {
+        unicode.titlecaseExpansion(self)
     }
 
     // ========================================================================

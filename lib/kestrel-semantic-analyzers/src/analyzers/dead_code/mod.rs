@@ -285,13 +285,12 @@ fn analyze_expression(expr: &Expression, errors: &mut Vec<UnreachableCodeWarning
                     has_break = true;
                 }
             }
-            if body_div == Divergence::Returns {
-                return Divergence::Returns;
-            }
-            if !has_break && body_div != Divergence::Returns {
-                Divergence::InfiniteLoop
-            } else {
+            if has_break {
                 Divergence::None
+            } else if body_div == Divergence::Returns {
+                Divergence::Returns
+            } else {
+                Divergence::InfiniteLoop
             }
         },
         ExprKind::Call {
@@ -546,17 +545,24 @@ fn expression_contains_break(expr: &Expression) -> bool {
         ExprKind::Break { .. } => true,
         ExprKind::If {
             then_branch,
+            then_value,
             else_branch,
             ..
         } => {
             then_branch
                 .iter()
                 .any(|s| statement_contains_break(&s.kind))
+                || then_value
+                    .as_ref()
+                    .map_or(false, |v| expression_contains_break(v))
                 || else_branch
                     .as_ref()
                     .map(|b| match b {
-                        ElseBranch::Block { statements, .. } => {
+                        ElseBranch::Block { statements, value } => {
                             statements.iter().any(|s| statement_contains_break(&s.kind))
+                                || value
+                                    .as_ref()
+                                    .map_or(false, |v| expression_contains_break(v))
                         },
                         ElseBranch::ElseIf(e) => expression_contains_break(e),
                     })
@@ -600,6 +606,13 @@ fn expression_contains_break(expr: &Expression) -> bool {
             .any(|a| expression_contains_break(&a.value)),
         ExprKind::Assignment { target, value } => {
             expression_contains_break(target) || expression_contains_break(value)
+        },
+        ExprKind::Match { arms, .. } => arms.iter().any(|arm| expression_contains_break(&arm.body)),
+        ExprKind::Block { statements, value } => {
+            statements.iter().any(|s| statement_contains_break(&s.kind))
+                || value
+                    .as_ref()
+                    .map_or(false, |v| expression_contains_break(v))
         },
         _ => false,
     }

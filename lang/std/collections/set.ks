@@ -2,7 +2,8 @@
 
 module std.collections
 
-import std.core.(Bool, Equatable, Cloneable, Hash, Hasher, Defaultable, Formattable, Addable, Comparable)
+import std.core.(Bool, Equatable, Cloneable, Hash, Hasher, Defaultable, Addable, Comparable)
+import std.text.(Formattable, FormatOptions)
 import std.num.(Int64)
 import std.result.(Optional)
 import std.iter.(Iterator, Iterable)
@@ -194,19 +195,6 @@ public struct Set[T, H = DefaultHasher]: Iterable where T: Hash, H: Hasher, H: D
     ///     }
     public func iter() -> SetIterator[T, H] {
         SetIterator(dictIter: self.dict.iter())
-    }
-
-    /// Creates a shallow clone of the set.
-    ///
-    /// Due to COW semantics, this is O(1) - the actual copy is deferred
-    /// until either set is mutated.
-    ///
-    /// Example:
-    ///     let a: Set = [1, 2, 3]
-    ///     var b = a.clone()     // O(1), shares storage
-    ///     b.insert( 4)  // Now b copies and diverges
-    public func clone() -> Set[T, H] {
-        Set(dict: self.dict.clone())
     }
 
     // ========================================================================
@@ -823,7 +811,7 @@ extend Set[T, H]: Equatable where T: Hash, H: Hasher, H: Defaultable {
 ///     "\{Set([1, 2, 3])}"  // "{1, 2, 3}"
 ///     "\{Set[Int64]()"     // "{}"
 extend Set[T, H]: Formattable where T: Formattable, T: Hash, H: Hasher, H: Defaultable {
-    public func format() -> String {
+    public func format(options: FormatOptions = FormatOptions.default()) -> String {
         // Implementation: build string representation
         var result = "{";
         var first = true;
@@ -833,7 +821,7 @@ extend Set[T, H]: Formattable where T: Formattable, T: Hash, H: Hasher, H: Defau
                 result = result + ", ";
             }
             first = false;
-            result = result + elem.format();
+            result = result + elem.format(options);
         }
         result = result + "}";
         result
@@ -847,7 +835,16 @@ extend Set[T, H]: Formattable where T: Formattable, T: Hash, H: Hasher, H: Defau
 /// Cloneable conformance for sets.
 ///
 /// Due to COW semantics, cloning is O(1) until mutation.
-extend Set[T, H]: Cloneable {}
+extend Set[T, H]: Cloneable {
+
+    /// Creates a shallow clone of the set.
+    ///
+    /// Due to COW semantics, this is O(1) - the actual copy is deferred
+    /// until either set is mutated.
+    public func clone() -> Set[T, H] {
+        Set(dict: self.dict.clone())
+    }
+}
 
 /// Deep clone when T is Cloneable.
 extend Set[T, H] where T: Hash, T: Cloneable, H: Hasher, H: Defaultable {

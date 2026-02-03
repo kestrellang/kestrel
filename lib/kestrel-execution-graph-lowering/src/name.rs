@@ -2,6 +2,7 @@
 
 use kestrel_execution_graph::{Id, QualifiedName, QualifiedNameData};
 use kestrel_semantic_tree::behavior::callable::CallableBehavior;
+use kestrel_semantic_tree::behavior::subscript::SubscriptBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::extension::ExtensionSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
@@ -108,21 +109,36 @@ fn collect_name_segments(symbol: &Arc<dyn Symbol<KestrelLanguage>>, segments: &m
             }
         },
 
-        // Functions contribute their name, with labels for overload differentiation
-        // e.g., unwrap(orElse:) becomes "unwrap$orElse", unwrap() becomes "unwrap"
+        // Functions contribute their name, with labels for overload differentiation.
+        // Uses external labels when available. For required parameters without labels,
+        // uses internal names to differentiate overloads like parse(string:) vs parse(string:radix:).
+        // Parameters with defaults are excluded to avoid naming changes when defaults are used.
         KestrelSymbolKind::Function => {
             let name = symbol.metadata().name();
             if let Some(callable) = symbol.metadata().get_behavior::<CallableBehavior>() {
-                let labels: Vec<&str> = callable
+                // Collect differentiating names:
+                // - External label if present
+                // - Internal name only if no label AND no default (required unlabeled param)
+                let param_names: Vec<&str> = callable
                     .parameters()
                     .iter()
-                    .filter_map(|p| p.external_label())
+                    .filter_map(|p| {
+                        if let Some(label) = p.external_label() {
+                            Some(label)
+                        } else if !p.has_default() {
+                            // Required parameter without label - use internal name
+                            Some(p.internal_name())
+                        } else {
+                            // Optional parameter without label - skip it
+                            None
+                        }
+                    })
                     .collect();
 
-                if labels.is_empty() {
+                if param_names.is_empty() {
                     segments.push(name.value.clone());
                 } else {
-                    segments.push(format!("{}${}", name.value, labels.join("$")));
+                    segments.push(format!("{}${}", name.value, param_names.join("$")));
                 }
             } else {
                 segments.push(name.value.clone());
@@ -205,13 +221,44 @@ fn collect_name_segments(symbol: &Arc<dyn Symbol<KestrelLanguage>>, segments: &m
 
         KestrelSymbolKind::Getter | KestrelSymbolKind::Setter => {
             // Getters and setters use their synthetic name (e.g., "get:fieldName", "set:fieldName")
+            // For subscript getters/setters, include parameter labels to differentiate overloads
             let name = symbol.metadata().name();
-            segments.push(name.value.clone());
+            if let Some(callable) = symbol.metadata().get_behavior::<CallableBehavior>() {
+                // Get labels from non-receiver parameters (skip self)
+                let labels: Vec<&str> = callable
+                    .parameters()
+                    .iter()
+                    .filter_map(|p| p.external_label())
+                    .collect();
+
+                if labels.is_empty() {
+                    segments.push(name.value.clone());
+                } else {
+                    segments.push(format!("{}${}", name.value, labels.join("$")));
+                }
+            } else {
+                segments.push(name.value.clone());
+            }
         },
 
         KestrelSymbolKind::Subscript => {
-            // Subscripts use the synthetic name "subscript" since they're identified by signature
-            segments.push("subscript".to_string());
+            // Subscripts include parameter labels for overload differentiation
+            // e.g., subscript(index:) becomes "subscript$index", subscript(range:) becomes "subscript$range"
+            if let Some(subscript_beh) = symbol.metadata().get_behavior::<SubscriptBehavior>() {
+                let labels: Vec<&str> = subscript_beh
+                    .parameters()
+                    .iter()
+                    .filter_map(|p| p.external_label())
+                    .collect();
+
+                if labels.is_empty() {
+                    segments.push("subscript".to_string());
+                } else {
+                    segments.push(format!("subscript${}", labels.join("$")));
+                }
+            } else {
+                segments.push("subscript".to_string());
+            }
         },
     }
 }

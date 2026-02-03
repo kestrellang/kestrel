@@ -164,22 +164,4 @@ public protocol Defaultable {
     init()
 }
 
-/// Protocol for types that can be formatted as a string.
-/// Used by print functions and string interpolation.
-///
-/// String interpolation syntax:
-///   "\(expr)"        uses default formatting
-///   "\(expr:spec)"   uses format spec (parsed into FormatOptions)
-///
-/// Examples:
-///   "\(name)"        "Alice"
-///   "\(name:>10)"    "     Alice"
-///   "\(n:08x)"       "0000002a"
-///   "\(pi:.2)"       "3.14"
-///   "\(value:?)"     debug representation
-@builtin(.FormattableProtocol)
-public protocol Formattable {
-    /// Returns this value formatted as a string with the given options.
-    @builtin(.FormattableFormat)
-    func format(options: FormatOptions = FormatOptions.default()) -> String
-}
+// Note: Formattable protocol is now in std.text/format.ks

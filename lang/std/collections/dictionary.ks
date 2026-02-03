@@ -2,7 +2,8 @@
 
 module std.collections
 
-import std.core.(Bool, Equatable, Cloneable, Hash, Hasher, Defaultable, Formattable, Addable)
+import std.core.(Bool, Equatable, Cloneable, Hash, Hasher, Defaultable, Addable)
+import std.text.(Formattable, FormatOptions)
 import std.num.(Int64, UInt64)
 import std.result.(Optional)
 import std.memory.(Layout, Pointer, RawPointer, SystemAllocator, RcBox)
@@ -1255,7 +1256,7 @@ extend Dictionary[K, V, H] where K: Hash, V: Equatable, H: Hasher, H: Defaultabl
 ///     "\{["a": 1, "b": 2]:?}"   // "Dictionary[String, Int64]{a: 1, b: 2}"
 extend Dictionary[K, V, H]: Formattable where K: Hash, K: Formattable, V: Formattable, H: Hasher, H: Defaultable {
     /// Formats this dictionary as a string.
-    public func format() -> String {
+    public func format(options: FormatOptions = FormatOptions.default()) -> String {
         var result = "{";
         var first = true;
         let myCap = self.capacity;
@@ -1270,7 +1271,7 @@ extend Dictionary[K, V, H]: Formattable where K: Hash, K: Formattable, V: Format
                     } else {
                         result = result + ", ";
                     }
-                    result = result + key.format() + ": " + value.format();
+                    result = result + key.format(options) + ": " + value.format(options);
                 },
                 _ => {}
             }

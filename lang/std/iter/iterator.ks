@@ -16,7 +16,7 @@ import std.collections.(Array)
 /// Iterators are the foundation of lazy sequence processing in Kestrel.
 /// They produce elements one at a time via the `next()` method until exhausted.
 ///
-/// Example:
+/// Implementing Iterator:
 ///     struct CountDown: Iterator {
 ///         type Item = Int64
 ///         var current: Int64
@@ -28,6 +28,13 @@ import std.collections.(Array)
 ///             return Some(value)
 ///         }
 ///     }
+///
+/// Usage:
+///     var countdown = CountDown(current: 3)
+///     countdown.next()  // Some(3)
+///     countdown.next()  // Some(2)
+///     countdown.next()  // Some(1)
+///     countdown.next()  // None
 @builtin(.IteratorProtocol)
 public protocol Iterator {
     /// The type of elements yielded by this iterator.
@@ -35,7 +42,8 @@ public protocol Iterator {
 
     /// Returns the next element, or None if the sequence is exhausted.
     ///
-    /// Once None is returned, subsequent calls should continue to return None.
+    /// Once None is returned, subsequent calls should continue to return None
+    /// (though `fuse()` can enforce this guarantee).
     @builtin(.IteratorNextMethod)
     mutating func next() -> Item?
 }
@@ -48,6 +56,12 @@ public protocol Iterator {
 /// Example:
 ///     for item in myCollection {
 ///         // item is each element from myCollection.iter()
+///     }
+///
+///     // Equivalent to:
+///     var iter = myCollection.iter()
+///     while let item = iter.next() {
+///         // ...
 ///     }
 @builtin(.IterableProtocol)
 public protocol Iterable {
@@ -70,6 +84,12 @@ public protocol Iterable {
 ///
 /// An iterator can serve as its own iterable, returning itself.
 /// This allows iterators to be used directly in for-in loops.
+///
+/// Example:
+///     let iter = [1, 2, 3].iter().filter({ it > 1 })
+///     for item in iter {
+///         // works because FilterIterator is Iterable
+///     }
 extend Iterator: Iterable {
     type Iterable.Item = Self.Item
     type Iterable.Iter = Self
@@ -161,8 +181,8 @@ extend Iterator {
     /// Lazy - transformation happens as elements are consumed.
     ///
     /// Example:
-    ///     [1, 2, 3].iter().map(|x| x * 2).collect()  // [2, 4, 6]
-    ///     ["hello", "world"].iter().map(|s| s.count).collect()  // [5, 5]
+    ///     [1, 2, 3].iter().map({ it * 2 }).collect()  // [2, 4, 6]
+    ///     ["hello", "world"].iter().map({ it.count }).collect()  // [5, 5]
     public func map[U](transform: (Item) -> U) -> MapIterator[Self, U] {
         MapIterator(inner: self, transform: transform)
     }
@@ -172,8 +192,8 @@ extend Iterator {
     /// Lazy - elements are tested as they are consumed.
     ///
     /// Example:
-    ///     [1, 2, 3, 4, 5].iter().filter(|x| x % 2 == 0).collect()  // [2, 4]
-    ///     ["", "a", "", "b"].iter().filter(|s| !s.isEmpty).collect()  // ["a", "b"]
+    ///     [1, 2, 3, 4, 5].iter().filter({ it % 2 == 0 }).collect()  // [2, 4]
+    ///     ["", "a", "", "b"].iter().filter({ !it.isEmpty }).collect()  // ["a", "b"]
     public func filter(predicate: (Item) -> Bool) -> FilterIterator[Self] {
         FilterIterator(inner: self, predicate: predicate)
     }
@@ -184,13 +204,28 @@ extend Iterator {
     ///
     /// Example:
     ///     ["1", "two", "3"].iter()
-    ///         .filterMap(|s| Int64.parse(s))
+    ///         .filterMap({ Int64.parse(it) })
     ///         .collect()  // [1, 3]
     public func filterMap[U](transform: (Item) -> U?) -> FilterMapIterator[Self, U] {
         FilterMapIterator(inner: self, transform: transform)
     }
 
-
+    /// Filters out None values and unwraps the Some values.
+    ///
+    /// Equivalent to `filterMap({ it })` but more readable when the elements
+    /// are already optionals.
+    ///
+    /// Example:
+    ///     let maybeNumbers: [Int64?] = [Some(1), None, Some(2), None, Some(3)]
+    ///     maybeNumbers.iter().compactMap().collect()  // [1, 2, 3]
+    ///
+    ///     // With transformation
+    ///     ["1", "two", "3"].iter()
+    ///         .map({ Int64.parse(it) })  // [Some(1), None, Some(3)]
+    ///         .compactMap()              // [1, 3]
+    public func compactMap[T]() -> FilterMapIterator[Self, T] where Item = Optional[T] {
+        FilterMapIterator(inner: self) transform: { it }
+    }
 
     /// Pairs each element with its zero-based index.
     ///
@@ -212,17 +247,17 @@ extend Iterator {
     ///
     /// Example:
     ///     [[1, 2], [3, 4], [5]].iter()
-    ///         .flatMap(|arr| arr.iter())
+    ///         .flatMap({ it.iter() })
     ///         .collect()  // [1, 2, 3, 4, 5]
     ///
     ///     // Get all characters from all words
     ///     ["hello", "world"].iter()
-    ///         .flatMap(|s| s.chars())
+    ///         .flatMap({ it.chars() })
     ///         .collect()  // ['h', 'e', 'l', 'l', 'o', 'w', 'o', 'r', 'l', 'd']
     ///
     ///     // Filter and expand in one step
     ///     [1, 2, 3].iter()
-    ///         .flatMap(|x| if x % 2 == 0 { [x, x].iter() } else { [].iter() })
+    ///         .flatMap({ if it % 2 == 0 { [it, it].iter() } else { [].iter() } })
     ///         .collect()  // [2, 2]
     public func flatMap[U](transform: (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator {
         FlatMapIterator(inner: self, transform: transform)
@@ -253,23 +288,6 @@ extend Iterator {
     }
 }
 
-// TODO: Ref[T] type not yet implemented
-// /// Extension for iterators over copyable references.
-// extend Iterator where Item = Ref[T], T: Copyable {
-//     /// Copies each referenced element, yielding owned values.
-//     public func copied() -> CopiedIterator[Self, T] {
-//         CopiedIterator(inner: self)
-//     }
-// }
-
-// /// Extension for iterators over cloneable references.
-// extend Iterator where Item = Ref[T], T: Cloneable {
-//     /// Clones each referenced element, yielding owned values.
-//     public func cloned() -> ClonedIterator[Self, T] {
-//         ClonedIterator(inner: self)
-//     }
-// }
-
 // ============================================================================
 // LIMITING ADAPTERS
 // ============================================================================
@@ -295,7 +313,7 @@ extend Iterator {
     ///
     /// Example:
     ///     [1, 2, 3, 4, 1, 2].iter()
-    ///         .takeWhile(|x| x < 4)
+    ///         .takeWhile({ it < 4 })
     ///         .collect()  // [1, 2, 3] - stops at 4
     public func takeWhile(predicate: (Item) -> Bool) -> TakeWhileIterator[Self] {
         TakeWhileIterator(inner: self, predicate: predicate)
@@ -317,7 +335,7 @@ extend Iterator {
     ///
     /// Example:
     ///     [1, 2, 3, 4, 1, 2].iter()
-    ///         .skipWhile(|x| x < 3)
+    ///         .skipWhile({ it < 3 })
     ///         .collect()  // [3, 4, 1, 2] - note 1, 2 at end included
     public func skipWhile(predicate: (Item) -> Bool) -> SkipWhileIterator[Self] {
         SkipWhileIterator(inner: self, predicate: predicate)
@@ -400,9 +418,9 @@ extend Iterator {
     ///
     /// Example:
     ///     [1, 2, 3].iter()
-    ///         .inspect(|x| print("before filter: \(x)"))
-    ///         .filter(|x| x > 1)
-    ///         .inspect(|x| print("after filter: \(x)"))
+    ///         .inspect({ print("before filter: \(it)") })
+    ///         .filter({ it > 1 })
+    ///         .inspect({ print("after filter: \(it)") })
     ///         .collect()
     ///     // Prints: before filter: 1
     ///     //         before filter: 2
@@ -432,13 +450,29 @@ extend Iterator {
     }
 }
 
-// TODO: IntersperseIterator commented out due to I.Item: Cloneable constraint issues
-// /// Intersperse adapter requires Cloneable for the separator.
-// extend Iterator where Item: Cloneable {
-//     public func intersperse(separator: Item) -> IntersperseIterator[Self] {
-//         IntersperseIterator(inner: self, separator: separator)
-//     }
-// }
+/// Intersperse adapter requires Cloneable for the separator.
+extend Iterator where Item: Cloneable {
+
+    /// Inserts a separator between each pair of elements.
+    ///
+    /// The separator is cloned for each insertion.
+    ///
+    /// Example:
+    ///     [1, 2, 3].iter().intersperse(separator: 0).collect()
+    ///     // [1, 0, 2, 0, 3]
+    ///
+    ///     ["a", "b", "c"].iter().intersperse(separator: "-").collect()
+    ///     // ["a", "-", "b", "-", "c"]
+    ///
+    ///     [1].iter().intersperse(separator: 0).collect()
+    ///     // [1] - no separator for single element
+    ///
+    ///     [].iter().intersperse(separator: 0).collect()
+    ///     // [] - empty stays empty
+    public func intersperse(separator: Item) -> IntersperseIterator[Self] {
+        IntersperseIterator(inner: self, separator: separator)
+    }
+}
 
 /// Intersperse with lazy separator generation.
 extend Iterator {
@@ -485,8 +519,8 @@ extend Iterator {
     /// Consumes the entire iterator.
     ///
     /// Example:
-    ///     [1, 2, 3].iter().filter(|x| x > 1).collect()  // [2, 3]
-    ///     (1..5).iter().map(|x| x * x).collect()  // [1, 4, 9, 16]
+    ///     [1, 2, 3].iter().filter({ it > 1 }).collect()  // [2, 3]
+    ///     (1..5).iter().map({ it * it }).collect()  // [1, 4, 9, 16]
     public func collect() -> Array[Item] {
         var result = Array[Item]();
         while let .Some(item) = self.next() {
@@ -500,7 +534,7 @@ extend Iterator {
     /// Consumes the entire iterator.
     ///
     /// Example:
-    ///     [1, 2, 3, 4, 5].iter().filter(|x| x % 2 == 0).count()  // 2
+    ///     [1, 2, 3, 4, 5].iter().filter({ it % 2 == 0 }).count()  // 2
     public func count() -> Int64 {
         var count = Int64(intLiteral: 0);
         while let .Some(_) = self.next() {
@@ -615,8 +649,8 @@ extend Iterator {
     /// Like `forEach`, but the action returns a Result. Stops on first Err.
     ///
     /// Example:
-    ///     files.iter().tryForEach(|path| {
-    ///         File.delete(path)  // Returns Result[Void, IoError]
+    ///     files.iter().tryForEach({ (path) in
+    ///         File.delete(path)  // Returns Result[(), IoError]
     ///     })  // Stops on first deletion failure
     public func tryForEach[E](action: (Item) -> Result[(), E]) -> Result[(), E] {
         self.tryFold(initial: (), combine: { (_, item) in action(item) })
@@ -635,7 +669,7 @@ extend Iterator {
     /// Consumes the entire iterator. Use when you need side effects.
     ///
     /// Example:
-    ///     [1, 2, 3].iter().forEach(|x| print(x))
+    ///     [1, 2, 3].iter().forEach({ print(it) })
     public func forEach(action: (Item) -> ()) {
         while let .Some(item) = self.next() {
             action(item);
@@ -656,9 +690,9 @@ extend Iterator {
     /// Returns false for an empty iterator.
     ///
     /// Example:
-    ///     [1, 2, 3, 4].iter().any(|x| x > 3)  // true (stops at 4)
-    ///     [1, 2, 3].iter().any(|x| x > 10)    // false
-    ///     [].iter().any(|x| true)             // false
+    ///     [1, 2, 3, 4].iter().any({ it > 3 })  // true (stops at 4)
+    ///     [1, 2, 3].iter().any({ it > 10 })    // false
+    ///     [].iter().any({ true })              // false
     public func any(predicate: (Item) -> Bool) -> Bool {
         while let .Some(item) = self.next() {
             if predicate(item) {
@@ -674,9 +708,9 @@ extend Iterator {
     /// Returns true for an empty iterator (vacuous truth).
     ///
     /// Example:
-    ///     [2, 4, 6].iter().all(|x| x % 2 == 0)  // true
-    ///     [2, 3, 4].iter().all(|x| x % 2 == 0)  // false (stops at 3)
-    ///     [].iter().all(|x| false)              // true (empty)
+    ///     [2, 4, 6].iter().all({ it % 2 == 0 })  // true
+    ///     [2, 3, 4].iter().all({ it % 2 == 0 })  // false (stops at 3)
+    ///     [].iter().all({ false })               // true (empty)
     public func all(predicate: (Item) -> Bool) -> Bool {
         while let .Some(item) = self.next() {
             if not predicate(item) {
@@ -699,8 +733,8 @@ extend Iterator {
     /// Short-circuits on first match.
     ///
     /// Example:
-    ///     [1, 2, 3, 4, 5].iter().find(|x| x > 3)   // Some(4)
-    ///     [1, 2, 3].iter().find(|x| x > 10)        // None
+    ///     [1, 2, 3, 4, 5].iter().find({ it > 3 })   // Some(4)
+    ///     [1, 2, 3].iter().find({ it > 10 })        // None
     public func find(predicate: (Item) -> Bool) -> Item? {
         while let .Some(item) = self.next() {
             if predicate(item) {
@@ -715,8 +749,8 @@ extend Iterator {
     /// Short-circuits on first match.
     ///
     /// Example:
-    ///     ["a", "b", "c"].iter().position(|s| s == "b")  // Some(1)
-    ///     [1, 2, 3].iter().position(|x| x > 10)         // None
+    ///     ["a", "b", "c"].iter().position({ it == "b" })  // Some(1)
+    ///     [1, 2, 3].iter().position({ it > 10 })          // None
     public func position(predicate: (Item) -> Bool) -> Int64? {
         var index = Int64(intLiteral: 0);
         while let .Some(item) = self.next() {
@@ -828,7 +862,7 @@ extend Iterator where Item: Comparable {
     ///
     /// Example:
     ///     [3, 1, 4, 1, 5].iter().sorted()  // [1, 1, 3, 4, 5]
-    ///     [3, 1, 2].iter().filter(|x| x > 1).sorted()  // [2, 3]
+    ///     [3, 1, 2].iter().filter({ it > 1 }).sorted()  // [2, 3]
     public func sorted() -> Array[Item] {
         var arr = self.collect();
         arr.sort(by: { (a, b) in a.compare(b) == Ordering.Less });
@@ -842,12 +876,12 @@ extend Iterator where Item: Comparable {
     ///
     /// Example:
     ///     let people = [("Alice", 30), ("Bob", 25), ("Charlie", 35)]
-    ///     people.iter().minBy(key: |p| p.1)  // Some(("Bob", 25))
+    ///     people.iter().minBy(key: { it.1 })  // Some(("Bob", 25))
     ///
     ///     let words = ["hello", "hi", "hey"]
-    ///     words.iter().minBy(key: |w| w.count)  // Some("hi")
+    ///     words.iter().minBy(key: { it.count })  // Some("hi")
     ///
-    ///     [].iter().minBy(key: |x| x)  // None
+    ///     [].iter().minBy(key: { it })  // None
     public func minBy[K](key: (Item) -> K) -> Item? where K: Comparable {
         if let .Some(first) = self.next() {
             var minItem = first;
@@ -872,12 +906,12 @@ extend Iterator where Item: Comparable {
     ///
     /// Example:
     ///     let people = [("Alice", 30), ("Bob", 25), ("Charlie", 35)]
-    ///     people.iter().maxBy(key: |p| p.1)  // Some(("Charlie", 35))
+    ///     people.iter().maxBy(key: { it.1 })  // Some(("Charlie", 35))
     ///
     ///     let words = ["hello", "hi", "hey"]
-    ///     words.iter().maxBy(key: |w| w.count)  // Some("hello")
+    ///     words.iter().maxBy(key: { it.count })  // Some("hello")
     ///
-    ///     [].iter().maxBy(key: |x| x)  // None
+    ///     [].iter().maxBy(key: { it })  // None
     public func maxBy[K](key: (Item) -> K) -> Item? where K: Comparable {
         if let .Some(first) = self.next() {
             var maxItem = first;
@@ -976,10 +1010,10 @@ extend Iterator {
     ///
     /// Example:
     ///     let people = [("Alice", 25), ("Bob", 30), ("Charlie", 35)]
-    ///     people.iter().isSortedBy(key: |p| p.1)  // true (sorted by age)
+    ///     people.iter().isSortedBy(key: { it.1 })  // true (sorted by age)
     ///
     ///     let words = ["a", "bb", "ccc"]
-    ///     words.iter().isSortedBy(key: |w| w.count)  // true (sorted by length)
+    ///     words.iter().isSortedBy(key: { it.count })  // true (sorted by length)
     public func isSortedBy[K](key: (Item) -> K) -> Bool where K: Comparable {
         self.isSorted(by: { (a, b) in key(a).compare(key(b)) != Ordering.Greater })
     }
@@ -989,34 +1023,68 @@ extend Iterator {
 // CONDITIONAL EXTENSIONS - NUMERIC
 // ============================================================================
 
-// TODO: sum() and product() require Addable.zero() and Multipliable.one() which don't exist
-// /// Extension for iterators with addable elements.
-// extend Iterator where Item: Addable {
-//     /// Returns the sum of all elements.
-//     public func sum() -> Item {
-//         self.fold(initial: Item.zero(), combine: { (acc, x) in acc.add(x) })
-//     }
-// }
+/// Extension for iterators with addable elements.
+extend Iterator where Item: Addable {
 
-// /// Extension for iterators with multipliable elements.
-// extend Iterator where Item: Multipliable {
-//     /// Returns the product of all elements.
-//     public func product() -> Item {
-//         self.fold(initial: Item.one(), combine: { (acc, x) in acc.multiply(x) })
-//     }
-// }
+    /// Returns the sum of all elements.
+    ///
+    /// Consumes the entire iterator. Returns the additive identity (zero)
+    /// if the iterator is empty.
+    ///
+    /// Example:
+    ///     [1, 2, 3, 4, 5].iter().sum()  // 15
+    ///     [1.5, 2.5, 3.0].iter().sum()  // 7.0
+    ///     [].iter().sum()               // 0
+    ///
+    ///     // With filtering
+    ///     [1, 2, 3, 4, 5].iter().filter({ it % 2 == 0 }).sum()  // 6
+    public func sum() -> Item {
+        self.fold(initial: Item.zero, combine: { (acc, x) in acc.add(x) })
+    }
+}
+
+/// Extension for iterators with multipliable elements.
+extend Iterator where Item: Multipliable {
+
+    /// Returns the product of all elements.
+    ///
+    /// Consumes the entire iterator. Returns the multiplicative identity (one)
+    /// if the iterator is empty.
+    ///
+    /// Example:
+    ///     [1, 2, 3, 4, 5].iter().product()  // 120
+    ///     [2.0, 3.0, 4.0].iter().product()  // 24.0
+    ///     [].iter().product()               // 1
+    ///
+    ///     // Factorial via range
+    ///     (1..=5).iter().product()  // 120 (5!)
+    public func product() -> Item {
+        self.fold(initial: Item.one, combine: { (acc, x) in acc.multiply(x) })
+    }
+}
 
 // ============================================================================
 // CONDITIONAL EXTENSIONS - NESTED ITERATORS
 // ============================================================================
 
-// TODO: FlattenIterator commented out due to I.Item: Iterator constraint issues
-// /// Extension for iterators of iterators.
-// extend Iterator where Item: Iterator {
-//     public func flatten() -> FlattenIterator[Self] {
-//         FlattenIterator(inner: self)
-//     }
-// }
+/// Extension for iterators of iterators.
+extend Iterator where Item: Iterator {
+
+    /// Flattens nested iterators into a single iterator.
+    ///
+    /// Each inner iterator is fully consumed before moving to the next.
+    ///
+    /// Example:
+    ///     let nested = [[1, 2], [3, 4], [5]].iter().map({ it.iter() })
+    ///     nested.flatten().collect()  // [1, 2, 3, 4, 5]
+    ///
+    ///     // Equivalent to flatMap when you already have iterators
+    ///     let iters: [ArrayIterator[Int64]] = ...
+    ///     iters.iter().flatten().collect()
+    public func flatten() -> FlattenIterator[Self] {
+        FlattenIterator(inner: self)
+    }
+}
 
 // ============================================================================
 // DOUBLE-ENDED ITERATOR EXTENSIONS
@@ -1036,19 +1104,25 @@ extend DoubleEndedIterator {
     ///     [1, 2, 3, 4, 5].iter().rev().take(count: 3).collect()  // [5, 4, 3]
     ///
     ///     // Find last matching element
-    ///     [1, 2, 3, 4, 5].iter().rev().find(|x| x % 2 == 0)  // Some(4)
+    ///     [1, 2, 3, 4, 5].iter().rev().find({ it % 2 == 0 })  // Some(4)
     public func rev() -> RevIterator[Self] {
         RevIterator(inner: self)
     }
 }
 
-// TODO: Cannot access private 'inner' field from extension
-// /// Extension making RevIterator also DoubleEndedIterator so rev().rev() works.
-// extend RevIterator[I]: DoubleEndedIterator where I: DoubleEndedIterator {
-//     public mutating func nextBack() -> I.Item? {
-//         self.inner.next()
-//     }
-// }
+/// Extension making RevIterator also DoubleEndedIterator so rev().rev() works.
+extend RevIterator[I]: DoubleEndedIterator where I: DoubleEndedIterator {
+
+    /// Returns the next element from the back of the inner iterator.
+    public mutating func next() -> I.Item? {
+        self.inner.nextBack()
+    }
+
+    /// Returns the next element from the front of the inner iterator.
+    public mutating func nextBack() -> I.Item? {
+        self.inner.next()
+    }
+}
 
 /// Extension providing optimized collect for exact-size iterators.
 extend ExactSizeIterator {

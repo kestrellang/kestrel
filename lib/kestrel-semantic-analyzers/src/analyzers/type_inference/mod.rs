@@ -130,12 +130,13 @@ impl Analyzer for TypeInferenceAnalyzer {
     ) {
         let kind = symbol.metadata().kind();
 
-        // Only process functions, initializers, getters, setters, and deinits
+        // Only process functions, initializers, getters, setters, deinits, and fields (static initializers)
         if kind != KestrelSymbolKind::Function
             && kind != KestrelSymbolKind::Initializer
             && kind != KestrelSymbolKind::Getter
             && kind != KestrelSymbolKind::Setter
             && kind != KestrelSymbolKind::Deinit
+            && kind != KestrelSymbolKind::Field
         {
             return;
         }
@@ -202,3 +203,4 @@ impl Analyzer for TypeInferenceAnalyzer {
             ));
     }
 }
+

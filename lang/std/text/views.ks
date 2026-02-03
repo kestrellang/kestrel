@@ -7,6 +7,7 @@ import std.num.(Int64, UInt8, UInt32)
 import std.result.(Optional)
 import std.iter.(Iterator, Iterable)
 import std.text.(Char, Grapheme, Byte, decodeUtf8, String)
+import std.text.unicode.(GraphemeBreakProperty, graphemeBreakProperty, shouldBreakBetween)
 import std.collections.(Array)
 
 // ============================================================================
@@ -85,6 +86,49 @@ public struct BytesView: Iterable {
         let bytePtr: lang.ptr[lang.i8] = lang.ptr_offset[lang.i8](self.ptr, rawOffset);
         let signedByte: lang.i8 = lang.ptr_read(bytePtr);
         UInt8(raw: signedByte)
+    }
+
+    /// Returns a substring by byte indices. Panics if out of bounds or invalid UTF-8 boundary.
+    public func substring(from start: Int64, to end: Int64) -> String {
+        match self.substring(checked: start, to: end) {
+            .Some(s) => s,
+            .None => lang.panic("BytesView.substring: invalid range or UTF-8 boundary")
+        }
+    }
+
+    /// Returns a substring by byte indices, or None if out of bounds or invalid UTF-8 boundary.
+    public func substring(checked start: Int64, to end: Int64) -> String? {
+        // Bounds check
+        if start < Int64(intLiteral: 0) or end > self.length or start > end {
+            return .None
+        }
+        // Check that start is at a valid UTF-8 boundary (not a continuation byte)
+        if start > Int64(intLiteral: 0) and start < self.length {
+            let startByte = self.byteAtUnchecked(start);
+            let startVal: lang.i32 = lang.cast_i8_i32(startByte.raw);
+            // Continuation bytes have pattern 10xxxxxx (0x80-0xBF)
+            if Bool(boolLiteral: lang.i32_eq(lang.i32_and(startVal, 0xC0), 0x80)) {
+                return .None
+            }
+        }
+        // Check that end is at a valid UTF-8 boundary
+        if end > Int64(intLiteral: 0) and end < self.length {
+            let endByte = self.byteAtUnchecked(end);
+            let endVal: lang.i32 = lang.cast_i8_i32(endByte.raw);
+            if Bool(boolLiteral: lang.i32_eq(lang.i32_and(endVal, 0xC0), 0x80)) {
+                return .None
+            }
+        }
+        // Create substring
+        let count = end - start;
+        if count == Int64(intLiteral: 0) {
+            return .Some(String())
+        }
+        var result = String(capacity: count);
+        for i in start..<end {
+            result.appendByte(self.byteAtUnchecked(i))
+        }
+        .Some(result)
     }
 
     /// Returns an iterator over the bytes.
@@ -167,39 +211,176 @@ public struct CharsView: Iterable {
         }
         n
     }
+
+    /// Returns a substring by character indices (O(n)). Panics if out of bounds.
+    public func substring(from start: Int64, to end: Int64) -> String {
+        match self.substring(checked: start, to: end) {
+            .Some(s) => s,
+            .None => lang.panic("CharsView.substring: index out of bounds")
+        }
+    }
+
+    /// Returns a substring by character indices (O(n)), or None if out of bounds.
+    public func substring(checked start: Int64, to end: Int64) -> String? {
+        if start < Int64(intLiteral: 0) or start > end {
+            return .None
+        }
+
+        // Find byte offsets for start and end character indices
+        var charIndex: Int64 = Int64(intLiteral: 0);
+        var byteIndex: Int64 = Int64(intLiteral: 0);
+        var startByte: Int64 = Int64(intLiteral: 0);
+        var endByte: Int64 = Int64(intLiteral: 0);
+        var foundStart: Bool = false;
+        var foundEnd: Bool = false;
+
+        // Handle empty range at start
+        if start == Int64(intLiteral: 0) {
+            startByte = Int64(intLiteral: 0);
+            foundStart = true
+        }
+        if end == Int64(intLiteral: 0) {
+            endByte = Int64(intLiteral: 0);
+            foundEnd = true
+        }
+
+        while byteIndex < self.length and foundEnd == false {
+            let result = decodeUtf8(self.ptr, self.length, at: byteIndex);
+            if let .Some(decoded) = result {
+                if charIndex == start and foundStart == false {
+                    startByte = byteIndex;
+                    foundStart = true
+                }
+                charIndex = charIndex + Int64(intLiteral: 1);
+                byteIndex = byteIndex + decoded.bytesConsumed;
+                if charIndex == end {
+                    endByte = byteIndex;
+                    foundEnd = true
+                }
+            } else {
+                byteIndex = byteIndex + Int64(intLiteral: 1)
+            }
+        }
+
+        // Handle end at string end
+        if foundStart and end == charIndex and foundEnd == false {
+            endByte = byteIndex;
+            foundEnd = true
+        }
+
+        if foundStart == false or foundEnd == false {
+            return .None
+        }
+
+        // Create substring from byte range
+        let count = endByte - startByte;
+        if count == Int64(intLiteral: 0) {
+            return .Some(String())
+        }
+        var result = String(capacity: count);
+        for i in startByte..<endByte {
+            let rawOffset: lang.i64 = i.raw;
+            let bytePtr: lang.ptr[lang.i8] = lang.ptr_offset[lang.i8](self.ptr, rawOffset);
+            let signedByte: lang.i8 = lang.ptr_read(bytePtr);
+            result.appendByte(UInt8(raw: signedByte))
+        }
+        .Some(result)
+    }
 }
 
 // ============================================================================
-// GRAPHEMES VIEW
+// GRAPHEMES VIEW (UAX #29)
 // ============================================================================
 
-/// Iterator over grapheme clusters.
+/// Iterator over grapheme clusters using UAX #29 segmentation.
 public struct GraphemesIterator: Iterator {
     type Item = Grapheme
 
     private var charsIter: CharsIterator
+    private var pendingChar: Char?
+    private var prevProp: GraphemeBreakProperty
+    private var prevPrevWasRI: Bool
+    private var started: Bool
 
     /// Creates a graphemes iterator.
     public init(charsIter: CharsIterator) {
         self.charsIter = charsIter;
+        self.pendingChar = .None;
+        self.prevProp = GraphemeBreakProperty.Other;
+        self.prevPrevWasRI = false;
+        self.started = false;
     }
 
     /// Returns the next grapheme cluster, or None if exhausted.
     public mutating func next() -> Grapheme? {
-        // Simplified: treat each char as a grapheme
-        // Full implementation would need grapheme cluster segmentation
-        let maybeChar = self.charsIter.next();
-        if let .Some(char) = maybeChar {
-            .Some(Grapheme(char: char))
+        var chars = Array[Char]();
+
+        // Get first char (either pending or from iterator)
+        var firstChar: Char? = .None;
+        if let .Some(pending) = self.pendingChar {
+            firstChar = .Some(pending);
+            self.pendingChar = .None
         } else {
-            .None
+            firstChar = self.charsIter.next()
+        }
+
+        // If no first char, we're done
+        if let .None = firstChar {
+            return .None
+        }
+
+        let first = match firstChar {
+            .Some(c) => c,
+            .None => { return .None }
+        };
+        chars.append(first);
+
+        var prevProp = graphemeBreakProperty(first);
+        var prevPrevWasRI: Bool = false;
+        var prevWasZWJ: Bool = prevProp == GraphemeBreakProperty.ZWJ;
+
+        // Keep accumulating chars until we hit a break
+        while true {
+            let nextChar = self.charsIter.next();
+            if let .None = nextChar {
+                // End of string - return what we have
+                break
+            }
+
+            let next = match nextChar {
+                .Some(c) => c,
+                .None => { break }
+            };
+
+            let currProp = graphemeBreakProperty(next);
+
+            // Check if we should break here
+            if shouldBreakBetween(prevProp, currProp, prevPrevWasRI, prevWasZWJ) {
+                // Save this char for next grapheme
+                self.pendingChar = .Some(next);
+                break
+            }
+
+            // No break - add to current cluster
+            chars.append(next);
+
+            // Update state for next iteration
+            prevPrevWasRI = prevProp == GraphemeBreakProperty.RegionalIndicator;
+            prevWasZWJ = currProp == GraphemeBreakProperty.ZWJ;
+            prevProp = currProp
+        }
+
+        // Return the grapheme
+        if chars.count == Int64(intLiteral: 1) {
+            .Some(Grapheme(char: chars(unchecked: Int64(intLiteral: 0))))
+        } else {
+            .Some(Grapheme(chars: chars))
         }
     }
 }
 
 /// A view over the extended grapheme clusters in a string.
-///
-/// Note: Simplified implementation treats each char as a grapheme.
+/// Uses UAX #29 grapheme cluster segmentation.
 public struct GraphemesView: Iterable {
     type Item = Grapheme
     type Iter = GraphemesIterator
@@ -220,16 +401,9 @@ public struct GraphemesView: Iterable {
 
     /// Returns the number of grapheme clusters (O(n)).
     public func count() -> Int64 {
-        // Simplified: same as char count
         var n: Int64 = Int64(intLiteral: 0);
-        for i in Int64(intLiteral: 0)..<self.length {
-            let rawOffset: lang.i64 = i.raw;
-            let bytePtr: lang.ptr[lang.i8] = lang.ptr_offset[lang.i8](self.ptr, rawOffset);
-            let signedByte: lang.i8 = lang.ptr_read(bytePtr);
-            let byteVal: lang.i32 = lang.cast_i8_i32(signedByte);
-            if lang.i32_ne(lang.i32_and(byteVal, 0xC0), 0x80) {
-                n = n + Int64(intLiteral: 1)
-            }
+        for _ in self.iter() {
+            n = n + Int64(intLiteral: 1)
         }
         n
     }

@@ -5,7 +5,7 @@ public type Byte = UInt8;
 
 /// A Unicode code point (scalar value from 0 to 0x10FFFF).
 /// Supports character literal syntax: 'a', '\n', '\u{1F600}'.
-public struct Char: Equatable, Comparable, Matchable, ExpressibleByCharLiteral, Hash {
+public struct Char: Equatable, Comparable, Matchable, ExpressibleByCharLiteral, Hash, RangeMatchable {
     /// Creates a Char from a Unicode code point value.
     public init(value: UInt32);
 
@@ -60,6 +60,15 @@ public struct Char: Equatable, Comparable, Matchable, ExpressibleByCharLiteral, 
     public func matches(other: Char) -> Bool;
     public func compare(other: Char) -> Ordering;
     public func hash[H](mutating into hasher: H) where H: Hasher;
+
+    /// Returns true if self >= bound (for range pattern matching).
+    public func isAtLeast(bound: Char) -> Bool;
+
+    /// Returns true if self <= bound (for range pattern matching).
+    public func isAtMost(bound: Char) -> Bool;
+
+    /// Returns true if self < bound (for range pattern matching).
+    public func isBelow(bound: Char) -> Bool;
 }
 
 /// An extended grapheme cluster (user-perceived character).

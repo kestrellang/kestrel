@@ -3268,6 +3268,663 @@ impl Expression {
             mutable: false,
         }
     }
+
+    /// Apply type substitutions to this expression and all nested expressions.
+    ///
+    /// This recursively walks the expression tree and applies the given substitutions
+    /// to all `Ty` fields. Used when lowering default argument expressions that were
+    /// resolved in the callee's context but need to be lowered in the caller's context
+    /// with concrete type arguments.
+    pub fn apply_substitutions(&self, subs: &Substitutions) -> Expression {
+        if subs.is_empty() {
+            return self.clone();
+        }
+
+        let new_ty = self.ty.apply_substitutions(subs);
+        let new_kind = self.apply_substitutions_to_kind(subs);
+
+        Expression {
+            id: ExprId::new(), // Fresh ID for the substituted expression
+            kind: new_kind,
+            ty: new_ty,
+            span: self.span.clone(),
+            mutable: self.mutable,
+        }
+    }
+
+    /// Apply substitutions to the ExprKind, handling all variants.
+    fn apply_substitutions_to_kind(&self, subs: &Substitutions) -> ExprKind {
+        match &self.kind {
+            // Literals don't contain types that need substitution
+            ExprKind::Literal(lit) => ExprKind::Literal(lit.clone()),
+
+            ExprKind::InterpolatedString { parts } => {
+                let new_parts = parts
+                    .iter()
+                    .map(|part| match part {
+                        InterpolationPart::Literal { text, span } => InterpolationPart::Literal {
+                            text: text.clone(),
+                            span: span.clone(),
+                        },
+                        InterpolationPart::Interpolation {
+                            expr,
+                            format_spec,
+                            span,
+                        } => InterpolationPart::Interpolation {
+                            expr: Box::new(expr.apply_substitutions(subs)),
+                            format_spec: format_spec.clone(),
+                            span: span.clone(),
+                        },
+                    })
+                    .collect();
+                ExprKind::InterpolatedString { parts: new_parts }
+            },
+
+            ExprKind::Array(elements) => {
+                ExprKind::Array(elements.iter().map(|e| e.apply_substitutions(subs)).collect())
+            },
+
+            ExprKind::Dictionary(pairs) => ExprKind::Dictionary(
+                pairs
+                    .iter()
+                    .map(|(k, v)| (k.apply_substitutions(subs), v.apply_substitutions(subs)))
+                    .collect(),
+            ),
+
+            ExprKind::Tuple(elements) => {
+                ExprKind::Tuple(elements.iter().map(|e| e.apply_substitutions(subs)).collect())
+            },
+
+            ExprKind::Grouping(inner) => {
+                ExprKind::Grouping(Box::new(inner.apply_substitutions(subs)))
+            },
+
+            // References don't contain nested expressions with types
+            ExprKind::LocalRef(id) => ExprKind::LocalRef(*id),
+            ExprKind::SymbolRef(id) => ExprKind::SymbolRef(*id),
+            ExprKind::OverloadedRef(ids) => ExprKind::OverloadedRef(ids.clone()),
+            ExprKind::TypeRef(id) => ExprKind::TypeRef(*id),
+            ExprKind::TypeParameterRef(id) => ExprKind::TypeParameterRef(*id),
+            ExprKind::AssociatedTypeRef => ExprKind::AssociatedTypeRef,
+
+            ExprKind::FieldAccess { object, field } => ExprKind::FieldAccess {
+                object: Box::new(object.apply_substitutions(subs)),
+                field: field.clone(),
+            },
+
+            ExprKind::ProtocolPropertyAccess {
+                receiver,
+                field_id,
+                property_name,
+                protocol_id,
+                is_static,
+                has_setter,
+            } => ExprKind::ProtocolPropertyAccess {
+                receiver: Box::new(receiver.apply_substitutions(subs)),
+                field_id: *field_id,
+                property_name: property_name.clone(),
+                protocol_id: *protocol_id,
+                is_static: *is_static,
+                has_setter: *has_setter,
+            },
+
+            ExprKind::TupleIndex { tuple, index } => ExprKind::TupleIndex {
+                tuple: Box::new(tuple.apply_substitutions(subs)),
+                index: *index,
+            },
+
+            ExprKind::MethodRef {
+                receiver,
+                candidates,
+                method_name,
+            } => ExprKind::MethodRef {
+                receiver: Box::new(receiver.apply_substitutions(subs)),
+                candidates: candidates.clone(),
+                method_name: method_name.clone(),
+            },
+
+            ExprKind::Call {
+                callee,
+                arguments,
+                substitutions: call_subs,
+            } => ExprKind::Call {
+                callee: Box::new(callee.apply_substitutions(subs)),
+                arguments: arguments
+                    .iter()
+                    .map(|arg| CallArgument {
+                        label: arg.label.clone(),
+                        value: arg.value.apply_substitutions(subs),
+                        span: arg.span.clone(),
+                    })
+                    .collect(),
+                substitutions: Self::apply_to_substitutions(call_subs, subs),
+            },
+
+            ExprKind::SubscriptCall {
+                receiver,
+                getter,
+                arguments,
+            } => ExprKind::SubscriptCall {
+                receiver: Box::new(receiver.apply_substitutions(subs)),
+                getter: *getter,
+                arguments: arguments
+                    .iter()
+                    .map(|arg| CallArgument {
+                        label: arg.label.clone(),
+                        value: arg.value.apply_substitutions(subs),
+                        span: arg.span.clone(),
+                    })
+                    .collect(),
+            },
+
+            ExprKind::PrimitiveMethodCall {
+                receiver,
+                method,
+                arguments,
+            } => ExprKind::PrimitiveMethodCall {
+                receiver: Box::new(receiver.apply_substitutions(subs)),
+                method: *method,
+                arguments: arguments
+                    .iter()
+                    .map(|arg| CallArgument {
+                        label: arg.label.clone(),
+                        value: arg.value.apply_substitutions(subs),
+                        span: arg.span.clone(),
+                    })
+                    .collect(),
+            },
+
+            ExprKind::PrimitiveMethodRef { receiver, method } => ExprKind::PrimitiveMethodRef {
+                receiver: Box::new(receiver.apply_substitutions(subs)),
+                method: *method,
+            },
+
+            ExprKind::DeferredMethodCall {
+                receiver,
+                method_name,
+                arguments,
+            } => ExprKind::DeferredMethodCall {
+                receiver: Box::new(receiver.apply_substitutions(subs)),
+                method_name: method_name.clone(),
+                arguments: arguments
+                    .iter()
+                    .map(|arg| CallArgument {
+                        label: arg.label.clone(),
+                        value: arg.value.apply_substitutions(subs),
+                        span: arg.span.clone(),
+                    })
+                    .collect(),
+            },
+
+            ExprKind::DeferredStaticCall {
+                target_ty,
+                method_name,
+                arguments,
+                protocol_candidates,
+            } => ExprKind::DeferredStaticCall {
+                target_ty: target_ty.apply_substitutions(subs),
+                method_name: method_name.clone(),
+                arguments: arguments
+                    .iter()
+                    .map(|arg| CallArgument {
+                        label: arg.label.clone(),
+                        value: arg.value.apply_substitutions(subs),
+                        span: arg.span.clone(),
+                    })
+                    .collect(),
+                protocol_candidates: protocol_candidates.clone(),
+            },
+
+            ExprKind::ImplicitStructInit {
+                struct_type,
+                arguments,
+            } => ExprKind::ImplicitStructInit {
+                struct_type: struct_type.apply_substitutions(subs),
+                arguments: arguments
+                    .iter()
+                    .map(|arg| CallArgument {
+                        label: arg.label.clone(),
+                        value: arg.value.apply_substitutions(subs),
+                        span: arg.span.clone(),
+                    })
+                    .collect(),
+            },
+
+            ExprKind::DelegatingInit {
+                initializer,
+                arguments,
+                substitutions: init_subs,
+            } => ExprKind::DelegatingInit {
+                initializer: *initializer,
+                arguments: arguments
+                    .iter()
+                    .map(|arg| CallArgument {
+                        label: arg.label.clone(),
+                        value: arg.value.apply_substitutions(subs),
+                        span: arg.span.clone(),
+                    })
+                    .collect(),
+                substitutions: Self::apply_to_substitutions(init_subs, subs),
+            },
+
+            ExprKind::Assignment { target, value } => ExprKind::Assignment {
+                target: Box::new(target.apply_substitutions(subs)),
+                value: Box::new(value.apply_substitutions(subs)),
+            },
+
+            ExprKind::If {
+                conditions,
+                then_branch,
+                then_value,
+                else_branch,
+            } => ExprKind::If {
+                conditions: conditions
+                    .iter()
+                    .map(|c| Self::apply_substitutions_to_if_condition(c, subs))
+                    .collect(),
+                then_branch: then_branch
+                    .iter()
+                    .map(|s| Self::apply_substitutions_to_statement(s, subs))
+                    .collect(),
+                then_value: then_value
+                    .as_ref()
+                    .map(|v| Box::new(v.apply_substitutions(subs))),
+                else_branch: else_branch
+                    .as_ref()
+                    .map(|eb| Self::apply_substitutions_to_else_branch(eb, subs)),
+            },
+
+            ExprKind::While {
+                loop_id,
+                label,
+                condition,
+                body,
+            } => ExprKind::While {
+                loop_id: *loop_id,
+                label: label.clone(),
+                condition: Box::new(condition.apply_substitutions(subs)),
+                body: body
+                    .iter()
+                    .map(|s| Self::apply_substitutions_to_statement(s, subs))
+                    .collect(),
+            },
+
+            ExprKind::WhileLet {
+                loop_id,
+                label,
+                conditions,
+                body,
+                from_for_loop,
+            } => ExprKind::WhileLet {
+                loop_id: *loop_id,
+                label: label.clone(),
+                conditions: conditions
+                    .iter()
+                    .map(|c| Self::apply_substitutions_to_if_condition(c, subs))
+                    .collect(),
+                body: body
+                    .iter()
+                    .map(|s| Self::apply_substitutions_to_statement(s, subs))
+                    .collect(),
+                from_for_loop: *from_for_loop,
+            },
+
+            ExprKind::Loop {
+                loop_id,
+                label,
+                body,
+            } => ExprKind::Loop {
+                loop_id: *loop_id,
+                label: label.clone(),
+                body: body
+                    .iter()
+                    .map(|s| Self::apply_substitutions_to_statement(s, subs))
+                    .collect(),
+            },
+
+            ExprKind::Break { loop_id, label } => ExprKind::Break {
+                loop_id: *loop_id,
+                label: label.clone(),
+            },
+
+            ExprKind::Continue { loop_id, label } => ExprKind::Continue {
+                loop_id: *loop_id,
+                label: label.clone(),
+            },
+
+            ExprKind::Return { value } => ExprKind::Return {
+                value: value
+                    .as_ref()
+                    .map(|v| Box::new(v.apply_substitutions(subs))),
+            },
+
+            ExprKind::Throw { value } => ExprKind::Throw {
+                value: Box::new(value.apply_substitutions(subs)),
+            },
+
+            ExprKind::Closure {
+                params,
+                body,
+                tail_expr,
+                captures,
+                uses_it,
+                implicit_param,
+            } => ExprKind::Closure {
+                params: params.as_ref().map(|ps| {
+                    ps.iter()
+                        .map(|p| ClosureParam {
+                            pattern: Self::apply_substitutions_to_pattern(&p.pattern, subs),
+                            ty: p.ty.apply_substitutions(subs),
+                            is_type_annotated: p.is_type_annotated,
+                            span: p.span.clone(),
+                        })
+                        .collect()
+                }),
+                body: body
+                    .iter()
+                    .map(|s| Self::apply_substitutions_to_statement(s, subs))
+                    .collect(),
+                tail_expr: tail_expr
+                    .as_ref()
+                    .map(|e| Box::new(e.apply_substitutions(subs))),
+                captures: captures
+                    .iter()
+                    .map(|c| Capture {
+                        local_id: c.local_id,
+                        name: c.name.clone(),
+                        ty: c.ty.apply_substitutions(subs),
+                        kind: c.kind,
+                        span: c.span.clone(),
+                    })
+                    .collect(),
+                uses_it: *uses_it,
+                implicit_param: implicit_param
+                    .as_ref()
+                    .map(|(id, ty, span)| (*id, ty.apply_substitutions(subs), span.clone())),
+            },
+
+            ExprKind::EnumCase { case_id } => ExprKind::EnumCase { case_id: *case_id },
+
+            ExprKind::ImplicitMemberAccess {
+                member_name,
+                arguments,
+            } => ExprKind::ImplicitMemberAccess {
+                member_name: member_name.clone(),
+                arguments: arguments.as_ref().map(|args| {
+                    args.iter()
+                        .map(|arg| CallArgument {
+                            label: arg.label.clone(),
+                            value: arg.value.apply_substitutions(subs),
+                            span: arg.span.clone(),
+                        })
+                        .collect()
+                }),
+            },
+
+            ExprKind::Match { scrutinee, arms } => ExprKind::Match {
+                scrutinee: Box::new(scrutinee.apply_substitutions(subs)),
+                arms: arms
+                    .iter()
+                    .map(|arm| MatchArm {
+                        pattern: Self::apply_substitutions_to_pattern(&arm.pattern, subs),
+                        guard: arm.guard.as_ref().map(|g| g.apply_substitutions(subs)),
+                        body: arm.body.apply_substitutions(subs),
+                        span: arm.span.clone(),
+                    })
+                    .collect(),
+            },
+
+            ExprKind::Block { statements, value } => ExprKind::Block {
+                statements: statements
+                    .iter()
+                    .map(|s| Self::apply_substitutions_to_statement(s, subs))
+                    .collect(),
+                value: value
+                    .as_ref()
+                    .map(|v| Box::new(v.apply_substitutions(subs))),
+            },
+
+            ExprKind::Error => ExprKind::Error,
+
+            ExprKind::LangIntrinsic {
+                intrinsic,
+                arguments,
+            } => ExprKind::LangIntrinsic {
+                intrinsic: intrinsic.clone(),
+                arguments: arguments
+                    .iter()
+                    .map(|arg| CallArgument {
+                        label: arg.label.clone(),
+                        value: arg.value.apply_substitutions(subs),
+                        span: arg.span.clone(),
+                    })
+                    .collect(),
+            },
+
+            ExprKind::LangIntrinsicRef(intrinsic) => ExprKind::LangIntrinsicRef(intrinsic.clone()),
+        }
+    }
+
+    /// Apply substitutions to nested Substitutions (for generic calls within the expression).
+    fn apply_to_substitutions(inner: &Substitutions, outer: &Substitutions) -> Substitutions {
+        let mut result = Substitutions::new();
+        for (id, ty) in inner.iter() {
+            result.insert(*id, ty.apply_substitutions(outer));
+        }
+        result
+    }
+
+    /// Apply substitutions to an IfCondition.
+    fn apply_substitutions_to_if_condition(cond: &IfCondition, subs: &Substitutions) -> IfCondition {
+        match cond {
+            IfCondition::Expr(expr) => IfCondition::Expr(expr.apply_substitutions(subs)),
+            IfCondition::Let {
+                pattern,
+                value,
+                span,
+            } => IfCondition::Let {
+                pattern: Self::apply_substitutions_to_pattern(pattern, subs),
+                value: value.apply_substitutions(subs),
+                span: span.clone(),
+            },
+        }
+    }
+
+    /// Apply substitutions to an ElseBranch.
+    fn apply_substitutions_to_else_branch(branch: &ElseBranch, subs: &Substitutions) -> ElseBranch {
+        match branch {
+            ElseBranch::Block { statements, value } => ElseBranch::Block {
+                statements: statements
+                    .iter()
+                    .map(|s| Self::apply_substitutions_to_statement(s, subs))
+                    .collect(),
+                value: value
+                    .as_ref()
+                    .map(|v| Box::new(v.apply_substitutions(subs))),
+            },
+            ElseBranch::ElseIf(if_expr) => {
+                ElseBranch::ElseIf(Box::new(if_expr.apply_substitutions(subs)))
+            },
+        }
+    }
+
+    /// Apply substitutions to a Statement.
+    fn apply_substitutions_to_statement(
+        stmt: &crate::stmt::Statement,
+        subs: &Substitutions,
+    ) -> crate::stmt::Statement {
+        use crate::stmt::{Statement, StatementKind};
+
+        let new_kind = match &stmt.kind {
+            StatementKind::Expr(expr) => StatementKind::Expr(expr.apply_substitutions(subs)),
+            StatementKind::Binding { pattern, value } => StatementKind::Binding {
+                pattern: Self::apply_substitutions_to_pattern(pattern, subs),
+                value: value.as_ref().map(|e| e.apply_substitutions(subs)),
+            },
+            StatementKind::GuardLet {
+                conditions,
+                else_block,
+            } => StatementKind::GuardLet {
+                conditions: conditions
+                    .iter()
+                    .map(|c| Self::apply_substitutions_to_if_condition(c, subs))
+                    .collect(),
+                else_block: Self::apply_substitutions_to_code_block(else_block, subs),
+            },
+            StatementKind::Deinit { local_id, name } => StatementKind::Deinit {
+                local_id: *local_id,
+                name: name.clone(),
+            },
+        };
+
+        Statement {
+            kind: new_kind,
+            span: stmt.span.clone(),
+        }
+    }
+
+    /// Apply substitutions to a CodeBlock.
+    fn apply_substitutions_to_code_block(
+        block: &crate::behavior::executable::CodeBlock,
+        subs: &Substitutions,
+    ) -> crate::behavior::executable::CodeBlock {
+        use crate::behavior::executable::CodeBlock;
+        CodeBlock::new(
+            block
+                .statements
+                .iter()
+                .map(|s| Self::apply_substitutions_to_statement(s, subs))
+                .collect(),
+            block
+                .yield_expr
+                .as_ref()
+                .map(|e| e.apply_substitutions(subs)),
+        )
+    }
+
+    /// Apply substitutions to a Pattern.
+    fn apply_substitutions_to_pattern(
+        pattern: &crate::pattern::Pattern,
+        subs: &Substitutions,
+    ) -> crate::pattern::Pattern {
+        use crate::pattern::{EnumPatternBinding, Pattern, PatternKind, StructPatternField};
+
+        let new_kind = match &pattern.kind {
+            PatternKind::Local {
+                local_id,
+                name,
+                mutability,
+            } => PatternKind::Local {
+                local_id: *local_id,
+                name: name.clone(),
+                mutability: *mutability,
+            },
+            PatternKind::Wildcard => PatternKind::Wildcard,
+            PatternKind::Literal { value } => PatternKind::Literal {
+                value: value.clone(),
+            },
+            PatternKind::Tuple {
+                prefix,
+                has_rest,
+                suffix,
+            } => PatternKind::Tuple {
+                prefix: prefix
+                    .iter()
+                    .map(|p| Self::apply_substitutions_to_pattern(p, subs))
+                    .collect(),
+                has_rest: *has_rest,
+                suffix: suffix
+                    .iter()
+                    .map(|p| Self::apply_substitutions_to_pattern(p, subs))
+                    .collect(),
+            },
+            PatternKind::EnumVariant {
+                case_id,
+                case_name,
+                bindings,
+            } => PatternKind::EnumVariant {
+                case_id: *case_id,
+                case_name: case_name.clone(),
+                bindings: bindings
+                    .iter()
+                    .map(|b| EnumPatternBinding {
+                        label: b.label.clone(),
+                        pattern: Box::new(Self::apply_substitutions_to_pattern(&b.pattern, subs)),
+                        span: b.span.clone(),
+                    })
+                    .collect(),
+            },
+            PatternKind::Struct {
+                struct_id,
+                struct_name,
+                fields,
+                has_rest,
+            } => PatternKind::Struct {
+                struct_id: *struct_id,
+                struct_name: struct_name.clone(),
+                fields: fields
+                    .iter()
+                    .map(|f| StructPatternField {
+                        field_name: f.field_name.clone(),
+                        pattern: Self::apply_substitutions_to_pattern(&f.pattern, subs),
+                        span: f.span.clone(),
+                    })
+                    .collect(),
+                has_rest: *has_rest,
+            },
+            PatternKind::Array {
+                prefix,
+                rest,
+                suffix,
+            } => PatternKind::Array {
+                prefix: prefix
+                    .iter()
+                    .map(|p| Self::apply_substitutions_to_pattern(p, subs))
+                    .collect(),
+                // rest is (Option<String>, Option<LocalId>) - no types to substitute
+                rest: rest.clone(),
+                suffix: suffix
+                    .iter()
+                    .map(|p| Self::apply_substitutions_to_pattern(p, subs))
+                    .collect(),
+            },
+            PatternKind::Range {
+                start,
+                end,
+                inclusive,
+            } => PatternKind::Range {
+                // RangeBound is Integer(i64) or Char(char) - no types to substitute
+                start: start.clone(),
+                end: end.clone(),
+                inclusive: *inclusive,
+            },
+            PatternKind::Or { alternatives } => PatternKind::Or {
+                alternatives: alternatives
+                    .iter()
+                    .map(|p| Self::apply_substitutions_to_pattern(p, subs))
+                    .collect(),
+            },
+            PatternKind::At {
+                local_id,
+                name,
+                mutability,
+                subpattern,
+            } => PatternKind::At {
+                local_id: *local_id,
+                name: name.clone(),
+                mutability: *mutability,
+                subpattern: Box::new(Self::apply_substitutions_to_pattern(subpattern, subs)),
+            },
+            PatternKind::Rest => PatternKind::Rest,
+            PatternKind::Error => PatternKind::Error,
+        };
+
+        Pattern {
+            kind: new_kind,
+            ty: pattern.ty.apply_substitutions(subs),
+            span: pattern.span.clone(),
+        }
+    }
 }
 
 #[cfg(test)]

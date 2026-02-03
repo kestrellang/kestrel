@@ -15,8 +15,8 @@ import std.num.(Int64)
 public struct MapIterator[I, U]: Iterator where I: Iterator {
     type Item = U
 
-    private var inner: I
-    private var transform: (I.Item) -> U
+    internal var inner: I
+    internal var transform: (I.Item) -> U
 
     /// Creates a map iterator that applies transform to each element of inner.
     public init(inner inner: I, transform transform: (I.Item) -> U) {
@@ -42,8 +42,8 @@ public struct MapIterator[I, U]: Iterator where I: Iterator {
 public struct FilterIterator[I]: Iterator where I: Iterator {
     type Item = I.Item
 
-    private var inner: I
-    private var predicate: (I.Item) -> Bool
+    internal var inner: I
+    internal var predicate: (I.Item) -> Bool
 
     /// Creates a filter iterator that yields only elements where predicate returns true.
     public init(inner inner: I, predicate predicate: (I.Item) -> Bool) {
@@ -67,8 +67,8 @@ public struct FilterIterator[I]: Iterator where I: Iterator {
 public struct FilterMapIterator[I, U]: Iterator where I: Iterator {
     type Item = U
 
-    private var inner: I
-    private var transform: (I.Item) -> U?
+    internal var inner: I
+    internal var transform: (I.Item) -> U?
 
     /// Creates an iterator that applies transform and yields only Some results.
     public init(inner inner: I, transform transform: (I.Item) -> U?) {
@@ -96,9 +96,9 @@ public struct FilterMapIterator[I, U]: Iterator where I: Iterator {
 public struct TakeWhileIterator[I]: Iterator where I: Iterator {
     type Item = I.Item
 
-    private var inner: I
-    private var predicate: (I.Item) -> Bool
-    private var done: Bool
+    internal var inner: I
+    internal var predicate: (I.Item) -> Bool
+    internal var done: Bool
 
     /// Creates an iterator that yields elements until predicate returns false.
     public init(inner inner: I, predicate predicate: (I.Item) -> Bool) {
@@ -131,9 +131,9 @@ public struct TakeWhileIterator[I]: Iterator where I: Iterator {
 public struct SkipWhileIterator[I]: Iterator where I: Iterator {
     type Item = I.Item
 
-    private var inner: I
-    private var predicate: (I.Item) -> Bool
-    private var doneSkipping: Bool
+    internal var inner: I
+    internal var predicate: (I.Item) -> Bool
+    internal var doneSkipping: Bool
 
     /// Creates an iterator that skips elements until predicate returns false.
     public init(inner inner: I, predicate predicate: (I.Item) -> Bool) {
@@ -169,8 +169,8 @@ public struct SkipWhileIterator[I]: Iterator where I: Iterator {
 public struct ZipIterator[A, B]: Iterator where A: Iterator, B: Iterator {
     type Item = (A.Item, B.Item)
 
-    private var first: A
-    private var second: B
+    internal var first: A
+    internal var second: B
 
     /// Creates an iterator that pairs elements from first and second.
     public init(first first: A, second second: B) {
@@ -196,8 +196,8 @@ public struct ZipIterator[A, B]: Iterator where A: Iterator, B: Iterator {
 public struct EnumerateIterator[I]: Iterator where I: Iterator {
     type Item = (Int64, I.Item)
 
-    private var inner: I
-    private var index: Int64
+    internal var inner: I
+    internal var index: Int64
 
     /// Creates an iterator that pairs each element with its zero-based index.
     public init(inner inner: I) {
@@ -225,8 +225,8 @@ public struct EnumerateIterator[I]: Iterator where I: Iterator {
 public struct TakeIterator[I]: Iterator where I: Iterator {
     type Item = I.Item
 
-    private var inner: I
-    private var remaining: Int64
+    internal var inner: I
+    internal var remaining: Int64
 
     /// Creates an iterator that yields at most count elements.
     public init(inner inner: I, count count: Int64) {
@@ -249,8 +249,8 @@ public struct TakeIterator[I]: Iterator where I: Iterator {
 public struct SkipIterator[I]: Iterator where I: Iterator {
     type Item = I.Item
 
-    private var inner: I
-    private var remaining: Int64
+    internal var inner: I
+    internal var remaining: Int64
 
     /// Creates an iterator that skips the first count elements.
     public init(inner inner: I, count count: Int64) {
@@ -277,9 +277,9 @@ public struct SkipIterator[I]: Iterator where I: Iterator {
 public struct ChainIterator[A, B]: Iterator where A: Iterator, B: Iterator, B.Item = A.Item {
     type Item = A.Item
 
-    private var first: A
-    private var second: B
-    private var firstDone: Bool
+    internal var first: A
+    internal var second: B
+    internal var firstDone: Bool
 
     /// Creates an iterator that chains first and second together.
     public init(first first: A, second second: B) {
@@ -308,8 +308,8 @@ public struct ChainIterator[A, B]: Iterator where A: Iterator, B: Iterator, B.It
 public struct PeekableIterator[I]: Iterator where I: Iterator {
     type Item = I.Item
 
-    private var inner: I
-    private var peeked: Optional[I.Item]?
+    internal var inner: I
+    internal var peeked: Optional[I.Item]?
 
     /// Creates a peekable iterator wrapping inner.
     public init(inner inner: I) {
@@ -347,8 +347,8 @@ public struct PeekableIterator[I]: Iterator where I: Iterator {
 public struct CycleIterator[I]: Iterator where I: Iterator, I: Cloneable {
     type Item = I.Item
 
-    private var original: I
-    private var current: I
+    internal var original: I
+    internal var current: I
 
     /// Creates an iterator that repeats iter infinitely.
     public init(iter iter: I) {
@@ -371,8 +371,8 @@ public struct CycleIterator[I]: Iterator where I: Iterator, I: Cloneable {
 public struct FuseIterator[I]: Iterator where I: Iterator {
     type Item = I.Item
 
-    private var inner: I
-    private var done: Bool
+    internal var inner: I
+    internal var done: Bool
 
     /// Creates a fused iterator that stops permanently after the first None.
     public init(inner inner: I) {
@@ -416,7 +416,7 @@ public struct EmptyIterator[T]: Iterator {
 public struct OnceIterator[T]: Iterator {
     type Item = T
 
-    private var value: T?
+    internal var value: T?
 
     /// Creates an iterator that yields value exactly once.
     public init(value value: T) {
@@ -435,7 +435,7 @@ public struct OnceIterator[T]: Iterator {
 public struct RepeatIterator[T]: Iterator where T: Cloneable {
     type Item = T
 
-    private var value: T
+    internal var value: T
 
     /// Creates an iterator that yields value forever.
     public init(value value: T) {
@@ -452,8 +452,8 @@ public struct RepeatIterator[T]: Iterator where T: Cloneable {
 public struct RepeatNIterator[T]: Iterator where T: Cloneable {
     type Item = T
 
-    private var value: T
-    private var remaining: Int64
+    internal var value: T
+    internal var remaining: Int64
 
     /// Creates an iterator that yields value exactly count times.
     public init(value value: T, count count: Int64) {
@@ -483,9 +483,9 @@ public struct RepeatNIterator[T]: Iterator where T: Cloneable {
 public struct FlatMapIterator[I, U]: Iterator where I: Iterator, U: Iterator {
     type Item = U.Item
 
-    private var inner: I
-    private var transform: (I.Item) -> U
-    private var current: U?
+    internal var inner: I
+    internal var transform: (I.Item) -> U
+    internal var current: U?
 
     /// Creates an iterator that applies transform to each element and flattens.
     public init(inner inner: I, transform transform: (I.Item) -> U) {
@@ -519,15 +519,42 @@ public struct FlatMapIterator[I, U]: Iterator where I: Iterator, U: Iterator {
 // FLATTENING ADAPTERS
 // ============================================================================
 
-// TODO: FlattenIterator has issues with nested associated type constraints (I.Item.Item)
-// /// Flattens nested iterators into a single iterator.
-// public struct FlattenIterator[I]: Iterator where I: Iterator, I.Item: Iterator {
-//     type Item = I.Item.Item
-//     private var inner: I
-//     private var current: I.Item?
-//     public init(inner inner: I) { ... }
-//     public mutating func next() -> I.Item.Item? { ... }
-// }
+/// Flattens nested iterators into a single iterator.
+///
+/// Takes an iterator of iterators and yields all elements from each
+/// inner iterator sequentially.
+public struct FlattenIterator[I]: Iterator where I: Iterator, I.Item: Iterator {
+    type Item = I.Item.Item
+
+    internal var inner: I
+    internal var current: I.Item?
+
+    /// Creates an iterator that flattens nested iterators.
+    public init(inner inner: I) {
+        self.inner = inner;
+        self.current = .None;
+    }
+
+    /// Returns the next element from the flattened sequence.
+    public mutating func next() -> I.Item.Item? {
+        while true {
+            if let .Some(currentIter) = self.current {
+                if let .Some(item) = currentIter.next() {
+                    return .Some(item)
+                }
+                self.current = .None;
+            }
+
+            if let .Some(nextIter) = self.inner.next() {
+                self.current = .Some(nextIter);
+            } else {
+                return .None
+            }
+        }
+        // Unreachable - loop always returns
+        .None
+    }
+}
 
 // ============================================================================
 // INSPECTING ADAPTERS
@@ -540,8 +567,8 @@ public struct FlatMapIterator[I, U]: Iterator where I: Iterator, U: Iterator {
 public struct InspectIterator[I]: Iterator where I: Iterator {
     type Item = I.Item
 
-    private var inner: I
-    private var inspector: (I.Item) -> ()
+    internal var inner: I
+    internal var inspector: (I.Item) -> ()
 
     /// Creates an iterator that calls inspector on each element.
     public init(inner inner: I, inspector inspector: (I.Item) -> ()) {
@@ -568,9 +595,9 @@ public struct InspectIterator[I]: Iterator where I: Iterator {
 public struct StepByIterator[I]: Iterator where I: Iterator {
     type Item = I.Item
 
-    private var inner: I
-    private var step: Int64
-    private var first: Bool
+    internal var inner: I
+    internal var step: Int64
+    internal var first: Bool
 
     /// Creates an iterator that yields every `step` elements.
     /// Panics if step is 0.
@@ -603,19 +630,14 @@ public struct StepByIterator[I]: Iterator where I: Iterator {
 /// Reverses a double-ended iterator.
 ///
 /// Yields elements by calling `nextBack()` on the inner iterator.
-public struct RevIterator[I]: Iterator where I: DoubleEndedIterator {
+public struct RevIterator[I] where I: DoubleEndedIterator {
     type Item = I.Item
 
-    private var inner: I
+    internal var inner: I
 
     /// Creates an iterator that yields elements in reverse order.
     public init(inner inner: I) {
         self.inner = inner;
-    }
-
-    /// Returns the next element from the back of the inner iterator.
-    public mutating func next() -> I.Item? {
-        self.inner.nextBack()
     }
 }
 
@@ -631,9 +653,9 @@ public struct RevIterator[I]: Iterator where I: DoubleEndedIterator {
 public struct ScanIterator[I, Acc]: Iterator where I: Iterator {
     type Item = Acc
 
-    private var inner: I
-    private var state: Acc
-    private var combine: (Acc, I.Item) -> Acc
+    internal var inner: I
+    internal var state: Acc
+    internal var combine: (Acc, I.Item) -> Acc
 
     /// Creates an iterator that yields running fold values.
     public init(inner inner: I, initial initial: Acc, combine combine: (Acc, I.Item) -> Acc) {
@@ -657,20 +679,52 @@ public struct ScanIterator[I, Acc]: Iterator where I: Iterator {
 // INTERSPERSING ADAPTERS
 // ============================================================================
 
-// TODO: IntersperseIterator has issues with I.Item: Cloneable constraint resolution
-// /// Inserts a separator between each element.
-// public struct IntersperseIterator[I]: Iterator where I: Iterator, I.Item: Cloneable {
-//     ...
-// }
+/// Inserts a separator between each element.
+public struct IntersperseIterator[I]: Iterator where I: Iterator, I.Item: Cloneable {
+    type Item = I.Item
+
+    internal var inner: I
+    internal var separator: I.Item
+    internal var needsSeparator: Bool
+    internal var pendingItem: I.Item?
+
+    /// Creates an iterator that inserts separator between elements.
+    public init(inner inner: I, separator separator: I.Item) {
+        self.inner = inner;
+        self.separator = separator;
+        self.needsSeparator = false;
+        self.pendingItem = .None;
+    }
+
+    /// Returns the next element or separator.
+    public mutating func next() -> I.Item? {
+        if let .Some(item) = self.pendingItem {
+            self.pendingItem = .None;
+            return .Some(item)
+        }
+
+        if let .Some(item) = self.inner.next() {
+            if self.needsSeparator {
+                self.pendingItem = .Some(item);
+                .Some(self.separator)
+            } else {
+                self.needsSeparator = true;
+                .Some(item)
+            }
+        } else {
+            .None
+        }
+    }
+}
 
 /// Inserts a lazily-generated separator between each element.
 public struct IntersperseWithIterator[I]: Iterator where I: Iterator {
     type Item = I.Item
 
-    private var inner: I
-    private var separator: () -> I.Item
-    private var nextIsSeparator: Bool
-    private var first: Bool
+    internal var inner: I
+    internal var separator: () -> I.Item
+    internal var nextIsSeparator: Bool
+    internal var first: Bool
 
     /// Creates an iterator that inserts separators generated by the function.
     public init(inner inner: I, separator separator: () -> I.Item) {
@@ -698,31 +752,6 @@ public struct IntersperseWithIterator[I]: Iterator where I: Iterator {
         }
     }
 }
-
-// ============================================================================
-// REFERENCE COPYING ADAPTERS
-// ============================================================================
-
-// TODO: Ref[T] type not yet implemented
-// /// Copies each element from a reference iterator.
-// public struct CopiedIterator[I, T]: Iterator where I: Iterator, I.Item = Ref[T], T: Copyable {
-//     type Item = T
-//     private var inner: I
-//     public init(inner: I) { self.inner = inner; }
-//     public mutating func next() -> T? {
-//         if let .Some(item) = self.inner.next() { .Some(item.copy()) } else { .None }
-//     }
-// }
-
-// /// Clones each element from a reference iterator.
-// public struct ClonedIterator[I, T]: Iterator where I: Iterator, I.Item = Ref[T], T: Cloneable {
-//     type Item = T
-//     private var inner: I
-//     public init(inner: I) { self.inner = inner; }
-//     public mutating func next() -> T? {
-//         if let .Some(item) = self.inner.next() { .Some(item.clone()) } else { .None }
-//     }
-// }
 
 // ============================================================================
 // CONVENIENCE FUNCTIONS

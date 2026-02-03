@@ -5,6 +5,9 @@ public enum Alignment: Equatable, Matchable {
     case left
     case right
     case center
+
+    public func equals(other: Alignment) -> Bool;
+    public func matches(other: Alignment) -> Bool;
 }
 
 /// Sign display mode for numeric formatting.
@@ -15,12 +18,15 @@ public enum Sign: Equatable, Matchable {
     case always
     /// Show space for positive, minus for negative.
     case space
+
+    public func equals(other: Sign) -> Bool;
+    public func matches(other: Sign) -> Bool;
 }
 
 /// Float display style.
 public enum FloatStyle: Equatable, Matchable {
     /// Default: use shortest representation.
-    case default
+    case auto
     /// Fixed-point notation (e.g., "3.14").
     case fixed
     /// Scientific notation with lowercase 'e' (e.g., "3.14e0").
@@ -29,6 +35,9 @@ public enum FloatStyle: Equatable, Matchable {
     case scientificUpper
     /// Percentage (multiplies by 100, adds '%').
     case percent
+
+    public func equals(other: FloatStyle) -> Bool;
+    public func matches(other: FloatStyle) -> Bool;
 }
 
 /// Options for controlling formatted output.
@@ -83,14 +92,12 @@ public struct FormatOptions: Equatable {
     public var debug: Bool
 
     /// Default format options.
-    public static var default: FormatOptions { get }
-
-    /// Creates format options from a format spec string.
-    /// Parses specs like ">8.2x" or "^10" or "?".
-    public init(spec: String);
+    public static func default() -> FormatOptions;
 
     /// Creates default format options.
     public init();
+
+    public func equals(other: FormatOptions) -> Bool;
 }
 
 /// Protocol for types that can be formatted as a string.
@@ -107,6 +114,42 @@ public struct FormatOptions: Equatable {
 ///   "\{pi:.2}"       "3.14"
 ///   "\{value:?}"     debug representation
 public protocol Formattable {
-    /// Returns a string representation of this value with the given options.
-    func format(options: FormatOptions = .default) -> String;
+    /// Returns this value formatted as a string with the given options.
+    func format(options: FormatOptions) -> String;
+}
+
+/// Protocol for types that accumulate string interpolation parts.
+public protocol StringInterpolationProtocol {
+    /// Initialize with capacity hints for optimization.
+    init(literalCapacity: Int64, interpolationCount: Int64);
+
+    /// Append a literal string segment.
+    mutating func appendLiteral(literal: String);
+
+    /// Append a formatted value with options.
+    mutating func appendInterpolation[T](value: T, options: FormatOptions) where T: Formattable;
+}
+
+/// Protocol for types that can be created from string interpolation.
+public protocol ExpressibleByStringInterpolation: ExpressibleByStringLiteral {
+    /// The type used to accumulate interpolation parts.
+    type Interpolation: StringInterpolationProtocol
+
+    /// Create from a completed interpolation.
+    init(interpolation: Interpolation);
+}
+
+/// Default implementation of StringInterpolationProtocol for String.
+public struct DefaultStringInterpolation: StringInterpolationProtocol {
+    /// Initialize with capacity hints.
+    public init(literalCapacity: Int64, interpolationCount: Int64);
+
+    /// Append a literal string segment.
+    public mutating func appendLiteral(literal: String);
+
+    /// Append a formatted value with options.
+    public mutating func appendInterpolation[T](value: T, options: FormatOptions) where T: Formattable;
+
+    /// Build the final string by concatenating all parts.
+    public func build() -> String;
 }

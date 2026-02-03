@@ -3,12 +3,13 @@
 module std.text
 
 import std.core.(Bool, Equatable, Comparable, Cloneable, Ordering, Addable, ExpressibleByStringLiteral, Hash, Hasher, Defaultable)
-import std.core.(Formattable)
+import std.text.(Formattable)
 import std.num.(Int64, UInt8)
 import std.result.(Optional)
 import std.memory.(Layout, Pointer, RawPointer, SystemAllocator, RcBox, Slice)
 import std.iter.(Iterator, Iterable)
 import std.text.(Char, decodeUtf8, encodeUtf8, BytesView, CharsView, GraphemesView, LinesView)
+import std.text.unicode as unicode
 import std.ffi.(memcpy)
 
 // ============================================================================
@@ -263,6 +264,9 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
     type Item = Char
     type Iter = StringIterator
     type Output = String
+
+    /// The additive identity for strings (empty string).
+    public static var zero: String { get { "" } }
 
     private var storage: RcBox[StringStorage]
 
@@ -1091,35 +1095,146 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
     // ========================================================================
 
     /// Converts all characters to lowercase using Unicode case mapping in place.
-    /// Handles locale-independent case folding including multi-character expansions
-    /// (e.g., German 'ß' uppercase becomes "SS").
+    /// Handles locale-independent case folding including multi-character expansions.
     public mutating func lowercase() {
-        // For now, delegate to ASCII-only lowercase
-        // Full Unicode case mapping would require ICU or similar
-        self.lowercaseAscii()
+        self = self.lowercased()
     }
 
     /// Converts all characters to uppercase using Unicode case mapping in place.
     /// Handles locale-independent case folding including multi-character expansions
     /// (e.g., German 'ß' uppercase becomes "SS").
     public mutating func uppercase() {
-        // For now, delegate to ASCII-only uppercase
-        // Full Unicode case mapping would require ICU or similar
-        self.uppercaseAscii()
+        self = self.uppercased()
     }
 
     /// Returns a string with all characters converted to lowercase using Unicode case mapping.
     /// Handles locale-independent case folding including multi-character expansions.
     public func lowercased() -> String {
-        // For now, delegate to ASCII-only lowercased
-        self.lowercasedAscii()
+        // Fast path: check if all ASCII
+        let myLen = self.len();
+        var allAscii = true;
+        var hasUpperAscii = false;
+        for i in Int64(intLiteral: 0)..<myLen {
+            let byte = self.ptr().offset(by: i).read();
+            if byte > 127 {
+                allAscii = false
+            }
+            if byte >= 65 and byte <= 90 {
+                hasUpperAscii = true
+            }
+        }
+
+        if allAscii {
+            // ASCII-only fast path
+            if hasUpperAscii == false {
+                return self.clone()
+            }
+            return self.lowercasedAscii()
+        }
+
+        // Full Unicode path
+        var result = String();
+        for c in self.chars.iter() {
+            if unicode.hasLowercaseExpansion(c) {
+                result.append(unicode.lowercaseExpansion(c))
+            } else {
+                result.appendChar(unicode.toLowercase(c))
+            }
+        }
+        result
     }
 
     /// Returns a string with all characters converted to uppercase using Unicode case mapping.
     /// Handles locale-independent case folding including multi-character expansions.
     public func uppercased() -> String {
-        // For now, delegate to ASCII-only uppercased
-        self.uppercasedAscii()
+        // Fast path: check if all ASCII
+        let myLen = self.len();
+        var allAscii = true;
+        var hasLowerAscii = false;
+        for i in Int64(intLiteral: 0)..<myLen {
+            let byte = self.ptr().offset(by: i).read();
+            if byte > 127 {
+                allAscii = false
+            }
+            if byte >= 97 and byte <= 122 {
+                hasLowerAscii = true
+            }
+        }
+
+        if allAscii {
+            // ASCII-only fast path
+            if hasLowerAscii == false {
+                return self.clone()
+            }
+            return self.uppercasedAscii()
+        }
+
+        // Full Unicode path
+        var result = String();
+        for c in self.chars.iter() {
+            if unicode.hasUppercaseExpansion(c) {
+                result.append(unicode.uppercaseExpansion(c))
+            } else {
+                result.appendChar(unicode.toUppercase(c))
+            }
+        }
+        result
+    }
+
+    /// Returns a string with all characters converted to titlecase using Unicode case mapping.
+    /// Titlecase converts the first character of each word to titlecase and the rest to lowercase.
+    public func titlecased() -> String {
+        var result = String();
+        var atWordStart = true;
+
+        for c in self.chars.iter() {
+            if c.isWhitespace() {
+                result.appendChar(c);
+                atWordStart = true
+            } else if atWordStart {
+                if unicode.hasTitlecaseExpansion(c) {
+                    result.append(unicode.titlecaseExpansion(c))
+                } else {
+                    result.appendChar(unicode.toTitlecase(c))
+                }
+                atWordStart = false
+            } else {
+                if unicode.hasLowercaseExpansion(c) {
+                    result.append(unicode.lowercaseExpansion(c))
+                } else {
+                    result.appendChar(unicode.toLowercase(c))
+                }
+            }
+        }
+        result
+    }
+
+    /// Compares two strings for equality, ignoring case.
+    /// Uses Unicode case folding for locale-independent comparison.
+    public func equalsCaseInsensitive(other: String) -> Bool {
+        // Compare case-folded versions
+        var selfIter = self.chars.iter();
+        var otherIter = other.chars.iter();
+
+        while true {
+            let selfChar = selfIter.next();
+            let otherChar = otherIter.next();
+
+            match (selfChar, otherChar) {
+                (.None, .None) => { return true },
+                (.Some(sc), .Some(oc)) => {
+                    // Compare case-folded characters
+                    let foldedSelf = unicode.caseFold(sc);
+                    let foldedOther = unicode.caseFold(oc);
+                    if foldedSelf.equals(foldedOther) == false {
+                        return false
+                    }
+                },
+                _ => { return false }
+            }
+        }
+        // Unreachable
+        false
     }
 
     // ========================================================================
@@ -1325,7 +1440,7 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
     }
 
     /// Returns the string representation (itself).
-    public func format() -> String {
+    public func format(options: FormatOptions = FormatOptions.default()) -> String {
         self.clone()
     }
 }

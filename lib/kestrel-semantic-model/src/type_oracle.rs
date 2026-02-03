@@ -3198,10 +3198,10 @@ fn equality_type_score(ty: &Ty) -> i32 {
         TyKind::AssociatedType { .. } => 1,
         TyKind::SelfType => 2,
         TyKind::Protocol { .. } => 3,
-        TyKind::Struct { .. } => 4,
+        TyKind::Struct { .. } | TyKind::Enum { .. } | TyKind::TypeAlias { .. } => 4,
         TyKind::Int(_) | TyKind::Float(_) | TyKind::Bool | TyKind::String | TyKind::Unit => 5,
-        TyKind::Tuple(_) | TyKind::Function { .. } => 4, // Complex but concrete-ish
-        _ => -1,
+        TyKind::Tuple(_) | TyKind::Function { .. } | TyKind::Pointer(_) => 4,
+        _ => -1, // Error, Never, Infer, UnresolvedFunction, UnresolvedPath
     }
 }
 

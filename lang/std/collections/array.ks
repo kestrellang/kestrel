@@ -4,7 +4,8 @@ module std.collections
 
 import std.core.(Bool, Equatable, Comparable, Cloneable, ArrayMatchable, Defaultable)
 import std.core.(ExpressibleByArrayLiteral, _ExpressibleByArrayLiteral)
-import std.core.(Range, Formattable, Hash)
+import std.core.(Range, Hash)
+import std.text.(Formattable, FormatOptions)
 import std.num.(Int64)
 import std.num.(RandomNumberGenerator, Lcg64)
 import std.result.(Optional)
@@ -2105,14 +2106,14 @@ extend Array[T] where T: Formattable {
 /// Example:
 ///     "\{[1, 2, 3]}"  // "[1, 2, 3]"
 extend Array[T]: Formattable where T: Formattable {
-    public func format() -> String {
+    public func format(options: FormatOptions = FormatOptions.default()) -> String {
         var result = "[";
         let myLen = self.count;
         for i in 0..<myLen {
             if i > Int64(intLiteral: 0) {
                 result = result + ", "
             }
-            result = result + self(unchecked: i).format()
+            result = result + self(unchecked: i).format(options)
         }
         result = result + "]";
         result

@@ -3,9 +3,9 @@
 module std.core
 
 import std.ffi.(FFISafe)
-import std.text.(String)
-import std.core.(FormatOptions)
-import std.num.(UInt8)
+import std.core.(Hash, Hasher)
+import std.text.(String, FormatOptions, Formattable)
+import std.num.(UInt8, Int64)
 import std.memory.(Slice, Pointer)
 
 /// The boolean type with support for logical operations, equality, hashing, and formatting.

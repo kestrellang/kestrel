@@ -862,9 +862,14 @@ fn compile_construct(
     };
 
     for (field_name, field_value) in fields {
-        let offset = field_offsets
-            .get(field_name)
-            .ok_or_else(|| CodegenError::Unsupported(format!("unknown field: {}", field_name)))?;
+        let offset = field_offsets.get(field_name).ok_or_else(|| {
+            let struct_name = ctx.mir.name(struct_def.name);
+            let available_fields: Vec<_> = field_offsets.keys().collect();
+            CodegenError::Unsupported(format!(
+                "unknown field: {} in struct {} (available: {:?})",
+                field_name, struct_name, available_fields
+            ))
+        })?;
 
         // Find the field type
         let mut field_ty = None;
@@ -1793,14 +1798,18 @@ fn get_field_info(
     };
 
     // Get field offset from layout (pass substituted type_args for generic structs)
+    let struct_def = ctx.mir.struct_def(struct_id);
     let struct_layout = ctx.layouts.struct_layout(struct_id, &type_args);
-    let offset = *struct_layout
-        .field_offsets
-        .get(field_name)
-        .ok_or_else(|| CodegenError::Unsupported(format!("unknown field: {}", field_name)))?;
+    let offset = *struct_layout.field_offsets.get(field_name).ok_or_else(|| {
+        let struct_name = ctx.mir.name(struct_def.name);
+        let available_fields: Vec<_> = struct_layout.field_offsets.keys().collect();
+        CodegenError::Unsupported(format!(
+            "unknown field: {} in struct {} (available: {:?})",
+            field_name, struct_name, available_fields
+        ))
+    })?;
 
     // Get field type and apply substitution for generic structs
-    let struct_def = ctx.mir.struct_def(struct_id);
     let type_params = struct_def.type_params.clone();
     let mut field_ty = None;
     for field_id in &struct_def.fields {

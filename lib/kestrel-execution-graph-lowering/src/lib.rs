@@ -101,7 +101,7 @@ fn generate_static_init_function(
     ctx: &mut LoweringContext,
     module: &Arc<dyn Symbol<KestrelLanguage>>,
 ) -> Option<kestrel_execution_graph::Id<kestrel_execution_graph::id::QualifiedName>> {
-    use kestrel_semantic_tree::behavior::executable::ExecutableBehavior;
+    use kestrel_semantic_tree::behavior::executable::{ExecutableBehavior, ResolvedExecutableBehavior};
     use kestrel_semantic_tree::symbol::field::FieldSymbol;
 
     // Collect all static fields with initializers
@@ -127,37 +127,42 @@ fn generate_static_init_function(
     // For each static field with an initializer, emit an assignment
     for field_sym in &static_fields {
         if let Some(field) = field_sym.as_ref().downcast_ref::<FieldSymbol>() {
-            // Get the ExecutableBehavior containing the initializer
-            if let Some(executable) = field_sym.metadata().get_behavior::<ExecutableBehavior>() {
-                let body = executable.body();
+            // Get the body - prefer ResolvedExecutableBehavior (with inferred types),
+            // fall back to ExecutableBehavior if not available
+            let body = if let Some(resolved) = field_sym.metadata().get_behavior::<ResolvedExecutableBehavior>() {
+                resolved.body().clone()
+            } else if let Some(executable) = field_sym.metadata().get_behavior::<ExecutableBehavior>() {
+                executable.body().clone()
+            } else {
+                continue;
+            };
 
-                // Get the yield expression (the initializer value)
-                if let Some(init_expr) = &body.yield_expr {
-                    // Get the static's name
-                    let static_name = name::qualified_name_for_symbol(ctx, field_sym);
+            // Get the yield expression (the initializer value)
+            if let Some(init_expr) = &body.yield_expr {
+                // Get the static's name
+                let static_name = name::qualified_name_for_symbol(ctx, field_sym);
 
-                    // Lower the initializer expression
-                    let init_value = expr::lower_expression(ctx, init_expr);
+                // Lower the initializer expression
+                let init_value = expr::lower_expression(ctx, init_expr);
 
-                    // Get or create the static in MIR
-                    let field_ty = ty::lower_type(ctx, field.field_type());
+                // Get or create the static in MIR
+                let field_ty = ty::lower_type(ctx, field.field_type());
 
-                    // Check if static already exists, if not add it
-                    let static_exists = ctx
-                        .mir
-                        .statics
-                        .iter()
-                        .any(|(_, def)| def.name == static_name);
-                    if !static_exists {
-                        ctx.mir.add_static(static_name, field_ty);
-                    }
-
-                    // Create a global place for the static
-                    let global_place = kestrel_execution_graph::Place::global(static_name);
-
-                    // Emit assignment: static = init_value
-                    ctx.emit_assign_value(global_place, init_value);
+                // Check if static already exists, if not add it
+                let static_exists = ctx
+                    .mir
+                    .statics
+                    .iter()
+                    .any(|(_, def)| def.name == static_name);
+                if !static_exists {
+                    ctx.mir.add_static(static_name, field_ty);
                 }
+
+                // Create a global place for the static
+                let global_place = kestrel_execution_graph::Place::global(static_name);
+
+                // Emit assignment: static = init_value
+                ctx.emit_assign_value(global_place, init_value);
             }
         }
     }

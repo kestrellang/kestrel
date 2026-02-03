@@ -12,11 +12,13 @@ use kestrel_semantic_model::{StructFields, SymbolFor};
 use kestrel_semantic_tree::behavior::callable::{
     CallableBehavior, ParameterAccessMode, ReceiverKind,
 };
+use kestrel_semantic_tree::behavior::executable::ResolvedExecutableBehavior;
 use kestrel_semantic_tree::expr::{
     CallArgument, ElseBranch, ExprKind, Expression, IfCondition, InterpolationPart, LiteralValue,
     PrimitiveMethod,
 };
 use kestrel_semantic_tree::symbol::field::FieldSymbol;
+use kestrel_semantic_tree::symbol::getter::GetterSymbol;
 use kestrel_semantic_tree::symbol::initializer::InitializerSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::ty::{Substitutions, Ty, TyKind};
@@ -24,6 +26,7 @@ use semantic_tree::symbol::SymbolId;
 
 use crate::context::LoweringContext;
 use crate::error::LoweringError;
+use crate::lowerer::get_subscript_type_parameters;
 use crate::name::qualified_name_for_symbol;
 use crate::stmt::lower_statement;
 use crate::ty::{lower_type, make_float_immediate, make_int_immediate, make_int_zero_for_mir_ty};
@@ -519,6 +522,78 @@ fn build_indirect_call_args(
             }
         })
         .collect()
+}
+
+/// Fill in default arguments for a call if any are missing.
+///
+/// Returns an extended `Vec<CallArgument>` that includes default expressions
+/// for any missing parameters. If no defaults are needed, returns None to
+/// indicate the original arguments can be used.
+///
+/// # Arguments
+/// * `ctx` - The lowering context (for symbol queries)
+/// * `arguments` - The arguments provided at the call site
+/// * `symbol_id` - The symbol ID of the callee (function/method/initializer)
+/// * `substitutions` - Type substitutions for the call (for generic functions)
+fn fill_default_arguments(
+    ctx: &LoweringContext,
+    arguments: &[CallArgument],
+    symbol_id: SymbolId,
+    substitutions: &Substitutions,
+) -> Option<Vec<CallArgument>> {
+    use kestrel_span::Span;
+    use semantic_tree::symbol::Symbol;
+
+    // Look up the symbol
+    let symbol = ctx.model.query(SymbolFor { id: symbol_id })?;
+
+    // Get callable behavior to know the expected parameters
+    let callable = symbol.metadata().get_behavior::<CallableBehavior>()?;
+    let params = callable.parameters();
+
+    // If we have all parameters, no need to fill defaults
+    if arguments.len() >= params.len() {
+        return None;
+    }
+
+    // Get resolved executable behavior to access default values
+    let resolved_exec = symbol.metadata().get_behavior::<ResolvedExecutableBehavior>()?;
+    let default_values = resolved_exec.default_values();
+
+    // Build the extended arguments list
+    let mut filled_args: Vec<CallArgument> = arguments.to_vec();
+
+    // For each missing parameter, try to get its default value
+    for i in arguments.len()..params.len() {
+        // Get the default expression for this parameter
+        let default_expr = match default_values.get(i) {
+            Some(Some(expr)) => expr,
+            _ => {
+                // No default available - this shouldn't happen if semantic analysis
+                // validated the call correctly, but we can't fill it in
+                return None;
+            },
+        };
+
+        // Apply type substitutions to the default expression
+        // This handles cases like `func foo[T](x: T = T.default())` called as `foo[Int]()`
+        let substituted_expr = default_expr.apply_substitutions(substitutions);
+
+        // Get the label for this parameter (if any)
+        let param = &params[i];
+        let label = param.external_label().map(|s| s.to_string());
+
+        // Create a CallArgument from the default expression
+        let call_arg = CallArgument {
+            label,
+            value: substituted_expr,
+            span: Span::new(0, 0..0), // Synthetic span for default argument
+        };
+
+        filled_args.push(call_arg);
+    }
+
+    Some(filled_args)
 }
 
 /// Lower an expression to a MIR Value.
@@ -3373,14 +3448,31 @@ fn lower_call(
     use kestrel_semantic_tree::symbol::function::FunctionSymbol;
     use semantic_tree::symbol::Symbol;
 
-    // Lower arguments first
-    let arg_values: Vec<Value> = arguments
+    // Try to extract the callee symbol ID to check for default arguments
+    let callee_symbol_id: Option<SymbolId> = match &callee.kind {
+        ExprKind::SymbolRef(symbol_id) => Some(*symbol_id),
+        ExprKind::MethodRef { candidates, .. } => candidates.first().copied(),
+        _ => None,
+    };
+
+    // Fill in default arguments if any are missing
+    let filled_arguments: Option<Vec<CallArgument>> = callee_symbol_id
+        .and_then(|symbol_id| fill_default_arguments(ctx, arguments, symbol_id, substitutions));
+
+    // Use filled arguments if available, otherwise use original
+    let arguments_to_use: &[CallArgument] = match &filled_arguments {
+        Some(filled) => filled.as_slice(),
+        None => arguments,
+    };
+
+    // Lower arguments
+    let arg_values: Vec<Value> = arguments_to_use
         .iter()
         .map(|arg| lower_expression(ctx, &arg.value))
         .collect();
 
     // Extract argument types for determining Copy vs Move passing modes
-    let arg_types: Vec<&Ty> = arguments.iter().map(|arg| &arg.value.ty).collect();
+    let arg_types: Vec<&Ty> = arguments_to_use.iter().map(|arg| &arg.value.ty).collect();
 
     // Helper to get ordered type args from a symbol's type parameters
     let get_ordered_type_args =
@@ -4270,11 +4362,34 @@ fn lower_subscript_call(
                     None => return Value::Immediate(Immediate::error()),
                 };
 
-            // Add type arguments from subscript's own type parameters (inferred from argument types)
-            // The argument types directly become the type arguments for the subscript's generic parameters
-            for arg in arguments {
-                let arg_mir_ty = lower_type(ctx, &arg.value.ty);
-                type_args.push(arg_mir_ty);
+            // Add type arguments for subscript's own type parameters (e.g., subscript[F](value: F))
+            // We infer these from the argument types by matching parameter types to argument types
+            if let Ok(getter_sym) = sym.clone().downcast_arc::<GetterSymbol>() {
+                use semantic_tree::symbol::Symbol;
+                let subscript_type_params = get_subscript_type_parameters(&getter_sym);
+                if !subscript_type_params.is_empty() {
+                    // Get the callable behavior to find parameter types
+                    if let Some(callable) = sym.metadata().get_behavior::<CallableBehavior>() {
+                        let params = callable.parameters();
+                        // For each subscript type param, find which parameter uses it and get the arg's type
+                        for type_param in &subscript_type_params {
+                            let type_param_id = type_param.metadata().id();
+                            // Find the parameter whose type is this type parameter
+                            for (param_idx, param) in params.iter().enumerate() {
+                                if let TyKind::TypeParameter(param_tp) = param.ty.kind() {
+                                    if param_tp.metadata().id() == type_param_id {
+                                        // Found it! Use the corresponding argument's type
+                                        if let Some(arg) = arguments.get(param_idx) {
+                                            let arg_mir_ty = lower_type(ctx, &arg.value.ty);
+                                            type_args.push(arg_mir_ty);
+                                        }
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
 
             // Create the callee

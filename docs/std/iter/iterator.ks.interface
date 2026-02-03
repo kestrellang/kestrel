@@ -290,41 +290,6 @@ extend Iterator {
     func scan[Acc](initial: Acc, combine: (Acc, Item) -> Acc) -> ScanIterator[Self, Acc];
 }
 
-/// Extension for iterators over copyable references.
-extend Iterator where Item = Ref[T], T: Copyable {
-
-    /// Copies each referenced element, yielding owned values.
-    ///
-    /// Converts an iterator of references into an iterator of owned copies.
-    /// Use when you need owned values but have references.
-    ///
-    /// Example:
-    ///     let arr = [1, 2, 3]
-    ///     let refs = arr.iterRefs()  // Iterator of Ref[Int64]
-    ///     let owned = refs.copied().collect()  // [1, 2, 3] as owned values
-    ///
-    ///     // Useful when working with borrowed data
-    ///     fn process(data: Ref[Array[Int64]]) -> Array[Int64] {
-    ///         data.iter().copied().filter({ it } > 0).collect()
-    ///     }
-    func copied() -> CopiedIterator[Self, T];
-}
-
-/// Extension for iterators over cloneable references.
-extend Iterator where Item = Ref[T], T: Cloneable {
-
-    /// Clones each referenced element, yielding owned values.
-    ///
-    /// Like `copied()` but uses Clone instead of Copy.
-    /// Use for types that require heap allocation or deep copying.
-    ///
-    /// Example:
-    ///     let strings = ["hello", "world"]
-    ///     let refs = strings.iterRefs()  // Iterator of Ref[String]
-    ///     let owned = refs.cloned().collect()  // ["hello", "world"] as owned
-    func cloned() -> ClonedIterator[Self, T];
-}
-
 // ============================================================================
 // LIMITING ADAPTERS
 // ============================================================================
@@ -449,7 +414,7 @@ extend Iterator {
     ///     //         before filter: 3
     ///     //         after filter: 3
     ///     // Returns: [2, 3]
-    func inspect(inspector: (Item) -> Void) -> InspectIterator[Self];
+    func inspect(inspector: (Item) -> ()) -> InspectIterator[Self];
 
     /// Yields every nth element, starting with the first.
     ///
@@ -627,9 +592,9 @@ extend Iterator {
     ///
     /// Example:
     ///     files.iter().tryForEach({ (path) in
-    ///         File.delete(path)  // Returns Result[Void, IoError]
+    ///         File.delete(path)  // Returns Result[(), IoError]
     ///     })  // Stops on first deletion failure
-    func tryForEach[E](action: (Item) -> Result[Void, E]) -> Result[Void, E];
+    func tryForEach[E](action: (Item) -> Result[(), E]) -> Result[(), E];
 }
 
 // ============================================================================
@@ -645,7 +610,7 @@ extend Iterator {
     ///
     /// Example:
     ///     [1, 2, 3].iter().forEach({ print(it) })
-    func forEach(action: (Item) -> Void);
+    func forEach(action: (Item) -> ());
 }
 
 // ============================================================================

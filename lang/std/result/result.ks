@@ -2,8 +2,8 @@
 
 module std.result
 
-import std.core.(Equatable, Formattable, Bool, ControlFlow, Tryable, FromResidual, FromValue)
-import std.text.(String)
+import std.core.(Equatable, Bool, ControlFlow, Tryable, FromResidual, FromValue)
+import std.text.(String, Formattable, FormatOptions)
 import std.result.(Optional)
 
 /// Represents the result of an operation: either `Ok(value)` or `Err(error)`.
@@ -287,10 +287,10 @@ extend Result[T, E]: Equatable where T: Equatable, E: Equatable {
 /// Formattable extension when T and E are Formattable.
 extend Result[T, E]: Formattable where T: Formattable, E: Formattable {
     /// Formats this result as "Ok(value)" or "Err(error)".
-    public func format() -> String {
+    public func format(options: FormatOptions = FormatOptions.default()) -> String {
         match self {
-            .Ok(value) => "Ok(" + value.format() + ")",
-            .Err(error) => "Err(" + error.format() + ")"
+            .Ok(value) => "Ok(" + value.format(options) + ")",
+            .Err(error) => "Err(" + error.format(options) + ")"
         }
     }
 }

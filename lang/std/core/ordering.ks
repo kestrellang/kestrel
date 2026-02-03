@@ -2,8 +2,7 @@
 
 module std.core
 
-import std.text.(String)
-import std.core.(FormatOptions)
+import std.text.(String, FormatOptions, Formattable)
 
 /// Represents the result of comparing two values.
 /// Used by the Comparable protocol to express total ordering.

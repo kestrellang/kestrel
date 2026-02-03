@@ -9,11 +9,11 @@ module std.num
 
 import std.ffi.(FFISafe)
 import std.core.(
-    Equatable, Comparable, Ordering, Bool, Formattable, FormatOptions,
+    Equatable, Comparable, Ordering, Bool,
     Addable, Subtractable, Multipliable, Divisible, Negatable,
     ExpressibleByFloatLiteral, ExpressibleByIntLiteral, Convertible, Defaultable
 )
-import std.text.(String)
+import std.text.(String, Formattable, FormatOptions)
 import std.num.(Int64, Float64)
 
 /// A 32-bit IEEE 754 single-precision floating-point type.
@@ -340,8 +340,14 @@ public struct Float32:
     public var sign: Float32 { get {
         if self.isNaN { Float32.nan }
         else if self.isZero {
-            let inverse = Float32.one.divide(other: self);
-            if inverse < 0.0 { Float32.zero.negate() } else { Float32(floatLiteral: 0.0) }
+            let one = Float32.one;
+            let inverse = one.divide(self);
+            if inverse < 0.0 {
+                let zero = Float32.zero;
+                zero.negate()
+            } else {
+                Float32(floatLiteral: 0.0)
+            }
         }
         else if self < 0.0 { Float32(raw: lang.f32_neg(1.0)) }
         else { Float32(floatLiteral: 1.0) }
@@ -1015,15 +1021,15 @@ public struct Float32:
     ///     Float32.parse(string: "nan")       // Some(nan)
     ///     Float32.parse(string: "abc")       // None
     ///     Float32.parse(string: "")          // None
-    public static func parse(string: String) -> Float32? {{
+    public static func parse(string: String) -> Float32? {
         let len = string.byteCount;
-        if len == 0 {{
+        if len == 0 {
             return .None
-        }}
+        }
 
         // Check for special values
         // "nan"
-        if len == 3 {{
+        if len == 3 {
             let b0: UInt8 = string.byteAtUnchecked(0);
             let b1: UInt8 = string.byteAtUnchecked(1);
             let b2: UInt8 = string.byteAtUnchecked(2);
@@ -1032,13 +1038,13 @@ public struct Float32:
             let isN0 = Int64(from: b0) == 110 or Int64(from: b0) == 78;
             let isA1 = Int64(from: b1) == 97 or Int64(from: b1) == 65;
             let isN2 = Int64(from: b2) == 110 or Int64(from: b2) == 78;
-            if isN0 and isA1 and isN2 {{
+            if isN0 and isA1 and isN2 {
                 return .Some(Float32.nan)
-            }}
-        }}
+            }
+        }
 
         // "inf"
-        if len == 3 {{
+        if len == 3 {
             let b0: UInt8 = string.byteAtUnchecked(0);
             let b1: UInt8 = string.byteAtUnchecked(1);
             let b2: UInt8 = string.byteAtUnchecked(2);
@@ -1048,13 +1054,13 @@ public struct Float32:
             let isI = Int64(from: b0) == 105 or Int64(from: b0) == 73;
             let isN = Int64(from: b1) == 110 or Int64(from: b1) == 78;
             let isF = Int64(from: b2) == 102 or Int64(from: b2) == 70;
-            if isI and isN and isF {{
+            if isI and isN and isF {
                 return .Some(Float32.infinity)
-            }}
-        }}
+            }
+        }
 
         // "-inf"
-        if len == 4 {{
+        if len == 4 {
             let b0: UInt8 = string.byteAtUnchecked(0);
             let b1: UInt8 = string.byteAtUnchecked(1);
             let b2: UInt8 = string.byteAtUnchecked(2);
@@ -1063,13 +1069,13 @@ public struct Float32:
             let isI = Int64(from: b1) == 105 or Int64(from: b1) == 73;
             let isN = Int64(from: b2) == 110 or Int64(from: b2) == 78;
             let isF = Int64(from: b3) == 102 or Int64(from: b3) == 70;
-            if isMinus and isI and isN and isF {{
+            if isMinus and isI and isN and isF {
                 return .Some(Float32(raw: lang.f32_neg(lang.f32_infinity())))
-            }}
-        }}
+            }
+        }
 
         // "+inf"
-        if len == 4 {{
+        if len == 4 {
             let b0: UInt8 = string.byteAtUnchecked(0);
             let b1: UInt8 = string.byteAtUnchecked(1);
             let b2: UInt8 = string.byteAtUnchecked(2);
@@ -1078,13 +1084,13 @@ public struct Float32:
             let isI = Int64(from: b1) == 105 or Int64(from: b1) == 73;
             let isN = Int64(from: b2) == 110 or Int64(from: b2) == 78;
             let isF = Int64(from: b3) == 102 or Int64(from: b3) == 70;
-            if isPlus and isI and isN and isF {{
+            if isPlus and isI and isN and isF {
                 return .Some(Float32.infinity)
-            }}
-        }}
+            }
+        }
 
         // "infinity"
-        if len == 8 {{
+        if len == 8 {
             // Check for "infinity" (case insensitive)
             let b0: UInt8 = string.byteAtUnchecked(0);
             let b1: UInt8 = string.byteAtUnchecked(1);
@@ -1102,10 +1108,10 @@ public struct Float32:
             let isI5 = Int64(from: b5) == 105 or Int64(from: b5) == 73;
             let isT6 = Int64(from: b6) == 116 or Int64(from: b6) == 84;
             let isY7 = Int64(from: b7) == 121 or Int64(from: b7) == 89;
-            if isI0 and isN1 and isF2 and isI3 and isN4 and isI5 and isT6 and isY7 {{
+            if isI0 and isN1 and isF2 and isI3 and isN4 and isI5 and isT6 and isY7 {
                 return .Some(Float32.infinity)
-            }}
-        }}
+            }
+        }
 
         // Parse regular number: [+-]?[0-9]*[.]?[0-9]*([eE][+-]?[0-9]+)?
         var index: Int64 = 0;
@@ -1114,129 +1120,129 @@ public struct Float32:
         // Check for sign
         let firstByte: UInt8 = string.byteAtUnchecked(0);
         let firstByteVal = Int64(from: firstByte);
-        if firstByteVal == 45 {{  // '-'
+        if firstByteVal == 45 {  // '-'
             isNegative = true;
             index = 1
-        }} else if firstByteVal == 43 {{  // '+'
+        } else if firstByteVal == 43 {  // '+'
             index = 1
-        }}
+        }
 
         // Must have something after sign
-        if index >= len {{
+        if index >= len {
             return .None
-        }}
+        }
 
         // Parse integer part - inline digit check (48='0', 57='9')
         var integerPart: Float32 = 0.0;
         var hasIntegerPart = false;
         var currentByte: Int64 = Int64(from: string.byteAtUnchecked(index));
 
-        while index < len and currentByte >= 48 and currentByte <= 57 {{
+        while index < len and currentByte >= 48 and currentByte <= 57 {
             let digit = Float32(from: currentByte - 48);
             integerPart = integerPart * 10.0 + digit;
             hasIntegerPart = true;
             index = index + 1;
-            if index < len {{
+            if index < len {
                 currentByte = Int64(from: string.byteAtUnchecked(index))
-            }}
-        }}
+            }
+        }
 
         // Parse fractional part
         var fractionalPart: Float32 = 0.0;
         var hasFractionalPart = false;
 
-        if index < len and currentByte == 46 {{  // '.'
+        if index < len and currentByte == 46 {  // '.'
             index = index + 1;
             var divisor: Float32 = 10.0;
 
-            if index < len {{
+            if index < len {
                 currentByte = Int64(from: string.byteAtUnchecked(index));
-                while index < len and currentByte >= 48 and currentByte <= 57 {{
+                while index < len and currentByte >= 48 and currentByte <= 57 {
                     let digit = Float32(from: currentByte - 48);
                     fractionalPart = fractionalPart + digit / divisor;
                     divisor = divisor * 10.0;
                     hasFractionalPart = true;
                     index = index + 1;
-                    if index < len {{
+                    if index < len {
                         currentByte = Int64(from: string.byteAtUnchecked(index))
-                    }}
-                }}
-            }}
-        }}
+                    }
+                }
+            }
+        }
 
         // Must have at least integer or fractional part
-        if not hasIntegerPart and not hasFractionalPart {{
+        if not hasIntegerPart and not hasFractionalPart {
             return .None
-        }}
+        }
 
         var result = integerPart + fractionalPart;
 
         // Parse exponent part
-        if index < len and (currentByte == 101 or currentByte == 69) {{  // 'e' or 'E'
+        if index < len and (currentByte == 101 or currentByte == 69) {  // 'e' or 'E'
             index = index + 1;
 
-            if index >= len {{
+            if index >= len {
                 return .None  // 'e' with no exponent
-            }}
+            }
 
             var expNegative = false;
             currentByte = Int64(from: string.byteAtUnchecked(index));
 
-            if currentByte == 45 {{  // '-'
+            if currentByte == 45 {  // '-'
                 expNegative = true;
                 index = index + 1;
-                if index < len {{
+                if index < len {
                     currentByte = Int64(from: string.byteAtUnchecked(index))
-                }}
-            }} else if currentByte == 43 {{  // '+'
+                }
+            } else if currentByte == 43 {  // '+'
                 index = index + 1;
-                if index < len {{
+                if index < len {
                     currentByte = Int64(from: string.byteAtUnchecked(index))
-                }}
-            }}
+                }
+            }
 
-            if index >= len {{
+            if index >= len {
                 return .None  // No exponent digits
-            }}
+            }
 
             var exponent: Int64 = 0;
             var hasExpDigit = false;
 
-            while index < len and currentByte >= 48 and currentByte <= 57 {{
+            while index < len and currentByte >= 48 and currentByte <= 57 {
                 exponent = exponent * 10 + (currentByte - 48);
                 hasExpDigit = true;
                 index = index + 1;
-                if index < len {{
+                if index < len {
                     currentByte = Int64(from: string.byteAtUnchecked(index))
-                }}
-            }}
+                }
+            }
 
-            if not hasExpDigit {{
+            if not hasExpDigit {
                 return .None
-            }}
+            }
 
             // Apply exponent using pow
             let expFloat = Float32(from: exponent);
             let ten: Float32 = 10.0;
-            if expNegative {{
+            if expNegative {
                 result = result / ten.pow(expFloat)
-            }} else {{
+            } else {
                 result = result * ten.pow(expFloat)
-            }}
-        }}
+            }
+        }
 
         // Check for trailing characters
-        if index != len {{
+        if index != len {
             return .None
-        }}
+        }
 
         // Apply sign
-        if isNegative {{
+        if isNegative {
             result = result.negate()
-        }}
+        }
 
         .Some(result)
-    }}
+    }
 
     // ========================================================================
     // FORMATTING
@@ -1251,15 +1257,15 @@ public struct Float32:
     /// - `precision`: Number of digits after decimal point. Default: 6
     /// - `width`: Minimum output width. Default: 0
     /// - `fill`: Padding character. Default: ' '
-    /// - `alignment`: .left, .right, or .center. Default: .right
-    /// - `sign`: .negative (default), .always, or .space
-    /// - `floatStyle`: .fixed, .scientific, .general, or .percent
+    /// - `alignment`: .Left, .Right, or .Center. Default: .Right
+    /// - `sign`: .Negative (default), .Always, or .Space
+    /// - `floatStyle`: .Fixed, .Scientific, .general, or .Percent
     ///
     /// Float styles:
-    /// - `.fixed`: Always use decimal notation (e.g., "3.14")
-    /// - `.scientific`: Always use exponential notation (e.g., "3.14e0")
+    /// - `.Fixed`: Always use decimal notation (e.g., "3.14")
+    /// - `.Scientific`: Always use exponential notation (e.g., "3.14e0")
     /// - `.general`: Choose notation based on magnitude (default)
-    /// - `.percent`: Multiply by 100 and add % (e.g., 0.5 -> "50%")
+    /// - `.Percent`: Multiply by 100 and add % (e.g., 0.5 -> "50%")
     ///
     /// Example:
     ///     (3.14159).format()  // "3.14159"
@@ -1269,20 +1275,20 @@ public struct Float32:
     ///     (3.14159).format(options: .{precision: 0})  // "3"
     ///
     ///     // Scientific notation
-    ///     (1234.5).format(options: .{floatStyle: .scientific})  // "1.2345e3"
-    ///     (0.00123).format(options: .{floatStyle: .scientific, precision: 2})  // "1.23e-3"
+    ///     (1234.5).format(options: .{floatStyle: .Scientific})  // "1.2345e3"
+    ///     (0.00123).format(options: .{floatStyle: .Scientific, precision: 2})  // "1.23e-3"
     ///
     ///     // Percentage
-    ///     (0.756).format(options: .{floatStyle: .percent})  // "75.6%"
-    ///     (0.756).format(options: .{floatStyle: .percent, precision: 0})  // "76%"
+    ///     (0.756).format(options: .{floatStyle: .Percent})  // "75.6%"
+    ///     (0.756).format(options: .{floatStyle: .Percent, precision: 0})  // "76%"
     ///
     ///     // Padding and alignment
     ///     (3.14).format(options: .{width: 8})  // "    3.14"
     ///     (3.14).format(options: .{width: 8, fill: '0'})  // "00003.14"
-    ///     (3.14).format(options: .{width: 8, alignment: .left})  // "3.14    "
+    ///     (3.14).format(options: .{width: 8, alignment: .Left})  // "3.14    "
     ///
     ///     // Sign display
-    ///     (3.14).format(options: .{sign: .always})  // "+3.14"
+    ///     (3.14).format(options: .{sign: .Always})  // "+3.14"
     ///
     ///     // String interpolation
     ///     "\{value}"       // general format
@@ -1317,7 +1323,8 @@ public struct Float32:
         } else {
             isNegative = value < 0.0;
             if value.isZero {
-                let inverse = Float32.one.divide(other: value);
+                let one = Float32.one;
+                let inverse = one.divide(value);
                 if inverse < 0.0 {
                     isNegative = true
                 }
@@ -1327,43 +1334,43 @@ public struct Float32:
             }
 
             var style = options.floatStyle;
-            if style == .percent {
-                value = value.multiply(other: 100.0);
+            if style == .Percent {
+                value = value.multiply(100.0);
                 suffixPercent = true;
-                style = .fixed
+                style = .Fixed
             }
 
-            if style == .auto {
+            if style == .Auto {
                 if precisionProvided == false {
                     trimTrailingZeros = true
                 }
                 if value.isZero {
-                    style = .fixed
+                    style = .Fixed
                 } else {
                     let expVal = value.log10().floor();
                     let expInt: Int64 = Int64(raw: lang.cast_f32_i64(expVal.raw));
                     if expInt < -4 or expInt >= precision {
-                        style = .scientific
+                        style = .Scientific
                     } else {
-                        style = .fixed
+                        style = .Fixed
                     }
                 }
             }
 
-            if style == .scientific or style == .scientificUpper {
+            if style == .Scientific or style == .ScientificUpper {
                 var exponent: Int64 = 0;
                 var mantissa = value;
                 if value.isZero == false {
                     let expVal = value.log10().floor();
                     exponent = Int64(raw: lang.cast_f32_i64(expVal.raw));
                     let pow10 = Float32(floatLiteral: 10.0).powi(exponent);
-                    mantissa = value.divide(other: pow10);
+                    mantissa = value.divide(pow10);
                 }
 
                 let scale = Float32(floatLiteral: 10.0).powi(precision);
-                mantissa = mantissa.multiply(other: scale).round().divide(other: scale);
+                mantissa = mantissa.multiply(scale).round().divide(scale);
                 if mantissa >= 10.0 {
-                    mantissa = mantissa.divide(other: 10.0);
+                    mantissa = mantissa.divide(10.0);
                     exponent = exponent + 1
                 }
 
@@ -1402,7 +1409,7 @@ public struct Float32:
                     }
                 }
 
-                if style == .scientificUpper {
+                if style == .ScientificUpper {
                     number.appendByte(69)  // 'E'
                 } else {
                     number.appendByte(101)  // 'e'
@@ -1438,7 +1445,7 @@ public struct Float32:
 
                 var rounded = value;
                 if precision >= 0 {
-                    rounded = rounded.multiply(other: scale).round().divide(other: scale)
+                    rounded = rounded.multiply(scale).round().divide(scale)
                 }
 
                 let intPart = rounded.trunc();
@@ -1486,9 +1493,9 @@ public struct Float32:
         if allowSign {
             if isNegative {
                 result.appendByte(45)  // '-'
-            } else if options.sign == .always {
+            } else if options.sign == .Always {
                 result.appendByte(43)  // '+'
-            } else if options.sign == .space {
+            } else if options.sign == .Space {
                 result.appendByte(32)  // ' '
             }
         }
@@ -1546,9 +1553,9 @@ public struct Float32:
                 var padLeft: Int64 = 0;
                 var padRight: Int64 = 0;
                 let padding = width - result.byteCount;
-                if options.alignment == .left {
+                if options.alignment == .Left {
                     padRight = padding
-                } else if options.alignment == .right {
+                } else if options.alignment == .Right {
                     padLeft = padding
                 } else {
                     padLeft = padding / 2;

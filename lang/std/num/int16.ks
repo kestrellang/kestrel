@@ -5,7 +5,7 @@ module std.num
 
 import std.ffi.(FFISafe)
 import std.core.(
-    Equatable, Comparable, Ordering, Bool, Matchable, Formattable, FormatOptions, Hash, Hasher,
+    Equatable, Comparable, Ordering, Bool, Matchable, Hash, Hasher,
     Addable, Subtractable, Multipliable, Divisible, Modulo, Negatable,
     BitwiseAnd, BitwiseOr, BitwiseXor, BitwiseNot, LeftShift, RightShift,
     AddAssign, SubtractAssign, MultiplyAssign, DivideAssign, ModuloAssign,
@@ -13,7 +13,7 @@ import std.core.(
     ExpressibleByIntLiteral, Convertible, Defaultable,
     RangeConstructible, ClosedRangeConstructible, Range, ClosedRange
 )
-import std.text.(String)
+import std.text.(String, Formattable, FormatOptions)
 import std.memory.(Slice, Pointer)
 import std.num.(UInt8, Int64, UInt64)
 

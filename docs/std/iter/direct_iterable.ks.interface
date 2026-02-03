@@ -196,10 +196,10 @@ extend DirectIterable[T] {
     /// ```
     /// [1, 2, 3].forEach({ print(it) })
     /// ```
-    public func forEach(action: (T) -> Void);
+    public func forEach(action: (T) -> ());
 
     /// Applies a function to each element with early exit on error.
-    public func tryForEach[E](action: (T) -> Result[Void, E]) -> Result[Void, E];
+    public func tryForEach[E](action: (T) -> Result[(), E]) -> Result[(), E];
 
     /// Returns the number of elements.
     ///

@@ -171,3 +171,81 @@ impl IntoDiagnostic for LangPtrArityError {
         ])
     }
 }
+
+/// Error when a type operator builtin is not defined.
+///
+/// This occurs when the syntax sugar (e.g., `[T]`, `T?`, `[K: V]`, `T throws E`)
+/// cannot be resolved because the corresponding builtin type alias is not registered.
+pub struct TypeOperatorNotDefinedError {
+    pub span: Span,
+    pub operator_name: String,
+}
+
+impl IntoDiagnostic for TypeOperatorNotDefinedError {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
+        Diagnostic::error()
+            .with_message(format!(
+                "{} is not defined",
+                self.operator_name
+            ))
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message("type operator cannot be resolved"),
+            ])
+            .with_notes(vec![
+                "Is the standard library imported?".to_string(),
+            ])
+    }
+}
+
+/// Error when a type operator symbol cannot be found in the registry.
+///
+/// This is an internal consistency error - the builtin was registered but
+/// the symbol ID doesn't exist in the symbol registry.
+pub struct TypeOperatorSymbolNotFoundError {
+    pub span: Span,
+    pub operator_name: String,
+}
+
+impl IntoDiagnostic for TypeOperatorSymbolNotFoundError {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
+        Diagnostic::error()
+            .with_message(format!(
+                "internal error: {} symbol not found in registry",
+                self.operator_name
+            ))
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message("type operator symbol missing"),
+            ])
+            .with_notes(vec![
+                "This is an internal compiler error. Please report this bug.".to_string(),
+            ])
+    }
+}
+
+/// Error when a type operator symbol has an unexpected type.
+///
+/// This is an internal consistency error - the symbol exists but is not
+/// a TypeAliasSymbol as expected.
+pub struct TypeOperatorInvalidSymbolError {
+    pub span: Span,
+    pub operator_name: String,
+}
+
+impl IntoDiagnostic for TypeOperatorInvalidSymbolError {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
+        Diagnostic::error()
+            .with_message(format!(
+                "internal error: {} is not a type alias",
+                self.operator_name
+            ))
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message("type operator has wrong symbol type"),
+            ])
+            .with_notes(vec![
+                "This is an internal compiler error. Please report this bug.".to_string(),
+            ])
+    }
+}

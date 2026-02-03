@@ -22,6 +22,9 @@ public struct BytesView: Iterable {
     /// Returns true if the view is empty.
     public func isEmpty() -> Bool;
 
+    /// Returns the raw pointer to the bytes.
+    public func asRaw() -> lang.ptr[lang.i8];
+
     /// Returns the byte at the given index, or None if out of bounds.
     public func byteAt(index: Int64) -> Optional[UInt8];
 
@@ -32,7 +35,7 @@ public struct BytesView: Iterable {
     public func substring(from start: Int64, to end: Int64) -> String;
 
     /// Returns a substring by byte indices, or None if out of bounds or invalid UTF-8 boundary.
-    public func substring(checked from: Int64, to end: Int64) -> Optional[String];
+    public func substring(checked start: Int64, to end: Int64) -> Optional[String];
 
     /// Returns an iterator over the bytes.
     public func iter() -> BytesIterator;
@@ -64,7 +67,7 @@ public struct CharsView: Iterable {
     public func substring(from start: Int64, to end: Int64) -> String;
 
     /// Returns a substring by character indices (O(n)), or None if out of bounds.
-    public func substring(checked from: Int64, to end: Int64) -> Optional[String];
+    public func substring(checked start: Int64, to end: Int64) -> Optional[String];
 }
 
 /// Iterator over grapheme clusters.

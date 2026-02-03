@@ -173,7 +173,7 @@ public struct InspectIterator[I]: Iterator where I: Iterator {
     type Item = I.Item
 
     /// Creates an iterator that calls inspector on each element.
-    public init(inner: I, inspector: (I.Item) -> Void);
+    public init(inner: I, inspector: (I.Item) -> ());
 
     /// Returns the next element after calling the inspector on it.
     public mutating func next() -> I.Item?;
@@ -257,33 +257,6 @@ public struct IntersperseWithIterator[I]: Iterator where I: Iterator {
 
     /// Returns the next element or generated separator.
     public mutating func next() -> I.Item?;
-}
-
-/// Copies each element from a reference iterator.
-///
-/// Converts an iterator of references into an iterator of owned values
-/// by copying each element.
-public struct CopiedIterator[I, T]: Iterator where I: Iterator, I.Item = Ref[T], T: Copyable {
-    type Item = T
-
-    /// Creates an iterator that copies each referenced element.
-    public init(inner: I);
-
-    /// Returns the next copied element.
-    public mutating func next() -> T?;
-}
-
-/// Clones each element from a reference iterator.
-///
-/// Like CopiedIterator but uses Clone instead of Copy.
-public struct ClonedIterator[I, T]: Iterator where I: Iterator, I.Item = Ref[T], T: Cloneable {
-    type Item = T
-
-    /// Creates an iterator that clones each referenced element.
-    public init(inner: I);
-
-    /// Returns the next cloned element.
-    public mutating func next() -> T?;
 }
 
 /// An iterator that yields nothing.

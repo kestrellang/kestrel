@@ -912,6 +912,14 @@ fn resolve_type(ty: &Ty, solution: &Solution) -> Ty {
         },
         // Pointer types - resolve pointee
         TyKind::Pointer(pointee) => Ty::pointer(resolve_type(pointee, solution), ty.span().clone()),
+        // Type aliases with substitutions - resolve any inference placeholders in substitutions
+        TyKind::TypeAlias {
+            symbol,
+            substitutions,
+        } => {
+            let resolved_subs = resolve_substitutions(substitutions, solution);
+            Ty::generic_type_alias(symbol.clone(), resolved_subs, ty.span().clone())
+        },
         // Other types - no inference placeholders to resolve
         _ => ty.clone(),
     }

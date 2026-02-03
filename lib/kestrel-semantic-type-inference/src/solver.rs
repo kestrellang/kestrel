@@ -1960,12 +1960,21 @@ fn check_fully_resolved(ctx: &mut InferenceContext<'_>) {
     }
 
     let mut unresolved = Vec::new();
+    let mut visited = HashSet::new();
 
-    // Check all registered types
-    for (id, ty) in ctx.type_registry() {
-        if matches!(ty.kind(), TyKind::Infer) && !ctx.substitutions().contains_key(id) {
-            unresolved.push((*id, ty.span().clone()));
-        }
+
+    // Check all registered types for unresolved Infer types.
+    // This includes:
+    // 1. Bare Infer types without substitutions
+    // 2. Infer types with substitutions to compound types containing unresolved Infer
+    // 3. Non-Infer compound types (like UnresolvedFunction) that contain unresolved Infer
+    for (_id, ty) in ctx.type_registry() {
+        find_nested_infer_types(ty, ctx, &mut unresolved, &mut visited);
+    }
+
+    // Also check all substitutions for nested unresolved Infer types
+    for (_id, subst_ty) in ctx.substitutions() {
+        find_nested_infer_types(subst_ty, ctx, &mut unresolved, &mut visited);
     }
 
     // Check for any inference placeholders in remaining constraints
@@ -2039,8 +2048,86 @@ fn check_fully_resolved(ctx: &mut InferenceContext<'_>) {
 
 fn check_resolved_id(id: TyId, ctx: &InferenceContext<'_>, unresolved: &mut Vec<(TyId, Span)>) {
     let ty = resolve_type(ctx, id);
+    // Check for top-level Infer or UnresolvedFunction
     if matches!(ty.kind(), TyKind::Infer | TyKind::UnresolvedFunction { .. }) {
         unresolved.push((id, ty.span().clone()));
+    }
+    // Also recursively check for nested Infer types inside compound types
+    find_nested_infer_types(&ty, ctx, unresolved, &mut HashSet::new());
+}
+
+/// Recursively find unresolved Infer types nested inside compound types.
+/// This catches cases where an Infer has a substitution to a compound type
+/// (like UnresolvedFunction) that itself contains unresolved Infer types.
+fn find_nested_infer_types(
+    ty: &Ty,
+    ctx: &InferenceContext<'_>,
+    unresolved: &mut Vec<(TyId, Span)>,
+    visited: &mut HashSet<TyId>,
+) {
+    // Prevent infinite recursion
+    if !visited.insert(ty.id()) {
+        return;
+    }
+
+    match ty.kind() {
+        TyKind::Infer => {
+            // Check if this Infer has a substitution
+            if let Some(subst) = ctx.substitutions().get(&ty.id()) {
+                // Recursively check the substitution
+                find_nested_infer_types(subst, ctx, unresolved, visited);
+            } else if !unresolved.iter().any(|(id, _)| *id == ty.id()) {
+                // No substitution - this is unresolved
+                unresolved.push((ty.id(), ty.span().clone()));
+            }
+        }
+        TyKind::UnresolvedFunction {
+            param_info,
+            return_type,
+        } => {
+            // Check return type
+            find_nested_infer_types(return_type, ctx, unresolved, visited);
+            // Check param types based on param_info
+            match param_info {
+                ParamInfo::ImplicitIt { it_type } => {
+                    find_nested_infer_types(it_type, ctx, unresolved, visited);
+                }
+                ParamInfo::Explicit { param_types } => {
+                    for pt in param_types {
+                        find_nested_infer_types(pt, ctx, unresolved, visited);
+                    }
+                }
+                ParamInfo::Unconstrained => {}
+            }
+        }
+        TyKind::Function {
+            params,
+            return_type,
+        } => {
+            for p in params {
+                find_nested_infer_types(p, ctx, unresolved, visited);
+            }
+            find_nested_infer_types(return_type, ctx, unresolved, visited);
+        }
+        TyKind::Tuple(elements) => {
+            for e in elements {
+                find_nested_infer_types(e, ctx, unresolved, visited);
+            }
+        }
+        TyKind::Struct { substitutions, .. } | TyKind::Enum { substitutions, .. } => {
+            for (_, sub_ty) in substitutions.iter() {
+                find_nested_infer_types(sub_ty, ctx, unresolved, visited);
+            }
+        }
+        TyKind::Pointer(pointee) => {
+            find_nested_infer_types(pointee, ctx, unresolved, visited);
+        }
+        TyKind::AssociatedType { container, .. } => {
+            if let Some(c) = container {
+                find_nested_infer_types(c, ctx, unresolved, visited);
+            }
+        }
+        _ => {}
     }
 }
 

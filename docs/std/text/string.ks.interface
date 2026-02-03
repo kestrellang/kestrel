@@ -26,7 +26,7 @@ public struct SplitWhereIterator: Iterator {
 
 /// A UTF-8 encoded, dynamically sized string with copy-on-write semantics.
 /// Strings are immutable by default; mutations create a new copy if shared.
-public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, Addable, ExpressibleByStringLiteral, Hash {
+public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, Addable, ExpressibleByStringLiteral, Hash, Defaultable {
     type Item = Char
     type Iter = StringIterator
     type Output = String
@@ -112,6 +112,13 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
     public func byteAtUnchecked(index: Int64) -> UInt8;
 
     // ============================================================
+    // Substrings
+    // ============================================================
+
+    /// Returns a substring by byte indices.
+    public func substringBytes(from start: Int64, to end: Int64) -> String;
+
+    // ============================================================
     // Appending (Mutating)
     // ============================================================
 
@@ -135,13 +142,13 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
     public func contains(substring: String) -> Bool;
 
     /// Returns true if any character matches the predicate.
-    public func contains(where predicate: (Char) -> Bool) -> Bool;
+    public func contains(matching predicate: (Char) -> Bool) -> Bool;
 
     /// Returns the byte index of the first occurrence of substring, or None.
     public func find(substring: String) -> Optional[Int64];
 
     /// Returns the byte index of the first character matching the predicate, or None.
-    public func find(where predicate: (Char) -> Bool) -> Optional[Int64];
+    public func find(matching predicate: (Char) -> Bool) -> Optional[Int64];
 
     /// Returns the byte index of the last occurrence of substring, or None.
     public func reverseFind(substring: String) -> Optional[Int64];
@@ -166,13 +173,13 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
     public mutating func trimEnd();
 
     /// Removes leading and trailing characters matching the predicate in place.
-    public mutating func trim(where predicate: (Char) -> Bool);
+    public mutating func trim(matching predicate: (Char) -> Bool);
 
     /// Removes leading characters matching the predicate in place.
-    public mutating func trimStart(where predicate: (Char) -> Bool);
+    public mutating func trimStart(matching predicate: (Char) -> Bool);
 
     /// Removes trailing characters matching the predicate in place.
-    public mutating func trimEnd(where predicate: (Char) -> Bool);
+    public mutating func trimEnd(matching predicate: (Char) -> Bool);
 
     // ============================================================
     // Trimming (Non-Mutating)
@@ -188,13 +195,13 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
     public func trimmedEnd() -> String;
 
     /// Returns a string with leading and trailing characters matching the predicate removed.
-    public func trimmed(where predicate: (Char) -> Bool) -> String;
+    public func trimmed(matching predicate: (Char) -> Bool) -> String;
 
     /// Returns a string with leading characters matching the predicate removed.
-    public func trimmedStart(where predicate: (Char) -> Bool) -> String;
+    public func trimmedStart(matching predicate: (Char) -> Bool) -> String;
 
     /// Returns a string with trailing characters matching the predicate removed.
-    public func trimmedEnd(where predicate: (Char) -> Bool) -> String;
+    public func trimmedEnd(matching predicate: (Char) -> Bool) -> String;
 
     // ============================================================
     // Case Conversion (ASCII-only)
@@ -256,7 +263,7 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
     public func split(separator: String) -> SplitIterator;
 
     /// Returns an iterator that splits the string where the predicate returns true.
-    public func split(where predicate: (Char) -> Bool) -> SplitWhereIterator;
+    public func split(matching predicate: (Char) -> Bool) -> SplitWhereIterator;
 
     // ============================================================
     // Repeating & Padding

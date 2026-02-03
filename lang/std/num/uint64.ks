@@ -5,7 +5,7 @@ module std.num
 
 import std.ffi.(FFISafe)
 import std.core.(
-    Equatable, Comparable, Ordering, Bool, Matchable, Formattable, FormatOptions, Hash, Hasher,
+    Equatable, Comparable, Ordering, Bool, Matchable, Hash, Hasher,
     Addable, Subtractable, Multipliable, Divisible, Modulo, Negatable,
     BitwiseAnd, BitwiseOr, BitwiseXor, BitwiseNot, LeftShift, RightShift,
     AddAssign, SubtractAssign, MultiplyAssign, DivideAssign, ModuloAssign,
@@ -13,7 +13,7 @@ import std.core.(
     ExpressibleByIntLiteral, Convertible, Defaultable,
     RangeConstructible, ClosedRangeConstructible, Range, ClosedRange
 )
-import std.text.(String)
+import std.text.(String, Formattable, FormatOptions)
 import std.memory.(Slice, Pointer)
 import std.num.(UInt8, Int64, UInt64)
 
@@ -624,5 +624,11 @@ public struct UInt64:
         reversed
     }}
 
-/// Platform-sized unsigned integer (alias to UInt64 on 64-bit platforms).
+/// Platform-sized unsigned integer.
+///
+/// On 64-bit platforms, UInt is an alias for UInt64. Use this when you need
+/// an unsigned integer of the platform's native word size.
+///
+/// Example:
+///     let size: UInt = 1024
 public type UInt = UInt64

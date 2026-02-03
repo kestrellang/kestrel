@@ -9,11 +9,11 @@ module std.num
 
 import std.ffi.(FFISafe)
 import std.core.(
-    Equatable, Comparable, Ordering, Bool, Formattable, FormatOptions,
+    Equatable, Comparable, Ordering, Bool,
     Addable, Subtractable, Multipliable, Divisible, Negatable,
     ExpressibleByFloatLiteral, ExpressibleByIntLiteral, Convertible, Defaultable
 )
-import std.text.(String)
+import std.text.(String, Formattable, FormatOptions)
 import std.num.(Int64, {{OTHER_FLOAT}})
 
 /// A {{BITS}}-bit IEEE 754 {{PRECISION_KIND}} floating-point type.
@@ -340,8 +340,14 @@ public struct {{TYPE_NAME}}:
     public var sign: {{TYPE_NAME}} { get {
         if self.isNaN { {{TYPE_NAME}}.nan }
         else if self.isZero {
-            let inverse = {{TYPE_NAME}}.one.divide(other: self);
-            if inverse < 0.0 { {{TYPE_NAME}}.zero.negate() } else { {{TYPE_NAME}}(floatLiteral: 0.0) }
+            let one = {{TYPE_NAME}}.one;
+            let inverse = one.divide(self);
+            if inverse < 0.0 {
+                let zero = {{TYPE_NAME}}.zero;
+                zero.negate()
+            } else {
+                {{TYPE_NAME}}(floatLiteral: 0.0)
+            }
         }
         else if self < 0.0 { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_neg(1.0)) }
         else { {{TYPE_NAME}}(floatLiteral: 1.0) }

@@ -10,6 +10,7 @@ use kestrel_semantic_model::SymbolFor;
 use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
 use kestrel_semantic_tree::behavior::callable::CallableBehavior;
 use kestrel_semantic_tree::behavior::extension_target::ExtensionTargetBehavior;
+use kestrel_semantic_tree::behavior::generics::GenericsBehavior;
 use kestrel_semantic_tree::behavior::implements::ImplementsBehavior;
 use kestrel_semantic_tree::behavior::typed::TypedBehavior;
 use kestrel_semantic_tree::expr::{ExprKind, Expression};
@@ -509,15 +510,112 @@ pub fn get_type_parameter_bounds_by_id(
     bounds
 }
 
+/// Check if a constraint path matches an associated type with its container.
+///
+/// For example, for `where I.Item: Protocol`:
+/// - `path` would be `["I", "Item"]`
+/// - `assoc_name` would be `"Item"`
+/// - `container` would be the type for `I`
+///
+/// This function verifies that:
+/// 1. The last segment of the path matches the associated type name
+/// 2. The preceding segments match the container type chain
+fn path_matches_associated_type(
+    path: &[String],
+    assoc_name: &str,
+    container: Option<&Ty>,
+) -> bool {
+    if path.is_empty() {
+        return false;
+    }
+
+    // Last segment must match the associated type name
+    if path.last() != Some(&assoc_name.to_string()) {
+        return false;
+    }
+
+    // If path has only one segment (e.g., ["Item"]), it matches any container
+    // This is for simple constraints like `where Item: Protocol` in protocol extensions
+    if path.len() == 1 {
+        return true;
+    }
+
+    // For multi-segment paths, verify the container chain matches
+    // E.g., for path ["I", "Item"], container should be type parameter "I"
+    let prefix = &path[..path.len() - 1];
+
+    // Check if container matches the path prefix
+    match container {
+        None => {
+            // No container means this is a top-level associated type in a protocol
+            // Only single-segment paths should match (handled above)
+            false
+        }
+        Some(container_ty) => {
+            // Recursively check the container chain
+            container_matches_path(container_ty, prefix)
+        }
+    }
+}
+
+/// Check if a container type matches a path prefix.
+///
+/// For example, for path prefix ["I"]:
+/// - A type parameter named "I" would match
+///
+/// For path prefix ["I", "Item"]:
+/// - An associated type "Item" with container type parameter "I" would match
+fn container_matches_path(container: &Ty, path: &[String]) -> bool {
+    if path.is_empty() {
+        return true;
+    }
+
+    match container.kind() {
+        TyKind::TypeParameter(type_param) => {
+            // Type parameter matches if it's the only segment and names match
+            path.len() == 1 && path[0] == type_param.metadata().name().value
+        }
+        TyKind::AssociatedType { symbol, container: nested_container } => {
+            // Associated type matches if:
+            // 1. Last segment matches the associated type name
+            // 2. Remaining prefix matches the nested container
+            if path.is_empty() {
+                return false;
+            }
+            let assoc_name = symbol.metadata().name().value.clone();
+            if path.last() != Some(&assoc_name) {
+                return false;
+            }
+            let prefix = &path[..path.len() - 1];
+            match nested_container {
+                Some(c) => container_matches_path(c, prefix),
+                None => prefix.is_empty(),
+            }
+        }
+        TyKind::SelfType => {
+            // Self matches if it's the only segment and named "Self"
+            path.len() == 1 && path[0] == "Self"
+        }
+        _ => {
+            // Other types don't match path prefixes
+            false
+        }
+    }
+}
+
 /// Get the protocol bounds for an associated type from context.
 ///
 /// This combines:
 /// 1. Direct bounds from the associated type symbol (e.g., `type Item: Protocol`)
 /// 2. Bounds from SelfBound constraints in the context's where clause (e.g., `where Item: Protocol`)
 ///
+/// The `container` parameter is used to verify that nested path constraints like
+/// `where I.Item: Protocol` match the actual associated type being queried.
+///
 /// This is analogous to `get_type_parameter_bounds_from_context` but for associated types.
 pub fn get_associated_type_bounds_from_context(
     assoc_type: &Arc<AssociatedTypeSymbol>,
+    container: Option<&Ty>,
     ctx: &mut BodyResolutionContext,
 ) -> Vec<Ty> {
     let mut bounds = Vec::new();
@@ -534,6 +632,7 @@ pub fn get_associated_type_bounds_from_context(
 
     // 2. Check context's where clause for SelfBound constraints
     // These are constraints like `where Item: Comparable` in protocol extensions
+    // or nested constraints like `where I.Item: Iterator`
     for constraint in ctx.where_clause().constraints() {
         if let Constraint::SelfBound {
             associated_type_path,
@@ -541,11 +640,10 @@ pub fn get_associated_type_bounds_from_context(
             ..
         } = constraint
         {
-            // Match constraints on this associated type
+            // Match constraints on this associated type, verifying the full path
             // Single-level: where Item: Protocol → path = ["Item"]
-            // Nested: where Iter.Item: Protocol → path = ["Iter", "Item"]
-            if !associated_type_path.is_empty() && associated_type_path.last() == Some(&assoc_name)
-            {
+            // Nested: where I.Item: Protocol → path = ["I", "Item"]
+            if path_matches_associated_type(associated_type_path, &assoc_name, container) {
                 for bound in self_bounds {
                     if matches!(bound.kind(), TyKind::Protocol { .. }) {
                         bounds.push(bound.clone());
@@ -556,7 +654,9 @@ pub fn get_associated_type_bounds_from_context(
         if let Constraint::InheritedAssociatedTypeBound { path, bounds: assoc_bounds, .. } =
             constraint
         {
-            if path.split('.').last() == Some(assoc_name.as_str()) {
+            // Convert dot-separated path to vec for matching
+            let path_segments: Vec<String> = path.split('.').map(|s| s.to_string()).collect();
+            if path_matches_associated_type(&path_segments, &assoc_name, container) {
                 for bound in assoc_bounds {
                     if matches!(bound.kind(), TyKind::Protocol { .. }) {
                         bounds.push(bound.clone());
@@ -571,7 +671,18 @@ pub fn get_associated_type_bounds_from_context(
             ..
         } = constraint
         {
-            if param_name == &assoc_name {
+            // TypeBound with param: None is for simple associated type constraints
+            // Match when:
+            // 1. Name matches AND container is None (top-level associated type)
+            // 2. Name matches AND container is Self (protocol extension associated type)
+            // This handles `where Item: Protocol` in protocol extensions where Item
+            // has container Self (since it's implicitly Self.Item)
+            let container_is_self_or_none = match container {
+                None => true,
+                Some(ty) => matches!(ty.kind(), TyKind::SelfType),
+            };
+
+            if param_name == &assoc_name && container_is_self_or_none {
                 for bound in param_bounds {
                     if matches!(bound.kind(), TyKind::Protocol { .. }) {
                         bounds.push(bound.clone());
@@ -581,97 +692,115 @@ pub fn get_associated_type_bounds_from_context(
         }
     }
 
-    // 3. Also check function's parent (extension) where clause
-    // The context's where_clause should already contain the combined constraints,
-    // but we double-check by looking at the parent extension's target behavior
+    // 3. Also check function's parent where clause (for struct, enum, and extension)
+    // The context's where_clause contains the function's own constraints,
+    // but we also need to check the parent's where clause for inherited constraints
     if let Some(function) = ctx.model.query(SymbolFor {
         id: ctx.function_id,
     }) {
         if let Some(parent) = function.metadata().parent() {
-            if parent.metadata().kind() == KestrelSymbolKind::Extension {
-                if let Some(target_beh) =
-                    parent.metadata().get_behavior::<ExtensionTargetBehavior>()
-                {
-                    let where_clause = target_beh.where_clause();
-                    for constraint in where_clause.constraints() {
-                        if let Constraint::SelfBound {
-                            associated_type_path,
-                            bounds: self_bounds,
-                            ..
-                        } = constraint
-                        {
-                            if !associated_type_path.is_empty()
-                                && associated_type_path.last() == Some(&assoc_name)
-                            {
-                                for bound in self_bounds {
-                                    if let TyKind::Protocol { symbol, .. } = bound.kind() {
-                                        // Check if this protocol is already in bounds
-                                        let already_present = bounds.iter().any(|b| {
-                                            if let TyKind::Protocol {
-                                                symbol: existing, ..
-                                            } = b.kind()
-                                            {
-                                                existing.metadata().id() == symbol.metadata().id()
-                                            } else {
-                                                false
-                                            }
-                                        });
-                                        if !already_present {
-                                            bounds.push(bound.clone());
+            // Get the parent's where clause depending on its kind
+            let parent_where_clause = match parent.metadata().kind() {
+                KestrelSymbolKind::Extension => {
+                    parent
+                        .metadata()
+                        .get_behavior::<ExtensionTargetBehavior>()
+                        .map(|t| t.where_clause().clone())
+                }
+                KestrelSymbolKind::Struct | KestrelSymbolKind::Enum => {
+                    parent
+                        .metadata()
+                        .get_behavior::<GenericsBehavior>()
+                        .map(|g| g.where_clause().clone())
+                }
+                _ => None,
+            };
+
+            if let Some(where_clause) = parent_where_clause {
+                for constraint in where_clause.constraints() {
+                    if let Constraint::SelfBound {
+                        associated_type_path,
+                        bounds: self_bounds,
+                        ..
+                    } = constraint
+                    {
+                        if path_matches_associated_type(associated_type_path, &assoc_name, container) {
+                            for bound in self_bounds {
+                                if let TyKind::Protocol { symbol, .. } = bound.kind() {
+                                    // Check if this protocol is already in bounds
+                                    let already_present = bounds.iter().any(|b| {
+                                        if let TyKind::Protocol {
+                                            symbol: existing, ..
+                                        } = b.kind()
+                                        {
+                                            existing.metadata().id() == symbol.metadata().id()
+                                        } else {
+                                            false
                                         }
+                                    });
+                                    if !already_present {
+                                        bounds.push(bound.clone());
                                     }
                                 }
                             }
                         }
-                        if let Constraint::InheritedAssociatedTypeBound {
-                            path,
-                            bounds: assoc_bounds,
-                            ..
-                        } = constraint
-                        {
-                            if path.split('.').last() == Some(assoc_name.as_str()) {
-                                for bound in assoc_bounds {
-                                    if let TyKind::Protocol { symbol, .. } = bound.kind() {
-                                        let already_present = bounds.iter().any(|b| {
-                                            if let TyKind::Protocol {
-                                                symbol: existing, ..
-                                            } = b.kind()
-                                            {
-                                                existing.metadata().id() == symbol.metadata().id()
-                                            } else {
-                                                false
-                                            }
-                                        });
-                                        if !already_present {
-                                            bounds.push(bound.clone());
+                    }
+                    if let Constraint::InheritedAssociatedTypeBound {
+                        path,
+                        bounds: assoc_bounds,
+                        ..
+                    } = constraint
+                    {
+                        let path_segments: Vec<String> = path.split('.').map(|s| s.to_string()).collect();
+                        if path_matches_associated_type(&path_segments, &assoc_name, container) {
+                            for bound in assoc_bounds {
+                                if let TyKind::Protocol { symbol, .. } = bound.kind() {
+                                    let already_present = bounds.iter().any(|b| {
+                                        if let TyKind::Protocol {
+                                            symbol: existing, ..
+                                        } = b.kind()
+                                        {
+                                            existing.metadata().id() == symbol.metadata().id()
+                                        } else {
+                                            false
                                         }
+                                    });
+                                    if !already_present {
+                                        bounds.push(bound.clone());
                                     }
                                 }
                             }
                         }
-                        if let Constraint::TypeBound {
-                            param: None,
-                            param_name,
-                            bounds: param_bounds,
-                            ..
-                        } = constraint
-                        {
-                            if param_name == &assoc_name {
-                                for bound in param_bounds {
-                                    if let TyKind::Protocol { symbol, .. } = bound.kind() {
-                                        let already_present = bounds.iter().any(|b| {
-                                            if let TyKind::Protocol {
-                                                symbol: existing, ..
-                                            } = b.kind()
-                                            {
-                                                existing.metadata().id() == symbol.metadata().id()
-                                            } else {
-                                                false
-                                            }
-                                        });
-                                        if !already_present {
-                                            bounds.push(bound.clone());
+                    }
+                    if let Constraint::TypeBound {
+                        param: None,
+                        param_name,
+                        bounds: param_bounds,
+                        ..
+                    } = constraint
+                    {
+                        // TypeBound with param: None matches simple associated type constraints
+                        // Match when container is None or Self (for protocol extensions)
+                        let container_is_self_or_none = match container {
+                            None => true,
+                            Some(ty) => matches!(ty.kind(), TyKind::SelfType),
+                        };
+
+                        if param_name == &assoc_name && container_is_self_or_none {
+                            for bound in param_bounds {
+                                if let TyKind::Protocol { symbol, .. } = bound.kind() {
+                                    let already_present = bounds.iter().any(|b| {
+                                        if let TyKind::Protocol {
+                                            symbol: existing, ..
+                                        } = b.kind()
+                                        {
+                                            existing.metadata().id() == symbol.metadata().id()
+                                        } else {
+                                            false
                                         }
+                                    });
+                                    if !already_present {
+                                        bounds.push(bound.clone());
                                     }
                                 }
                             }
