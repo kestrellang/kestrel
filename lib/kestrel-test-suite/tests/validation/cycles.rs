@@ -270,11 +270,12 @@ protocol Hashable {
     func hash() -> lang.i64
 }
 
-struct Set[T] where T: Hashable {
+struct MySet[T] where T: Hashable {
     let items: [T]
 }
 "#,
         )
+        .with_stdlib()
         .expect(Compiles)
         .expect(Symbol::new("Hashable").is(SymbolKind::Protocol));
     }

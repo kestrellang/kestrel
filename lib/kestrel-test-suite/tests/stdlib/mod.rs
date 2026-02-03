@@ -93,8 +93,8 @@ mod set {
                 arr.append(2);
                 arr.append(3);
 
-                let set = std.collections.Set[std.num.Int64](from: arr);
-                if set.count != 3 { return 1 }
+                let mySet = std.collections.Set[std.num.Int64](from: arr);
+                if mySet.count != 3 { return 1 }
 
                 0
             }

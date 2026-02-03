@@ -2133,8 +2133,22 @@ fn collect_protocols_with_inherited_impl(
         return;
     }
 
+    // Clone substitutions and populate any missing type parameter defaults.
+    // This is necessary for protocols like `NotEqual[Rhs = Self]` where the
+    // Rhs parameter has a default value that must be included in substitutions
+    // for method signature resolution to work correctly.
+    let mut subs_with_defaults = subs.clone();
+    for type_param in proto.type_parameters() {
+        let param_id = type_param.metadata().id();
+        if !subs_with_defaults.contains(param_id)
+            && let Some(default_ty) = type_param.default()
+        {
+            subs_with_defaults.insert(param_id, default_ty.clone());
+        }
+    }
+
     // Add this protocol to results
-    result.push((proto.clone(), subs.clone()));
+    result.push((proto.clone(), subs_with_defaults.clone()));
 
     // Get inherited protocols from ConformancesBehavior
     if let Some(conformances) = proto.metadata().get_behavior::<ConformancesBehavior>() {
@@ -2145,13 +2159,13 @@ fn collect_protocols_with_inherited_impl(
             } = conformance.kind()
             {
                 // Apply parent substitutions to inherited protocol's substitutions.
-                // For each type in inherited_subs, apply subs to get the final type.
+                // For each type in inherited_subs, apply subs_with_defaults to get the final type.
                 let mut combined_subs = Substitutions::new();
                 for (param_id, ty) in inherited_subs.iter() {
-                    combined_subs.insert(*param_id, subs.apply(ty));
+                    combined_subs.insert(*param_id, subs_with_defaults.apply(ty));
                 }
                 // Also copy over any subs from parent that aren't in inherited_subs
-                for (param_id, ty) in subs.iter() {
+                for (param_id, ty) in subs_with_defaults.iter() {
                     if !combined_subs.contains(*param_id) {
                         combined_subs.insert(*param_id, ty.clone());
                     }
