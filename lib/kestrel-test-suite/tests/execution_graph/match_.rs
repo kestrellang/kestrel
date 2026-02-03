@@ -35,7 +35,7 @@ mod match_expressions {
         .expect(Compiles)
         .expect(Mir::compiles())
         .expect(
-            Mir::mir_function("Main.describe")
+            Mir::mir_function("Main.describe$n")
                 .returns(MirTy::I64)
                 .has_at_least_blocks(3),
         );
@@ -58,7 +58,7 @@ mod match_expressions {
         .expect(Compiles)
         .expect(Mir::compiles())
         .expect(
-            Mir::mir_function("Main.toInt")
+            Mir::mir_function("Main.toInt$b")
                 .returns(MirTy::I64)
                 .any_block(|b| b.terminates_with(TerminatorPattern::Branch)),
         );
@@ -86,7 +86,7 @@ mod match_expressions {
         .expect(Compiles)
         .expect(Mir::compiles())
         .expect(
-            Mir::mir_function("Main.unwrap")
+            Mir::mir_function("Main.unwrap$opt")
                 .returns(MirTy::I64)
                 .any_block(|b| b.terminates_with(TerminatorPattern::Switch)),
         );
@@ -115,7 +115,7 @@ mod match_expressions {
         .expect(Compiles)
         .expect(Mir::compiles())
         .expect(
-            Mir::mir_function("Main.isRed")
+            Mir::mir_function("Main.isRed$c")
                 .returns(MirTy::Bool)
                 .any_block(|b| b.terminates_with(TerminatorPattern::Switch)),
         );
@@ -153,7 +153,7 @@ mod if_let {
         .expect(Compiles)
         .expect(Mir::compiles())
         .expect(
-            Mir::mir_function("Main.unwrap")
+            Mir::mir_function("Main.unwrap$opt")
                 .returns(MirTy::I64)
                 .has_at_least_blocks(3), // entry, then, else
         );
@@ -183,7 +183,7 @@ mod if_let {
         .expect(Compiles)
         .expect(Mir::compiles())
         .expect(
-            Mir::mir_function("Main.addIfBothSome")
+            Mir::mir_function("Main.addIfBothSome$a$b")
                 .returns(MirTy::I64)
                 .has_at_least_blocks(4), // entry, first match, second match, else
         );
@@ -212,7 +212,7 @@ mod if_let {
         .expect(Compiles)
         .expect(Mir::compiles())
         .expect(
-            Mir::mir_function("Main.maybeDouble")
+            Mir::mir_function("Main.maybeDouble$opt")
                 .returns(MirTy::I64)
                 .has_local("result", MirTy::I64),
         );
@@ -237,7 +237,7 @@ mod if_let {
         .expect(Compiles)
         .expect(Mir::compiles())
         .expect(
-            Mir::mir_function("Main.unwrap")
+            Mir::mir_function("Main.unwrap$opt")
                 .has_at_least_blocks(3)
                 .any_block(|b| b.terminates_with(TerminatorPattern::Switch)),
         );
@@ -274,7 +274,7 @@ mod guard_let {
         .expect(Compiles)
         .expect(Mir::compiles())
         .expect(
-            Mir::mir_function("Main.process")
+            Mir::mir_function("Main.process$opt")
                 .returns(MirTy::I64)
                 .has_at_least_blocks(3), // entry, guard body, continuation
         );
@@ -305,7 +305,7 @@ mod guard_let {
         .expect(Compiles)
         .expect(Mir::compiles())
         .expect(
-            Mir::mir_function("Main.process")
+            Mir::mir_function("Main.process$a$b")
                 .returns(MirTy::I64)
                 .has_at_least_blocks(4),
         );
@@ -397,7 +397,7 @@ mod tuple_patterns {
         .expect(Compiles)
         .expect(Mir::compiles())
         .expect(
-            Mir::mir_function("Main.classify")
+            Mir::mir_function("Main.classify$pair")
                 .returns(MirTy::I64)
                 .has_at_least_blocks(4),
         );
@@ -418,7 +418,7 @@ mod tuple_patterns {
         .expect(Compiles)
         .expect(Mir::compiles())
         .expect(
-            Mir::mir_function("Main.sum")
+            Mir::mir_function("Main.sum$pair")
                 .returns(MirTy::I64)
                 .has_local("a", MirTy::I64)
                 .has_local("b", MirTy::I64),
@@ -463,7 +463,7 @@ mod nested_patterns {
         .expect(Compiles)
         .expect(Mir::compiles())
         .expect(
-            Mir::mir_function("Main.extract")
+            Mir::mir_function("Main.extract$o")
                 .returns(MirTy::I64)
                 .has_at_least_blocks(4),
         );
@@ -541,7 +541,7 @@ mod match_with_guards {
         .expect(Compiles)
         .expect(Mir::compiles())
         .expect(
-            Mir::mir_function("Main.classify")
+            Mir::mir_function("Main.classify$n")
                 .returns(MirTy::I64)
                 .has_at_least_blocks(5), // Multiple guards create multiple branches
         );

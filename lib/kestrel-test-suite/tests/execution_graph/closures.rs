@@ -391,7 +391,7 @@ mod closure_as_parameter {
         .expect(Compiles)
         .expect(Mir::compiles())
         .expect(
-            Mir::mir_function("Main.apply")
+            Mir::mir_function("Main.apply$f$x")
                 .returns(MirTy::I64)
                 .has_param_count(2)
                 .calls_escaping(),
@@ -412,7 +412,7 @@ mod closure_as_parameter {
         .expect(Compiles)
         .expect(Mir::compiles())
         .expect(
-            Mir::mir_function("Main.compose")
+            Mir::mir_function("Main.compose$f$g$x")
                 .returns(MirTy::I64)
                 .has_param_count(3)
                 .calls_escaping(),
@@ -443,7 +443,7 @@ mod closure_as_parameter {
         )
         .expect(Compiles)
         .expect(Mir::compiles())
-        .expect(Mir::mir_function("Main.main").calls("Main.apply"))
+        .expect(Mir::mir_function("Main.main").calls("Main.apply$f$x"))
         .expect(
             Mir::mir_closure("Main.main", 0)
                 .any_block(|b| b.has_statement(StatementPattern::BinOp(BinOp::MulSigned))),

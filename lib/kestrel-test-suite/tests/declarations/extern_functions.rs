@@ -109,7 +109,7 @@ mod positive {
         .expect(Mir::compiles())
         // Parameters should be value types (MyInt), NOT reference types (&MyInt)
         .expect(
-            Mir::mir_function("Test.c_add")
+            Mir::mir_function("Test.c_add$a$b")
                 .has_param("a", MirTy::named("Test.MyInt"))
                 .has_param("b", MirTy::named("Test.MyInt"))
                 .returns(MirTy::named("Test.MyInt")),
@@ -135,7 +135,7 @@ mod positive {
         .expect(Compiles)
         .expect(Mir::compiles())
         .expect(
-            Mir::mir_function("Test.implicit_consuming")
+            Mir::mir_function("Test.implicit_consuming$x")
                 .has_param("x", MirTy::named("Test.MyInt"))
                 .returns(MirTy::named("Test.MyInt")),
         );
@@ -158,7 +158,7 @@ mod positive {
         .expect(Compiles)
         .expect(Mir::compiles())
         .expect(
-            Mir::mir_function("Test.explicit_consuming")
+            Mir::mir_function("Test.explicit_consuming$x")
                 .has_param("x", MirTy::named("Test.MyInt"))
                 .returns(MirTy::named("Test.MyInt")),
         );

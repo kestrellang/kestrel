@@ -190,24 +190,24 @@ public struct SDLApp : not Copyable {
     public mutating func pollEvent() -> Event? {
         let eventPtr = lang.cast_ptr[lang.i8](self.eventBuffer.asPointer().asRaw().raw);
 
-        guard sdlPollEvent(eventPtr) != 0 else {
+        if sdlPollEvent(eventPtr) == 0 {
             return null;
         }
 
         let eventType = sdlGetEventType(eventPtr);
 
         match eventType {
-            0x100 => Event.Quit,
+            0x100 => .Some(Event.Quit),
             0x300 => {
                 let code = sdlGetKeyScancode(eventPtr);
 
-                Event.KeyDown(scancodeToKey(code))
+                .Some(Event.KeyDown(scancodeToKey(code)))
             },
             0x301 => {
                 let code = sdlGetKeyScancode(eventPtr);
-                
-                Event.KeyUp(scancodeToKey(code));
-            }
+
+                .Some(Event.KeyUp(scancodeToKey(code)))
+            },
             _ => null
         }
     }

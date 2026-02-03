@@ -657,7 +657,7 @@ mod witness_method_calls {
         .expect(Compiles)
         .expect(Mir::compiles())
         .expect(
-            Mir::mir_function("Test.addThem")
+            Mir::mir_function("Test.addThem$a$b")
                 .has_type_params(1)
                 .calls_witness("Test.Add", "add"),
         );
@@ -732,7 +732,7 @@ mod witness_method_calls {
         .expect(Compiles)
         .expect(Mir::compiles())
         .expect(
-            Mir::mir_function("Test.make")
+            Mir::mir_function("Test.make$v")
                 .has_type_params(1)
                 .calls_witness("Test.Factory", "init"),
         );
@@ -757,7 +757,7 @@ mod witness_method_calls {
         .expect(Compiles)
         .expect(Mir::compiles())
         .expect(
-            Mir::mir_function("Test.run")
+            Mir::mir_function("Test.run$proc$a$b")
                 .has_type_params(1)
                 .calls_witness("Test.Processor", "process"),
         );
@@ -787,7 +787,7 @@ mod witness_method_calls {
         .expect(Compiles)
         .expect(Mir::compiles())
         .expect(
-            Mir::mir_function("Test.compute")
+            Mir::mir_function("Test.compute$a$b")
                 .has_type_params(1)
                 .calls_witness("Test.Add", "add")
                 .calls_witness("Test.Mul", "mul"),
@@ -813,7 +813,7 @@ mod witness_method_calls {
         .expect(Compiles)
         .expect(Mir::compiles())
         .expect(
-            Mir::mir_function("Test.convert")
+            Mir::mir_function("Test.convert$n")
                 .has_type_params(1)
                 .calls_witness("Test.Convertible", "fromInt"),
         );
@@ -839,7 +839,7 @@ mod witness_method_calls {
         .expect(Compiles)
         .expect(Mir::compiles())
         .expect(
-            Mir::mir_function("Test.bump")
+            Mir::mir_function("Test.bump$a")
                 .has_type_params(1)
                 .calls_witness("Test.Counter", "increment"),
         );

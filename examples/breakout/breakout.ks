@@ -57,7 +57,7 @@ struct Config {
 // Styles
 // ============================================
 
-struct Styles {
+struct Styles : Cloneable {
     static var border: Style { [.White, .Dim] }
     static var paddle: Style { [.White, .Bold] }
     static var ball: Style { [.Yellow, .Bold] }
@@ -67,6 +67,8 @@ struct Styles {
     static var gameOver: Style { [.Red, .Bold] }
     static var win: Style { [.Green, .Bold] }
     static var prompt: Style { [.Yellow] }
+
+    func clone() -> Styles { Styles() }
 }
 
 // ============================================
@@ -164,7 +166,7 @@ struct Paddle {
 // BrickGrid
 // ============================================
 
-struct BrickGrid {
+struct BrickGrid : Cloneable {
     var bricks: Array[Bool]
     var remaining: Int64
 
@@ -200,6 +202,13 @@ struct BrickGrid {
     }
 
     var allCleared: Bool { self.remaining <= 0 }
+
+    func clone() -> BrickGrid {
+        var copy = BrickGrid();
+        copy.bricks = self.bricks.clone();
+        copy.remaining = self.remaining;
+        copy
+    }
 
     mutating func reset() {
         for i in Range[Int64](0, Config.brickRows * Config.brickCols) {
@@ -567,9 +576,7 @@ func usleep(usec: UInt32) -> Int32
 func main() -> () throws Error {
     var game = Game();
 
-    let iterator = game.iter();
-
-    while let .Some(x) = iterator.next() {
+    while let .Some(x) = game.next() {
         usleep(16667);
     }
 

@@ -439,7 +439,7 @@ mod mir_tests {
         // The final call to consume should use Move mode
         .expect(Mir::mir_function("Test.test").any_block(|b| {
             b.has_statement(StatementPattern::CallWithModes {
-                callee: "Test.consume".to_string(),
+                callee: "Test.consume$d".to_string(),
                 arg_modes: vec![PassingMode::Move],
             })
         }));
@@ -482,7 +482,7 @@ mod mir_tests {
         // Reference is created first, then copied to the call
         .expect(Mir::mir_function("Test.test").any_block(|b| {
             b.has_statement(StatementPattern::CallWithModes {
-                callee: "Test.borrow".to_string(),
+                callee: "Test.borrow$d".to_string(),
                 arg_modes: vec![PassingMode::Copy],
             })
         }))
@@ -515,7 +515,7 @@ mod mir_tests {
         // Simple copyable uses Copy mode, not Move after clone
         .expect(Mir::mir_function("Test.test").any_block(|b| {
             b.has_statement(StatementPattern::CallWithModes {
-                callee: "Test.consume".to_string(),
+                callee: "Test.consume$p".to_string(),
                 arg_modes: vec![PassingMode::Copy],
             })
         }));
@@ -601,7 +601,7 @@ mod generic_tests {
         .without_prelude()
         .expect(Compiles)
         .expect(Mir::compiles())
-        .expect(Mir::mir_function("Test.makeClone").calls_witness("Test.Cloneable", "clone"));
+        .expect(Mir::mir_function("Test.makeClone$item").calls_witness("Test.Cloneable", "clone"));
     }
 
     #[test]
@@ -755,7 +755,7 @@ mod multiple_args_tests {
         .expect(Mir::compiles())
         .expect(Mir::mir_function("Test.test").any_block(|b| {
             b.has_statement(StatementPattern::CallWithModes {
-                callee: "Test.consumeTwo".to_string(),
+                callee: "Test.consumeTwo$a$b".to_string(),
                 arg_modes: vec![PassingMode::Move, PassingMode::Move],
             })
         }));
@@ -803,7 +803,7 @@ mod multiple_args_tests {
         // Point is simple Copyable → Copy, Data is Cloneable → Move (after clone)
         .expect(Mir::mir_function("Test.test").any_block(|b| {
             b.has_statement(StatementPattern::CallWithModes {
-                callee: "Test.consumeMixed".to_string(),
+                callee: "Test.consumeMixed$p$d".to_string(),
                 arg_modes: vec![PassingMode::Copy, PassingMode::Move],
             })
         }));

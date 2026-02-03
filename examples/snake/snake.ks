@@ -20,7 +20,7 @@ struct Config {
 // Styles
 // ============================================
 
-struct Styles {
+struct Styles : Cloneable {
     static var border: Style { [.White] }
     static var title: Style { [.Yellow, .Bold] }
     static var score: Style { [.White, .Bold] }
@@ -30,6 +30,8 @@ struct Styles {
     static var food: Style { [.Red, .Bold] }
     static var gameOver: Style { [.Red, .Bold] }
     static var prompt: Style { [.Yellow] }
+
+    func clone() -> Styles { Styles() }
 }
 
 // ============================================

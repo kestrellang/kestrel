@@ -614,12 +614,12 @@ mod automatic_deinit {
         Test::new(
             r#"module Test
             import Prelude
-            
+
             struct Handle: not Copyable {
                 var fd: lang.i64
                 deinit {}
             }
-            
+
             func example(cond: lang.i1) {
                 if cond {
                     let h1 = Handle(fd: 1);
@@ -631,7 +631,7 @@ mod automatic_deinit {
         )
         .expect(Compiles)
         .expect(
-            MirFunction::new("Test.example")
+            MirFunction::new("Test.example$cond")
                 // Both branches should have deinit calls for their Handle
                 .any_block(|b| {
                     b.has_statement(StatementPattern::DeinitCall {
@@ -751,14 +751,14 @@ mod automatic_deinit {
         Test::new(
             r#"module Test
             import Prelude
-            
+
             struct Handle: not Copyable {
                 var fd: lang.i64
                 deinit {}
             }
-            
+
             func consume(consuming h: Handle) {}
-            
+
             func example(cond: lang.i1) {
                 let handle = Handle(fd: 42);
                 if cond {
@@ -772,7 +772,7 @@ mod automatic_deinit {
         )
         .expect(Compiles)
         .expect(
-            MirFunction::new("Test.example")
+            MirFunction::new("Test.example$cond")
                 .any_block(|b| b.has_statement(StatementPattern::AnyDeinitIf)),
         );
     }
@@ -784,14 +784,14 @@ mod automatic_deinit {
         Test::new(
             r#"module Test
             import Prelude
-            
+
             struct Handle: not Copyable {
                 var fd: lang.i64
                 deinit {}
             }
-            
+
             func consume(consuming h: Handle) {}
-            
+
             func example(cond: lang.i1) {
                 let handle = Handle(fd: 42);
                 if cond {
@@ -804,7 +804,7 @@ mod automatic_deinit {
         )
         .expect(Compiles)
         .expect(
-            MirFunction::new("Test.example")
+            MirFunction::new("Test.example$cond")
                 // Should have flag-setting statements
                 .any_block(|b| b.has_statement(StatementPattern::AnySetDeinitFlag)),
         );
@@ -816,14 +816,14 @@ mod automatic_deinit {
         Test::new(
             r#"module Test
             import Prelude
-            
+
             struct Handle: not Copyable {
                 var fd: lang.i64
                 deinit {}
             }
-            
+
             func consume(consuming h: Handle) {}
-            
+
             func example(cond: lang.i1) {
                 let handle = Handle(fd: 42);
                 if cond {
@@ -837,7 +837,7 @@ mod automatic_deinit {
         )
         .expect(Compiles)
         .expect(
-            MirFunction::new("Test.example")
+            MirFunction::new("Test.example$cond")
                 // Should NOT have a DeinitIf for handle
                 .no_block(|b| b.has_statement(StatementPattern::AnyDeinitIf))
                 // Should NOT have a Deinit for handle either
@@ -855,16 +855,16 @@ mod automatic_deinit {
         Test::new(
             r#"module Test
             import Prelude
-            
+
             struct Handle: not Copyable {
                 var fd: lang.i64
                 deinit {}
             }
-            
+
             func getVal(h: Handle) -> lang.i64 {
                 return h.fd
             }
-            
+
             func example(cond: lang.i1) {
                 let handle = Handle(fd: 42);
                 if cond {
@@ -878,7 +878,7 @@ mod automatic_deinit {
         )
         .expect(Compiles)
         .expect(
-            MirFunction::new("Test.example")
+            MirFunction::new("Test.example$cond")
                 // Should have regular deinit call for handle
                 .any_block(|b| {
                     b.has_statement(StatementPattern::DeinitCall {

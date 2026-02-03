@@ -440,7 +440,7 @@ mod mir_lowering {
         .expect(Mir::compiles())
         // Pointers are passed by reference like other types, so the parameter is &ptr[I64]
         .expect(
-            Mir::mir_function("Test.usePtr").has_param("p", MirTy::ref_(MirTy::ptr(MirTy::I64))),
+            Mir::mir_function("Test.usePtr$p").has_param("p", MirTy::ref_(MirTy::ptr(MirTy::I64))),
         );
     }
 

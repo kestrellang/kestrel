@@ -216,9 +216,9 @@ mod mir_tests {
                 var x: lang.i64
                 var y: lang.i64
             }
-            
+
             func consume(consuming p: Point) {}
-            
+
             func test() {
                 let pt = Point(x: 1, y: 2);
                 consume(pt)
@@ -230,7 +230,7 @@ mod mir_tests {
         .expect(Mir::compiles())
         .expect(Mir::mir_function("Test.test").any_block(|b| {
             b.has_statement(StatementPattern::CallWithModes {
-                callee: "Test.consume".to_string(),
+                callee: "Test.consume$p".to_string(),
                 arg_modes: vec![PassingMode::Copy],
             })
         }));
@@ -243,13 +243,13 @@ mod mir_tests {
             r#"module Test
             @builtin(.Copyable)
             protocol Copyable {}
-            
+
             struct Handle: not Copyable {
                 var fd: lang.i64
             }
-            
+
             func consume(consuming h: Handle) {}
-            
+
             func test() {
                 let handle = Handle(fd: 42);
                 consume(handle)
@@ -261,7 +261,7 @@ mod mir_tests {
         .expect(Mir::compiles())
         .expect(Mir::mir_function("Test.test").any_block(|b| {
             b.has_statement(StatementPattern::CallWithModes {
-                callee: "Test.consume".to_string(),
+                callee: "Test.consume$h".to_string(),
                 arg_modes: vec![PassingMode::Move],
             })
         }));
@@ -294,7 +294,7 @@ mod mir_tests {
         // The call passes the reference with Copy mode (the reference value is copied)
         .expect(Mir::mir_function("Test.test").any_block(|b| {
             b.has_statement(StatementPattern::CallWithModes {
-                callee: "Test.borrow_it".to_string(),
+                callee: "Test.borrow_it$h".to_string(),
                 arg_modes: vec![PassingMode::Copy],
             })
         }))
@@ -312,9 +312,9 @@ mod mir_tests {
                 case Active
                 case Inactive
             }
-            
+
             func consume(consuming s: Status) {}
-            
+
             func test() {
                 let status = Status.Active;
                 consume(status)
@@ -326,7 +326,7 @@ mod mir_tests {
         .expect(Mir::compiles())
         .expect(Mir::mir_function("Test.test").any_block(|b| {
             b.has_statement(StatementPattern::CallWithModes {
-                callee: "Test.consume".to_string(),
+                callee: "Test.consume$s".to_string(),
                 arg_modes: vec![PassingMode::Copy],
             })
         }));
@@ -338,14 +338,14 @@ mod mir_tests {
             r#"module Test
             @builtin(.Copyable)
             protocol Copyable {}
-            
+
             enum State: not Copyable {
                 case Open
                 case Closed
             }
-            
+
             func consume(consuming s: State) {}
-            
+
             func test() {
                 let state = State.Open;
                 consume(state)
@@ -357,7 +357,7 @@ mod mir_tests {
         .expect(Mir::compiles())
         .expect(Mir::mir_function("Test.test").any_block(|b| {
             b.has_statement(StatementPattern::CallWithModes {
-                callee: "Test.consume".to_string(),
+                callee: "Test.consume$s".to_string(),
                 arg_modes: vec![PassingMode::Move],
             })
         }));
@@ -369,7 +369,7 @@ mod mir_tests {
         Test::new(
             r#"module Test
             func consume(consuming n: lang.i64) {}
-            
+
             func test() {
                 let x = 42;
                 consume(x)
@@ -381,7 +381,7 @@ mod mir_tests {
         .expect(Mir::compiles())
         .expect(Mir::mir_function("Test.test").any_block(|b| {
             b.has_statement(StatementPattern::CallWithModes {
-                callee: "Test.consume".to_string(),
+                callee: "Test.consume$n".to_string(),
                 arg_modes: vec![PassingMode::Copy],
             })
         }));
@@ -417,7 +417,7 @@ mod mir_tests {
         .expect(Mir::compiles())
         .expect(Mir::mir_function("Test.test").any_block(|b| {
             b.has_statement(StatementPattern::CallWithModes {
-                callee: "Test.mixed".to_string(),
+                callee: "Test.mixed$p$h".to_string(),
                 arg_modes: vec![PassingMode::Copy, PassingMode::Move],
             })
         }));
@@ -440,9 +440,9 @@ mod rvalue_tests {
                 var x: lang.i64
                 var y: lang.i64
             }
-            
+
             func consume(consuming p: Point) -> lang.i64 { p.x }
-            
+
             func test() -> lang.i64 {
                 let pt = Point(x: 1, y: 2);
                 let pt2 = pt;
@@ -467,13 +467,13 @@ mod rvalue_tests {
             r#"module Test
             @builtin(.Copyable)
             protocol Copyable {}
-            
+
             struct Handle: not Copyable {
                 var fd: lang.i64
             }
-            
+
             func consume(consuming h: Handle) -> lang.i64 { h.fd }
-            
+
             func test() -> lang.i64 {
                 let h = Handle(fd: 42);
                 consume(h)
@@ -485,7 +485,7 @@ mod rvalue_tests {
         .expect(Mir::compiles())
         .expect(Mir::mir_function("Test.test").any_block(|b| {
             b.has_statement(StatementPattern::CallWithModes {
-                callee: "Test.consume".to_string(),
+                callee: "Test.consume$h".to_string(),
                 arg_modes: vec![PassingMode::Move],
             })
         }));

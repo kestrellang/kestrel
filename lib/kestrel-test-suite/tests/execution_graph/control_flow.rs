@@ -36,7 +36,7 @@ mod while_loops {
         .expect(Compiles)
         .expect(Mir::compiles())
         .expect(
-            Mir::mir_function("Main.countdown")
+            Mir::mir_function("Main.countdown$n")
                 .returns(MirTy::I64)
                 .has_at_least_blocks(3) // entry, loop header, loop body, exit
                 .any_block(|b| b.terminates_with(TerminatorPattern::Branch)),
@@ -64,7 +64,7 @@ mod while_loops {
         .expect(Compiles)
         .expect(Mir::compiles())
         .expect(
-            Mir::mir_function("Main.factorial")
+            Mir::mir_function("Main.factorial$n")
                 .returns(MirTy::I64)
                 .has_local("result", MirTy::I64)
                 .has_local("i", MirTy::I64)
@@ -100,7 +100,7 @@ mod while_loops {
         .expect(Compiles)
         .expect(Mir::compiles())
         .expect(
-            Mir::mir_function("Main.fibonacci")
+            Mir::mir_function("Main.fibonacci$n")
                 .returns(MirTy::I64)
                 .has_at_least_blocks(4), // if, else start, loop, exit
         );
@@ -172,7 +172,7 @@ mod break_continue {
         .expect(Compiles)
         .expect(Mir::compiles())
         .expect(
-            Mir::mir_function("Main.findFirst")
+            Mir::mir_function("Main.findFirst$limit")
                 .returns(MirTy::I64)
                 .has_at_least_blocks(3),
         );
@@ -202,7 +202,7 @@ mod break_continue {
         .expect(Compiles)
         .expect(Mir::compiles())
         .expect(
-            Mir::mir_function("Main.sumOdd")
+            Mir::mir_function("Main.sumOdd$limit")
                 .returns(MirTy::I64)
                 .has_local("sum", MirTy::I64)
                 .has_at_least_blocks(4), // entry, loop header, continue block, add block
@@ -237,7 +237,7 @@ mod break_continue {
         .expect(Compiles)
         .expect(Mir::compiles())
         .expect(
-            Mir::mir_function("Main.sumUntil")
+            Mir::mir_function("Main.sumUntil$limit")
                 .returns(MirTy::I64)
                 .has_at_least_blocks(5),
         );
@@ -278,7 +278,7 @@ mod early_returns {
         .expect(Compiles)
         .expect(Mir::compiles())
         .expect(
-            Mir::mir_function("Main.classify")
+            Mir::mir_function("Main.classify$n")
                 .returns(MirTy::I64)
                 .has_at_least_blocks(5), // Multiple return paths
         );
@@ -302,7 +302,7 @@ mod early_returns {
         .expect(Compiles)
         .expect(Mir::compiles())
         .expect(
-            Mir::mir_function("Main.earlyReturn")
+            Mir::mir_function("Main.earlyReturn$x")
                 .returns(MirTy::I64)
                 .any_block(|b| b.terminates_with(TerminatorPattern::Return))
                 .any_block(|b| b.terminates_with(TerminatorPattern::Branch)),
@@ -344,7 +344,7 @@ mod nested_control_flow {
         .expect(Compiles)
         .expect(Mir::compiles())
         .expect(
-            Mir::mir_function("Main.nested")
+            Mir::mir_function("Main.nested$x$y")
                 .returns(MirTy::I64)
                 .has_at_least_blocks(7), // entry, 2 outer branches, 4 inner branches
         );
@@ -372,7 +372,7 @@ mod nested_control_flow {
         .expect(Compiles)
         .expect(Mir::compiles())
         .expect(
-            Mir::mir_function("Main.loopInIf")
+            Mir::mir_function("Main.loopInIf$x")
                 .returns(MirTy::I64)
                 .has_at_least_blocks(5),
         );
@@ -400,7 +400,7 @@ mod nested_control_flow {
         .expect(Compiles)
         .expect(Mir::compiles())
         .expect(
-            Mir::mir_function("Main.ifInLoop")
+            Mir::mir_function("Main.ifInLoop$n")
                 .returns(MirTy::I64)
                 .has_local("count", MirTy::I64)
                 .has_at_least_blocks(5),
@@ -516,7 +516,7 @@ mod complex_control_flow {
         .expect(Compiles)
         .expect(Mir::compiles())
         .expect(
-            Mir::mir_function("Main.process")
+            Mir::mir_function("Main.process$x")
                 .returns(MirTy::I64)
                 .has_local("result", MirTy::I64),
         );
