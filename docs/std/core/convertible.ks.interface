@@ -1,8 +1,0 @@
-// Type conversion protocol
-
-/// Protocol for types that can be constructed from another type.
-/// Implement this to enable explicit type conversions using the init(from:) pattern.
-public protocol Convertible[From] {
-    /// Creates an instance of this type from a value of another type.
-    init(from value: From);
-}
