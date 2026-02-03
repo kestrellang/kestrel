@@ -316,3 +316,117 @@ func testIncompleteHex() -> lang.str {
         .expect(HasError("invalid escape sequence"));
     }
 }
+
+mod string_interpolation {
+    use super::*;
+
+    /// Test basic string interpolation with multiple string values.
+    /// Verifies: basic \(expr) syntax, multiple interpolations in one string.
+    #[test]
+    fn basic_multiple_string_interpolations() {
+        Test::new(
+            r#"
+module Main
+import std.io.stdio.println
+
+func main() -> std.num.Int64 {
+    let first = "Hello";
+    let second = "World";
+    let third = "Kestrel";
+    let _ = println("\(first), \(second)! Welcome to \(third).");
+    0
+}
+"#,
+        )
+        .with_stdlib()
+        .expect(StdoutEquals("Hello, World! Welcome to Kestrel.\n"));
+    }
+
+    /// Test integer interpolation without format options.
+    /// Verifies: integer formatting with default options, multiple integer interpolations.
+    #[test]
+    fn integer_interpolation_no_format() {
+        Test::new(
+            r#"
+module Main
+import std.io.stdio.println
+
+func main() -> std.num.Int64 {
+    let a = 42;
+    let b = 100;
+    let sum = a + b;
+    let _ = println("a=\(a), b=\(b), sum=\(sum)");
+    0
+}
+"#,
+        )
+        .with_stdlib()
+        .expect(StdoutEquals("a=42, b=100, sum=142\n"));
+    }
+
+    /// Test interpolation with width and alignment format options.
+    /// Verifies: right-align (>), left-align (<), center (^), and width specifiers.
+    #[test]
+    fn interpolation_with_alignment_format() {
+        Test::new(
+            r#"
+module Main
+import std.io.stdio.println
+
+func main() -> std.num.Int64 {
+    let val = 42;
+    let name = "test";
+    // Right-align val in width 8, left-align name in width 10
+    let _ = println("[\(val:>8)] [\(name:<10)] [\(val:^6)]");
+    0
+}
+"#,
+        )
+        .with_stdlib()
+        .expect(StdoutEquals("[      42] [test      ] [  42  ]\n"));
+    }
+
+    /// Test interpolation with radix format options (hex, binary).
+    /// Verifies: hex lower (x), hex upper (X), binary (b), alternate form (#).
+    #[test]
+    fn interpolation_with_radix_format() {
+        Test::new(
+            r#"
+module Main
+import std.io.stdio.println
+
+func main() -> std.num.Int64 {
+    let val = 255;
+    // hex lower, hex upper with prefix, binary with prefix, zero-padded hex
+    let _ = println("hex:\(val:x) HEX:\(val:#X) bin:\(val:#b) pad:\(val:08x)");
+    0
+}
+"#,
+        )
+        .with_stdlib()
+        .expect(StdoutEquals("hex:ff HEX:0xFF bin:0b11111111 pad:000000ff\n"));
+    }
+
+    /// Test mixed interpolation with strings, integers, and various format options.
+    /// Verifies: combining different types and format specs in one string.
+    #[test]
+    fn mixed_types_and_formats() {
+        Test::new(
+            r#"
+module Main
+import std.io.stdio.println
+
+func main() -> std.num.Int64 {
+    let name = "Result";
+    let value = 42;
+    let hex_val = 0xAB;
+    // Mix strings (no format), integers with padding, and hex with prefix
+    let _ = println("\(name): \(value:05) (hex: \(hex_val:#x), bin: \(value:b))");
+    0
+}
+"#,
+        )
+        .with_stdlib()
+        .expect(StdoutEquals("Result: 00042 (hex: 0xab, bin: 101010)\n"));
+    }
+}

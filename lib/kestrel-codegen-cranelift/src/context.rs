@@ -191,9 +191,11 @@ impl<'a> CodegenContext<'a> {
             ))
         })?;
 
-        // Compute element size from element_ty using layout cache
+        // Compute element size and alignment from element_ty using layout cache
         // (translate_type returns pointer type for structs, which gives wrong size)
-        let element_size = self.layouts.layout_of(fc_data.element_ty).size;
+        let element_layout = self.layouts.layout_of(fc_data.element_ty);
+        let element_size = element_layout.size;
+        let element_align = element_layout.align;
 
         // Validate file size is aligned to element size
         if element_size > 0 && file_bytes.len() % element_size != 0 {
@@ -216,6 +218,8 @@ impl<'a> CodegenContext<'a> {
         let data_name = format!("{}_data", name);
         let mut data_desc = DataDescription::new();
         data_desc.define(file_bytes.into_boxed_slice());
+        // Set alignment to at least 8 bytes to avoid unaligned pointer warnings
+        data_desc.set_align(element_align.max(8) as u64);
 
         let data_id = self
             .module
@@ -239,6 +243,8 @@ impl<'a> CodegenContext<'a> {
         // Create the slice data
         let mut slice_desc = DataDescription::new();
         slice_desc.define(slice_bytes.into_boxed_slice());
+        // Set alignment to pointer size for the slice struct
+        slice_desc.set_align(ptr_size as u64);
 
         // Add a relocation for the pointer field (points to the embedded data)
         let data_ref = self.module.declare_data_in_data(data_id, &mut slice_desc);
