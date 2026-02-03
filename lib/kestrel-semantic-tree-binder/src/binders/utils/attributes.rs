@@ -390,6 +390,86 @@ pub fn parse_extern_attribute(
     }
 }
 
+/// Result of parsing a `@fileconstant("path")` attribute.
+pub enum FileConstantParseResult {
+    /// Successfully parsed: contains the relative file path
+    Success {
+        relative_path: String,
+        span: Span,
+    },
+    /// Not a fileconstant attribute
+    NotFileConstant,
+    /// Error occurred during parsing (diagnostic already emitted)
+    Error,
+}
+
+/// Parse a `@fileconstant("path.bin")` attribute from an AttributesBehavior.
+///
+/// This function checks if the attributes contain a `@fileconstant` attribute,
+/// validates its arguments, and returns the parsed file path.
+///
+/// # Arguments
+/// * `attributes` - The resolved attributes behavior
+/// * `source` - The source text (needed to extract string value)
+/// * `diagnostics` - The diagnostic context for emitting errors
+///
+/// # Returns
+/// - `FileConstantParseResult::Success { ... }` if a valid fileconstant attribute was found
+/// - `FileConstantParseResult::NotFileConstant` if no fileconstant attribute is present
+/// - `FileConstantParseResult::Error` if a fileconstant attribute is present but invalid
+pub fn parse_fileconstant_attribute(
+    attributes: &AttributesBehavior,
+    source: &str,
+    diagnostics: &mut DiagnosticContext,
+) -> FileConstantParseResult {
+    use crate::diagnostics::{
+        FileConstantInvalidArgumentError, FileConstantRequiresPathError,
+        FileConstantRequiresStringError,
+    };
+
+    // Find the @fileconstant attribute
+    let Some(attr) = attributes.get_kind(AttributeKind::FileConstant) else {
+        return FileConstantParseResult::NotFileConstant;
+    };
+
+    // Must have exactly one argument (the file path)
+    if attr.args.is_empty() {
+        diagnostics.throw(FileConstantRequiresPathError {
+            span: attr.span.clone(),
+        });
+        return FileConstantParseResult::Error;
+    }
+
+    let path_arg = &attr.args[0];
+
+    // Argument must be unlabeled
+    if path_arg.is_labeled() {
+        diagnostics.throw(FileConstantInvalidArgumentError {
+            span: path_arg.span.clone(),
+        });
+        return FileConstantParseResult::Error;
+    }
+
+    // Extract the path from the source using the value span
+    let arg_text = &source[path_arg.value_span.range()];
+
+    // Must be a string literal
+    if !arg_text.starts_with('"') || !arg_text.ends_with('"') || arg_text.len() < 2 {
+        diagnostics.throw(FileConstantRequiresStringError {
+            span: path_arg.value_span.clone(),
+        });
+        return FileConstantParseResult::Error;
+    }
+
+    // Extract the path (remove quotes)
+    let relative_path = arg_text[1..arg_text.len() - 1].to_string();
+
+    FileConstantParseResult::Success {
+        relative_path,
+        span: attr.span.clone(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
 

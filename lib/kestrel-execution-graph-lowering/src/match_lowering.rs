@@ -52,7 +52,7 @@ use semantic_tree::symbol::Symbol;
 use crate::context::LoweringContext;
 use crate::error::LoweringError;
 use crate::expr::lower_expression;
-use crate::name::qualified_name_for_symbol;
+use crate::name::{init_name_suffix_from_callable, qualified_name_for_symbol};
 use crate::ty::{lower_type, make_int_immediate};
 
 /// Lower a match expression to MIR.
@@ -1229,20 +1229,11 @@ fn emit_matchable_switch(
                             &mut name_parts,
                         );
 
-                        // Get all labels from the found init symbol
+                        // Get init name suffix from the found init symbol (uses helper for consistency)
                         let init_name_suffix = if let Some(callable) =
                             init_sym.metadata().get_behavior::<CallableBehavior>()
                         {
-                            let labels: Vec<&str> = callable
-                                .parameters()
-                                .iter()
-                                .filter_map(|p| p.external_label())
-                                .collect();
-                            if labels.is_empty() {
-                                "init".to_string()
-                            } else {
-                                format!("init${}", labels.join("$"))
-                            }
+                            init_name_suffix_from_callable(&callable)
                         } else {
                             "init$intLiteral".to_string()
                         };
@@ -1363,20 +1354,11 @@ fn emit_matchable_switch(
                             &mut name_parts,
                         );
 
-                        // Get all labels from the found init symbol
+                        // Get init name suffix from the found init symbol (uses helper for consistency)
                         let init_name_suffix = if let Some(callable) =
                             init_sym.metadata().get_behavior::<CallableBehavior>()
                         {
-                            let labels: Vec<&str> = callable
-                                .parameters()
-                                .iter()
-                                .filter_map(|p| p.external_label())
-                                .collect();
-                            if labels.is_empty() {
-                                "init".to_string()
-                            } else {
-                                format!("init${}", labels.join("$"))
-                            }
+                            init_name_suffix_from_callable(&callable)
                         } else {
                             "init$boolLiteral".to_string()
                         };
@@ -1503,20 +1485,11 @@ fn emit_matchable_switch(
                             &mut name_parts,
                         );
 
-                        // Get all labels from the found init symbol
+                        // Get init name suffix from the found init symbol (uses helper for consistency)
                         let init_name_suffix = if let Some(callable) =
                             init_sym.metadata().get_behavior::<CallableBehavior>()
                         {
-                            let labels: Vec<&str> = callable
-                                .parameters()
-                                .iter()
-                                .filter_map(|p| p.external_label())
-                                .collect();
-                            if labels.is_empty() {
-                                "init".to_string()
-                            } else {
-                                format!("init${}", labels.join("$"))
-                            }
+                            init_name_suffix_from_callable(&callable)
                         } else {
                             "init$charLiteral".to_string()
                         };
@@ -1636,21 +1609,13 @@ fn emit_matchable_switch(
                                 &mut name_parts,
                             );
 
+                            // Get init name suffix from the found init symbol (includes types for disambiguation)
                             let init_name_suffix = if let Some(callable) =
                                 init_sym.metadata().get_behavior::<CallableBehavior>()
                             {
-                                let labels: Vec<&str> = callable
-                                    .parameters()
-                                    .iter()
-                                    .filter_map(|p| p.external_label())
-                                    .collect();
-                                if labels.is_empty() {
-                                    "init".to_string()
-                                } else {
-                                    format!("init${}", labels.join("$"))
-                                }
+                                init_name_suffix_from_callable(&callable)
                             } else {
-                                "init$charLiteral".to_string()
+                                "init$charLiteral_I32".to_string()
                             };
                             name_parts.push(init_name_suffix);
 

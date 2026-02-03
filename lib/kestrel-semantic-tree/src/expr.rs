@@ -389,14 +389,22 @@ pub enum LiteralValue {
 pub enum LangPrimitive {
     /// 1-bit integer (boolean)
     I1,
-    /// 8-bit integer
+    /// 8-bit signed integer
     I8,
-    /// 16-bit integer
+    /// 16-bit signed integer
     I16,
-    /// 32-bit integer
+    /// 32-bit signed integer
     I32,
-    /// 64-bit integer
+    /// 64-bit signed integer
     I64,
+    /// 8-bit unsigned integer
+    U8,
+    /// 16-bit unsigned integer
+    U16,
+    /// 32-bit unsigned integer
+    U32,
+    /// 64-bit unsigned integer
+    U64,
     /// 16-bit floating point
     F16,
     /// 32-bit floating point
@@ -415,6 +423,10 @@ impl LangPrimitive {
             "i16" => Some(LangPrimitive::I16),
             "i32" => Some(LangPrimitive::I32),
             "i64" => Some(LangPrimitive::I64),
+            "u8" => Some(LangPrimitive::U8),
+            "u16" => Some(LangPrimitive::U16),
+            "u32" => Some(LangPrimitive::U32),
+            "u64" => Some(LangPrimitive::U64),
             "f16" => Some(LangPrimitive::F16),
             "f32" => Some(LangPrimitive::F32),
             "f64" => Some(LangPrimitive::F64),
@@ -430,6 +442,10 @@ impl LangPrimitive {
             LangPrimitive::I16 => "i16",
             LangPrimitive::I32 => "i32",
             LangPrimitive::I64 => "i64",
+            LangPrimitive::U8 => "u8",
+            LangPrimitive::U16 => "u16",
+            LangPrimitive::U32 => "u32",
+            LangPrimitive::U64 => "u64",
             LangPrimitive::F16 => "f16",
             LangPrimitive::F32 => "f32",
             LangPrimitive::F64 => "f64",
@@ -445,6 +461,21 @@ impl LangPrimitive {
                 | LangPrimitive::I16
                 | LangPrimitive::I32
                 | LangPrimitive::I64
+                | LangPrimitive::U8
+                | LangPrimitive::U16
+                | LangPrimitive::U32
+                | LangPrimitive::U64
+        )
+    }
+
+    /// Check if this is an unsigned integer type.
+    pub fn is_unsigned(&self) -> bool {
+        matches!(
+            self,
+            LangPrimitive::U8
+                | LangPrimitive::U16
+                | LangPrimitive::U32
+                | LangPrimitive::U64
         )
     }
 
@@ -460,23 +491,24 @@ impl LangPrimitive {
     pub fn bit_width(&self) -> u32 {
         match self {
             LangPrimitive::I1 => 1,
-            LangPrimitive::I8 => 8,
-            LangPrimitive::I16 => 16,
-            LangPrimitive::F16 => 16,
-            LangPrimitive::I32 | LangPrimitive::F32 => 32,
-            LangPrimitive::I64 | LangPrimitive::F64 => 64,
+            LangPrimitive::I8 | LangPrimitive::U8 => 8,
+            LangPrimitive::I16 | LangPrimitive::U16 | LangPrimitive::F16 => 16,
+            LangPrimitive::I32 | LangPrimitive::U32 | LangPrimitive::F32 => 32,
+            LangPrimitive::I64 | LangPrimitive::U64 | LangPrimitive::F64 => 64,
         }
     }
 
     /// Convert this primitive to a semantic type.
+    /// Note: Unsigned primitives map to the same-sized signed int types,
+    /// since signedness is a runtime property in Kestrel (2's complement).
     pub fn to_ty(&self, span: Span) -> crate::ty::Ty {
         use crate::ty::{FloatBits, IntBits, Ty};
         match self {
             LangPrimitive::I1 => Ty::bool(span),
-            LangPrimitive::I8 => Ty::int(IntBits::I8, span),
-            LangPrimitive::I16 => Ty::int(IntBits::I16, span),
-            LangPrimitive::I32 => Ty::int(IntBits::I32, span),
-            LangPrimitive::I64 => Ty::int(IntBits::I64, span),
+            LangPrimitive::I8 | LangPrimitive::U8 => Ty::int(IntBits::I8, span),
+            LangPrimitive::I16 | LangPrimitive::U16 => Ty::int(IntBits::I16, span),
+            LangPrimitive::I32 | LangPrimitive::U32 => Ty::int(IntBits::I32, span),
+            LangPrimitive::I64 | LangPrimitive::U64 => Ty::int(IntBits::I64, span),
             LangPrimitive::F16 => Ty::float(FloatBits::F16, span),
             LangPrimitive::F32 => Ty::float(FloatBits::F32, span),
             LangPrimitive::F64 => Ty::float(FloatBits::F64, span),

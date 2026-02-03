@@ -383,8 +383,10 @@ pub enum CastKind {
     IntToFloat,
     /// `f64.to.i64`
     FloatToInt,
-    /// `i32.to.i64`
+    /// `i32.to.i64` (sign-extend)
     IntWiden,
+    /// `u32.to.i64` (zero-extend for unsigned source)
+    IntUnsignedWiden,
     /// `i64.to.i32`
     IntTruncate,
     /// `f32.to.f64`
@@ -973,6 +975,7 @@ impl CastKind {
             CastKind::IntToFloat => "i64.to.f64",
             CastKind::FloatToInt => "f64.to.i64",
             CastKind::IntWiden => "int.widen",
+            CastKind::IntUnsignedWiden => "uint.widen",
             CastKind::IntTruncate => "int.truncate",
             CastKind::FloatWiden => "float.widen",
             CastKind::FloatTruncate => "float.truncate",

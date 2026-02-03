@@ -336,7 +336,7 @@ fn load_stdlib() -> Result<Vec<(String, String)>, String> {
     };
 
     match StdLib::load(&config) {
-        Ok(Some(stdlib)) => Ok(stdlib.sources),
+        Ok(Some(stdlib)) => Ok(stdlib.sources.into_iter().map(|(name, content, _path)| (name, content)).collect()),
         Ok(None) => Ok(Vec::new()), // Stdlib disabled
         Err(e) => Err(e.to_string()),
     }

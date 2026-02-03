@@ -1,6 +1,7 @@
 //! Lowering context - holds all state during the lowering pass.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 use kestrel_execution_graph::{
     BasicBlock, Block, CallArg, Callee, Function, Id, Immediate, Local, MirContext, Place,
@@ -130,11 +131,20 @@ pub struct LoweringContext<'a> {
     /// Cache of generated thunks for function references.
     /// Maps (function name, type args) to the thunk name.
     thunk_cache: ThunkCache,
+
+    /// Maps file_id to the directory containing that source file.
+    /// Used to resolve relative paths in @fileconstant.
+    file_paths: HashMap<usize, PathBuf>,
 }
 
 impl<'a> LoweringContext<'a> {
     /// Create a new lowering context.
     pub fn new(model: &'a SemanticModel) -> Self {
+        Self::with_file_paths(model, HashMap::new())
+    }
+
+    /// Create a new lowering context with file path information.
+    pub fn with_file_paths(model: &'a SemanticModel, file_paths: HashMap<usize, PathBuf>) -> Self {
         LoweringContext {
             model,
             mir: MirContext::new(),
@@ -150,7 +160,13 @@ impl<'a> LoweringContext<'a> {
             closure_counter: 0,
             deinit_flag_counter: 0,
             thunk_cache: HashMap::new(),
+            file_paths,
         }
+    }
+
+    /// Get the directory for a file by its ID.
+    pub fn file_directory(&self, file_id: usize) -> Option<&PathBuf> {
+        self.file_paths.get(&file_id)
     }
 
     /// Finish lowering and return the result.

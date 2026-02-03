@@ -8,6 +8,7 @@ pub mod deinit;
 pub mod executable;
 pub mod extension_target;
 pub mod extern_fn;
+pub mod file_constant;
 pub mod function_data;
 pub mod generics;
 pub mod implements;
@@ -18,6 +19,7 @@ pub mod valued;
 pub mod visibility;
 
 pub use computed_member_access::ComputedMemberAccessBehavior;
+pub use file_constant::FileConstantBehavior;
 pub use subscript::SubscriptBehavior;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -33,6 +35,7 @@ pub enum KestrelBehaviorKind {
     Executable,
     Extern,
     ExtensionTarget,
+    FileConstant,
     FlattenedProtocol,
     FunctionData,
     Generics,

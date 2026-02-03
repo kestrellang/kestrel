@@ -58,6 +58,13 @@ impl Analyzer for ExhaustiveReturnAnalyzer {
         let Some(body) = ctx.model.query(ExecutableBodyFor { symbol_id }) else {
             return;
         };
+
+        // Skip empty bodies (e.g., protocol method declarations that only have defaults)
+        // These are declarations, not definitions, so they don't need return checking
+        if body.statements.is_empty() && body.yield_expr.is_none() {
+            return;
+        }
+
         let state = analyze_block(&body.statements, body.yield_expr.as_deref());
         if state.definitely_returns() {
             return;

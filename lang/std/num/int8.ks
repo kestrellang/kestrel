@@ -114,9 +114,9 @@ public struct Int8:
     public init(from other: Int32) { self.raw = lang.cast_i32_i8(other.raw) }
     public init(from other: Int64) { self.raw = lang.cast_i64_i8(other.raw) }
     public init(from other: UInt8) { self.raw = other.raw }
-    public init(from other: UInt16) { self.raw = lang.cast_i16_i8(other.raw) }
-    public init(from other: UInt32) { self.raw = lang.cast_i32_i8(other.raw) }
-    public init(from other: UInt64) { self.raw = lang.cast_i64_i8(other.raw) }
+    public init(from other: UInt16) { self.raw = lang.cast_u16_i8(other.raw) }
+    public init(from other: UInt32) { self.raw = lang.cast_u32_i8(other.raw) }
+    public init(from other: UInt64) { self.raw = lang.cast_u64_i8(other.raw) }
 
     // ========================================================================
     // SIGN INSPECTION (Properties)

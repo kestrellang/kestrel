@@ -3036,6 +3036,18 @@ fn compile_cast(
             }
         },
 
+        CastKind::IntUnsignedWiden => {
+            // Unsigned integer widening - zero-extend to larger integer type
+            let src_ty = builder.func.dfg.value_type(val);
+            if target_ty.bits() > src_ty.bits() {
+                Ok(builder.ins().uextend(target_ty, val))
+            } else {
+                // Same size or smaller - this shouldn't happen for IntUnsignedWiden
+                // but handle gracefully
+                Ok(val)
+            }
+        },
+
         CastKind::IntTruncate => {
             // Integer narrowing - truncate to smaller integer type
             let src_ty = builder.func.dfg.value_type(val);

@@ -9,6 +9,7 @@ use kestrel_execution_graph::{
     QualifiedNameData, Rvalue, UnOp, Value,
 };
 use kestrel_semantic_model::{StructFields, SymbolFor};
+use kestrel_semantic_tree::behavior::FileConstantBehavior;
 use kestrel_semantic_tree::behavior::callable::{
     CallableBehavior, ParameterAccessMode, ReceiverKind,
 };
@@ -556,9 +557,19 @@ fn fill_default_arguments(
         return None;
     }
 
-    // Get resolved executable behavior to access default values
-    let resolved_exec = symbol.metadata().get_behavior::<ResolvedExecutableBehavior>()?;
-    let default_values = resolved_exec.default_values();
+    // Get default values from ResolvedExecutableBehavior or ExecutableBehavior
+    // Protocol method declarations may only have ExecutableBehavior, not ResolvedExecutableBehavior
+    // Clone the defaults into a Vec so we own them
+    use kestrel_semantic_tree::behavior::executable::ExecutableBehavior;
+    let default_values: Vec<Option<Expression>> =
+        if let Some(resolved_exec) = symbol.metadata().get_behavior::<ResolvedExecutableBehavior>() {
+            resolved_exec.default_values().to_vec()
+        } else if let Some(exec_beh) = symbol.metadata().get_behavior::<ExecutableBehavior>() {
+            exec_beh.default_values().to_vec()
+        } else {
+            // No executable behavior - can't fill defaults
+            return None;
+        };
 
     // Build the extended arguments list
     let mut filled_args: Vec<CallArgument> = arguments.to_vec();
@@ -694,7 +705,26 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
                                 ctx.mir.statics.iter().any(|(_, def)| def.name == name_id);
                             if !static_exists {
                                 let mir_ty = lower_type(ctx, &expr.ty);
-                                ctx.mir.add_static(name_id, mir_ty);
+                                // Check if this is a file constant
+                                if let Some(fc_behavior) =
+                                    sym.metadata().get_behavior::<FileConstantBehavior>()
+                                {
+                                    // Extract element type from LiteralSlice[T]
+                                    let element_ty =
+                                        extract_literal_slice_element_type(ctx, &expr.ty);
+                                    // Get base path from the symbol's span file_id
+                                    let file_id = sym.metadata().span().file_id;
+                                    let base_path = ctx.file_directory(file_id).cloned();
+                                    ctx.mir.add_file_constant_static(
+                                        name_id,
+                                        mir_ty,
+                                        fc_behavior.relative_path().to_string(),
+                                        element_ty,
+                                        base_path,
+                                    );
+                                } else {
+                                    ctx.mir.add_static(name_id, mir_ty);
+                                }
                             }
 
                             Value::Place(Place::global(name_id))
@@ -754,7 +784,26 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
                             // Get the field type and lower it
                             let field_ty = &expr.ty;
                             let mir_ty = lower_type(ctx, field_ty);
-                            ctx.mir.add_static(name_id, mir_ty);
+                            // Check if this is a file constant
+                            if let Some(fc_behavior) =
+                                field_symbol.metadata().get_behavior::<FileConstantBehavior>()
+                            {
+                                // Extract element type from LiteralSlice[T]
+                                let element_ty =
+                                    extract_literal_slice_element_type(ctx, field_ty);
+                                // Get base path from the symbol's span file_id
+                                let file_id = field_symbol.metadata().span().file_id;
+                                let base_path = ctx.file_directory(file_id).cloned();
+                                ctx.mir.add_file_constant_static(
+                                    name_id,
+                                    mir_ty,
+                                    fc_behavior.relative_path().to_string(),
+                                    element_ty,
+                                    base_path,
+                                );
+                            } else {
+                                ctx.mir.add_static(name_id, mir_ty);
+                            }
                         }
 
                         return Value::Place(Place::global(name_id));
@@ -4306,11 +4355,23 @@ fn lower_subscript_call(
 ) -> Value {
     use kestrel_semantic_tree::behavior::callable::CallableBehavior;
 
+    // Fill in default arguments if any are missing
+    // Subscripts don't have generic type parameters, so use empty substitutions
+    let empty_subs = Substitutions::new();
+    let filled_arguments: Option<Vec<CallArgument>> =
+        fill_default_arguments(ctx, arguments, getter_id, &empty_subs);
+
+    // Use filled arguments if available, otherwise use original
+    let arguments_to_use: &[CallArgument] = match &filled_arguments {
+        Some(filled) => filled.as_slice(),
+        None => arguments,
+    };
+
     // Lower the receiver expression (e.g., the array)
     let receiver_value = lower_expression(ctx, receiver);
 
     // Lower arguments (e.g., the index)
-    let arg_values: Vec<Value> = arguments
+    let arg_values: Vec<Value> = arguments_to_use
         .iter()
         .map(|arg| lower_expression(ctx, &arg.value))
         .collect();
@@ -4321,7 +4382,7 @@ fn lower_subscript_call(
 
     // Build argument types list
     let mut all_arg_types: Vec<&Ty> = vec![&receiver.ty];
-    all_arg_types.extend(arguments.iter().map(|arg| &arg.value.ty));
+    all_arg_types.extend(arguments_to_use.iter().map(|arg| &arg.value.ty));
 
     // Get the result type and create a temp for it
     let result_ty = lower_type(ctx, &expr.ty);
@@ -7172,6 +7233,10 @@ fn determine_cast_kind(
     // Int <-> Int (signed or unsigned)
     if from.is_int() && to.is_int() {
         if from.bit_width() < to.bit_width() {
+            // Use unsigned widen (zero-extend) for unsigned source types
+            if from.is_unsigned() {
+                return CastKind::IntUnsignedWiden;
+            }
             return CastKind::IntWiden;
         } else {
             return CastKind::IntTruncate;
@@ -7291,4 +7356,26 @@ fn lower_function_ref_as_value(
     );
 
     Value::Place(result_place)
+}
+
+/// Extract the element type T from a LiteralSlice[T] type.
+///
+/// If the type is not a LiteralSlice, returns unit type as a fallback.
+fn extract_literal_slice_element_type(
+    ctx: &mut LoweringContext,
+    ty: &Ty,
+) -> kestrel_execution_graph::Id<kestrel_execution_graph::Ty> {
+    // Expand type aliases to get the actual struct type
+    let expanded = ty.expand_aliases();
+
+    // LiteralSlice[T] is a struct with one type parameter
+    if let TyKind::Struct { substitutions, .. } = expanded.kind() {
+        // The first substitution is the element type T
+        if let Some((_, element_ty)) = substitutions.iter().next() {
+            return lower_type(ctx, element_ty);
+        }
+    }
+
+    // Fallback: return unit type (shouldn't happen for valid LiteralSlice types)
+    ctx.mir.ty_unit()
 }

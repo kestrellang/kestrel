@@ -19,6 +19,11 @@ pub enum AttributeKind {
     /// The function has no body and will be linked from external C code.
     Extern,
 
+    /// `@fileconstant("path.bin")` - Embeds a binary file as static data.
+    /// The file is read at compile time and embedded in .rodata.
+    /// Only valid on `let` declarations with `LiteralSlice[T]` type.
+    FileConstant,
+
     /// `@dummy` - A placeholder attribute for testing the infrastructure.
     /// This attribute is recognized but has no semantic effect.
     Dummy,
@@ -34,6 +39,7 @@ impl AttributeKind {
         match name {
             "builtin" => AttributeKind::Builtin,
             "extern" => AttributeKind::Extern,
+            "fileconstant" => AttributeKind::FileConstant,
             "dummy" => AttributeKind::Dummy,
             _ => AttributeKind::Unknown,
         }

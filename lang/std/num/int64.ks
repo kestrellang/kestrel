@@ -180,7 +180,7 @@ public struct Int64:
     /// Example:
     ///     let unsigned: UInt8 = 255
     ///     let signed = Int64(from: unsigned)  // 255
-    public init(from other: UInt8) { self.raw = lang.cast_i8_i64(other.raw) }
+    public init(from other: UInt8) { self.raw = lang.cast_u8_i64(other.raw) }
     /// Creates an Int64 from a UInt16.
     ///
     /// This conversion is always safe (widening, unsigned to signed).
@@ -188,7 +188,7 @@ public struct Int64:
     /// Example:
     ///     let unsigned: UInt16 = 65535
     ///     let signed = Int64(from: unsigned)  // 65535
-    public init(from other: UInt16) { self.raw = lang.cast_i16_i64(other.raw) }
+    public init(from other: UInt16) { self.raw = lang.cast_u16_i64(other.raw) }
     /// Creates an Int64 from a UInt32.
     ///
     /// This conversion is always safe (widening, unsigned to signed).
@@ -196,7 +196,7 @@ public struct Int64:
     /// Example:
     ///     let unsigned: UInt32 = 4000000000
     ///     let signed = Int64(from: unsigned)  // 4000000000
-    public init(from other: UInt32) { self.raw = lang.cast_i32_i64(other.raw) }
+    public init(from other: UInt32) { self.raw = lang.cast_u32_i64(other.raw) }
     /// Creates an Int64 from a UInt64.
     ///
     /// WARNING: This conversion may overflow if the UInt64 value exceeds

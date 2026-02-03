@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use kestrel_semantic_tree::behavior::ComputedMemberAccessBehavior;
+use kestrel_semantic_tree::behavior::FileConstantBehavior;
 use kestrel_semantic_tree::behavior::executable::ExecutableBehavior;
 use kestrel_semantic_tree::behavior::member_access::MemberAccessBehavior;
 use kestrel_semantic_tree::behavior::typed::TypedBehavior;
@@ -13,6 +14,7 @@ use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
 
+use crate::binders::utils::attributes::{parse_fileconstant_attribute, FileConstantParseResult};
 use crate::body_resolver::BodyResolutionContext;
 use crate::body_resolver::context::create_local_scope_for_body;
 use crate::declaration_binder::{BindingContext, DeclarationBinder};
@@ -46,6 +48,25 @@ impl DeclarationBinder for FieldBinder {
             file_id,
             context.diagnostics,
         );
+
+        // Check for @fileconstant attribute
+        match parse_fileconstant_attribute(&attributes_behavior, &source, context.diagnostics) {
+            FileConstantParseResult::Success {
+                relative_path,
+                span,
+            } => {
+                // Attach FileConstantBehavior - file data will be loaded during lowering
+                let file_constant_behavior = FileConstantBehavior::new(relative_path, span);
+                symbol.metadata().add_behavior(file_constant_behavior);
+            },
+            FileConstantParseResult::NotFileConstant => {
+                // Normal field, no action needed
+            },
+            FileConstantParseResult::Error => {
+                // Error already reported by parse_fileconstant_attribute
+            },
+        }
+
         symbol.metadata().add_behavior(attributes_behavior);
 
         // Resolve the type directly from syntax
@@ -123,6 +144,15 @@ impl DeclarationBinder for FieldBinder {
     ) {
         // Only process field symbols
         if symbol.metadata().kind() != KestrelSymbolKind::Field {
+            return;
+        }
+
+        // Skip file constants - they don't have runtime initializers
+        if symbol
+            .metadata()
+            .get_behavior::<FileConstantBehavior>()
+            .is_some()
+        {
             return;
         }
 

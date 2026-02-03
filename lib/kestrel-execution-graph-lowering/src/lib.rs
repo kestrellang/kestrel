@@ -74,7 +74,19 @@ pub fn lower_module(
     model: &SemanticModel,
     module: &Arc<dyn Symbol<KestrelLanguage>>,
 ) -> LoweringResult {
-    let mut ctx = LoweringContext::new(model);
+    lower_module_with_file_paths(model, module, std::collections::HashMap::new())
+}
+
+/// Lower a module with file path information for @fileconstant resolution.
+///
+/// Like `lower_module`, but accepts a mapping from file IDs to their containing directories.
+/// This allows @fileconstant paths to be resolved relative to the source file location.
+pub fn lower_module_with_file_paths(
+    model: &SemanticModel,
+    module: &Arc<dyn Symbol<KestrelLanguage>>,
+    file_paths: std::collections::HashMap<usize, std::path::PathBuf>,
+) -> LoweringResult {
+    let mut ctx = LoweringContext::with_file_paths(model, file_paths);
 
     // Lower all children of the module
     for child in module.metadata().children() {
@@ -179,6 +191,7 @@ fn collect_static_fields_with_initializers(
     symbol: &Arc<dyn Symbol<KestrelLanguage>>,
     result: &mut Vec<Arc<dyn Symbol<KestrelLanguage>>>,
 ) {
+    use kestrel_semantic_tree::behavior::FileConstantBehavior;
     use kestrel_semantic_tree::behavior::executable::ExecutableBehavior;
     use kestrel_semantic_tree::symbol::field::FieldSymbol;
     use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
@@ -189,6 +202,19 @@ fn collect_static_fields_with_initializers(
     if kind == KestrelSymbolKind::Field
         && let Some(field) = symbol.as_ref().downcast_ref::<FieldSymbol>()
     {
+        // Skip file constants - they don't need runtime initialization
+        if symbol
+            .metadata()
+            .get_behavior::<FileConstantBehavior>()
+            .is_some()
+        {
+            // Still recurse into children
+            for child in symbol.metadata().children() {
+                collect_static_fields_with_initializers(&child, result);
+            }
+            return;
+        }
+
         // Module-level fields are implicitly static even without the 'static' keyword
         let is_module_level = symbol
             .metadata()

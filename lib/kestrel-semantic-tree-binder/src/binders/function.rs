@@ -486,6 +486,17 @@ impl DeclarationBinder for FunctionBinder {
                 &source,
                 file_id,
             );
+        } else {
+            // No body (e.g., protocol method declaration) - but still resolve defaults
+            // This is needed so that calls to protocol methods can fill in default arguments
+            resolve_defaults_for_bodyless_function(
+                symbol,
+                syntax,
+                &resolved_params,
+                context,
+                &source,
+                file_id,
+            );
         }
     }
 }
@@ -701,6 +712,72 @@ fn resolve_function_body(
         parameter_patterns,
         default_values,
     );
+}
+
+/// Resolve default values for a function without a body (e.g., protocol method declaration).
+///
+/// For protocol methods like `func format(options: FormatOptions = FormatOptions.default()) -> String`,
+/// we need to store the default expressions so that calls can fill them in.
+fn resolve_defaults_for_bodyless_function(
+    symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+    func_syntax: &SyntaxNode,
+    params: &[Parameter],
+    context: &mut BindingContext,
+    source: &str,
+    file_id: usize,
+) {
+    use crate::body_resolver::BodyResolutionContext;
+    use crate::body_resolver::context::create_local_scope_for_body;
+    use kestrel_semantic_tree::behavior::executable::{CodeBlock, ExecutableBehavior};
+
+    // Check if any parameters have defaults
+    let has_any_defaults = params.iter().any(|p| p.has_default);
+    if !has_any_defaults {
+        return; // No defaults to resolve
+    }
+
+    let symbol_id = symbol.metadata().id();
+
+    // Create a BodyResolutionContext for resolving default expressions
+    // We need to create a local scope (even though it's empty for protocol methods)
+    let where_clause = symbol
+        .metadata()
+        .get_behavior::<kestrel_semantic_tree::behavior::generics::GenericsBehavior>()
+        .map(|g| g.where_clause().clone());
+
+    let local_scope = create_local_scope_for_body(symbol.clone(), "__protocol_default_temp");
+
+    let mut body_ctx = BodyResolutionContext::new_with_scope(
+        context.model,
+        context.diagnostics,
+        source,
+        file_id,
+        symbol_id,
+        local_scope,
+        where_clause,
+    );
+
+    // Get parameter syntax nodes
+    let param_syntax_nodes: Vec<SyntaxNode> = find_child(func_syntax, SyntaxKind::ParameterList)
+        .map(|param_list| {
+            param_list
+                .children()
+                .filter(|c| c.kind() == SyntaxKind::Parameter)
+                .collect()
+        })
+        .unwrap_or_default();
+
+    // Resolve default values
+    let default_values = resolve_default_values(&param_syntax_nodes, params, &mut body_ctx);
+
+    // Only attach behavior if we resolved any defaults
+    if default_values.iter().any(|d| d.is_some()) {
+        // Create an empty body since this is a declaration
+        let empty_body = CodeBlock::empty();
+        let exec_behavior =
+            ExecutableBehavior::with_defaults(empty_body, Vec::new(), default_values);
+        symbol.metadata().add_behavior(exec_behavior);
+    }
 }
 
 /// Resolve return type from a FunctionDeclaration syntax node during bind phase

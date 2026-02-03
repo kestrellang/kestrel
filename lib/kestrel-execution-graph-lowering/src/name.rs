@@ -6,11 +6,92 @@ use kestrel_semantic_tree::behavior::subscript::SubscriptBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::extension::ExtensionSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
-use kestrel_semantic_tree::ty::TyKind;
+use kestrel_semantic_tree::ty::{Ty, TyKind};
 use semantic_tree::symbol::Symbol;
 use std::sync::Arc;
 
 use crate::context::LoweringContext;
+
+/// Mangle a type into a string suitable for use in qualified names.
+/// This is used to disambiguate overloaded initializers with the same labels
+/// but different parameter types (e.g., init(from: Int8) vs init(from: UInt32)).
+pub fn mangle_type_name(ty: &Ty) -> String {
+    use kestrel_semantic_tree::ty::{FloatBits, IntBits};
+
+    match ty.kind() {
+        TyKind::Struct { symbol, .. } => symbol.metadata().name().value.clone(),
+        TyKind::Enum { symbol, .. } => symbol.metadata().name().value.clone(),
+        TyKind::Protocol { symbol, .. } => symbol.metadata().name().value.clone(),
+        TyKind::Int(bits) => match bits {
+            IntBits::I8 => "I8".to_string(),
+            IntBits::I16 => "I16".to_string(),
+            IntBits::I32 => "I32".to_string(),
+            IntBits::I64 => "I64".to_string(),
+        },
+        TyKind::Float(bits) => match bits {
+            FloatBits::F16 => "F16".to_string(),
+            FloatBits::F32 => "F32".to_string(),
+            FloatBits::F64 => "F64".to_string(),
+        },
+        TyKind::Bool => "Bool".to_string(),
+        TyKind::String => "String".to_string(),
+        TyKind::Unit => "Unit".to_string(),
+        TyKind::Never => "Never".to_string(),
+        TyKind::Pointer(inner) => format!("Ptr{}", mangle_type_name(inner)),
+        TyKind::TypeParameter(tp) => tp.metadata().name().value.clone(),
+        TyKind::SelfType => "Self".to_string(),
+        TyKind::Function { .. } => "Fn".to_string(),
+        TyKind::Tuple(elements) => {
+            let parts: Vec<String> = elements.iter().map(mangle_type_name).collect();
+            format!("Tuple{}", parts.join("_"))
+        },
+        TyKind::TypeAlias { symbol, .. } => symbol.metadata().name().value.clone(),
+        TyKind::Error => "Error".to_string(),
+        TyKind::Infer => "Infer".to_string(),
+        TyKind::AssociatedType { symbol, .. } => symbol.metadata().name().value.clone(),
+        TyKind::UnresolvedFunction { .. } => "UnresolvedFn".to_string(),
+        TyKind::UnresolvedPath { segments } => segments.join("_"),
+    }
+}
+
+/// Generate the "init" portion of an initializer's qualified name from its callable behavior.
+///
+/// For most initializers, this uses just labels (e.g., "init$intLiteral").
+/// For initializers with "from" label (from Convertible protocol), types are included
+/// to disambiguate overloads (e.g., "init$from_UInt32").
+///
+/// For example:
+/// - `init(intLiteral:)` becomes "init$intLiteral"
+/// - `init(from: UInt32)` becomes "init$from_UInt32"
+/// - `init()` becomes "init"
+pub fn init_name_suffix_from_callable(callable: &CallableBehavior) -> String {
+    let params = callable.parameters();
+
+    // Check if any parameter has "from" label - this indicates Convertible protocol
+    // which has multiple overloads with same label but different types
+    let has_from_label = params.iter().any(|p| p.external_label() == Some("from"));
+
+    let name_parts: Vec<String> = params
+        .iter()
+        .map(|p| {
+            let label = p.external_label().unwrap_or_else(|| p.internal_name());
+            if has_from_label {
+                // Include type for disambiguation
+                let type_name = mangle_type_name(&p.ty);
+                format!("{}_{}", label, type_name)
+            } else {
+                // Just use label
+                label.to_string()
+            }
+        })
+        .collect();
+
+    if name_parts.is_empty() {
+        "init".to_string()
+    } else {
+        format!("init${}", name_parts.join("$"))
+    }
+}
 
 /// Build a qualified name for a symbol by walking up the parent chain.
 ///
@@ -146,22 +227,11 @@ fn collect_name_segments(symbol: &Arc<dyn Symbol<KestrelLanguage>>, segments: &m
         },
 
         KestrelSymbolKind::Initializer => {
-            // Initializers include parameter labels in the name for overload differentiation
-            // e.g., init(intLiteral:) becomes "init$intLiteral", init() becomes "init"
-            // For unlabeled params, we use internal names (e.g., init$ptr$len$cap)
+            // Initializers include parameter labels in the name for overload differentiation.
+            // For "from:" initializers (Convertible protocol), types are also included
+            // because multiple conformances create overloads with the same label.
             if let Some(callable) = symbol.metadata().get_behavior::<CallableBehavior>() {
-                // Use external labels if present, otherwise fall back to internal names
-                let name_parts: Vec<&str> = callable
-                    .parameters()
-                    .iter()
-                    .map(|p| p.external_label().unwrap_or_else(|| p.internal_name()))
-                    .collect();
-
-                if name_parts.is_empty() {
-                    segments.push("init".to_string());
-                } else {
-                    segments.push(format!("init${}", name_parts.join("$")));
-                }
+                segments.push(init_name_suffix_from_callable(&callable));
             } else {
                 segments.push("init".to_string());
             }

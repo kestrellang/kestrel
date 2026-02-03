@@ -1,3 +1,4 @@
+use crate::builder::SourceEntry;
 use crate::error::CompileError;
 use crate::run::RunResult;
 use crate::source_file::SourceFile;
@@ -41,7 +42,7 @@ impl Compilation {
     }
 
     /// Internal method to create a compilation from source files.
-    pub(crate) fn from_sources(sources: Vec<(String, String)>, stdlib_enabled: bool) -> Self {
+    pub(crate) fn from_sources(sources: Vec<SourceEntry>, stdlib_enabled: bool) -> Self {
         let mut diagnostics = DiagnosticContext::new();
         let mut source_files = Vec::new();
 
@@ -52,7 +53,11 @@ impl Compilation {
         }
 
         // Phase 1, 2 & 3: Lex, parse, and add each file to the semantic tree
-        for (name, source) in sources {
+        for entry in sources {
+            let name = entry.name;
+            let source = entry.content;
+            let path = entry.path;
+
             // Add source file to diagnostics context
             let file_id = diagnostics.add_file(name.clone(), source.clone());
 
@@ -100,8 +105,12 @@ impl Compilation {
                 &mut diagnostics,
             );
 
-            // Create source file
-            let source_file = SourceFile::new(name, source, parse_result.tree);
+            // Create source file with path if available
+            let source_file = if let Some(p) = path {
+                SourceFile::with_path(name, source, parse_result.tree, p)
+            } else {
+                SourceFile::new(name, source, parse_result.tree)
+            };
 
             source_files.push(source_file);
         }
@@ -262,6 +271,11 @@ impl Compilation {
         self.source_files.iter().find(|f| f.name() == name)
     }
 
+    /// Get the directory containing a source file by name.
+    pub fn source_directory(&self, name: &str) -> Option<std::path::PathBuf> {
+        self.get_source_file(name).and_then(|f| f.directory())
+    }
+
     /// Lower the compilation to an execution graph (MIR).
     ///
     /// Returns an error if there are semantic errors or no semantic model.
@@ -275,8 +289,17 @@ impl Compilation {
             .as_ref()
             .ok_or(CompileError::NoSemanticModel)?;
 
+        // Build file_id -> directory mapping for @fileconstant path resolution
+        let file_paths: std::collections::HashMap<usize, std::path::PathBuf> = self
+            .source_files
+            .iter()
+            .enumerate()
+            .filter_map(|(file_id, sf)| sf.directory().map(|dir| (file_id, dir)))
+            .collect();
+
         let root = model.root();
-        let result = kestrel_execution_graph_lowering::lower_module(model, root);
+        let result =
+            kestrel_execution_graph_lowering::lower_module_with_file_paths(model, root, file_paths);
 
         if result.has_errors() {
             return Err(CompileError::LoweringFailed(result.diagnostics));

@@ -59,4 +59,12 @@ public struct LiteralSlice[T]: Iterable {
     public func iter() -> LiteralSliceIterator[T] {
         LiteralSliceIterator(ptr: self.ptr, remaining: self.len)
     }
+
+    /// Unchecked element access by index. No bounds checking.
+    public subscript(unchecked index: Int64) -> T {
+        get {
+            let offset = lang.i64_mul(index.raw, lang.sizeof[T]());
+            lang.ptr_read(lang.ptr_offset[T](self.ptr, offset))
+        }
+    }
 }

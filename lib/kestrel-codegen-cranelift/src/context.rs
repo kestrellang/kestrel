@@ -109,14 +109,27 @@ impl<'a> CodegenContext<'a> {
             .mir
             .statics
             .iter()
-            .map(|(id, def)| (id, def.name, def.ty))
+            .map(|(id, def)| {
+                (
+                    id,
+                    def.name,
+                    def.ty,
+                    def.file_constant_data.clone(),
+                )
+            })
             .collect();
 
-        for (_static_id, name_id, ty) in statics {
+        for (_static_id, name_id, ty, file_constant_data) in statics {
             let name = self.mir.name(name_id);
             let mangled_name = format!("{}", name);
 
-            // Compute the size of the static variable
+            // Check if this is a file constant
+            if let Some(fc_data) = file_constant_data {
+                self.define_file_constant_static(&mangled_name, &fc_data)?;
+                continue;
+            }
+
+            // Normal static: compute size and create zero-initialized data
             let empty_subst = Substitution::new();
             let cl_type = translate_type_with_subst(self.mir, ty, self.target, &empty_subst);
             let size = cl_type.bytes() as usize;
@@ -143,6 +156,107 @@ impl<'a> CodegenContext<'a> {
                 ))
             })?;
         }
+
+        Ok(())
+    }
+
+    /// Define a file constant static (for @fileconstant).
+    ///
+    /// This embeds the file bytes in .rodata and creates a LiteralSlice struct
+    /// pointing to the embedded data.
+    fn define_file_constant_static(
+        &mut self,
+        name: &str,
+        fc_data: &kestrel_execution_graph::FileConstantData,
+    ) -> Result<(), CodegenError> {
+        use crate::monomorphize::Substitution;
+        use crate::types::translate_type_with_subst;
+
+        let ptr_size = if self.target.is_64bit() { 8 } else { 4 };
+
+        // Resolve the file path - either relative to the source file's directory
+        // or relative to the current working directory
+        let resolved_path = if let Some(base) = &fc_data.base_path {
+            base.join(&fc_data.relative_path)
+        } else {
+            std::path::PathBuf::from(&fc_data.relative_path)
+        };
+
+        // Read the file from the resolved path
+        let file_bytes = std::fs::read(&resolved_path).map_err(|e| {
+            CodegenError::DataSection(format!(
+                "failed to read file constant '{}': {}",
+                resolved_path.display(),
+                e
+            ))
+        })?;
+
+        // Compute element size from element_ty using layout cache
+        // (translate_type returns pointer type for structs, which gives wrong size)
+        let element_size = self.layouts.layout_of(fc_data.element_ty).size;
+
+        // Validate file size is aligned to element size
+        if element_size > 0 && file_bytes.len() % element_size != 0 {
+            return Err(CodegenError::DataSection(format!(
+                "file '{}' size ({}) is not aligned to element size ({})",
+                resolved_path.display(),
+                file_bytes.len(),
+                element_size
+            )));
+        }
+
+        // Compute element count
+        let count = if element_size > 0 {
+            file_bytes.len() / element_size
+        } else {
+            0
+        };
+
+        // 1. Embed the raw file bytes in .rodata
+        let data_name = format!("{}_data", name);
+        let mut data_desc = DataDescription::new();
+        data_desc.define(file_bytes.into_boxed_slice());
+
+        let data_id = self
+            .module
+            .declare_data(&data_name, Linkage::Local, false, false)
+            .map_err(|e| CodegenError::DataSection(format!("failed to declare data: {}", e)))?;
+
+        self.module
+            .define_data(data_id, &data_desc)
+            .map_err(|e| CodegenError::DataSection(format!("failed to define data: {}", e)))?;
+
+        // 2. Create the LiteralSlice struct in .data
+        // LiteralSlice[T] = { ptr: lang.ptr[T], len: lang.i64 }
+        // On 64-bit: ptr at offset 0 (8 bytes), len at offset 8 (8 bytes) = 16 bytes total
+        let slice_size = ptr_size * 2;
+        let mut slice_bytes = vec![0u8; slice_size];
+
+        // Write count at offset ptr_size (len field)
+        let count_bytes = (count as i64).to_le_bytes();
+        slice_bytes[ptr_size..ptr_size + 8].copy_from_slice(&count_bytes[..8.min(ptr_size)]);
+
+        // Create the slice data
+        let mut slice_desc = DataDescription::new();
+        slice_desc.define(slice_bytes.into_boxed_slice());
+
+        // Add a relocation for the pointer field (points to the embedded data)
+        let data_ref = self.module.declare_data_in_data(data_id, &mut slice_desc);
+        slice_desc.write_data_addr(0, data_ref, 0);
+
+        // Declare and define the LiteralSlice static
+        let slice_id = self
+            .module
+            .declare_data(name, Linkage::Export, true, false)
+            .map_err(|e| {
+                CodegenError::DataSection(format!("failed to declare slice static: {}", e))
+            })?;
+
+        self.module
+            .define_data(slice_id, &slice_desc)
+            .map_err(|e| {
+                CodegenError::DataSection(format!("failed to define slice static: {}", e))
+            })?;
 
         Ok(())
     }

@@ -49,12 +49,14 @@ UNSIGNED_MAX = {
 }
 
 
-def get_cast(from_bits: int, to_bits: int) -> str:
+def get_cast(from_bits: int, to_bits: int, from_signed: bool) -> str:
     """Get the cast expression from one bit width to another."""
     if from_bits == to_bits:
         return "other.raw"
     else:
-        return f"lang.cast_i{from_bits}_i{to_bits}(other.raw)"
+        # Use 'i' prefix for signed source, 'u' prefix for unsigned source
+        from_prefix = "i" if from_signed else "u"
+        return f"lang.cast_{from_prefix}{from_bits}_i{to_bits}(other.raw)"
 
 
 def normalize_signature(line: str) -> str:
@@ -861,13 +863,13 @@ def generate_integer(type_name: str, bits: int, signed: bool, is_default: bool) 
     lang_type = f"i{bits}"
 
     # Generate Convertible conformances and inits for all other integer types
-    other_types = [(name, b) for name, b, _, _ in INTEGERS if name != type_name]
+    other_types = [(name, b, s) for name, b, s, _ in INTEGERS if name != type_name]
 
     conformances = []
     inits = []
-    for other_name, other_bits in other_types:
+    for other_name, other_bits, other_signed in other_types:
         conformances.append(f"    Convertible[{other_name}]")
-        cast_expr = get_cast(other_bits, bits)
+        cast_expr = get_cast(other_bits, bits, other_signed)
         inits.append(f"    public init(from other: {other_name}) {{ self.raw = {cast_expr} }}")
 
     # Join with comma+newline, no trailing comma
