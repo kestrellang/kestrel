@@ -166,6 +166,7 @@ func test(opts: [Option[lang.i64]]) -> lang.i64 {
 }
 "#,
         )
+        .with_stdlib()
         .expect(Compiles);
     }
 

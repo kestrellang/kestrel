@@ -1039,6 +1039,7 @@ mod edge_cases {
             }
         "#,
         )
+        .with_stdlib()
         .expect(Compiles)
         .expect(
             Symbol::new("Node")
@@ -1081,6 +1082,7 @@ mod edge_cases {
             }
         "#,
         )
+        .with_stdlib()
         .expect(Compiles)
         .expect(
             Symbol::new("Tree")
@@ -1591,6 +1593,7 @@ mod constraint_enforcement {
             func main() {}
         "#,
         )
+        .with_stdlib()
         .expect(Compiles);
     }
 

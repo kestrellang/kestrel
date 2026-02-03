@@ -185,6 +185,7 @@ mod nested_and_complex_types {
             type ArrayPtr = lang.ptr[[lang.i64]];
         "#,
         )
+        .with_stdlib()
         .expect(Compiles);
     }
 
@@ -227,6 +228,7 @@ mod nested_and_complex_types {
             type PtrArray = [lang.ptr[lang.i64]];
         "#,
         )
+        .with_stdlib()
         .expect(Compiles);
     }
 

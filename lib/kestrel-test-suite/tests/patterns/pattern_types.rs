@@ -989,6 +989,7 @@ func test(arr: [lang.i64]) -> lang.i64 {
 }
 "#,
         )
+        .with_stdlib()
         .expect(Compiles);
     }
 
@@ -1006,6 +1007,7 @@ func test(arr: [lang.i64]) -> lang.str {
 }
 "#,
         )
+        .with_stdlib()
         .expect(Compiles);
     }
 
@@ -1080,6 +1082,7 @@ func test(arr: [lang.i64]) -> lang.i64 {
 }
 "#,
         )
+        .with_stdlib()
         .expect(Compiles);
     }
 
@@ -1098,6 +1101,7 @@ func test(arr: [lang.i64]) -> lang.i64 {
 }
 "#,
         )
+        .with_stdlib()
         .expect(Compiles);
     }
 

@@ -34,6 +34,7 @@ func matchEmpty(arr: [lang.i64]) -> lang.i64 {
 }
 "#,
         )
+        .with_stdlib()
         .expect(Compiles);
     }
 
@@ -52,6 +53,7 @@ func matchSingle(arr: [lang.i64]) -> lang.i64 {
 }
 "#,
         )
+        .with_stdlib()
         .expect(Compiles);
     }
 
@@ -70,6 +72,7 @@ func sum3(arr: [lang.i64]) -> lang.i64 {
 }
 "#,
         )
+        .with_stdlib()
         .expect(Compiles);
     }
 }
@@ -96,6 +99,7 @@ func getFirst(arr: [lang.i64]) -> lang.i64 {
 }
 "#,
         )
+        .with_stdlib()
         .expect(Compiles);
     }
 
@@ -155,6 +159,7 @@ func sumFirstTwo(arr: [lang.i64]) -> lang.i64 {
 }
 "#,
         )
+        .with_stdlib()
         .expect(Compiles);
     }
 }
@@ -181,6 +186,7 @@ func getLast(arr: [lang.i64]) -> lang.i64 {
 }
 "#,
         )
+        .with_stdlib()
         .expect(Compiles);
     }
 
@@ -199,6 +205,7 @@ func endpoints(arr: [lang.i64]) -> lang.i64 {
 }
 "#,
         )
+        .with_stdlib()
         .expect(Compiles);
     }
 
@@ -217,6 +224,7 @@ func lastTwo(arr: [lang.i64]) -> lang.i64 {
 }
 "#,
         )
+        .with_stdlib()
         .expect(Compiles);
     }
 }
@@ -335,6 +343,7 @@ func sumFirstPair(arr: [(lang.i64, lang.i64)]) -> lang.i64 {
 }
 "#,
         )
+        .with_stdlib()
         .expect(Compiles);
     }
 }

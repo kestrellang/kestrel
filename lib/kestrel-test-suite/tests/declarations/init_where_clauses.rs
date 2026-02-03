@@ -26,6 +26,7 @@ mod basic {
             }
         "#,
         )
+        .with_stdlib()
         .expect(Compiles);
     }
 
@@ -220,6 +221,7 @@ mod multiple_initializers {
             }
         "#,
         )
+        .with_stdlib()
         .expect(Compiles);
     }
 }

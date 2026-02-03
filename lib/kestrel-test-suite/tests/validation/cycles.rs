@@ -99,6 +99,7 @@ struct Node {
 }
 "#,
         )
+        .with_stdlib()
         .expect(Compiles)
         .expect(
             Symbol::new("Node")
@@ -120,6 +121,7 @@ struct TreeNode {
 }
 "#,
         )
+        .with_stdlib()
         .expect(Compiles)
         .expect(
             Symbol::new("TreeNode")
