@@ -46,7 +46,7 @@ use super::utils::{
     find_type_directed_match, format_symbol_kind, get_associated_type_bounds_from_context,
     get_callable_behavior, get_type_container, get_type_parameter_bounds_by_id,
     get_type_parameter_bounds_from_context, infer_type_arguments,
-    matches_signature, substitute_self, substitute_type, type_satisfies_bound,
+    matches_signature, resolve_associated_types, substitute_self, substitute_type, type_satisfies_bound,
 };
 
 /// Resolve a chain of member accesses: obj.field1.field2.field3
@@ -1010,7 +1010,19 @@ pub fn resolve_member_call(
             let method_type_params = generics.type_parameters();
             if !method_type_params.is_empty() {
                 let arg_types: Vec<Ty> = arguments.iter().map(|a| a.value.ty.clone()).collect();
-                let method_subs = infer_type_arguments(method_type_params, callable, &arg_types);
+                let mut method_subs = infer_type_arguments(method_type_params, callable, &arg_types);
+
+                // Ensure all type parameters have substitutions (even if they're inference variables)
+                // This is critical for bidirectional type inference with closures
+                for tp in method_type_params {
+                    let tp_id = tp.metadata().id();
+                    if !method_subs.contains(tp_id) {
+                        // Create fresh inference variable for this type parameter
+                        let infer_ty = Ty::infer(span.clone());
+                        method_subs.insert(tp_id, infer_ty);
+                    }
+                }
+
                 for (key, ty) in method_subs.iter() {
                     call_subs.insert(*key, ty.clone());
                 }
@@ -1451,6 +1463,9 @@ fn collect_protocol_methods(
                     // Apply protocol type parameter substitutions
                     let substituted_callable =
                         substitute_callable(&substituted_callable, protocol_substitutions);
+                    // Resolve associated types (e.g., ArrayIterator[Int64].Item -> Int64)
+                    let substituted_callable =
+                        resolve_callable_associated_types(&substituted_callable, ctx);
 
                     candidates.push(ConstrainedMethodCandidate {
                         method: method.symbol.clone(),
@@ -1478,6 +1493,9 @@ fn collect_protocol_methods(
             // Apply protocol type parameter substitutions
             let substituted_callable =
                 substitute_callable(&substituted_callable, protocol_substitutions);
+            // Resolve associated types (e.g., ArrayIterator[Int64].Item -> Int64)
+            let substituted_callable =
+                resolve_callable_associated_types(&substituted_callable, ctx);
 
             candidates.push(ConstrainedMethodCandidate {
                 method: child.clone(),
@@ -1531,6 +1549,45 @@ pub fn substitute_callable_self(callable: &CallableBehavior, receiver_ty: &Ty) -
         .collect();
 
     let new_return = substitute_self(callable.return_type(), receiver_ty);
+
+    // Preserve receiver kind if present
+    match callable.receiver() {
+        Some(receiver_kind) => CallableBehavior::with_receiver(
+            new_params,
+            new_return,
+            receiver_kind,
+            callable.span().clone(),
+        ),
+        None => CallableBehavior::new(new_params, new_return, callable.span().clone()),
+    }
+}
+
+/// Resolve associated types in a CallableBehavior.
+///
+/// This recursively resolves any AssociatedType projections in parameter types
+/// and return type to their concrete types using the TypeOracle.
+pub fn resolve_callable_associated_types(
+    callable: &CallableBehavior,
+    ctx: &BodyResolutionContext,
+) -> CallableBehavior {
+    use kestrel_semantic_tree::behavior::callable::CallableParameter;
+
+    let new_params: Vec<CallableParameter> = callable
+        .parameters()
+        .iter()
+        .map(|p| {
+            let new_ty = resolve_associated_types(&p.ty, ctx);
+            CallableParameter {
+                access_mode: p.access_mode,
+                ty: new_ty,
+                label: p.label.clone(),
+                bind_name: p.bind_name.clone(),
+                has_default: p.has_default,
+            }
+        })
+        .collect();
+
+    let new_return = resolve_associated_types(callable.return_type(), ctx);
 
     // Preserve receiver kind if present
     match callable.receiver() {
@@ -2647,9 +2704,11 @@ pub fn resolve_delegating_init(
 
 /// Get all protocols that a concrete type conforms to (including through extensions).
 ///
-/// Returns a list of (protocol_symbol, protocol_type) pairs.
-fn get_type_conformances(ty: &Ty, ctx: &BodyResolutionContext) -> Vec<SymbolId> {
-    ctx.model.protocol_conformance_ids_for_type(ty)
+/// Returns a list of protocol types with their type parameter substitutions preserved.
+/// For example, for `Int64` conforming to `NotEqual[Int64]`, this returns the full
+/// protocol type `NotEqual[Int64]` rather than just the protocol ID.
+fn get_type_conformances(ty: &Ty, ctx: &BodyResolutionContext) -> Vec<Ty> {
+    ctx.model.protocol_conformances_for_type(ty)
 }
 
 /// Get all applicable protocol extensions for a concrete type.
@@ -2657,17 +2716,27 @@ fn get_type_conformances(ty: &Ty, ctx: &BodyResolutionContext) -> Vec<SymbolId> 
 /// This finds all protocol extensions where:
 /// 1. The concrete type conforms to the target protocol
 /// 2. All SelfBound constraints are satisfied
+///
+/// Returns tuples of (extension_symbol, specificity, protocol_type) where protocol_type
+/// includes the type parameter substitutions from the conformance.
 fn get_applicable_protocol_extensions(
     concrete_ty: &Ty,
     ctx: &BodyResolutionContext,
 ) -> Vec<(
     Arc<kestrel_semantic_tree::symbol::extension::ExtensionSymbol>,
     usize,
+    Ty,
 )> {
     let conformances = get_type_conformances(concrete_ty, ctx);
     let mut applicable = Vec::new();
 
-    for protocol_id in conformances {
+    for protocol_ty in conformances {
+        // Extract the protocol symbol and substitutions from the protocol type
+        let (protocol_id, _protocol_subs) = match protocol_ty.kind() {
+            TyKind::Protocol { symbol, substitutions } => (symbol.metadata().id(), substitutions),
+            _ => continue, // Skip non-protocol types
+        };
+
         // Get all extensions for this protocol
         let extensions = ctx.model.query(ExtensionsFor {
             target_id: protocol_id,
@@ -2690,13 +2759,13 @@ fn get_applicable_protocol_extensions(
             // Check SelfBound constraints
             if is_protocol_extension_applicable(&extension, concrete_ty, ctx) {
                 let specificity = target_behavior.protocol_extension_specificity();
-                applicable.push((extension, specificity));
+                applicable.push((extension, specificity, protocol_ty.clone()));
             }
         }
     }
 
     // Sort by specificity (most specific first)
-    applicable.sort_by_key(|(_, specificity)| std::cmp::Reverse(*specificity));
+    applicable.sort_by_key(|(_, specificity, _)| std::cmp::Reverse(*specificity));
 
     applicable
 }
@@ -2763,19 +2832,11 @@ fn find_methods_in_protocol_extensions(
         return Vec::new();
     }
 
-    // Extensions are sorted by specificity (highest first)
-    // Determine the highest specificity
-    let highest_specificity = applicable_extensions[0].1;
-
     let mut methods = Vec::new();
 
-    // Only collect methods from extensions at the highest specificity level
-    for (extension, specificity) in applicable_extensions {
-        if specificity < highest_specificity {
-            // We've passed all extensions at the highest specificity level
-            break;
-        }
-
+    // Search ALL applicable extensions (not just highest specificity)
+    // Extensions are sorted by specificity (highest first)
+    for (extension, _specificity, _protocol_ty) in applicable_extensions {
         for child in extension.metadata().children() {
             if child.metadata().kind() == KestrelSymbolKind::Function
                 && child.metadata().name().value == method_name

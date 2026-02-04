@@ -53,7 +53,7 @@ use super::utils::{
     create_generic_struct_type, create_struct_type, create_struct_type_with_type_args,
     find_type_directed_match, get_callable_behavior, get_type_container,
     get_type_parameter_bounds_by_id, infer_type_arguments, is_expression_kind, matches_signature,
-    replace_type_params_except, substitute_self, substitute_type,
+    replace_type_params_except, resolve_associated_types, substitute_self, substitute_type,
     validate_not_standalone_type_param, verify_type_argument_constraints,
 };
 
@@ -1554,8 +1554,8 @@ pub fn resolve_method_call(
 
     for &candidate_id in candidates {
         if let Some(symbol) = ctx.model.query(SymbolFor { id: candidate_id })
-            && let Some(callable) = get_callable_behavior(&symbol)
-            && matches_signature(&callable, arguments.len(), arg_labels)
+            && let Some(orig_callable) = get_callable_behavior(&symbol)
+            && matches_signature(&orig_callable, arguments.len(), arg_labels)
         {
             // Check visibility
             if !ctx.model.query(IsVisibleFrom {
@@ -1570,7 +1570,7 @@ pub fn resolve_method_call(
             // e.g., for Box[Int], we get {T -> Int}
             // For static methods (TypeRef receiver), get the struct type from the symbol
             // For instance methods, resolve Self to concrete type
-            use super::members::resolve_self_type_to_concrete;
+            use super::members::{resolve_callable_associated_types, resolve_self_type_to_concrete, substitute_callable_self};
             use kestrel_semantic_tree::behavior::typed::TypedBehavior;
             let resolved_receiver_ty = match &receiver.kind {
                 ExprKind::TypeRef(type_symbol_id) => {
@@ -1613,8 +1613,15 @@ pub fn resolve_method_call(
             // e.g., OptionalTypeOperator[Int] -> Optional[Int]
             let resolved_receiver_ty = resolved_receiver_ty.expand_aliases();
 
+            // Substitute Self in the callable and resolve associated types
+            // This ensures parameter types like ArrayIterator[Int64].Item become Int64
+            let mut callable = substitute_callable_self(&orig_callable, &resolved_receiver_ty);
+            callable = resolve_callable_associated_types(&callable, ctx);
+
             // Get return type, substituting Self with the resolved receiver type
             let mut return_ty = substitute_self(callable.return_type(), &resolved_receiver_ty);
+            // Resolve associated types in the return type (e.g., ArrayIterator[Int64].Item -> Int64)
+            return_ty = resolve_associated_types(&return_ty, ctx);
             let mut call_substitutions = Substitutions::new();
             let mut resolved_receiver_ty = resolved_receiver_ty;
 
@@ -1721,6 +1728,89 @@ pub fn resolve_method_call(
                                 }
                             }
                             break;
+                        }
+                    }
+                }
+            }
+            // Handle methods from protocol conformances for concrete types
+            // e.g., for Int64 conforming to NotEqual[Int64], when calling notEquals(other: Rhs),
+            // we need to substitute Rhs with Int64
+            //
+            // Check if this method comes from a protocol or protocol extension
+            if let Some(method_parent) = symbol.metadata().parent() {
+                // The method could come from:
+                // 1. A protocol directly (parent is Protocol)
+                // 2. A protocol extension (parent is Extension that targets a Protocol)
+                let target_protocol_opt = if method_parent.metadata().kind() == KestrelSymbolKind::Protocol {
+                    // Direct protocol method
+                    Some((method_parent.metadata().id(), None))
+                } else if method_parent.metadata().kind() == KestrelSymbolKind::Extension {
+                    // Protocol extension method - get the protocol being extended
+                    use kestrel_semantic_tree::behavior::extension_target::ExtensionTargetBehavior;
+                    if let Some(ext_behavior) = method_parent.metadata().get_behavior::<ExtensionTargetBehavior>()
+                        && ext_behavior.is_protocol_extension()
+                    {
+                        let target_ty = ext_behavior.target_type();
+                        // Extract protocol symbol from the target type
+                        if let TyKind::Protocol { symbol: target_proto, .. } = target_ty.kind() {
+                            // For protocol extensions, we need to use the target protocol directly
+                            Some((target_proto.metadata().id(), Some(target_proto.clone())))
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+
+                if let Some((target_protocol_id, target_protocol_opt)) = target_protocol_opt {
+                    // Find the receiver type's conformance to this protocol
+                    let conformances = ctx.model.protocol_conformances_for_type(&resolved_receiver_ty);
+
+                    for conformance_ty in conformances {
+                        if let TyKind::Protocol {
+                            symbol: proto,
+                            substitutions: proto_subs,
+                        } = conformance_ty.kind()
+                        {
+                            // Check if this conformance is for the target protocol (or an ancestor)
+                            let protocol_matches = if proto.metadata().id() == target_protocol_id {
+                                // Direct match
+                                true
+                            } else if let Some(target_proto) = &target_protocol_opt {
+                                // Check if the conformance protocol inherits from the target
+                                // This handles cases where we have Protocol A: B and the method is from B
+                                get_method_protocol_substitutions(&symbol, proto, proto_subs).is_some()
+                            } else {
+                                // For direct protocol methods, use get_method_protocol_substitutions
+                                get_method_protocol_substitutions(&symbol, proto, proto_subs).is_some()
+                            };
+
+                            if protocol_matches {
+                                // For protocol extension methods, use the conformance substitutions directly
+                                // For direct protocol methods, compose through inheritance
+                                let subs_to_apply = if target_protocol_opt.is_some() {
+                                    // Protocol extension: use conformance substitutions directly
+                                    proto_subs.clone()
+                                } else {
+                                    // Direct protocol method: trace through inheritance
+                                    get_method_protocol_substitutions(&symbol, proto, proto_subs).unwrap_or_default()
+                                };
+
+                                // Apply protocol substitutions to callable and return type
+                                if !subs_to_apply.is_empty() {
+                                    callable = substitute_callable_with_substitutions(&callable, &subs_to_apply);
+                                    return_ty = substitute_type(&return_ty, &subs_to_apply);
+
+                                    // Add to call_substitutions for later use
+                                    for (param_id, ty) in subs_to_apply.iter() {
+                                        call_substitutions.insert(*param_id, ty.clone());
+                                    }
+                                }
+                                break;
+                            }
                         }
                     }
                 }
@@ -1864,11 +1954,17 @@ pub fn resolve_method_call(
                         for (param_id, ty) in method_subs.iter() {
                             call_substitutions.insert(*param_id, ty.clone());
                         }
-                        // Reapply substitutions to return type with inferred types
-                        if !method_subs.is_empty() {
-                            return_ty = callable.return_type().clone();
-                            return_ty = return_ty.apply_substitutions(&call_substitutions);
+                        // For any type parameters that couldn't be inferred (not in method_subs),
+                        // add them as inference variables so the type inference solver can solve for them
+                        for param in method_type_params {
+                            let param_id = param.metadata().id();
+                            if !call_substitutions.contains(param_id) {
+                                call_substitutions.insert(param_id, Ty::infer(span.clone()));
+                            }
                         }
+                        // Reapply substitutions to return type (now including inference variables for uninferred params)
+                        return_ty = callable.return_type().clone();
+                        return_ty = return_ty.apply_substitutions(&call_substitutions);
                     }
                 }
             }
@@ -1888,14 +1984,16 @@ pub fn resolve_method_call(
             validate_argument_access_modes(&callable, &arguments, &span, ctx);
 
             // Compute the function type with substitutions applied
-            // Must substitute both type parameters AND Self
+            // Must substitute both type parameters AND Self, then resolve associated types
             let method_fn_ty = {
                 let param_tys: Vec<Ty> = callable
                     .parameters()
                     .iter()
-                    .map(|p| {
+                    .enumerate()
+                    .map(|(i, p)| {
                         let ty = substitute_type(&p.ty, &call_substitutions);
-                        substitute_self(&ty, &resolved_receiver_ty)
+                        let ty = substitute_self(&ty, &resolved_receiver_ty);
+                        resolve_associated_types(&ty, ctx)
                     })
                     .collect();
                 let ret_ty = substitute_type(&return_ty, &call_substitutions);

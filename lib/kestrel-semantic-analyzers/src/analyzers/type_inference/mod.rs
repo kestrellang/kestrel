@@ -159,16 +159,18 @@ impl Analyzer for TypeInferenceAnalyzer {
         }
 
         // Apply solution to create resolved body (even if there are errors)
-        let resolved_body = apply_solution(executable.body(), &solution);
+        // Pass the model as a TypeOracle to resolve associated types during the same pass
+        let resolved_body = apply_solution(executable.body(), &solution, ctx.model);
 
         // Apply solution to parameter patterns for destructuring support
         let resolved_patterns =
-            apply_solution_to_patterns(executable.parameter_patterns(), &solution);
+            apply_solution_to_patterns(executable.parameter_patterns(), &solution, ctx.model);
 
         // Apply solution to default value expressions
-        let resolved_defaults = apply_solution_to_defaults(executable.default_values(), &solution);
+        let resolved_defaults = apply_solution_to_defaults(executable.default_values(), &solution, ctx.model);
 
-        // Update local variables in the container with resolved types.
+        // Update local variables in the container with resolved types, including
+        // resolving associated type projections inline during the same pass.
         // This is necessary because pattern-bound locals are created with Ty::infer()
         // placeholder types, and subsequent code reads the type from the LocalContainer.
         // Also resolves SelfType to the concrete type for the `self` local.
@@ -177,18 +179,21 @@ impl Analyzer for TypeInferenceAnalyzer {
             apply_solution_to_locals(
                 func as &dyn LocalContainer,
                 &solution,
+                ctx.model,
                 concrete_self_type.as_ref(),
             );
         } else if let Some(init) = symbol.as_ref().downcast_ref::<InitializerSymbol>() {
             apply_solution_to_locals(
                 init as &dyn LocalContainer,
                 &solution,
+                ctx.model,
                 concrete_self_type.as_ref(),
             );
         } else if let Some(deinit) = symbol.as_ref().downcast_ref::<DeinitSymbol>() {
             apply_solution_to_locals(
                 deinit as &dyn LocalContainer,
                 &solution,
+                ctx.model,
                 concrete_self_type.as_ref(),
             );
         }

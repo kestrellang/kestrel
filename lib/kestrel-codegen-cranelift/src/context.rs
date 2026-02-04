@@ -417,6 +417,21 @@ impl<'a> CodegenContext<'a> {
         let is_main = self.is_main(func_def);
         let symbol_name = self.symbol_name_for_instantiation(inst);
 
+        eprintln!("\n=== DEBUG: Compiling function ===");
+        eprintln!("Function: {}", self.mir.name(func_def.name));
+        eprintln!("Symbol: {}", symbol_name);
+        eprintln!("Type args: {:?}", inst.type_args);
+        eprintln!("Self type: {:?}", inst.self_type);
+        if !inst.type_args.is_empty() {
+            eprintln!("Type arg details:");
+            for (i, &ty) in inst.type_args.iter().enumerate() {
+                eprintln!("  [{}] {:?} -> {:?}", i, ty, self.mir.ty(ty));
+            }
+        }
+        if let Some(st) = inst.self_type {
+            eprintln!("Self type details: {:?} -> {:?}", st, self.mir.ty(st));
+        }
+
         if !func_def.type_params.is_empty() && func_def.type_params.len() != inst.type_args.len() {
             return Err(CodegenError::Unsupported(format!(
                 "missing type arguments for function instantiation '{}': expected {}, got {}",

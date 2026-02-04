@@ -3029,7 +3029,11 @@ fn compile_cast(
         local_map,
         stack_locals,
     )?;
-    let target_ty = translate_type(ctx.mir, target, ctx.target);
+    // Apply substitution to target type before translation
+    let substituted_target = subst
+        .apply_ty_readonly(ctx.mir, target)
+        .unwrap_or(target);
+    let target_ty = translate_type(ctx.mir, substituted_target, ctx.target);
 
     match kind {
         CastKind::IntWiden => {
@@ -3245,11 +3249,17 @@ fn get_place_type_for_call(
     ctx: &CodegenContext<'_>,
     place: &Place,
     local_map: &HashMap<Id<Local>, Variable>,
+    subst: &Substitution,
 ) -> Result<Id<Ty>, CodegenError> {
     match &place.kind {
         PlaceKind::Local(local_id) => {
             let local_def = ctx.mir.local(*local_id);
-            Ok(local_def.ty)
+            // Apply substitution to the local's type to resolve type parameters
+            let ty = subst.apply_ty_readonly(ctx.mir, local_def.ty)
+                .map_err(|e| CodegenError::Unsupported(format!(
+                    "failed to substitute local type: {:?}", e
+                )))?;
+            Ok(ty)
         },
 
         PlaceKind::Global(name_id) => {
@@ -3264,23 +3274,24 @@ fn get_place_type_for_call(
                     let global_name = ctx.mir.name(*name_id);
                     CodegenError::Unsupported(format!("static variable not found: {}", global_name))
                 })?;
+            // Globals/statics don't have type parameters, so no substitution needed
             Ok(static_def.ty)
         },
 
         PlaceKind::Field { parent, name } => {
-            let parent_ty = get_place_type_for_call(ctx, parent, local_map)?;
+            let parent_ty = get_place_type_for_call(ctx, parent, local_map, subst)?;
             get_field_type_for_call(ctx, parent_ty, name)
         },
 
         PlaceKind::Index { parent, index } => {
-            let parent_ty = get_place_type_for_call(ctx, parent, local_map)?;
+            let parent_ty = get_place_type_for_call(ctx, parent, local_map, subst)?;
             get_field_type_by_index_for_call(ctx, parent_ty, *index)
         },
 
-        PlaceKind::Downcast { parent, .. } => get_place_type_for_call(ctx, parent, local_map),
+        PlaceKind::Downcast { parent, .. } => get_place_type_for_call(ctx, parent, local_map, subst),
 
         PlaceKind::Deref(inner) => {
-            let inner_ty = get_place_type_for_call(ctx, inner, local_map)?;
+            let inner_ty = get_place_type_for_call(ctx, inner, local_map, subst)?;
             match ctx.mir.ty(inner_ty) {
                 MirTy::Pointer(pointee) | MirTy::Ref(pointee) | MirTy::RefMut(pointee) => {
                     Ok(*pointee)
@@ -3591,6 +3602,9 @@ fn compile_apply_partial(
 
             if is_aggregate {
                 // Copy nested struct data
+                eprintln!("DEBUG: About to call layout_of for nested aggregate");
+                eprintln!("  concrete_field_ty: {:?}", concrete_field_ty);
+                eprintln!("  field_mir_ty: {:?}", field_mir_ty);
                 let nested_layout = ctx.layouts.layout_of(concrete_field_ty);
                 let dest_ptr = if offset == 0 {
                     env_ptr
@@ -3778,7 +3792,7 @@ fn compile_thin_call(
     };
 
     // Get the type of the place to determine the function signature
-    let func_ty = get_place_type_for_call(ctx, place, local_map)?;
+    let func_ty = get_place_type_for_call(ctx, place, local_map, subst)?;
     let resolved_ty = resolve_func_type(ctx, func_ty);
     let ret_ty = match ctx.mir.ty(resolved_ty) {
         MirTy::FuncThin { ret, .. } | MirTy::FuncThick { ret, .. } => *ret,
@@ -3804,7 +3818,13 @@ fn compile_thin_call(
     }
 
     // Build the signature
-    let sig = build_signature_from_func_type(ctx, func_ty, builder)?;
+    // Apply substitution to the function type to resolve any type parameters or projections
+    let substituted_func_ty = subst
+        .apply_ty_readonly(ctx.mir, func_ty)
+        .map_err(|e| CodegenError::Unsupported(format!(
+            "failed to substitute function type in thin call: {:?}", e
+        )))?;
+    let sig = build_signature_from_func_type(ctx, substituted_func_ty, builder)?;
     let sig_ref = builder.import_signature(sig);
 
     // Compile arguments with proper PassingMode handling
@@ -3877,8 +3897,14 @@ fn compile_thick_call(
     let ptr_size = if ctx.target.is_64bit() { 8 } else { 4 };
 
     // Get the type of the place to determine how to handle the call
-    let func_ty = get_place_type_for_call(ctx, place, local_map)?;
-    let resolved_ty = resolve_func_type(ctx, func_ty);
+    let func_ty = get_place_type_for_call(ctx, place, local_map, subst)?;
+    // Apply substitution to resolve any type parameters or projections
+    let substituted_func_ty = subst
+        .apply_ty_readonly(ctx.mir, func_ty)
+        .map_err(|e| CodegenError::Unsupported(format!(
+            "failed to substitute function type in thick call: {:?}", e
+        )))?;
+    let resolved_ty = resolve_func_type(ctx, substituted_func_ty);
     let mir_ty = ctx.mir.ty(resolved_ty);
 
     // Check if this is actually a thin function type
@@ -3976,12 +4002,10 @@ fn compile_thick_call(
             }
         },
         MirTy::FuncThick { params, ret } => {
-            // Apply substitution to params and ret to handle generic closures
-            let params: Vec<_> = params
-                .iter()
-                .map(|&ty| subst.apply_ty_readonly(ctx.mir, ty).unwrap_or(ty))
-                .collect();
-            let ret = subst.apply_ty_readonly(ctx.mir, *ret).unwrap_or(*ret);
+            // Note: params and ret are already substituted since we applied substitution
+            // to the entire function type above (substituted_func_ty)
+            let params = params.clone();
+            let ret = *ret;
 
             // For thick function types, the value is a struct with func_ptr and env_ptr
             let place_value =

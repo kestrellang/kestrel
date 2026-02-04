@@ -4211,8 +4211,30 @@ fn lower_call(
                                 // Method is defined directly in a protocol
                                 Some(parent)
                             } else if parent.metadata().kind() == KestrelSymbolKind::Extension {
-                                // Method is in an extension - find which protocol conformance it belongs to
-                                find_protocol_for_extension_method(&parent, method_name)
+                                // Check if this is a protocol extension (extend Protocol { ... })
+                                use kestrel_semantic_tree::symbol::extension::ExtensionSymbol;
+                                if let Some(ext_sym) = parent.as_ref().downcast_ref::<ExtensionSymbol>() {
+                                    if let Some(target_ty) = ext_sym.target_type() {
+                                        if is_protocol_type(&target_ty) {
+                                            // This is a protocol extension: extend Iterator { ... }
+                                            // Protocol extension methods always use witness dispatch
+                                            // because the method is defined on the protocol extension,
+                                            // not on the concrete type itself
+                                            if let TyKind::Protocol { symbol, .. } = target_ty.kind() {
+                                                Some(symbol.clone() as std::sync::Arc<dyn semantic_tree::symbol::Symbol<kestrel_semantic_tree::language::KestrelLanguage>>)
+                                            } else {
+                                                None
+                                            }
+                                        } else {
+                                            // Regular type extension with protocol conformances
+                                            find_protocol_for_extension_method(&parent, method_name)
+                                        }
+                                    } else {
+                                        None
+                                    }
+                                } else {
+                                    None
+                                }
                             } else {
                                 None
                             }
@@ -4226,6 +4248,29 @@ fn lower_call(
                             TyKind::Int(_) | TyKind::Float(_) | TyKind::Bool | TyKind::String
                         );
 
+                        // Debug logging for witness dispatch decisions (filtered to common protocol methods)
+                        let debug_methods = [
+                            "lessThan", "greaterThan", "equals", "add", "subtract",
+                            "multiply", "divide", "map", "filter", "next"
+                        ];
+                        if debug_methods.contains(&method_name.as_str()) {
+                            eprintln!("\n=== Witness Dispatch Debug: {} ===", method_name);
+                            eprintln!("  protocol_symbol: {}",
+                                if let Some(ref ps) = protocol_symbol {
+                                    format!("Some({:?})", qualified_name_for_symbol(ctx, ps))
+                                } else {
+                                    "None".to_string()
+                                });
+                            eprintln!("  receiver.ty: {:?}", receiver.ty);
+                            eprintln!("  is_type_param_call: {}", is_type_param_call);
+                            eprintln!("  is_static_type_param_call: {}", is_static_type_param_call);
+                            eprintln!("  is_assoc_type_call: {}", is_assoc_type_call);
+                            eprintln!("  is_static_assoc_type_call: {}", is_static_assoc_type_call);
+                            eprintln!("  is_self_type_call: {}", is_self_type_call);
+                            eprintln!("  is_protocol_type_call: {}", is_protocol_type_call);
+                            eprintln!("  is_builtin_type: {}", is_builtin_type);
+                        }
+
                         // Check if this requires witness dispatch:
                         // - Only protocol methods (protocol_symbol.is_some()) can be dispatched via witnesses.
                         // - For protocol-typed receivers calling extension-only methods, use direct calls.
@@ -4237,6 +4282,12 @@ fn lower_call(
                                 || is_self_type_call
                                 || is_protocol_type_call)
                                 || !is_builtin_type);
+
+                        // Continue debug logging
+                        if debug_methods.contains(&method_name.as_str()) {
+                            eprintln!("  needs_witness_dispatch: {}", needs_witness_dispatch);
+                            eprintln!("===================================\n");
+                        }
 
                         if needs_witness_dispatch {
                             if let Some(protocol_sym) = protocol_symbol {

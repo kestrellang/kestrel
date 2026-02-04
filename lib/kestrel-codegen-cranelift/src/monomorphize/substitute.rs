@@ -157,18 +157,41 @@ impl Substitution {
                 }
             },
 
-            // Associated type projection - substitute the base type
-            // Note: Full resolution of associated types requires witness lookup,
-            // which is handled separately. Here we just substitute the base.
+            // Associated type projection - substitute the base type and attempt resolution
             MirTy::AssociatedTypeProjection {
                 base,
                 protocol,
                 associated,
             } => {
                 let new_base = self.apply_ty(mir, base);
+
+                // After substitution, attempt to resolve the associated type
+                // using witness lookup. This is critical for monomorphization
+                // of iterator adapters and other generic types with associated types.
+                // Only attempt resolution if the base is a concrete type (not a type parameter).
+                let base_is_concrete = !matches!(
+                    mir.ty(new_base),
+                    MirTy::TypeParam(_) | MirTy::SelfType | MirTy::AssociatedTypeProjection { .. }
+                );
+
+                if base_is_concrete {
+                    if let Ok(resolved) = super::witness::resolve_associated_type(
+                        mir,
+                        new_base,
+                        protocol,
+                        &associated,
+                    ) {
+                        // Successfully resolved to a concrete type
+                        return resolved;
+                    }
+                }
+
+                // Either base is not concrete yet, or resolution failed
                 if new_base == base {
+                    // Base didn't change - return original type
                     ty
                 } else {
+                    // Base changed - intern the substituted projection
                     mir.intern_type(MirTy::AssociatedTypeProjection {
                         base: new_base,
                         protocol,
@@ -328,16 +351,41 @@ impl Substitution {
                 }
             },
 
-            // Associated type projection - substitute the base type
+            // Associated type projection - substitute the base type and attempt resolution
             MirTy::AssociatedTypeProjection {
                 base,
                 protocol,
                 associated,
             } => {
                 let new_base = self.apply_ty_readonly(mir, *base)?;
+
+                // After substitution, attempt to resolve the associated type
+                // using witness lookup. This is critical for monomorphization
+                // of iterator adapters and other generic types with associated types.
+                // Only attempt resolution if the base is a concrete type (not a type parameter).
+                let base_is_concrete = !matches!(
+                    mir.ty(new_base),
+                    MirTy::TypeParam(_) | MirTy::SelfType | MirTy::AssociatedTypeProjection { .. }
+                );
+
+                if base_is_concrete {
+                    if let Ok(resolved) = super::witness::resolve_associated_type(
+                        mir,
+                        new_base,
+                        *protocol,
+                        associated,
+                    ) {
+                        // Successfully resolved to a concrete type
+                        return Ok(resolved);
+                    }
+                }
+
+                // Either base is not concrete yet, or resolution failed
                 if new_base == *base {
+                    // Base didn't change - return original type
                     Ok(ty)
                 } else {
+                    // Base changed - intern the substituted projection
                     mir.lookup_type(&MirTy::AssociatedTypeProjection {
                         base: new_base,
                         protocol: *protocol,

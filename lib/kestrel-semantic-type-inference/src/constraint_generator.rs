@@ -598,7 +598,9 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
 
         // Calls
         ExprKind::Call {
-            callee, arguments, ..
+            callee,
+            arguments,
+            substitutions,
         } => {
             generate_expression_constraints(ctx, callee);
             for arg in arguments {

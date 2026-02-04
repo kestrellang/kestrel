@@ -11,8 +11,9 @@
 use std::collections::HashSet;
 
 use kestrel_semantic_tree::builtins::LanguageFeature;
-use kestrel_semantic_tree::ty::{ParamInfo, Ty, TyId, TyKind};
+use kestrel_semantic_tree::ty::{ParamInfo, Substitutions, Ty, TyId, TyKind};
 use kestrel_span::Span;
+use semantic_tree::symbol::Symbol;
 
 use crate::constraint::Constraint;
 use crate::context::InferenceContext;
@@ -251,17 +252,29 @@ fn solve_round(ctx: &mut InferenceContext<'_>) -> bool {
     let mut progress = false;
     let constraints = ctx.take_constraints();
 
-    for constraint in constraints {
-        match try_solve(ctx, &constraint) {
-            Ok(SolveResult::Solved) => progress = true,
-            Ok(SolveResult::Deferred) => ctx.push_constraint(constraint),
+    eprintln!("[DEBUG solve_round] Processing {} constraints", constraints.len());
+
+    for (idx, constraint) in constraints.iter().enumerate() {
+        eprintln!("[DEBUG solve_round] Constraint {}: {:?}", idx, constraint);
+        match try_solve(ctx, constraint) {
+            Ok(SolveResult::Solved) => {
+                eprintln!("[DEBUG solve_round] Constraint {} SOLVED", idx);
+                progress = true;
+            },
+            Ok(SolveResult::Deferred) => {
+                eprintln!("[DEBUG solve_round] Constraint {} DEFERRED", idx);
+                ctx.push_constraint(constraint.clone());
+            },
             Err(error) => {
+                eprintln!("[DEBUG solve_round] Constraint {} FAILED: {:?}", idx, error);
                 // Accumulate error and mark as progress (constraint was processed)
                 ctx.add_error(error);
                 progress = true;
             },
         }
     }
+
+    eprintln!("[DEBUG solve_round] Round complete, progress={}, {} constraints remain", progress, ctx.constraints().len());
 
     progress
 }
@@ -1031,6 +1044,11 @@ fn resolve_promotable(
     let from = resolve_type(ctx, from_ty);
     let to = resolve_type(ctx, to_ty);
 
+    // Debug only for function type promotions where we expect issues
+    if matches!(to.kind(), TyKind::Function { .. }) && to.to_string().contains("ArrayIterator[Int64].Item") {
+        eprintln!("[DEBUG resolve_promotable] ARRAY ITERATOR ERROR: to_ty={:?} resolved to: {}", to_ty, to);
+    }
+
     // Expand type aliases for both types to get the underlying types
     let from = from.expand_aliases();
     let to = to.expand_aliases();
@@ -1296,6 +1314,143 @@ fn check_conforms(
     }
 }
 
+/// Deeply resolve associated types recursively.
+///
+/// This function takes a type that may contain associated types and recursively
+/// resolves them until no more associated types remain. For example:
+/// - `TakeIterator[ArrayIterator[Int64]].Item` ->
+///   `ArrayIterator[Int64].Item` ->
+///   `Int64`
+///
+/// Uses a visited set to detect and handle cycles.
+fn deeply_resolve_associated_types(
+    ctx: &mut InferenceContext<'_>,
+    ty: &Ty,
+    visited: &mut HashSet<TyId>,
+) -> Ty {
+    // Check for cycles
+    if !visited.insert(ty.id()) {
+        return ty.clone();
+    }
+
+    let result = match ty.kind() {
+        // Associated type with container - resolve the container first, then the associated type,
+        // then recurse on the result
+        TyKind::AssociatedType { symbol, container } => {
+            if let Some(container_ty) = container {
+                // First, recursively resolve associated types in the container
+                let resolved_container = deeply_resolve_associated_types(ctx, container_ty, visited);
+                ctx.register_type(&resolved_container);
+
+                // Expand type aliases on the resolved container
+                let mut expanded_container = resolved_container;
+                while matches!(expanded_container.kind(), TyKind::TypeAlias { .. }) {
+                    expanded_container = ctx.oracle().expand_type_alias(&expanded_container);
+                    ctx.register_type(&expanded_container);
+                }
+
+                // Try to resolve the associated type on the expanded container
+                if let Some(resolved_assoc) = ctx.oracle().resolve_associated_type(&expanded_container, &symbol.metadata().name().value) {
+                    ctx.register_type(&resolved_assoc);
+                    // Recursively resolve any nested associated types in the result
+                    deeply_resolve_associated_types(ctx, &resolved_assoc, visited)
+                } else {
+                    // Could not resolve - return the type with the resolved container
+                    let result_ty = Ty::qualified_associated_type(symbol.clone(), expanded_container, ty.span().clone());
+                    ctx.register_type(&result_ty);
+                    result_ty
+                }
+            } else {
+                // No container - return as-is
+                ty.clone()
+            }
+        },
+
+        // Struct/Enum with substitutions - recursively resolve associated types in substitutions
+        TyKind::Struct { symbol, substitutions } => {
+            let mut new_subs = Substitutions::new();
+            let mut changed = false;
+            for (param_id, sub_ty) in substitutions.iter() {
+                let resolved_sub = deeply_resolve_associated_types(ctx, sub_ty, visited);
+                if resolved_sub.id() != sub_ty.id() {
+                    changed = true;
+                }
+                new_subs.insert(*param_id, resolved_sub);
+            }
+            if changed {
+                let result_ty = Ty::generic_struct(symbol.clone(), new_subs, ty.span().clone());
+                ctx.register_type(&result_ty);
+                result_ty
+            } else {
+                ty.clone()
+            }
+        },
+
+        TyKind::Enum { symbol, substitutions } => {
+            let mut new_subs = Substitutions::new();
+            let mut changed = false;
+            for (param_id, sub_ty) in substitutions.iter() {
+                let resolved_sub = deeply_resolve_associated_types(ctx, sub_ty, visited);
+                if resolved_sub.id() != sub_ty.id() {
+                    changed = true;
+                }
+                new_subs.insert(*param_id, resolved_sub);
+            }
+            if changed {
+                let result_ty = Ty::generic_enum(symbol.clone(), new_subs, ty.span().clone());
+                ctx.register_type(&result_ty);
+                result_ty
+            } else {
+                ty.clone()
+            }
+        },
+
+        TyKind::Protocol { symbol, substitutions } => {
+            let mut new_subs = Substitutions::new();
+            let mut changed = false;
+            for (param_id, sub_ty) in substitutions.iter() {
+                let resolved_sub = deeply_resolve_associated_types(ctx, sub_ty, visited);
+                if resolved_sub.id() != sub_ty.id() {
+                    changed = true;
+                }
+                new_subs.insert(*param_id, resolved_sub);
+            }
+            if changed {
+                let result_ty = Ty::generic_protocol(symbol.clone(), new_subs, ty.span().clone());
+                ctx.register_type(&result_ty);
+                result_ty
+            } else {
+                ty.clone()
+            }
+        },
+
+        TyKind::TypeAlias { symbol, substitutions } => {
+            let mut new_subs = Substitutions::new();
+            let mut changed = false;
+            for (param_id, sub_ty) in substitutions.iter() {
+                let resolved_sub = deeply_resolve_associated_types(ctx, sub_ty, visited);
+                if resolved_sub.id() != sub_ty.id() {
+                    changed = true;
+                }
+                new_subs.insert(*param_id, resolved_sub);
+            }
+            if changed {
+                let result_ty = Ty::generic_type_alias(symbol.clone(), new_subs, ty.span().clone());
+                ctx.register_type(&result_ty);
+                result_ty
+            } else {
+                ty.clone()
+            }
+        },
+
+        // Other types - return as-is
+        _ => ty.clone(),
+    };
+
+    visited.remove(&ty.id());
+    result
+}
+
 /// Resolve an associated type projection.
 fn normalize(
     ctx: &mut InferenceContext<'_>,
@@ -1322,9 +1477,16 @@ fn normalize(
     // Try to resolve the associated type via the oracle
     match ctx.oracle().resolve_associated_type(&base_ty, assoc_name) {
         Some(resolved_assoc) => {
-            // Register and unify with the result
+            // Register the initially resolved type
             ctx.register_type(&resolved_assoc);
-            ctx.equate(resolved_assoc.id(), result, span.clone());
+
+            // Deeply resolve any nested associated types in the result
+            let mut visited = HashSet::new();
+            let fully_resolved = deeply_resolve_associated_types(ctx, &resolved_assoc, &mut visited);
+            ctx.register_type(&fully_resolved);
+
+            // Unify with the result
+            ctx.equate(fully_resolved.id(), result, span.clone());
             Ok(SolveResult::Solved)
         },
         None => Err(InferenceError::associated_type_not_found(
@@ -1398,7 +1560,10 @@ fn resolve_member(
     expr_id: kestrel_semantic_tree::expr::ExprId,
     span: &Span,
 ) -> Result<SolveResult, InferenceError> {
+    eprintln!("[DEBUG resolve_member] Resolving {:?}.{} with {} arguments, result={:?}",
+              receiver, member, arguments.len(), result);
     let mut receiver_ty = resolve_type(ctx, receiver);
+    eprintln!("[DEBUG resolve_member] Receiver type: {}", receiver_ty);
 
     // Expand type aliases before member lookup.
     // Type aliases (e.g., Int -> Int64) need to be expanded to their underlying
@@ -1443,7 +1608,9 @@ fn resolve_member(
             // Create constraints for argument types vs parameter types.
             // This enables proper type inference for literals in expressions like `int32 + 5`
             // where the literal `5` should be constrained to Int32 (not defaulted to Int64).
-            for (arg_ty_id, param_ty) in arguments.iter().zip(resolution.parameters.iter()) {
+            eprintln!("[DEBUG resolve_member] Creating {} parameter constraints", resolution.parameters.len());
+            for (i, (arg_ty_id, param_ty)) in arguments.iter().zip(resolution.parameters.iter()).enumerate() {
+                eprintln!("[DEBUG resolve_member] Param {}: equating arg {:?} with param {}", i, arg_ty_id, param_ty);
                 ctx.register_type(param_ty);
                 ctx.equate(*arg_ty_id, param_ty.id(), span.clone());
             }
@@ -2042,6 +2209,10 @@ fn check_fully_resolved(ctx: &mut InferenceContext<'_>) {
         // Deduplicate by TyId
         unresolved.sort_by_key(|(id, _)| id.raw());
         unresolved.dedup_by_key(|(id, _)| id.raw());
+        eprintln!("[DEBUG check_fully_resolved] Found {} unresolved inference types:", unresolved.len());
+        for (ty_id, span) in &unresolved {
+            eprintln!("[DEBUG check_fully_resolved]   {:?} at {:?}", ty_id, span);
+        }
         ctx.add_error(InferenceError::ambiguous(unresolved));
     }
 }

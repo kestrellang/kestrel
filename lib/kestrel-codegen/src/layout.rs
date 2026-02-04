@@ -184,6 +184,18 @@ impl<'a> LayoutCache<'a> {
                 protocol,
                 associated,
             } => {
+                eprintln!("\n=== DEBUG: AssociatedTypeProjection in layout_of ===");
+                eprintln!("Type ID: {:?}", ty);
+                eprintln!("Base type ID: {:?}", base);
+                eprintln!("Base type: {:?}", self.ctx.ty(*base));
+                eprintln!("Protocol: {:?}", protocol);
+                eprintln!("Associated: {}", associated);
+
+                // Print backtrace to see where this is coming from
+                eprintln!("\nBacktrace:");
+                let bt = std::backtrace::Backtrace::force_capture();
+                eprintln!("{}", bt);
+
                 panic!(
                     "AssociatedTypeProjection (base={:?}, protocol={:?}, associated={}) reached layout computation without resolution - this is a bug",
                     base, protocol, associated

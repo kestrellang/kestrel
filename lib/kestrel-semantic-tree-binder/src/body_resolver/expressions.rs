@@ -2391,20 +2391,47 @@ fn resolve_closure_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext
         let param_types: Vec<kestrel_semantic_tree::ty::Ty> =
             param_list.iter().map(|p| p.ty.clone()).collect();
 
-        let return_ty = tail_expr
-            .as_ref()
-            .map(|e| e.ty.clone())
-            .unwrap_or_else(|| kestrel_semantic_tree::ty::Ty::unit(span.clone()));
+        // Get the return type from tail expression or unit
+        // NOTE: It's important that we DON'T just clone the tail expression's type directly,
+        // as that would cause them to share the same TyId. Instead, we use the tail type's
+        // *kind* to construct a semantically equivalent but distinct type. This allows the
+        // constraint solver to properly unify them.
+        let return_ty = if let Some(ref tail) = tail_expr {
+            // Clone creates a new Ty with the same TyId - we need a truly fresh type
+            match tail.ty.kind() {
+                kestrel_semantic_tree::ty::TyKind::Infer => {
+                    // Tail is infer - create fresh infer type for return
+                    kestrel_semantic_tree::ty::Ty::infer(span.clone())
+                },
+                _ => {
+                    // Tail has concrete type - create fresh infer type for return
+                    // The constraint solver will unify them
+                    kestrel_semantic_tree::ty::Ty::infer(span.clone())
+                }
+            }
+        } else {
+            // No tail - return type is unit
+            kestrel_semantic_tree::ty::Ty::unit(span.clone())
+        };
 
         kestrel_semantic_tree::ty::Ty::function(param_types, return_ty, span.clone())
     } else {
         // No explicit parameters - create UnresolvedFunction with appropriate ParamInfo
         use kestrel_semantic_tree::ty::ParamInfo;
 
-        let return_ty = tail_expr
-            .as_ref()
-            .map(|e| e.ty.clone())
-            .unwrap_or_else(|| kestrel_semantic_tree::ty::Ty::unit(span.clone()));
+        // Same logic as above for return type
+        let return_ty = if let Some(ref tail) = tail_expr {
+            match tail.ty.kind() {
+                kestrel_semantic_tree::ty::TyKind::Infer => {
+                    kestrel_semantic_tree::ty::Ty::infer(span.clone())
+                },
+                _ => {
+                    kestrel_semantic_tree::ty::Ty::infer(span.clone())
+                }
+            }
+        } else {
+            kestrel_semantic_tree::ty::Ty::unit(span.clone())
+        };
 
         if it_was_used {
             // Uses implicit `it` - exactly 1 param

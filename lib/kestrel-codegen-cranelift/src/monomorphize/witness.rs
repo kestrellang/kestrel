@@ -292,31 +292,56 @@ pub fn resolve_witness(
         })?;
 
     // Build the type arguments:
-    // 1. First, the witness's type params (from pattern matching the implementing type)
-    // 2. Then, any method-specific type args (e.g., Self=X for protocol extension methods)
-    let mut type_args: Vec<_> = witness_def
-        .type_params
-        .iter()
-        .map(|tp| {
-            witness_match
-                .type_bindings
-                .get(tp)
-                .copied()
-                // If a type param wasn't bound, it means it wasn't used in the
-                // implementing type pattern (rare but possible). In this case,
-                // we can't determine the type arg - this is an error.
-                .unwrap_or_else(|| {
-                    // This shouldn't happen with well-formed witnesses
-                    panic!(
-                        "witness type param {:?} not bound during matching",
-                        mir.type_param(*tp).name
-                    )
-                })
-        })
-        .collect();
+    //
+    // For direct implementations (e.g., Box[T].clone implementing Cloneable.clone):
+    //   - Include witness type params (e.g., [T] from Box[T])
+    //   - Then append method-specific type args
+    //
+    // For extension methods (e.g., Iterator.map from extend Iterator):
+    //   - Do NOT include witness type params
+    //   - Only use method-specific type args (which handle Self through self_type)
+    //
+    // Detection: Extension methods come from protocol extensions, so their
+    // qualified name includes the protocol name (e.g., std.iter.Iterator.map).
+    // Direct implementations come from the implementing type.
+    let protocol_name_str = mir.name(protocol).to_string();
+    let impl_func_name_str = mir.name(*impl_func_name).to_string();
 
-    // Add method-specific type arguments (e.g., Self binding for protocol extension methods)
-    type_args.extend(method_type_args.iter().cloned());
+    // Check if this is an extension method by seeing if the implementation
+    // is defined within the protocol (protocol extensions)
+    let is_extension_method = impl_func_name_str.contains(&protocol_name_str);
+
+    let type_args = if is_extension_method {
+        // Extension methods: only use method-specific type args
+        // (Self is handled via self_type substitution, not type_args)
+        method_type_args.clone()
+    } else {
+        // Direct implementations: include witness type params + method type args
+        let mut type_args: Vec<_> = witness_def
+            .type_params
+            .iter()
+            .map(|tp| {
+                witness_match
+                    .type_bindings
+                    .get(tp)
+                    .copied()
+                    // If a type param wasn't bound, it means it wasn't used in the
+                    // implementing type pattern (rare but possible). In this case,
+                    // we can't determine the type arg - this is an error.
+                    .unwrap_or_else(|| {
+                        // This shouldn't happen with well-formed witnesses
+                        panic!(
+                            "witness type param {:?} not bound during matching",
+                            mir.type_param(*tp).name
+                        )
+                    })
+            })
+            .collect();
+
+        // Add method-specific type arguments
+        type_args.extend(method_type_args.iter().cloned());
+        type_args
+    };
 
     Ok((*impl_func_name, type_args))
 }

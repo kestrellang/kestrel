@@ -22,7 +22,7 @@ use kestrel_semantic_tree::symbol::protocol::ProtocolSymbol;
 use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
 use kestrel_semantic_tree::symbol::type_alias::TypeAliasSymbol;
 use kestrel_semantic_tree::symbol::type_parameter::TypeParameterSymbol;
-use kestrel_semantic_tree::ty::{Constraint, Substitutions, Ty, TyKind, WhereClause};
+use kestrel_semantic_tree::ty::{Constraint, Substitutions, Ty, TyId, TyKind, WhereClause};
 use kestrel_semantic_type_inference::{MemberError, MemberResolution, TypeOracle};
 use semantic_tree::symbol::{Symbol, SymbolId};
 
@@ -541,7 +541,10 @@ impl TypeOracle for SemanticModel {
                             type_alias_id: type_alias.metadata().id(),
                         })
                     {
-                        return Some(resolved.apply_substitutions(substitutions));
+                        let result = resolved.apply_substitutions(substitutions);
+                        // Recursively resolve any nested associated types
+                        let mut visited = std::collections::HashSet::new();
+                        return Some(deeply_resolve_associated_types(self, &result, &mut visited));
                     }
                 }
 
@@ -558,7 +561,10 @@ impl TypeOracle for SemanticModel {
                         && let Some(ty) =
                             resolve_associated_type_from_protocol(proto, assoc_name, proto_subs)
                     {
-                        return Some(ty.apply_substitutions(substitutions));
+                        let result = ty.apply_substitutions(substitutions);
+                        // Recursively resolve any nested associated types
+                        let mut visited = std::collections::HashSet::new();
+                        return Some(deeply_resolve_associated_types(self, &result, &mut visited));
                     }
                 }
 
@@ -584,7 +590,10 @@ impl TypeOracle for SemanticModel {
                                 type_alias_id: type_alias.metadata().id(),
                             })
                         {
-                            return Some(resolved.apply_substitutions(substitutions));
+                            let result = resolved.apply_substitutions(substitutions);
+                            // Recursively resolve any nested associated types
+                            let mut visited = std::collections::HashSet::new();
+                            return Some(deeply_resolve_associated_types(self, &result, &mut visited));
                         }
                     }
                 }
@@ -759,6 +768,13 @@ impl SemanticModel {
     /// added via type extensions and transitive conformances from protocol extensions.
     pub fn protocol_conformance_ids_for_type(&self, ty: &Ty) -> Vec<SymbolId> {
         collect_protocol_conformance_ids_for_type(self, ty)
+    }
+
+    /// Get all protocol conformances for a concrete type as full protocol types.
+    ///
+    /// This returns protocol types with their type parameter substitutions preserved.
+    pub fn protocol_conformances_for_type(&self, ty: &Ty) -> Vec<Ty> {
+        collect_protocol_conformances_for_type(self, ty)
     }
 
     /// Check for transitive conformance through protocol extensions.
@@ -1393,6 +1409,127 @@ fn get_type_symbol_id(ty: &Ty) -> Option<SymbolId> {
     }
 }
 
+/// Deeply resolve associated types recursively in a type.
+///
+/// This function takes a type that may contain associated types and recursively
+/// resolves them until no more associated types remain. For example:
+/// - `TakeIterator[ArrayIterator[Int64]].Item` ->
+///   `ArrayIterator[Int64].Item` ->
+///   `Int64`
+///
+/// Uses a visited set to detect and handle cycles.
+fn deeply_resolve_associated_types(
+    oracle: &dyn TypeOracle,
+    ty: &Ty,
+    visited: &mut std::collections::HashSet<TyId>,
+) -> Ty {
+    // Check for cycles
+    if !visited.insert(ty.id()) {
+        return ty.clone();
+    }
+
+    let result = match ty.kind() {
+        // Associated type with container - resolve the container first, then the associated type,
+        // then recurse on the result
+        TyKind::AssociatedType { symbol, container } => {
+            if let Some(container_ty) = container {
+                // First, recursively resolve associated types in the container
+                let resolved_container = deeply_resolve_associated_types(oracle, container_ty, visited);
+
+                // Expand type aliases on the resolved container
+                let expanded_container = oracle.expand_type_alias(&resolved_container);
+
+                // Try to resolve the associated type on the expanded container
+                if let Some(resolved_assoc) = oracle.resolve_associated_type(&expanded_container, &symbol.metadata().name().value) {
+                    // Recursively resolve any nested associated types in the result
+                    deeply_resolve_associated_types(oracle, &resolved_assoc, visited)
+                } else {
+                    // Could not resolve - return the type with the resolved container
+                    Ty::qualified_associated_type(symbol.clone(), expanded_container, ty.span().clone())
+                }
+            } else {
+                // No container - return as-is
+                ty.clone()
+            }
+        },
+
+        // Struct/Enum/Protocol with substitutions - recursively resolve associated types in substitutions
+        TyKind::Struct { symbol, substitutions } => {
+            let mut new_subs = Substitutions::new();
+            let mut changed = false;
+            for (param_id, sub_ty) in substitutions.iter() {
+                let resolved_sub = deeply_resolve_associated_types(oracle, sub_ty, visited);
+                if resolved_sub.id() != sub_ty.id() {
+                    changed = true;
+                }
+                new_subs.insert(*param_id, resolved_sub);
+            }
+            if changed {
+                Ty::generic_struct(symbol.clone(), new_subs, ty.span().clone())
+            } else {
+                ty.clone()
+            }
+        },
+
+        TyKind::Enum { symbol, substitutions } => {
+            let mut new_subs = Substitutions::new();
+            let mut changed = false;
+            for (param_id, sub_ty) in substitutions.iter() {
+                let resolved_sub = deeply_resolve_associated_types(oracle, sub_ty, visited);
+                if resolved_sub.id() != sub_ty.id() {
+                    changed = true;
+                }
+                new_subs.insert(*param_id, resolved_sub);
+            }
+            if changed {
+                Ty::generic_enum(symbol.clone(), new_subs, ty.span().clone())
+            } else {
+                ty.clone()
+            }
+        },
+
+        TyKind::Protocol { symbol, substitutions } => {
+            let mut new_subs = Substitutions::new();
+            let mut changed = false;
+            for (param_id, sub_ty) in substitutions.iter() {
+                let resolved_sub = deeply_resolve_associated_types(oracle, sub_ty, visited);
+                if resolved_sub.id() != sub_ty.id() {
+                    changed = true;
+                }
+                new_subs.insert(*param_id, resolved_sub);
+            }
+            if changed {
+                Ty::generic_protocol(symbol.clone(), new_subs, ty.span().clone())
+            } else {
+                ty.clone()
+            }
+        },
+
+        TyKind::TypeAlias { symbol, substitutions } => {
+            let mut new_subs = Substitutions::new();
+            let mut changed = false;
+            for (param_id, sub_ty) in substitutions.iter() {
+                let resolved_sub = deeply_resolve_associated_types(oracle, sub_ty, visited);
+                if resolved_sub.id() != sub_ty.id() {
+                    changed = true;
+                }
+                new_subs.insert(*param_id, resolved_sub);
+            }
+            if changed {
+                Ty::generic_type_alias(symbol.clone(), new_subs, ty.span().clone())
+            } else {
+                ty.clone()
+            }
+        },
+
+        // Other types - return as-is
+        _ => ty.clone(),
+    };
+
+    visited.remove(&ty.id());
+    result
+}
+
 /// Resolve an associated type from a protocol.
 fn resolve_associated_type_from_protocol(
     protocol: &Arc<ProtocolSymbol>,
@@ -1786,6 +1923,7 @@ fn resolve_member_via_protocol_conformance(
     receiver_ty: &Ty,
     member: &str,
 ) -> Option<MemberResolution> {
+    eprintln!("[DEBUG resolve_member_via_protocol_conformance] receiver_ty={}, member={}", receiver_ty, member);
     let conformances = collect_protocol_conformances_for_type(model, receiver_ty);
 
     for conformance in conformances {
@@ -1804,18 +1942,34 @@ fn resolve_member_via_protocol_conformance(
                 if child.metadata().name().value == member {
                     let member_id = child.metadata().id();
                     if let Some(callable) = child.metadata().get_behavior::<CallableBehavior>() {
+                        eprintln!("[DEBUG resolve_member_via_protocol_conformance] Found '{}' in protocol '{}'", member, current_proto.metadata().name().value);
+                        eprintln!("[DEBUG resolve_member_via_protocol_conformance] Protocol substitutions: {:?}", current_subs);
+                        eprintln!("[DEBUG resolve_member_via_protocol_conformance] Raw parameters before substitution:");
+                        for (i, p) in callable.parameters().iter().enumerate() {
+                            eprintln!("  [{}] {}", i, p.ty);
+                        }
+
                         let raw_return_ty =
                             callable.return_type().apply_substitutions(current_subs);
                         let returns_self = matches!(raw_return_ty.kind(), TyKind::SelfType);
-                        let return_ty = raw_return_ty.substitute_self(receiver_ty);
+                        let return_ty_before_resolve = raw_return_ty.substitute_self(receiver_ty);
+                        // Recursively resolve any nested associated types in the return type
+                        let mut visited = std::collections::HashSet::new();
+                        let return_ty = deeply_resolve_associated_types(model, &return_ty_before_resolve, &mut visited);
+
                         let parameters: Vec<Ty> = callable
                             .parameters()
                             .iter()
-                            .map(|p| {
-                                p.ty.apply_substitutions(current_subs)
-                                    .substitute_self(receiver_ty)
+                            .enumerate()
+                            .map(|(i, p)| {
+                                let after_subs = p.ty.apply_substitutions(current_subs);
+                                let after_self = after_subs.substitute_self(receiver_ty);
+                                eprintln!("  [{}] after substitutions: {} -> after substitute_self: {}", i, after_subs, after_self);
+                                after_self
                             })
                             .collect();
+
+                        eprintln!("[DEBUG resolve_member_via_protocol_conformance] Final parameters: {:?}", parameters.iter().map(|p| p.to_string()).collect::<Vec<_>>());
                         return Some(MemberResolution {
                             ty: return_ty,
                             symbol_id: member_id,
@@ -1839,18 +1993,34 @@ fn resolve_member_via_protocol_conformance(
                         let member_id = child.metadata().id();
                         if let Some(callable) = child.metadata().get_behavior::<CallableBehavior>()
                         {
+                            eprintln!("[DEBUG resolve_member_via_protocol_conformance] Found '{}' in extension on protocol '{}'", member, current_proto.metadata().name().value);
+                            eprintln!("[DEBUG resolve_member_via_protocol_conformance] Protocol substitutions: {:?}", current_subs);
+                            eprintln!("[DEBUG resolve_member_via_protocol_conformance] Raw parameters before substitution:");
+                            for (i, p) in callable.parameters().iter().enumerate() {
+                                eprintln!("  [{}] {}", i, p.ty);
+                            }
+
                             let raw_return_ty =
                                 callable.return_type().apply_substitutions(current_subs);
                             let returns_self = matches!(raw_return_ty.kind(), TyKind::SelfType);
-                            let return_ty = raw_return_ty.substitute_self(receiver_ty);
+                            let return_ty_before_resolve = raw_return_ty.substitute_self(receiver_ty);
+                            // Recursively resolve any nested associated types in the return type
+                            let mut visited = std::collections::HashSet::new();
+                            let return_ty = deeply_resolve_associated_types(model, &return_ty_before_resolve, &mut visited);
+
                             let parameters: Vec<Ty> = callable
                                 .parameters()
                                 .iter()
-                                .map(|p| {
-                                    p.ty.apply_substitutions(current_subs)
-                                        .substitute_self(receiver_ty)
+                                .enumerate()
+                                .map(|(i, p)| {
+                                    let after_subs = p.ty.apply_substitutions(current_subs);
+                                    let after_self = after_subs.substitute_self(receiver_ty);
+                                    eprintln!("  [{}] after substitutions: {} -> after substitute_self: {}", i, after_subs, after_self);
+                                    after_self
                                 })
                                 .collect();
+
+                            eprintln!("[DEBUG resolve_member_via_protocol_conformance] Final parameters: {:?}", parameters.iter().map(|p| p.to_string()).collect::<Vec<_>>());
                             return Some(MemberResolution {
                                 ty: return_ty,
                                 symbol_id: member_id,
@@ -2184,7 +2354,23 @@ fn collect_protocols_with_inherited_impl(
                 for (param_id, ty) in inherited_subs.iter() {
                     combined_subs.insert(*param_id, subs_with_defaults.apply(ty));
                 }
-                // Also copy over any subs from parent that aren't in inherited_subs
+
+                // Add defaults for any inherited protocol type parameters not in inherited_subs.
+                // This ensures that if a protocol like `NotEqual[Rhs = Self]` is inherited as
+                // just `NotEqual` (without explicit type arguments), we still get `{Rhs → Self}`.
+                for type_param in inherited_proto.type_parameters() {
+                    let param_id = type_param.metadata().id();
+                    if !combined_subs.contains(param_id) {
+                        if let Some(default_ty) = type_param.default() {
+                            // Apply parent substitutions to the default type.
+                            // This handles cases like `Self` which needs to be resolved in parent context.
+                            combined_subs.insert(param_id, subs_with_defaults.apply(&default_ty));
+                        }
+                    }
+                }
+
+                // Also copy over any subs from parent that aren't in inherited_subs.
+                // This propagates parent protocol type parameters to inherited protocols.
                 for (param_id, ty) in subs_with_defaults.iter() {
                     if !combined_subs.contains(*param_id) {
                         combined_subs.insert(*param_id, ty.clone());
@@ -2491,7 +2677,7 @@ fn get_self_type_bounds_with_context(
 ///
 /// This recursively walks the type structure, resolving any `AssociatedType` variants
 /// that have a container (qualified associated types like `T.Item`).
-fn resolve_all_associated_types(oracle: &impl TypeOracle, ty: &Ty) -> Ty {
+pub fn resolve_all_associated_types(oracle: &impl TypeOracle, ty: &Ty) -> Ty {
     resolve_all_associated_types_impl(oracle, ty, &mut std::collections::HashSet::new())
 }
 

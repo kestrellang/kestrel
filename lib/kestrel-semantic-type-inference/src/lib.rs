@@ -42,7 +42,7 @@ mod solver;
 
 pub use apply::{
     apply_solution, apply_solution_to_defaults, apply_solution_to_locals,
-    apply_solution_to_patterns,
+    apply_solution_to_patterns, resolve_associated_types_in_locals,
 };
 pub use constraint::{Constraint, ProtocolRef};
 pub use constraint_generator::{generate_constraints, generate_default_value_constraints};

@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 use kestrel_reporting::IntoDiagnostic;
 use kestrel_semantic_model::SymbolFor;
+use kestrel_semantic_type_inference::TypeOracle;
 use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
 use kestrel_semantic_tree::behavior::callable::CallableBehavior;
 use kestrel_semantic_tree::behavior::extension_target::ExtensionTargetBehavior;
@@ -889,7 +890,124 @@ pub fn substitute_type(ty: &Ty, substitutions: &Substitutions) -> Ty {
             }
             Ty::generic_type_alias(symbol.clone(), new_subs, ty.span().clone())
         },
+        TyKind::AssociatedType { symbol, container } => {
+            // Associated types need to recursively substitute in their container
+            if let Some(container_ty) = container {
+                let new_container = substitute_type(container_ty, substitutions);
+                Ty::qualified_associated_type(symbol.clone(), new_container, ty.span().clone())
+            } else {
+                // Unqualified associated type - no substitution needed
+                ty.clone()
+            }
+        },
         // For simple types, just return a clone
+        _ => ty.clone(),
+    }
+}
+
+/// Resolve associated types in a type using the TypeOracle.
+///
+/// This recursively traverses a type and resolves any AssociatedType projections
+/// to their concrete types. For example, `ArrayIterator[Int64].Item` resolves to `Int64`.
+///
+/// This is used when calling protocol extension methods, where associated types
+/// need to be resolved to their concrete implementations.
+///
+/// # Arguments
+/// * `ty` - The type to resolve
+/// * `ctx` - The body resolution context containing the TypeOracle
+///
+/// # Returns
+/// The type with all associated types resolved
+pub fn resolve_associated_types(ty: &Ty, ctx: &BodyResolutionContext) -> Ty {
+    match ty.kind() {
+        TyKind::AssociatedType { symbol, container } => {
+            if let Some(container_ty) = container {
+                // First resolve the container recursively
+                let resolved_container = resolve_associated_types(container_ty, ctx);
+
+                // Don't try to resolve if the container is an inference variable -
+                // resolution will happen later during type inference when concrete types are known
+                if matches!(resolved_container.kind(), TyKind::Infer) {
+                    return Ty::qualified_associated_type(symbol.clone(), resolved_container, ty.span().clone());
+                }
+
+                // Try to resolve the associated type using the TypeOracle
+                if let Some(resolved) = ctx.model.resolve_associated_type(&resolved_container, &symbol.metadata().name().value) {
+                    // Recursively resolve in case the result also has associated types
+                    resolve_associated_types(&resolved, ctx)
+                } else {
+                    // Can't resolve - return the type with the resolved container
+                    Ty::qualified_associated_type(symbol.clone(), resolved_container, ty.span().clone())
+                }
+            } else {
+                // Unqualified associated type - can't resolve without container
+                ty.clone()
+            }
+        },
+        TyKind::Tuple(elements) => {
+            let new_elements: Vec<Ty> = elements
+                .iter()
+                .map(|e| resolve_associated_types(e, ctx))
+                .collect();
+            Ty::tuple(new_elements, ty.span().clone())
+        },
+        TyKind::Pointer(element_type) => {
+            let new_element = resolve_associated_types(element_type, ctx);
+            Ty::pointer(new_element, ty.span().clone())
+        },
+        TyKind::Function {
+            params,
+            return_type,
+        } => {
+            let new_params: Vec<Ty> = params
+                .iter()
+                .map(|p| resolve_associated_types(p, ctx))
+                .collect();
+            let new_return = resolve_associated_types(return_type, ctx);
+            Ty::function(new_params, new_return, ty.span().clone())
+        },
+        TyKind::Struct {
+            symbol,
+            substitutions,
+        } => {
+            let mut new_subs = Substitutions::new();
+            for (id, sub_ty) in substitutions.iter() {
+                new_subs.insert(*id, resolve_associated_types(sub_ty, ctx));
+            }
+            Ty::generic_struct(symbol.clone(), new_subs, ty.span().clone())
+        },
+        TyKind::Enum {
+            symbol,
+            substitutions,
+        } => {
+            let mut new_subs = Substitutions::new();
+            for (id, sub_ty) in substitutions.iter() {
+                new_subs.insert(*id, resolve_associated_types(sub_ty, ctx));
+            }
+            Ty::generic_enum(symbol.clone(), new_subs, ty.span().clone())
+        },
+        TyKind::Protocol {
+            symbol,
+            substitutions,
+        } => {
+            let mut new_subs = Substitutions::new();
+            for (id, sub_ty) in substitutions.iter() {
+                new_subs.insert(*id, resolve_associated_types(sub_ty, ctx));
+            }
+            Ty::generic_protocol(symbol.clone(), new_subs, ty.span().clone())
+        },
+        TyKind::TypeAlias {
+            symbol,
+            substitutions,
+        } => {
+            let mut new_subs = Substitutions::new();
+            for (id, sub_ty) in substitutions.iter() {
+                new_subs.insert(*id, resolve_associated_types(sub_ty, ctx));
+            }
+            Ty::generic_type_alias(symbol.clone(), new_subs, ty.span().clone())
+        },
+        // For simple types (primitives, type parameters, etc.), just return a clone
         _ => ty.clone(),
     }
 }
@@ -969,6 +1087,16 @@ fn infer_from_type(
             if type_params.iter().any(|tp| tp.metadata().id() == param_id) {
                 // Only insert if not already mapped (first match wins)
                 if !substitutions.contains(param_id) {
+                    // IMPORTANT: We DO map inference variables now! This is critical for
+                    // bidirectional type inference with generic methods. When a closure's
+                    // return type is an inference variable, we need to link the type parameter
+                    // to that same inference variable so the constraint solver can unify them.
+                    //
+                    // For example, for map[U](transform: (T) -> U) called with { (x) in x * 2 }:
+                    // - The closure has type (Int64) -> _ where _ is an inference variable
+                    // - We map U to that same _ inference variable
+                    // - Later, when the closure body is type-checked, _ gets unified with Int64
+                    // - This solves U = Int64
                     substitutions.insert(param_id, arg_ty.clone());
                 }
             }

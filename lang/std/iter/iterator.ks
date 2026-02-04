@@ -6,6 +6,29 @@ import std.result.(Optional, Result)
 import std.core.(Bool, Equatable, Comparable, Addable, Multipliable, Copyable, Cloneable, Ordering)
 import std.num.(Int64)
 import std.collections.(Array)
+import std.iter.(
+    MapIterator,
+    FilterIterator,
+    FilterMapIterator,
+    EnumerateIterator,
+    FlatMapIterator,
+    ScanIterator,
+    TakeIterator,
+    TakeWhileIterator,
+    SkipIterator,
+    SkipWhileIterator,
+    ZipIterator,
+    ChainIterator,
+    PeekableIterator,
+    FuseIterator,
+    InspectIterator,
+    StepByIterator,
+    IntersperseIterator,
+    IntersperseWithIterator,
+    CycleIterator,
+    FlattenIterator,
+    RevIterator
+)
 
 // ============================================================================
 // CORE PROTOCOLS

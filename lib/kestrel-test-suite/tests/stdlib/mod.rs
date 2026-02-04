@@ -566,12 +566,12 @@ mod iterator_adapters {
                 arr.append(5);
 
                 // Test take
-                let first3 = arr.iter().take(count: 3).collect();
+                let first3 = arr.iter().take(3).collect();
                 if first3.count != 3 { return 1 }
                 if first3(unchecked: 2) != 3 { return 2 }
 
                 // Test skip
-                let last3 = arr.iter().skip(count: 2).collect();
+                let last3 = arr.iter().skip(2).collect();
                 if last3.count != 3 { return 3 }
                 if last3(unchecked: 0) != 3 { return 4 }
 
@@ -611,7 +611,7 @@ mod iterator_adapters {
                 arr2.append(30);
 
                 // Test zip
-                let zipped = arr1.iter().zip(other: arr2.iter()).collect();
+                let zipped = arr1.iter().zip(arr2.iter()).collect();
                 if zipped.count != 3 { return 1 }
                 let (a, b) = zipped(unchecked: 0);
                 if a != 1 { return 2 }
@@ -625,7 +625,7 @@ mod iterator_adapters {
                 if val != 2 { return 6 }
 
                 // Test chain
-                let chained = arr1.iter().chain(other: arr2.iter()).collect();
+                let chained = arr1.iter().chain(arr2.iter()).collect();
                 if chained.count != 6 { return 7 }
                 if chained(unchecked: 3) != 10 { return 8 }
 
@@ -673,7 +673,7 @@ mod iterator_adapters {
                 if found.unwrap() != 4 { return 9 }
 
                 // Test nth
-                let third = arr.iter().nth(n: 2);
+                let third = arr.iter().nth(2);
                 if third.isNone() { return 10 }
                 if third.unwrap() != 3 { return 11 }
 
@@ -794,12 +794,12 @@ mod iterator_adapters {
                 arr.append(3);
 
                 // Test stepBy
-                let everyOther = [0, 1, 2, 3, 4, 5, 6].iter().stepBy(n: 2).collect();
+                let everyOther = [0, 1, 2, 3, 4, 5, 6].iter().stepBy(2).collect();
                 if everyOther.count != 4 { return 1 }
                 if everyOther(unchecked: 1) != 2 { return 2 }
 
                 // Test scan (running sum)
-                let running = arr.iter().scan(initial: 0, combine: { (acc, x) in acc + x }).collect();
+                let running = arr.iter().scan(0, { (acc, x) in acc + x }).collect();
                 if running.count != 3 { return 3 }
                 if running(unchecked: 0) != 1 { return 4 }
                 if running(unchecked: 2) != 6 { return 5 }
@@ -810,8 +810,8 @@ mod iterator_adapters {
                 if pos.unwrap() != 1 { return 7 }
 
                 // Test contains
-                if arr.iter().contains(element: 2) == false { return 8 }
-                if arr.iter().contains(element: 10) { return 9 }
+                if arr.iter().contains(2) == false { return 8 }
+                if arr.iter().contains(10) { return 9 }
 
                 0
             }
