@@ -19,10 +19,13 @@ license = "Apache-2.0"
 chumsky = "0.12"
 clap = { version = "4.5.53", features = ["derive"] }
 codespan-reporting = "0.13.1"
+dashmap = "6"
 downcast-rs = "2.0.2"
 logos = "0.16.0"
 parking_lot = "0.12.5"
 rowan = "0.16.1"
+tokio = { version = "1", features = ["full"] }
+tower-lsp = "0.20"
 unicode-xid = "0.2"
 
 
@@ -47,6 +50,7 @@ members = [
     "lib/kestrel-execution-graph-lowering",
     "lib/kestrel-codegen",
     "lib/kestrel-codegen-cranelift",
+    "lib/kestrel-lsp",
     "lib/kestrel-test-suite"
 ]
 
