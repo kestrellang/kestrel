@@ -224,7 +224,7 @@ extend Iterator {
     ///         .map({ Int64.parse(it) })  // [Some(1), None, Some(3)]
     ///         .compactMap()              // [1, 3]
     public func compactMap[T]() -> FilterMapIterator[Self, T] where Item = Optional[T] {
-        FilterMapIterator(inner: self) transform: { it }
+        FilterMapIterator(inner: self, transform: { it })
     }
 
     /// Pairs each element with its zero-based index.

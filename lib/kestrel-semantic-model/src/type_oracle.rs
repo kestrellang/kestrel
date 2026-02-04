@@ -160,7 +160,7 @@ impl TypeOracle for SemanticModel {
         }
 
         // Get the container symbol and substitutions
-        let (container, substitutions) = match get_type_container_with_subs(receiver_ty) {
+        let (container, substitutions) = match get_type_container_with_subs(self, receiver_ty) {
             Some(c) => c,
             None => {
                 return Err(MemberError::NotFound {
@@ -1322,6 +1322,7 @@ fn get_extension_bounds_for_param(
 
 /// Get the container symbol and substitutions from a type.
 fn get_type_container_with_subs(
+    model: &SemanticModel,
     ty: &Ty,
 ) -> Option<(Arc<dyn Symbol<KestrelLanguage>>, Substitutions)> {
     match ty.kind() {
@@ -1358,6 +1359,19 @@ fn get_type_container_with_subs(
             }
             let dyn_symbol: Arc<dyn Symbol<KestrelLanguage>> = symbol.clone();
             Some((dyn_symbol, subs_with_defaults))
+        },
+        TyKind::TypeAlias {
+            symbol,
+            substitutions,
+        } => {
+            // Resolve type alias to its underlying type and recursively get container
+            let alias_id = symbol.metadata().id();
+            if let Some(resolved) = model.query(ResolvedAliasedType { type_alias_id: alias_id }) {
+                let resolved_with_subs = resolved.apply_substitutions(substitutions);
+                get_type_container_with_subs(model, &resolved_with_subs)
+            } else {
+                None
+            }
         },
         TyKind::SelfType => {
             // SelfType is handled in resolve_member() before this function is called.
@@ -2803,20 +2817,24 @@ fn normalize_type_with_context(model: &SemanticModel, ty: &Ty, context_id: Symbo
 
     // In protocol/protocol-extension contexts, implicitly qualify unqualified associated
     // types with `Self` so constraints like `Item = (A, B)` apply to `Self.Item`.
-    if !owned_equalities.is_empty() && !self_protocol_bounds(model, context_id).is_empty() {
+    let qualified_ty = if !owned_equalities.is_empty() && !self_protocol_bounds(model, context_id).is_empty() {
         let mut qualified = Vec::with_capacity(owned_equalities.len());
+        let self_ty = Ty::self_type(ty.span().clone());
         for (left, right) in owned_equalities.into_iter() {
-            let self_ty = Ty::self_type(left.span().clone());
             qualified.push((
                 left.substitute_self(&self_ty),
                 right.substitute_self(&self_ty),
             ));
         }
         owned_equalities = qualified;
-    }
+        // Also qualify the input type so it matches against qualified constraints
+        ty.substitute_self(&self_ty)
+    } else {
+        ty.clone()
+    };
 
     if owned_equalities.is_empty() {
-        return ty.clone();
+        return qualified_ty;
     }
 
     let equalities: Vec<(&Ty, &Ty)> = owned_equalities
@@ -2824,8 +2842,9 @@ fn normalize_type_with_context(model: &SemanticModel, ty: &Ty, context_id: Symbo
         .map(|(l, r)| (l, r))
         .collect();
 
-    normalize_type_inner(ty, &equalities)
+    normalize_type_inner(&qualified_ty, &equalities)
 }
+
 
 /// Derive equality constraints from protocol associated type definitions.
 ///

@@ -771,6 +771,16 @@ fn substitute_receiver_type_args(ty: &Ty, receiver_ty: &Ty) -> Ty {
                 substitute_type(ty, substitutions)
             }
         },
+        TyKind::TypeAlias { .. } => {
+            // Expand the type alias and recurse to substitute on the underlying type
+            let expanded = receiver_ty.expand_aliases();
+            // Avoid infinite recursion if expand_aliases returns the same type
+            if !matches!(expanded.kind(), TyKind::TypeAlias { .. }) {
+                substitute_receiver_type_args(ty, &expanded)
+            } else {
+                ty.clone()
+            }
+        },
         _ => ty.clone(),
     }
 }

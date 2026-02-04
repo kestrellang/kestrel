@@ -1413,7 +1413,7 @@ func test() {
 }
 "#,
         )
-        .expect(HasError("cannot use tuple index"));
+        .expect(HasError("cannot index into non-tuple type"));
     }
 
     #[test]

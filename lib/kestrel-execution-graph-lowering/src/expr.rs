@@ -8,7 +8,7 @@ use kestrel_execution_graph::{
     BinOp, CallArg, Callee, CastKind, Id, Immediate, Local, MirTy, PassingMode, Place,
     QualifiedNameData, Rvalue, UnOp, Value,
 };
-use kestrel_semantic_model::{StructFields, SymbolFor};
+use kestrel_semantic_model::{ResolvedAliasedType, StructFields, SymbolFor};
 use kestrel_semantic_tree::behavior::FileConstantBehavior;
 use kestrel_semantic_tree::behavior::callable::{
     CallableBehavior, ParameterAccessMode, ReceiverKind,
@@ -4683,7 +4683,20 @@ fn get_type_args_for_receiver(
     use kestrel_semantic_tree::behavior::generics::GenericsBehavior;
     use semantic_tree::symbol::Symbol;
 
-    let (type_params, substitutions) = match receiver_ty.kind() {
+    // Resolve type alias if needed and apply substitutions
+    let resolved_ty = if let Some((alias_sym, subs)) = receiver_ty.as_type_alias_with_subs() {
+        let alias_id = alias_sym.metadata().id();
+        ctx.model.query(ResolvedAliasedType {
+            type_alias_id: alias_id,
+        }).map(|resolved| resolved.apply_substitutions(subs))
+    } else {
+        None
+    };
+
+    // Use the resolved type if available, otherwise use the original
+    let effective_ty = resolved_ty.as_ref().unwrap_or(receiver_ty);
+
+    let (type_params, substitutions) = match effective_ty.kind() {
         TyKind::Struct {
             symbol,
             substitutions,
@@ -4892,8 +4905,21 @@ fn lower_subscript_setter_call(
 fn find_field_info(ctx: &LoweringContext, ty: &Ty, field_name: &str) -> Option<(SymbolId, bool)> {
     use semantic_tree::symbol::Symbol;
 
+    // Resolve type alias if needed and apply substitutions
+    let resolved_ty = if let Some((alias_sym, subs)) = ty.as_type_alias_with_subs() {
+        let alias_id = alias_sym.metadata().id();
+        ctx.model.query(ResolvedAliasedType {
+            type_alias_id: alias_id,
+        }).map(|resolved| resolved.apply_substitutions(subs))
+    } else {
+        None
+    };
+
+    // Use the resolved type if available, otherwise use the original
+    let effective_ty = resolved_ty.as_ref().unwrap_or(ty);
+
     // Try to get the struct symbol from the type
-    if let Some(struct_sym) = ty.as_struct() {
+    if let Some(struct_sym) = effective_ty.as_struct() {
         // Query fields from the struct symbol
         let struct_id = struct_sym.metadata().id();
         let fields = ctx.model.query(StructFields { struct_id });
@@ -4905,7 +4931,7 @@ fn find_field_info(ctx: &LoweringContext, ty: &Ty, field_name: &str) -> Option<(
     }
 
     // Try enum type - enums can also have computed properties
-    if let Some(enum_sym) = ty.as_enum() {
+    if let Some(enum_sym) = effective_ty.as_enum() {
         // Look through children for fields
         for child in enum_sym.metadata().children() {
             if child.metadata().kind() == KestrelSymbolKind::Field
@@ -5309,9 +5335,22 @@ fn extract_type_args_from_receiver(
     use kestrel_semantic_tree::behavior::generics::GenericsBehavior;
     use semantic_tree::symbol::Symbol;
 
+    // Resolve type alias if needed and apply substitutions
+    let resolved_ty = if let Some((alias_sym, subs)) = receiver_ty.as_type_alias_with_subs() {
+        let alias_id = alias_sym.metadata().id();
+        ctx.model.query(ResolvedAliasedType {
+            type_alias_id: alias_id,
+        }).map(|resolved| resolved.apply_substitutions(subs))
+    } else {
+        None
+    };
+
+    // Use the resolved type if available, otherwise use the original
+    let effective_ty = resolved_ty.as_ref().unwrap_or(receiver_ty);
+
     // Get the type's substitutions and the parent type's parameter order
     let (type_params, substitutions) =
-        if let Some((struct_sym, subs)) = receiver_ty.as_struct_with_subs() {
+        if let Some((struct_sym, subs)) = effective_ty.as_struct_with_subs() {
             // Get type parameters from struct
             let params: Vec<_> =
                 if let Some(generics) = struct_sym.metadata().get_behavior::<GenericsBehavior>() {
@@ -5324,7 +5363,7 @@ fn extract_type_args_from_receiver(
                     vec![]
                 };
             (params, subs)
-        } else if let Some((enum_sym, subs)) = receiver_ty.as_enum_with_subs() {
+        } else if let Some((enum_sym, subs)) = effective_ty.as_enum_with_subs() {
             // Get type parameters from enum
             let params: Vec<_> =
                 if let Some(generics) = enum_sym.metadata().get_behavior::<GenericsBehavior>() {

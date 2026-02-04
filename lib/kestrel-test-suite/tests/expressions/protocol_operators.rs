@@ -257,7 +257,7 @@ mod stdlib_comparison_protocols {
         Test::new(
             r#"module Test
 
-            enum LocalOrdering: std.core.Equatable {
+            public enum LocalOrdering: std.core.Equatable {
                 case Less
                 case Equal
 

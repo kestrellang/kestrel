@@ -1,0 +1,5 @@
+- Incremental Compilation
+- Usability within a LSP
+- Enable complex queries
+- Shorter code
+- Test suite passes
