@@ -51,10 +51,10 @@ use super::members::{
 };
 use super::utils::{
     create_generic_struct_type, create_struct_type, create_struct_type_with_type_args,
-    find_type_directed_match, get_callable_behavior, get_type_container,
-    get_type_parameter_bounds_by_id, infer_type_arguments, is_expression_kind, matches_signature,
-    replace_type_params_except, resolve_associated_types, substitute_self, substitute_type,
-    validate_not_standalone_type_param, verify_type_argument_constraints,
+    find_type_directed_match, get_associated_type_bounds_from_context, get_callable_behavior,
+    get_type_container, get_type_parameter_bounds_by_id, infer_type_arguments, is_expression_kind,
+    matches_signature, replace_type_params_except, resolve_associated_types, substitute_self,
+    substitute_type, validate_not_standalone_type_param, verify_type_argument_constraints,
 };
 
 /// Resolve a call expression: callee(arg1, arg2, ...) or callee[T](arg1, ...)
@@ -1739,6 +1739,46 @@ pub fn resolve_method_call(
                     }
                 }
             }
+            // Handle instance method calls where receiver's TYPE is an AssociatedType
+            // e.g., item.myEquals(target) where item: Item and Item: MyEqual[Rhs = Self]
+            // The default Rhs = Self needs to be substituted with the associated type (Item)
+            else if let TyKind::AssociatedType { symbol: assoc_type, container } = receiver.ty.kind() {
+                // Get bounds for this associated type from its definition and context
+                let bounds = get_associated_type_bounds_from_context(assoc_type, container.as_ref().map(|v| &**v), ctx);
+
+                // Find the protocol that contains this method and get composed substitutions
+                for bound in &bounds {
+                    // Apply protocol defaults with Self = the associated type (receiver.ty)
+                    // This substitutes defaults like Rhs = Self with Rhs = Item
+                    let bound = apply_protocol_defaults_with_self(bound, &receiver.ty);
+
+                    if let TyKind::Protocol {
+                        symbol: proto,
+                        substitutions: proto_subs,
+                    } = bound.kind()
+                    {
+                        // Get composed substitutions tracing through inheritance
+                        if let Some(mut composed_subs) =
+                            get_method_protocol_substitutions(&symbol, proto, proto_subs)
+                        {
+                            // Also include the proto_subs which have defaults applied
+                            for (param_id, ty) in proto_subs.iter() {
+                                if !composed_subs.contains(*param_id) {
+                                    composed_subs.insert(*param_id, ty.clone());
+                                }
+                            }
+                            // Apply composed substitutions to return type and callable
+                            if !composed_subs.is_empty() {
+                                return_ty = substitute_type(&return_ty, &composed_subs);
+                                for (param_id, ty) in composed_subs.iter() {
+                                    call_substitutions.insert(*param_id, ty.clone());
+                                }
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
             // Handle methods from protocol conformances for concrete types
             // e.g., for Int64 conforming to NotEqual[Int64], when calling notEquals(other: Rhs),
             // we need to substitute Rhs with Int64
@@ -2286,6 +2326,47 @@ fn resolve_type_parameter_init_call(
         return_ty,
         span,
     )
+}
+
+/// Apply protocol default type parameters and substitute Self with the provided type.
+///
+/// For example, `MyEqual` with default `Rhs = Self` becomes `MyEqual[Rhs = Item]`
+/// when `self_ty` is `Item` (an associated type).
+///
+/// This function:
+/// 1. Fills in any missing type parameters with their defaults
+/// 2. Substitutes Self with self_ty in all substitutions (including defaults and existing ones)
+fn apply_protocol_defaults_with_self(bound: &Ty, self_ty: &Ty) -> Ty {
+    let TyKind::Protocol {
+        symbol,
+        substitutions,
+    } = bound.kind()
+    else {
+        return bound.clone();
+    };
+
+    let type_params = symbol.type_parameters();
+
+    // Start with existing substitutions, but substitute Self in each one
+    let mut new_subs = Substitutions::new();
+    for (param_id, ty) in substitutions.iter() {
+        let resolved = ty.substitute_self(self_ty);
+        new_subs.insert(*param_id, resolved);
+    }
+
+    // Fill in missing defaults, also substituting Self
+    for param in &type_params {
+        let param_id = param.metadata().id();
+        if !new_subs.contains(param_id) {
+            if let Some(default_ty) = param.default() {
+                // Substitute Self in the default type with the concrete type
+                let resolved_default = default_ty.substitute_self(self_ty);
+                new_subs.insert(param_id, resolved_default);
+            }
+        }
+    }
+
+    Ty::generic_protocol(symbol.clone(), new_subs, bound.span().clone())
 }
 
 /// Find the substitutions needed to use a method from a protocol, tracing through inheritance.

@@ -67,6 +67,9 @@ impl TypeOracle for SemanticModel {
             }
 
             for bound in &bounds {
+                // Apply protocol defaults with Self = receiver_ty (the type parameter)
+                // This resolves defaults like `Rhs = Self` in `Equal[Rhs = Self]`
+                let bound = apply_protocol_defaults(bound.clone(), Some(receiver_ty));
                 if let TyKind::Protocol {
                     symbol: proto,
                     substitutions: proto_subs,
@@ -1471,6 +1474,9 @@ fn resolve_member_with_context(
         }
 
         for bound in &bounds {
+            // Apply protocol defaults with Self = receiver_ty (the associated type)
+            // This resolves defaults like `Rhs = Self` in `Equal[Rhs = Self]`
+            let bound = apply_protocol_defaults(bound.clone(), Some(receiver_ty));
             if let TyKind::Protocol {
                 symbol: proto,
                 substitutions: proto_subs,
@@ -2120,8 +2126,8 @@ fn collect_protocol_conformances_for_type(model: &SemanticModel, ty: &Ty) -> Vec
         symbol_id: type_symbol_id,
     });
     for conformance in conformances {
-        // Apply default type parameters first (so Self gets substituted properly)
-        let conformance = apply_protocol_defaults(conformance);
+        // Apply default type parameters first, substituting Self with concrete type
+        let conformance = apply_protocol_defaults(conformance, Some(&ty));
         let applied = if actual_subs.is_empty() {
             conformance.clone()
         } else {
@@ -2146,8 +2152,8 @@ fn collect_protocol_conformances_for_type(model: &SemanticModel, ty: &Ty) -> Vec
             symbol_id: extension.metadata().id(),
         });
         for conformance in ext_conformances {
-            // Apply default type parameters first (so Self gets substituted properly)
-            let conformance = apply_protocol_defaults(conformance);
+            // Apply default type parameters first, substituting Self with concrete type
+            let conformance = apply_protocol_defaults(conformance, Some(&ty));
             let applied = if actual_subs.is_empty() {
                 conformance.clone()
             } else {
@@ -2189,8 +2195,8 @@ fn collect_protocol_conformances_for_type(model: &SemanticModel, ty: &Ty) -> Vec
                 continue;
             };
             for ext_conf in conformances.conformances() {
-                // Apply default type parameters first (so Self gets substituted properly)
-                let ext_conf = apply_protocol_defaults(ext_conf.clone());
+                // Apply default type parameters first, substituting Self with concrete type
+                let ext_conf = apply_protocol_defaults(ext_conf.clone(), Some(&ty));
                 // Apply protocol substitutions (for protocol type params), then Self -> concrete
                 let applied = if proto_subs.is_empty() {
                     ext_conf.clone()
@@ -2820,7 +2826,11 @@ fn collect_protocols_with_inherited_impl(
 ///
 /// This fills in any missing type parameters with their default values.
 /// For example, `NotEqual` (with default `Rhs = Self`) becomes `NotEqual[Rhs = Self]`.
-fn apply_protocol_defaults(ty: Ty) -> Ty {
+///
+/// The `self_ty` parameter is used to substitute `Self` in default types that
+/// reference it. For example, `Equal[Rhs = Self]` where Self is `Int` becomes
+/// `Equal[Rhs = Int]`.
+fn apply_protocol_defaults(ty: Ty, self_ty: Option<&Ty>) -> Ty {
     let TyKind::Protocol {
         symbol,
         substitutions,
@@ -2841,7 +2851,13 @@ fn apply_protocol_defaults(ty: Ty) -> Ty {
         let param_id = param.metadata().id();
         if !new_subs.contains(param_id) {
             if let Some(default_ty) = param.default() {
-                new_subs.insert(param_id, default_ty.clone());
+                // Substitute Self in the default type if we have a concrete type
+                let resolved_default = if let Some(concrete) = self_ty {
+                    default_ty.substitute_self(concrete)
+                } else {
+                    default_ty.clone()
+                };
+                new_subs.insert(param_id, resolved_default);
                 changed = true;
             }
         }
