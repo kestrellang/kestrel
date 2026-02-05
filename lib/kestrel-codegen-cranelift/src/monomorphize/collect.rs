@@ -376,15 +376,23 @@ impl<'a> CollectionContext<'a> {
                             let param = &self.mir.params[param_id];
                             self.type_needs_self(self.mir.ty(param.ty))
                         }) || self.type_needs_self(self.mir.ty(ret));
+
                         if needs_self {
-                            self.errors
-                                .push(MonomorphizeError::UnsupportedFunctionReference {
-                                    name: *func,
-                                    reason: "function reference requires Self type".to_string(),
-                                });
-                            return;
+                            // Non-generic closures can still need Self type if they're defined in
+                            // a protocol extension method. Try to use self_type from substitution.
+                            if let Some(st) = subst.get_self_type() {
+                                FunctionInstantiation::with_self_type(func_id, Vec::new(), st)
+                            } else {
+                                self.errors
+                                    .push(MonomorphizeError::UnsupportedFunctionReference {
+                                        name: *func,
+                                        reason: "function reference requires Self type".to_string(),
+                                    });
+                                return;
+                            }
+                        } else {
+                            FunctionInstantiation::non_generic(func_id)
                         }
-                        FunctionInstantiation::non_generic(func_id)
                     };
 
                     if self.result.add_function(inst.clone()) {

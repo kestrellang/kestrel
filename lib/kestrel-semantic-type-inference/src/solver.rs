@@ -1595,6 +1595,9 @@ fn resolve_member(
     // Try to resolve the member via the oracle
     match ctx.oracle().resolve_member(&receiver_ty, member, is_static) {
         Ok(resolution) => {
+            // Save substitutions before moving them
+            let substitutions = resolution.substitutions.clone();
+
             // Record the value resolution
             ctx.values_mut().insert(
                 expr_id,
@@ -1613,6 +1616,30 @@ fn resolve_member(
                 eprintln!("[DEBUG resolve_member] Param {}: equating arg {:?} with param {}", i, arg_ty_id, param_ty);
                 ctx.register_type(param_ty);
                 ctx.equate(*arg_ty_id, param_ty.id(), span.clone());
+            }
+
+            // Process where clause equality constraints.
+            // These enable type parameter inference from constraints like `where Item = Optional[T]`.
+            // For example, in `compactMap[T]() where Item = Optional[T]`, this creates a constraint
+            // that equates the receiver's Item associated type with Optional[T], allowing T to be inferred.
+            eprintln!("[DEBUG resolve_member] Processing {} where clause constraints", resolution.where_constraints.equality_constraints().len());
+            for (left, right) in resolution.where_constraints.equality_constraints() {
+                // Apply substitutions from the method resolution
+                let left_ty = left.apply_substitutions(&substitutions);
+                let right_ty = right.apply_substitutions(&substitutions);
+
+                // Substitute Self with the receiver type
+                let left_ty = left_ty.substitute_self(&receiver_ty);
+                let right_ty = right_ty.substitute_self(&receiver_ty);
+
+                eprintln!("[DEBUG resolve_member] Where constraint: {} = {}", left_ty, right_ty);
+
+                // Register both types
+                ctx.register_type(&left_ty);
+                ctx.register_type(&right_ty);
+
+                // Create equality constraint
+                ctx.equate(left_ty.id(), right_ty.id(), span.clone());
             }
 
             // For Self-returning methods (like negate()), equate receiver with result.
@@ -1810,6 +1837,16 @@ fn resolve_enum_pattern_binding(
 
     let resolved_ty = resolve_type(ctx, enum_ty);
 
+    // Debug specific TyIds
+    if format!("{:?}", enum_ty) == "TyId(128014)" {
+        eprintln!("[DEBUG resolve_enum_pattern_binding] {:?} resolves to: {}", enum_ty, resolved_ty);
+        eprintln!("[DEBUG resolve_enum_pattern_binding] Binding case: {}", case_name);
+        for (label, binding_ty) in binding_tys {
+            let binding_resolved = resolve_type(ctx, *binding_ty);
+            eprintln!("[DEBUG resolve_enum_pattern_binding]   Binding {:?} {:?} resolves to: {}", label, binding_ty, binding_resolved);
+        }
+    }
+
     // Expand type aliases to get underlying type (e.g., OptionalTypeOperator -> Optional)
     let resolved_ty = resolved_ty.expand_aliases();
 
@@ -1873,6 +1910,14 @@ fn resolve_enum_pattern_binding(
             // Apply substitutions to the parameter type and equate
             let param_ty = param.ty.apply_substitutions(substitutions);
             ctx.register_type(&param_ty);
+
+            // Debug specific TyIds
+            if format!("{:?}", enum_ty) == "TyId(128014)" {
+                eprintln!("[DEBUG resolve_enum_pattern_binding]   Case param {} before subst: {}", idx, param.ty);
+                eprintln!("[DEBUG resolve_enum_pattern_binding]   Case param {} after subst: {}", idx, param_ty);
+                eprintln!("[DEBUG resolve_enum_pattern_binding]   Equating binding {:?} with param {:?}", binding_ty_id, param_ty.id());
+            }
+
             ctx.equate(*binding_ty_id, param_ty.id(), span.clone());
         }
     }

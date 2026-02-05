@@ -4,7 +4,7 @@
 //! without depending directly on the semantic model implementation.
 
 use kestrel_semantic_tree::builtins::LanguageFeature;
-use kestrel_semantic_tree::ty::{FloatBits, IntBits, Substitutions, Ty};
+use kestrel_semantic_tree::ty::{FloatBits, IntBits, Substitutions, Ty, WhereClause};
 use kestrel_span::Span;
 use semantic_tree::symbol::SymbolId;
 
@@ -26,6 +26,10 @@ pub struct MemberResolution {
     /// the expected result type can propagate back to constrain the receiver type.
     /// This enables patterns like `-32768` to infer as Int16 when context expects Int16.
     pub returns_self: bool,
+    /// Where clause constraints from the method declaration.
+    /// These are converted into inference constraints to enable type parameter inference
+    /// from where clause equality constraints like `where Item = Optional[T]`.
+    pub where_constraints: WhereClause,
 }
 
 /// Error when member resolution fails.
@@ -244,5 +248,26 @@ pub trait TypeOracle {
         // Default implementation returns the type unchanged.
         // Implementors with access to where clause constraints can override.
         ty.clone()
+    }
+
+    /// Get the where clause for a function symbol.
+    ///
+    /// Used to extract where clause constraints from method calls that were
+    /// resolved during binding. This is critical for methods like
+    /// `compactMap[T]() where Item = Optional[T]` where the where clause
+    /// equality constraint is the only way to infer `T`.
+    ///
+    /// # Arguments
+    ///
+    /// * `function_id` - The symbol ID of the function
+    ///
+    /// # Returns
+    ///
+    /// The function's where clause, or an empty where clause if not found.
+    fn function_where_clause(&self, function_id: SymbolId) -> WhereClause {
+        // Default implementation returns empty where clause.
+        // Implementors with access to the semantic model can override.
+        let _ = function_id;
+        WhereClause::new()
     }
 }

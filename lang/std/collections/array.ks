@@ -378,7 +378,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     /// Example:
     ///     [1, 2, 3].count  // 3
     ///     [].count         // 0
-    public var count: Int64 { self.len() }
+    public var count: Int64 { get { self.len() } }
 
     /// Returns the current capacity (elements storable without reallocating).
     ///

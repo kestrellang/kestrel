@@ -31,6 +31,10 @@ fn type_uses_self(mir: &MirContext, ty_id: Id<Ty>) -> bool {
     let ty = mir.ty(ty_id);
     match ty {
         MirTy::SelfType => true,
+        MirTy::AssociatedTypeProjection { base, .. } => {
+            // Associated type projections like `Self.Item` depend on Self
+            type_uses_self(mir, *base)
+        },
         MirTy::Ref(inner) | MirTy::RefMut(inner) | MirTy::Pointer(inner) => {
             type_uses_self(mir, *inner)
         },
@@ -3527,8 +3531,14 @@ fn compile_apply_partial(
 
     // 2. Get the function pointer for the closure function
     // Use the instantiated type args derived from the parent function's substitution
+    // If the closure needs Self type (e.g., in protocol extension methods), get it from subst
+    let self_type_for_closure = if func_uses_self(ctx.mir, closure_def) {
+        subst.get_self_type()
+    } else {
+        None
+    };
     let mangled_name =
-        ctx.symbol_name_for_function(closure_func_id, closure_def, &closure_type_args, None);
+        ctx.symbol_name_for_function(closure_func_id, closure_def, &closure_type_args, self_type_for_closure);
     let cl_func_id = ctx.func_ids_by_name.get(&mangled_name).ok_or_else(|| {
         CodegenError::Unsupported(format!(
             "closure function not found: {} (mangled: {})",

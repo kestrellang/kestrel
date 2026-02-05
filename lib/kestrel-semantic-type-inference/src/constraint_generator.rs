@@ -11,6 +11,7 @@ use kestrel_semantic_tree::stmt::{Statement, StatementKind};
 use kestrel_semantic_tree::symbol::field::FieldSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::ty::{Ty, TyKind};
+use kestrel_span::Span;
 use semantic_tree::symbol::Symbol;
 
 use crate::constraint::ProtocolRef;
@@ -672,6 +673,12 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
                     // Otherwise callee type is not a function - might be an error or inference needed
                 },
             }
+
+            // Extract where clause constraints from method calls resolved during binding
+            // This handles cases like `compactMap[T]() where Item = Optional[T]`
+            // where the method was resolved during binding and its where clause needs to
+            // be converted into inference constraints
+            generate_where_clause_constraints_for_call(ctx, callee, substitutions, &expr.span);
         },
 
         ExprKind::PrimitiveMethodCall {
@@ -1379,6 +1386,114 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
         },
 
         ExprKind::Error => {},
+    }
+}
+
+/// Generate where clause constraints for a method call.
+///
+/// When a method is resolved during binding (not deferred to type inference),
+/// its where clause constraints need to be converted into inference constraints.
+/// This is critical for methods like `compactMap[T]() where Item = Optional[T]`
+/// where the where clause equality constraint is the only way to infer `T`.
+///
+/// # Arguments
+///
+/// * `ctx` - The inference context
+/// * `callee` - The callee expression (should be a SymbolRef to a function)
+/// * `substitutions` - Type argument substitutions from the generic call
+/// * `span` - Span for error reporting
+fn generate_where_clause_constraints_for_call(
+    ctx: &mut InferenceContext<'_>,
+    callee: &Expression,
+    substitutions: &kestrel_semantic_tree::ty::Substitutions,
+    span: &Span,
+) {
+    // Get the function symbol ID and receiver type from the callee expression
+    // Method calls have MethodRef with candidates, regular calls have SymbolRef
+    let (callee_symbol_id, receiver_ty_opt) = match &callee.kind {
+        ExprKind::SymbolRef(id) => (*id, None),
+        ExprKind::MethodRef { candidates, receiver, .. } => {
+            // For MethodRef, use the first candidate (should only be one after resolution)
+            if candidates.len() != 1 {
+                return;
+            }
+            (candidates[0], Some(&receiver.ty))
+        }
+        _ => {
+            return;
+        }
+    };
+
+    // Get the where clause from the function symbol
+    let where_clause = ctx.oracle().function_where_clause(callee_symbol_id);
+
+    if where_clause.is_empty() {
+        return;
+    }
+
+    // Process equality constraints from the where clause
+    // For `where Item = Optional[T]`, we need to:
+    // 1. Qualify the left side (Item -> Self.Item) with the receiver type if it's an associated type
+    // 2. Apply substitutions to both sides (replaces T with fresh inference variables)
+    // 3. Create a Normalizes constraint to resolve the associated type, then equate with the right side
+    for (left_ty, right_ty) in where_clause.equality_constraints() {
+        // Register both types
+        ctx.register_type(left_ty);
+        ctx.register_type(right_ty);
+
+        // Qualify the left side if it's an unqualified associated type and we have a receiver
+        let qualified_left = if let Some(receiver_ty) = receiver_ty_opt {
+            qualify_associated_type(left_ty, receiver_ty)
+        } else {
+            left_ty.clone()
+        };
+
+        // Apply the generic call's substitutions to both sides
+        // This replaces type parameters like T with their instantiated types (inference variables)
+        let left_with_subs = qualified_left.apply_substitutions(substitutions);
+        let right_with_subs = right_ty.apply_substitutions(substitutions);
+
+        // Register the substituted types
+        ctx.register_type(&left_with_subs);
+        ctx.register_type(&right_with_subs);
+
+        // If the left side is a qualified associated type (e.g., ArrayIterator[Optional[Int64]].Item),
+        // create a Normalizes constraint to resolve it, then equate with the right side
+        if let Some((assoc_symbol, Some(container_ty))) = left_with_subs.as_associated_type_with_container() {
+            let assoc_name = assoc_symbol.metadata().name().value.clone();
+            ctx.register_type(container_ty);
+
+            // Create a Normalizes constraint: container.assoc_name => right_side
+            // This tells the solver to resolve ArrayIterator[Optional[Int64]].Item and equate it with Optional[_]
+            ctx.normalizes(
+                container_ty.id(),
+                assoc_name,
+                right_with_subs.id(),
+                span.clone(),
+            );
+        } else {
+            // Not an associated type, just create an equality constraint
+            ctx.equate(
+                left_with_subs.id(),
+                right_with_subs.id(),
+                span.clone(),
+            );
+        }
+    }
+}
+
+/// Qualify an unqualified associated type with a container type.
+///
+/// For example, if `ty` is `Item` (an unqualified associated type) and `container` is
+/// `ArrayIterator[Optional[Int64]]`, this returns `ArrayIterator[Optional[Int64]].Item`.
+fn qualify_associated_type(ty: &Ty, container: &Ty) -> Ty {
+    match ty.kind() {
+        // If it's an unqualified associated type (no container), qualify it
+        TyKind::AssociatedType { symbol, container: None } => {
+            Ty::qualified_associated_type(symbol.clone(), container.clone(), ty.span().clone())
+        }
+        // Otherwise return as-is
+        _ => ty.clone(),
     }
 }
 

@@ -1549,6 +1549,9 @@ pub fn resolve_method_call(
     use super::utils::substitute_self;
     use kestrel_semantic_tree::symbol::function::FunctionSymbol;
 
+    eprintln!("[METHOD_CALL] Resolving method call '{}' with {} candidates (receiver type: {})",
+              method_name, candidates.len(), receiver.ty);
+
     // Find matching overload
     let mut invisible_matches = Vec::new();
 
@@ -1557,6 +1560,8 @@ pub fn resolve_method_call(
             && let Some(orig_callable) = get_callable_behavior(&symbol)
             && matches_signature(&orig_callable, arguments.len(), arg_labels)
         {
+            eprintln!("[METHOD_CALL] Candidate '{}' matches signature (symbol: {})",
+                      method_name, symbol.metadata().name().value);
             // Check visibility
             if !ctx.model.query(IsVisibleFrom {
                 target: candidate_id,
@@ -1565,6 +1570,8 @@ pub fn resolve_method_call(
                 invisible_matches.push(symbol);
                 continue;
             }
+            eprintln!("[METHOD_CALL] Candidate '{}' is visible, proceeding with resolution",
+                      method_name);
 
             // Build substitutions from the receiver type
             // e.g., for Box[Int], we get {T -> Int}
@@ -2012,6 +2019,11 @@ pub fn resolve_method_call(
                 span: span.clone(),
                 mutable: false,
             };
+
+            eprintln!("[METHOD_CALL] Successfully resolved '{}' to function (return type: {})",
+                      method_name, return_ty);
+            eprintln!("[METHOD_CALL] Call substitutions: {:?}", call_substitutions.iter()
+                      .map(|(id, ty)| format!("{:?}={}", id, ty)).collect::<Vec<_>>());
 
             return Expression::generic_call(
                 method_ref,
