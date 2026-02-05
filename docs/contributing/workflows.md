@@ -361,6 +361,104 @@ report_my_error(diagnostics, span, name);
 
 ---
 
+## Adding or Modifying Standard Library Methods
+
+The standard library lives in `lang/std/` as Kestrel source files.
+
+### Directory Structure
+
+```
+lang/std/
+├── collections/    # Array, Set, Dictionary
+├── core/           # Bool, Equatable, Comparable, Cloneable, Hash, Range, etc.
+├── ffi/            # Foreign function interface
+├── io/             # File, stdin/stdout/stderr, Read/Write protocols
+├── iter/           # Iterator protocol and adapters
+├── memory/         # Layout, Pointer, Slice, RawPointer, SystemAllocator, RcBox
+├── num/            # Int64, Float, RandomNumberGenerator
+├── result/         # Optional, Result
+└── text/           # String, Formattable, FormatOptions
+```
+
+### Stdlib File Structure
+
+Each `.ks` file follows this pattern:
+
+```kestrel
+module std.collections
+
+import std.core.(Bool, Equatable, Comparable)
+import std.num.(Int64)
+// ... other imports
+
+public struct MyType[T] {
+    private var data: Pointer[T]
+
+    public init() { ... }
+
+    public func myMethod() -> Bool { ... }
+
+    public mutating func myMutatingMethod() { ... }
+}
+```
+
+Key conventions:
+- Module path matches directory structure (`std.collections`, `std.core`, etc.)
+- Public API uses `public` visibility
+- Internal fields use `private`
+- Mutating methods are marked `mutating`
+- COW types (String, Array) call `makeUnique()` before `grow()` in mutating methods
+
+### Testing Stdlib Methods
+
+Stdlib tests live in `lib/kestrel-test-suite/tests/stdlib/`. Each test compiles and **runs** a Kestrel program that exercises the method.
+
+```rust
+use kestrel_test_suite::*;
+
+#[test]
+fn my_method_test() {
+    Test::new(
+        r#"module Test
+
+        func main() -> lang.i64 {
+            // Setup
+            let x = ...
+
+            // Test the method — return non-zero on failure
+            if x.myMethod() == false { return 1 }
+
+            0
+        }
+    "#,
+    )
+    .with_stdlib()
+    .expect(Compiles)
+    .expect(Runs);
+}
+```
+
+Key patterns:
+- Use `.with_stdlib()` to include the standard library
+- Use `.expect(Runs)` to compile and execute (not just compile)
+- `main()` returns `lang.i64` — return `0` for success, non-zero for failure
+- Each check returns a unique non-zero value to identify which assertion failed
+
+### Step-by-Step
+
+#### 1. Implement the method
+Edit the appropriate file in `lang/std/`. Follow existing patterns in that file.
+
+#### 2. Add tests
+Add tests in `lib/kestrel-test-suite/tests/stdlib/{type}.rs`. If the file doesn't exist, create it and add the module to `lib/kestrel-test-suite/tests/stdlib/mod.rs`.
+
+#### 3. Run the specific test
+```bash
+cargo test -p kestrel-test-suite --release -- test_name
+```
+
+---
+
 ## Debugging Semantic Resolution Issues
 
 When symbols aren't being created or resolved correctly.

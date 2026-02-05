@@ -10,13 +10,13 @@ This guide helps you understand the Kestrel compiler codebase and contribute eff
 | [Quick Reference](quick-reference.md) | File paths, common imports, task locations | Looking up where to make changes |
 | [Patterns](patterns.md) | Naming conventions, code patterns, testing | Writing code that matches existing style |
 | [Workflows](workflows.md) | Step-by-step guides for common tasks | Adding features, diagnostics, tests |
+| [Type Inference](type-inference.md) | Constraint solver, type substitutions, TyKind | Working on types, inference, generics |
 | [Git](git.md) | Branching strategy, PRs, issues | Contributing code changes |
 
 ## Related Documentation
 
 Detailed implementation guides (in `.claude/commands/`):
-- **write-feature.md** - Complete 7-step guide for adding language features (lexer through tests)
-- **write-parser.md** - Detailed parser implementation guide
+- **feature.md** - Complete workflow for adding language features (brainstorm, design, plan, implement)
 
 Compiler internals (in `docs/internals/`):
 - Parser architecture, execution graph, validation passes
@@ -37,15 +37,23 @@ kestrel/
 │   ├── kestrel-syntax-tree/    # Lossless CST (Rowan)
 │   ├── kestrel-semantic-tree/  # Symbols, types, behaviors
 │   ├── kestrel-semantic-model/ # SemanticModel + query system
-│   ├── kestrel-semantic-tree-builder/  # BUILD/lowering (SyntaxNode -> SemanticModel)
+│   ├── kestrel-semantic-tree-builder/  # BUILD (SyntaxNode -> SemanticModel)
 │   ├── kestrel-semantic-tree-binder/   # BIND (resolve + body resolution)
 │   ├── kestrel-semantic-analyzers/     # VALIDATE (post-bind analyzers)
+│   ├── kestrel-semantic-type-inference/  # Hindley-Milner type inference
+│   ├── kestrel-semantic-pattern-matching/ # Exhaustiveness & usefulness checking
+│   ├── kestrel-execution-graph/          # MIR (mid-level IR)
+│   ├── kestrel-execution-graph-lowering/ # Semantic model -> MIR lowering
+│   ├── kestrel-codegen/        # Backend-agnostic codegen utilities (layout, mangling)
+│   ├── kestrel-codegen-cranelift/ # Cranelift JIT backend (MIR -> native code)
 │   ├── kestrel-compiler/       # High-level orchestration
 │   ├── kestrel-test-suite/     # Integration tests
 │   ├── kestrel-span/           # Source locations
 │   ├── kestrel-prelude/        # Primitive types
 │   ├── kestrel-reporting/      # Diagnostics
 │   └── semantic-tree/          # Language-agnostic symbol infra
+├── lang/
+│   └── std/                    # Standard library (Kestrel source)
 ├── docs/
 │   ├── language/               # User-facing language guide
 │   ├── contributing/           # This guide
