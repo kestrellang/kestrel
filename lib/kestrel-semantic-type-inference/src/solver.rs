@@ -1357,11 +1357,21 @@ fn deeply_resolve_associated_types(
                 let resolved_container = deeply_resolve_associated_types(ctx, container_ty, visited);
                 ctx.register_type(&resolved_container);
 
+                // Also resolve inference variables in the container
+                let resolved_container = resolve_type(ctx, resolved_container.id());
+
                 // Expand type aliases on the resolved container
                 let mut expanded_container = resolved_container;
                 while matches!(expanded_container.kind(), TyKind::TypeAlias { .. }) {
                     expanded_container = ctx.oracle().expand_type_alias(&expanded_container);
                     ctx.register_type(&expanded_container);
+                }
+
+                // If the container is still an inference variable, we can't resolve - return as-is
+                if matches!(expanded_container.kind(), TyKind::Infer) {
+                    let result_ty = Ty::qualified_associated_type(symbol.clone(), expanded_container, ty.span().clone());
+                    ctx.register_type(&result_ty);
+                    return result_ty;
                 }
 
                 // Try to resolve the associated type on the expanded container
@@ -2096,6 +2106,35 @@ fn resolve_type(ctx: &InferenceContext<'_>, id: TyId) -> Ty {
                     return concrete_ty;
                 }
             }
+        }
+    }
+
+    // If the resolved type is a struct with type arguments that might contain
+    // associated types, recursively resolve them. This handles cases like
+    // Array[U.Item] where U has been resolved to ArrayIterator[Int64].
+    if let TyKind::Struct { symbol, substitutions } = resolved.kind() {
+        let mut new_subs = Substitutions::new();
+        let mut changed = false;
+
+        for (param_id, sub_ty) in substitutions.iter() {
+            // Check if this type argument contains an associated type that could be resolved
+            let resolved_arg = if matches!(sub_ty.kind(), TyKind::AssociatedType { .. }) {
+                let r = resolve_type(ctx, sub_ty.id());
+                // If the resolved type is different (by ID), or if it was an AssociatedType but now isn't,
+                // then we made progress
+                if r.id() != sub_ty.id() || !matches!(r.kind(), TyKind::AssociatedType { .. }) {
+                    changed = true;
+                }
+                r
+            } else {
+                sub_ty.clone()
+            };
+            new_subs.insert(*param_id, resolved_arg);
+        }
+
+        if changed {
+            let new_ty = Ty::generic_struct(symbol.clone(), new_subs, resolved.span().clone());
+            return new_ty;
         }
     }
 

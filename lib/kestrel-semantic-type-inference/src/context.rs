@@ -9,6 +9,7 @@ use std::collections::{HashMap, HashSet};
 use kestrel_semantic_tree::expr::ExprId;
 use kestrel_semantic_tree::ty::{ParamInfo, Ty, TyId, TyKind};
 use kestrel_span::Span;
+use semantic_tree::symbol::Symbol;
 
 use crate::constraint::{Constraint, ProtocolRef};
 use crate::error::InferenceError;
@@ -386,6 +387,7 @@ impl<'a> InferenceContext<'a> {
         // Resolve inference variables in ValueResolution substitutions
         // Clone substitutions first since we need it for both resolution and the final solution
         let substitutions = self.substitutions;
+        let oracle = self.oracle;
         let resolved_values: HashMap<ExprId, ValueResolution> = self
             .values
             .into_iter()
@@ -393,7 +395,7 @@ impl<'a> InferenceContext<'a> {
                 let mut resolved_subs = kestrel_semantic_tree::ty::Substitutions::new();
                 for (sym_id, ty) in value_res.substitutions.iter() {
                     // Resolve inference variables in the type
-                    let resolved_ty = resolve_type_for_solution(ty, &substitutions);
+                    let resolved_ty = resolve_type_for_solution(ty, &substitutions, oracle);
                     resolved_subs.insert(*sym_id, resolved_ty);
                 }
                 (
@@ -413,13 +415,13 @@ impl<'a> InferenceContext<'a> {
 }
 
 /// Resolve a type using the given substitutions (for building the final solution).
-fn resolve_type_for_solution(ty: &Ty, substitutions: &HashMap<TyId, Ty>) -> Ty {
+fn resolve_type_for_solution(ty: &Ty, substitutions: &HashMap<TyId, Ty>, oracle: &dyn TypeOracle) -> Ty {
     match ty.kind() {
         TyKind::Infer => {
             // Look up the inference variable in substitutions
             if let Some(resolved) = substitutions.get(&ty.id()) {
                 // Recursively resolve in case the result also has inference vars
-                resolve_type_for_solution(resolved, substitutions)
+                resolve_type_for_solution(resolved, substitutions, oracle)
             } else {
                 ty.clone()
             }
@@ -428,24 +430,46 @@ fn resolve_type_for_solution(ty: &Ty, substitutions: &HashMap<TyId, Ty>) -> Ty {
             // Resolve type arguments in struct substitutions
             let mut resolved_subs = kestrel_semantic_tree::ty::Substitutions::new();
             for (sym_id, arg_ty) in struct_subs.iter() {
-                resolved_subs.insert(*sym_id, resolve_type_for_solution(arg_ty, substitutions));
+                resolved_subs.insert(*sym_id, resolve_type_for_solution(arg_ty, substitutions, oracle));
             }
             Ty::generic_struct(symbol.clone(), resolved_subs, ty.span().clone())
         }
         TyKind::Function { params, return_type } => {
             let resolved_params: Vec<Ty> = params
                 .iter()
-                .map(|p| resolve_type_for_solution(p, substitutions))
+                .map(|p| resolve_type_for_solution(p, substitutions, oracle))
                 .collect();
-            let resolved_return = resolve_type_for_solution(return_type, substitutions);
+            let resolved_return = resolve_type_for_solution(return_type, substitutions, oracle);
             Ty::function(resolved_params, resolved_return, ty.span().clone())
         }
         TyKind::Tuple(elements) => {
             let resolved_elements: Vec<Ty> = elements
                 .iter()
-                .map(|e| resolve_type_for_solution(e, substitutions))
+                .map(|e| resolve_type_for_solution(e, substitutions, oracle))
                 .collect();
             Ty::tuple(resolved_elements, ty.span().clone())
+        }
+        TyKind::AssociatedType { symbol, container } => {
+            // Resolve inference placeholders in the container
+            if let Some(container_ty) = container {
+                let resolved_container = resolve_type_for_solution(container_ty, substitutions, oracle);
+                // If container is no longer an inference placeholder, try to resolve the associated type
+                if !matches!(resolved_container.kind(), TyKind::Infer) {
+                    // Try to resolve the associated type using the oracle
+                    if let Some(resolved_assoc) = oracle.resolve_associated_type(&resolved_container, &symbol.metadata().name().value) {
+                        // Recursively resolve in case the result has more associated types
+                        return resolve_type_for_solution(&resolved_assoc, substitutions, oracle);
+                    }
+                }
+                // If we couldn't fully resolve, at least return with resolved container
+                if resolved_container.id() != container_ty.id() {
+                    Ty::qualified_associated_type(symbol.clone(), resolved_container, ty.span().clone())
+                } else {
+                    ty.clone()
+                }
+            } else {
+                ty.clone()
+            }
         }
         _ => ty.clone(),
     }
