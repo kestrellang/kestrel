@@ -610,8 +610,8 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
             return
         }
         let myLen = self.len();
-        self.grow(myLen + otherLen);
         self.makeUnique();
+        self.grow(myLen + otherLen);
         var s = self.storage.getValue();
         let otherPtr = other.ptr();
         for i in Int64(intLiteral: 0)..<otherLen {
@@ -624,8 +624,8 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
     /// Appends a character to this string.
     public mutating func appendChar(c: Char) {
         let utf8Len = c.utf8Length();
-        self.grow(self.len() + utf8Len);
         self.makeUnique();
+        self.grow(self.len() + utf8Len);
         var s = self.storage.getValue();
         // Encode to buffer
         let rawPtr: lang.ptr[lang.i8] = lang.cast_ptr[lang.i8](s.ptr.asRaw().raw);
@@ -636,8 +636,8 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
 
     /// Appends a raw byte (caller must ensure valid UTF-8).
     public mutating func appendByte(byte: UInt8) {
-        self.grow(self.len() + Int64(intLiteral: 1));
         self.makeUnique();
+        self.grow(self.len() + Int64(intLiteral: 1));
         var s = self.storage.getValue();
         s.ptr.offset(by: s.len).write(byte);
         s.len = s.len + Int64(intLiteral: 1);

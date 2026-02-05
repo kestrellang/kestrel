@@ -143,6 +143,46 @@ pub fn align_to_shift(align: usize) -> u8 {
     align.trailing_zeros() as u8
 }
 
+/// Zero-initialize a memory region pointed to by `ptr` with the given `size`.
+///
+/// Uses multi-byte stores for efficiency: 8-byte stores for the bulk,
+/// then 4/2/1-byte stores for any remainder. This ensures padding bytes
+/// and unused payload areas (e.g., in enum None variants) are zeroed,
+/// preventing reads of uninitialized stack memory.
+pub fn zero_memory(builder: &mut FunctionBuilder<'_>, ptr: CraneliftValue, size: usize) {
+    let mut offset = 0;
+    if size >= 8 {
+        let zero_i64 = builder.ins().iconst(cl_types::I64, 0);
+        while offset + 8 <= size {
+            builder
+                .ins()
+                .store(MemFlags::new(), zero_i64, ptr, offset as i32);
+            offset += 8;
+        }
+    }
+    let remaining = size - offset;
+    if remaining >= 4 {
+        let zero_i32 = builder.ins().iconst(cl_types::I32, 0);
+        builder
+            .ins()
+            .store(MemFlags::new(), zero_i32, ptr, offset as i32);
+        offset += 4;
+    }
+    if size - offset >= 2 {
+        let zero_i16 = builder.ins().iconst(cl_types::I16, 0);
+        builder
+            .ins()
+            .store(MemFlags::new(), zero_i16, ptr, offset as i32);
+        offset += 2;
+    }
+    if size - offset >= 1 {
+        let zero_i8 = builder.ins().iconst(cl_types::I8, 0);
+        builder
+            .ins()
+            .store(MemFlags::new(), zero_i8, ptr, offset as i32);
+    }
+}
+
 fn copy_aggregate_value(
     ctx: &mut CodegenContext<'_>,
     ty: Id<Ty>,
@@ -854,6 +894,9 @@ fn compile_construct(
     // Get pointer to the stack slot
     let ptr = builder.ins().stack_addr(ptr_type, slot, 0);
 
+    // Zero-initialize the stack slot to prevent uninitialized padding bytes
+    zero_memory(builder, ptr, layout.size);
+
     // Store each field at its offset
     let struct_def = ctx.mir.struct_def(struct_id);
     let type_params: Vec<_> = struct_def.type_params.clone();
@@ -996,6 +1039,9 @@ fn compile_tuple(
 
     // Get pointer to the stack slot
     let ptr = builder.ins().stack_addr(ptr_type, slot, 0);
+
+    // Zero-initialize the stack slot to prevent uninitialized padding bytes
+    zero_memory(builder, ptr, total_size);
 
     // Store each element at its offset
     for (i, value) in values.iter().enumerate() {
@@ -1463,6 +1509,10 @@ fn compile_enum_variant(
 
     // Get pointer to the stack slot
     let ptr = builder.ins().stack_addr(ptr_type, slot, 0);
+
+    // Zero-initialize the stack slot to prevent uninitialized payload bytes
+    // (e.g., None variant of Optional leaves payload area uninitialized)
+    zero_memory(builder, ptr, enum_layout.size);
 
     // Find the case and its discriminant
     let enum_def = ctx.mir.enum_def(enum_id);

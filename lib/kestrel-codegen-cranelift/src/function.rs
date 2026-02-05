@@ -3,7 +3,7 @@
 use crate::context::CodegenContext;
 use crate::error::CodegenError;
 use crate::monomorphize::Substitution;
-use crate::rvalue::align_to_shift;
+use crate::rvalue::{align_to_shift, zero_memory};
 use crate::types::translate_type_with_subst;
 
 use kestrel_execution_graph::{
@@ -262,6 +262,9 @@ fn compile_blocks(
                 align_to_shift(align),
             ));
             let addr = builder.ins().stack_addr(ptr_type, slot, 0);
+
+            // Zero-initialize the stack slot to prevent uninitialized memory reads
+            zero_memory(builder, addr, size);
 
             // Initialize the Variable to point to the stack slot
             let var = local_map[&local_id];

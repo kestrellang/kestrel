@@ -745,8 +745,8 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     ///     arr.append( 3)  // [1, 2, 3]
     public mutating func append(element: T) {
         let myLen = self.len();
-        self.grow(myLen + Int64(intLiteral: 1));
         self.makeUnique();
+        self.grow(myLen + Int64(intLiteral: 1));
         var s = self.storage.getValue();
         s.ptr.offset(by: s.len).write(element);
         s.len = s.len + Int64(intLiteral: 1);
@@ -764,8 +764,8 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
             return
         }
         let myLen = self.len();
-        self.grow(myLen + otherLen);
         self.makeUnique();
+        self.grow(myLen + otherLen);
         var s = self.storage.getValue();
         let otherPtr = other.asPointer();
         for i in 0..<otherLen {
@@ -802,8 +802,8 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
         if index < Int64(intLiteral: 0) or index > myLen {
             lang.panic("Array.insert: index out of bounds")
         }
-        self.grow(myLen + Int64(intLiteral: 1));
         self.makeUnique();
+        self.grow(myLen + Int64(intLiteral: 1));
         var s = self.storage.getValue();
         // Shift elements right
         var i: Int64 = s.len;

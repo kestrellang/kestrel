@@ -1,7 +1,6 @@
 # Release Checklist
 
-- [ ] All tests pass
-- [ ] Redo string interpolation
+- [x] All tests pass
 - [x] All examples build
 - [ ] All docs are up to date
 - [x] Remove docs/std
