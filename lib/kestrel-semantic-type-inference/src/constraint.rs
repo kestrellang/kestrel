@@ -92,6 +92,8 @@ pub enum Constraint {
         result: TyId,
         /// The expression ID for tracking the value resolution
         expr_id: ExprId,
+        /// Substitutions from the call site (includes inference variables for method type params)
+        substitutions: kestrel_semantic_tree::ty::Substitutions,
         /// Span for error reporting
         span: Span,
     },
@@ -207,6 +209,7 @@ impl Constraint {
         arguments: Vec<TyId>,
         result: TyId,
         expr_id: ExprId,
+        substitutions: kestrel_semantic_tree::ty::Substitutions,
         span: Span,
     ) -> Self {
         Constraint::MemberAccess {
@@ -216,6 +219,7 @@ impl Constraint {
             arguments,
             result,
             expr_id,
+            substitutions,
             span,
         }
     }

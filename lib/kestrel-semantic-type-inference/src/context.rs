@@ -216,6 +216,9 @@ impl<'a> InferenceContext<'a> {
     /// For method calls, `arguments` contains the type IDs of the call arguments.
     /// When the method is resolved, constraints will be created to equate
     /// argument types with parameter types (enabling proper type inference for literals).
+    ///
+    /// `substitutions` contains the call-site substitutions (including inference variables
+    /// for method type parameters created during binding).
     pub fn member_access(
         &mut self,
         receiver: TyId,
@@ -224,10 +227,11 @@ impl<'a> InferenceContext<'a> {
         arguments: Vec<TyId>,
         result: TyId,
         expr_id: ExprId,
+        substitutions: kestrel_semantic_tree::ty::Substitutions,
         span: Span,
     ) {
         self.constraints.push(Constraint::member_access(
-            receiver, member, is_static, arguments, result, expr_id, span,
+            receiver, member, is_static, arguments, result, expr_id, substitutions, span,
         ));
     }
 
@@ -379,14 +383,75 @@ impl<'a> InferenceContext<'a> {
     }
 
     pub(crate) fn into_solution(self) -> Solution {
+        // Resolve inference variables in ValueResolution substitutions
+        // Clone substitutions first since we need it for both resolution and the final solution
+        let substitutions = self.substitutions;
+        let resolved_values: HashMap<ExprId, ValueResolution> = self
+            .values
+            .into_iter()
+            .map(|(expr_id, value_res)| {
+                let mut resolved_subs = kestrel_semantic_tree::ty::Substitutions::new();
+                for (sym_id, ty) in value_res.substitutions.iter() {
+                    // Resolve inference variables in the type
+                    let resolved_ty = resolve_type_for_solution(ty, &substitutions);
+                    resolved_subs.insert(*sym_id, resolved_ty);
+                }
+                (
+                    expr_id,
+                    ValueResolution::new(value_res.symbol_id, resolved_subs),
+                )
+            })
+            .collect();
+
         Solution::with_promotions(
-            self.substitutions,
-            self.values,
+            substitutions,
+            resolved_values,
             self.promotions,
             self.errors,
         )
     }
+}
 
+/// Resolve a type using the given substitutions (for building the final solution).
+fn resolve_type_for_solution(ty: &Ty, substitutions: &HashMap<TyId, Ty>) -> Ty {
+    match ty.kind() {
+        TyKind::Infer => {
+            // Look up the inference variable in substitutions
+            if let Some(resolved) = substitutions.get(&ty.id()) {
+                // Recursively resolve in case the result also has inference vars
+                resolve_type_for_solution(resolved, substitutions)
+            } else {
+                ty.clone()
+            }
+        }
+        TyKind::Struct { symbol, substitutions: struct_subs } => {
+            // Resolve type arguments in struct substitutions
+            let mut resolved_subs = kestrel_semantic_tree::ty::Substitutions::new();
+            for (sym_id, arg_ty) in struct_subs.iter() {
+                resolved_subs.insert(*sym_id, resolve_type_for_solution(arg_ty, substitutions));
+            }
+            Ty::generic_struct(symbol.clone(), resolved_subs, ty.span().clone())
+        }
+        TyKind::Function { params, return_type } => {
+            let resolved_params: Vec<Ty> = params
+                .iter()
+                .map(|p| resolve_type_for_solution(p, substitutions))
+                .collect();
+            let resolved_return = resolve_type_for_solution(return_type, substitutions);
+            Ty::function(resolved_params, resolved_return, ty.span().clone())
+        }
+        TyKind::Tuple(elements) => {
+            let resolved_elements: Vec<Ty> = elements
+                .iter()
+                .map(|e| resolve_type_for_solution(e, substitutions))
+                .collect();
+            Ty::tuple(resolved_elements, ty.span().clone())
+        }
+        _ => ty.clone(),
+    }
+}
+
+impl<'a> InferenceContext<'a> {
     pub(crate) fn type_registry(&self) -> &HashMap<TyId, Ty> {
         &self.type_registry
     }

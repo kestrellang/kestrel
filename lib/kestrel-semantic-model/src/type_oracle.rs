@@ -258,15 +258,26 @@ impl TypeOracle for SemanticModel {
                 && let Some(callable) = member_symbol.metadata().get_behavior::<CallableBehavior>()
                 && callable.is_static()
             {
+                // Instantiate method-level type parameters with fresh inference variables
+                let mut combined_subs = substitutions.clone();
+                if let Some(func_sym) = member_symbol.as_any().downcast_ref::<FunctionSymbol>() {
+                    let method_type_params = func_sym.type_parameters();
+                    for type_param in method_type_params {
+                        let param_id = type_param.metadata().id();
+                        let infer_ty = Ty::infer(callable.span().clone());
+                        combined_subs.insert(param_id, infer_ty);
+                    }
+                }
+
                 // Substitute both type parameters and Self with the receiver type
-                let raw_return_ty = callable.return_type().apply_substitutions(&substitutions);
+                let raw_return_ty = callable.return_type().apply_substitutions(&combined_subs);
                 let returns_self = matches!(raw_return_ty.kind(), TyKind::SelfType);
                 let return_ty = raw_return_ty.substitute_self(receiver_ty);
                 let parameters: Vec<Ty> = callable
                     .parameters()
                     .iter()
                     .map(|p| {
-                        p.ty.apply_substitutions(&substitutions)
+                        p.ty.apply_substitutions(&combined_subs)
                             .substitute_self(receiver_ty)
                     })
                     .collect();
@@ -274,7 +285,7 @@ impl TypeOracle for SemanticModel {
                 return Ok(MemberResolution {
                     ty: return_ty,
                     symbol_id: member_id,
-                    substitutions,
+                    substitutions: combined_subs,
                     parameters,
                     returns_self,
                     where_constraints,
@@ -343,9 +354,27 @@ impl TypeOracle for SemanticModel {
             && let Some(callable) = member_symbol.metadata().get_behavior::<CallableBehavior>()
         {
             eprintln!("[DEBUG resolve_member] Member is a Function with CallableBehavior");
+
+            // Create fresh inference variables for method type parameters.
+            // For deferred method calls, the binding phase didn't create these.
+            // For non-deferred calls, the solver will merge with call-site substitutions,
+            // overwriting these with the binding-time inference variables.
+            let mut combined_subs = substitutions.clone();
+            if let Some(func_sym) = member_symbol.as_any().downcast_ref::<FunctionSymbol>() {
+                let method_type_params = func_sym.type_parameters();
+                eprintln!("[DEBUG resolve_member] Method has {} type parameters", method_type_params.len());
+                for type_param in method_type_params {
+                    let param_id = type_param.metadata().id();
+                    let param_name = &type_param.metadata().name().value;
+                    let infer_ty = Ty::infer(callable.span().clone());
+                    eprintln!("[DEBUG resolve_member] Creating fresh inference variable for method type parameter '{}' (ID: {:?})", param_name, param_id);
+                    combined_subs.insert(param_id, infer_ty);
+                }
+            }
+
             // For methods, return the return type and parameter types
             // Substitute both type parameters and Self with the receiver type
-            let raw_return_ty = callable.return_type().apply_substitutions(&substitutions);
+            let raw_return_ty = callable.return_type().apply_substitutions(&combined_subs);
             let returns_self = matches!(raw_return_ty.kind(), TyKind::SelfType);
             let return_ty = raw_return_ty.substitute_self(receiver_ty);
             // Resolve any qualified associated types (e.g., String.Output → String)
@@ -355,16 +384,17 @@ impl TypeOracle for SemanticModel {
                 .iter()
                 .map(|p| {
                     let param_ty =
-                        p.ty.apply_substitutions(&substitutions)
+                        p.ty.apply_substitutions(&combined_subs)
                             .substitute_self(receiver_ty);
                     resolve_all_associated_types(self, &param_ty)
                 })
                 .collect();
             let where_constraints = get_where_clause_from_symbol(member_symbol.as_ref()).unwrap_or_default();
+            eprintln!("[DEBUG resolve_member] Creating {} parameter constraints", parameters.len());
             return Ok(MemberResolution {
                 ty: return_ty,
                 symbol_id: member_id,
-                substitutions,
+                substitutions: combined_subs,
                 parameters,
                 returns_self,
                 where_constraints,
@@ -1756,6 +1786,28 @@ fn deeply_resolve_associated_types(
             }
         },
 
+        // Function types - recursively resolve associated types in parameters and return type
+        TyKind::Function { params, return_type } => {
+            let mut changed = false;
+            let mut new_params = Vec::new();
+            for param in params {
+                let resolved_param = deeply_resolve_associated_types(oracle, param, visited);
+                if resolved_param.id() != param.id() {
+                    changed = true;
+                }
+                new_params.push(resolved_param);
+            }
+            let resolved_return = deeply_resolve_associated_types(oracle, return_type, visited);
+            if resolved_return.id() != return_type.id() {
+                changed = true;
+            }
+            if changed {
+                Ty::function(new_params, resolved_return, ty.span().clone())
+            } else {
+                ty.clone()
+            }
+        },
+
         // Other types - return as-is
         _ => ty.clone(),
     };
@@ -2198,8 +2250,24 @@ fn resolve_member_via_protocol_conformance(
                             eprintln!("  [{}] {}", i, p.ty);
                         }
 
+                        // Create fresh inference variables for method type parameters.
+                        // For deferred method calls, the binding phase didn't create these.
+                        // For non-deferred calls, the solver will merge with call-site substitutions.
+                        let mut combined_subs = proto_subs.clone();
+                        if let Some(func_sym) = child.as_any().downcast_ref::<FunctionSymbol>() {
+                            let method_type_params = func_sym.type_parameters();
+                            eprintln!("[DEBUG resolve_member_via_protocol_conformance] Method has {} type parameters", method_type_params.len());
+                            for type_param in method_type_params {
+                                let param_id = type_param.metadata().id();
+                                let param_name = &type_param.metadata().name().value;
+                                let infer_ty = Ty::infer(callable.span().clone());
+                                eprintln!("[DEBUG resolve_member_via_protocol_conformance] Creating fresh inference variable for method type parameter '{}' (ID: {:?})", param_name, param_id);
+                                combined_subs.insert(param_id, infer_ty);
+                            }
+                        }
+
                         let raw_return_ty =
-                            callable.return_type().apply_substitutions(proto_subs);
+                            callable.return_type().apply_substitutions(&combined_subs);
                         let returns_self = matches!(raw_return_ty.kind(), TyKind::SelfType);
                         let return_ty_before_resolve = raw_return_ty.substitute_self(receiver_ty);
                         // Recursively resolve any nested associated types in the return type
@@ -2211,10 +2279,12 @@ fn resolve_member_via_protocol_conformance(
                             .iter()
                             .enumerate()
                             .map(|(i, p)| {
-                                let after_subs = p.ty.apply_substitutions(proto_subs);
+                                let after_subs = p.ty.apply_substitutions(&combined_subs);
                                 let after_self = after_subs.substitute_self(receiver_ty);
                                 eprintln!("  [{}] after substitutions: {} -> after substitute_self: {}", i, after_subs, after_self);
-                                after_self
+                                // Recursively resolve any nested associated types in the parameter type
+                                let mut visited = std::collections::HashSet::new();
+                                deeply_resolve_associated_types(model, &after_self, &mut visited)
                             })
                             .collect();
 
@@ -2227,7 +2297,7 @@ fn resolve_member_via_protocol_conformance(
                         return Some(MemberResolution {
                             ty: return_ty,
                             symbol_id: member_id,
-                            substitutions: proto_subs.clone(),
+                            substitutions: combined_subs,
                             parameters,
                             returns_self,
                             where_constraints,
@@ -2302,8 +2372,24 @@ fn resolve_member_via_protocol_conformance(
                                 eprintln!("  [{}] {}", i, p.ty);
                             }
 
+                            // Create fresh inference variables for method type parameters.
+                            // For deferred method calls, the binding phase didn't create these.
+                            // For non-deferred calls, the solver will merge with call-site substitutions.
+                            let mut combined_subs = effective_subs;
+                            if let Some(func_sym) = child.as_any().downcast_ref::<FunctionSymbol>() {
+                                let method_type_params = func_sym.type_parameters();
+                                eprintln!("[DEBUG resolve_member_via_protocol_conformance] Method has {} type parameters", method_type_params.len());
+                                for type_param in method_type_params {
+                                    let param_id = type_param.metadata().id();
+                                    let param_name = &type_param.metadata().name().value;
+                                    let infer_ty = Ty::infer(callable.span().clone());
+                                    eprintln!("[DEBUG resolve_member_via_protocol_conformance] Creating fresh inference variable for method type parameter '{}' (ID: {:?})", param_name, param_id);
+                                    combined_subs.insert(param_id, infer_ty);
+                                }
+                            }
+
                             let raw_return_ty =
-                                callable.return_type().apply_substitutions(&effective_subs);
+                                callable.return_type().apply_substitutions(&combined_subs);
                             let returns_self = matches!(raw_return_ty.kind(), TyKind::SelfType);
                             let return_ty_before_resolve = raw_return_ty.substitute_self(receiver_ty);
                             // Recursively resolve any nested associated types in the return type
@@ -2315,16 +2401,18 @@ fn resolve_member_via_protocol_conformance(
                                 .iter()
                                 .enumerate()
                                 .map(|(i, p)| {
-                                    let after_subs = p.ty.apply_substitutions(&effective_subs);
+                                    let after_subs = p.ty.apply_substitutions(&combined_subs);
                                     let after_self = after_subs.substitute_self(receiver_ty);
                                     eprintln!("  [{}] after substitutions: {} -> after substitute_self: {}", i, after_subs, after_self);
-                                    after_self
+                                    // Recursively resolve any nested associated types in the parameter type
+                                    let mut visited = std::collections::HashSet::new();
+                                    deeply_resolve_associated_types(model, &after_self, &mut visited)
                                 })
                                 .collect();
 
                             eprintln!("[DEBUG resolve_member_via_protocol_conformance] Final parameters: {:?}", parameters.iter().map(|p| p.to_string()).collect::<Vec<_>>());
-                            eprintln!("[DEBUG resolve_member_via_protocol_conformance] Returning MemberResolution with {} substitutions", effective_subs.len());
-                            for (id, ty) in effective_subs.iter() {
+                            eprintln!("[DEBUG resolve_member_via_protocol_conformance] Returning MemberResolution with {} substitutions", combined_subs.len());
+                            for (id, ty) in combined_subs.iter() {
                                 eprintln!("  {:?} -> {}", id, ty);
                             }
                             let where_constraints = get_where_clause_from_symbol(child.as_ref()).unwrap_or_default();
@@ -2341,7 +2429,7 @@ fn resolve_member_via_protocol_conformance(
                             return Some(MemberResolution {
                                 ty: return_ty,
                                 symbol_id: member_id,
-                                substitutions: effective_subs.clone(),
+                                substitutions: combined_subs,
                                 parameters,
                                 returns_self,
                                 where_constraints,

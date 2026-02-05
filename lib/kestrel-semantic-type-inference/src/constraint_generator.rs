@@ -10,7 +10,7 @@ use kestrel_semantic_tree::pattern::{Pattern, PatternKind};
 use kestrel_semantic_tree::stmt::{Statement, StatementKind};
 use kestrel_semantic_tree::symbol::field::FieldSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
-use kestrel_semantic_tree::ty::{Ty, TyKind};
+use kestrel_semantic_tree::ty::{Substitutions, Ty, TyKind};
 use kestrel_span::Span;
 use semantic_tree::symbol::Symbol;
 
@@ -542,6 +542,7 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
                     vec![], // no arguments for field access
                     expr.ty.id(),
                     expr.id,
+                    Substitutions::new(), // no substitutions for field access
                     expr.span.clone(),
                 );
             }
@@ -658,6 +659,7 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
                             arg_ty_ids, // argument types for parameter constraint generation
                             expr.ty.id(),
                             expr.id,
+                            substitutions.clone(), // pass call-site substitutions with inference vars
                             expr.span.clone(),
                         );
 
@@ -715,6 +717,7 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
                 arg_ty_ids, // argument types for parameter constraint generation
                 expr.ty.id(),
                 expr.id,
+                Substitutions::new(), // no call-site substitutions for deferred method call
                 expr.span.clone(),
             );
 
@@ -766,6 +769,7 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
                 arg_ty_ids,
                 expr.ty.id(),
                 expr.id,
+                Substitutions::new(), // no call-site substitutions for deferred static call
                 expr.span.clone(),
             );
         },

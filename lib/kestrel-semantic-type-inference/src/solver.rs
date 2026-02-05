@@ -300,9 +300,10 @@ fn try_solve(
             arguments,
             result,
             expr_id,
+            substitutions,
             span,
         } => resolve_member(
-            ctx, *receiver, member, *is_static, arguments, *result, *expr_id, span,
+            ctx, *receiver, member, *is_static, arguments, *result, *expr_id, substitutions, span,
         ),
         Constraint::ImplicitMember {
             expr_ty,
@@ -374,12 +375,18 @@ fn unify(
         return Ok(SolveResult::Solved);
     }
 
+    // DEBUG: Print when unifying types
+    eprintln!("[UNIFY] Attempting to unify:");
+    eprintln!("[UNIFY]   a (TyId {:?}): {} (kind: {:?})", a, ty_a, std::mem::discriminant(ty_a.kind()));
+    eprintln!("[UNIFY]   b (TyId {:?}): {} (kind: {:?})", b, ty_b, std::mem::discriminant(ty_b.kind()));
+
     // Handle inference placeholders
     match (ty_a.kind(), ty_b.kind()) {
         // Both are inference placeholders - unify them
         (TyKind::Infer, TyKind::Infer) => {
             // Map one to the other
             ctx.substitutions_mut().insert(ty_a.id(), ty_b.clone());
+            eprintln!("[UNIFY] Both Infer - unified");
             Ok(SolveResult::Solved)
         },
 
@@ -409,6 +416,7 @@ fn unify(
                 ));
             }
             ctx.substitutions_mut().insert(ty_a.id(), ty_b.clone());
+            eprintln!("[UNIFY] a is Infer - substituted {} := {}", ty_a, ty_b);
             Ok(SolveResult::Solved)
         },
         (_, TyKind::Infer) => {
@@ -420,6 +428,7 @@ fn unify(
                 ));
             }
             ctx.substitutions_mut().insert(ty_b.id(), ty_a.clone());
+            eprintln!("[UNIFY] b is Infer - substituted {} := {}", ty_b, ty_a);
             Ok(SolveResult::Solved)
         },
 
@@ -873,9 +882,12 @@ fn unify(
             let id_a = Symbol::<KestrelLanguage>::metadata(param_a.as_ref()).id();
             let id_b = Symbol::<KestrelLanguage>::metadata(param_b.as_ref()).id();
 
+            eprintln!("[UNIFY] Both TypeParameter - id_a={:?}, id_b={:?}", id_a, id_b);
             if id_a == id_b {
+                eprintln!("[UNIFY] TypeParameter - same ID, unified");
                 Ok(SolveResult::Solved)
             } else {
+                eprintln!("[UNIFY] TypeParameter mismatch!");
                 Err(InferenceError::type_mismatch(
                     ty_a.clone(),
                     ty_b.clone(),
@@ -1021,11 +1033,14 @@ fn unify(
         },
 
         // No match - type mismatch
-        _ => Err(InferenceError::type_mismatch(
-            ty_a.clone(),
-            ty_b.clone(),
-            span.clone(),
-        )),
+        _ => {
+            eprintln!("[UNIFY] No matching case - TYPE MISMATCH");
+            Err(InferenceError::type_mismatch(
+                ty_a.clone(),
+                ty_b.clone(),
+                span.clone(),
+            ))
+        },
     }
 }
 
@@ -1558,10 +1573,11 @@ fn resolve_member(
     arguments: &[TyId],
     result: TyId,
     expr_id: kestrel_semantic_tree::expr::ExprId,
+    call_site_substitutions: &kestrel_semantic_tree::ty::Substitutions,
     span: &Span,
 ) -> Result<SolveResult, InferenceError> {
-    eprintln!("[DEBUG resolve_member] Resolving {:?}.{} with {} arguments, result={:?}",
-              receiver, member, arguments.len(), result);
+    eprintln!("[DEBUG resolve_member] Resolving {:?}.{} with {} arguments, result={:?}, {} call-site subs",
+              receiver, member, arguments.len(), result, call_site_substitutions.len());
     let mut receiver_ty = resolve_type(ctx, receiver);
     eprintln!("[DEBUG resolve_member] Receiver type: {}", receiver_ty);
 
@@ -1595,13 +1611,20 @@ fn resolve_member(
     // Try to resolve the member via the oracle
     match ctx.oracle().resolve_member(&receiver_ty, member, is_static) {
         Ok(resolution) => {
-            // Save substitutions before moving them
-            let substitutions = resolution.substitutions.clone();
+            // Merge substitutions: call-site substitutions take precedence for method type params
+            // - resolution.substitutions has protocol-level subs (Self, Item, etc.)
+            // - call_site_substitutions has method type param inference vars (U = _)
+            let mut substitutions = resolution.substitutions.clone();
+            for (param_id, ty) in call_site_substitutions.iter() {
+                substitutions.insert(*param_id, ty.clone());
+            }
+            eprintln!("[DEBUG resolve_member] Merged substitutions: {} oracle + {} call-site = {} total",
+                      resolution.substitutions.len(), call_site_substitutions.len(), substitutions.len());
 
-            // Record the value resolution
+            // Record the value resolution with merged substitutions
             ctx.values_mut().insert(
                 expr_id,
-                ValueResolution::new(resolution.symbol_id, resolution.substitutions),
+                ValueResolution::new(resolution.symbol_id, substitutions.clone()),
             );
 
             // Register and unify the member type with the result
@@ -2050,12 +2073,33 @@ fn resolve_type(ctx: &InferenceContext<'_>, id: TyId) -> Ty {
 
     // Return the last substitution found (which is the resolved type),
     // or look in registry, or create inference placeholder
-    last_subst
+    let resolved = last_subst
         .or_else(|| ctx.type_registry().get(&current_id).cloned())
         .unwrap_or_else(|| {
             // If not found anywhere, create an inference placeholder
             Ty::infer(Span::new(0, 0..0))
-        })
+        });
+
+    // If the resolved type is an associated type with a concrete container,
+    // try to resolve it using the oracle. This handles cases like when
+    // U.Item has substitutions applied and U becomes Array[Int64], giving
+    // us Array[Int64].Item which should resolve to Int64.
+    if let TyKind::AssociatedType { symbol, container } = resolved.kind() {
+        if let Some(container_ty) = container {
+            // First, recursively resolve the container (it might have substitutions too)
+            let resolved_container = resolve_type(ctx, container_ty.id());
+            let name = symbol.metadata().name().value.clone();
+
+            // Only try to resolve if the container is concrete (not Infer)
+            if !matches!(resolved_container.kind(), TyKind::Infer) {
+                if let Some(concrete_ty) = ctx.oracle().resolve_associated_type(&resolved_container, &name) {
+                    return concrete_ty;
+                }
+            }
+        }
+    }
+
+    resolved
 }
 
 /// Check if var occurs in ty (prevents infinite types).

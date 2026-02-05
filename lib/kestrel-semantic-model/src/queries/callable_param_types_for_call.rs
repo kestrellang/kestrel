@@ -8,6 +8,7 @@ use semantic_tree::symbol::Symbol;
 use crate::SemanticModel;
 use crate::queries::{StructFields, SymbolFor};
 use crate::query::Query;
+use crate::resolve_all_associated_types;
 
 /// Get the expected parameter types for a call-like expression.
 ///
@@ -46,7 +47,10 @@ impl<'a> Query for CallableParamTypesForCall<'a> {
                             callable
                                 .parameters()
                                 .iter()
-                                .map(|p| p.ty.apply_substitutions(substitutions))
+                                .map(|p| {
+                                    let ty = p.ty.apply_substitutions(substitutions);
+                                    resolve_all_associated_types(model, &ty)
+                                })
                                 .collect(),
                         )
                     },
@@ -69,7 +73,8 @@ impl<'a> Query for CallableParamTypesForCall<'a> {
                                     .iter()
                                     .map(|p| {
                                         let ty = p.ty.apply_substitutions(substitutions);
-                                        ty.substitute_self(&receiver.ty)
+                                        let ty = ty.substitute_self(&receiver.ty);
+                                        resolve_all_associated_types(model, &ty)
                                     })
                                     .collect(),
                             );
