@@ -11,7 +11,7 @@ Items marked "(known limitation)" have tests that fail due to compiler bugs.
 ### Constructors
 - [x] `init()`
 - [x] `init(capacity:)`
-- [ ] `init(repeating:count:)` — needs Cloneable on T
+- [x] `init(repeating:count:)` — needs Cloneable on T (TODO: may fail at monomorphization)
 - [x] `init(from:)`
 - [x] `init(count:generator:)` (known limitation — signature collision with internal init)
 
@@ -19,7 +19,7 @@ Items marked "(known limitation)" have tests that fail due to compiler bugs.
 - [x] `count`
 - [x] `capacity`
 - [x] `isEmpty`
-- [ ] `indices`
+- [x] `indices`
 
 ### Element Access
 - [x] `subscript(index:)` (direct get)
@@ -34,8 +34,8 @@ Items marked "(known limitation)" have tests that fail due to compiler bugs.
 - [x] `subscript(clampingRange:)`
 - [x] `first()`
 - [x] `last()`
-- [ ] `asPointer()`
-- [ ] `asSlice()`
+- [x] `asPointer()`
+- [x] `asSlice()`
 - [x] `isValidIndex()`
 - [x] `setUnchecked(index:value:)`
 
@@ -63,9 +63,9 @@ Items marked "(known limitation)" have tests that fail due to compiler bugs.
 
 ### Shuffling
 - [x] `shuffle()`
-- [ ] `shuffle(using:)`
+- [x] `shuffle(using:)`
 - [x] `shuffled()`
-- [ ] `shuffled(using:)`
+- [x] `shuffled(using:)`
 
 ### Capacity Management
 - [x] `reserveCapacity(minimumCapacity:)`
@@ -234,7 +234,7 @@ Items marked "(known limitation)" have tests that fail due to compiler bugs.
 ### Protocol Methods
 - [x] `equals(other:)`
 - [x] `compare(other:)`
-- [ ] `hash(into:)`
+- [x] `hash(into:)`
 - [x] `clone()`
 - [x] `format(options:)`
 - [x] `add(other:)`
@@ -302,8 +302,8 @@ Items marked "(known limitation)" have tests that fail due to compiler bugs.
 - [x] `allKeys(forValue:)`
 
 ### Other Extensions
-- [ ] `deepClone()`
-- [ ] `sumValues()`
+- [x] `deepClone()` (TODO: may fail — needs Cloneable on K and V)
+- [x] `sumValues()`
 
 ---
 
@@ -360,8 +360,8 @@ Items marked "(known limitation)" have tests that fail due to compiler bugs.
 ### Transformations
 - [x] `filter(matching:)`
 - [x] `map(transform:)`
-- [ ] `compactMap(transform:)`
-- [ ] `flatMap(transform:)`
+- [x] `compactMap(transform:)`
+- [x] `flatMap(transform:)`
 
 ### Capacity & Conversion
 - [x] `reserveCapacity(minimumCapacity:)`
@@ -593,8 +593,8 @@ Items marked "(known limitation)" have tests that fail due to compiler bugs.
 - [x] `parse(string:radix:)` (known limitation — overload resolution)
 
 ### Other
-- [ ] `hash(into:)`
-- [ ] `format(options:)`
+- [x] `hash(into:)`
+- [x] `format(options:)`
 
 ---
 
@@ -625,7 +625,7 @@ Items marked "(known limitation)" have tests that fail due to compiler bugs.
 - [x] `inspect(inspector:)` (known limitation — verifying side effects requires mutable closure captures)
 - [x] `stepBy(n:)`
 - [x] `intersperse(separator:)` (known limitation — AssociatedTypeProjection in layout)
-- [ ] `intersperseWith(separator:)`
+- [x] `intersperseWith(separator:)` (TODO: may hit AssociatedTypeProjection issue)
 - [x] `cycle()` (known limitation — ArrayIterator lacks Cloneable)
 
 ### Collecting
@@ -636,8 +636,8 @@ Items marked "(known limitation)" have tests that fail due to compiler bugs.
 ### Folding
 - [x] `fold(initial:combine:)`
 - [x] `reduce(combine:)`
-- [ ] `tryFold(initial:combine:)`
-- [ ] `tryForEach(action:)`
+- [x] `tryFold(initial:combine:)`
+- [x] `tryForEach(action:)`
 
 ### Iteration
 - [x] `forEach(action:)` (known limitation — captured variable assignment)
@@ -664,8 +664,8 @@ Items marked "(known limitation)" have tests that fail due to compiler bugs.
 - [x] `maxBy(key:)`
 - [x] `isSorted()`
 - [x] `isSortedDescending()`
-- [ ] `isSorted(by:)`
-- [ ] `isSortedBy(key:)`
+- [x] `isSorted(by:)`
+- [x] `isSortedBy(key:)`
 
 ### Numeric Extensions
 - [x] `sum()`
@@ -675,14 +675,14 @@ Items marked "(known limitation)" have tests that fail due to compiler bugs.
 - [x] `flatten()` (known limitation — type inference for map + flatten chain)
 
 ### DoubleEndedIterator
-- [ ] `rev()`
+- [ ] `rev()` — no stdlib iterator implements DoubleEndedIterator yet
 
 ---
 
 ## Char
 
-- [ ] `init(value:)`
-- [ ] `value()`
+- [x] `init(value:)`
+- [x] `value()`
 - [x] `isAscii()`
 - [x] `isAlphabetic()`
 - [x] `isDigit()`
@@ -699,14 +699,14 @@ Items marked "(known limitation)" have tests that fail due to compiler bugs.
 - [x] `fromDigit(d:)`
 - [x] `equals(other:)`
 - [x] `compare(other:)`
-- [ ] `hash(into:)`
+- [x] `hash(into:)`
 - [x] `matches(other:)`
 
 ## Grapheme
 
 - [x] `init(char:)`
 - [x] `init(chars:)`
-- [ ] `chars()`
+- [x] `chars()`
 - [x] `charCount()`
 - [x] `firstChar()`
 - [x] `isAscii()`
@@ -741,22 +741,542 @@ Items marked "(known limitation)" have tests that fail due to compiler bugs.
 
 ---
 
-## Float64 (entirely untested)
+## Float64
 
-_Not yet inventoried - needs review._
+_Primary float type. Has a completely different interface from integer types (math functions,
+trigonometry, IEEE 754 operations, etc.), so it gets a full detailed checklist._
 
-## Other Numeric Types (Int8, Int16, Int32, UInt8, UInt16, UInt32, UInt64, Float32)
+### Constructors
+- [x] `init()`
+- [x] `init(floatLiteral:)`
+- [x] `init(intLiteral:)`
+- [x] `init(from: Int64)` (Convertible)
+- [x] `init(from: Float32)` (Convertible)
 
-_Not yet inventoried - share same method signatures as Int64/Float64._
+### Static Constants
+- [x] `zero`
+- [x] `one`
+- [x] `minValue`
+- [x] `maxValue`
+- [x] `minPositive`
+- [x] `epsilon`
+- [x] `infinity`
+- [x] `nan`
+- [x] `pi`
+- [x] `e`
+- [x] `tau`
+- [x] `ln2`
+- [x] `ln10`
+- [x] `sqrt2`
 
-## IO Module (entirely untested)
+### Classification Properties
+- [x] `isNaN`
+- [x] `isInfinite`
+- [x] `isFinite`
+- [x] `isNormal`
+- [x] `isSubnormal`
 
-_File, stdin/stdout/stderr, Read/Write protocols - needs review._
+### Sign Properties
+- [x] `sign`
+- [x] `isPositive`
+- [x] `isNegative`
+- [x] `isZero`
 
-## Memory Module (partially tested via RcBox)
+### Comparison
+- [x] `equals(other:)`
+- [x] `compare(other:)`
 
-### Buffer
-_Not yet inventoried - needs review._
+### Arithmetic
+- [x] `add(other:)`
+- [x] `subtract(other:)`
+- [x] `multiply(other:)`
+- [x] `divide(other:)`
+- [x] `negate()`
 
-### Pointer
-_Not yet inventoried - needs review._
+### Basic Math
+- [x] `abs()`
+- [x] `floor()`
+- [x] `ceil()`
+- [x] `round()`
+- [x] `trunc()`
+- [x] `fract()`
+- [x] `sqrt()`
+- [x] `cbrt()`
+- [x] `hypot(other:)`
+
+### Exponential / Logarithmic
+- [x] `exp()`
+- [x] `exp2()`
+- [x] `expm1()`
+- [x] `ln()`
+- [x] `ln1p()`
+- [x] `log2()`
+- [x] `log10()`
+- [x] `log(base:)`
+- [x] `pow(exponent:)`
+- [x] `powi(exponent:)`
+
+### Trigonometric
+- [x] `sin()`
+- [x] `cos()`
+- [x] `tan()`
+- [x] `asin()`
+- [x] `acos()`
+- [x] `atan()`
+- [x] `atan2(x:)`
+- [x] `sinCos()`
+
+### Hyperbolic
+- [x] `sinh()`
+- [x] `cosh()`
+- [x] `tanh()`
+- [x] `asinh()`
+- [x] `acosh()`
+- [x] `atanh()`
+
+### IEEE 754 Operations
+- [x] `fma(a:b:)`
+- [x] `copysign(from:)`
+- [x] `nextUp()`
+- [x] `nextDown()`
+- [x] `remainder(dividingBy:)`
+
+### Clamping / Interpolation
+- [x] `clamp(min:max:)`
+- [x] `lerp(to:t:)`
+
+### Conversion
+- [x] `toInt64()`
+- [x] `toFloat32()`
+- [x] `parse(string:)`
+
+### Protocol Methods
+- [x] `format(options:)`
+
+---
+
+## Float32
+
+_Generated from the same template as Float64. Shared behavior (arithmetic, math functions,
+trig, hyperbolic, IEEE 754, comparison, protocol methods) is covered by Float64 tests.
+Only boundary-specific and conversion-specific items are listed here._
+
+### Boundary-Specific Constants
+- [x] `minValue` (different from Float64)
+- [x] `maxValue` (different from Float64)
+- [x] `minPositive` (different from Float64)
+- [x] `epsilon` (different from Float64)
+
+### Precision-Sensitive Behavior
+- [x] Classification near Float32 subnormal boundary (`isNormal`, `isSubnormal`)
+- [x] Precision loss in trig/math functions at Float32 resolution
+- [x] `round()` / `trunc()` behavior near Float32 max
+
+### Conversion
+- [x] `init(from: Float64)` (Convertible — narrowing conversion)
+- [x] `init(from: Int64)` (Convertible)
+- [x] `toInt64()`
+- [x] `toFloat64()`
+- [x] `parse(string:)` — with Float32-range values and out-of-range values
+
+---
+
+## Signed Integer Types (Int8, Int16, Int32)
+
+_All signed integer types are generated from the same template as Int64 and share identical
+method signatures. Int64 (above) is the reference type with full test coverage. For Int8,
+Int16, and Int32, only boundary-specific and bit-width-specific behavior needs per-type
+testing. Shared behavior (basic arithmetic, bitwise ops, comparison, hash, format, compound
+assignment, stepping, extended arithmetic, clamping) is covered by Int64 tests._
+
+### Int8
+
+#### Boundaries & Constants
+- [x] `minValue` (-128)
+- [x] `maxValue` (127)
+- [x] `bitWidth` (8)
+
+#### Overflow / Boundary Behavior
+- [x] `addChecked(other:)` — overflow at 127
+- [x] `subtractChecked(other:)` — underflow at -128
+- [x] `multiplyChecked(other:)` — overflow near boundaries
+- [x] `negateChecked()` — overflow at -128 (no positive 128)
+- [x] `absChecked()` — overflow at -128
+- [x] `addSaturating(other:)` — clamps to -128..127
+- [x] `subtractSaturating(other:)` — clamps to -128..127
+- [x] `multiplySaturating(other:)` — clamps to -128..127
+- [x] `negateSaturating()` — -128 saturates to 127
+- [x] `absSaturating()` — -128 saturates to 127
+
+#### Bit-Width-Specific
+- [x] `byteSwapped` (identity for single-byte type)
+- [x] `leadingZeros` — relative to 8-bit width
+- [x] `trailingZeros` — relative to 8-bit width
+- [x] `rotateLeft(by:)` — 8-bit rotation
+- [x] `rotateRight(by:)` — 8-bit rotation
+
+#### Conversion
+- [x] `init(from:)` — from Int64 and other integer types
+- [x] `parse(string:)` — with Int8-range values and out-of-range values
+
+### Int16
+
+#### Boundaries & Constants
+- [x] `minValue` (-32768)
+- [x] `maxValue` (32767)
+- [x] `bitWidth` (16)
+
+#### Overflow / Boundary Behavior
+- [x] `addChecked(other:)` — overflow at 32767
+- [x] `subtractChecked(other:)` — underflow at -32768
+- [x] `multiplyChecked(other:)` — overflow near boundaries
+- [x] `negateChecked()` — overflow at -32768
+- [x] `absChecked()` — overflow at -32768
+- [x] `addSaturating(other:)` — clamps to -32768..32767
+- [x] `subtractSaturating(other:)` — clamps to -32768..32767
+- [x] `multiplySaturating(other:)` — clamps to -32768..32767
+- [x] `negateSaturating()` — -32768 saturates to 32767
+- [x] `absSaturating()` — -32768 saturates to 32767
+
+#### Bit-Width-Specific
+- [x] `byteSwapped` — 2-byte swap
+- [x] `leadingZeros` — relative to 16-bit width
+- [x] `rotateLeft(by:)` — 16-bit rotation
+- [x] `rotateRight(by:)` — 16-bit rotation
+
+#### Conversion
+- [x] `init(from:)` — from Int64 and other integer types
+- [x] `parse(string:)` — with Int16-range values and out-of-range values
+
+### Int32
+
+#### Boundaries & Constants
+- [x] `minValue` (-2147483648)
+- [x] `maxValue` (2147483647)
+- [x] `bitWidth` (32)
+
+#### Overflow / Boundary Behavior
+- [x] `addChecked(other:)` — overflow at 2147483647
+- [x] `subtractChecked(other:)` — underflow at -2147483648
+- [x] `multiplyChecked(other:)` — overflow near boundaries
+- [x] `negateChecked()` — overflow at -2147483648
+- [x] `absChecked()` — overflow at -2147483648
+- [x] `addSaturating(other:)` — clamps to -2147483648..2147483647
+- [x] `subtractSaturating(other:)` — clamps to -2147483648..2147483647
+- [x] `multiplySaturating(other:)` — clamps to -2147483648..2147483647
+- [x] `negateSaturating()` — -2147483648 saturates to 2147483647
+- [x] `absSaturating()` — -2147483648 saturates to 2147483647
+
+#### Bit-Width-Specific
+- [x] `byteSwapped` — 4-byte swap
+- [x] `leadingZeros` — relative to 32-bit width
+- [x] `rotateLeft(by:)` — 32-bit rotation
+- [x] `rotateRight(by:)` — 32-bit rotation
+
+#### Conversion
+- [x] `init(from:)` — from Int64 and other integer types
+- [x] `parse(string:)` — with Int32-range values and out-of-range values
+
+---
+
+## Unsigned Integer Types (UInt8, UInt16, UInt32, UInt64)
+
+_All unsigned integer types are generated from the same template. They share the same
+interface as signed integers except: no `negate()`, `negateChecked()`, `negateSaturating()`,
+`abs()`, `absChecked()`, `absSaturating()`. Shared behavior (basic arithmetic, bitwise ops,
+comparison, hash, format, compound assignment, stepping, extended arithmetic, clamping) is
+covered by Int64 tests. Only boundary-specific and unsigned-specific items are listed._
+
+### UInt8
+
+#### Boundaries & Constants
+- [x] `minValue` (0)
+- [x] `maxValue` (255)
+- [x] `bitWidth` (8)
+
+#### Overflow / Boundary Behavior
+- [x] `addChecked(other:)` — overflow at 255
+- [x] `subtractChecked(other:)` — underflow at 0
+- [x] `multiplyChecked(other:)` — overflow near 255
+- [x] `addSaturating(other:)` — clamps to 0..255
+- [x] `subtractSaturating(other:)` — clamps to 0 (no negative)
+- [x] `multiplySaturating(other:)` — clamps to 255
+
+#### Unsigned-Specific
+- [ ] Verify `negate()` is absent (compile error or not available)
+- [ ] Verify `abs()` is absent
+- [x] Subtraction wrapping behavior (e.g., 0 - 1 wraps to 255)
+
+#### Bit-Width-Specific
+- [x] `byteSwapped` (identity for single-byte type)
+- [x] `leadingZeros` — relative to 8-bit width
+- [x] `rotateLeft(by:)` — 8-bit rotation
+- [x] `rotateRight(by:)` — 8-bit rotation
+
+#### Conversion
+- [x] `init(from:)` — from Int64 and other integer types
+- [x] `parse(string:)` — with UInt8-range values and out-of-range values
+
+### UInt16
+
+#### Boundaries & Constants
+- [x] `minValue` (0)
+- [x] `maxValue` (65535)
+- [x] `bitWidth` (16)
+
+#### Overflow / Boundary Behavior
+- [x] `addChecked(other:)` — overflow at 65535
+- [x] `subtractChecked(other:)` — underflow at 0
+- [x] `multiplyChecked(other:)` — overflow near 65535
+- [x] `addSaturating(other:)` — clamps to 0..65535
+- [x] `subtractSaturating(other:)` — clamps to 0
+- [x] `multiplySaturating(other:)` — clamps to 65535
+
+#### Unsigned-Specific
+- [ ] Verify `negate()` / `abs()` are absent
+- [x] Subtraction wrapping behavior at 0
+
+#### Bit-Width-Specific
+- [x] `byteSwapped` — 2-byte swap
+- [x] `leadingZeros` — relative to 16-bit width
+- [x] `rotateLeft(by:)` — 16-bit rotation
+- [x] `rotateRight(by:)` — 16-bit rotation
+
+#### Conversion
+- [x] `init(from:)` — from Int64 and other integer types
+- [x] `parse(string:)` — with UInt16-range values and out-of-range values
+
+### UInt32
+
+#### Boundaries & Constants
+- [x] `minValue` (0)
+- [x] `maxValue` (4294967295)
+- [x] `bitWidth` (32)
+
+#### Overflow / Boundary Behavior
+- [x] `addChecked(other:)` — overflow at 4294967295
+- [x] `subtractChecked(other:)` — underflow at 0
+- [x] `multiplyChecked(other:)` — overflow near 4294967295
+- [x] `addSaturating(other:)` — clamps to 0..4294967295
+- [x] `subtractSaturating(other:)` — clamps to 0
+- [x] `multiplySaturating(other:)` — clamps to 4294967295
+
+#### Unsigned-Specific
+- [ ] Verify `negate()` / `abs()` are absent
+- [x] Subtraction wrapping behavior at 0
+
+#### Bit-Width-Specific
+- [x] `byteSwapped` — 4-byte swap
+- [x] `leadingZeros` — relative to 32-bit width
+- [x] `rotateLeft(by:)` — 32-bit rotation
+- [x] `rotateRight(by:)` — 32-bit rotation
+
+#### Conversion
+- [x] `init(from:)` — from Int64 and other integer types
+- [x] `parse(string:)` — with UInt32-range values and out-of-range values
+
+### UInt64
+
+#### Boundaries & Constants
+- [x] `minValue` (0)
+- [x] `maxValue` (18446744073709551615)
+- [x] `bitWidth` (64)
+
+#### Overflow / Boundary Behavior
+- [x] `addChecked(other:)` — overflow at max
+- [x] `subtractChecked(other:)` — underflow at 0
+- [x] `multiplyChecked(other:)` — overflow near max
+- [x] `addSaturating(other:)` — clamps to 0..max
+- [x] `subtractSaturating(other:)` — clamps to 0
+- [x] `multiplySaturating(other:)` — clamps to max
+
+#### Unsigned-Specific
+- [ ] Verify `negate()` / `abs()` are absent
+- [x] Subtraction wrapping behavior at 0
+
+#### Bit-Width-Specific
+- [x] `byteSwapped` — 8-byte swap (same width as Int64, but unsigned)
+- [x] `leadingZeros` — relative to 64-bit width
+- [x] `rotateLeft(by:)` — 64-bit rotation
+- [x] `rotateRight(by:)` — 64-bit rotation
+
+#### Conversion
+- [x] `init(from:)` — from Int64 and other integer types
+- [x] `parse(string:)` — with UInt64-range values and out-of-range values
+
+---
+
+## IO Module
+
+### File
+
+#### Constructors
+- [ ] `open(path:)`
+- [ ] `create(path:)`
+- [ ] `openReadWrite(path:)`
+- [ ] `openAppend(path:)`
+- [ ] `createNew(path:)`
+
+#### Read/Write Methods
+- [ ] `read(into:)`
+- [ ] `write(from:)`
+- [ ] `flush()`
+
+#### Seek Methods
+- [ ] `seek(to:)`
+- [ ] `position()`
+- [ ] `rewind()`
+
+#### Low-level
+- [ ] `rawFd()`
+
+### Stdin
+- [ ] `init()`
+- [ ] `read(into:)`
+
+### Stdout
+- [ ] `init()`
+- [ ] `write(from:)`
+- [ ] `flush()`
+
+### Stderr
+- [ ] `init()`
+- [ ] `write(from:)`
+- [ ] `flush()`
+
+### Free Functions (stdio)
+- [ ] `print(value:)`
+- [ ] `println(value:)`
+- [ ] `printlnEmpty()`
+- [ ] `eprint(value:)`
+- [ ] `eprintln(value:)`
+- [ ] `readLine()`
+- [ ] `prompt(message:)`
+
+### Free Functions (file convenience)
+- [ ] `readFileString(path:)`
+- [ ] `readFileBytes(path:)`
+- [ ] `writeFileString(path:content:)`
+- [ ] `writeFileBytes(path:content:)`
+- [ ] `appendFileString(path:content:)`
+- [ ] `appendFileBytes(path:content:)`
+
+### Read Protocol Implementations
+
+#### Empty
+- [x] `init()`
+- [x] `read(into:)`
+
+#### Repeat
+- [x] `init(byte:)`
+- [x] `read(into:)`
+
+#### Cursor
+- [x] `init(data:)`
+- [x] `read(into:)`
+- [x] `position()`
+- [x] `setPosition(to:)`
+
+### Read Free Functions
+- [x] `readByte(reader:)`
+- [x] `readAll(reader:into:)`
+- [ ] `readExact(reader:into:)`
+
+### Write Protocol Implementations
+
+#### Sink
+- [x] `init()`
+- [x] `write(from:)`
+- [x] `flush()`
+
+#### Buffer (io)
+- [x] `init()`
+- [x] `init(capacity:)`
+- [x] `write(from:)`
+- [x] `flush()`
+- [x] `count()`
+- [x] `isEmpty()`
+- [x] `clear()`
+- [x] `asSlice()`
+- [x] `toArray()`
+- [x] `toString()`
+
+### Write Free Functions
+- [x] `writeAll(writer:from:)`
+- [x] `writeByte(writer:byte:)`
+- [x] `writeStr(writer:s:)`
+- [x] `writeLine(writer:s:)`
+
+### Error
+- [x] `init(code:)`
+- [ ] `last()`
+- [x] `description()`
+- [x] `errno()`
+- [x] `notFound()`
+- [x] `permissionDenied()`
+- [x] `alreadyExists()`
+- [x] `invalidInput()`
+- [x] `wouldBlock()`
+- [x] `interrupted()`
+- [x] `brokenPipe()`
+
+---
+
+## Memory Module
+
+### RawPointer
+- [ ] `init(raw:)`
+- [x] `init(address:)`
+- [x] `nilPointer()`
+- [x] `address`
+- [x] `isNull`
+- [x] `cast()`
+- [x] `offset(by:)`
+- [x] `equals(other:)`
+- [ ] `hash(into:)`
+
+### Pointer[T]
+- [ ] `init(raw:)`
+- [ ] `init(to:)`
+- [x] `nullPointer()`
+- [ ] `pointee` (get/set)
+- [x] `address`
+- [x] `isNull`
+- [x] `read()`
+- [x] `write(value:)`
+- [x] `offset(by:)`
+- [x] `asRaw()`
+- [ ] `cast()`
+- [x] `equals(other:)`
+- [ ] `hash(into:)`
+
+### Slice[T]
+- [x] `init(pointer:count:)`
+- [x] `count`
+- [x] `isEmpty`
+- [x] `pointer`
+- [x] `subscript(safe:)`
+- [x] `subscript(unchecked:)` (get/set)
+- [x] `slice(from:to:)`
+- [x] `iter()`
+- [x] `first()`
+- [x] `last()`
+- [ ] `equals(other:)`
+
+### Buffer[T, A]
+- [x] `init(capacity:allocator:)`
+- [x] `capacity`
+- [x] `pointer`
+- [x] `read(unchecked:)`
+- [x] `write(unchecked:value:)`
+- [x] `read(at:)`
+- [x] `write(at:value:)`
+- [x] `resize(to:)`
+- [x] `asSlice()`
+- [x] `slice(from:to:)`
+
+### Allocator Protocol
+- [x] `SystemAllocator.init()`
+- [x] `allocate(layout:)`
+- [x] `deallocate(ptr:layout:)`
+- [x] `reallocate(ptr:oldLayout:newLayout:)`
