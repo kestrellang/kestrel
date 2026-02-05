@@ -175,7 +175,8 @@ impl Substitution {
                 );
 
                 if base_is_concrete {
-                    if let Ok(resolved) = super::witness::resolve_associated_type(
+                    // Use the mutable version that can intern new types
+                    if let Ok(resolved) = super::witness::resolve_associated_type_mut(
                         mir,
                         new_base,
                         protocol,

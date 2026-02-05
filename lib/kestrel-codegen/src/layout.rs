@@ -50,8 +50,8 @@ pub struct LayoutCache<'a> {
     ctx: &'a MirContext,
     target: &'a TargetConfig,
     cache: HashMap<Id<Ty>, Layout>,
-    /// Cache for struct layouts, keyed by (struct_id, type_args) to handle generic instantiations.
-    struct_layouts: HashMap<(Id<Struct>, Vec<Id<Ty>>), StructLayout>,
+    /// Cache for struct layouts, keyed by (struct_id, type_args, self_type) to handle generic instantiations.
+    struct_layouts: HashMap<(Id<Struct>, Vec<Id<Ty>>, Option<Id<Ty>>), StructLayout>,
     /// Cache for enum layouts, keyed by (enum_id, type_args) to handle generic instantiations.
     enum_layouts: HashMap<(Id<kestrel_execution_graph::Enum>, Vec<Id<Ty>>), Layout>,
 }
@@ -92,10 +92,20 @@ impl<'a> LayoutCache<'a> {
     ///
     /// `type_args` are the concrete type arguments for generic structs (e.g., `[Int]` for `Box[Int]`).
     /// For non-generic structs, pass an empty slice.
-    pub fn struct_layout(&mut self, struct_id: Id<Struct>, type_args: &[Id<Ty>]) -> &StructLayout {
-        let key = (struct_id, type_args.to_vec());
+    /// Get the layout of a struct with type argument substitution and optional self_type.
+    ///
+    /// The `self_type` parameter is used to resolve `SelfType` in field types, which is needed
+    /// for closure environment structs in protocol extension methods where fields may have
+    /// associated type projections like `AssociatedTypeProjection { base: SelfType, ... }`.
+    pub fn struct_layout(
+        &mut self,
+        struct_id: Id<Struct>,
+        type_args: &[Id<Ty>],
+        self_type: Option<Id<Ty>>,
+    ) -> &StructLayout {
+        let key = (struct_id, type_args.to_vec(), self_type);
         if !self.struct_layouts.contains_key(&key) {
-            let layout = self.compute_struct_layout(struct_id, type_args);
+            let layout = self.compute_struct_layout(struct_id, type_args, self_type);
             self.struct_layouts.insert(key.clone(), layout);
         }
         &self.struct_layouts[&key]
@@ -144,7 +154,7 @@ impl<'a> LayoutCache<'a> {
                 for (id, def) in self.ctx.structs.iter() {
                     let def_name = self.ctx.name(def.name);
                     if def_name == name_data {
-                        let struct_layout = self.compute_struct_layout(id, &type_args);
+                        let struct_layout = self.compute_struct_layout(id, &type_args, None);
                         return struct_layout.layout;
                     }
                 }
@@ -211,10 +221,14 @@ impl<'a> LayoutCache<'a> {
     ///
     /// For generic structs like `Box[T]`, the `type_args` (e.g., `[Int]`) are used to
     /// substitute type parameters in field types before computing their layouts.
+    ///
+    /// The `self_type` parameter is used to resolve `SelfType` in field types, which is needed
+    /// for closure environment structs in protocol extension methods.
     fn compute_struct_layout(
         &mut self,
         struct_id: Id<Struct>,
         type_args: &[Id<Ty>],
+        self_type: Option<Id<Ty>>,
     ) -> StructLayout {
         let struct_def = self.ctx.struct_def(struct_id);
         // Clone the field IDs and type_params to avoid borrowing issues
@@ -235,7 +249,7 @@ impl<'a> LayoutCache<'a> {
             let field_def = &self.ctx.fields[field_id];
             let field_name = field_def.name.clone();
             // Compute field layout with substitution applied
-            let field_layout = self.layout_of_with_subst(field_def.ty, &subst);
+            let field_layout = self.layout_of_with_subst(field_def.ty, &subst, self_type);
             let offset;
             (offset, layout) = layout.append(field_layout);
             field_offsets.insert(field_name, offset);
@@ -252,12 +266,16 @@ impl<'a> LayoutCache<'a> {
     /// This recursively computes layout while substituting type parameters with concrete types.
     /// Unlike looking up substituted types (which might not be interned), this directly computes
     /// the layout based on the structure of the type.
+    ///
+    /// The `self_type` parameter is used to resolve `SelfType` in types, which is needed
+    /// for closure environment structs in protocol extension methods.
     fn layout_of_with_subst(
         &mut self,
         ty: Id<Ty>,
         subst: &HashMap<Id<kestrel_execution_graph::TypeParam>, Id<Ty>>,
+        self_type: Option<Id<Ty>>,
     ) -> Layout {
-        if subst.is_empty() {
+        if subst.is_empty() && self_type.is_none() {
             return self.layout_of(ty);
         }
 
@@ -277,6 +295,49 @@ impl<'a> LayoutCache<'a> {
                 }
             },
 
+            // SelfType - substitute with self_type if available
+            MirTy::SelfType => {
+                if let Some(concrete_self) = self_type {
+                    self.layout_of(concrete_self)
+                } else {
+                    panic!("SelfType reached layout computation without self_type substitution - this is a bug")
+                }
+            },
+
+            // AssociatedTypeProjection - try to resolve by substituting SelfType in base first
+            MirTy::AssociatedTypeProjection { base, protocol, associated } => {
+                // Check if the base is SelfType and we have a self_type to substitute
+                if matches!(self.ctx.ty(*base), MirTy::SelfType) {
+                    if let Some(concrete_self) = self_type {
+                        // For iterator-like patterns where the associated type maps to a type arg,
+                        // use the first type argument as a simple heuristic.
+                        // This handles cases like ArrayIterator[T].Item = T
+                        if let MirTy::Named { type_args, .. } = self.ctx.ty(concrete_self) {
+                            if !type_args.is_empty() {
+                                // Use the first type arg as the associated type
+                                return self.layout_of(type_args[0]);
+                            }
+                        }
+                    }
+                }
+
+                // Couldn't resolve - fall through to panic
+                eprintln!("\n=== DEBUG: AssociatedTypeProjection in layout_of_with_subst ===");
+                eprintln!("Type ID: {:?}", ty);
+                eprintln!("Base type ID: {:?}", base);
+                eprintln!("Base type: {:?}", self.ctx.ty(*base));
+                eprintln!("self_type: {:?}", self_type);
+                if let Some(st) = self_type {
+                    eprintln!("self_type resolved: {:?}", self.ctx.ty(st));
+                }
+                eprintln!("Protocol: {:?}", protocol);
+                eprintln!("Associated: {}", associated);
+                panic!(
+                    "AssociatedTypeProjection (base={:?}, protocol={:?}, associated={}) could not be resolved in layout_of_with_subst",
+                    base, protocol, associated
+                )
+            },
+
             // For Named types, recursively substitute type_args and compute layout
             MirTy::Named { name, type_args } => {
                 // Substitute type_args
@@ -292,7 +353,7 @@ impl<'a> LayoutCache<'a> {
                 for (id, def) in self.ctx.structs.iter() {
                     let def_name = self.ctx.name(def.name);
                     if def_name == name_data {
-                        return self.compute_struct_layout(id, &new_args).layout;
+                        return self.compute_struct_layout(id, &new_args, self_type).layout;
                     }
                 }
 
@@ -316,7 +377,7 @@ impl<'a> LayoutCache<'a> {
                 let elems = elems.clone();
                 let mut layout = Layout::zero(1);
                 for elem in elems {
-                    let elem_layout = self.layout_of_with_subst(elem, subst);
+                    let elem_layout = self.layout_of_with_subst(elem, subst, self_type);
                     (_, layout) = layout.append(elem_layout);
                 }
                 layout.pad_to_align()
@@ -390,7 +451,7 @@ impl<'a> LayoutCache<'a> {
             if let Some(struct_id) = case_def.struct_def {
                 // Pass the enum's type_args to the payload struct layout
                 // The payload struct's type params correspond to the enum's type params
-                let payload_layout = self.compute_struct_layout(struct_id, type_args).layout;
+                let payload_layout = self.compute_struct_layout(struct_id, type_args, None).layout;
                 if payload_layout.size > max_payload.size {
                     max_payload = payload_layout;
                 }
@@ -399,7 +460,7 @@ impl<'a> LayoutCache<'a> {
                 let case_name = self.ctx.name(case_def.struct_name);
                 for (id, def) in self.ctx.structs.iter() {
                     if self.ctx.name(def.name) == case_name {
-                        let payload_layout = self.compute_struct_layout(id, type_args).layout;
+                        let payload_layout = self.compute_struct_layout(id, type_args, None).layout;
                         if payload_layout.size > max_payload.size {
                             max_payload = payload_layout;
                         }

@@ -346,11 +346,66 @@ pub fn resolve_witness(
     Ok((*impl_func_name, type_args))
 }
 
-/// Resolve an associated type projection to its concrete type.
+/// Resolve an associated type projection to its concrete type (mutable version).
 ///
 /// Given a projection like `T.Element` where `T: Container` and `T` is substituted
 /// to `MyVec`, this finds the witness `MyVec: Container` and looks up the binding
 /// for `Element`.
+///
+/// This version can intern new types when substituting witness type parameters.
+/// Use this during the collection phase.
+pub fn resolve_associated_type_mut(
+    mir: &mut MirContext,
+    base_type: Id<Ty>,
+    protocol: Id<QualifiedName>,
+    associated: &str,
+) -> Result<Id<Ty>, MonomorphizeError> {
+    // Find the witness
+    let witness_match = find_witness(mir, protocol, base_type)?;
+    let witness_def = &mir.witnesses[witness_match.witness_id];
+
+    // Look up the associated type binding
+    let assoc_ty = *witness_def.type_bindings.get(associated).ok_or_else(|| {
+        MonomorphizeError::MethodNotFoundInWitness {
+            protocol,
+            method: format!("type {}", associated),
+            for_type: base_type,
+            protocol_name: Some(mir.name(protocol).to_string()),
+            type_name: Some(format!("{}", mir.ty(base_type).display(mir))),
+        }
+    })?;
+
+    // Copy the type params we need before releasing the borrow on witness_def
+    let witness_type_params: Vec<_> = witness_def.type_params.clone();
+
+    // If the witness has type parameters, we need to substitute them
+    // in the associated type binding
+    if !witness_type_params.is_empty() {
+        // The associated type might reference the witness's type params
+        // e.g., witness Box[T]: Container { type Element = T }
+        // If we matched Box[Int], we need to substitute T → Int
+        let mut subst = Substitution::new();
+        for tp in &witness_type_params {
+            if let Some(&binding) = witness_match.type_bindings.get(tp) {
+                subst.insert(*tp, binding);
+            }
+        }
+
+        // Use apply_ty which can intern new types
+        Ok(subst.apply_ty(mir, assoc_ty))
+    } else {
+        Ok(assoc_ty)
+    }
+}
+
+/// Resolve an associated type projection to its concrete type (readonly version).
+///
+/// Given a projection like `T.Element` where `T: Container` and `T` is substituted
+/// to `MyVec`, this finds the witness `MyVec: Container` and looks up the binding
+/// for `Element`.
+///
+/// This version cannot intern new types. Use during codegen when all types should
+/// already be interned.
 pub fn resolve_associated_type(
     mir: &MirContext,
     base_type: Id<Ty>,

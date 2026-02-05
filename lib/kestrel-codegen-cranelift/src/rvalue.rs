@@ -833,7 +833,7 @@ fn compile_construct(
     };
 
     // Get struct layout with field offsets
-    let struct_layout = ctx.layouts.struct_layout(struct_id, &type_args);
+    let struct_layout = ctx.layouts.struct_layout(struct_id, &type_args, None);
     let layout = struct_layout.layout;
     let field_offsets = struct_layout.field_offsets.clone();
 
@@ -1485,7 +1485,7 @@ fn compile_enum_variant(
         // Pass the enum's type_args since payload struct uses the same type parameters
         let payload_layout = ctx
             .layouts
-            .struct_layout(payload_struct_id, &enum_type_args);
+            .struct_layout(payload_struct_id, &enum_type_args, None);
         let field_offsets = payload_layout.field_offsets.clone();
 
         // Compute the payload offset based on the MAXIMUM payload alignment across all cases.
@@ -1495,7 +1495,7 @@ fn compile_enum_variant(
         for cid in &case_ids {
             let cd = &ctx.mir.enum_cases[*cid];
             if let Some(struct_id) = cd.struct_def {
-                let pl = ctx.layouts.struct_layout(struct_id, &enum_type_args);
+                let pl = ctx.layouts.struct_layout(struct_id, &enum_type_args, None);
                 if pl.layout.align > max_payload_layout.align
                     || (pl.layout.align == max_payload_layout.align
                         && pl.layout.size > max_payload_layout.size)
@@ -1812,7 +1812,7 @@ fn get_field_info(
 
     // Get field offset from layout (pass substituted type_args for generic structs)
     let struct_def = ctx.mir.struct_def(struct_id);
-    let struct_layout = ctx.layouts.struct_layout(struct_id, &type_args);
+    let struct_layout = ctx.layouts.struct_layout(struct_id, &type_args, None);
     let offset = *struct_layout.field_offsets.get(field_name).ok_or_else(|| {
         let struct_name = ctx.mir.name(struct_def.name);
         let available_fields: Vec<_> = struct_layout.field_offsets.keys().collect();
@@ -1990,7 +1990,7 @@ fn get_struct_field_by_index(
         .collect();
 
     // Get field offset from layout (pass substituted type_args for generic structs)
-    let struct_layout = ctx.layouts.struct_layout(struct_id, &concrete_type_args);
+    let struct_layout = ctx.layouts.struct_layout(struct_id, &concrete_type_args, None);
     let offset = *struct_layout.field_offsets.get(field_name).ok_or_else(|| {
         CodegenError::Unsupported(format!("field offset not found: {}", field_name))
     })?;
@@ -2106,7 +2106,7 @@ fn wrap_extern_return_value(
             && struct_def.fields.len() == 1
         {
             let field_def = &ctx.mir.fields[struct_def.fields[0]];
-            let struct_layout = ctx.layouts.struct_layout(struct_id, &type_args);
+            let struct_layout = ctx.layouts.struct_layout(struct_id, &type_args, None);
             let field_offset = struct_layout
                 .field_offsets
                 .get(&field_def.name)
@@ -3555,7 +3555,7 @@ fn compile_apply_partial(
         // Get the environment struct layout.
         // Env structs inherit type params from their parent closure function,
         // so we pass the same type args used for the closure instantiation.
-        let env_layout = ctx.layouts.struct_layout(env_struct_id, &closure_type_args);
+        let env_layout = ctx.layouts.struct_layout(env_struct_id, &closure_type_args, self_type_for_closure);
         let layout = env_layout.layout;
         let field_offsets = env_layout.field_offsets.clone();
 

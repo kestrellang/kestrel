@@ -302,7 +302,7 @@ pub(crate) fn get_enum_payload_offset(
     for case_id in &case_ids {
         let case_def = &ctx.mir.enum_cases[*case_id];
         if let Some(struct_id) = case_def.struct_def {
-            let payload_layout = ctx.layouts.struct_layout(struct_id, &type_args);
+            let payload_layout = ctx.layouts.struct_layout(struct_id, &type_args, None);
             // Track the maximum alignment and size
             if payload_layout.layout.align > max_payload_layout.align
                 || (payload_layout.layout.align == max_payload_layout.align
@@ -480,8 +480,12 @@ fn get_field_info(
     };
 
     // Get field offset from layout (pass type_args for generic structs)
+    // Also pass self_type from the substitution context - this is needed for closure
+    // environment structs in protocol extension methods where fields may have
+    // associated type projections like AssociatedTypeProjection { base: SelfType, ... }
     let struct_def = ctx.mir.struct_def(struct_id);
-    let struct_layout = ctx.layouts.struct_layout(struct_id, &type_args);
+    let self_type = subst.get_self_type();
+    let struct_layout = ctx.layouts.struct_layout(struct_id, &type_args, self_type);
     let offset = *struct_layout.field_offsets.get(field_name).ok_or_else(|| {
         let struct_name = ctx.mir.name(struct_def.name);
         let available_fields: Vec<_> = struct_layout.field_offsets.keys().collect();
@@ -660,7 +664,7 @@ fn get_struct_field_by_index(
         .collect();
 
     // Get field offset from layout (pass substituted type_args for generic structs)
-    let struct_layout = ctx.layouts.struct_layout(struct_id, &concrete_type_args);
+    let struct_layout = ctx.layouts.struct_layout(struct_id, &concrete_type_args, None);
     let offset = *struct_layout.field_offsets.get(field_name).ok_or_else(|| {
         CodegenError::Unsupported(format!("field offset not found: {}", field_name))
     })?;

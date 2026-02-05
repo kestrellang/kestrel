@@ -691,8 +691,7 @@ mod iterator_adapters {
         "#,
         )
         .with_stdlib()
-        .expect(Compiles)
-        .expect(Runs);
+        .expect(HasError("cannot assign to captured variable"));
     }
 
     #[test]
