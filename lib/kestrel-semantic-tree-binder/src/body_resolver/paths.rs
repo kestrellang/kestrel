@@ -623,6 +623,96 @@ pub fn resolve_path_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContex
                 base
             }
         },
+        ValuePathResolution::FieldValue {
+            symbol_id,
+            ty,
+            resolved_index,
+        } => {
+            // This is a field/getter value followed by more path segments
+            // e.g., `Float64.e.subtract(1.0)` where `e` is a static field
+            // and `subtract()` is a method call on that value
+            let field_span = if resolved_index < path_with_spans.len() {
+                path_with_spans[resolved_index].1.clone()
+            } else {
+                first_span.clone()
+            };
+
+            // Build the field access expression the same way as static field access
+            // in the NotAValue arm: create a TypeRef for the parent, then field_access
+            if let Some(symbol) = ctx.model.query(SymbolFor { id: symbol_id }) {
+                use kestrel_semantic_tree::symbol::field::FieldSymbol;
+
+                let is_mutable = symbol
+                    .as_ref()
+                    .downcast_ref::<FieldSymbol>()
+                    .map(|f| f.is_mutable())
+                    .unwrap_or(false);
+
+                // Get the parent type to build a TypeRef base
+                if let Some(parent) = symbol.metadata().parent() {
+                    use super::utils::create_struct_type_with_type_args;
+                    use kestrel_semantic_tree::behavior::typed::TypedBehavior;
+                    use kestrel_semantic_tree::symbol::enum_symbol::EnumSymbol;
+
+                    let parent_id = parent.metadata().id();
+
+                    let parent_ty = if let Ok(struct_sym) =
+                        parent.clone().downcast_arc::<StructSymbol>()
+                    {
+                        create_struct_type_with_type_args(
+                            &(struct_sym
+                                as std::sync::Arc<
+                                    dyn Symbol<kestrel_semantic_tree::language::KestrelLanguage>,
+                                >),
+                            &[],
+                            field_span.clone(),
+                            ctx,
+                        )
+                    } else if let Ok(enum_sym) = parent.clone().downcast_arc::<EnumSymbol>() {
+                        Ty::r#enum(enum_sym, field_span.clone())
+                    } else {
+                        Ty::infer(field_span.clone())
+                    };
+
+                    let type_ref =
+                        Expression::type_ref(parent_id, parent_ty, field_span.clone());
+
+                    let field_ty = symbol
+                        .metadata()
+                        .get_behavior::<TypedBehavior>()
+                        .map(|tb| tb.ty().clone())
+                        .unwrap_or_else(|| ty.clone());
+
+                    let field_name = symbol.metadata().name().value.clone();
+
+                    let base = Expression::field_access(
+                        type_ref,
+                        field_name,
+                        is_mutable,
+                        field_ty,
+                        field_span,
+                    );
+
+                    // Resolve remaining segments as member accesses
+                    if resolved_index + 1 < path_with_spans.len() {
+                        resolve_member_chain(base, &path_with_spans[resolved_index + 1..], ctx)
+                    } else {
+                        base
+                    }
+                } else {
+                    // No parent - fall back to simple symbol ref
+                    let base = Expression::symbol_ref(symbol_id, ty, is_mutable, field_span);
+                    if resolved_index + 1 < path_with_spans.len() {
+                        resolve_member_chain(base, &path_with_spans[resolved_index + 1..], ctx)
+                    } else {
+                        base
+                    }
+                }
+            } else {
+                // Symbol not found - error
+                Expression::error(span)
+            }
+        },
     }
 }
 

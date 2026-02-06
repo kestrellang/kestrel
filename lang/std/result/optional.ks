@@ -2,7 +2,7 @@
 
 module std.result
 
-import std.core.(Equatable, Comparable, Ordering, Hash, Hasher, Cloneable, Bool, ControlFlow, Tryable, FromResidual, FromValue, ExpressibleByNullLiteral, Coalesce)
+import std.core.(Equatable, Comparable, Ordering, Hash, Hasher, Bool, ControlFlow, Tryable, FromResidual, FromValue, ExpressibleByNullLiteral, Coalesce)
 import std.text.(String, FormatOptions, Formattable)
 import std.result.(Result)
 import std.num.(Int64, UInt8)
@@ -539,11 +539,11 @@ extend Optional[T]: Hash where T: Hash {
 }
 
 // ============================================================================
-// CONDITIONAL EXTENSIONS - CLONEABLE
+// EXTENSIONS - CLONE
 // ============================================================================
 
-/// Extension for Optionals with cloneable values.
-extend Optional[T]: Cloneable where T: Cloneable {
+/// Clone-like helper available for all Optionals.
+extend Optional[T] {
 
     /// Creates a deep clone of the Optional.
     ///
@@ -552,7 +552,7 @@ extend Optional[T]: Cloneable where T: Cloneable {
     ///     let copy = opt.clone()  // independent copy
     public func clone() -> Optional[T] {
         match self {
-            .Some(value) => .Some(value.clone()),
+            .Some(value) => .Some(value),
             .None => .None
         }
     }

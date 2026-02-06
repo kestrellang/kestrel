@@ -23,12 +23,14 @@ fn bytes_view_basic() {
             // 'h' = 104
             let b0 = s.bytes.byteAt(0);
             if b0.isNone() { return 5 }
-            if b0.unwrap() != std.num.UInt8(intLiteral: 104) { return 6 }
+            let byteH: std.num.UInt8 = 104;
+            if b0.unwrap() != byteH { return 6 }
 
             // 'e' = 101
             let b1 = s.bytes.byteAt(1);
             if b1.isNone() { return 7 }
-            if b1.unwrap() != std.num.UInt8(intLiteral: 101) { return 8 }
+            let byteE: std.num.UInt8 = 101;
+            if b1.unwrap() != byteE { return 8 }
 
             // Out of bounds returns None
             let bOob = s.bytes.byteAt(100);
@@ -41,7 +43,8 @@ fn bytes_view_basic() {
             // ---- bytes.byteAtUnchecked() ----
             // 'o' = 111
             let bu = s.bytes.byteAtUnchecked(4);
-            if bu != std.num.UInt8(intLiteral: 111) { return 11 }
+            let byteO: std.num.UInt8 = 111;
+            if bu != byteO { return 11 }
 
             0
         }
@@ -64,11 +67,14 @@ fn bytes_view_iter() {
             let byteArr = s.bytes.iter().collect();
             if byteArr.count != 3 { return 1 }
             // 'a' = 97
-            if byteArr(unchecked: 0) != std.num.UInt8(intLiteral: 97) { return 2 }
+            let byteA: std.num.UInt8 = 97;
+            if byteArr(unchecked: 0) != byteA { return 2 }
             // 'b' = 98
-            if byteArr(unchecked: 1) != std.num.UInt8(intLiteral: 98) { return 3 }
+            let byteB: std.num.UInt8 = 98;
+            if byteArr(unchecked: 1) != byteB { return 3 }
             // 'c' = 99
-            if byteArr(unchecked: 2) != std.num.UInt8(intLiteral: 99) { return 4 }
+            let byteC: std.num.UInt8 = 99;
+            if byteArr(unchecked: 2) != byteC { return 4 }
 
             // Empty string yields empty iter
             let empty = std.text.String();

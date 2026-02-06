@@ -49,7 +49,6 @@ fn int8_boundaries_and_constants() {
     .expect(Runs);
 }
 
-// TODO: Fails due to unary minus requiring Negatable protocol resolution on Int8
 #[test]
 fn int8_overflow_behavior() {
     Test::new(
@@ -58,21 +57,23 @@ fn int8_overflow_behavior() {
         func main() -> lang.i64 {
             let maxVal = std.num.Int8.maxValue;
             let minVal = std.num.Int8.minValue;
-            let one = std.num.Int8(intLiteral: 1);
-            let negOne = std.num.Int8(intLiteral: -1);
+            let one: std.num.Int8 = 1;
+            let negOne: std.num.Int8 = -1;
 
             // addChecked — overflow at 127
-            let addOk = maxVal.addChecked(std.num.Int8(intLiteral: 0));
+            let addCheckZero: std.num.Int8 = 0;
+            let addOk = maxVal.addChecked(addCheckZero);
             if addOk.isNone() { return 1 }
             let addOverflow = maxVal.addChecked(one);
             if addOverflow.isSome() { return 2 }
 
             // addChecked — normal case
-            let ten = std.num.Int8(intLiteral: 10);
-            let five = std.num.Int8(intLiteral: 5);
+            let ten: std.num.Int8 = 10;
+            let five: std.num.Int8 = 5;
             let addNormal = ten.addChecked(five);
             if addNormal.isNone() { return 3 }
-            if addNormal.unwrap() != std.num.Int8(intLiteral: 15) { return 4 }
+            let expectedFifteen: std.num.Int8 = 15;
+            if addNormal.unwrap() != expectedFifteen { return 4 }
 
             // subtractChecked — underflow at -128
             let subOverflow = minVal.subtractChecked(one);
@@ -81,19 +82,21 @@ fn int8_overflow_behavior() {
             // subtractChecked — normal case
             let subNormal = ten.subtractChecked(five);
             if subNormal.isNone() { return 6 }
-            if subNormal.unwrap() != std.num.Int8(intLiteral: 5) { return 7 }
+            let expectedFive: std.num.Int8 = 5;
+            if subNormal.unwrap() != expectedFive { return 7 }
 
             // multiplyChecked — overflow near boundaries
-            let big = std.num.Int8(intLiteral: 100);
-            let two = std.num.Int8(intLiteral: 2);
+            let big: std.num.Int8 = 100;
+            let two: std.num.Int8 = 2;
             let mulOverflow = big.multiplyChecked(two);
             if mulOverflow.isSome() { return 8 }
 
             // multiplyChecked — normal case
-            let three = std.num.Int8(intLiteral: 3);
+            let three: std.num.Int8 = 3;
             let mulNormal = five.multiplyChecked(three);
             if mulNormal.isNone() { return 9 }
-            if mulNormal.unwrap() != std.num.Int8(intLiteral: 15) { return 10 }
+            let expectedMulFifteen: std.num.Int8 = 15;
+            if mulNormal.unwrap() != expectedMulFifteen { return 10 }
 
             // negateChecked — overflow at -128 (no positive 128 in Int8)
             let negMin = minVal.negateChecked();
@@ -102,14 +105,15 @@ fn int8_overflow_behavior() {
             // negateChecked — normal case
             let negTen = ten.negateChecked();
             if negTen.isNone() { return 12 }
-            if negTen.unwrap() != std.num.Int8(intLiteral: -10) { return 13 }
+            let expectedNegTen: std.num.Int8 = -10;
+            if negTen.unwrap() != expectedNegTen { return 13 }
 
             // absChecked — overflow at -128
             let absMin = minVal.absChecked();
             if absMin.isSome() { return 14 }
 
             // absChecked — normal case
-            let negFive = std.num.Int8(intLiteral: -5);
+            let negFive: std.num.Int8 = -5;
             let absFive = negFive.absChecked();
             if absFive.isNone() { return 15 }
             if absFive.unwrap() != five { return 16 }
@@ -117,7 +121,8 @@ fn int8_overflow_behavior() {
             // addSaturating — clamps to 127
             let addSat = maxVal.addSaturating(one);
             if addSat != maxVal { return 17 }
-            let addSatBig = maxVal.addSaturating(std.num.Int8(intLiteral: 100));
+            let satHundred: std.num.Int8 = 100;
+            let addSatBig = maxVal.addSaturating(satHundred);
             if addSatBig != maxVal { return 18 }
 
             // addSaturating — clamps to -128
@@ -137,7 +142,7 @@ fn int8_overflow_behavior() {
             if mulSat != maxVal { return 22 }
 
             // multiplySaturating — clamps to -128 (positive * negative overflow)
-            let negBig = std.num.Int8(intLiteral: -100);
+            let negBig: std.num.Int8 = -100;
             let mulSatNeg = negBig.multiplySaturating(two);
             if mulSatNeg != minVal { return 23 }
 
@@ -147,7 +152,8 @@ fn int8_overflow_behavior() {
 
             // negateSaturating — normal case
             let negSatTen = ten.negateSaturating();
-            if negSatTen != std.num.Int8(intLiteral: -10) { return 25 }
+            let expectedNegSatTen: std.num.Int8 = -10;
+            if negSatTen != expectedNegSatTen { return 25 }
 
             // absSaturating — -128 saturates to 127
             let absSatMin = minVal.absSaturating();
@@ -166,7 +172,6 @@ fn int8_overflow_behavior() {
     .expect(Runs);
 }
 
-// TODO: Fails due to unary minus requiring Negatable protocol resolution
 #[test]
 fn int8_bitwidth_and_conversion() {
     Test::new(
@@ -174,86 +179,89 @@ fn int8_bitwidth_and_conversion() {
 
         func main() -> lang.i64 {
             // byteSwapped — identity for single-byte type
-            let val = std.num.Int8(intLiteral: 42);
+            let val: std.num.Int8 = 42;
             if val.byteSwapped != val { return 1 }
-            let negVal = std.num.Int8(intLiteral: -42);
+            let negVal: std.num.Int8 = -42;
             if negVal.byteSwapped != negVal { return 2 }
 
             // leadingZeros — relative to 8-bit width
-            let one = std.num.Int8(intLiteral: 1);
+            let one: std.num.Int8 = 1;
             if one.leadingZeros != 7 { return 3 }
-            let zero = std.num.Int8(intLiteral: 0);
+            let zero: std.num.Int8 = 0;
             if zero.leadingZeros != 8 { return 4 }
             // -1 in Int8 is all 1s, so 0 leading zeros
-            let negOne = std.num.Int8(intLiteral: -1);
+            let negOne: std.num.Int8 = -1;
             if negOne.leadingZeros != 0 { return 5 }
-            let four = std.num.Int8(intLiteral: 4);
+            let four: std.num.Int8 = 4;
             // 4 = 0b00000100 -> 5 leading zeros
             if four.leadingZeros != 5 { return 6 }
 
             // trailingZeros — relative to 8-bit width
             if one.trailingZeros != 0 { return 7 }
             if zero.trailingZeros != 8 { return 8 }
-            let eight = std.num.Int8(intLiteral: 8);
+            let eight: std.num.Int8 = 8;
             // 8 = 0b00001000 -> 3 trailing zeros
             if eight.trailingZeros != 3 { return 9 }
 
             // rotateLeft — 8-bit rotation
             // rotate 1 left by 1 = 2
-            if one.rotateLeft(by: 1) != std.num.Int8(intLiteral: 2) { return 10 }
+            let expectedRotateTwo: std.num.Int8 = 2;
+            if one.rotateLeft(by: 1) != expectedRotateTwo { return 10 }
             // rotate by 0 = unchanged
             if val.rotateLeft(by: 0) != val { return 11 }
 
             // rotateRight — 8-bit rotation
             // rotate 2 right by 1 = 1
-            let two = std.num.Int8(intLiteral: 2);
+            let two: std.num.Int8 = 2;
             if two.rotateRight(by: 1) != one { return 12 }
             // rotate by 0 = unchanged
             if val.rotateRight(by: 0) != val { return 13 }
 
             // rotateLeft and rotateRight are inverses
-            let testVal = std.num.Int8(intLiteral: 37);
+            let testVal: std.num.Int8 = 37;
             if testVal.rotateLeft(by: 3).rotateRight(by: 3) != testVal { return 14 }
 
             // init(from:) — from Int64
             let i64val: std.num.Int64 = 100;
             let fromI64 = std.num.Int8(from: i64val);
-            if fromI64 != std.num.Int8(intLiteral: 100) { return 15 }
+            let expectedHundred: std.num.Int8 = 100;
+            if fromI64 != expectedHundred { return 15 }
 
             // init(from:) — from Int64 negative
             let negI64: std.num.Int64 = -50;
             let fromNegI64 = std.num.Int8(from: negI64);
-            if fromNegI64 != std.num.Int8(intLiteral: -50) { return 16 }
+            let expectedNegFifty: std.num.Int8 = -50;
+            if fromNegI64 != expectedNegFifty { return 16 }
 
             // parse — valid Int8 value
-            let parsed = std.num.Int8.parse(string: "42");
+            let parsed = std.num.Int8.parse( "42");
             if parsed.isNone() { return 17 }
             if parsed.unwrap() != val { return 18 }
 
             // parse — negative value
-            let parsedNeg = std.num.Int8.parse(string: "-128");
+            let parsedNeg = std.num.Int8.parse( "-128");
             if parsedNeg.isNone() { return 19 }
             if parsedNeg.unwrap() != std.num.Int8.minValue { return 20 }
 
             // parse — maxValue
-            let parsedMax = std.num.Int8.parse(string: "127");
+            let parsedMax = std.num.Int8.parse( "127");
             if parsedMax.isNone() { return 21 }
             if parsedMax.unwrap() != std.num.Int8.maxValue { return 22 }
 
             // parse — out-of-range (too large)
-            let parsedBig = std.num.Int8.parse(string: "128");
+            let parsedBig = std.num.Int8.parse( "128");
             if parsedBig.isSome() { return 23 }
 
             // parse — out-of-range (too small)
-            let parsedSmall = std.num.Int8.parse(string: "-129");
+            let parsedSmall = std.num.Int8.parse( "-129");
             if parsedSmall.isSome() { return 24 }
 
             // parse — invalid string
-            let parsedBad = std.num.Int8.parse(string: "abc");
+            let parsedBad = std.num.Int8.parse( "abc");
             if parsedBad.isSome() { return 25 }
 
             // parse — empty string
-            let parsedEmpty = std.num.Int8.parse(string: "");
+            let parsedEmpty = std.num.Int8.parse( "");
             if parsedEmpty.isSome() { return 26 }
 
             0

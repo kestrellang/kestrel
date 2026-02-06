@@ -114,6 +114,19 @@ pub enum ValuePathResolution {
         /// (segments after this should be member accesses)
         resolved_index: usize,
     },
+    /// Resolved to a field/getter value, but there are more path segments.
+    /// The remaining segments should be handled as member accesses by the caller.
+    /// This handles cases like `Float64.e.subtract(1.0)` where `e` is a static field
+    /// and `subtract` is a method on the field's value type.
+    FieldValue {
+        /// The field symbol ID
+        symbol_id: SymbolId,
+        /// The type of the field value
+        ty: Ty,
+        /// The index in the path where the field was found
+        /// (segments after this should be member accesses)
+        resolved_index: usize,
+    },
     /// A segment in the path was not found
     NotFound {
         /// The segment that wasn't found
@@ -147,6 +160,7 @@ impl ValuePathResolution {
                 | ValuePathResolution::TypeParameter { .. }
                 | ValuePathResolution::AssociatedType { .. }
                 | ValuePathResolution::EnumCaseValue { .. }
+                | ValuePathResolution::FieldValue { .. }
         )
     }
 

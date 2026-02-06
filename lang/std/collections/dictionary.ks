@@ -1280,8 +1280,8 @@ extend Dictionary[K, V, H]: Formattable where K: Hash, K: Formattable, V: Format
     }
 }
 
-/// Deep clone when both K and V are Cloneable.
-extend Dictionary[K, V, H] where K: Hash, K: Cloneable, V: Cloneable, H: Hasher, H: Defaultable {
+/// Deep clone for dictionaries with copyable keys and values.
+extend Dictionary[K, V, H] where K: Hash, H: Hasher, H: Defaultable {
 
     /// Creates a deep clone of the dictionary.
     ///
@@ -1300,7 +1300,7 @@ extend Dictionary[K, V, H] where K: Hash, K: Cloneable, V: Cloneable, H: Hasher,
             let bucket = myBuckets.offset(by: i).read();
             match bucket {
                 .Occupied(key, value, _) => {
-                    let _ = result.insert( key.clone(), value.clone());
+                    let _ = result.insert( key, value);
                 },
                 _ => {}
             }

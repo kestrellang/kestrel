@@ -269,12 +269,12 @@ fn optional_ok_or() {
             let none: std.result.Optional[std.num.Int64] = .None;
 
             // Test okOr on Some - returns Ok(value)
-            let okResult: std.result.Result[std.num.Int64, std.num.Int64] = some.okOr(error: 99);
+            let okResult: std.result.Result[std.num.Int64, std.num.Int64] = some.okOr( 99);
             if okResult.isOk() == false { return 1 }
             if okResult.unwrap() != 42 { return 2 }
 
             // Test okOr on None - returns Err(error)
-            let errResult: std.result.Result[std.num.Int64, std.num.Int64] = none.okOr(error: 99);
+            let errResult: std.result.Result[std.num.Int64, std.num.Int64] = none.okOr( 99);
             if errResult.isErr() == false { return 3 }
             if errResult.unwrapErr() != 99 { return 4 }
 
@@ -430,8 +430,6 @@ fn optional_compare() {
     .expect(Runs);
 }
 
-// TODO: Known limitation - Int64 doesn't have a Cloneable witness, so clone() cannot be
-// called on Optional[Int64]. Need Cloneable conformance for Int64.
 #[test]
 fn optional_clone() {
     Test::new(

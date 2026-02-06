@@ -1,6 +1,5 @@
 use kestrel_test_suite::*;
 
-// TODO: Fails -- memory module type paths or pointer operations may not resolve correctly
 #[test]
 fn memory_raw_pointer() {
     Test::new(
@@ -12,7 +11,8 @@ fn memory_raw_pointer() {
             if nil.isNull == false { return 1 }
 
             // Test address of nil pointer is 0
-            if nil.address != std.num.UInt64(intLiteral: 0) { return 2 }
+            let zeroAddr: std.num.UInt64 = 0;
+            if nil.address != zeroAddr { return 2 }
 
             // Create a non-null pointer from an array
             var arr = std.collections.Array[std.num.Int64]();
@@ -24,7 +24,8 @@ fn memory_raw_pointer() {
             if raw.isNull { return 3 }
 
             // Address should be non-zero
-            if raw.address == std.num.UInt64(intLiteral: 0) { return 4 }
+            let zeroCheck: std.num.UInt64 = 0;
+            if raw.address == zeroCheck { return 4 }
 
             // Test equals - same pointer should be equal
             if raw.equals(raw) == false { return 5 }
@@ -58,7 +59,6 @@ fn memory_raw_pointer() {
     .expect(Runs);
 }
 
-// TODO: Fails -- memory module type paths or pointer operations may not resolve correctly
 #[test]
 fn memory_typed_pointer() {
     Test::new(
@@ -66,11 +66,12 @@ fn memory_typed_pointer() {
 
         func main() -> lang.i64 {
             // Test nullPointer
-            let null = std.memory.Pointer[std.num.Int64].nullPointer();
-            if null.isNull == false { return 1 }
+            let nullPtr = std.memory.Pointer[std.num.Int64].nullPointer();
+            if nullPtr.isNull == false { return 1 }
 
             // Test address of null pointer is 0
-            if null.address != std.num.UInt64(intLiteral: 0) { return 2 }
+            let zeroAddr: std.num.UInt64 = 0;
+            if nullPtr.address != zeroAddr { return 2 }
 
             // Create a typed pointer from an array
             var arr = std.collections.Array[std.num.Int64]();
@@ -93,7 +94,7 @@ fn memory_typed_pointer() {
             if ptr2.read() != 300 { return 6 }
 
             // Test write
-            ptr1.write(value: 999);
+            ptr1.write(999);
             if ptr1.read() != 999 { return 7 }
             // Verify the array was modified through the pointer
             if arr(unchecked: 1) != 999 { return 8 }
@@ -109,7 +110,8 @@ fn memory_typed_pointer() {
 
             // Test address round-trip
             let addr = ptr.address;
-            if addr == std.num.UInt64(intLiteral: 0) { return 13 }
+            let zeroCheck: std.num.UInt64 = 0;
+            if addr == zeroCheck { return 13 }
 
             0
         }
@@ -237,7 +239,6 @@ fn memory_slice() {
     .expect(Runs);
 }
 
-// TODO: Fails -- Buffer requires Allocator generic which may hit codegen issues
 #[test]
 fn memory_buffer() {
     Test::new(
@@ -246,7 +247,7 @@ fn memory_buffer() {
         func main() -> lang.i64 {
             // Create a buffer with SystemAllocator
             var alloc = std.memory.SystemAllocator();
-            var buf = std.memory.Buffer[std.num.Int64, std.memory.SystemAllocator](capacity: 10, allocator: alloc);
+            var buf = std.memory.Buffer[std.num.Int64, std.memory.SystemAllocator](10, alloc);
 
             // Test capacity
             if buf.capacity != 10 { return 1 }
@@ -255,24 +256,24 @@ fn memory_buffer() {
             if buf.pointer.isNull { return 2 }
 
             // Test write(unchecked:value:) and read(unchecked:)
-            buf.write(unchecked: 0, value: 42);
-            buf.write(unchecked: 1, value: 99);
-            buf.write(unchecked: 2, value: 77);
+            buf.write(unchecked: 0, 42);
+            buf.write(unchecked: 1, 99);
+            buf.write(unchecked: 2, 77);
             if buf.read(unchecked: 0) != 42 { return 3 }
             if buf.read(unchecked: 1) != 99 { return 4 }
             if buf.read(unchecked: 2) != 77 { return 5 }
 
             // Test write(at:value:) with bounds checking
-            let ok1 = buf.write(at: 5, value: 55);
+            let ok1 = buf.write(at: 5, 55);
             if ok1 == false { return 6 }
             if buf.read(unchecked: 5) != 55 { return 7 }
 
             // Test write(at:value:) out of bounds
-            let oob = buf.write(at: 100, value: 0);
+            let oob = buf.write(at: 100, 0);
             if oob { return 8 }
 
             // Test write(at:value:) negative index
-            let neg = buf.write(at: -1, value: 0);
+            let neg = buf.write(at: -1, 0);
             if neg { return 9 }
 
             // Test read(at:) with bounds checking
@@ -313,7 +314,7 @@ fn memory_buffer() {
             if buf.read(unchecked: 2) != 77 { return 24 }
 
             // Can write to the expanded region
-            buf.write(unchecked: 15, value: 123);
+            buf.write(unchecked: 15, 123);
             if buf.read(unchecked: 15) != 123 { return 25 }
 
             0
@@ -325,7 +326,6 @@ fn memory_buffer() {
     .expect(Runs);
 }
 
-// TODO: Fails -- Layout/Allocator types may not resolve correctly in test harness
 #[test]
 fn memory_allocator() {
     Test::new(
@@ -344,11 +344,11 @@ fn memory_allocator() {
 
             // Write to and read from the allocated memory
             let typedPtr = ptr.cast[std.num.Int64]();
-            typedPtr.write(value: 12345);
+            typedPtr.write(12345);
             if typedPtr.read() != 12345 { return 3 }
 
             // Write at an offset
-            typedPtr.offset(by: 1).write(value: 67890);
+            typedPtr.offset(by: 1).write(67890);
             if typedPtr.offset(by: 1).read() != 67890 { return 4 }
 
             // Test reallocate
@@ -372,7 +372,7 @@ fn memory_allocator() {
             if i64Layout.alignment != 8 { return 10 }
 
             // Test Layout.array
-            let arrLayout = std.memory.Layout.array[std.num.Int64](count: 4);
+            let arrLayout = std.memory.Layout.array[std.num.Int64](4);
             if arrLayout.size != 32 { return 11 }
             if arrLayout.alignment != 8 { return 12 }
 

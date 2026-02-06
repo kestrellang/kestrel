@@ -189,6 +189,23 @@ impl Query for ResolveValuePath {
                 }
             }
 
+            // If current_symbol is a Field or Getter and we can't find a child, return FieldValue.
+            // Fields/getters are values, not namespaces - remaining segments should be member accesses.
+            // This handles cases like `Float64.e.subtract(1.0)` where `e` is a static field
+            // and `subtract()` is a method call on that value.
+            if matches.is_empty()
+                && (current_symbol.metadata().kind() == KestrelSymbolKind::Field
+                    || current_symbol.metadata().kind() == KestrelSymbolKind::Getter)
+            {
+                if let Some(value_beh) = current_symbol.metadata().get_behavior::<ValueBehavior>() {
+                    return ValuePathResolution::FieldValue {
+                        symbol_id: current_symbol.metadata().id(),
+                        ty: value_beh.ty().clone(),
+                        resolved_index: index - 1,
+                    };
+                }
+            }
+
             // Last segment: handle overloads
             if index == self.path.len() - 1 {
                 return extract_value_from_symbols(&matches, segment, index);

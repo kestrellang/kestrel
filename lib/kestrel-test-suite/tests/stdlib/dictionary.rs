@@ -589,9 +589,6 @@ fn dictionary_merge_from_pairs() {
     .expect(Runs);
 }
 
-// TODO: deepClone() requires both K: Cloneable and V: Cloneable. Int64 does not implement
-// Cloneable, so this will likely fail at monomorphization. Keeping expect(Compiles).expect(Runs)
-// to track when Int64 gains Cloneable support.
 #[test]
 fn dictionary_deep_clone() {
     Test::new(
