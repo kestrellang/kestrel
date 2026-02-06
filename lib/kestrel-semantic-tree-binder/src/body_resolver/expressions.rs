@@ -18,9 +18,9 @@ use crate::diagnostics::{
     AsciiEscapeOutOfRangeError, BreakOutsideLoopError, CannotAssignThroughImmutableBindingError,
     CannotAssignToImmutableFieldError, CannotAssignToLetError, CannotAssignToTemporaryError,
     CapturingClosureEscapeError, ContinueOutsideLoopError, EmptyCharacterLiteralError,
-    IncompleteEscapeSequenceError, InvalidEscapeSequenceError, InvalidUnicodeEscapeError,
-    MultipleCodepointsInCharLiteralError, TupleIndexOnNonTupleError, TupleIndexOutOfBoundsError,
-    UndeclaredLabelError, UnicodeEscapeErrorReason,
+    IncompleteEscapeSequenceError, IntegerLiteralOverflowError, InvalidEscapeSequenceError,
+    InvalidUnicodeEscapeError, MultipleCodepointsInCharLiteralError, TupleIndexOnNonTupleError,
+    TupleIndexOutOfBoundsError, UndeclaredLabelError, UnicodeEscapeErrorReason,
 };
 use kestrel_syntax_tree::utils::get_node_span;
 
@@ -54,7 +54,7 @@ pub fn resolve_expression(expr_node: &SyntaxNode, ctx: &mut BodyResolutionContex
         SyntaxKind::ExprUnit => Expression::unit(span),
 
         SyntaxKind::ExprInteger => {
-            let value = extract_integer_value(expr_node);
+            let value = extract_integer_value(expr_node, ctx);
             // Use inference type so literal protocols can be applied
             Expression::integer_infer(value, span)
         },
@@ -168,25 +168,44 @@ pub fn resolve_expression(expr_node: &SyntaxNode, ctx: &mut BodyResolutionContex
 }
 
 /// Extract integer value from an ExprInteger node
-fn extract_integer_value(node: &SyntaxNode) -> i64 {
+fn extract_integer_value(node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> i64 {
     node.children_with_tokens()
         .filter_map(|e| e.into_token())
         .find(|t| t.kind() == SyntaxKind::Integer)
-        .and_then(|t| parse_integer_literal(t.text()))
+        .and_then(|t| {
+            let text = t.text();
+            match parse_integer_literal(text) {
+                Ok(value) => Some(i64::from_ne_bytes(value.to_ne_bytes())),
+                Err(_) => {
+                    let text_range = t.text_range();
+                    let token_start: usize = text_range.start().into();
+                    let token_span = Span::new(
+                        ctx.file_id,
+                        token_start..token_start + text.len(),
+                    );
+                    let error = IntegerLiteralOverflowError {
+                        span: token_span,
+                        literal: text.to_string(),
+                    };
+                    ctx.diagnostics.add_diagnostic(error.into_diagnostic());
+                    None
+                },
+            }
+        })
         .unwrap_or(0)
 }
 
 /// Parse an integer literal (handles 0x, 0b, 0o prefixes)
-fn parse_integer_literal(text: &str) -> Option<i64> {
+fn parse_integer_literal(text: &str) -> Result<u64, std::num::ParseIntError> {
     let text = text.replace('_', "");
     if text.starts_with("0x") || text.starts_with("0X") {
-        i64::from_str_radix(&text[2..], 16).ok()
+        u64::from_str_radix(&text[2..], 16)
     } else if text.starts_with("0b") || text.starts_with("0B") {
-        i64::from_str_radix(&text[2..], 2).ok()
+        u64::from_str_radix(&text[2..], 2)
     } else if text.starts_with("0o") || text.starts_with("0O") {
-        i64::from_str_radix(&text[2..], 8).ok()
+        u64::from_str_radix(&text[2..], 8)
     } else {
-        text.parse().ok()
+        text.parse()
     }
 }
 
@@ -3601,11 +3620,11 @@ mod tests {
 
     #[test]
     fn test_parse_integer_literal() {
-        assert_eq!(parse_integer_literal("42"), Some(42));
-        assert_eq!(parse_integer_literal("0xFF"), Some(255));
-        assert_eq!(parse_integer_literal("0b1010"), Some(10));
-        assert_eq!(parse_integer_literal("0o17"), Some(15));
-        assert_eq!(parse_integer_literal("1_000_000"), Some(1000000));
+        assert_eq!(parse_integer_literal("42"), Ok(42));
+        assert_eq!(parse_integer_literal("0xFF"), Ok(255));
+        assert_eq!(parse_integer_literal("0b1010"), Ok(10));
+        assert_eq!(parse_integer_literal("0o17"), Ok(15));
+        assert_eq!(parse_integer_literal("1_000_000"), Ok(1000000));
     }
 
     #[test]

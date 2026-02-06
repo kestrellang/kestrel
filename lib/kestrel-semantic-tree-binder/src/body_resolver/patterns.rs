@@ -389,7 +389,10 @@ fn resolve_literal_pattern(
             let text = token.text();
             match token.kind() {
                 SyntaxKind::Integer => {
-                    let value = parse_integer(text);
+                    let text_range = token.text_range();
+                    let token_start: usize = text_range.start().into();
+                    let token_span = Span::new(ctx.file_id, token_start..token_start + text.len());
+                    let value = parse_integer(text, token_span, ctx);
                     // Use inference placeholder - let type inference determine the actual type
                     // based on the scrutinee type and ExpressibleByIntLiteral conformance
                     let ty = Ty::infer(span.clone());
@@ -498,15 +501,29 @@ fn resolve_literal_pattern(
 }
 
 /// Parse an integer literal (handles hex, binary, octal).
-fn parse_integer(text: &str) -> i64 {
-    if text.starts_with("0x") || text.starts_with("0X") {
-        i64::from_str_radix(&text[2..], 16).unwrap_or(0)
-    } else if text.starts_with("0b") || text.starts_with("0B") {
-        i64::from_str_radix(&text[2..], 2).unwrap_or(0)
-    } else if text.starts_with("0o") || text.starts_with("0O") {
-        i64::from_str_radix(&text[2..], 8).unwrap_or(0)
+fn parse_integer(text: &str, token_span: Span, ctx: &mut BodyResolutionContext) -> i64 {
+    let text_clean = text.replace('_', "");
+    let parsed = if text_clean.starts_with("0x") || text_clean.starts_with("0X") {
+        u64::from_str_radix(&text_clean[2..], 16)
+    } else if text_clean.starts_with("0b") || text_clean.starts_with("0B") {
+        u64::from_str_radix(&text_clean[2..], 2)
+    } else if text_clean.starts_with("0o") || text_clean.starts_with("0O") {
+        u64::from_str_radix(&text_clean[2..], 8)
     } else {
-        text.parse::<i64>().unwrap_or(0)
+        text_clean.parse::<u64>()
+    };
+
+    match parsed {
+        Ok(value) => i64::from_ne_bytes(value.to_ne_bytes()),
+        Err(_) => {
+            use crate::diagnostics::IntegerLiteralOverflowError;
+            let error = IntegerLiteralOverflowError {
+                span: token_span,
+                literal: text.to_string(),
+            };
+            ctx.diagnostics.add_diagnostic(error.into_diagnostic());
+            0
+        },
     }
 }
 
@@ -803,7 +820,10 @@ fn resolve_range_pattern(
         match token.kind() {
             SyntaxKind::Integer => {
                 let text = token.text();
-                let value = parse_integer(text);
+                let text_range = token.text_range();
+                let token_start: usize = text_range.start().into();
+                let token_span = Span::new(ctx.file_id, token_start..token_start + text.len());
+                let value = parse_integer(text, token_span, ctx);
                 let bound = RangeBound::Integer(value);
                 if !found_operator {
                     start_bound = Some(bound);
