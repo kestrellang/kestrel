@@ -268,6 +268,12 @@ public struct CharsView: Iterable {
             foundEnd = true
         }
 
+        // Handle empty range at non-zero offset (start == end > 0)
+        if foundEnd and foundStart == false and start == end {
+            foundStart = true;
+            startByte = endByte
+        }
+
         if foundStart == false or foundEnd == false {
             return .None
         }

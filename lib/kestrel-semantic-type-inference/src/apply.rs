@@ -345,13 +345,26 @@ fn apply_to_expression(expr: &Expression, solution: &Solution, oracle: &dyn Type
 
             // Check if we have a resolved symbol for this expression
             if let Some(value_resolution) = solution.get_value(expr.id) {
+                let method_fn_ty = oracle
+                    .resolve_member_with_arity(
+                        &resolved_receiver.ty,
+                        method_name,
+                        false,
+                        resolved_arguments.len(),
+                    )
+                    .map(|resolution| {
+                        Ty::function(resolution.parameters, resolution.ty, expr.span.clone())
+                    })
+                    .unwrap_or_else(|_| Ty::infer(expr.span.clone()));
+
                 // Create a MethodRef with the resolved method symbol
-                let method_ref = Expression::method_ref(
+                let mut method_ref = Expression::method_ref(
                     resolved_receiver.clone(),
                     vec![value_resolution.symbol_id],
                     method_name.clone(),
                     expr.span.clone(),
                 );
+                method_ref.ty = method_fn_ty;
                 // Create a Call expression with the method ref as callee
                 ExprKind::Call {
                     callee: Box::new(method_ref),

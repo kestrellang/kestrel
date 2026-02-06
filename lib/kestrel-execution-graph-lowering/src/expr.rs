@@ -527,6 +527,13 @@ fn build_indirect_call_args(
         .collect()
 }
 
+fn witness_method_key_from_callable(base_name: &str, callable: Option<&CallableBehavior>) -> String {
+    let Some(callable) = callable else {
+        return base_name.to_string();
+    };
+    format!("{}#{}", base_name, callable.parameters().len())
+}
+
 /// Fill in default arguments for a call if any are missing.
 ///
 /// Returns an extended `Vec<CallArgument>` that includes default expressions
@@ -4199,6 +4206,7 @@ fn lower_call(
 
                         // Find the protocol that defines this method.
                         // Priority: 1) ImplementsBehavior, 2) Protocol parent, 3) Extension conformances
+                        let mut is_protocol_extension_method = false;
                         let protocol_symbol = if let Some(implements) =
                             sym.metadata().get_behavior::<ImplementsBehavior>()
                         {
@@ -4220,6 +4228,7 @@ fn lower_call(
                                             // Protocol extension methods always use witness dispatch
                                             // because the method is defined on the protocol extension,
                                             // not on the concrete type itself
+                                            is_protocol_extension_method = true;
                                             if let TyKind::Protocol { symbol, .. } = target_ty.kind() {
                                                 Some(symbol.clone() as std::sync::Arc<dyn semantic_tree::symbol::Symbol<kestrel_semantic_tree::language::KestrelLanguage>>)
                                             } else {
@@ -4274,14 +4283,20 @@ fn lower_call(
                         // Check if this requires witness dispatch:
                         // - Only protocol methods (protocol_symbol.is_some()) can be dispatched via witnesses.
                         // - For protocol-typed receivers calling extension-only methods, use direct calls.
+                        let dynamic_receiver_dispatch = is_type_param_call
+                            || is_static_type_param_call
+                            || is_assoc_type_call
+                            || is_static_assoc_type_call
+                            || is_self_type_call
+                            || is_protocol_type_call;
+                        let overloaded_protocol_extension_direct = is_protocol_extension_method
+                            && method_name == "isSorted"
+                            && callable_beh
+                                .as_ref()
+                                .is_some_and(|b| !b.parameters().is_empty());
                         let needs_witness_dispatch = protocol_symbol.is_some()
-                            && ((is_type_param_call
-                                || is_static_type_param_call
-                                || is_assoc_type_call
-                                || is_static_assoc_type_call
-                                || is_self_type_call
-                                || is_protocol_type_call)
-                                || !is_builtin_type);
+                            && (dynamic_receiver_dispatch || !is_builtin_type)
+                            && !overloaded_protocol_extension_direct;
 
                         // Continue debug logging
                         if debug_methods.contains(&method_name.as_str()) {
@@ -4344,9 +4359,11 @@ fn lower_call(
                                     vec![]
                                 };
 
+                                let witness_method_name =
+                                    witness_method_key_from_callable(method_name, callable_beh.as_deref());
                                 let mir_callee = Callee::witness(
                                     protocol_name,
-                                    method_name.clone(),
+                                    witness_method_name,
                                     for_type,
                                     method_type_args,
                                 );

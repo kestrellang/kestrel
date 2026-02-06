@@ -36,6 +36,7 @@ use crate::diagnostics::{
     DelegatingInitOutsideInitializerError, MemberNotAccessibleError, MemberNotVisibleError,
     MethodNotInBoundsError, NoMatchingMethodError, NoSuchMemberError, NoSuchMethodError,
     UnconstrainedAssociatedTypeMemberError, UnconstrainedTypeParameterMemberError,
+    ConstraintNotSatisfiedError,
 };
 
 use super::calls::{
@@ -48,6 +49,119 @@ use super::utils::{
     get_type_parameter_bounds_from_context, infer_type_arguments,
     matches_signature, resolve_associated_types, substitute_self, substitute_type, type_satisfies_bound,
 };
+
+fn verify_where_clause_constraints_from_substitutions(
+    where_clause: &kestrel_semantic_tree::ty::WhereClause,
+    substitutions: &Substitutions,
+    self_ty: Option<&Ty>,
+    call_span: &Span,
+    model: &kestrel_semantic_model::SemanticModel,
+    diagnostics: &mut kestrel_reporting::DiagnosticContext,
+) -> bool {
+    use kestrel_semantic_tree::ty::Constraint;
+
+    let mut all_satisfied = true;
+
+    for constraint in where_clause.constraints() {
+        match constraint {
+            Constraint::TypeBound {
+                param: Some(param_id),
+                param_name,
+                param_span,
+                bounds,
+            } => {
+                let actual_ty = substitutions
+                    .get(*param_id)
+                    .or_else(|| if param_name == "Self" { self_ty } else { None });
+                if let Some(actual_ty) = actual_ty {
+                    if matches!(
+                        actual_ty.kind(),
+                        TyKind::Infer | TyKind::TypeParameter(_) | TyKind::SelfType
+                    ) {
+                        continue;
+                    }
+                    for bound in bounds {
+                        if !type_satisfies_bound(actual_ty, bound, model) {
+                            diagnostics.add_diagnostic(
+                                ConstraintNotSatisfiedError {
+                                    call_span: call_span.clone(),
+                                    type_name: actual_ty.to_string(),
+                                    constraint_name: bound.to_string(),
+                                    type_param_name: param_name.clone(),
+                                    constraint_span: Some(param_span.clone()),
+                                }
+                                .into_diagnostic(),
+                            );
+                            all_satisfied = false;
+                        }
+                    }
+                }
+            },
+            Constraint::TypeBound {
+                param: None,
+                param_name,
+                param_span,
+                bounds,
+            } if param_name == "Self" => {
+                if let Some(actual_self_ty) = self_ty {
+                    if matches!(
+                        actual_self_ty.kind(),
+                        TyKind::Infer | TyKind::TypeParameter(_) | TyKind::SelfType
+                    ) {
+                        continue;
+                    }
+                    for bound in bounds {
+                        if !type_satisfies_bound(actual_self_ty, bound, model) {
+                            diagnostics.add_diagnostic(
+                                ConstraintNotSatisfiedError {
+                                    call_span: call_span.clone(),
+                                    type_name: actual_self_ty.to_string(),
+                                    constraint_name: bound.to_string(),
+                                    type_param_name: "Self".to_string(),
+                                    constraint_span: Some(param_span.clone()),
+                                }
+                                .into_diagnostic(),
+                            );
+                            all_satisfied = false;
+                        }
+                    }
+                }
+            },
+            Constraint::SelfBound {
+                associated_type_path,
+                path_span,
+                bounds,
+            } if associated_type_path.is_empty() => {
+                if let Some(actual_self_ty) = self_ty {
+                    if matches!(
+                        actual_self_ty.kind(),
+                        TyKind::Infer | TyKind::TypeParameter(_) | TyKind::SelfType
+                    ) {
+                        continue;
+                    }
+                    for bound in bounds {
+                        if !type_satisfies_bound(actual_self_ty, bound, model) {
+                            diagnostics.add_diagnostic(
+                                ConstraintNotSatisfiedError {
+                                    call_span: call_span.clone(),
+                                    type_name: actual_self_ty.to_string(),
+                                    constraint_name: bound.to_string(),
+                                    type_param_name: "Self".to_string(),
+                                    constraint_span: Some(path_span.clone()),
+                                }
+                                .into_diagnostic(),
+                            );
+                            all_satisfied = false;
+                        }
+                    }
+                }
+            },
+            _ => {},
+        }
+    }
+
+    all_satisfied
+}
 
 /// Resolve a chain of member accesses: obj.field1.field2.field3
 pub fn resolve_member_chain(
@@ -1041,6 +1155,40 @@ pub fn resolve_member_call(
                 // Also apply method substitutions to return type
                 return_ty = return_ty.apply_substitutions(&method_subs);
             }
+        }
+
+        // Validate method where-clause constraints against final substitutions.
+        if let Some(func_sym) = method
+            .as_any()
+            .downcast_ref::<kestrel_semantic_tree::symbol::function::FunctionSymbol>()
+        {
+            let where_clause = func_sym.where_clause();
+            verify_where_clause_constraints_from_substitutions(
+                &where_clause,
+                &call_subs,
+                Some(&resolved_base_ty),
+                &span,
+                ctx.model,
+                ctx.diagnostics,
+            );
+        }
+
+        // If method comes from an extension, validate extension target constraints too.
+        if let Some(parent) = method.metadata().parent()
+            && parent.metadata().kind() == KestrelSymbolKind::Extension
+            && let Some(ext_behavior) = parent
+                .metadata()
+                .get_behavior::<ExtensionTargetBehavior>()
+        {
+            let where_clause = ext_behavior.where_clause();
+            verify_where_clause_constraints_from_substitutions(
+                &where_clause,
+                &call_subs,
+                Some(&resolved_base_ty),
+                &span,
+                ctx.model,
+                ctx.diagnostics,
+            );
         }
 
         // Create method ref and then call
@@ -2860,7 +3008,20 @@ fn find_methods_in_protocol_extensions(
     method_name: &str,
     ctx: &BodyResolutionContext,
 ) -> Vec<SymbolId> {
+    if method_name == "cycle" {
+        eprintln!(
+            "[CYCLE_PROTO_EXT] lookup concrete_ty={}",
+            concrete_ty
+        );
+    }
     let applicable_extensions = get_applicable_protocol_extensions(concrete_ty, ctx);
+
+    if method_name == "cycle" {
+        eprintln!(
+            "[CYCLE_PROTO_EXT] applicable_extensions={}",
+            applicable_extensions.len()
+        );
+    }
 
     if applicable_extensions.is_empty() {
         return Vec::new();

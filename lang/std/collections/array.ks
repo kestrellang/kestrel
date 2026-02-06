@@ -300,7 +300,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     /// Example:
     ///     let zeros = Array(repeating: 0, count: 5)  // [0, 0, 0, 0, 0]
     ///     let empty = Array(repeating: "x", count: 0)  // []
-    public init(repeating value: T, count: Int64) where T: Cloneable {
+    public init(repeating value: T, count: Int64) {
         if count <= Int64(intLiteral: 0) {
             self.init()
         } else {
@@ -311,9 +311,9 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
                 let newPtr = rawPtr.cast[T]();
                 // Write first element directly
                 newPtr.write(value);
-                // Clone for remaining elements
+                // Copy for remaining elements
                 for i in 1..<count {
-                    newPtr.offset(by: i).write(value.clone());
+                    newPtr.offset(by: i).write(value);
                 }
                 self.storage = RcBox(ArrayStorage(
                     ptr: newPtr,

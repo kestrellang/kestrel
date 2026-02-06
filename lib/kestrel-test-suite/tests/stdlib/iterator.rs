@@ -776,7 +776,7 @@ fn try_fold_adapter() {
 
             // tryFold on empty iterator returns Ok(initial)
             let empty = std.collections.Array[std.num.Int64]();
-            let emptyResult = empty.iter().tryFold(initial: 42, combine: { (acc, x) in
+            let emptyResult: std.result.Result[std.num.Int64, std.num.Int64] = empty.iter().tryFold(initial: 42, combine: { (acc, x) in
                 .Ok(acc + x)
             });
             match emptyResult {

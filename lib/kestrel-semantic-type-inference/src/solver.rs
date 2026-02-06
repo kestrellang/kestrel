@@ -1619,7 +1619,10 @@ fn resolve_member(
     }
 
     // Try to resolve the member via the oracle
-    match ctx.oracle().resolve_member(&receiver_ty, member, is_static) {
+    match ctx
+        .oracle()
+        .resolve_member_with_arity(&receiver_ty, member, is_static, arguments.len())
+    {
         Ok(resolution) => {
             // Merge substitutions: call-site substitutions take precedence for method type params
             // - resolution.substitutions has protocol-level subs (Self, Item, etc.)

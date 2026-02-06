@@ -201,9 +201,24 @@ impl TypeOracle for SemanticModel {
                     target_id: container_id,
                 });
 
-                // Find in extensions on the type itself
+                // Find in extensions on the type itself, filtering by where-clause constraints.
+                // Extensions with unsatisfied where clauses (e.g., `where T: Cloneable`)
+                // must be excluded so that calls like `iter.cycle()` on non-Cloneable
+                // receivers fail at semantic checking instead of monomorphization.
                 let extension_member = extensions
                     .iter()
+                    .filter(|ext| {
+                        // Check if extension's where-clause constraints are satisfied
+                        if let Some(target_beh) = ext.metadata().get_behavior::<ExtensionTargetBehavior>() {
+                            let where_clause = target_beh.where_clause();
+                            if where_clause.constraints().is_empty() {
+                                return true;
+                            }
+                            check_where_clause_satisfied(self, &where_clause, &substitutions)
+                        } else {
+                            true
+                        }
+                    })
                     .flat_map(|ext| ext.metadata().children())
                     .find(|child| child.metadata().name().value == member);
 
@@ -2435,6 +2450,52 @@ fn resolve_member_via_protocol_conformance(
         });
 
         for ext in &proto_extensions {
+            // Check if this protocol extension's where-clause constraints are satisfied.
+            // For example, `extend Iterator where Self: Cloneable { func cycle() ... }`
+            // should only be visible when receiver_ty conforms to Cloneable.
+            if let Some(ext_target) = ext.metadata().get_behavior::<ExtensionTargetBehavior>() {
+                let ext_where = ext_target.where_clause();
+                let mut ext_applicable = true;
+                for constraint in ext_where.constraints() {
+                    match constraint {
+                        Constraint::SelfBound { associated_type_path, bounds, .. } => {
+                            if associated_type_path.is_empty() {
+                                // Self: Protocol - check receiver conforms
+                                for bound in bounds {
+                                    if let TyKind::Protocol { symbol: bound_proto, .. } = bound.kind() {
+                                        if !model.conforms_to(receiver_ty, bound_proto.metadata().id()) {
+                                            ext_applicable = false;
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                            // TODO: Self.Item: Protocol checks
+                        }
+                        Constraint::TypeBound { param: Some(param_id), bounds, .. } => {
+                            // Check type-parameter bounds against substitutions
+                            if let Some(actual_ty) = proto_subs.get(*param_id) {
+                                for bound in bounds {
+                                    if let TyKind::Protocol { symbol: bound_proto, .. } = bound.kind() {
+                                        if !model.conforms_to(actual_ty, bound_proto.metadata().id()) {
+                                            ext_applicable = false;
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                    if !ext_applicable {
+                        break;
+                    }
+                }
+                if !ext_applicable {
+                    continue;
+                }
+            }
+
             for child in ext.metadata().children() {
                 if child.metadata().name().value == member {
                     let member_id = child.metadata().id();

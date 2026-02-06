@@ -41,6 +41,7 @@ use crate::diagnostics::{
     NonCallableError, NotGenericError, OverloadDescription, PrimitiveMethodArityError,
     TooFewTypeArgumentsError, TooManyTypeArgumentsError, TypeArgsOnNonGenericError,
     UnconstrainedTypeParameterMemberError,
+    ConstraintNotSatisfiedError,
 };
 use kestrel_syntax_tree::utils::get_node_span;
 
@@ -55,8 +56,124 @@ use super::utils::{
     find_type_directed_match, get_associated_type_bounds_from_context, get_callable_behavior,
     get_type_container, get_type_parameter_bounds_by_id, infer_type_arguments, is_expression_kind,
     matches_signature, replace_type_params_except, resolve_associated_types, substitute_self,
-    substitute_type, validate_not_standalone_type_param, verify_type_argument_constraints,
+    substitute_type, type_satisfies_bound, validate_not_standalone_type_param,
+    verify_type_argument_constraints,
 };
+
+fn verify_where_clause_constraints_from_substitutions(
+    where_clause: &kestrel_semantic_tree::ty::WhereClause,
+    substitutions: &Substitutions,
+    self_ty: Option<&Ty>,
+    call_span: &Span,
+    model: &kestrel_semantic_model::SemanticModel,
+    diagnostics: &mut kestrel_reporting::DiagnosticContext,
+) -> bool {
+    use kestrel_semantic_tree::ty::Constraint;
+
+    let mut all_satisfied = true;
+
+    for constraint in where_clause.constraints() {
+        match constraint {
+            Constraint::TypeBound {
+                param: Some(param_id),
+                param_name,
+                param_span,
+                bounds,
+            } => {
+                let actual_ty = substitutions
+                    .get(*param_id)
+                    .or_else(|| if param_name == "Self" { self_ty } else { None });
+                if let Some(actual_ty) = actual_ty {
+                    // Defer checks for unresolved placeholders and generic type parameters.
+                    // These must be validated after concrete instantiation.
+                    if matches!(
+                        actual_ty.kind(),
+                        TyKind::Infer | TyKind::TypeParameter(_) | TyKind::SelfType
+                    ) {
+                        continue;
+                    }
+                    for bound in bounds {
+                        if !type_satisfies_bound(actual_ty, bound, model) {
+                            diagnostics.add_diagnostic(
+                                ConstraintNotSatisfiedError {
+                                    call_span: call_span.clone(),
+                                    type_name: actual_ty.to_string(),
+                                    constraint_name: bound.to_string(),
+                                    type_param_name: param_name.clone(),
+                                    constraint_span: Some(param_span.clone()),
+                                }
+                                .into_diagnostic(),
+                            );
+                            all_satisfied = false;
+                        }
+                    }
+                }
+            },
+            Constraint::TypeBound {
+                param: None,
+                param_name,
+                param_span,
+                bounds,
+            } if param_name == "Self" => {
+                if let Some(actual_self_ty) = self_ty {
+                    if matches!(
+                        actual_self_ty.kind(),
+                        TyKind::Infer | TyKind::TypeParameter(_) | TyKind::SelfType
+                    ) {
+                        continue;
+                    }
+                    for bound in bounds {
+                        if !type_satisfies_bound(actual_self_ty, bound, model) {
+                            diagnostics.add_diagnostic(
+                                ConstraintNotSatisfiedError {
+                                    call_span: call_span.clone(),
+                                    type_name: actual_self_ty.to_string(),
+                                    constraint_name: bound.to_string(),
+                                    type_param_name: "Self".to_string(),
+                                    constraint_span: Some(param_span.clone()),
+                                }
+                                .into_diagnostic(),
+                            );
+                            all_satisfied = false;
+                        }
+                    }
+                }
+            },
+            Constraint::SelfBound {
+                associated_type_path,
+                path_span,
+                bounds,
+            } if associated_type_path.is_empty() => {
+                if let Some(actual_self_ty) = self_ty {
+                    if matches!(
+                        actual_self_ty.kind(),
+                        TyKind::Infer | TyKind::TypeParameter(_) | TyKind::SelfType
+                    ) {
+                        continue;
+                    }
+                    for bound in bounds {
+                        if !type_satisfies_bound(actual_self_ty, bound, model) {
+                            diagnostics.add_diagnostic(
+                                ConstraintNotSatisfiedError {
+                                    call_span: call_span.clone(),
+                                    type_name: actual_self_ty.to_string(),
+                                    constraint_name: bound.to_string(),
+                                    type_param_name: "Self".to_string(),
+                                    constraint_span: Some(path_span.clone()),
+                                }
+                                .into_diagnostic(),
+                            );
+                            all_satisfied = false;
+                        }
+                    }
+                }
+            },
+            _ => {},
+        }
+    }
+
+    all_satisfied
+}
 
 /// Resolve a call expression: callee(arg1, arg2, ...) or callee[T](arg1, ...)
 pub fn resolve_call_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> Expression {
@@ -1310,32 +1427,13 @@ fn resolve_explicit_init_call(
                     let mut init_substitutions =
                         infer_type_arguments(&init_type_params, callable, &arg_types);
 
-                    // Build inferred type args, using Infer for parameters that couldn't be determined
-                    let inferred_args: Vec<Ty> = init_type_params
-                        .iter()
-                        .map(|tp| {
-                            let tp_id = tp.metadata().id();
-                            if let Some(inferred_ty) = init_substitutions.get(tp_id) {
-                                inferred_ty.clone()
-                            } else {
-                                // Create fresh inference variable for this type parameter
-                                let infer_ty = Ty::infer(span.clone());
-                                init_substitutions.insert(tp_id, infer_ty.clone());
-                                infer_ty
-                            }
-                        })
-                        .collect();
-
-                    // Verify where clause constraints are satisfied
-                    let where_clause = init_symbol.where_clause();
-                    verify_type_argument_constraints(
-                        &init_type_params,
-                        &inferred_args,
-                        &where_clause,
-                        span.clone(),
-                        ctx.model,
-                        ctx.diagnostics,
-                    );
+                    // Ensure every initializer type parameter has a substitution entry.
+                    for tp in &init_type_params {
+                        let tp_id = tp.metadata().id();
+                        if !init_substitutions.contains(tp_id) {
+                            init_substitutions.insert(tp_id, Ty::infer(span.clone()));
+                        }
+                    }
 
                     init_substitutions
                 } else {
@@ -1349,6 +1447,21 @@ fn resolve_explicit_init_call(
         let mut combined_subs = struct_subs.clone();
         for (key, ty) in init_subs.iter() {
             combined_subs.insert(*key, ty.clone());
+        }
+
+        // Validate initializer where-clause constraints using the full substitution map.
+        // This covers both initializer-owned generic params and enclosing receiver type params
+        // referenced in constraints (e.g., Array[T].init(... ) where T: Cloneable).
+        if let Some(init_symbol) = init_sym.as_any().downcast_ref::<InitializerSymbol>() {
+            let where_clause = init_symbol.where_clause();
+            verify_where_clause_constraints_from_substitutions(
+                &where_clause,
+                &combined_subs,
+                Some(&struct_ty),
+                &span,
+                ctx.model,
+                ctx.diagnostics,
+            );
         }
 
         // Build the function type for the initializer, applying combined substitutions
@@ -2047,6 +2160,39 @@ pub fn resolve_method_call(
                 return_ty = substitute_type(&return_ty, &call_substitutions);
             }
 
+            // Validate method where-clause constraints against final substitutions.
+            if let Some(func_sym) = symbol.as_any().downcast_ref::<FunctionSymbol>() {
+                let where_clause = func_sym.where_clause();
+                verify_where_clause_constraints_from_substitutions(
+                    &where_clause,
+                    &call_substitutions,
+                    Some(&resolved_receiver_ty),
+                    &span,
+                    ctx.model,
+                    ctx.diagnostics,
+                );
+            }
+
+            // If this method comes from an extension, also validate extension target constraints.
+            // This closes gaps where extension where-clauses were accepted during candidate
+            // selection with inference placeholders but become invalid once concrete types are known.
+            if let Some(parent) = symbol.metadata().parent()
+                && parent.metadata().kind() == KestrelSymbolKind::Extension
+                && let Some(ext_behavior) = parent
+                    .metadata()
+                    .get_behavior::<ExtensionTargetBehavior>()
+            {
+                let where_clause = ext_behavior.where_clause();
+                verify_where_clause_constraints_from_substitutions(
+                    &where_clause,
+                    &call_substitutions,
+                    Some(&resolved_receiver_ty),
+                    &span,
+                    ctx.model,
+                    ctx.diagnostics,
+                );
+            }
+
             // Validate access modes for arguments
             validate_argument_access_modes(&callable, &arguments, &span, ctx);
 
@@ -2075,7 +2221,7 @@ pub fn resolve_method_call(
                     candidates: vec![candidate_id],
                     method_name: method_name.to_string(),
                 },
-                ty: method_fn_ty,
+                ty: method_fn_ty.clone(),
                 span: span.clone(),
                 mutable: false,
             };

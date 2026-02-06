@@ -2781,14 +2781,33 @@ pub fn compile_call(
                     let st = match subst.get_self_type() {
                         Some(st) => st,
                         None => {
-                            // Try to infer self_type from the method's containing type
-                            // e.g., Test.Widget.create -> Self = Test.Widget
-                            infer_self_type_from_method_name(ctx, *name).ok_or_else(|| {
-                                CodegenError::Unsupported(format!(
-                                    "direct call requires Self type: {}",
-                                    ctx.mir.name(*name)
-                                ))
-                            })?
+                            // Try to infer self_type from the receiver argument first.
+                            // This handles protocol-extension methods lowered as direct calls.
+                            let from_first_arg = args.first().and_then(|first_arg| {
+                                if let Value::Place(place) = &first_arg.value {
+                                    get_place_type_for_call(ctx, place, local_map, subst)
+                                        .ok()
+                                        .map(|ty| match ctx.mir.ty(ty) {
+                                            MirTy::Ref(inner) | MirTy::RefMut(inner) => *inner,
+                                            _ => ty,
+                                        })
+                                } else {
+                                    None
+                                }
+                            });
+
+                            if let Some(st) = from_first_arg {
+                                st
+                            } else {
+                                // Fallback: infer self_type from the method's containing type
+                                // e.g., Test.Widget.create -> Self = Test.Widget
+                                infer_self_type_from_method_name(ctx, *name).ok_or_else(|| {
+                                    CodegenError::Unsupported(format!(
+                                        "direct call requires Self type: {}",
+                                        ctx.mir.name(*name)
+                                    ))
+                                })?
+                            }
                         },
                     };
                     if !type_is_concrete(ctx.mir, st) {
@@ -2846,6 +2865,14 @@ pub fn compile_call(
 
             // Get the function reference for use in this function
             let func_ref = ctx.module.declare_func_in_func(*cl_func_id, builder.func);
+            // Align sret usage with the imported function signature. Some semantic
+            // return types (notably witness-backed calls) can overapproximate sret.
+            let sig_ref = builder.func.dfg.ext_funcs[func_ref].signature;
+            let expected_param_count = builder.func.dfg.signatures[sig_ref].params.len();
+            if needs_sret && expected_param_count == args.len() {
+                needs_sret = false;
+                ret_ptr = None;
+            }
 
             // Compile arguments with proper PassingMode handling
             let mut arg_values = Vec::with_capacity(args.len() + if needs_sret { 1 } else { 0 });
@@ -3004,7 +3031,6 @@ pub fn compile_call(
                 ))
             })?;
 
-            let func_ref = ctx.module.declare_func_in_func(*cl_func_id, builder.func);
             let is_extern = callee_def.map(|def| def.is_extern()).unwrap_or(false);
             let mut needs_sret = false;
             let mut ret_ptr = None;
@@ -3035,6 +3061,26 @@ pub fn compile_call(
                         align_to_shift(align),
                     ));
                     ret_ptr = Some(builder.ins().stack_addr(ptr_type, slot, 0));
+                }
+            }
+            let func_ref = ctx.module.declare_func_in_func(*cl_func_id, builder.func);
+            // Keep witness call ABI consistent with the imported function signature.
+            let sig_ref = builder.func.dfg.ext_funcs[func_ref].signature;
+            let expected_param_count = builder.func.dfg.signatures[sig_ref].params.len();
+            if needs_sret && expected_param_count == args.len() {
+                needs_sret = false;
+                ret_ptr = None;
+            }
+
+            // Debug: witness call argument info
+            {
+                eprintln!("=== WITNESS CALL DEBUG: {} ===", method);
+                eprintln!("  mangled: {}", mangled_name);
+                eprintln!("  args.len(): {}", args.len());
+                eprintln!("  expected_param_count: {}", expected_param_count);
+                eprintln!("  needs_sret: {}", needs_sret);
+                for (i, arg) in args.iter().enumerate() {
+                    eprintln!("  arg[{}]: mode={:?}", i, arg.mode);
                 }
             }
 

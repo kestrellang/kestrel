@@ -22,7 +22,7 @@ public struct RawPointer: Equatable, FFISafe, Hash {
 
     /// Creates a raw pointer from an address.
     public init(address address: UInt64) {
-        self.raw = lang.ptr_from_address(address)
+        self.raw = lang.ptr_from_address(address.raw)
     }
 
     /// Returns a null raw pointer.

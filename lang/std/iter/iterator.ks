@@ -473,12 +473,12 @@ extend Iterator {
     }
 }
 
-/// Intersperse adapter requires Cloneable for the separator.
-extend Iterator where Item: Cloneable {
+/// Intersperse adapter copies the separator between elements.
+extend Iterator {
 
     /// Inserts a separator between each pair of elements.
     ///
-    /// The separator is cloned for each insertion.
+    /// The separator is copied for each insertion.
     ///
     /// Example:
     ///     [1, 2, 3].iter().intersperse(separator: 0).collect()
@@ -515,10 +515,10 @@ extend Iterator {
     }
 }
 
-/// Cycle adapter requires Cloneable to restart iteration.
-extend Iterator where Self: Cloneable {
+/// Cycle adapter restarts iteration by copying the original iterator.
+extend Iterator {
 
-    /// Repeats this iterator forever by cloning when exhausted.
+    /// Repeats this iterator forever by copying when exhausted.
     ///
     /// WARNING: Creates an infinite iterator. Use with `take()` to limit.
     ///

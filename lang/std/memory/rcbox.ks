@@ -71,10 +71,10 @@ public struct RcBox[T] {
         RcBox(inner: self.ptr)
     }
 
-    /// Creates a deep clone with new storage and a cloned value.
+    /// Creates a deep clone with new storage and a copied value.
     /// Used when mutation is needed on shared storage.
-    public func deepClone() -> RcBox[T] where T: Cloneable {
-        RcBox(self.ptr.read().value.clone())
+    public func deepClone() -> RcBox[T] {
+        RcBox(self.ptr.read().value)
     }
 
     // Release reference (called by deinit)

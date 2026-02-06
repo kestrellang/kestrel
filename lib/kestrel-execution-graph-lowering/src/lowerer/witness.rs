@@ -9,6 +9,7 @@ use kestrel_semantic_model::SymbolFor;
 use kestrel_semantic_model::queries::ExtensionsFor;
 use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
 use kestrel_semantic_tree::behavior::conforms_to::ConformsToBehavior;
+use kestrel_semantic_tree::behavior::callable::CallableBehavior;
 use kestrel_semantic_tree::behavior::implements::ImplementsBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::enum_symbol::EnumSymbol;
@@ -25,6 +26,16 @@ use std::sync::Arc;
 use crate::context::LoweringContext;
 use crate::name::qualified_name_for_symbol;
 use crate::ty::lower_type;
+
+fn witness_method_key(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> String {
+    symbol.metadata().name().value.clone()
+}
+
+fn witness_method_arity_key(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> Option<String> {
+    let base = symbol.metadata().name().value.clone();
+    let callable = symbol.metadata().get_behavior::<CallableBehavior>()?;
+    Some(format!("{}#{}", base, callable.parameters().len()))
+}
 
 /// Generate witnesses for all protocol conformances on a struct.
 pub fn generate_witnesses_for_struct(ctx: &mut LoweringContext, struct_symbol: &Arc<StructSymbol>) {
@@ -484,13 +495,16 @@ fn bind_methods(
             let method_name = if let Some(method_symbol) = ctx.model.query(SymbolFor {
                 id: protocol_method_id,
             }) {
-                method_symbol.metadata().name().value.clone()
+                witness_method_key(&method_symbol)
             } else {
-                func_name.clone()
+                witness_method_key(&child)
             };
 
             let impl_name = qualified_name_for_symbol(ctx, &child);
             ctx.mir.witnesses[witness_id].bind_method(method_name, impl_name, vec![]);
+            if let Some(arity_key) = witness_method_arity_key(&child) {
+                ctx.mir.witnesses[witness_id].bind_method(arity_key, impl_name, vec![]);
+            }
             continue;
         }
 
@@ -499,7 +513,11 @@ fn bind_methods(
         // complexities with Self). If the method name matches a protocol method name, bind it.
         if protocol_method_names.contains(&func_name) {
             let impl_name = qualified_name_for_symbol(ctx, &child);
-            ctx.mir.witnesses[witness_id].bind_method(func_name, impl_name, vec![]);
+            let method_key = witness_method_key(&child);
+            ctx.mir.witnesses[witness_id].bind_method(method_key, impl_name, vec![]);
+            if let Some(arity_key) = witness_method_arity_key(&child) {
+                ctx.mir.witnesses[witness_id].bind_method(arity_key, impl_name, vec![]);
+            }
         }
     }
 
@@ -566,7 +584,11 @@ fn bind_extension_methods(
 
             // Bind the extension method
             let impl_name = qualified_name_for_symbol(ctx, &child);
-            ctx.mir.witnesses[witness_id].bind_method(method_name.clone(), impl_name, vec![]);
+            let method_key = witness_method_key(&child);
+            ctx.mir.witnesses[witness_id].bind_method(method_key, impl_name, vec![]);
+            if let Some(arity_key) = witness_method_arity_key(&child) {
+                ctx.mir.witnesses[witness_id].bind_method(arity_key, impl_name, vec![]);
+            }
 
             // Mark as bound so we don't bind it again from another extension
             bound_methods.insert(method_name);
@@ -788,7 +810,11 @@ fn bind_methods_from_extension(
             // during monomorphization via FunctionInstantiation.self_type.
             // We don't need to pass type args here - the collector will set self_type
             // when creating the FunctionInstantiation.
-            ctx.mir.witnesses[witness_id].bind_method(method_name, impl_name, vec![]);
+            let method_key = witness_method_key(&impl_method);
+            ctx.mir.witnesses[witness_id].bind_method(method_key, impl_name, vec![]);
+            if let Some(arity_key) = witness_method_arity_key(&impl_method) {
+                ctx.mir.witnesses[witness_id].bind_method(arity_key, impl_name, vec![]);
+            }
         }
     }
 }
