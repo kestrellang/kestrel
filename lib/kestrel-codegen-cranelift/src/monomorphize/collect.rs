@@ -119,13 +119,24 @@ impl<'a> CollectionContext<'a> {
         let locals = func_def.locals.clone();
         let ret = func_def.ret;
 
-        // Build substitution
-        if type_params.len() != inst.type_args.len() {
+        // Build substitution. Some method instantiations rely on self_type and do not
+        // carry explicit type_args for owner generics (e.g. Buffer[T, A].deinit).
+        let mut effective_type_args = inst.type_args.clone();
+        if type_params.len() != effective_type_args.len()
+            && effective_type_args.is_empty()
+            && let Some(st) = inst.self_type
+            && let Some(inferred_args) =
+                Self::extract_named_type_args_from_self_type(self.mir, st, type_params.len())
+        {
+            effective_type_args = inferred_args;
+        }
+
+        if type_params.len() != effective_type_args.len() {
             eprintln!("MISMATCH in function: {}", func_name);
             eprintln!("  type_params: {:?}", type_params);
-            eprintln!("  type_args: {:?}", inst.type_args);
+            eprintln!("  type_args: {:?}", effective_type_args);
         }
-        let mut subst = build_substitution(self.mir, &type_params, &inst.type_args);
+        let mut subst = build_substitution(self.mir, &type_params, &effective_type_args);
 
         // Set self_type if this instantiation has one (protocol extension methods)
         if let Some(st) = inst.self_type {
@@ -164,6 +175,39 @@ impl<'a> CollectionContext<'a> {
         for &block_id in &blocks {
             self.scan_block(block_id, &subst);
         }
+    }
+
+    fn extract_named_type_args_from_self_type(
+        mir: &MirContext,
+        self_ty: Id<kestrel_execution_graph::Ty>,
+        expected_len: usize,
+    ) -> Option<Vec<Id<kestrel_execution_graph::Ty>>> {
+        let mut current = self_ty;
+        loop {
+            match mir.ty(current) {
+                MirTy::Ref(inner) | MirTy::RefMut(inner) | MirTy::Pointer(inner) => {
+                    current = *inner;
+                },
+                MirTy::Named { type_args, .. } if type_args.len() == expected_len => {
+                    return Some(type_args.clone());
+                },
+                _ => return None,
+            }
+        }
+    }
+
+    fn infer_type_args_from_subst(
+        &mut self,
+        type_params: &[Id<TypeParam>],
+        subst: &Substitution,
+    ) -> Vec<Id<Ty>> {
+        type_params
+            .iter()
+            .map(|&tp| {
+                let tp_ty = self.mir.intern_type(MirTy::TypeParam(tp));
+                subst.apply_ty(self.mir, tp_ty)
+            })
+            .collect()
     }
 
     /// Scan a block for instantiations.
@@ -483,19 +527,43 @@ impl<'a> CollectionContext<'a> {
         match callee {
             Callee::Direct { name, type_args } => {
                 // Apply substitution to type args
-                let concrete_args: Vec<_> = type_args
+                let mut concrete_args: Vec<_> = type_args
                     .iter()
                     .map(|ty| subst.apply_ty(self.mir, *ty))
                     .collect();
 
                 // Record function instantiation (only include self_type if callee needs it)
                 if let Some(&func_id) = self.functions_by_name.get(name) {
+                    let (callee_type_params, callee_params, callee_ret) = {
+                        let callee_def = &self.mir.functions[func_id];
+                        (
+                            callee_def.type_params.clone(),
+                            callee_def.params.clone(),
+                            callee_def.ret,
+                        )
+                    };
+
                     // Check if the callee actually uses Self in its signature
-                    let callee_def = &self.mir.functions[func_id];
-                    let callee_needs_self = callee_def.params.iter().any(|&param_id| {
+                    if concrete_args.is_empty() && !callee_type_params.is_empty() {
+                        concrete_args = self.infer_type_args_from_subst(&callee_type_params, subst);
+                        let unresolved = concrete_args
+                            .iter()
+                            .any(|&ty| matches!(self.mir.ty(ty), MirTy::TypeParam(_)));
+                        if unresolved
+                            && let Some(st) = subst.get_self_type()
+                            && let Some(from_self) = Self::extract_named_type_args_from_self_type(
+                                self.mir,
+                                st,
+                                callee_type_params.len(),
+                            )
+                        {
+                            concrete_args = from_self;
+                        }
+                    }
+                    let callee_needs_self = callee_params.iter().any(|&param_id| {
                         let param = &self.mir.params[param_id];
                         self.type_needs_self(self.mir.ty(param.ty))
-                    }) || self.type_needs_self(self.mir.ty(callee_def.ret));
+                    }) || self.type_needs_self(self.mir.ty(callee_ret));
 
                     let inst = if callee_needs_self {
                         let st = if let Some(st) = subst.get_self_type() {
@@ -579,16 +647,39 @@ impl<'a> CollectionContext<'a> {
         match imm {
             ImmediateKind::FunctionRef { name, type_args } => {
                 // Apply substitution to type args
-                let concrete_args: Vec<_> = type_args
+                let mut concrete_args: Vec<_> = type_args
                     .iter()
                     .map(|ty| subst.apply_ty(self.mir, *ty))
                     .collect();
 
                 // Record function instantiation
                 if let Some(&func_id) = self.functions_by_name.get(name) {
-                    let func_def = &self.mir.functions[func_id];
-                    if !func_def.type_params.is_empty()
-                        && func_def.type_params.len() != concrete_args.len()
+                    let (func_type_params, func_params, func_ret) = {
+                        let func_def = &self.mir.functions[func_id];
+                        (
+                            func_def.type_params.clone(),
+                            func_def.params.clone(),
+                            func_def.ret,
+                        )
+                    };
+
+                    if concrete_args.is_empty() && !func_type_params.is_empty() {
+                        concrete_args = self.infer_type_args_from_subst(&func_type_params, subst);
+                        let unresolved = concrete_args
+                            .iter()
+                            .any(|&ty| matches!(self.mir.ty(ty), MirTy::TypeParam(_)));
+                        if unresolved
+                            && let Some(st) = subst.get_self_type()
+                            && let Some(from_self) = Self::extract_named_type_args_from_self_type(
+                                self.mir,
+                                st,
+                                func_type_params.len(),
+                            )
+                        {
+                            concrete_args = from_self;
+                        }
+                    }
+                    if !func_type_params.is_empty() && func_type_params.len() != concrete_args.len()
                     {
                         self.errors
                             .push(MonomorphizeError::UnsupportedFunctionReference {
@@ -598,10 +689,10 @@ impl<'a> CollectionContext<'a> {
                         return;
                     }
 
-                    let callee_needs_self = func_def.params.iter().any(|&param_id| {
+                    let callee_needs_self = func_params.iter().any(|&param_id| {
                         let param = &self.mir.params[param_id];
                         self.type_needs_self(self.mir.ty(param.ty))
-                    }) || self.type_needs_self(self.mir.ty(func_def.ret));
+                    }) || self.type_needs_self(self.mir.ty(func_ret));
 
                     let inst = if callee_needs_self {
                         if let Some(st) = subst.get_self_type() {

@@ -613,7 +613,17 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
             // This enables bidirectional type inference for closures passed as arguments
             // and allows implicit promotion from T to Optional[T] or Result[T, E]
             match callee.ty.kind() {
-                TyKind::Function { params, .. } => {
+                TyKind::Function {
+                    params,
+                    return_type,
+                } => {
+                    // The call expression type must match the callee's function return type.
+                    // This is critical for propagating contextual type information through
+                    // higher-order calls like map/flatMap/collect.
+                    ctx.register_type(return_type);
+                    ctx.register_type(&expr.ty);
+                    ctx.equate(expr.ty.id(), return_type.id(), expr.span.clone());
+
                     for (arg, param_ty) in arguments.iter().zip(params.iter()) {
                         ctx.register_type(&arg.value.ty);
                         ctx.register_type(param_ty);

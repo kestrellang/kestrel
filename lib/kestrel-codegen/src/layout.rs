@@ -105,7 +105,7 @@ impl<'a> LayoutCache<'a> {
     ) -> &StructLayout {
         let key = (struct_id, type_args.to_vec(), self_type);
         if !self.struct_layouts.contains_key(&key) {
-            let layout = self.compute_struct_layout(struct_id, type_args, self_type);
+            let layout = self.compute_struct_layout(struct_id, type_args, self_type, &HashMap::new());
             self.struct_layouts.insert(key.clone(), layout);
         }
         &self.struct_layouts[&key]
@@ -154,7 +154,8 @@ impl<'a> LayoutCache<'a> {
                 for (id, def) in self.ctx.structs.iter() {
                     let def_name = self.ctx.name(def.name);
                     if def_name == name_data {
-                        let struct_layout = self.compute_struct_layout(id, &type_args, None);
+                        let struct_layout =
+                            self.compute_struct_layout(id, &type_args, None, &HashMap::new());
                         return struct_layout.layout;
                     }
                 }
@@ -162,7 +163,7 @@ impl<'a> LayoutCache<'a> {
                 for (id, def) in self.ctx.enums.iter() {
                     let def_name = self.ctx.name(def.name);
                     if def_name == name_data {
-                        return self.compute_enum_layout(id, &type_args);
+                        return self.compute_enum_layout(id, &type_args, &HashMap::new());
                     }
                 }
                 // Unknown named type - use pointer size as fallback
@@ -229,18 +230,18 @@ impl<'a> LayoutCache<'a> {
         struct_id: Id<Struct>,
         type_args: &[Id<Ty>],
         self_type: Option<Id<Ty>>,
+        outer_subst: &HashMap<Id<kestrel_execution_graph::TypeParam>, Id<Ty>>,
     ) -> StructLayout {
         let struct_def = self.ctx.struct_def(struct_id);
         // Clone the field IDs and type_params to avoid borrowing issues
         let field_ids: Vec<_> = struct_def.fields.clone();
         let type_params: Vec<_> = struct_def.type_params.clone();
 
-        // Build substitution map: type_param_id -> concrete_type
-        let subst: HashMap<_, _> = type_params
-            .iter()
-            .zip(type_args.iter())
-            .map(|(&tp, &ty)| (tp, ty))
-            .collect();
+        // Build substitution map: parent substitutions + local type_param_id -> concrete_type
+        let mut subst = outer_subst.clone();
+        for (&tp, &ty) in type_params.iter().zip(type_args.iter()) {
+            subst.insert(tp, ty);
+        }
 
         let mut layout = Layout::zero(1);
         let mut field_offsets = HashMap::new();
@@ -285,7 +286,8 @@ impl<'a> LayoutCache<'a> {
             // Type parameter - look up in substitution and compute its layout
             MirTy::TypeParam(tp) => {
                 if let Some(&concrete_ty) = subst.get(tp) {
-                    self.layout_of(concrete_ty)
+                    // Keep substitution context active for nested projections in concrete_ty.
+                    self.layout_of_with_subst(concrete_ty, subst, self_type)
                 } else {
                     let tp_def = &self.ctx.type_params[*tp];
                     panic!(
@@ -304,21 +306,21 @@ impl<'a> LayoutCache<'a> {
                 }
             },
 
-            // AssociatedTypeProjection - try to resolve by substituting SelfType in base first
+            // AssociatedTypeProjection - resolve base through substitution, then project Item.
             MirTy::AssociatedTypeProjection { base, protocol, associated } => {
-                // Check if the base is SelfType and we have a self_type to substitute
-                if matches!(self.ctx.ty(*base), MirTy::SelfType) {
-                    if let Some(concrete_self) = self_type {
-                        // For iterator-like patterns where the associated type maps to a type arg,
-                        // use the first type argument as a simple heuristic.
-                        // This handles cases like ArrayIterator[T].Item = T
-                        if let MirTy::Named { type_args, .. } = self.ctx.ty(concrete_self) {
-                            if !type_args.is_empty() {
-                                // Use the first type arg as the associated type
-                                return self.layout_of(type_args[0]);
-                            }
-                        }
-                    }
+                let resolved_base = match self.ctx.ty(*base) {
+                    MirTy::SelfType => self_type.unwrap_or(*base),
+                    MirTy::TypeParam(tp) => subst.get(tp).copied().unwrap_or(*base),
+                    _ => *base,
+                };
+
+                // For iterator-like patterns where Item maps to the first type arg:
+                // ArrayIterator[T].Item = T, PeekableIterator[I].Item = I.Item, etc.
+                if *associated == "Item"
+                    && let MirTy::Named { type_args, .. } = self.ctx.ty(resolved_base)
+                    && !type_args.is_empty()
+                {
+                    return self.layout_of_with_subst(type_args[0], subst, self_type);
                 }
 
                 // Couldn't resolve - fall through to panic
@@ -326,6 +328,7 @@ impl<'a> LayoutCache<'a> {
                 eprintln!("Type ID: {:?}", ty);
                 eprintln!("Base type ID: {:?}", base);
                 eprintln!("Base type: {:?}", self.ctx.ty(*base));
+                eprintln!("Resolved base type: {:?}", self.ctx.ty(resolved_base));
                 eprintln!("self_type: {:?}", self_type);
                 if let Some(st) = self_type {
                     eprintln!("self_type resolved: {:?}", self.ctx.ty(st));
@@ -353,7 +356,9 @@ impl<'a> LayoutCache<'a> {
                 for (id, def) in self.ctx.structs.iter() {
                     let def_name = self.ctx.name(def.name);
                     if def_name == name_data {
-                        return self.compute_struct_layout(id, &new_args, self_type).layout;
+                        return self
+                            .compute_struct_layout(id, &new_args, self_type, subst)
+                            .layout;
                     }
                 }
 
@@ -361,7 +366,7 @@ impl<'a> LayoutCache<'a> {
                 for (id, def) in self.ctx.enums.iter() {
                     let def_name = self.ctx.name(def.name);
                     if def_name == name_data {
-                        return self.compute_enum_layout(id, &new_args);
+                        return self.compute_enum_layout(id, &new_args, subst);
                     }
                 }
 
@@ -403,9 +408,83 @@ impl<'a> LayoutCache<'a> {
             // Type parameter - look up in substitution
             MirTy::TypeParam(tp) => subst.get(tp).copied().unwrap_or(ty),
 
-            // For other types, we need to recursively substitute
-            // But for layout purposes, we can just return the original if the substituted
-            // version isn't interned - the layout computation will handle it
+            MirTy::AssociatedTypeProjection {
+                base,
+                protocol,
+                associated,
+            } => {
+                let new_base = self.substitute_type_for_layout(*base, subst);
+                if new_base == *base {
+                    ty
+                } else {
+                    self.ctx
+                        .lookup_type(&MirTy::AssociatedTypeProjection {
+                            base: new_base,
+                            protocol: *protocol,
+                            associated: associated.clone(),
+                        })
+                        .unwrap_or(ty)
+                }
+            },
+
+            MirTy::Named { name, type_args } => {
+                let new_args: Vec<_> = type_args
+                    .iter()
+                    .map(|&arg| self.substitute_type_for_layout(arg, subst))
+                    .collect();
+
+                if new_args == *type_args {
+                    ty
+                } else {
+                    self.ctx
+                        .lookup_type(&MirTy::Named {
+                            name: *name,
+                            type_args: new_args,
+                        })
+                        .unwrap_or(ty)
+                }
+            },
+
+            MirTy::Tuple(elems) => {
+                let new_elems: Vec<_> = elems
+                    .iter()
+                    .map(|&elem| self.substitute_type_for_layout(elem, subst))
+                    .collect();
+
+                if new_elems == *elems {
+                    ty
+                } else {
+                    self.ctx.lookup_type(&MirTy::Tuple(new_elems)).unwrap_or(ty)
+                }
+            },
+
+            MirTy::Pointer(inner) => {
+                let new_inner = self.substitute_type_for_layout(*inner, subst);
+                if new_inner == *inner {
+                    ty
+                } else {
+                    self.ctx.lookup_type(&MirTy::Pointer(new_inner)).unwrap_or(ty)
+                }
+            },
+
+            MirTy::Ref(inner) => {
+                let new_inner = self.substitute_type_for_layout(*inner, subst);
+                if new_inner == *inner {
+                    ty
+                } else {
+                    self.ctx.lookup_type(&MirTy::Ref(new_inner)).unwrap_or(ty)
+                }
+            },
+
+            MirTy::RefMut(inner) => {
+                let new_inner = self.substitute_type_for_layout(*inner, subst);
+                if new_inner == *inner {
+                    ty
+                } else {
+                    self.ctx.lookup_type(&MirTy::RefMut(new_inner)).unwrap_or(ty)
+                }
+            },
+
             _ => ty,
         }
     }
@@ -424,7 +503,7 @@ impl<'a> LayoutCache<'a> {
             return layout;
         }
 
-        let layout = self.compute_enum_layout(enum_id, type_args);
+        let layout = self.compute_enum_layout(enum_id, type_args, &HashMap::new());
         self.enum_layouts.insert(key, layout);
         layout
     }
@@ -434,6 +513,7 @@ impl<'a> LayoutCache<'a> {
         &mut self,
         enum_id: Id<kestrel_execution_graph::Enum>,
         type_args: &[Id<Ty>],
+        outer_subst: &HashMap<Id<kestrel_execution_graph::TypeParam>, Id<Ty>>,
     ) -> Layout {
         let enum_def = self.ctx.enum_def(enum_id);
         // Clone case IDs to avoid borrowing issues
@@ -451,7 +531,9 @@ impl<'a> LayoutCache<'a> {
             if let Some(struct_id) = case_def.struct_def {
                 // Pass the enum's type_args to the payload struct layout
                 // The payload struct's type params correspond to the enum's type params
-                let payload_layout = self.compute_struct_layout(struct_id, type_args, None).layout;
+                let payload_layout = self
+                    .compute_struct_layout(struct_id, type_args, None, outer_subst)
+                    .layout;
                 if payload_layout.size > max_payload.size {
                     max_payload = payload_layout;
                 }
@@ -460,7 +542,9 @@ impl<'a> LayoutCache<'a> {
                 let case_name = self.ctx.name(case_def.struct_name);
                 for (id, def) in self.ctx.structs.iter() {
                     if self.ctx.name(def.name) == case_name {
-                        let payload_layout = self.compute_struct_layout(id, type_args, None).layout;
+                        let payload_layout = self
+                            .compute_struct_layout(id, type_args, None, outer_subst)
+                            .layout;
                         if payload_layout.size > max_payload.size {
                             max_payload = payload_layout;
                         }

@@ -252,21 +252,16 @@ fn solve_round(ctx: &mut InferenceContext<'_>) -> bool {
     let mut progress = false;
     let constraints = ctx.take_constraints();
 
-    eprintln!("[DEBUG solve_round] Processing {} constraints", constraints.len());
 
-    for (idx, constraint) in constraints.iter().enumerate() {
-        eprintln!("[DEBUG solve_round] Constraint {}: {:?}", idx, constraint);
+    for constraint in constraints.iter() {
         match try_solve(ctx, constraint) {
             Ok(SolveResult::Solved) => {
-                eprintln!("[DEBUG solve_round] Constraint {} SOLVED", idx);
                 progress = true;
             },
             Ok(SolveResult::Deferred) => {
-                eprintln!("[DEBUG solve_round] Constraint {} DEFERRED", idx);
                 ctx.push_constraint(constraint.clone());
             },
             Err(error) => {
-                eprintln!("[DEBUG solve_round] Constraint {} FAILED: {:?}", idx, error);
                 // Accumulate error and mark as progress (constraint was processed)
                 ctx.add_error(error);
                 progress = true;
@@ -274,7 +269,6 @@ fn solve_round(ctx: &mut InferenceContext<'_>) -> bool {
         }
     }
 
-    eprintln!("[DEBUG solve_round] Round complete, progress={}, {} constraints remain", progress, ctx.constraints().len());
 
     progress
 }
@@ -376,9 +370,8 @@ fn unify(
     }
 
     // DEBUG: Print when unifying types
-    eprintln!("[UNIFY] Attempting to unify:");
-    eprintln!("[UNIFY]   a (TyId {:?}): {} (kind: {:?})", a, ty_a, std::mem::discriminant(ty_a.kind()));
-    eprintln!("[UNIFY]   b (TyId {:?}): {} (kind: {:?})", b, ty_b, std::mem::discriminant(ty_b.kind()));
+
+
 
     // Handle inference placeholders
     match (ty_a.kind(), ty_b.kind()) {
@@ -386,7 +379,6 @@ fn unify(
         (TyKind::Infer, TyKind::Infer) => {
             // Map one to the other
             ctx.substitutions_mut().insert(ty_a.id(), ty_b.clone());
-            eprintln!("[UNIFY] Both Infer - unified");
             Ok(SolveResult::Solved)
         },
 
@@ -416,7 +408,6 @@ fn unify(
                 ));
             }
             ctx.substitutions_mut().insert(ty_a.id(), ty_b.clone());
-            eprintln!("[UNIFY] a is Infer - substituted {} := {}", ty_a, ty_b);
             Ok(SolveResult::Solved)
         },
         (_, TyKind::Infer) => {
@@ -428,7 +419,6 @@ fn unify(
                 ));
             }
             ctx.substitutions_mut().insert(ty_b.id(), ty_a.clone());
-            eprintln!("[UNIFY] b is Infer - substituted {} := {}", ty_b, ty_a);
             Ok(SolveResult::Solved)
         },
 
@@ -882,12 +872,9 @@ fn unify(
             let id_a = Symbol::<KestrelLanguage>::metadata(param_a.as_ref()).id();
             let id_b = Symbol::<KestrelLanguage>::metadata(param_b.as_ref()).id();
 
-            eprintln!("[UNIFY] Both TypeParameter - id_a={:?}, id_b={:?}", id_a, id_b);
             if id_a == id_b {
-                eprintln!("[UNIFY] TypeParameter - same ID, unified");
                 Ok(SolveResult::Solved)
             } else {
-                eprintln!("[UNIFY] TypeParameter mismatch!");
                 Err(InferenceError::type_mismatch(
                     ty_a.clone(),
                     ty_b.clone(),
@@ -1034,7 +1021,6 @@ fn unify(
 
         // No match - type mismatch
         _ => {
-            eprintln!("[UNIFY] No matching case - TYPE MISMATCH");
             Err(InferenceError::type_mismatch(
                 ty_a.clone(),
                 ty_b.clone(),
@@ -1061,7 +1047,6 @@ fn resolve_promotable(
 
     // Debug only for function type promotions where we expect issues
     if matches!(to.kind(), TyKind::Function { .. }) && to.to_string().contains("ArrayIterator[Int64].Item") {
-        eprintln!("[DEBUG resolve_promotable] ARRAY ITERATOR ERROR: to_ty={:?} resolved to: {}", to_ty, to);
     }
 
     // Expand type aliases for both types to get the underlying types
@@ -1302,6 +1287,15 @@ fn check_conforms(
 
     // If the type is still an inference placeholder, defer
     if matches!(resolved.kind(), TyKind::Infer) {
+        return Ok(SolveResult::Deferred);
+    }
+
+    // Defer unresolved associated projections like `_.Item` until their container resolves.
+    if let TyKind::AssociatedType { container, .. } = resolved.kind()
+        && container
+            .as_ref()
+            .is_some_and(|c| contains_unresolved_infer(c))
+    {
         return Ok(SolveResult::Deferred);
     }
 
@@ -1586,10 +1580,7 @@ fn resolve_member(
     call_site_substitutions: &kestrel_semantic_tree::ty::Substitutions,
     span: &Span,
 ) -> Result<SolveResult, InferenceError> {
-    eprintln!("[DEBUG resolve_member] Resolving {:?}.{} with {} arguments, result={:?}, {} call-site subs",
-              receiver, member, arguments.len(), result, call_site_substitutions.len());
     let mut receiver_ty = resolve_type(ctx, receiver);
-    eprintln!("[DEBUG resolve_member] Receiver type: {}", receiver_ty);
 
     // Expand type aliases before member lookup.
     // Type aliases (e.g., Int -> Int64) need to be expanded to their underlying
@@ -1618,6 +1609,15 @@ fn resolve_member(
         return Ok(SolveResult::Deferred);
     }
 
+    // Defer unresolved associated projections like `_.Item` until their container resolves.
+    if let TyKind::AssociatedType { container, .. } = receiver_ty.kind()
+        && container
+            .as_ref()
+            .is_some_and(|c| contains_unresolved_infer(c))
+    {
+        return Ok(SolveResult::Deferred);
+    }
+
     // Try to resolve the member via the oracle
     match ctx.oracle().resolve_member(&receiver_ty, member, is_static) {
         Ok(resolution) => {
@@ -1628,8 +1628,6 @@ fn resolve_member(
             for (param_id, ty) in call_site_substitutions.iter() {
                 substitutions.insert(*param_id, ty.clone());
             }
-            eprintln!("[DEBUG resolve_member] Merged substitutions: {} oracle + {} call-site = {} total",
-                      resolution.substitutions.len(), call_site_substitutions.len(), substitutions.len());
 
             // Record the value resolution with merged substitutions
             ctx.values_mut().insert(
@@ -1644,9 +1642,7 @@ fn resolve_member(
             // Create constraints for argument types vs parameter types.
             // This enables proper type inference for literals in expressions like `int32 + 5`
             // where the literal `5` should be constrained to Int32 (not defaulted to Int64).
-            eprintln!("[DEBUG resolve_member] Creating {} parameter constraints", resolution.parameters.len());
-            for (i, (arg_ty_id, param_ty)) in arguments.iter().zip(resolution.parameters.iter()).enumerate() {
-                eprintln!("[DEBUG resolve_member] Param {}: equating arg {:?} with param {}", i, arg_ty_id, param_ty);
+            for (arg_ty_id, param_ty) in arguments.iter().zip(resolution.parameters.iter()) {
                 ctx.register_type(param_ty);
                 ctx.equate(*arg_ty_id, param_ty.id(), span.clone());
             }
@@ -1655,7 +1651,6 @@ fn resolve_member(
             // These enable type parameter inference from constraints like `where Item = Optional[T]`.
             // For example, in `compactMap[T]() where Item = Optional[T]`, this creates a constraint
             // that equates the receiver's Item associated type with Optional[T], allowing T to be inferred.
-            eprintln!("[DEBUG resolve_member] Processing {} where clause constraints", resolution.where_constraints.equality_constraints().len());
             for (left, right) in resolution.where_constraints.equality_constraints() {
                 // Apply substitutions from the method resolution
                 let left_ty = left.apply_substitutions(&substitutions);
@@ -1665,7 +1660,6 @@ fn resolve_member(
                 let left_ty = left_ty.substitute_self(&receiver_ty);
                 let right_ty = right_ty.substitute_self(&receiver_ty);
 
-                eprintln!("[DEBUG resolve_member] Where constraint: {} = {}", left_ty, right_ty);
 
                 // Register both types
                 ctx.register_type(&left_ty);
@@ -1870,16 +1864,6 @@ fn resolve_enum_pattern_binding(
 
     let resolved_ty = resolve_type(ctx, enum_ty);
 
-    // Debug specific TyIds
-    if format!("{:?}", enum_ty) == "TyId(128014)" {
-        eprintln!("[DEBUG resolve_enum_pattern_binding] {:?} resolves to: {}", enum_ty, resolved_ty);
-        eprintln!("[DEBUG resolve_enum_pattern_binding] Binding case: {}", case_name);
-        for (label, binding_ty) in binding_tys {
-            let binding_resolved = resolve_type(ctx, *binding_ty);
-            eprintln!("[DEBUG resolve_enum_pattern_binding]   Binding {:?} {:?} resolves to: {}", label, binding_ty, binding_resolved);
-        }
-    }
-
     // Expand type aliases to get underlying type (e.g., OptionalTypeOperator -> Optional)
     let resolved_ty = resolved_ty.expand_aliases();
 
@@ -1943,13 +1927,6 @@ fn resolve_enum_pattern_binding(
             // Apply substitutions to the parameter type and equate
             let param_ty = param.ty.apply_substitutions(substitutions);
             ctx.register_type(&param_ty);
-
-            // Debug specific TyIds
-            if format!("{:?}", enum_ty) == "TyId(128014)" {
-                eprintln!("[DEBUG resolve_enum_pattern_binding]   Case param {} before subst: {}", idx, param.ty);
-                eprintln!("[DEBUG resolve_enum_pattern_binding]   Case param {} after subst: {}", idx, param_ty);
-                eprintln!("[DEBUG resolve_enum_pattern_binding]   Equating binding {:?} with param {:?}", binding_ty_id, param_ty.id());
-            }
 
             ctx.equate(*binding_ty_id, param_ty.id(), span.clone());
         }
@@ -2337,10 +2314,6 @@ fn check_fully_resolved(ctx: &mut InferenceContext<'_>) {
         // Deduplicate by TyId
         unresolved.sort_by_key(|(id, _)| id.raw());
         unresolved.dedup_by_key(|(id, _)| id.raw());
-        eprintln!("[DEBUG check_fully_resolved] Found {} unresolved inference types:", unresolved.len());
-        for (ty_id, span) in &unresolved {
-            eprintln!("[DEBUG check_fully_resolved]   {:?} at {:?}", ty_id, span);
-        }
         ctx.add_error(InferenceError::ambiguous(unresolved));
     }
 }

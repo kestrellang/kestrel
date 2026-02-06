@@ -23,7 +23,7 @@ use kestrel_semantic_tree::symbol::protocol::ProtocolSymbol;
 use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
 use kestrel_semantic_tree::symbol::type_parameter::TypeParameterSymbol;
 use kestrel_semantic_tree::symbol::associated_type::AssociatedTypeSymbol;
-use kestrel_semantic_tree::ty::{Constraint, Substitutions, Ty, TyKind, WhereClause};
+use kestrel_semantic_tree::ty::{Constraint, ParamInfo, Substitutions, Ty, TyKind, WhereClause};
 use kestrel_span::Span;
 use kestrel_syntax_tree::SyntaxKind;
 use semantic_tree::symbol::{Symbol, SymbolId};
@@ -1125,6 +1125,27 @@ fn infer_from_type(
             {
                 for (pp, ap) in params.iter().zip(arg_params.iter()) {
                     infer_from_type(pp, ap, type_params, substitutions);
+                }
+                infer_from_type(return_type, arg_ret, type_params, substitutions);
+            } else if let TyKind::UnresolvedFunction {
+                param_info,
+                return_type: arg_ret,
+            } = arg_ty.kind()
+            {
+                match param_info {
+                    ParamInfo::Unconstrained => {},
+                    ParamInfo::ImplicitIt { it_type } => {
+                        if params.len() == 1 {
+                            infer_from_type(&params[0], it_type, type_params, substitutions);
+                        }
+                    },
+                    ParamInfo::Explicit { param_types } => {
+                        if params.len() == param_types.len() {
+                            for (pp, ap) in params.iter().zip(param_types.iter()) {
+                                infer_from_type(pp, ap, type_params, substitutions);
+                            }
+                        }
+                    },
                 }
                 infer_from_type(return_type, arg_ret, type_params, substitutions);
             }

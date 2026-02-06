@@ -264,12 +264,8 @@ fn filter_map_flatten() {
     "#,
     )
     .with_stdlib()
-    // TODO: Known limitation - flatMap's closure return type inference doesn't propagate
-    // to associated type Item in time. When flatMap({ arr in arr.iter() }) returns
-    // FlatMapIterator[I, U] where U is the closure's return type, U isn't resolved
-    // before collect() creates Array[U.Item]. This requires changes to constraint
-    // ordering or lazy associated type normalization.
-    .expect(HasError("does not conform to protocol"));
+    .expect(Compiles)
+    .expect(Runs);
 }
 
 #[test]
@@ -567,9 +563,6 @@ fn unzip_iterator() {
     .expect(Runs);
 }
 
-// TODO: Known limitation - flatten requires Item: Iterator. When mapping arrays to their
-// iterators via map(), the resulting FlatMapIterator/FlattenIterator encounters the same
-// "does not conform to protocol" type inference issue as flatMap.
 #[test]
 fn flatten_iterator() {
     Test::new(

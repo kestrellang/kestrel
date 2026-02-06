@@ -11,7 +11,7 @@ use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::associated_type::AssociatedTypeSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::symbol::type_parameter::TypeParameterSymbol;
-use kestrel_semantic_tree::ty::{FloatBits, IntBits, Ty, TyKind};
+use kestrel_semantic_tree::ty::{Constraint, FloatBits, IntBits, Ty, TyKind};
 use kestrel_span::Span;
 use semantic_tree::symbol::{Symbol, SymbolId};
 
@@ -258,30 +258,48 @@ fn resolve_associated_type_from_type_param_with_context(
     let mut current_id = Some(context_id);
     let param_id = type_param.metadata().id();
     let mut all_bounds = Vec::new();
+    let inherited_path = format!("{}.{}", type_param.metadata().name().value, segment);
+    let mut inherited_assoc_bounds = Vec::new();
 
     // Walk up the symbol hierarchy to collect all protocol bounds for this type parameter
     while let Some(id) = current_id {
         if let Some(symbol) = model.query(SymbolFor { id }) {
             // Check GenericsBehavior
             if let Some(generics_beh) = symbol.metadata().get_behavior::<GenericsBehavior>() {
+                let where_clause = generics_beh.where_clause();
                 all_bounds.extend(
-                    generics_beh
-                        .where_clause()
+                    where_clause
                         .bounds_for(param_id)
                         .into_iter()
                         .cloned(),
                 );
+                for constraint in where_clause.constraints() {
+                    if let Constraint::InheritedAssociatedTypeBound { path, bounds, .. } =
+                        constraint
+                        && *path == inherited_path
+                    {
+                        inherited_assoc_bounds.extend(bounds.iter().cloned());
+                    }
+                }
             }
 
             // Check ExtensionTargetBehavior
             if let Some(target_beh) = symbol.metadata().get_behavior::<ExtensionTargetBehavior>() {
+                let where_clause = target_beh.where_clause();
                 all_bounds.extend(
-                    target_beh
-                        .where_clause()
+                    where_clause
                         .bounds_for(param_id)
                         .into_iter()
                         .cloned(),
                 );
+                for constraint in where_clause.constraints() {
+                    if let Constraint::InheritedAssociatedTypeBound { path, bounds, .. } =
+                        constraint
+                        && *path == inherited_path
+                    {
+                        inherited_assoc_bounds.extend(bounds.iter().cloned());
+                    }
+                }
             }
 
             current_id = symbol.metadata().parent().map(|p| p.metadata().id());
@@ -336,6 +354,24 @@ fn resolve_associated_type_from_type_param_with_context(
                             ) {
                                 return Some(result);
                             }
+
+                            // Fallback for cases where the associated type bounds come from an
+                            // inherited associated-type where constraint in the current context,
+                            // e.g. `where I.Item: Iterator` enabling `I.Item.Item`.
+                            if !inherited_assoc_bounds.is_empty()
+                                && let Some(result) = resolve_nested_associated_type_from_bounds(
+                                    model,
+                                    &inherited_assoc_bounds,
+                                    Ty::qualified_associated_type(
+                                        assoc_type_arc.clone(),
+                                        container_ty.clone(),
+                                        span.clone(),
+                                    ),
+                                    &remaining_path[1..],
+                                )
+                            {
+                                return Some(result);
+                            }
                         }
 
                         let ty = Ty::qualified_associated_type(assoc_type_arc, container_ty, span);
@@ -354,6 +390,61 @@ fn resolve_associated_type_from_type_param_with_context(
                 let span = type_param.metadata().span().clone();
                 let container_ty = Ty::type_parameter(type_param.clone(), span.clone());
                 let ty = Ty::qualified_associated_type(assoc_type_arc, container_ty, span);
+                return Some(TypePathResolution::Resolved(ty));
+            }
+        }
+    }
+
+    None
+}
+
+/// Resolve nested associated types from explicit protocol bounds.
+///
+/// This is used for context-derived constraints like `I.Item: Iterator`, where
+/// the associated type symbol itself may not declare bounds, but the where clause does.
+fn resolve_nested_associated_type_from_bounds(
+    model: &SemanticModel,
+    bounds: &[Ty],
+    container_ty: Ty,
+    remaining_path: &[String],
+) -> Option<TypePathResolution> {
+    if remaining_path.is_empty() {
+        return None;
+    }
+
+    let segment = &remaining_path[0];
+
+    for bound in bounds {
+        if let TyKind::Protocol {
+            symbol: protocol, ..
+        } = bound.kind()
+        {
+            let protocol_dyn = protocol.clone() as Arc<dyn Symbol<KestrelLanguage>>;
+
+            for child in protocol_dyn.metadata().children() {
+                if child.metadata().kind() == KestrelSymbolKind::AssociatedType
+                    && child.metadata().name().value == *segment
+                    && let Some(symbol) = model.query(SymbolFor {
+                        id: child.metadata().id(),
+                    })
+                    && let Ok(inner_assoc_arc) =
+                        symbol.into_any_arc().downcast::<AssociatedTypeSymbol>()
+                {
+                    let span = container_ty.span().clone();
+                    let ty = Ty::qualified_associated_type(inner_assoc_arc, container_ty, span);
+                    return Some(TypePathResolution::Resolved(ty));
+                }
+            }
+
+            if let Some(member_id) = model.query(InheritedProtocolMember {
+                protocol_id: protocol.metadata().id(),
+                name: segment.to_string(),
+            }) && let Some(symbol) = model.query(SymbolFor { id: member_id })
+                && let Ok(inner_assoc_arc) =
+                    symbol.into_any_arc().downcast::<AssociatedTypeSymbol>()
+            {
+                let span = container_ty.span().clone();
+                let ty = Ty::qualified_associated_type(inner_assoc_arc, container_ty, span);
                 return Some(TypePathResolution::Resolved(ty));
             }
         }

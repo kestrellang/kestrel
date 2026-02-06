@@ -38,12 +38,9 @@ impl TypeOracle for SemanticModel {
         member: &str,
         is_static: bool,
     ) -> Result<MemberResolution, MemberError> {
-        eprintln!("[DEBUG TypeOracle::resolve_member] receiver_ty={}, member={}, is_static={}",
-                 receiver_ty, member, is_static);
 
         // Handle inference placeholders
         if matches!(receiver_ty.kind(), TyKind::Infer) {
-            eprintln!("[DEBUG TypeOracle::resolve_member] Receiver is Infer, returning UnknownType");
             return Err(MemberError::UnknownType);
         }
 
@@ -175,12 +172,9 @@ impl TypeOracle for SemanticModel {
         // Get the container symbol and substitutions
         let (container, substitutions) = match get_type_container_with_subs(self, receiver_ty) {
             Some((c, s)) => {
-                eprintln!("[DEBUG resolve_member] Container: {}, substitutions: {:?}",
-                         c.metadata().name().value, s);
                 (c, s)
             },
             None => {
-                eprintln!("[DEBUG resolve_member] get_type_container_with_subs returned None for {}", receiver_ty);
                 return Err(MemberError::NotFound {
                     receiver_ty: receiver_ty.clone(),
                     member: member.to_string(),
@@ -189,29 +183,16 @@ impl TypeOracle for SemanticModel {
         };
 
         // Look for the member in direct children
-        eprintln!("[DEBUG resolve_member] Looking for member '{}' in {} direct children",
-                 member, container.metadata().children().len());
-        for child in container.metadata().children() {
-            let child_name = &child.metadata().name().value;
-            let matches = child_name == member;
-            eprintln!("[DEBUG resolve_member]   Child: '{}' (matches: {})", child_name, matches);
-        }
         let member_symbol = container
             .metadata()
             .children()
             .into_iter()
-            .find(|c| {
-                let matches = c.metadata().name().value == member;
-                eprintln!("[DEBUG resolve_member] Checking child '{}' == '{}': {}", c.metadata().name().value, member, matches);
-                matches
-            });
+            .find(|c| c.metadata().name().value == member);
 
-        eprintln!("[DEBUG resolve_member] find() result: {}", if member_symbol.is_some() { "Some" } else { "None" });
 
         // If not found in direct children, search extensions
         let member_symbol = match member_symbol {
             Some(m) => {
-                eprintln!("[DEBUG resolve_member] Found member in direct children!");
                 m
             },
             None => {
@@ -235,6 +216,7 @@ impl TypeOracle for SemanticModel {
                             self,
                             receiver_ty,
                             member,
+                            None,
                         ) {
                             return Ok(resolution);
                         }
@@ -251,8 +233,6 @@ impl TypeOracle for SemanticModel {
         let member_id = member_symbol.metadata().id();
         let member_kind = member_symbol.metadata().kind();
 
-        eprintln!("[DEBUG resolve_member] member_id={:?}, member_kind={:?}, is_static={}",
-                 member_id, member_kind, is_static);
 
         // Handle static vs instance access
         if is_static {
@@ -304,14 +284,10 @@ impl TypeOracle for SemanticModel {
         // Instance access
 
         // Check for field access via MemberAccessBehavior
-        eprintln!("[DEBUG resolve_member] Checking {} behaviors for MemberAccess",
-                 member_symbol.metadata().behaviors().len());
         for behavior in member_symbol.metadata().behaviors() {
-            eprintln!("[DEBUG resolve_member] Behavior kind: {:?}", behavior.kind());
             if behavior.kind() == KestrelBehaviorKind::MemberAccess
                 && let Some(access) = behavior.as_ref().downcast_ref::<MemberAccessBehavior>()
             {
-                eprintln!("[DEBUG resolve_member] Found MemberAccessBehavior, returning member type");
                 // Substitute type parameters and Self with the receiver type
                 let member_ty = access
                     .member_type()
@@ -332,7 +308,6 @@ impl TypeOracle for SemanticModel {
             if behavior.kind() == KestrelBehaviorKind::ComputedMemberAccess
                 && let Some(access) = behavior.as_ref().downcast_ref::<ComputedMemberAccessBehavior>()
             {
-                eprintln!("[DEBUG resolve_member] Found ComputedMemberAccessBehavior, returning member type");
                 // Substitute type parameters and Self with the receiver type
                 let member_ty = access
                     .member_type()
@@ -352,11 +327,9 @@ impl TypeOracle for SemanticModel {
         }
 
         // Check for method access
-        eprintln!("[DEBUG resolve_member] Checking if member is a Function");
         if member_kind == KestrelSymbolKind::Function
             && let Some(callable) = member_symbol.metadata().get_behavior::<CallableBehavior>()
         {
-            eprintln!("[DEBUG resolve_member] Member is a Function with CallableBehavior");
 
             // Create fresh inference variables for method type parameters.
             // For deferred method calls, the binding phase didn't create these.
@@ -365,12 +338,9 @@ impl TypeOracle for SemanticModel {
             let mut combined_subs = substitutions.clone();
             if let Some(func_sym) = member_symbol.as_any().downcast_ref::<FunctionSymbol>() {
                 let method_type_params = func_sym.type_parameters();
-                eprintln!("[DEBUG resolve_member] Method has {} type parameters", method_type_params.len());
                 for type_param in method_type_params {
                     let param_id = type_param.metadata().id();
-                    let param_name = &type_param.metadata().name().value;
                     let infer_ty = Ty::infer(callable.span().clone());
-                    eprintln!("[DEBUG resolve_member] Creating fresh inference variable for method type parameter '{}' (ID: {:?})", param_name, param_id);
                     combined_subs.insert(param_id, infer_ty);
                 }
             }
@@ -393,7 +363,6 @@ impl TypeOracle for SemanticModel {
                 })
                 .collect();
             let where_constraints = get_where_clause_from_symbol(member_symbol.as_ref()).unwrap_or_default();
-            eprintln!("[DEBUG resolve_member] Creating {} parameter constraints", parameters.len());
             return Ok(MemberResolution {
                 ty: return_ty,
                 symbol_id: member_id,
@@ -405,6 +374,120 @@ impl TypeOracle for SemanticModel {
         }
 
         // Member exists but is not accessible (e.g., type alias, nested type)
+        Err(MemberError::NotFound {
+            receiver_ty: receiver_ty.clone(),
+            member: member.to_string(),
+        })
+    }
+
+    fn resolve_member_with_arity(
+        &self,
+        receiver_ty: &Ty,
+        member: &str,
+        is_static: bool,
+        argument_count: usize,
+    ) -> Result<MemberResolution, MemberError> {
+        if let Ok(resolution) = self.resolve_member(receiver_ty, member, is_static)
+            && resolution.parameters.len() == argument_count
+        {
+            return Ok(resolution);
+        }
+
+        if matches!(receiver_ty.kind(), TyKind::Infer) {
+            return Err(MemberError::UnknownType);
+        }
+
+        let (container, substitutions) = match get_type_container_with_subs(self, receiver_ty) {
+            Some((c, s)) => (c, s),
+            None => {
+                if let Some(resolution) = resolve_member_via_protocol_conformance(
+                    self,
+                    receiver_ty,
+                    member,
+                    Some(argument_count),
+                ) {
+                    return Ok(resolution);
+                }
+                return Err(MemberError::NotFound {
+                    receiver_ty: receiver_ty.clone(),
+                    member: member.to_string(),
+                });
+            },
+        };
+
+        let mut candidates: Vec<Arc<dyn Symbol<KestrelLanguage>>> = container
+            .metadata()
+            .children()
+            .into_iter()
+            .filter(|c| c.metadata().name().value == member)
+            .collect();
+
+        let extensions = self.query(ExtensionsFor {
+            target_id: container.metadata().id(),
+        });
+        candidates.extend(
+            extensions
+                .iter()
+                .flat_map(|ext| ext.metadata().children())
+                .filter(|c| c.metadata().name().value == member),
+        );
+
+        for candidate in candidates {
+            if let Some(callable) = candidate.metadata().get_behavior::<CallableBehavior>() {
+                if callable.parameters().len() != argument_count {
+                    continue;
+                }
+                if callable.is_static() != is_static {
+                    continue;
+                }
+
+                let mut combined_subs = substitutions.clone();
+                if let Some(func_sym) = candidate.as_any().downcast_ref::<FunctionSymbol>() {
+                    for type_param in func_sym.type_parameters() {
+                        let param_id = type_param.metadata().id();
+                        combined_subs.insert(param_id, Ty::infer(callable.span().clone()));
+                    }
+                }
+
+                let raw_return_ty = callable.return_type().apply_substitutions(&combined_subs);
+                let returns_self = matches!(raw_return_ty.kind(), TyKind::SelfType);
+                let return_ty =
+                    resolve_all_associated_types(self, &raw_return_ty.substitute_self(receiver_ty));
+                let parameters: Vec<Ty> = callable
+                    .parameters()
+                    .iter()
+                    .map(|p| {
+                        resolve_all_associated_types(
+                            self,
+                            &p.ty
+                                .apply_substitutions(&combined_subs)
+                                .substitute_self(receiver_ty),
+                        )
+                    })
+                    .collect();
+                let where_constraints =
+                    get_where_clause_from_symbol(candidate.as_ref()).unwrap_or_default();
+
+                return Ok(MemberResolution {
+                    ty: return_ty,
+                    symbol_id: candidate.metadata().id(),
+                    substitutions: combined_subs,
+                    parameters,
+                    returns_self,
+                    where_constraints,
+                });
+            }
+        }
+
+        if let Some(resolution) = resolve_member_via_protocol_conformance(
+            self,
+            receiver_ty,
+            member,
+            Some(argument_count),
+        ) {
+            return Ok(resolution);
+        }
+
         Err(MemberError::NotFound {
             receiver_ty: receiver_ty.clone(),
             member: member.to_string(),
@@ -854,11 +937,16 @@ impl TypeOracle for SemanticModel {
                 None
             },
 
-            // For associated types themselves, we might need to resolve nested projections
-            TyKind::AssociatedType { container, .. } => {
-                // First resolve the container's associated type, then look for nested
-                if let Some(resolved_container) = container {
-                    self.resolve_associated_type(resolved_container, assoc_name)
+            // For nested associated types, resolve step-by-step:
+            //   (Container.Assoc).Target
+            // We must first resolve `Container.Assoc`, then resolve `Target` on that result.
+            TyKind::AssociatedType { symbol, container } => {
+                if let Some(base_container) = container {
+                    let base_assoc_name = symbol.metadata().name().value.clone();
+                    self.resolve_associated_type(base_container, &base_assoc_name)
+                        .and_then(|resolved_base| {
+                            self.resolve_associated_type(&resolved_base, assoc_name)
+                        })
                 } else {
                     None
                 }
@@ -1088,6 +1176,24 @@ impl TypeOracle for ContextualOracle<'_> {
             member,
             is_static,
             Some(self.context_symbol_id),
+            None,
+        )
+    }
+
+    fn resolve_member_with_arity(
+        &self,
+        receiver_ty: &Ty,
+        member: &str,
+        is_static: bool,
+        argument_count: usize,
+    ) -> Result<MemberResolution, MemberError> {
+        resolve_member_with_context(
+            self.model,
+            receiver_ty,
+            member,
+            is_static,
+            Some(self.context_symbol_id),
+            Some(argument_count),
         )
     }
 
@@ -1226,13 +1332,11 @@ fn resolve_member_with_context(
     member: &str,
     is_static: bool,
     context: Option<SymbolId>,
+    expected_arity: Option<usize>,
 ) -> Result<MemberResolution, MemberError> {
-    eprintln!("[DEBUG resolve_member_with_context] receiver_ty={}, member={}, is_static={}, context={:?}",
-             receiver_ty, member, is_static, context);
 
     // Handle inference placeholders
     if matches!(receiver_ty.kind(), TyKind::Infer) {
-        eprintln!("[DEBUG resolve_member_with_context] Receiver is Infer, returning UnknownType");
         return Err(MemberError::UnknownType);
     }
 
@@ -1274,6 +1378,11 @@ fn resolve_member_with_context(
                             if let Some(callable) =
                                 child.metadata().get_behavior::<CallableBehavior>()
                             {
+                                if let Some(expected) = expected_arity
+                                    && callable.parameters().len() != expected
+                                {
+                                    continue;
+                                }
                                 // Substitute type parameters and Self (Self = the receiver)
                                 let raw_return_ty =
                                     callable.return_type().apply_substitutions(proto_subs);
@@ -1313,6 +1422,11 @@ fn resolve_member_with_context(
                                 if let Some(callable) =
                                     child.metadata().get_behavior::<CallableBehavior>()
                                 {
+                                    if let Some(expected) = expected_arity
+                                        && callable.parameters().len() != expected
+                                    {
+                                        continue;
+                                    }
                                     // Substitute type parameters and Self (Self = the receiver)
                                     let raw_return_ty =
                                         callable.return_type().apply_substitutions(proto_subs);
@@ -1387,6 +1501,11 @@ fn resolve_member_with_context(
                             if let Some(callable) =
                                 child.metadata().get_behavior::<CallableBehavior>()
                             {
+                                if let Some(expected) = expected_arity
+                                    && callable.parameters().len() != expected
+                                {
+                                    continue;
+                                }
                                 // Substitute type parameters and Self (Self = the type parameter)
                                 let raw_return_ty =
                                     callable.return_type().apply_substitutions(proto_subs);
@@ -1426,6 +1545,11 @@ fn resolve_member_with_context(
                                 if let Some(callable) =
                                     child.metadata().get_behavior::<CallableBehavior>()
                                 {
+                                    if let Some(expected) = expected_arity
+                                        && callable.parameters().len() != expected
+                                    {
+                                        continue;
+                                    }
                                     // Substitute type parameters and Self (Self = the type parameter)
                                     let raw_return_ty =
                                         callable.return_type().apply_substitutions(proto_subs);
@@ -1493,6 +1617,11 @@ fn resolve_member_with_context(
                             if let Some(callable) =
                                 child.metadata().get_behavior::<CallableBehavior>()
                             {
+                                if let Some(expected) = expected_arity
+                                    && callable.parameters().len() != expected
+                                {
+                                    continue;
+                                }
                                 // Substitute type parameters and Self (Self = the associated type)
                                 let raw_return_ty =
                                     callable.return_type().apply_substitutions(proto_subs);
@@ -1532,6 +1661,11 @@ fn resolve_member_with_context(
                                 if let Some(callable) =
                                     child.metadata().get_behavior::<CallableBehavior>()
                                 {
+                                    if let Some(expected) = expected_arity
+                                        && callable.parameters().len() != expected
+                                    {
+                                        continue;
+                                    }
                                     // Substitute type parameters and Self (Self = the associated type)
                                     let raw_return_ty =
                                         callable.return_type().apply_substitutions(proto_subs);
@@ -1572,7 +1706,11 @@ fn resolve_member_with_context(
 
     // For non-type-parameter types, delegate to the model's resolve_member
     // (which doesn't need context)
-    model.resolve_member(receiver_ty, member, is_static)
+    if let Some(argument_count) = expected_arity {
+        model.resolve_member_with_arity(receiver_ty, member, is_static, argument_count)
+    } else {
+        model.resolve_member(receiver_ty, member, is_static)
+    }
 }
 
 /// Walk up from a function to find if it's inside an extension,
@@ -2216,21 +2354,9 @@ fn resolve_member_via_protocol_conformance(
     model: &SemanticModel,
     receiver_ty: &Ty,
     member: &str,
+    expected_arity: Option<usize>,
 ) -> Option<MemberResolution> {
-    eprintln!("[DEBUG resolve_member_via_protocol_conformance] receiver_ty={}, member={}", receiver_ty, member);
     let conformances = collect_protocol_conformances_for_type(model, receiver_ty);
-    eprintln!("[DEBUG resolve_member_via_protocol_conformance] Found {} conformances", conformances.len());
-
-    for (idx, conformance) in conformances.iter().enumerate() {
-        if let TyKind::Protocol { symbol: p, substitutions: s } = conformance.kind() {
-            if p.metadata().name().value == "NotEqual" {
-                eprintln!("[DEBUG resolve_member_via_protocol_conformance] Conformance {}: NotEqual with {} substitutions", idx, s.len());
-                for (id, ty) in s.iter() {
-                    eprintln!("  {:?} -> {}", id, ty);
-                }
-            }
-        }
-    }
 
     for conformance in &conformances {
         let TyKind::Protocol {
@@ -2246,70 +2372,60 @@ fn resolve_member_via_protocol_conformance(
         // collect_protocols_with_inherited again.
         // Check protocol's direct members
         for child in proto.metadata().children() {
-                if child.metadata().name().value == member {
-                    let member_id = child.metadata().id();
-                    if let Some(callable) = child.metadata().get_behavior::<CallableBehavior>() {
-                        eprintln!("[DEBUG resolve_member_via_protocol_conformance] Found '{}' in protocol '{}'", member, proto.metadata().name().value);
-                        eprintln!("[DEBUG resolve_member_via_protocol_conformance] Protocol substitutions: {:?}", proto_subs);
-                        eprintln!("[DEBUG resolve_member_via_protocol_conformance] Raw parameters before substitution:");
-                        for (i, p) in callable.parameters().iter().enumerate() {
-                            eprintln!("  [{}] {}", i, p.ty);
-                        }
-
-                        // Create fresh inference variables for method type parameters.
-                        // For deferred method calls, the binding phase didn't create these.
-                        // For non-deferred calls, the solver will merge with call-site substitutions.
-                        let mut combined_subs = proto_subs.clone();
-                        if let Some(func_sym) = child.as_any().downcast_ref::<FunctionSymbol>() {
-                            let method_type_params = func_sym.type_parameters();
-                            eprintln!("[DEBUG resolve_member_via_protocol_conformance] Method has {} type parameters", method_type_params.len());
-                            for type_param in method_type_params {
-                                let param_id = type_param.metadata().id();
-                                let param_name = &type_param.metadata().name().value;
-                                let infer_ty = Ty::infer(callable.span().clone());
-                                eprintln!("[DEBUG resolve_member_via_protocol_conformance] Creating fresh inference variable for method type parameter '{}' (ID: {:?})", param_name, param_id);
-                                combined_subs.insert(param_id, infer_ty);
-                            }
-                        }
-
-                        let raw_return_ty =
-                            callable.return_type().apply_substitutions(&combined_subs);
-                        let returns_self = matches!(raw_return_ty.kind(), TyKind::SelfType);
-                        let return_ty_before_resolve = raw_return_ty.substitute_self(receiver_ty);
-                        // Recursively resolve any nested associated types in the return type
-                        let mut visited = std::collections::HashSet::new();
-                        let return_ty = deeply_resolve_associated_types(model, &return_ty_before_resolve, &mut visited);
-
-                        let parameters: Vec<Ty> = callable
-                            .parameters()
-                            .iter()
-                            .enumerate()
-                            .map(|(i, p)| {
-                                let after_subs = p.ty.apply_substitutions(&combined_subs);
-                                let after_self = after_subs.substitute_self(receiver_ty);
-                                eprintln!("  [{}] after substitutions: {} -> after substitute_self: {}", i, after_subs, after_self);
-                                // Recursively resolve any nested associated types in the parameter type
-                                let mut visited = std::collections::HashSet::new();
-                                deeply_resolve_associated_types(model, &after_self, &mut visited)
-                            })
-                            .collect();
-
-                        eprintln!("[DEBUG resolve_member_via_protocol_conformance] Final parameters: {:?}", parameters.iter().map(|p| p.to_string()).collect::<Vec<_>>());
-                        let where_constraints = get_where_clause_from_symbol(child.as_ref()).unwrap_or_default();
-                        eprintln!("[DEBUG resolve_member_via_protocol_conformance] where_constraints: {} equality constraints", where_constraints.equality_constraints().len());
-                        for (left, right) in where_constraints.equality_constraints() {
-                            eprintln!("[DEBUG resolve_member_via_protocol_conformance]   {} = {}", left, right);
-                        }
-                        return Some(MemberResolution {
-                            ty: return_ty,
-                            symbol_id: member_id,
-                            substitutions: combined_subs,
-                            parameters,
-                            returns_self,
-                            where_constraints,
-                        });
+            if child.metadata().name().value == member {
+                let member_id = child.metadata().id();
+                if let Some(callable) = child.metadata().get_behavior::<CallableBehavior>() {
+                    if let Some(expected) = expected_arity
+                        && callable.parameters().len() != expected
+                    {
+                        continue;
                     }
+
+                    // Create fresh inference variables for method type parameters.
+                    // For deferred method calls, the binding phase didn't create these.
+                    // For non-deferred calls, the solver will merge with call-site substitutions.
+                    let mut combined_subs = proto_subs.clone();
+                    if let Some(func_sym) = child.as_any().downcast_ref::<FunctionSymbol>() {
+                        for type_param in func_sym.type_parameters() {
+                            let param_id = type_param.metadata().id();
+                            let infer_ty = Ty::infer(callable.span().clone());
+                            combined_subs.insert(param_id, infer_ty);
+                        }
+                    }
+
+                    let raw_return_ty = callable.return_type().apply_substitutions(&combined_subs);
+                    let returns_self = matches!(raw_return_ty.kind(), TyKind::SelfType);
+                    let return_ty_before_resolve = raw_return_ty.substitute_self(receiver_ty);
+                    let mut visited = std::collections::HashSet::new();
+                    let return_ty = deeply_resolve_associated_types(
+                        model,
+                        &return_ty_before_resolve,
+                        &mut visited,
+                    );
+
+                    let parameters: Vec<Ty> = callable
+                        .parameters()
+                        .iter()
+                        .map(|p| {
+                            let after_subs = p.ty.apply_substitutions(&combined_subs);
+                            let after_self = after_subs.substitute_self(receiver_ty);
+                            let mut visited = std::collections::HashSet::new();
+                            deeply_resolve_associated_types(model, &after_self, &mut visited)
+                        })
+                        .collect();
+
+                    let where_constraints =
+                        get_where_clause_from_symbol(child.as_ref()).unwrap_or_default();
+                    return Some(MemberResolution {
+                        ty: return_ty,
+                        symbol_id: member_id,
+                        substitutions: combined_subs,
+                        parameters,
+                        returns_self,
+                        where_constraints,
+                    });
                 }
+            }
         }
 
         // Check extensions on this protocol
@@ -2320,125 +2436,93 @@ fn resolve_member_via_protocol_conformance(
 
         for ext in &proto_extensions {
             for child in ext.metadata().children() {
-                    if child.metadata().name().value == member {
-                        let member_id = child.metadata().id();
-                        if let Some(callable) = child.metadata().get_behavior::<CallableBehavior>()
+                if child.metadata().name().value == member {
+                    let member_id = child.metadata().id();
+                    if let Some(callable) = child.metadata().get_behavior::<CallableBehavior>() {
+                        if let Some(expected) = expected_arity
+                            && callable.parameters().len() != expected
                         {
-                            eprintln!("[DEBUG resolve_member_via_protocol_conformance] Found '{}' in extension on protocol '{}'", member, proto.metadata().name().value);
-                            eprintln!("[DEBUG resolve_member_via_protocol_conformance] Checking if this method belongs to a child protocol conformance...");
+                            continue;
+                        }
 
-                            // Check if this extension adds protocol conformances
-                            // e.g., `extend Comparable: NotEqual[Self]` means methods in the extension
-                            // might be fulfilling requirements from NotEqual, not Comparable
-                            let ext_conformances = ext.metadata().get_behavior::<ConformancesBehavior>();
-                            eprintln!("[DEBUG resolve_member_via_protocol_conformance] Extension has conformances behavior: {}", ext_conformances.is_some());
+                        // Check if this extension adds protocol conformances
+                        // e.g., `extend Comparable: NotEqual[Self]` means methods in the extension
+                        // might be fulfilling requirements from NotEqual, not Comparable
+                        let mut effective_subs = proto_subs.clone();
+                        if let Some(ext_conformances) =
+                            ext.metadata().get_behavior::<ConformancesBehavior>()
+                        {
+                            for ext_conf_ty in ext_conformances.conformances() {
+                                let TyKind::Protocol { symbol: ext_proto, .. } = ext_conf_ty.kind() else {
+                                    continue;
+                                };
+                                let method_in_protocol = ext_proto
+                                    .metadata()
+                                    .children()
+                                    .iter()
+                                    .any(|c| c.metadata().name().value == member);
+                                if !method_in_protocol {
+                                    continue;
+                                }
 
-                            // Try to find which protocol this method actually belongs to
-                            // by checking if we have a conformance for any of the extension's protocols
-                            let mut effective_subs = proto_subs.clone();
-
-                            if let Some(ext_conformances) = ext_conformances {
-                                eprintln!("[DEBUG resolve_member_via_protocol_conformance] Extension adds {} protocol conformances", ext_conformances.conformances().len());
-                                for ext_conf_ty in ext_conformances.conformances() {
-                                    if let TyKind::Protocol { symbol: ext_proto, .. } = ext_conf_ty.kind() {
-                                        let ext_proto_name = &ext_proto.metadata().name().value;
-                                        eprintln!("[DEBUG resolve_member_via_protocol_conformance]   Extension conformance: {}", ext_proto_name);
-
-                                        // Check if this method is declared in this protocol
-                                        let method_in_protocol = ext_proto.metadata().children()
-                                            .iter()
-                                            .any(|c| c.metadata().name().value == member);
-
-                                        if method_in_protocol {
-                                            eprintln!("[DEBUG resolve_member_via_protocol_conformance]   Method '{}' is declared in protocol '{}'", member, ext_proto_name);
-
-                                            // Find the corresponding conformance from our receiver type
-                                            // that matches this protocol
-                                            for candidate_conf in &conformances {
-                                                if let TyKind::Protocol { symbol: candidate_proto, substitutions: candidate_subs } = candidate_conf.kind() {
-                                                    if candidate_proto.metadata().id() == ext_proto.metadata().id() {
-                                                        eprintln!("[DEBUG resolve_member_via_protocol_conformance]   Found matching conformance with {} substitutions", candidate_subs.len());
-                                                        for (id, ty) in candidate_subs.iter() {
-                                                            eprintln!("    {:?} -> {}", id, ty);
-                                                        }
-                                                        // Use the substitutions from this conformance instead!
-                                                        effective_subs = candidate_subs.clone();
-                                                        break;
-                                                    }
-                                                }
-                                            }
-                                        }
+                                // Find the corresponding conformance from our receiver type
+                                // that matches this protocol.
+                                for candidate_conf in &conformances {
+                                    if let TyKind::Protocol {
+                                        symbol: candidate_proto,
+                                        substitutions: candidate_subs,
+                                    } = candidate_conf.kind()
+                                        && candidate_proto.metadata().id() == ext_proto.metadata().id()
+                                    {
+                                        effective_subs = candidate_subs.clone();
+                                        break;
                                     }
                                 }
                             }
+                        }
 
-                            eprintln!("[DEBUG resolve_member_via_protocol_conformance] Using effective substitutions: {:?}", effective_subs);
-                            eprintln!("[DEBUG resolve_member_via_protocol_conformance] Raw parameters before substitution:");
-                            for (i, p) in callable.parameters().iter().enumerate() {
-                                eprintln!("  [{}] {}", i, p.ty);
+                        // Create fresh inference variables for method type parameters.
+                        // For deferred method calls, the binding phase didn't create these.
+                        // For non-deferred calls, the solver will merge with call-site substitutions.
+                        let mut combined_subs = effective_subs;
+                        if let Some(func_sym) = child.as_any().downcast_ref::<FunctionSymbol>() {
+                            for type_param in func_sym.type_parameters() {
+                                let param_id = type_param.metadata().id();
+                                let infer_ty = Ty::infer(callable.span().clone());
+                                combined_subs.insert(param_id, infer_ty);
                             }
+                        }
 
-                            // Create fresh inference variables for method type parameters.
-                            // For deferred method calls, the binding phase didn't create these.
-                            // For non-deferred calls, the solver will merge with call-site substitutions.
-                            let mut combined_subs = effective_subs;
-                            if let Some(func_sym) = child.as_any().downcast_ref::<FunctionSymbol>() {
-                                let method_type_params = func_sym.type_parameters();
-                                eprintln!("[DEBUG resolve_member_via_protocol_conformance] Method has {} type parameters", method_type_params.len());
-                                for type_param in method_type_params {
-                                    let param_id = type_param.metadata().id();
-                                    let param_name = &type_param.metadata().name().value;
-                                    let infer_ty = Ty::infer(callable.span().clone());
-                                    eprintln!("[DEBUG resolve_member_via_protocol_conformance] Creating fresh inference variable for method type parameter '{}' (ID: {:?})", param_name, param_id);
-                                    combined_subs.insert(param_id, infer_ty);
-                                }
-                            }
+                        let raw_return_ty = callable.return_type().apply_substitutions(&combined_subs);
+                        let returns_self = matches!(raw_return_ty.kind(), TyKind::SelfType);
+                        let return_ty_before_resolve = raw_return_ty.substitute_self(receiver_ty);
+                        let mut visited = std::collections::HashSet::new();
+                        let return_ty = deeply_resolve_associated_types(
+                            model,
+                            &return_ty_before_resolve,
+                            &mut visited,
+                        );
 
-                            let raw_return_ty =
-                                callable.return_type().apply_substitutions(&combined_subs);
-                            let returns_self = matches!(raw_return_ty.kind(), TyKind::SelfType);
-                            let return_ty_before_resolve = raw_return_ty.substitute_self(receiver_ty);
-                            // Recursively resolve any nested associated types in the return type
-                            let mut visited = std::collections::HashSet::new();
-                            let return_ty = deeply_resolve_associated_types(model, &return_ty_before_resolve, &mut visited);
+                        let parameters: Vec<Ty> = callable
+                            .parameters()
+                            .iter()
+                            .map(|p| {
+                                let after_subs = p.ty.apply_substitutions(&combined_subs);
+                                let after_self = after_subs.substitute_self(receiver_ty);
+                                let mut visited = std::collections::HashSet::new();
+                                deeply_resolve_associated_types(model, &after_self, &mut visited)
+                            })
+                            .collect();
 
-                            let parameters: Vec<Ty> = callable
-                                .parameters()
-                                .iter()
-                                .enumerate()
-                                .map(|(i, p)| {
-                                    let after_subs = p.ty.apply_substitutions(&combined_subs);
-                                    let after_self = after_subs.substitute_self(receiver_ty);
-                                    eprintln!("  [{}] after substitutions: {} -> after substitute_self: {}", i, after_subs, after_self);
-                                    // Recursively resolve any nested associated types in the parameter type
-                                    let mut visited = std::collections::HashSet::new();
-                                    deeply_resolve_associated_types(model, &after_self, &mut visited)
-                                })
-                                .collect();
-
-                            eprintln!("[DEBUG resolve_member_via_protocol_conformance] Final parameters: {:?}", parameters.iter().map(|p| p.to_string()).collect::<Vec<_>>());
-                            eprintln!("[DEBUG resolve_member_via_protocol_conformance] Returning MemberResolution with {} substitutions", combined_subs.len());
-                            for (id, ty) in combined_subs.iter() {
-                                eprintln!("  {:?} -> {}", id, ty);
-                            }
-                            let where_constraints = get_where_clause_from_symbol(child.as_ref()).unwrap_or_default();
-                            eprintln!("[DEBUG resolve_member_via_protocol_conformance] (extension) member={}, where_constraints: {} total constraints, {} equality constraints",
-                                     child.metadata().name().value,
-                                     where_constraints.constraints().len(),
-                                     where_constraints.equality_constraints().len());
-                            for c in where_constraints.constraints() {
-                                eprintln!("[DEBUG]   constraint: {:?}", c);
-                            }
-                            for (left, right) in where_constraints.equality_constraints() {
-                                eprintln!("[DEBUG resolve_member_via_protocol_conformance]   {} = {}", left, right);
-                            }
-                            return Some(MemberResolution {
-                                ty: return_ty,
-                                symbol_id: member_id,
-                                substitutions: combined_subs,
-                                parameters,
-                                returns_self,
-                                where_constraints,
+                        let where_constraints =
+                            get_where_clause_from_symbol(child.as_ref()).unwrap_or_default();
+                        return Some(MemberResolution {
+                            ty: return_ty,
+                            symbol_id: member_id,
+                            substitutions: combined_subs,
+                            parameters,
+                            returns_self,
+                            where_constraints,
                         });
                     }
                 }

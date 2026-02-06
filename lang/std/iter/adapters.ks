@@ -497,8 +497,10 @@ public struct FlatMapIterator[I, U]: Iterator where I: Iterator, U: Iterator {
     /// Returns the next element from the flattened sequence, or None if exhausted.
     public mutating func next() -> U.Item? {
         while true {
-            if let .Some(currentIter) = self.current {
+            if let .Some(existing) = self.current {
+                var currentIter = existing;
                 if let .Some(item) = currentIter.next() {
+                    self.current = .Some(currentIter);
                     return .Some(item)
                 }
                 self.current = .None;
@@ -538,8 +540,10 @@ public struct FlattenIterator[I]: Iterator where I: Iterator, I.Item: Iterator {
     /// Returns the next element from the flattened sequence.
     public mutating func next() -> I.Item.Item? {
         while true {
-            if let .Some(currentIter) = self.current {
+            if let .Some(existing) = self.current {
+                var currentIter = existing;
                 if let .Some(item) = currentIter.next() {
+                    self.current = .Some(currentIter);
                     return .Some(item)
                 }
                 self.current = .None;

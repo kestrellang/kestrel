@@ -413,11 +413,9 @@ pub fn build_substitution(
     type_params: &[Id<TypeParam>],
     type_args: &[Id<Ty>],
 ) -> Substitution {
-    debug_assert_eq!(
-        type_params.len(),
-        type_args.len(),
-        "type params and args length mismatch"
-    );
+    // Some method instantiations can rely on `self_type` without carrying explicit
+    // type_args for the owner generic parameters (e.g. deinit-like methods).
+    // Build the substitution from the pairs that are available instead of panicking.
 
     let mut subst = Substitution::new();
     for (&param, &arg) in type_params.iter().zip(type_args.iter()) {

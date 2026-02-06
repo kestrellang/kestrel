@@ -10,6 +10,7 @@ use kestrel_semantic_model::queries::ExtensionsFor;
 use kestrel_semantic_model::{IsVisibleFrom, SemanticModel, SymbolFor};
 use kestrel_semantic_tree::behavior::callable::{CallableBehavior, ParameterAccessMode};
 use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
+use kestrel_semantic_tree::behavior::extension_target::ExtensionTargetBehavior;
 use kestrel_semantic_tree::behavior::subscript::SubscriptBehavior;
 use kestrel_semantic_tree::expr::{CallArgument, ExprId, ExprKind, Expression};
 use kestrel_semantic_tree::language::KestrelLanguage;
@@ -1863,6 +1864,21 @@ pub fn resolve_method_call(
                 }
             }
 
+            // Protocol(-extension) methods should use conformance substitutions and Self substitution,
+            // not the receiver nominal type's generic substitutions.
+            let method_is_protocol_scoped = symbol.metadata().parent().is_some_and(|parent| {
+                if parent.metadata().kind() == KestrelSymbolKind::Protocol {
+                    return true;
+                }
+                if parent.metadata().kind() == KestrelSymbolKind::Extension
+                    && let Some(ext_behavior) =
+                        parent.metadata().get_behavior::<ExtensionTargetBehavior>()
+                {
+                    return ext_behavior.is_protocol_extension();
+                }
+                false
+            });
+
             // Handle struct receiver types (e.g., Box[Int])
             if let Some((struct_sym, substitutions)) = resolved_receiver_ty.as_struct_with_subs() {
                 // Check if we need type inference (only for static methods):
@@ -1922,10 +1938,12 @@ pub fn resolve_method_call(
                     }
                 } else {
                     // Add receiver's substitutions to call_substitutions
-                    for (param_id, ty) in substitutions.iter() {
-                        call_substitutions.insert(*param_id, ty.clone());
+                    if !method_is_protocol_scoped {
+                        for (param_id, ty) in substitutions.iter() {
+                            call_substitutions.insert(*param_id, ty.clone());
+                        }
+                        return_ty = return_ty.apply_substitutions(substitutions);
                     }
-                    return_ty = return_ty.apply_substitutions(substitutions);
                 }
             }
             // Handle enum receiver types (e.g., Optional[Int])
@@ -1976,10 +1994,12 @@ pub fn resolve_method_call(
                             .apply_substitutions(&call_substitutions);
                     }
                 } else {
-                    for (param_id, ty) in substitutions.iter() {
-                        call_substitutions.insert(*param_id, ty.clone());
+                    if !method_is_protocol_scoped {
+                        for (param_id, ty) in substitutions.iter() {
+                            call_substitutions.insert(*param_id, ty.clone());
+                        }
+                        return_ty = return_ty.apply_substitutions(substitutions);
                     }
-                    return_ty = return_ty.apply_substitutions(substitutions);
                 }
             }
 

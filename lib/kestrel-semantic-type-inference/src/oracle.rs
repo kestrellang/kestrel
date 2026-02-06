@@ -78,6 +78,27 @@ pub trait TypeOracle {
         is_static: bool,
     ) -> Result<MemberResolution, MemberError>;
 
+    /// Look up a member on a type with expected argument arity for callable members.
+    ///
+    /// Default implementation delegates to `resolve_member` and then verifies callable arity.
+    fn resolve_member_with_arity(
+        &self,
+        receiver_ty: &Ty,
+        member: &str,
+        is_static: bool,
+        argument_count: usize,
+    ) -> Result<MemberResolution, MemberError> {
+        let resolution = self.resolve_member(receiver_ty, member, is_static)?;
+        if resolution.parameters.len() == argument_count {
+            Ok(resolution)
+        } else {
+            Err(MemberError::NotFound {
+                receiver_ty: receiver_ty.clone(),
+                member: member.to_string(),
+            })
+        }
+    }
+
     /// Check if a type conforms to a protocol.
     ///
     /// # Arguments

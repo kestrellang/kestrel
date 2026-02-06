@@ -2736,7 +2736,7 @@ pub fn compile_call(
     match callee {
         Callee::Direct { name, type_args } => {
             // Apply substitution to type args
-            let concrete_args: Vec<_> = type_args
+            let mut concrete_args: Vec<_> = type_args
                 .iter()
                 .map(|ty| {
                     subst
@@ -2744,16 +2744,36 @@ pub fn compile_call(
                         .expect("type substitution failed for direct call")
                 })
                 .collect();
-            ensure_concrete_type_args(
-                ctx.mir,
-                &concrete_args,
-                &format!("direct call {}", ctx.mir.name(*name)),
-            )?;
 
             // Look up the Cranelift FuncId for this function.
             // For extern functions, use the symbol name from extern_info.
             // Otherwise, use the mangled name (with param types for overloads).
             let callee_lookup = ctx.mir.functions.iter().find(|(_, def)| def.name == *name);
+            let callee_def = callee_lookup.map(|(_, def)| def);
+
+            // Some lowered direct calls (notably deinit-style methods) can omit explicit
+            // type args even when calling a generic method on a concrete receiver.
+            // Infer missing args from the first argument's concrete type.
+            if concrete_args.is_empty()
+                && let Some(def) = callee_def
+                && !def.type_params.is_empty()
+                && let Some(first_arg) = args.first()
+                && let Value::Place(place) = &first_arg.value
+                && let Ok(arg_ty) = get_place_type_for_call(ctx, place, local_map, subst)
+                && let Some(inferred) = extract_named_type_args_for_count(
+                    ctx.mir,
+                    arg_ty,
+                    def.type_params.len(),
+                )
+            {
+                concrete_args = inferred;
+            }
+
+            ensure_concrete_type_args(
+                ctx.mir,
+                &concrete_args,
+                &format!("direct call {}", ctx.mir.name(*name)),
+            )?;
 
             let self_type = match callee_lookup {
                 Some((_, def)) if func_uses_self(ctx.mir, def) => {
@@ -2791,7 +2811,6 @@ pub fn compile_call(
                 ))
             })?;
 
-            let callee_def = callee_lookup.map(|(_, def)| def);
             let is_extern = callee_def.map(|def| def.is_extern()).unwrap_or(false);
             let mut needs_sret = false;
             let mut ret_ptr = None;
@@ -3356,6 +3375,24 @@ fn get_place_type_for_call(
                 ))),
             }
         },
+    }
+}
+
+fn extract_named_type_args_for_count(
+    mir: &MirContext,
+    mut ty: Id<Ty>,
+    expected_len: usize,
+) -> Option<Vec<Id<Ty>>> {
+    loop {
+        match mir.ty(ty) {
+            MirTy::Ref(inner) | MirTy::RefMut(inner) | MirTy::Pointer(inner) => {
+                ty = *inner;
+            },
+            MirTy::Named { type_args, .. } if type_args.len() == expected_len => {
+                return Some(type_args.clone());
+            },
+            _ => return None,
+        }
     }
 }
 
