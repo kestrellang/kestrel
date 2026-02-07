@@ -317,12 +317,13 @@ fn collect_type_param_substitutions(
                 params: arg_params,
                 return_type: arg_ret,
             } = arg_ty.kind()
-                && param_params.len() == arg_params.len() {
-                    for (p, a) in param_params.iter().zip(arg_params.iter()) {
-                        collect_type_param_substitutions(p, a, method_param_ids, subs);
-                    }
-                    collect_type_param_substitutions(param_ret, arg_ret, method_param_ids, subs);
+                && param_params.len() == arg_params.len()
+            {
+                for (p, a) in param_params.iter().zip(arg_params.iter()) {
+                    collect_type_param_substitutions(p, a, method_param_ids, subs);
                 }
+                collect_type_param_substitutions(param_ret, arg_ret, method_param_ids, subs);
+            }
         },
         TyKind::Pointer(param_inner) => {
             if let TyKind::Pointer(arg_inner) = arg_ty.kind() {
@@ -3777,10 +3778,8 @@ fn lower_call(
                         all_params.push(Symbol::metadata(tp.as_ref()).id());
                     }
                 } else if let Some(ext_sym) = parent.as_ref().downcast_ref::<ExtensionSymbol>() {
-                    let is_protocol_extension = ext_sym
-                        .target_type()
-                        .as_ref()
-                        .is_some_and(is_protocol_type);
+                    let is_protocol_extension =
+                        ext_sym.target_type().as_ref().is_some_and(is_protocol_type);
                     for tp in ext_sym.referenced_type_parameters() {
                         if is_protocol_extension && tp.metadata().name().value == "Self" {
                             continue;
@@ -3827,10 +3826,8 @@ fn lower_call(
                         all_params.push(Symbol::metadata(tp.as_ref()).id());
                     }
                 } else if let Some(ext_sym) = parent.as_ref().downcast_ref::<ExtensionSymbol>() {
-                    let is_protocol_extension = ext_sym
-                        .target_type()
-                        .as_ref()
-                        .is_some_and(is_protocol_type);
+                    let is_protocol_extension =
+                        ext_sym.target_type().as_ref().is_some_and(is_protocol_type);
                     for tp in ext_sym.referenced_type_parameters() {
                         if is_protocol_extension && tp.metadata().name().value == "Self" {
                             continue;
@@ -3851,18 +3848,19 @@ fn lower_call(
             None
         };
 
-        let mut effective_subs = if let Some(callable) = callable.filter(|_| !method_param_ids.is_empty()) {
-            infer_type_param_substitutions_from_call(
-                substitutions,
-                callable,
-                call_arg_types,
-                is_instance_method,
-                receiver_ty,
-                &method_param_ids,
-            )
-        } else {
-            substitutions.clone()
-        };
+        let mut effective_subs =
+            if let Some(callable) = callable.filter(|_| !method_param_ids.is_empty()) {
+                infer_type_param_substitutions_from_call(
+                    substitutions,
+                    callable,
+                    call_arg_types,
+                    is_instance_method,
+                    receiver_ty,
+                    &method_param_ids,
+                )
+            } else {
+                substitutions.clone()
+            };
 
         // For static method calls on generic types (e.g. Pointer[Int64].nullPointer()),
         // the parent type parameter substitutions live in the receiver type, not in the
@@ -4758,14 +4756,15 @@ fn lower_subscript_call(
                             // Find the parameter whose type is this type parameter
                             for (param_idx, param) in params.iter().enumerate() {
                                 if let TyKind::TypeParameter(param_tp) = param.ty.kind()
-                                    && param_tp.metadata().id() == type_param_id {
-                                        // Found it! Use the corresponding argument's type
-                                        if let Some(arg) = arguments.get(param_idx) {
-                                            let arg_mir_ty = lower_type(ctx, &arg.value.ty);
-                                            type_args.push(arg_mir_ty);
-                                        }
-                                        break;
+                                    && param_tp.metadata().id() == type_param_id
+                                {
+                                    // Found it! Use the corresponding argument's type
+                                    if let Some(arg) = arguments.get(param_idx) {
+                                        let arg_mir_ty = lower_type(ctx, &arg.value.ty);
+                                        type_args.push(arg_mir_ty);
                                     }
+                                    break;
+                                }
                             }
                         }
                     }

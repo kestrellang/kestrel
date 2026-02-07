@@ -560,9 +560,7 @@ fn expression_contains_break(expr: &Expression) -> bool {
                     .map(|b| match b {
                         ElseBranch::Block { statements, value } => {
                             statements.iter().any(|s| statement_contains_break(&s.kind))
-                                || value
-                                    .as_ref()
-                                    .is_some_and(|v| expression_contains_break(v))
+                                || value.as_ref().is_some_and(|v| expression_contains_break(v))
                         },
                         ElseBranch::ElseIf(e) => expression_contains_break(e),
                     })
@@ -610,9 +608,7 @@ fn expression_contains_break(expr: &Expression) -> bool {
         ExprKind::Match { arms, .. } => arms.iter().any(|arm| expression_contains_break(&arm.body)),
         ExprKind::Block { statements, value } => {
             statements.iter().any(|s| statement_contains_break(&s.kind))
-                || value
-                    .as_ref()
-                    .is_some_and(|v| expression_contains_break(v))
+                || value.as_ref().is_some_and(|v| expression_contains_break(v))
         },
         _ => false,
     }

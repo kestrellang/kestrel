@@ -1157,7 +1157,9 @@ fn resolve_promotable(
     let to = resolve_type(ctx, to_ty);
 
     // Debug only for function type promotions where we expect issues
-    if matches!(to.kind(), TyKind::Function { .. }) { to.to_string().contains("ArrayIterator[Int64].Item"); }
+    if matches!(to.kind(), TyKind::Function { .. }) {
+        to.to_string().contains("ArrayIterator[Int64].Item");
+    }
 
     // Expand type aliases for both types to get the underlying types
     let from = from.expand_aliases();
@@ -2211,20 +2213,21 @@ fn resolve_type(ctx: &InferenceContext<'_>, id: TyId) -> Ty {
     // U.Item has substitutions applied and U becomes Array[Int64], giving
     // us Array[Int64].Item which should resolve to Int64.
     if let TyKind::AssociatedType { symbol, container } = resolved.kind()
-        && let Some(container_ty) = container {
-            // First, recursively resolve the container (it might have substitutions too)
-            let resolved_container = resolve_type(ctx, container_ty.id());
-            let name = symbol.metadata().name().value.clone();
+        && let Some(container_ty) = container
+    {
+        // First, recursively resolve the container (it might have substitutions too)
+        let resolved_container = resolve_type(ctx, container_ty.id());
+        let name = symbol.metadata().name().value.clone();
 
-            // Only try to resolve if the container is concrete (not Infer)
-            if !matches!(resolved_container.kind(), TyKind::Infer)
-                && let Some(concrete_ty) = ctx
-                    .oracle()
-                    .resolve_associated_type(&resolved_container, &name)
-                {
-                    return concrete_ty;
-                }
+        // Only try to resolve if the container is concrete (not Infer)
+        if !matches!(resolved_container.kind(), TyKind::Infer)
+            && let Some(concrete_ty) = ctx
+                .oracle()
+                .resolve_associated_type(&resolved_container, &name)
+        {
+            return concrete_ty;
         }
+    }
 
     // If the resolved type is a struct with type arguments that might contain
     // associated types, recursively resolve them. This handles cases like
@@ -2537,7 +2540,9 @@ fn find_nested_infer_types(
         TyKind::Pointer(pointee) => {
             find_nested_infer_types(pointee, ctx, unresolved, visited);
         },
-        TyKind::AssociatedType { container: Some(c), .. } => {
+        TyKind::AssociatedType {
+            container: Some(c), ..
+        } => {
             find_nested_infer_types(c, ctx, unresolved, visited);
         },
         _ => {},

@@ -220,12 +220,13 @@ fn string_contains_interpolation(text: &str) -> bool {
     let mut chars = text.chars().peekable();
     while let Some(c) = chars.next() {
         if c == '\\'
-            && let Some(&next) = chars.peek() {
-                if next == '(' {
-                    return true;
-                }
-                chars.next(); // Skip escaped character
+            && let Some(&next) = chars.peek()
+        {
+            if next == '(' {
+                return true;
             }
+            chars.next(); // Skip escaped character
+        }
     }
     false
 }

@@ -2545,9 +2545,10 @@ pub(super) fn filter_applicable_extensions(
                                     tp_symbol.metadata().id(),
                                     bound,
                                     ctx.where_clause(),
-                                ) {
-                                    continue;
-                                }
+                                )
+                            {
+                                continue;
+                            }
                             // Constraint not satisfied
                             return None;
                         }
@@ -2682,20 +2683,22 @@ fn normalize_type_param_with_equality(
         {
             // Check if left side is our type parameter
             if let TyKind::TypeParameter(tp) = left.kind()
-                && tp.metadata().id() == param_id {
-                    // Return the right side if it's concrete enough for member access
-                    if is_concrete_for_member_access(right) {
-                        return Some(right.clone());
-                    }
+                && tp.metadata().id() == param_id
+            {
+                // Return the right side if it's concrete enough for member access
+                if is_concrete_for_member_access(right) {
+                    return Some(right.clone());
                 }
+            }
             // Also check if right side is our type parameter (constraints are symmetric)
             if let TyKind::TypeParameter(tp) = right.kind()
-                && tp.metadata().id() == param_id {
-                    // Return the left side if it's concrete enough for member access
-                    if is_concrete_for_member_access(left) {
-                        return Some(left.clone());
-                    }
+                && tp.metadata().id() == param_id
+            {
+                // Return the left side if it's concrete enough for member access
+                if is_concrete_for_member_access(left) {
+                    return Some(left.clone());
                 }
+            }
         }
     }
     None
@@ -2722,18 +2725,20 @@ fn type_param_has_bound_in_where_clause(
     for constraint in where_clause.constraints() {
         // Check if this constraint is for our type parameter
         if let Some(constraint_param_id) = constraint.type_parameter_id()
-            && constraint_param_id == param_id {
-                // Check if any of the bounds match
-                for constraint_bound in constraint.bounds() {
-                    if let TyKind::Protocol {
-                        symbol: bound_proto,
-                        ..
-                    } = constraint_bound.kind()
-                        && bound_proto.metadata().id() == required_proto.metadata().id() {
-                            return true;
-                        }
+            && constraint_param_id == param_id
+        {
+            // Check if any of the bounds match
+            for constraint_bound in constraint.bounds() {
+                if let TyKind::Protocol {
+                    symbol: bound_proto,
+                    ..
+                } = constraint_bound.kind()
+                    && bound_proto.metadata().id() == required_proto.metadata().id()
+                {
+                    return true;
                 }
             }
+        }
     }
 
     false

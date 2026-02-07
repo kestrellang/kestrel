@@ -700,110 +700,106 @@ pub fn get_associated_type_bounds_from_context(
     // but we also need to check the parent's where clause for inherited constraints
     if let Some(function) = ctx.model.query(SymbolFor {
         id: ctx.function_id,
-    })
-        && let Some(parent) = function.metadata().parent() {
-            // Get the parent's where clause depending on its kind
-            let parent_where_clause = match parent.metadata().kind() {
-                KestrelSymbolKind::Extension => parent
-                    .metadata()
-                    .get_behavior::<ExtensionTargetBehavior>()
-                    .map(|t| t.where_clause().clone()),
-                KestrelSymbolKind::Struct | KestrelSymbolKind::Enum => parent
-                    .metadata()
-                    .get_behavior::<GenericsBehavior>()
-                    .map(|g| g.where_clause().clone()),
-                _ => None,
-            };
+    }) && let Some(parent) = function.metadata().parent()
+    {
+        // Get the parent's where clause depending on its kind
+        let parent_where_clause = match parent.metadata().kind() {
+            KestrelSymbolKind::Extension => parent
+                .metadata()
+                .get_behavior::<ExtensionTargetBehavior>()
+                .map(|t| t.where_clause().clone()),
+            KestrelSymbolKind::Struct | KestrelSymbolKind::Enum => parent
+                .metadata()
+                .get_behavior::<GenericsBehavior>()
+                .map(|g| g.where_clause().clone()),
+            _ => None,
+        };
 
-            if let Some(where_clause) = parent_where_clause {
-                for constraint in where_clause.constraints() {
-                    if let Constraint::SelfBound {
-                        associated_type_path,
-                        bounds: self_bounds,
-                        ..
-                    } = constraint
-                        && path_matches_associated_type(
-                            associated_type_path,
-                            &assoc_name,
-                            container,
-                        ) {
-                            for bound in self_bounds {
-                                if let TyKind::Protocol { symbol, .. } = bound.kind() {
-                                    // Check if this protocol is already in bounds
-                                    let already_present = bounds.iter().any(|b| {
-                                        if let TyKind::Protocol {
-                                            symbol: existing, ..
-                                        } = b.kind()
-                                        {
-                                            existing.metadata().id() == symbol.metadata().id()
-                                        } else {
-                                            false
-                                        }
-                                    });
-                                    if !already_present {
-                                        bounds.push(bound.clone());
-                                    }
+        if let Some(where_clause) = parent_where_clause {
+            for constraint in where_clause.constraints() {
+                if let Constraint::SelfBound {
+                    associated_type_path,
+                    bounds: self_bounds,
+                    ..
+                } = constraint
+                    && path_matches_associated_type(associated_type_path, &assoc_name, container)
+                {
+                    for bound in self_bounds {
+                        if let TyKind::Protocol { symbol, .. } = bound.kind() {
+                            // Check if this protocol is already in bounds
+                            let already_present = bounds.iter().any(|b| {
+                                if let TyKind::Protocol {
+                                    symbol: existing, ..
+                                } = b.kind()
+                                {
+                                    existing.metadata().id() == symbol.metadata().id()
+                                } else {
+                                    false
                                 }
+                            });
+                            if !already_present {
+                                bounds.push(bound.clone());
                             }
                         }
-                    if let Constraint::InheritedAssociatedTypeBound {
-                        path,
-                        bounds: assoc_bounds,
-                        ..
-                    } = constraint
-                    {
-                        let path_segments: Vec<String> =
-                            path.split('.').map(|s| s.to_string()).collect();
-                        if path_matches_associated_type(&path_segments, &assoc_name, container) {
-                            for bound in assoc_bounds {
-                                if let TyKind::Protocol { symbol, .. } = bound.kind() {
-                                    let already_present = bounds.iter().any(|b| {
-                                        if let TyKind::Protocol {
-                                            symbol: existing, ..
-                                        } = b.kind()
-                                        {
-                                            existing.metadata().id() == symbol.metadata().id()
-                                        } else {
-                                            false
-                                        }
-                                    });
-                                    if !already_present {
-                                        bounds.push(bound.clone());
+                    }
+                }
+                if let Constraint::InheritedAssociatedTypeBound {
+                    path,
+                    bounds: assoc_bounds,
+                    ..
+                } = constraint
+                {
+                    let path_segments: Vec<String> =
+                        path.split('.').map(|s| s.to_string()).collect();
+                    if path_matches_associated_type(&path_segments, &assoc_name, container) {
+                        for bound in assoc_bounds {
+                            if let TyKind::Protocol { symbol, .. } = bound.kind() {
+                                let already_present = bounds.iter().any(|b| {
+                                    if let TyKind::Protocol {
+                                        symbol: existing, ..
+                                    } = b.kind()
+                                    {
+                                        existing.metadata().id() == symbol.metadata().id()
+                                    } else {
+                                        false
                                     }
+                                });
+                                if !already_present {
+                                    bounds.push(bound.clone());
                                 }
                             }
                         }
                     }
-                    if let Constraint::TypeBound {
-                        param: None,
-                        param_name,
-                        bounds: param_bounds,
-                        ..
-                    } = constraint
-                    {
-                        // TypeBound with param: None matches simple associated type constraints
-                        // Match when container is None or Self (for protocol extensions)
-                        let container_is_self_or_none = match container {
-                            None => true,
-                            Some(ty) => matches!(ty.kind(), TyKind::SelfType),
-                        };
+                }
+                if let Constraint::TypeBound {
+                    param: None,
+                    param_name,
+                    bounds: param_bounds,
+                    ..
+                } = constraint
+                {
+                    // TypeBound with param: None matches simple associated type constraints
+                    // Match when container is None or Self (for protocol extensions)
+                    let container_is_self_or_none = match container {
+                        None => true,
+                        Some(ty) => matches!(ty.kind(), TyKind::SelfType),
+                    };
 
-                        if param_name == &assoc_name && container_is_self_or_none {
-                            for bound in param_bounds {
-                                if let TyKind::Protocol { symbol, .. } = bound.kind() {
-                                    let already_present = bounds.iter().any(|b| {
-                                        if let TyKind::Protocol {
-                                            symbol: existing, ..
-                                        } = b.kind()
-                                        {
-                                            existing.metadata().id() == symbol.metadata().id()
-                                        } else {
-                                            false
-                                        }
-                                    });
-                                    if !already_present {
-                                        bounds.push(bound.clone());
+                    if param_name == &assoc_name && container_is_self_or_none {
+                        for bound in param_bounds {
+                            if let TyKind::Protocol { symbol, .. } = bound.kind() {
+                                let already_present = bounds.iter().any(|b| {
+                                    if let TyKind::Protocol {
+                                        symbol: existing, ..
+                                    } = b.kind()
+                                    {
+                                        existing.metadata().id() == symbol.metadata().id()
+                                    } else {
+                                        false
                                     }
+                                });
+                                if !already_present {
+                                    bounds.push(bound.clone());
                                 }
                             }
                         }
@@ -811,6 +807,7 @@ pub fn get_associated_type_bounds_from_context(
                 }
             }
         }
+    }
 
     bounds
 }
