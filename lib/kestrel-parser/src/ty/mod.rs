@@ -121,7 +121,7 @@ impl TyExpression {
 fn is_trivia(token: &Token) -> bool {
     matches!(
         token,
-        Token::Whitespace | Token::LineComment | Token::BlockComment
+        Token::Whitespace | Token::Newline | Token::LineComment | Token::BlockComment
     )
 }
 
@@ -168,17 +168,53 @@ pub(crate) fn ty_parser<'tokens>()
             .ignore_then(just(Token::Underscore).map_with(|_, e| to_kestrel_span(e.span())))
             .map(TyVariant::Inferred);
 
-        // Unit type or tuple/function type
+        // Unit type, grouping (T), tuple (T, U) or (T,), or function type
+        // We need to distinguish:
+        // - () -> Unit
+        // - (T) -> Grouping (just returns T, for precedence)
+        // - (T,) -> Single-element Tuple
+        // - (T, U, ...) -> Tuple
+        // - (...) -> T -> Function
         let paren_types = {
             skip_trivia()
                 .ignore_then(just(Token::LParen).map_with(|_, e| to_kestrel_span(e.span())))
                 .then(
-                    ty.clone()
-                        .separated_by(just(Token::Comma))
-                        .allow_trailing()
-                        .collect::<Vec<_>>(),
+                    // Empty parens case
+                    skip_trivia()
+                        .ignore_then(just(Token::RParen).map_with(|_, e| to_kestrel_span(e.span())))
+                        .map(|rparen| (Vec::new(), false, rparen))
+                        .or(
+                            // At least one type
+                            ty.clone()
+                                .then(
+                                    // Check for comma after first element
+                                    skip_trivia()
+                                        .ignore_then(
+                                            just(Token::Comma)
+                                                .map_with(|_, e| to_kestrel_span(e.span())),
+                                        )
+                                        .then(
+                                            // After comma: more types separated by comma
+                                            ty.clone()
+                                                .separated_by(
+                                                    skip_trivia().ignore_then(just(Token::Comma)),
+                                                )
+                                                .allow_trailing()
+                                                .collect::<Vec<_>>(),
+                                        )
+                                        .map(|(_comma, more)| (true, more))
+                                        .or(empty().to((false, Vec::new()))),
+                                )
+                                .then(skip_trivia().ignore_then(
+                                    just(Token::RParen).map_with(|_, e| to_kestrel_span(e.span())),
+                                ))
+                                .map(|((first, (has_comma, more)), rparen)| {
+                                    let mut types = vec![first];
+                                    types.extend(more);
+                                    (types, has_comma, rparen)
+                                }),
+                        ),
                 )
-                .then(just(Token::RParen).map_with(|_, e| to_kestrel_span(e.span())))
                 .then(
                     // Optional arrow and return type for function types
                     skip_trivia()
@@ -187,12 +223,16 @@ pub(crate) fn ty_parser<'tokens>()
                         .then(ty.clone())
                         .or_not(),
                 )
-                .map(|(((lparen, types), rparen), arrow_and_return)| {
+                .map(|((lparen, (types, has_comma, rparen)), arrow_and_return)| {
                     if let Some((arrow_span, return_ty)) = arrow_and_return {
                         TyVariant::Function(lparen, types, rparen, arrow_span, Box::new(return_ty))
                     } else if types.is_empty() {
                         TyVariant::Unit(lparen, rparen)
+                    } else if types.len() == 1 && !has_comma {
+                        // (T) - grouping, just return the inner type
+                        types.into_iter().next().unwrap()
                     } else {
+                        // (T,) or (T, U, ...) - tuple
                         TyVariant::Tuple(lparen, types, rparen)
                     }
                 })
@@ -218,40 +258,97 @@ pub(crate) fn ty_parser<'tokens>()
             .map(|(segments, args)| TyVariant::Path { segments, args })
             .boxed();
 
-        // Array type: [T]
-        let array = skip_trivia()
+        // Array type [T] or Dictionary type [K: V]
+        let array_or_dict = skip_trivia()
             .ignore_then(just(Token::LBracket).map_with(|_, e| to_kestrel_span(e.span())))
             .then(ty.clone())
+            .then(
+                // Check for colon - if present, this is a dictionary [K: V]
+                skip_trivia()
+                    .ignore_then(just(Token::Colon).map_with(|_, e| to_kestrel_span(e.span())))
+                    .then(ty.clone())
+                    .or_not(),
+            )
             .then(
                 skip_trivia()
                     .ignore_then(just(Token::RBracket).map_with(|_, e| to_kestrel_span(e.span()))),
             )
-            .map(|((lbracket, element_ty), rbracket)| {
-                TyVariant::Array(lbracket, Box::new(element_ty), rbracket)
-            })
+            .map(
+                |(((lbracket, first_ty), maybe_colon_and_value), rbracket)| {
+                    if let Some((colon_span, value_ty)) = maybe_colon_and_value {
+                        // Dictionary: [K: V]
+                        TyVariant::Dictionary(
+                            lbracket,
+                            Box::new(first_ty),
+                            colon_span,
+                            Box::new(value_ty),
+                            rbracket,
+                        )
+                    } else {
+                        // Array: [T]
+                        TyVariant::Array(lbracket, Box::new(first_ty), rbracket)
+                    }
+                },
+            )
             .boxed();
 
-        // Try never first, then inferred, then paren types, then array, then path
+        // Try never first, then inferred, then paren types, then array/dict, then path
         let base_ty = never
             .or(inferred)
             .or(paren_types)
-            .or(array)
+            .or(array_or_dict)
             .or(path)
             .boxed();
 
-        // Optional modifier: T?
-        base_ty
-            .then(
-                skip_trivia()
-                    .ignore_then(just(Token::Question).map_with(|_, e| to_kestrel_span(e.span())))
-                    .or_not(),
+        // Type operators: ? (Optional) and throws E (Result)
+        // Both operators can appear in any order and can be chained:
+        // - T? -> Optional[T]
+        // - T throws E -> Result[T, E]
+        // - T? throws E -> Result[Optional[T], E]
+        // - T throws E? -> Optional[Result[T, E]]
+        // - T throws E1 throws E2 -> Result[Result[T, E1], E2]
+        //
+        // We use a helper enum to track which operator we found
+        #[derive(Clone)]
+        enum TypeOperator {
+            Optional(Span),
+            Throws(Span, TyVariant),
+        }
+
+        let type_operator = skip_trivia()
+            .ignore_then(
+                just(Token::Question)
+                    .map_with(|_, e| TypeOperator::Optional(to_kestrel_span(e.span())))
+                    .or(just(Token::Throws)
+                        .map_with(|_, e| to_kestrel_span(e.span()))
+                        .then(ty.clone())
+                        .map(|(throws_span, error_ty)| {
+                            TypeOperator::Throws(throws_span, error_ty)
+                        })),
             )
-            .map(|(base, opt_span)| {
-                if let Some(question_span) = opt_span {
-                    TyVariant::Optional(Box::new(base), question_span)
-                } else {
-                    base
+            .boxed();
+
+        // Parse base type, then zero or more type operators
+        base_ty
+            .then(type_operator.repeated().collect::<Vec<_>>())
+            .map(|(base, operators)| {
+                // Apply operators left-to-right
+                let mut result = base;
+                for op in operators {
+                    match op {
+                        TypeOperator::Optional(question_span) => {
+                            result = TyVariant::Optional(Box::new(result), question_span);
+                        },
+                        TypeOperator::Throws(throws_span, error_ty) => {
+                            result = TyVariant::Result(
+                                Box::new(result),
+                                throws_span,
+                                Box::new(error_ty),
+                            );
+                        },
+                    }
                 }
+                result
             })
             .boxed()
     })
@@ -274,8 +371,7 @@ where
         },
         Err(errors) => {
             for error in errors {
-                let span = error.span();
-                sink.error_at(format!("Parse error: {:?}", error), *span);
+                sink.error_from_rich(&error);
             }
         },
     }
@@ -312,8 +408,21 @@ pub(crate) fn emit_ty_variant(sink: &mut EventSink, variant: &TyVariant) {
         TyVariant::Array(lbracket, element_ty, rbracket) => {
             emit_array_type(sink, lbracket.clone(), element_ty, rbracket.clone());
         },
+        TyVariant::Dictionary(lbracket, key_ty, colon, value_ty, rbracket) => {
+            emit_dictionary_type(
+                sink,
+                lbracket.clone(),
+                key_ty,
+                colon.clone(),
+                value_ty,
+                rbracket.clone(),
+            );
+        },
         TyVariant::Optional(base_ty, question_span) => {
             emit_optional_type(sink, base_ty, question_span.clone());
+        },
+        TyVariant::Result(success_ty, throws_span, error_ty) => {
+            emit_result_type(sink, success_ty, throws_span.clone(), error_ty);
         },
     }
 }
@@ -333,8 +442,12 @@ pub enum TyVariant {
     },
     /// Array type: [T]
     Array(Span, Box<TyVariant>, Span), // (lbracket, element_type, rbracket)
+    /// Dictionary type: [K: V]
+    Dictionary(Span, Box<TyVariant>, Span, Box<TyVariant>, Span), // (lbracket, key_type, colon, value_type, rbracket)
     /// Optional type: T?
     Optional(Box<TyVariant>, Span), // (base_type, question_span)
+    /// Result type: T throws E
+    Result(Box<TyVariant>, Span, Box<TyVariant>), // (success_type, throws_span, error_type)
 }
 
 /// Emit events for an inferred type: _
@@ -497,6 +610,46 @@ pub(crate) fn emit_optional_type(sink: &mut EventSink, base_ty: &TyVariant, ques
     sink.add_token(SyntaxKind::Question, question_span);
 
     sink.finish_node(); // Finish TyOptional
+    sink.finish_node(); // Finish Ty
+}
+
+/// Emit events for a dictionary type: [K: V]
+pub(crate) fn emit_dictionary_type(
+    sink: &mut EventSink,
+    lbracket: Span,
+    key_ty: &TyVariant,
+    colon: Span,
+    value_ty: &TyVariant,
+    rbracket: Span,
+) {
+    sink.start_node(SyntaxKind::Ty);
+    sink.start_node(SyntaxKind::TyDictionary);
+
+    sink.add_token(SyntaxKind::LBracket, lbracket);
+    emit_ty_variant(sink, key_ty);
+    sink.add_token(SyntaxKind::Colon, colon);
+    emit_ty_variant(sink, value_ty);
+    sink.add_token(SyntaxKind::RBracket, rbracket);
+
+    sink.finish_node(); // Finish TyDictionary
+    sink.finish_node(); // Finish Ty
+}
+
+/// Emit events for a result type: T throws E
+pub(crate) fn emit_result_type(
+    sink: &mut EventSink,
+    success_ty: &TyVariant,
+    throws_span: Span,
+    error_ty: &TyVariant,
+) {
+    sink.start_node(SyntaxKind::Ty);
+    sink.start_node(SyntaxKind::TyResult);
+
+    emit_ty_variant(sink, success_ty);
+    sink.add_token(SyntaxKind::Throws, throws_span);
+    emit_ty_variant(sink, error_ty);
+
+    sink.finish_node(); // Finish TyResult
     sink.finish_node(); // Finish Ty
 }
 

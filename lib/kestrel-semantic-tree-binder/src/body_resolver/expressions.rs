@@ -5,26 +5,34 @@
 //! like calls, operators, and paths.
 
 use kestrel_reporting::IntoDiagnostic;
-use kestrel_semantic_tree::expr::{ElseBranch, Expression, IfCondition, LabelInfo};
+use kestrel_semantic_tree::builtins::LanguageFeature;
+use kestrel_semantic_tree::expr::{
+    CallArgument, ElseBranch, Expression, IfCondition, InterpolationPart, LabelInfo,
+};
 use kestrel_semantic_tree::stmt::Statement;
 use kestrel_semantic_tree::ty::Ty;
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use crate::diagnostics::{
-    AsciiEscapeOutOfRangeError, BreakOutsideLoopError, ContinueOutsideLoopError,
-    IncompleteEscapeSequenceError, InvalidEscapeSequenceError, InvalidUnicodeEscapeError,
-    TryExpressionNotSupportedError, TupleIndexOnNonTupleError, TupleIndexOutOfBoundsError,
-    UndeclaredLabelError, UnicodeEscapeErrorReason,
+    AsciiEscapeOutOfRangeError, BreakOutsideLoopError, CannotAssignThroughImmutableBindingError,
+    CannotAssignToImmutableFieldError, CannotAssignToLetError, CannotAssignToTemporaryError,
+    CapturingClosureEscapeError, ContinueOutsideLoopError, EmptyCharacterLiteralError,
+    IncompleteEscapeSequenceError, IntegerLiteralOverflowError, InvalidEscapeSequenceError,
+    InvalidUnicodeEscapeError, MultipleCodepointsInCharLiteralError, TupleIndexOnNonTupleError,
+    TupleIndexOutOfBoundsError, UndeclaredLabelError, UnicodeEscapeErrorReason,
 };
 use kestrel_syntax_tree::utils::get_node_span;
 
-use super::calls::{resolve_argument_list, resolve_call_expression};
+use super::calls::{
+    MutabilityClassification, classify_mutability, resolve_argument_list, resolve_call_expression,
+};
 use super::context::BodyResolutionContext;
 use super::operators::{
     resolve_binary_expression, resolve_postfix_expression, resolve_unary_expression,
 };
 use super::paths::resolve_path_expression;
+use super::patterns::resolve_pattern_with_mutability;
 use super::statements::resolve_statement;
 use super::utils::{is_expression_kind, validate_not_standalone_type_param};
 
@@ -46,7 +54,7 @@ pub fn resolve_expression(expr_node: &SyntaxNode, ctx: &mut BodyResolutionContex
         SyntaxKind::ExprUnit => Expression::unit(span),
 
         SyntaxKind::ExprInteger => {
-            let value = extract_integer_value(expr_node);
+            let value = extract_integer_value(expr_node, ctx);
             // Use inference type so literal protocols can be applied
             Expression::integer_infer(value, span)
         },
@@ -58,6 +66,21 @@ pub fn resolve_expression(expr_node: &SyntaxNode, ctx: &mut BodyResolutionContex
         },
 
         SyntaxKind::ExprString => {
+            // Check if this string contains interpolation syntax `\(`
+            // This handles nested strings that the parser didn't transform
+            if let Some(token) = expr_node
+                .children_with_tokens()
+                .filter_map(|e| e.into_token())
+                .find(|t| t.kind() == SyntaxKind::String)
+            {
+                let text = token.text();
+                if text.len() >= 2 {
+                    let inner = &text[1..text.len() - 1];
+                    if string_contains_interpolation(inner) {
+                        return resolve_interpolated_string_expression(expr_node, ctx);
+                    }
+                }
+            }
             let value = extract_string_value(expr_node, ctx);
             // Use inference type so literal protocols can be applied
             Expression::string_infer(value, span)
@@ -69,6 +92,12 @@ pub fn resolve_expression(expr_node: &SyntaxNode, ctx: &mut BodyResolutionContex
             Expression::string_infer(value, span)
         },
 
+        SyntaxKind::ExprChar => {
+            let value = extract_char_value(expr_node, ctx);
+            // Use inference type so literal protocols can be applied
+            Expression::char_infer(value, span)
+        },
+
         SyntaxKind::ExprBool => {
             let value = extract_bool_value(expr_node);
             // Use inference type so literal protocols can be applied
@@ -76,6 +105,8 @@ pub fn resolve_expression(expr_node: &SyntaxNode, ctx: &mut BodyResolutionContex
         },
 
         SyntaxKind::ExprArray => resolve_array_expression(expr_node, ctx),
+
+        SyntaxKind::ExprDictionary => resolve_dictionary_expression(expr_node, ctx),
 
         SyntaxKind::ExprTuple => resolve_tuple_expression(expr_node, ctx),
 
@@ -90,13 +121,17 @@ pub fn resolve_expression(expr_node: &SyntaxNode, ctx: &mut BodyResolutionContex
         SyntaxKind::ExprBinary => resolve_binary_expression(expr_node, ctx),
 
         SyntaxKind::ExprNull => {
-            // TODO: Handle null properly with optional types
-            Expression::error(span)
+            // Create a null literal - type inference will resolve via ExpressibleByNullLiteral
+            Expression::null_literal(span)
         },
 
         SyntaxKind::ExprCall => resolve_call_expression(expr_node, ctx),
 
         SyntaxKind::ExprAssignment => resolve_assignment_expression(expr_node, ctx),
+
+        SyntaxKind::ExprCompoundAssignment => {
+            resolve_compound_assignment_expression(expr_node, ctx)
+        },
 
         SyntaxKind::ExprIf => resolve_if_expression(expr_node, ctx),
 
@@ -104,11 +139,15 @@ pub fn resolve_expression(expr_node: &SyntaxNode, ctx: &mut BodyResolutionContex
 
         SyntaxKind::ExprLoop => resolve_loop_expression(expr_node, ctx),
 
+        SyntaxKind::ExprFor => resolve_for_expression(expr_node, ctx),
+
         SyntaxKind::ExprBreak => resolve_break_expression(expr_node, ctx),
 
         SyntaxKind::ExprContinue => resolve_continue_expression(expr_node, ctx),
 
         SyntaxKind::ExprReturn => resolve_return_expression(expr_node, ctx),
+
+        SyntaxKind::ExprThrow => resolve_throw_expression(expr_node, ctx),
 
         SyntaxKind::ExprTry => resolve_try_expression(expr_node, ctx),
 
@@ -120,30 +159,50 @@ pub fn resolve_expression(expr_node: &SyntaxNode, ctx: &mut BodyResolutionContex
 
         SyntaxKind::ExprMatch => resolve_match_expression(expr_node, ctx),
 
+        SyntaxKind::ExprInterpolatedString => {
+            resolve_interpolated_string_expression(expr_node, ctx)
+        },
+
         _ => Expression::error(span),
     }
 }
 
 /// Extract integer value from an ExprInteger node
-fn extract_integer_value(node: &SyntaxNode) -> i64 {
+fn extract_integer_value(node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> i64 {
     node.children_with_tokens()
         .filter_map(|e| e.into_token())
         .find(|t| t.kind() == SyntaxKind::Integer)
-        .and_then(|t| parse_integer_literal(t.text()))
+        .and_then(|t| {
+            let text = t.text();
+            match parse_integer_literal(text) {
+                Ok(value) => Some(i64::from_ne_bytes(value.to_ne_bytes())),
+                Err(_) => {
+                    let text_range = t.text_range();
+                    let token_start: usize = text_range.start().into();
+                    let token_span = Span::new(ctx.file_id, token_start..token_start + text.len());
+                    let error = IntegerLiteralOverflowError {
+                        span: token_span,
+                        literal: text.to_string(),
+                    };
+                    ctx.diagnostics.add_diagnostic(error.into_diagnostic());
+                    None
+                },
+            }
+        })
         .unwrap_or(0)
 }
 
 /// Parse an integer literal (handles 0x, 0b, 0o prefixes)
-fn parse_integer_literal(text: &str) -> Option<i64> {
+fn parse_integer_literal(text: &str) -> Result<u64, std::num::ParseIntError> {
     let text = text.replace('_', "");
     if text.starts_with("0x") || text.starts_with("0X") {
-        i64::from_str_radix(&text[2..], 16).ok()
+        u64::from_str_radix(&text[2..], 16)
     } else if text.starts_with("0b") || text.starts_with("0B") {
-        i64::from_str_radix(&text[2..], 2).ok()
+        u64::from_str_radix(&text[2..], 2)
     } else if text.starts_with("0o") || text.starts_with("0O") {
-        i64::from_str_radix(&text[2..], 8).ok()
+        u64::from_str_radix(&text[2..], 8)
     } else {
-        text.parse().ok()
+        text.parse()
     }
 }
 
@@ -154,6 +213,22 @@ fn extract_float_value(node: &SyntaxNode) -> f64 {
         .find(|t| t.kind() == SyntaxKind::Float)
         .and_then(|t| t.text().replace('_', "").parse().ok())
         .unwrap_or(0.0)
+}
+
+/// Check if a string literal contains interpolation (`\(`)
+fn string_contains_interpolation(text: &str) -> bool {
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\\'
+            && let Some(&next) = chars.peek()
+        {
+            if next == '(' {
+                return true;
+            }
+            chars.next(); // Skip escaped character
+        }
+    }
+    false
 }
 
 /// Extract string value from an ExprString node (strips quotes and processes escapes)
@@ -194,6 +269,56 @@ fn extract_raw_string_value(node: &SyntaxNode) -> String {
             }
         })
         .unwrap_or_default()
+}
+
+/// Extract character value from an ExprChar node (strips quotes, processes escapes, validates single codepoint)
+fn extract_char_value(node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> u32 {
+    node.children_with_tokens()
+        .filter_map(|e| e.into_token())
+        .find(|t| t.kind() == SyntaxKind::Char)
+        .map(|t| {
+            let text = t.text();
+            let text_range = t.text_range();
+            let token_start: usize = text_range.start().into();
+            let token_span = Span::new(ctx.file_id, token_start..token_start + text.len());
+
+            // Strip surrounding single quotes
+            if text.len() >= 2 {
+                let inner = &text[1..text.len() - 1];
+
+                if inner.is_empty() {
+                    // Empty character literal ''
+                    let error = EmptyCharacterLiteralError { span: token_span };
+                    ctx.diagnostics.add_diagnostic(error.into_diagnostic());
+                    return 0;
+                }
+
+                // Process escape sequences, collecting code points
+                let unescaped = unescape_string(inner, ctx.file_id, token_start + 1, ctx);
+                let code_points: Vec<char> = unescaped.chars().collect();
+
+                if code_points.is_empty() {
+                    // After escape processing, still empty (shouldn't happen normally)
+                    let error = EmptyCharacterLiteralError { span: token_span };
+                    ctx.diagnostics.add_diagnostic(error.into_diagnostic());
+                    0
+                } else if code_points.len() > 1 {
+                    // Multiple code points
+                    let error = MultipleCodepointsInCharLiteralError {
+                        span: token_span,
+                        count: code_points.len(),
+                    };
+                    ctx.diagnostics.add_diagnostic(error.into_diagnostic());
+                    // Return the first code point as a fallback
+                    code_points[0] as u32
+                } else {
+                    code_points[0] as u32
+                }
+            } else {
+                0
+            }
+        })
+        .unwrap_or(0)
 }
 
 /// Process escape sequences in a string literal.
@@ -421,6 +546,14 @@ fn extract_bool_value(node: &SyntaxNode) -> bool {
 }
 
 /// Resolve an array expression: [1, 2, 3]
+///
+/// Array literals use type inference similar to other literals (integer, string, etc.).
+/// The type is initially `Infer`, and the constraint generator adds:
+/// - A `Conforms` constraint to `_ExpressibleByArrayLiteral`
+/// - A `Normalizes` constraint linking the `Element` associated type to element types
+///
+/// This allows array literals to be assigned to custom types that conform to
+/// `ExpressibleByArrayLiteral`, not just the builtin `Array[T]` type.
 fn resolve_array_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> Expression {
     let span = get_node_span(node, ctx.file_id);
 
@@ -430,13 +563,39 @@ fn resolve_array_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) 
         .map(|c| resolve_expression(&c, ctx))
         .collect();
 
-    // Infer element type from first element, or use infer if empty
-    let element_ty = elements
-        .first()
-        .map(|e| e.ty.clone())
-        .unwrap_or_else(|| Ty::infer(span.clone()));
+    // Use inference type so ExpressibleByArrayLiteral protocol can be applied
+    // The constraint generator will add the necessary constraints
+    let array_ty = Ty::infer(span.clone());
 
-    Expression::array(elements, element_ty, span)
+    Expression::array(elements, array_ty, span)
+}
+
+/// Resolve a dictionary expression: ["key": value, ...]
+/// Dictionary literals use inference types so ExpressibleByDictionaryLiteral
+/// protocol can be applied. This allows dictionary literals to be assigned to
+/// custom types that conform to the protocol.
+fn resolve_dictionary_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> Expression {
+    let span = get_node_span(node, ctx.file_id);
+
+    let pairs: Vec<(Expression, Expression)> = node
+        .children()
+        .filter(|c| c.kind() == SyntaxKind::DictionaryEntry)
+        .filter_map(|entry| {
+            // Each DictionaryEntry contains: key_expr, Colon, value_expr
+            let mut exprs = entry
+                .children()
+                .filter(|c| c.kind() == SyntaxKind::Expression || is_expression_kind(c.kind()));
+
+            let key = exprs.next().map(|c| resolve_expression(&c, ctx))?;
+            let value = exprs.next().map(|c| resolve_expression(&c, ctx))?;
+            Some((key, value))
+        })
+        .collect();
+
+    // Use inference type so ExpressibleByDictionaryLiteral protocol can be applied
+    let dict_ty = Ty::infer(span.clone());
+
+    Expression::dictionary(pairs, dict_ty, span)
 }
 
 /// Resolve a tuple expression: (1, 2, 3)
@@ -492,10 +651,85 @@ fn resolve_assignment_expression(node: &SyntaxNode, ctx: &mut BodyResolutionCont
     let target = resolve_expression(&lhs_node, ctx);
     let value = resolve_expression(&rhs_node, ctx);
 
-    // TODO: Validate that target is assignable (var, not let; field on mutable receiver)
+    // Validate that target is assignable (var, not let; field on mutable receiver)
+    validate_assignment_target(&target, &span, ctx);
+
     // TODO: Type check that value type is compatible with target type
 
     Expression::assignment(target, value, span)
+}
+
+/// Resolve a compound assignment expression: target += value, target -= value, etc.
+/// Desugars to a method call: target.addAssign(value), etc.
+fn resolve_compound_assignment_expression(
+    node: &SyntaxNode,
+    ctx: &mut BodyResolutionContext,
+) -> Expression {
+    use kestrel_semantic_tree::operators::CompoundOp;
+
+    let span = get_node_span(node, ctx.file_id);
+
+    // Find the operator token to determine which compound operator this is
+    let op_token = node
+        .children_with_tokens()
+        .filter_map(|e| e.into_token())
+        .find(|t| CompoundOp::from_syntax_kind(t.kind()).is_some());
+
+    let Some(op_token) = op_token else {
+        return Expression::error(span);
+    };
+
+    let Some(op) = CompoundOp::from_syntax_kind(op_token.kind()) else {
+        return Expression::error(span);
+    };
+
+    // Find the LHS and RHS expressions
+    // ExprCompoundAssignment contains: Expression, operator token, Expression
+    let mut expr_children = node
+        .children()
+        .filter(|c| c.kind() == SyntaxKind::Expression || is_expression_kind(c.kind()));
+
+    let lhs_node = match expr_children.next() {
+        Some(n) => n,
+        None => return Expression::error(span),
+    };
+
+    let rhs_node = match expr_children.next() {
+        Some(n) => n,
+        None => return Expression::error(span),
+    };
+
+    // Resolve both sides
+    let target = resolve_expression(&lhs_node, ctx);
+    let value = resolve_expression(&rhs_node, ctx);
+
+    // If either operand has a poison type, propagate error without cascading diagnostics.
+    if target.ty.is_poison() || value.ty.is_poison() {
+        return Expression::error(span);
+    }
+
+    // Validate that target is assignable (var, not let; field on mutable receiver)
+    validate_assignment_target(&target, &span, ctx);
+
+    // Desugar to method call: target.{method_name}(value)
+    // The method returns (), so the compound assignment expression has type ()
+    let method_name = op.method_name();
+    let arg = CallArgument::unlabeled(value.clone(), value.span.clone());
+    let result_ty = Ty::unit(span.clone());
+
+    // Try to use MethodRef pattern with builtin registry for better error messages
+    if let Some(method_id) = ctx.model.builtin_registry().method(op.method_feature()) {
+        let method_ref = Expression::method_ref(
+            target,
+            vec![method_id],
+            method_name.to_string(),
+            span.clone(),
+        );
+        return Expression::call(method_ref, vec![arg], result_ty, span);
+    }
+
+    // Fallback: use DeferredMethodCall if builtin not registered
+    Expression::deferred_method_call(target, method_name.to_string(), vec![arg], result_ty, span)
 }
 
 /// Resolve an if expression: if condition { then } else { else }
@@ -813,7 +1047,7 @@ fn can_be_trailing_expression(expr_node: &SyntaxNode) -> bool {
                 // Match expressions are always exhaustive and can be trailing expressions
                 return true;
             },
-            SyntaxKind::ExprLoop | SyntaxKind::ExprWhile => {
+            SyntaxKind::ExprLoop | SyntaxKind::ExprWhile | SyntaxKind::ExprFor => {
                 // Loops cannot be trailing expressions - they return () or Never
                 return false;
             },
@@ -1017,6 +1251,200 @@ fn resolve_while_let_expression(
     Expression::while_let(loop_id, label_info, conditions, body, span)
 }
 
+/// Resolve a for expression by desugaring to while-let:
+/// ```text
+/// for pattern in iterable { body }
+/// ```
+/// becomes:
+/// ```text
+/// {
+///     var iter = iterable.iter()
+///     while let .Some(pattern) = iter.next() {
+///         body
+///     }
+/// }
+/// ```
+fn resolve_for_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> Expression {
+    use kestrel_semantic_tree::expr::IfCondition;
+    use kestrel_semantic_tree::pattern::{EnumPatternBinding, Mutability, Pattern};
+    use kestrel_semantic_tree::stmt::Statement;
+
+    let span = get_node_span(node, ctx.file_id);
+
+    // Extract label if present (use the same function as while/loop)
+    let label_info = extract_loop_label(node, ctx.file_id);
+
+    // Find the ForPattern node
+    let pattern_node = node
+        .children()
+        .find(|c| c.kind() == SyntaxKind::ForPattern)
+        .and_then(|fp| {
+            fp.children()
+                .find(|c| super::patterns::is_pattern_kind(c.kind()))
+        });
+
+    // Find the ForIterable node
+    let iterable_node = node
+        .children()
+        .find(|c| c.kind() == SyntaxKind::ForIterable)
+        .and_then(|fi| {
+            fi.children()
+                .find(|c| c.kind() == SyntaxKind::Expression || is_expression_kind(c.kind()))
+        });
+
+    // Find the body (CodeBlock)
+    let body_node = node.children().find(|c| c.kind() == SyntaxKind::CodeBlock);
+
+    // Resolve the iterable expression
+    let iterable_expr = iterable_node
+        .as_ref()
+        .map(|n| resolve_expression(n, ctx))
+        .unwrap_or_else(|| Expression::error(span.clone()));
+
+    // Snapshot move state before the loop
+    let pre_loop_moves = ctx.move_tracker.snapshot();
+
+    // Push a new scope for the iterator variable and loop body
+    ctx.local_scope.push_scope();
+
+    // Create a synthetic iterator variable: var iter = iterable.iter()
+    let iter_ty = Ty::infer(span.clone());
+    let iter_local_id = ctx.local_scope.bind(
+        "$for_iter".to_string(),
+        iter_ty.clone(),
+        true, // mutable
+        span.clone(),
+    );
+
+    // Create the .iter() method call on the iterable using MethodRef pattern.
+    // This produces "does not conform to Iterable" errors instead of "no member iter".
+    let iter_method_id = ctx
+        .model
+        .builtin_registry()
+        .method(LanguageFeature::IterableIterMethod);
+    let iter_call = if let Some(method_id) = iter_method_id {
+        // Create MethodRef with the protocol method as candidate, then wrap in Call
+        let method_ref = Expression::method_ref(
+            iterable_expr,
+            vec![method_id],
+            "iter".to_string(),
+            span.clone(),
+        );
+        Expression::call(method_ref, vec![], iter_ty.clone(), span.clone())
+    } else {
+        // Fallback if builtin not registered (shouldn't happen in practice)
+        Expression::deferred_method_call(
+            iterable_expr,
+            "iter".to_string(),
+            vec![],
+            iter_ty.clone(),
+            span.clone(),
+        )
+    };
+
+    // Create the binding pattern for the iterator
+    let iter_pattern = Pattern::local(
+        iter_local_id,
+        Mutability::Mutable,
+        "$for_iter".to_string(),
+        iter_ty.clone(),
+        span.clone(),
+    );
+
+    // Create the binding statement: var iter = iterable.iter()
+    let iter_binding = Statement::binding(iter_pattern, Some(iter_call), span.clone());
+
+    // Enter the loop context with the label
+    let label_name = label_info.as_ref().map(|l| l.name.clone());
+    let label_span = label_info.as_ref().map(|l| l.span.clone());
+    let loop_id = ctx.enter_loop(label_name, label_span);
+
+    // Push a new scope for pattern bindings in the loop body
+    ctx.local_scope.push_scope();
+
+    // Create the .next() method call: iter.next() using MethodRef pattern.
+    // This produces "does not conform to Iterator" errors instead of "no member next".
+    let item_ty = Ty::infer(span.clone());
+    let optional_item_ty = Ty::infer(span.clone()); // Will be Optional[Item]
+    let iter_ref = Expression::local_ref(iter_local_id, iter_ty, true, span.clone());
+    let next_method_id = ctx
+        .model
+        .builtin_registry()
+        .method(LanguageFeature::IteratorNextMethod);
+    let next_call = if let Some(method_id) = next_method_id {
+        // Create MethodRef with the protocol method as candidate, then wrap in Call
+        let method_ref =
+            Expression::method_ref(iter_ref, vec![method_id], "next".to_string(), span.clone());
+        Expression::call(method_ref, vec![], optional_item_ty.clone(), span.clone())
+    } else {
+        // Fallback if builtin not registered (shouldn't happen in practice)
+        Expression::deferred_method_call(
+            iter_ref,
+            "next".to_string(),
+            vec![],
+            optional_item_ty.clone(),
+            span.clone(),
+        )
+    };
+
+    // Resolve the user's pattern with the item type
+    let user_pattern = pattern_node
+        .as_ref()
+        .map(|n| super::patterns::resolve_pattern(n, ctx, Some(&item_ty)))
+        .unwrap_or_else(|| Pattern::error(span.clone()));
+
+    // Create the .Some(pattern) enum pattern
+    // Use the same type as next_call (optional_item_ty) so type inference connects them
+    let some_binding = EnumPatternBinding::unlabeled(user_pattern, span.clone());
+    let some_pattern = Pattern::enum_variant(
+        None,
+        "Some".to_string(),
+        vec![some_binding],
+        optional_item_ty.clone(),
+        span.clone(),
+    );
+
+    // Create the while-let condition: let .Some(pattern) = iter.next()
+    let condition = IfCondition::Let {
+        pattern: some_pattern,
+        value: next_call,
+        span: span.clone(),
+    };
+
+    // Resolve the body
+    let body = body_node
+        .as_ref()
+        .map(|c| resolve_while_let_body(c, ctx))
+        .unwrap_or_default();
+
+    // Pop the pattern scope
+    ctx.local_scope.pop_scope();
+
+    // Exit the loop context
+    ctx.exit_loop();
+
+    // For for loops: the body might not execute (iterator might be empty).
+    // So any move inside the body is "maybe moved" after the loop.
+    let after_body_moves = ctx.move_tracker.snapshot();
+    ctx.move_tracker.restore(after_body_moves);
+    ctx.move_tracker.merge(&pre_loop_moves);
+
+    // Create the while-let expression (marked as from_for_loop for pattern checking)
+    let while_let =
+        Expression::while_let_from_for(loop_id, label_info, vec![condition], body, span.clone());
+
+    // Pop the iterator scope
+    ctx.local_scope.pop_scope();
+
+    // Create the block expression: { var iter = ...; while let ... }
+    Expression::block(
+        vec![iter_binding],
+        Some(while_let),
+        Ty::unit(span.clone()),
+        span,
+    )
+}
+
 /// Resolve a single while-let condition: let pattern = expr
 fn resolve_while_let_condition(node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> IfCondition {
     use super::patterns::resolve_pattern;
@@ -1206,7 +1634,35 @@ fn resolve_return_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext)
             validate_not_standalone_type_param(expr, ctx)
         });
 
+    // Check for escaping capturing closure
+    // TODO: Remove this restriction once heap allocation for closure environments is implemented.
+    if let Some(ref value_expr) = value {
+        check_capturing_closure_escape(value_expr, &span, ctx);
+    }
+
     Expression::return_expr(value, span)
+}
+
+/// Resolve a throw expression: throw expr
+fn resolve_throw_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> Expression {
+    let span = get_node_span(node, ctx.file_id);
+
+    // Find the value expression (required for throw)
+    let value_node = match node
+        .children()
+        .find(|c| c.kind() == SyntaxKind::Expression || is_expression_kind(c.kind()))
+    {
+        Some(n) => n,
+        None => return Expression::error(span),
+    };
+
+    let value = resolve_expression(&value_node, ctx);
+    let value = validate_not_standalone_type_param(value, ctx);
+
+    // Check for escaping capturing closure
+    check_capturing_closure_escape(&value, &span, ctx);
+
+    Expression::throw_expr(value, span)
 }
 
 /// Resolve a try expression: try expr
@@ -1218,21 +1674,9 @@ fn resolve_return_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext)
 ///     .Break(early) => return R.fromResidual(early)
 /// }
 /// ```
-// TODO: Remove the TryExpressionNotSupportedError and restore full implementation
-// when try expressions are fully supported
+/// where R is the enclosing function's return type.
 fn resolve_try_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> Expression {
-    let span = get_node_span(node, ctx.file_id);
-
-    // Emit error: try expressions are not yet supported
-    ctx.diagnostics
-        .throw(TryExpressionNotSupportedError { span: span.clone() });
-
-    Expression::error(span)
-}
-
-#[allow(dead_code)]
-fn resolve_try_expression_impl(node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> Expression {
-    use kestrel_semantic_tree::expr::MatchArm;
+    use kestrel_semantic_tree::expr::{CallArgument, MatchArm};
     use kestrel_semantic_tree::pattern::{EnumPatternBinding, Mutability, Pattern};
 
     let span = get_node_span(node, ctx.file_id);
@@ -1249,23 +1693,43 @@ fn resolve_try_expression_impl(node: &SyntaxNode, ctx: &mut BodyResolutionContex
     let operand = resolve_expression(&operand_node, ctx);
 
     // Create method call: operand.tryExtract()
-    // This is a deferred method call that will be resolved during type inference
-    let try_extract_call = Expression::deferred_method_call(
-        operand,
-        "tryExtract".to_string(),
-        vec![],
-        Ty::infer(span.clone()), // ControlFlow[Output, Early]
-        span.clone(),
-    );
+    // Try to use MethodRef pattern with builtin registry for better error messages
+    let try_extract_call = if let Some(method_id) = ctx
+        .model
+        .builtin_registry()
+        .method(LanguageFeature::TryExtractMethod)
+    {
+        let method_ref = Expression::method_ref(
+            operand,
+            vec![method_id],
+            "tryExtract".to_string(),
+            span.clone(),
+        );
+        Expression::call(method_ref, vec![], Ty::infer(span.clone()), span.clone())
+    } else {
+        // Fallback: use DeferredMethodCall if builtin not registered
+        Expression::deferred_method_call(
+            operand,
+            "tryExtract".to_string(),
+            vec![],
+            Ty::infer(span.clone()), // ControlFlow[Output, Early]
+            span.clone(),
+        )
+    };
 
     // Create locals for the bound variables in each arm
     // Push scope for continue arm
     ctx.local_scope.push_scope();
 
+    // Create a single inference type for the value binding.
+    // This type will be shared between the local binding, pattern, and body reference
+    // so that type inference can connect them properly.
+    let value_ty = Ty::infer(span.clone());
+
     // Bind 'value' local for .Continue(value) pattern
     let value_local_id = ctx.local_scope.bind(
         "$try_value".to_string(), // Use synthetic name to avoid conflicts
-        Ty::infer(span.clone()),
+        value_ty.clone(),
         false,
         span.clone(),
     );
@@ -1275,7 +1739,7 @@ fn resolve_try_expression_impl(node: &SyntaxNode, ctx: &mut BodyResolutionContex
         value_local_id,
         Mutability::Immutable,
         "$try_value".to_string(),
-        Ty::infer(span.clone()),
+        value_ty.clone(),
         span.clone(),
     );
     let continue_binding = EnumPatternBinding::unlabeled(value_binding_pattern, span.clone());
@@ -1286,8 +1750,8 @@ fn resolve_try_expression_impl(node: &SyntaxNode, ctx: &mut BodyResolutionContex
     );
 
     // Body for continue arm: just reference the value
-    let continue_body =
-        Expression::local_ref(value_local_id, Ty::infer(span.clone()), false, span.clone());
+    // Use the same type as the binding pattern so type inference connects them
+    let continue_body = Expression::local_ref(value_local_id, value_ty, false, span.clone());
     let continue_arm = MatchArm::new(continue_pattern, continue_body, span.clone());
 
     ctx.local_scope.pop_scope();
@@ -1295,10 +1759,15 @@ fn resolve_try_expression_impl(node: &SyntaxNode, ctx: &mut BodyResolutionContex
     // Push scope for break arm
     ctx.local_scope.push_scope();
 
+    // Create a single inference type for the early binding.
+    // This type will be shared between the local binding, pattern, and body reference
+    // so that type inference can connect them properly.
+    let early_ty = Ty::infer(span.clone());
+
     // Bind 'early' local for .Break(early) pattern
     let early_local_id = ctx.local_scope.bind(
         "$try_early".to_string(),
-        Ty::infer(span.clone()),
+        early_ty.clone(),
         false,
         span.clone(),
     );
@@ -1308,18 +1777,45 @@ fn resolve_try_expression_impl(node: &SyntaxNode, ctx: &mut BodyResolutionContex
         early_local_id,
         Mutability::Immutable,
         "$try_early".to_string(),
-        Ty::infer(span.clone()),
+        early_ty.clone(),
         span.clone(),
     );
     let break_binding = EnumPatternBinding::unlabeled(early_binding_pattern, span.clone());
     let break_pattern =
         Pattern::unresolved_enum_variant("Break".to_string(), vec![break_binding], span.clone());
 
-    // Body for break arm: return (error placeholder for now)
-    // TODO: Implement proper fromResidual call
-    // For now, just create an error expression that will produce a type error
-    // This allows parsing to work while we implement the full desugaring
-    let break_body = Expression::return_expr(Some(Expression::error(span.clone())), span.clone());
+    // Body for break arm: return R.fromResidual(early)
+    // R is the enclosing function's return type
+    let return_ty = ctx
+        .function_return_type()
+        .unwrap_or_else(|| Ty::error(span.clone()));
+
+    // Reference to the early local - use the same type as the binding pattern
+    let early_ref = Expression::local_ref(early_local_id, early_ty, false, span.clone());
+
+    // Create argument: residual: early
+    let from_residual_arg = CallArgument::labeled("residual".to_string(), early_ref, span.clone());
+
+    // Get the FromResidualMethod for better error messages
+    let protocol_candidates: Vec<_> = ctx
+        .model
+        .builtin_registry()
+        .method(LanguageFeature::FromResidualMethod)
+        .into_iter()
+        .collect();
+
+    // Create deferred static call: R.fromResidual(early)
+    // Type inference will resolve this to the actual static method
+    let from_residual_call = Expression::deferred_static_call(
+        return_ty.clone(),
+        "fromResidual".to_string(),
+        vec![from_residual_arg],
+        protocol_candidates,
+        return_ty, // Result type is also R (Self)
+        span.clone(),
+    );
+
+    let break_body = Expression::return_expr(Some(from_residual_call), span.clone());
     let break_arm = MatchArm::new(break_pattern, break_body, span.clone());
 
     ctx.local_scope.pop_scope();
@@ -1467,14 +1963,22 @@ fn resolve_tuple_index_expression(
             Expression::tuple_index(base, index, element_ty, span)
         },
         None => {
-            // Not a tuple type
-            let error = TupleIndexOnNonTupleError {
-                span: span.clone(),
-                index,
-                base_type: base_ty.to_string(),
-            };
-            ctx.diagnostics.add_diagnostic(error.into_diagnostic());
-            Expression::error(span)
+            // Check if this could potentially be a tuple after type inference
+            // (e.g., type parameters with tuple constraints, associated types)
+            if base_ty.could_be_tuple() {
+                // Defer to type inference - use Infer type for the element
+                let element_ty = Ty::infer(span.clone());
+                Expression::tuple_index(base, index, element_ty, span)
+            } else {
+                // Definitely not a tuple type
+                let error = TupleIndexOnNonTupleError {
+                    span: span.clone(),
+                    index,
+                    base_type: base_ty.to_string(),
+                };
+                ctx.diagnostics.add_diagnostic(error.into_diagnostic());
+                Expression::error(span)
+            }
         },
     }
 }
@@ -1582,6 +2086,10 @@ fn expression_references_local(
             .iter()
             .any(|e| expression_references_local(e, local_id)),
 
+        ExprKind::Dictionary(pairs) => pairs.iter().any(|(k, v)| {
+            expression_references_local(k, local_id) || expression_references_local(v, local_id)
+        }),
+
         ExprKind::Grouping(inner) => expression_references_local(inner, local_id),
 
         ExprKind::FieldAccess { object, .. } => expression_references_local(object, local_id),
@@ -1624,6 +2132,10 @@ fn expression_references_local(
                     .iter()
                     .any(|arg| expression_references_local(&arg.value, local_id))
         },
+
+        ExprKind::DeferredStaticCall { arguments, .. } => arguments
+            .iter()
+            .any(|arg| expression_references_local(&arg.value, local_id)),
 
         ExprKind::ImplicitStructInit { arguments, .. } => arguments
             .iter()
@@ -1770,6 +2282,7 @@ fn expression_references_local(
                 false
             }
         },
+        ExprKind::Throw { value } => expression_references_local(value, local_id),
 
         // Implicit member access - check arguments if present
         ExprKind::ImplicitMemberAccess { arguments, .. } => {
@@ -1830,10 +2343,12 @@ fn expression_references_local(
         | ExprKind::TypeRef(_)
         | ExprKind::TypeParameterRef(_)
         | ExprKind::AssociatedTypeRef
+        | ExprKind::ProtocolPropertyAccess { .. }
         | ExprKind::EnumCase { .. }
         | ExprKind::Break { .. }
         | ExprKind::Continue { .. }
         | ExprKind::LangIntrinsicRef(_)
+        | ExprKind::InterpolatedString { .. }
         | ExprKind::Error => false,
     }
 }
@@ -1870,6 +2385,12 @@ fn resolve_closure_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext
     // Resolve the closure body (statements and trailing expression)
     let (body, tail_expr) = resolve_closure_body(node, ctx);
 
+    // Check for escaping capturing closure in closure's tail expression
+    // TODO: Remove this restriction once heap allocation for closure environments is implemented.
+    if let Some(ref tail) = tail_expr {
+        check_capturing_closure_escape(tail, &span, ctx);
+    }
+
     // Check if `it` was actually referenced in the body (if we injected it)
     let it_was_used = if has_it {
         check_it_referenced_in_closure(&body, tail_expr.as_ref(), ctx)
@@ -1886,20 +2407,45 @@ fn resolve_closure_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext
         let param_types: Vec<kestrel_semantic_tree::ty::Ty> =
             param_list.iter().map(|p| p.ty.clone()).collect();
 
-        let return_ty = tail_expr
-            .as_ref()
-            .map(|e| e.ty.clone())
-            .unwrap_or_else(|| kestrel_semantic_tree::ty::Ty::unit(span.clone()));
+        // Get the return type from tail expression or unit
+        // NOTE: It's important that we DON'T just clone the tail expression's type directly,
+        // as that would cause them to share the same TyId. Instead, we use the tail type's
+        // *kind* to construct a semantically equivalent but distinct type. This allows the
+        // constraint solver to properly unify them.
+        let return_ty = if let Some(ref tail) = tail_expr {
+            // Clone creates a new Ty with the same TyId - we need a truly fresh type
+            match tail.ty.kind() {
+                kestrel_semantic_tree::ty::TyKind::Infer => {
+                    // Tail is infer - create fresh infer type for return
+                    kestrel_semantic_tree::ty::Ty::infer(span.clone())
+                },
+                _ => {
+                    // Tail has concrete type - create fresh infer type for return
+                    // The constraint solver will unify them
+                    kestrel_semantic_tree::ty::Ty::infer(span.clone())
+                },
+            }
+        } else {
+            // No tail - return type is unit
+            kestrel_semantic_tree::ty::Ty::unit(span.clone())
+        };
 
         kestrel_semantic_tree::ty::Ty::function(param_types, return_ty, span.clone())
     } else {
         // No explicit parameters - create UnresolvedFunction with appropriate ParamInfo
         use kestrel_semantic_tree::ty::ParamInfo;
 
-        let return_ty = tail_expr
-            .as_ref()
-            .map(|e| e.ty.clone())
-            .unwrap_or_else(|| kestrel_semantic_tree::ty::Ty::unit(span.clone()));
+        // Same logic as above for return type
+        let return_ty = if let Some(ref tail) = tail_expr {
+            match tail.ty.kind() {
+                kestrel_semantic_tree::ty::TyKind::Infer => {
+                    kestrel_semantic_tree::ty::Ty::infer(span.clone())
+                },
+                _ => kestrel_semantic_tree::ty::Ty::infer(span.clone()),
+            }
+        } else {
+            kestrel_semantic_tree::ty::Ty::unit(span.clone())
+        };
 
         if it_was_used {
             // Uses implicit `it` - exactly 1 param
@@ -1942,6 +2488,8 @@ fn resolve_closure_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext
 }
 
 /// Resolve closure parameters from the syntax tree.
+///
+/// Supports destructuring patterns like `(a, b)` or `Point { x, y }`.
 fn resolve_closure_params(
     node: &SyntaxNode,
     ctx: &mut BodyResolutionContext,
@@ -1957,13 +2505,6 @@ fn resolve_closure_params(
     for child in params_node.children() {
         if child.kind() == SyntaxKind::ClosureParam {
             let param_span = get_node_span(&child, ctx.file_id);
-
-            // Extract name
-            let name = child
-                .children_with_tokens()
-                .filter_map(|e| e.into_token())
-                .find(|t| t.kind() == SyntaxKind::Identifier)
-                .map(|t| t.text().to_string())?;
 
             // Extract optional type annotation
             let ty_node = child.children().find(|c| c.kind() == SyntaxKind::Ty);
@@ -1985,20 +2526,51 @@ fn resolve_closure_params(
                 ),
             };
 
-            // Bind parameter as local
-            let local_id = ctx.local_scope.bind(
-                name.clone(),
-                ty.clone(),
-                false, // closure params are immutable
-                param_span.clone(),
-            );
+            // Find and resolve the pattern
+            // The Pattern node contains the destructuring pattern for this parameter
+            let pattern_node = child.children().find(|c| c.kind() == SyntaxKind::Pattern);
+            let pattern = if let Some(pattern_node) = pattern_node {
+                // Use pattern resolution with the declared type as expected type
+                // Closure params are always immutable (false for force_mutable)
+                resolve_pattern_with_mutability(
+                    &pattern_node,
+                    ctx,
+                    Some(&ty),
+                    false, // closure params are immutable
+                )
+            } else {
+                // Fallback: try to find identifier directly (for simple patterns)
+                // This handles the case where the pattern is a simple binding
+                if let Some(ident_token) = child
+                    .children_with_tokens()
+                    .filter_map(|e| e.into_token())
+                    .find(|t| t.kind() == SyntaxKind::Identifier)
+                {
+                    let name = ident_token.text().to_string();
+                    let local_id = ctx.local_scope.bind(
+                        name.clone(),
+                        ty.clone(),
+                        false, // closure params are immutable
+                        param_span.clone(),
+                    );
+                    kestrel_semantic_tree::pattern::Pattern::local(
+                        local_id,
+                        kestrel_semantic_tree::pattern::Mutability::Immutable,
+                        name,
+                        ty.clone(),
+                        param_span.clone(),
+                    )
+                } else {
+                    // No pattern found - create error pattern
+                    kestrel_semantic_tree::pattern::Pattern::error(param_span.clone())
+                }
+            };
 
             params.push(kestrel_semantic_tree::expr::ClosureParam {
-                name,
+                pattern,
                 ty,
                 is_type_annotated: is_annotated,
                 span: param_span,
-                local_id,
             });
         }
     }
@@ -2169,6 +2741,34 @@ fn collect_captures(
     captures
 }
 
+/// Check if an expression is a capturing closure and report an error if so.
+///
+/// This is a temporary restriction until heap allocation for closure environments
+/// is implemented. When a closure captures variables, its environment is allocated
+/// on the stack, which becomes invalid when the function returns.
+///
+/// TODO: Remove this restriction once heap allocation for closure environments
+/// is implemented.
+fn check_capturing_closure_escape(
+    expr: &Expression,
+    return_span: &Span,
+    ctx: &mut BodyResolutionContext,
+) {
+    use kestrel_semantic_tree::expr::ExprKind;
+
+    if let ExprKind::Closure { captures, .. } = &expr.kind
+        && !captures.is_empty()
+    {
+        let captured_names: Vec<String> = captures.iter().map(|c| c.name.clone()).collect();
+        let error = CapturingClosureEscapeError {
+            closure_span: expr.span.clone(),
+            return_span: return_span.clone(),
+            captured_names,
+        };
+        ctx.diagnostics.add_diagnostic(error.into_diagnostic());
+    }
+}
+
 /// Walk a statement to find LocalRef expressions.
 fn collect_captures_from_statement<F>(stmt: &Statement, process: &mut F)
 where
@@ -2274,6 +2874,11 @@ where
                 collect_captures_from_expression(&arg.value, process);
             }
         },
+        ExprKind::DeferredStaticCall { arguments, .. } => {
+            for arg in arguments {
+                collect_captures_from_expression(&arg.value, process);
+            }
+        },
         ExprKind::MethodRef { receiver, .. } => {
             collect_captures_from_expression(receiver, process);
         },
@@ -2308,6 +2913,12 @@ where
         ExprKind::Array(elements) => {
             for elem in elements {
                 collect_captures_from_expression(elem, process);
+            }
+        },
+        ExprKind::Dictionary(pairs) => {
+            for (key, value) in pairs {
+                collect_captures_from_expression(key, process);
+                collect_captures_from_expression(value, process);
             }
         },
         ExprKind::If {
@@ -2383,6 +2994,9 @@ where
                 collect_captures_from_expression(val, process);
             }
         },
+        ExprKind::Throw { value } => {
+            collect_captures_from_expression(value, process);
+        },
         ExprKind::Closure {
             body, tail_expr, ..
         } => {
@@ -2446,6 +3060,11 @@ where
             }
         },
 
+        // ProtocolPropertyAccess - recurse into receiver
+        ExprKind::ProtocolPropertyAccess { receiver, .. } => {
+            collect_captures_from_expression(receiver, process);
+        },
+
         // Leaf nodes - no recursion needed
         ExprKind::Literal(_)
         | ExprKind::SymbolRef(_)
@@ -2456,6 +3075,16 @@ where
         | ExprKind::EnumCase { .. }
         | ExprKind::LangIntrinsicRef(_)
         | ExprKind::Error => {},
+
+        // Interpolated strings - recurse into interpolation expressions
+        ExprKind::InterpolatedString { parts } => {
+            use kestrel_semantic_tree::expr::InterpolationPart;
+            for part in parts {
+                if let InterpolationPart::Interpolation { expr, .. } = part {
+                    collect_captures_from_expression(expr, process);
+                }
+            }
+        },
     }
 }
 
@@ -2638,17 +3267,409 @@ fn resolve_match_arm_body(body_node: &SyntaxNode, ctx: &mut BodyResolutionContex
     resolve_expression(body_node, ctx)
 }
 
+/// Check if the target is a field access on `self`.
+///
+/// This is used to allow assignment to `let` fields in initializers.
+fn is_field_access_on_self(target: &Expression, ctx: &BodyResolutionContext) -> bool {
+    use kestrel_semantic_tree::expr::ExprKind;
+
+    match &target.kind {
+        ExprKind::FieldAccess { object, .. } => {
+            // Check if the object is `self`
+            if let ExprKind::LocalRef(local_id) = &object.kind
+                && let Some(local) = ctx.local_scope.get_local(*local_id)
+            {
+                return local.name() == "self";
+            }
+            false
+        },
+        _ => false,
+    }
+}
+
+/// Validate that the target of an assignment is mutable.
+///
+/// This checks that the target is:
+/// - A `var` binding (not `let`)
+/// - A mutable field chain (all fields in the path must be `var`, and root must be `var`)
+///
+/// Exception: In initializers, assignment to `let` fields on `self` is allowed
+/// since this is the initial assignment.
+///
+/// Emits appropriate diagnostics if the target is not mutable.
+fn validate_assignment_target(
+    target: &Expression,
+    assignment_span: &Span,
+    ctx: &mut BodyResolutionContext,
+) {
+    match classify_mutability(target, ctx) {
+        MutabilityClassification::Mutable => {
+            // Target is mutable, assignment is allowed
+        },
+        MutabilityClassification::ImmutableLocal { name, span } => {
+            ctx.diagnostics.add_diagnostic(
+                CannotAssignToLetError {
+                    assignment_span: assignment_span.clone(),
+                    target_span: target.span.clone(),
+                    binding_name: name,
+                    binding_span: span,
+                }
+                .into_diagnostic(),
+            );
+        },
+        MutabilityClassification::ImmutableField {
+            field_name,
+            field_span,
+        } => {
+            // In initializers, assignment to `let` fields on `self` is allowed
+            if ctx.is_initializer_context() && is_field_access_on_self(target, ctx) {
+                return;
+            }
+            ctx.diagnostics.add_diagnostic(
+                CannotAssignToImmutableFieldError {
+                    assignment_span: assignment_span.clone(),
+                    target_span: target.span.clone(),
+                    field_name,
+                    field_span,
+                }
+                .into_diagnostic(),
+            );
+        },
+        MutabilityClassification::ImmutableThroughBinding {
+            binding_name,
+            binding_span,
+            field_path,
+        } => {
+            // In initializers, assignment to fields on `self` is allowed even if `self` is
+            // technically immutable (since initializers use special receiver semantics)
+            if ctx.is_initializer_context() && is_field_access_on_self(target, ctx) {
+                return;
+            }
+            ctx.diagnostics.add_diagnostic(
+                CannotAssignThroughImmutableBindingError {
+                    assignment_span: assignment_span.clone(),
+                    target_span: target.span.clone(),
+                    binding_name,
+                    binding_span,
+                    field_path,
+                }
+                .into_diagnostic(),
+            );
+        },
+        MutabilityClassification::Temporary => {
+            ctx.diagnostics.add_diagnostic(
+                CannotAssignToTemporaryError {
+                    assignment_span: assignment_span.clone(),
+                    target_span: target.span.clone(),
+                }
+                .into_diagnostic(),
+            );
+        },
+    }
+}
+
+/// Resolve an interpolated string expression (e.g., "Hello \(name)!")
+fn resolve_interpolated_string_expression(
+    node: &SyntaxNode,
+    ctx: &mut BodyResolutionContext,
+) -> Expression {
+    let span = get_node_span(node, ctx.file_id);
+
+    // Extract the string token
+    let Some(token) = node
+        .children_with_tokens()
+        .filter_map(|e| e.into_token())
+        .find(|t| t.kind() == SyntaxKind::String)
+    else {
+        return Expression::error(span);
+    };
+
+    let text = token.text();
+    let text_range = token.text_range();
+    let token_start: usize = text_range.start().into();
+
+    // Strip surrounding quotes
+    if text.len() < 2 {
+        return Expression::error(span);
+    }
+    let inner = &text[1..text.len() - 1];
+
+    // Parse the string content into parts
+    let parts = parse_interpolated_string_parts(inner, ctx.file_id, token_start + 1, ctx);
+
+    Expression::interpolated_string(parts, span)
+}
+
+/// Parse the content of an interpolated string into literal and interpolation parts.
+///
+/// The input should be the string content without the surrounding quotes.
+/// `base_offset` is the offset of the first character in the input within the file.
+fn parse_interpolated_string_parts(
+    input: &str,
+    file_id: usize,
+    base_offset: usize,
+    ctx: &mut BodyResolutionContext,
+) -> Vec<InterpolationPart> {
+    let mut parts = Vec::new();
+    let mut chars = input.char_indices().peekable();
+    let mut literal_start = 0;
+    let mut literal = String::new();
+
+    while let Some((i, c)) = chars.next() {
+        if c == '\\' {
+            if let Some(&(_, next)) = chars.peek() {
+                if next == '(' {
+                    // Start of interpolation
+                    // First, emit any accumulated literal
+                    if !literal.is_empty() {
+                        parts.push(InterpolationPart::Literal {
+                            text: literal.clone(),
+                            span: Span::new(
+                                file_id,
+                                (base_offset + literal_start)..(base_offset + i),
+                            ),
+                        });
+                        literal.clear();
+                    }
+
+                    // Skip the '('
+                    chars.next();
+                    let interp_start = i;
+
+                    // Find the matching ')' and extract expression + format spec
+                    let (expr_text, format_spec, interp_end) =
+                        extract_interpolation(&mut chars, input, i + 2);
+
+                    // Parse and resolve the expression
+                    let resolved_expr =
+                        parse_and_resolve_expression(&expr_text, file_id, base_offset + i + 2, ctx);
+
+                    parts.push(InterpolationPart::Interpolation {
+                        expr: Box::new(resolved_expr),
+                        format_spec,
+                        span: Span::new(
+                            file_id,
+                            (base_offset + interp_start)..(base_offset + interp_end),
+                        ),
+                    });
+
+                    literal_start = interp_end;
+                } else {
+                    // Regular escape sequence
+                    chars.next(); // consume the escaped character
+                    // Unescape the sequence
+                    let escaped = unescape_char(next, file_id, base_offset + i + 1, ctx);
+                    literal.push(escaped);
+                }
+            }
+        } else {
+            literal.push(c);
+        }
+    }
+
+    // Emit any remaining literal
+    if !literal.is_empty() {
+        parts.push(InterpolationPart::Literal {
+            text: literal,
+            span: Span::new(
+                file_id,
+                (base_offset + literal_start)..(base_offset + input.len()),
+            ),
+        });
+    }
+
+    parts
+}
+
+/// Extract the expression text and optional format spec from an interpolation.
+///
+/// Returns (expression_text, format_spec, end_offset).
+/// `chars` should be positioned just after the opening `\(`.
+/// `input` is the full string content.
+/// `start` is the offset of the first character after `\(` within `input`.
+fn extract_interpolation(
+    chars: &mut std::iter::Peekable<std::str::CharIndices>,
+    input: &str,
+    start: usize,
+) -> (String, Option<String>, usize) {
+    let mut depth = 1;
+    let mut in_string = false;
+    let mut in_char = false;
+    let mut format_start: Option<usize> = None;
+
+    while let Some(&(i, c)) = chars.peek() {
+        chars.next();
+
+        // Track string literals
+        if c == '"' && !in_char {
+            in_string = !in_string;
+        }
+        // Track character literals
+        if c == '\'' && !in_string {
+            in_char = !in_char;
+        }
+
+        if in_string || in_char {
+            // Skip escape sequences inside strings/chars
+            if c == '\\' {
+                chars.next();
+            }
+            continue;
+        }
+
+        match c {
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth == 0 {
+                    // Found the closing paren
+                    let end = i + 1;
+
+                    // Determine expression and format spec
+                    if let Some(fmt_start) = format_start {
+                        let expr_text = input[start..fmt_start].to_string();
+                        let fmt_text = input[fmt_start + 1..i].to_string();
+                        return (expr_text, Some(fmt_text), end);
+                    } else {
+                        let expr_text = input[start..i].to_string();
+                        return (expr_text, None, end);
+                    }
+                }
+            },
+            ':' if depth == 1 && format_start.is_none() => {
+                // This colon introduces a format spec (only at depth 1)
+                format_start = Some(i);
+            },
+            _ => {},
+        }
+    }
+
+    // Unterminated interpolation - return what we have
+    let expr_text = input[start..].to_string();
+    (expr_text, None, input.len())
+}
+
+/// Parse and resolve an expression from source text.
+fn parse_and_resolve_expression(
+    expr_text: &str,
+    file_id: usize,
+    offset: usize,
+    ctx: &mut BodyResolutionContext,
+) -> Expression {
+    use kestrel_lexer::lex;
+    use kestrel_parser::event::{EventSink, TreeBuilder};
+    use kestrel_parser::parse_expr;
+
+    // Lex the expression text - keep spans relative to expr_text (starting at 0)
+    let tokens: Vec<_> = lex(expr_text, file_id)
+        .filter_map(|t| t.ok())
+        .map(|spanned| (spanned.value, spanned.span))
+        .collect();
+
+    if tokens.is_empty() {
+        return Expression::error(Span::new(file_id, offset..(offset + expr_text.len())));
+    }
+
+    // Parse the expression with local spans
+    let mut sink = EventSink::new(file_id);
+    parse_expr(expr_text, tokens.into_iter(), &mut sink);
+    let tree = TreeBuilder::new(expr_text, sink.into_events()).build();
+
+    // Resolve the parsed expression
+    // The tree's root should be an Expression node
+    let mut resolved = resolve_expression(&tree, ctx);
+
+    // Adjust the resolved expression's span to be relative to the original file
+    resolved.span = Span::new(
+        file_id,
+        (resolved.span.start + offset)..(resolved.span.end + offset),
+    );
+
+    resolved
+}
+
+/// Unescape a single escape character (simplified version for interpolation parsing).
+fn unescape_char(
+    c: char,
+    _file_id: usize,
+    _offset: usize,
+    _ctx: &mut BodyResolutionContext,
+) -> char {
+    match c {
+        'n' => '\n',
+        'r' => '\r',
+        't' => '\t',
+        '\\' => '\\',
+        '"' => '"',
+        '\'' => '\'',
+        '0' => '\0',
+        // For other escapes, just return the character as-is
+        // (unicode escapes are handled separately in the full unescape logic)
+        _ => c,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kestrel_span::Span;
 
     #[test]
     fn test_parse_integer_literal() {
-        assert_eq!(parse_integer_literal("42"), Some(42));
-        assert_eq!(parse_integer_literal("0xFF"), Some(255));
-        assert_eq!(parse_integer_literal("0b1010"), Some(10));
-        assert_eq!(parse_integer_literal("0o17"), Some(15));
-        assert_eq!(parse_integer_literal("1_000_000"), Some(1000000));
+        assert_eq!(parse_integer_literal("42"), Ok(42));
+        assert_eq!(parse_integer_literal("0xFF"), Ok(255));
+        assert_eq!(parse_integer_literal("0b1010"), Ok(10));
+        assert_eq!(parse_integer_literal("0o17"), Ok(15));
+        assert_eq!(parse_integer_literal("1_000_000"), Ok(1000000));
+    }
+
+    #[test]
+    fn test_extract_interpolation_simple() {
+        let input = "name)";
+        let mut chars = input.char_indices().peekable();
+        let (expr, fmt, end) = extract_interpolation(&mut chars, input, 0);
+        assert_eq!(expr, "name");
+        assert_eq!(fmt, None);
+        assert_eq!(end, 5); // "name)" is 5 chars
+    }
+
+    #[test]
+    fn test_extract_interpolation_with_format() {
+        let input = "x:>8)";
+        let mut chars = input.char_indices().peekable();
+        let (expr, fmt, end) = extract_interpolation(&mut chars, input, 0);
+        assert_eq!(expr, "x");
+        assert_eq!(fmt, Some(">8".to_string()));
+        assert_eq!(end, 5);
+    }
+
+    #[test]
+    fn test_extract_interpolation_nested_parens() {
+        let input = "func(a, b))";
+        let mut chars = input.char_indices().peekable();
+        let (expr, fmt, end) = extract_interpolation(&mut chars, input, 0);
+        assert_eq!(expr, "func(a, b)");
+        assert_eq!(fmt, None);
+        assert_eq!(end, 11);
+    }
+
+    #[test]
+    fn test_extract_interpolation_with_string() {
+        let input = r#"greeting("hello"))rest"#;
+        let mut chars = input.char_indices().peekable();
+        let (expr, fmt, end) = extract_interpolation(&mut chars, input, 0);
+        assert_eq!(expr, r#"greeting("hello")"#);
+        assert_eq!(fmt, None);
+        assert_eq!(end, 18);
+    }
+
+    #[test]
+    fn test_extract_interpolation_with_colon_in_string() {
+        // Colon inside string should not be treated as format spec
+        let input = r#"f(":"))"#;
+        let mut chars = input.char_indices().peekable();
+        let (expr, fmt, end) = extract_interpolation(&mut chars, input, 0);
+        assert_eq!(expr, r#"f(":")"#);
+        assert_eq!(fmt, None);
+        assert_eq!(end, 7);
     }
 }

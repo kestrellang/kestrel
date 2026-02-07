@@ -11,15 +11,42 @@ use cranelift_codegen::ir::types as cl_types;
 ///
 /// If the type is an `AssociatedTypeProjection`, resolve it via witness lookup.
 /// Otherwise, return the type unchanged.
-fn resolve_projection(ctx: &MirContext, ty: Id<Ty>) -> Result<Id<Ty>, String> {
+///
+/// This function is recursive - if resolving a projection produces another projection,
+/// we continue resolving until we get a concrete type.
+///
+/// IMPORTANT: If a substitution is provided, it will be applied to the base type
+/// before attempting to resolve the projection. This is critical for resolving
+/// projections like `I.Item` where `I` is a type parameter.
+fn resolve_projection(
+    ctx: &MirContext,
+    ty: Id<Ty>,
+    subst: Option<&Substitution>,
+) -> Result<Id<Ty>, String> {
     if let MirTy::AssociatedTypeProjection {
         base,
         protocol,
         associated,
     } = ctx.ty(ty)
     {
-        resolve_associated_type(ctx, *base, *protocol, associated)
-            .map_err(|e| format!("failed to resolve associated type projection: {:?}", e))
+        // Apply substitution to the base type first, if provided
+        let substituted_base = if let Some(s) = subst {
+            s.apply_ty_readonly(ctx, *base)
+                .map_err(|e| format!("failed to apply substitution to base type: {:?}", e))?
+        } else {
+            *base
+        };
+
+        let resolved = resolve_associated_type(ctx, substituted_base, *protocol, associated)
+            .map_err(|e| format!("failed to resolve associated type projection: {:?}", e))?;
+
+        // Recursively resolve if the result is still a projection
+        // This handles cases like MapIterator[T].Item -> ArrayIterator[T].Item -> T
+        if matches!(ctx.ty(resolved), MirTy::AssociatedTypeProjection { .. }) {
+            resolve_projection(ctx, resolved, subst)
+        } else {
+            Ok(resolved)
+        }
     } else {
         Ok(ty)
     }
@@ -33,7 +60,7 @@ fn resolve_projection(ctx: &MirContext, ty: Id<Ty>) -> Result<Id<Ty>, String> {
 /// IMPORTANT: If you call this with a type that might be an `AssociatedTypeProjection`,
 /// you should call `resolve_projection` first, or use `translate_type_with_subst` instead.
 pub fn translate_type(ctx: &MirContext, ty: Id<Ty>, target: &TargetConfig) -> CraneliftType {
-    translate_type_ext(ctx, ty, target, false)
+    translate_type_ext_with_subst(ctx, ty, target, false, None)
 }
 
 pub fn translate_type_ext(
@@ -42,6 +69,16 @@ pub fn translate_type_ext(
     target: &TargetConfig,
     is_extern: bool,
 ) -> CraneliftType {
+    translate_type_ext_with_subst(ctx, ty, target, is_extern, None)
+}
+
+fn translate_type_ext_with_subst(
+    ctx: &MirContext,
+    ty: Id<Ty>,
+    target: &TargetConfig,
+    is_extern: bool,
+    subst: Option<&Substitution>,
+) -> CraneliftType {
     let ptr_type = if target.is_64bit() {
         cl_types::I64
     } else {
@@ -49,10 +86,48 @@ pub fn translate_type_ext(
     };
 
     // Try to resolve any associated type projections before translation
-    let ty = resolve_projection(ctx, ty).expect("failed to resolve projection in translate_type");
+    // Pass the substitution context if available
+    let ty = resolve_projection(ctx, ty, subst).unwrap_or_else(|e| {
+        eprintln!("\n=== DEBUG: resolve_projection failed in translate_type_ext ===");
+        eprintln!("Type ID: {:?}", ty);
+        eprintln!("Type: {:?}", ctx.ty(ty));
+        eprintln!("Error: {:?}", e);
+
+        // If it's an associated type projection, print more details about the base type
+        if let kestrel_execution_graph::MirTy::AssociatedTypeProjection {
+            base,
+            protocol: _,
+            associated: _,
+        } = ctx.ty(ty)
+        {
+            eprintln!("\nBase type ID: {:?}", base);
+            eprintln!("Base type MirTy: {:?}", ctx.ty(*base));
+
+            // If base is a type param, print its details
+            if let kestrel_execution_graph::MirTy::TypeParam(tp) = ctx.ty(*base) {
+                use kestrel_execution_graph::TypeParamOwner;
+                let tp_def = &ctx.type_params[*tp];
+                eprintln!("TypeParam name: {}", tp_def.name);
+                eprintln!("TypeParam owner: {:?}", tp_def.owner);
+
+                // If owned by a struct, print the struct name
+                if let TypeParamOwner::Struct(struct_id) = tp_def.owner {
+                    let struct_def = &ctx.structs[struct_id];
+                    eprintln!("Owner struct name: {}", ctx.name(struct_def.name));
+                }
+            }
+        }
+
+        // Print backtrace to see where this is coming from
+        eprintln!("\nBacktrace:");
+        let bt = std::backtrace::Backtrace::force_capture();
+        eprintln!("{}", bt);
+
+        panic!("failed to resolve projection in translate_type: {:?}", e)
+    });
 
     if is_extern && let Some(inner) = get_wrapper_primitive(ctx, ty) {
-        return translate_type_ext(ctx, inner, target, is_extern);
+        return translate_type_ext_with_subst(ctx, inner, target, is_extern, subst);
     }
 
     match ctx.ty(ty) {
@@ -106,7 +181,9 @@ pub fn is_pass_by_value(ctx: &MirContext, ty: Id<Ty>) -> bool {
 #[allow(dead_code)]
 pub fn is_pass_by_value_ext(ctx: &MirContext, ty: Id<Ty>, is_extern: bool) -> bool {
     // Resolve any associated type projections first
-    let ty = resolve_projection(ctx, ty).expect("failed to resolve projection in is_pass_by_value");
+    // Note: we don't have substitution context here, so we pass None
+    let ty = resolve_projection(ctx, ty, None)
+        .expect("failed to resolve projection in is_pass_by_value");
 
     if is_extern && let Some(inner) = get_wrapper_primitive(ctx, ty) {
         return is_pass_by_value_ext(ctx, inner, is_extern);
@@ -160,13 +237,13 @@ pub fn translate_type_with_subst(
     target: &TargetConfig,
     subst: &Substitution,
 ) -> CraneliftType {
-    // Apply substitution first
+    // Apply substitution first - this will resolve projections as part of substitution
     let concrete_ty = subst
         .apply_ty_readonly(ctx, ty)
         .expect("type substitution failed for translate_type");
 
-    // translate_type will handle any remaining projection resolution
-    translate_type(ctx, concrete_ty, target)
+    // Then translate the resolved type, passing substitution for any additional resolution needed
+    translate_type_ext_with_subst(ctx, concrete_ty, target, false, Some(subst))
 }
 
 /// Check if a type should be passed by value, applying substitution first.

@@ -58,6 +58,13 @@ impl Analyzer for ExhaustiveReturnAnalyzer {
         let Some(body) = ctx.model.query(ExecutableBodyFor { symbol_id }) else {
             return;
         };
+
+        // Skip empty bodies (e.g., protocol method declarations that only have defaults)
+        // These are declarations, not definitions, so they don't need return checking
+        if body.statements.is_empty() && body.yield_expr.is_none() {
+            return;
+        }
+
         let state = analyze_block(&body.statements, body.yield_expr.as_deref());
         if state.definitely_returns() {
             return;
@@ -169,6 +176,7 @@ fn analyze_statement(stmt: &Statement) -> ReturnState {
 fn analyze_expression(expr: &Expression) -> ReturnState {
     match &expr.kind {
         ExprKind::Return { .. } => ReturnState::Returns,
+        ExprKind::Throw { .. } => ReturnState::Returns,
         ExprKind::Break { .. } | ExprKind::Continue { .. } => ReturnState::Diverges,
         ExprKind::If {
             conditions,
@@ -291,7 +299,21 @@ fn analyze_expression(expr: &Expression) -> ReturnState {
             }
             ReturnState::MayFallThrough
         },
+        ExprKind::Dictionary(pairs) => {
+            for (k, v) in pairs {
+                let s = analyze_expression(k);
+                if s.definitely_returns() {
+                    return s;
+                }
+                let s = analyze_expression(v);
+                if s.definitely_returns() {
+                    return s;
+                }
+            }
+            ReturnState::MayFallThrough
+        },
         ExprKind::FieldAccess { object, .. } => analyze_expression(object),
+        ExprKind::ProtocolPropertyAccess { receiver, .. } => analyze_expression(receiver),
         ExprKind::TupleIndex { tuple, .. } => analyze_expression(tuple),
         ExprKind::MethodRef { receiver, .. } => analyze_expression(receiver),
         ExprKind::PrimitiveMethodRef { receiver, .. } => analyze_expression(receiver),
@@ -321,6 +343,15 @@ fn analyze_expression(expr: &Expression) -> ReturnState {
             if s.definitely_returns() {
                 return s;
             }
+            for arg in arguments {
+                let s = analyze_expression(&arg.value);
+                if s.definitely_returns() {
+                    return s;
+                }
+            }
+            ReturnState::MayFallThrough
+        },
+        ExprKind::DeferredStaticCall { arguments, .. } => {
             for arg in arguments {
                 let s = analyze_expression(&arg.value);
                 if s.definitely_returns() {
@@ -380,6 +411,7 @@ fn analyze_expression(expr: &Expression) -> ReturnState {
         | ExprKind::Closure { .. }
         | ExprKind::LangIntrinsicRef(_)
         | ExprKind::SubscriptCall { .. }
+        | ExprKind::InterpolatedString { .. }
         | ExprKind::Error => ReturnState::MayFallThrough,
 
         // Match expression - all arms must return for the match to be exhaustive

@@ -84,12 +84,175 @@ impl<'a> CodegenContext<'a> {
 
     /// Compile all functions in the MIR context.
     pub fn compile_all(&mut self) -> Result<(), CodegenError> {
-        // First pass: declare all functions (including runtime helpers)
+        // First pass: declare and define all static variables
+        self.define_all_statics()?;
+
+        // Second pass: declare all functions (including runtime helpers)
         self.declare_all_functions()?;
         self.declare_runtime_helpers()?;
 
-        // Second pass: define all functions
+        // Third pass: define all functions
         self.define_all_functions()?;
+
+        Ok(())
+    }
+
+    /// Define all static variables in the module.
+    ///
+    /// This creates global data entries for each static variable in the MIR.
+    fn define_all_statics(&mut self) -> Result<(), CodegenError> {
+        use crate::monomorphize::Substitution;
+        use crate::types::translate_type_with_subst;
+
+        // Collect statics to avoid borrow issues
+        let statics: Vec<_> = self
+            .mir
+            .statics
+            .iter()
+            .map(|(id, def)| (id, def.name, def.ty, def.file_constant_data.clone()))
+            .collect();
+
+        for (_static_id, name_id, ty, file_constant_data) in statics {
+            let name = self.mir.name(name_id);
+            let mangled_name = format!("{}", name);
+
+            // Check if this is a file constant
+            if let Some(fc_data) = file_constant_data {
+                self.define_file_constant_static(&mangled_name, &fc_data)?;
+                continue;
+            }
+
+            // Normal static: compute size and create zero-initialized data
+            let empty_subst = Substitution::new();
+            let cl_type = translate_type_with_subst(self.mir, ty, self.target, &empty_subst);
+            let size = cl_type.bytes() as usize;
+
+            // Create zeroed data for the static
+            let mut desc = DataDescription::new();
+            desc.define_zeroinit(size);
+
+            // Declare and define the data
+            let data_id = self
+                .module
+                .declare_data(&mangled_name, Linkage::Export, true, false)
+                .map_err(|e| {
+                    CodegenError::DataSection(format!(
+                        "failed to declare static '{}': {}",
+                        mangled_name, e
+                    ))
+                })?;
+
+            self.module.define_data(data_id, &desc).map_err(|e| {
+                CodegenError::DataSection(format!(
+                    "failed to define static '{}': {}",
+                    mangled_name, e
+                ))
+            })?;
+        }
+
+        Ok(())
+    }
+
+    /// Define a file constant static (for @fileconstant).
+    ///
+    /// This embeds the file bytes in .rodata and creates a LiteralSlice struct
+    /// pointing to the embedded data.
+    fn define_file_constant_static(
+        &mut self,
+        name: &str,
+        fc_data: &kestrel_execution_graph::FileConstantData,
+    ) -> Result<(), CodegenError> {
+        let ptr_size = if self.target.is_64bit() { 8 } else { 4 };
+
+        // Resolve the file path - either relative to the source file's directory
+        // or relative to the current working directory
+        let resolved_path = if let Some(base) = &fc_data.base_path {
+            base.join(&fc_data.relative_path)
+        } else {
+            std::path::PathBuf::from(&fc_data.relative_path)
+        };
+
+        // Read the file from the resolved path
+        let file_bytes = std::fs::read(&resolved_path).map_err(|e| {
+            CodegenError::DataSection(format!(
+                "failed to read file constant '{}': {}",
+                resolved_path.display(),
+                e
+            ))
+        })?;
+
+        // Compute element size and alignment from element_ty using layout cache
+        // (translate_type returns pointer type for structs, which gives wrong size)
+        let element_layout = self.layouts.layout_of(fc_data.element_ty);
+        let element_size = element_layout.size;
+        let element_align = element_layout.align;
+
+        // Validate file size is aligned to element size
+        if element_size > 0 && file_bytes.len() % element_size != 0 {
+            return Err(CodegenError::DataSection(format!(
+                "file '{}' size ({}) is not aligned to element size ({})",
+                resolved_path.display(),
+                file_bytes.len(),
+                element_size
+            )));
+        }
+
+        // Compute element count
+        let count = if element_size > 0 {
+            file_bytes.len() / element_size
+        } else {
+            0
+        };
+
+        // 1. Embed the raw file bytes in .rodata
+        let data_name = format!("{}_data", name);
+        let mut data_desc = DataDescription::new();
+        data_desc.define(file_bytes.into_boxed_slice());
+        // Set alignment to at least 8 bytes to avoid unaligned pointer warnings
+        data_desc.set_align(element_align.max(8) as u64);
+
+        let data_id = self
+            .module
+            .declare_data(&data_name, Linkage::Local, false, false)
+            .map_err(|e| CodegenError::DataSection(format!("failed to declare data: {}", e)))?;
+
+        self.module
+            .define_data(data_id, &data_desc)
+            .map_err(|e| CodegenError::DataSection(format!("failed to define data: {}", e)))?;
+
+        // 2. Create the LiteralSlice struct in .data
+        // LiteralSlice[T] = { ptr: lang.ptr[T], len: lang.i64 }
+        // On 64-bit: ptr at offset 0 (8 bytes), len at offset 8 (8 bytes) = 16 bytes total
+        let slice_size = ptr_size * 2;
+        let mut slice_bytes = vec![0u8; slice_size];
+
+        // Write count at offset ptr_size (len field)
+        let count_bytes = (count as i64).to_le_bytes();
+        slice_bytes[ptr_size..ptr_size + 8].copy_from_slice(&count_bytes[..8.min(ptr_size)]);
+
+        // Create the slice data
+        let mut slice_desc = DataDescription::new();
+        slice_desc.define(slice_bytes.into_boxed_slice());
+        // Set alignment to pointer size for the slice struct
+        slice_desc.set_align(ptr_size as u64);
+
+        // Add a relocation for the pointer field (points to the embedded data)
+        let data_ref = self.module.declare_data_in_data(data_id, &mut slice_desc);
+        slice_desc.write_data_addr(0, data_ref, 0);
+
+        // Declare and define the LiteralSlice static
+        let slice_id = self
+            .module
+            .declare_data(name, Linkage::Export, true, false)
+            .map_err(|e| {
+                CodegenError::DataSection(format!("failed to declare slice static: {}", e))
+            })?;
+
+        self.module
+            .define_data(slice_id, &slice_desc)
+            .map_err(|e| {
+                CodegenError::DataSection(format!("failed to define slice static: {}", e))
+            })?;
 
         Ok(())
     }
@@ -202,7 +365,7 @@ impl<'a> CodegenContext<'a> {
                 continue;
             }
 
-            let sig = self.create_signature_with_subst(func_def, &inst.type_args);
+            let sig = self.create_signature_with_subst(func_def, &inst.type_args, inst.self_type);
 
             let cl_func_id = self
                 .module
@@ -244,6 +407,30 @@ impl<'a> CodegenContext<'a> {
         let is_main = self.is_main(func_def);
         let symbol_name = self.symbol_name_for_instantiation(inst);
 
+        eprintln!("\n=== DEBUG: Compiling function ===");
+        eprintln!("Function: {}", self.mir.name(func_def.name));
+        eprintln!("Symbol: {}", symbol_name);
+        eprintln!("Type args: {:?}", inst.type_args);
+        eprintln!("Self type: {:?}", inst.self_type);
+        if !inst.type_args.is_empty() {
+            eprintln!("Type arg details:");
+            for (i, &ty) in inst.type_args.iter().enumerate() {
+                eprintln!("  [{}] {:?} -> {:?}", i, ty, self.mir.ty(ty));
+            }
+        }
+        if let Some(st) = inst.self_type {
+            eprintln!("Self type details: {:?} -> {:?}", st, self.mir.ty(st));
+        }
+
+        if !func_def.type_params.is_empty() && func_def.type_params.len() != inst.type_args.len() {
+            return Err(CodegenError::Unsupported(format!(
+                "missing type arguments for function instantiation '{}': expected {}, got {}",
+                self.mir.name(func_def.name),
+                func_def.type_params.len(),
+                inst.type_args.len()
+            )));
+        }
+
         let cl_func_id = *self.func_ids_by_name.get(&symbol_name).ok_or_else(|| {
             CodegenError::FunctionDefinition {
                 name: symbol_name.clone(),
@@ -259,7 +446,7 @@ impl<'a> CodegenContext<'a> {
             subst.set_self_type(st);
         }
 
-        let sig = self.create_signature_with_subst(func_def, &inst.type_args);
+        let sig = self.create_signature_with_subst(func_def, &inst.type_args, inst.self_type);
         let mut cl_func =
             CraneliftFunction::with_name_signature(UserFuncName::user(0, cl_func_id.as_u32()), sig);
 
@@ -306,6 +493,7 @@ impl<'a> CodegenContext<'a> {
         &self,
         func_def: &FunctionDef,
         type_args: &[Id<Ty>],
+        self_type: Option<Id<Ty>>,
     ) -> Signature {
         // Use C calling convention for extern functions, default otherwise
         let call_conv = if func_def.is_extern() {
@@ -316,7 +504,10 @@ impl<'a> CodegenContext<'a> {
         let mut sig = Signature::new(call_conv);
 
         // Build substitution
-        let subst = build_substitution(self.mir, &func_def.type_params, type_args);
+        let mut subst = build_substitution(self.mir, &func_def.type_params, type_args);
+        if let Some(st) = self_type {
+            subst.set_self_type(st);
+        }
 
         // Return type (used for sret decisions)
         let is_main = self.is_main(func_def);

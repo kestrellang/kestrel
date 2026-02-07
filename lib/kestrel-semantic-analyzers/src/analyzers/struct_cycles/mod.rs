@@ -157,7 +157,6 @@ fn check_type_for_struct_cycle(
             }
             None
         },
-        TyKind::Array(_) => None,
         TyKind::Function { .. } => None,
         _ => None,
     }

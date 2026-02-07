@@ -1,17 +1,51 @@
-// A terminal-based Pong game in Kestrel using std2.
+// A terminal-based Pong game in Kestrel using shared game libraries.
 // Demonstrates: Structs, Methods, ANSI Graphics, and External C Calls.
 
 module Pong
 
-struct Pong {
-    var ballX: Int64
-    var ballY: Int64
-    var ballDX: Int64
-    var ballDY: Int64
-    var paddle1Y: Int64
-    var paddle2Y: Int64
-    var score1: Int64
-    var score2: Int64
+import std.core.Range
+import Tui.(Style, StyleOption, Box, moveTo, home, clearScreen, hideCursor, showCursor, clearLine, repeatStr)
+import Input.(Key, InputManager)
+
+// ============================================
+// Configuration
+// ============================================
+
+struct Config {
+    static var gameWidth: Int64 { 60 }
+    static var gameHeight: Int64 { 20 }
+    static var paddleSize: Int64 { 4 }
+    static var holdTimeout: Int64 { 16 }
+}
+
+// ============================================
+// Styles
+// ============================================
+
+struct Styles: Cloneable {
+    static var border: Style { [.White, .Dim] }
+    static var paddle1: Style { [.Green, .Bold] }
+    static var paddle2: Style { [.Cyan, .Bold] }
+    static var ball: Style { [.Yellow, .Bold] }
+    static var trail: Style { [.Gray] }
+    static var label: Style { [.Gray] }
+    static var value: Style { [.White, .Bold] }
+    static var centerLine: Style { [.White, .Dim] }
+
+    func clone() -> Styles {
+        Styles()
+    }
+}
+
+// ============================================
+// Ball
+// ============================================
+
+struct Ball {
+    var x: Int64
+    var y: Int64
+    var dx: Int64
+    var dy: Int64
 
     // Trail tracking (3 positions)
     var trailX1: Int64
@@ -21,335 +55,355 @@ struct Pong {
     var trailX3: Int64
     var trailY3: Int64
 
-    // Configurable settings
-    var width: Int64
-    var height: Int64
-    var paddleSize: Int64
-
-    // Player control (1 = left paddle, 2 = right paddle)
-    var playerPaddle: Int64
-
-    // Input state: lastDirection (-1=up, 0=none, 1=down), framesSinceInput
-    var lastDirection: Int64
-    var framesSinceInput: Int64
-
-    // Frame counter for timing
-    var frameCount: Int64
-
-    init(width width: Int64, height height: Int64, paddleSize paddleSize: Int64) {
-        self.width = width;
-        self.height = height;
-        self.paddleSize = paddleSize;
-
-        self.ballX = width / 2;
-        self.ballY = height / 2;
-        self.ballDX = 1;
-        self.ballDY = 1;
-        self.paddle1Y = (height - paddleSize) / 2;
-        self.paddle2Y = (height - paddleSize) / 2;
+    init() {
+        self.x = Config.gameWidth / 2;
+        self.y = Config.gameHeight / 2;
+        self.dx = 1;
+        self.dy = 1;
 
         // Initialize trail to ball starting position
-        self.trailX1 = self.ballX;
-        self.trailY1 = self.ballY;
-        self.trailX2 = self.ballX;
-        self.trailY2 = self.ballY;
-        self.trailX3 = self.ballX;
-        self.trailY3 = self.ballY;
-
-        // Player controls left paddle by default
-        self.playerPaddle = 1;
-
-        // Input state
-        self.lastDirection = 0;
-        self.framesSinceInput = 0;
-
-        // Frame counter
-        self.frameCount = 0;
-
-        // Scores
-        self.score1 = 0;
-        self.score2 = 0;
+        self.trailX1 = self.x;
+        self.trailY1 = self.y;
+        self.trailX2 = self.x;
+        self.trailY2 = self.y;
+        self.trailX3 = self.x;
+        self.trailY3 = self.y;
     }
 
-    // Convenience init with defaults
-    init() {
-        self.init(width: 60, height: 20, paddleSize: 4);
-    }
-
-    // Helper: check if position is part of the ball trail
     func isTrail(x x: Int64, y y: Int64) -> Bool {
         (x == self.trailX1 and y == self.trailY1) or
         (x == self.trailX2 and y == self.trailY2) or
         (x == self.trailX3 and y == self.trailY3)
     }
 
-    // Helper: check if y position is within paddle 1
-    func isPaddle1(y y: Int64) -> Bool {
-        y >= self.paddle1Y and y < self.paddle1Y + self.paddleSize
+    mutating func updateTrail() {
+        self.trailX3 = self.trailX2;
+        self.trailY3 = self.trailY2;
+        self.trailX2 = self.trailX1;
+        self.trailY2 = self.trailY1;
+        self.trailX1 = self.x;
+        self.trailY1 = self.y;
     }
 
-    // Helper: check if y position is within paddle 2
-    func isPaddle2(y y: Int64) -> Bool {
-        y >= self.paddle2Y and y < self.paddle2Y + self.paddleSize
+    mutating func move() {
+        self.x = self.x + self.dx;
+        self.y = self.y + self.dy;
     }
 
-    // Handle keyboard input for player paddle
+    mutating func bounceHorizontal() {
+        self.dx = -self.dx;
+    }
+
+    mutating func bounceVertical() {
+        self.dy = -self.dy;
+    }
+
+    mutating func reset() {
+        self.x = Config.gameWidth / 2;
+        self.y = Config.gameHeight / 2;
+        self.dx = 0 - self.dx;
+
+        // Reset trail to new ball position
+        self.trailX1 = self.x;
+        self.trailY1 = self.y;
+        self.trailX2 = self.x;
+        self.trailY2 = self.y;
+        self.trailX3 = self.x;
+        self.trailY3 = self.y;
+    }
+}
+
+// ============================================
+// Paddle
+// ============================================
+
+struct Paddle {
+    var y: Int64
+
+    init() {
+        self.y = (Config.gameHeight - Config.paddleSize) / 2;
+    }
+
+    func contains(ballY ballY: Int64) -> Bool {
+        ballY >= self.y and ballY < self.y + Config.paddleSize
+    }
+
+    // Returns hit position relative to paddle (0=top, paddleSize-1=bottom)
+    func hitPosition(ballY ballY: Int64) -> Int64 {
+        ballY - self.y
+    }
+
+    mutating func move(direction direction: Int64) {
+        self.y = self.y + direction;
+        self.clamp();
+    }
+
+    mutating func clamp() {
+        if self.y < 0 {
+            self.y = 0;
+        }
+        let maxY = Config.gameHeight - Config.paddleSize;
+        if self.y > maxY {
+            self.y = maxY;
+        }
+    }
+
+    mutating func reset() {
+        self.y = (Config.gameHeight - Config.paddleSize) / 2;
+    }
+}
+
+// ============================================
+// Game
+// ============================================
+
+struct Game: not Copyable {
+    var ball: Ball
+    var paddle1: Paddle
+    var paddle2: Paddle
+    var box: Box
+    var score1: Int64
+    var score2: Int64
+
+    // Player controls paddle 1 (left)
+    var lastDirection: Int64
+    var framesSinceInput: Int64
+
+    // Frame counter for timing
+    var frameCount: Int64
+
+    // Previous positions for clearing
+    var prevPaddle1Y: Int64
+    var prevPaddle2Y: Int64
+    var prevTrailX3: Int64
+    var prevTrailY3: Int64
+
+    var input: InputManager
+
+    init() {
+        self.ball = Ball();
+        self.paddle1 = Paddle();
+        self.paddle2 = Paddle();
+        self.box = Box(x: 0, y: 1, width: Config.gameWidth + 2, height: Config.gameHeight + 2, style: Styles.border);
+        self.score1 = 0;
+        self.score2 = 0;
+        self.lastDirection = 0;
+        self.framesSinceInput = 0;
+        self.frameCount = 0;
+        self.prevPaddle1Y = self.paddle1.y;
+        self.prevPaddle2Y = self.paddle2.y;
+        self.prevTrailX3 = self.ball.trailX3;
+        self.prevTrailY3 = self.ball.trailY3;
+        self.input = InputManager();
+
+        print(hideCursor() + clearScreen());
+    }
+
+    deinit {
+        print(showCursor() + clearScreen() + home());
+        println("Thanks for playing Pong!");
+    }
+
+    // ----------------------------------------
+    // Input Handling
+    // ----------------------------------------
+
     mutating func handleInput() {
-        // Player moves 1 unit per frame while key is held
-        let speed = 1;
-
-        // How many frames to keep moving after last key (prevents stutter)
-        let holdTimeout = 16;
-
-        // Read all queued keys and update direction
         var gotInput = false;
-        var key = checkKey();
-        while key != -1 {
-            // Check for W/S or arrow keys
-            if key == KEY_W() or key == KEY_UP() {
-                self.lastDirection = -1;  // Up
-                gotInput = true;
-            } else if key == KEY_S() or key == KEY_DOWN() {
-                self.lastDirection = 1;   // Down
-                gotInput = true;
+
+        for key in self.input.drainAll() {
+            match key {
+                .Up => {
+                    self.lastDirection = -1;
+                    gotInput = true;
+                },
+                .Down => {
+                    self.lastDirection = 1;
+                    gotInput = true;
+                },
+                _ => {}
             }
-            key = checkKey();
         }
 
-        // Update frames since input
         if gotInput {
             self.framesSinceInput = 0;
         } else {
             self.framesSinceInput = self.framesSinceInput + 1;
         }
 
-        // Stop if no input for too long
-        if self.framesSinceInput > holdTimeout {
+        if self.framesSinceInput > Config.holdTimeout {
             self.lastDirection = 0;
         }
 
-        // Move paddle based on current direction
         if self.lastDirection != 0 {
-            if self.playerPaddle == 1 {
-                self.paddle1Y = self.paddle1Y + self.lastDirection * speed;
-            } else {
-                self.paddle2Y = self.paddle2Y + self.lastDirection * speed;
-            }
-        }
-
-        // Clamp paddle positions to screen bounds
-        if self.paddle1Y < 0 {
-            self.paddle1Y = 0;
-        }
-        if self.paddle1Y > self.height - self.paddleSize {
-            self.paddle1Y = self.height - self.paddleSize;
-        }
-        if self.paddle2Y < 0 {
-            self.paddle2Y = 0;
-        }
-        if self.paddle2Y > self.height - self.paddleSize {
-            self.paddle2Y = self.height - self.paddleSize;
+            self.paddle1.move(direction: self.lastDirection);
         }
     }
 
+    // ----------------------------------------
+    // Update Logic
+    // ----------------------------------------
+
     mutating func update() {
-        // Increment frame counter
         self.frameCount = self.frameCount + 1;
 
-        // Handle player input first (every frame for responsiveness)
+        // Handle player input every frame for responsiveness
         self.handleInput();
 
         // Move ball every 2nd frame (slower ball)
         if self.frameCount % 2 == 0 {
-            // Shift trail positions before moving ball
-            self.trailX3 = self.trailX2;
-            self.trailY3 = self.trailY2;
-            self.trailX2 = self.trailX1;
-            self.trailY2 = self.trailY1;
-            self.trailX1 = self.ballX;
-            self.trailY1 = self.ballY;
-
-            // Move ball
-            self.ballX = self.ballX + self.ballDX;
-            self.ballY = self.ballY + self.ballDY;
+            self.ball.updateTrail();
+            self.ball.move();
 
             // Bounce off top/bottom
-            if self.ballY <= 0 {
-                self.ballY = 0;
-                self.ballDY = 1;
-            } else if self.ballY >= self.height - 1 {
-                self.ballY = self.height - 1;
-                self.ballDY = -1;
+            if self.ball.y <= 0 {
+                self.ball.y = 0;
+                self.ball.dy = 1;
+            } else if self.ball.y >= Config.gameHeight - 1 {
+                self.ball.y = Config.gameHeight - 1;
+                self.ball.dy = -1;
             }
         }
 
-        // AI for the non-player paddle only (every 2nd frame)
+        // AI for paddle 2 (right) - every 2nd frame
         if self.frameCount % 2 == 0 {
-            // Paddle 2 (AI) follows the ball when it's on its side
-            if self.ballX >= (3 * self.width / 4) {
-                if self.ballY > self.paddle2Y + 2 and self.paddle2Y < self.height - self.paddleSize {
-                    self.paddle2Y = self.paddle2Y + 1;
-                } else if self.ballY < self.paddle2Y + 1 and self.paddle2Y > 0 {
-                    self.paddle2Y = self.paddle2Y - 1;
+            if self.ball.x >= (3 * Config.gameWidth / 4) {
+                if self.ball.y > self.paddle2.y + 2 and self.paddle2.y < Config.gameHeight - Config.paddleSize {
+                    self.paddle2.move(direction: 1);
+                } else if self.ball.y < self.paddle2.y + 1 and self.paddle2.y > 0 {
+                    self.paddle2.move(direction: -1);
                 }
             }
         }
 
-        // Bounce off paddles with angle based on hit position
-        if self.ballX == 1 {
-            if self.ballY >= self.paddle1Y and self.ballY < self.paddle1Y + self.paddleSize {
-                self.ballDX = 1;
-                // Angle based on hit position
-                let hitPos = self.ballY - self.paddle1Y;
+        // Paddle collision with angle based on hit position
+        if self.ball.x == 1 {
+            if self.paddle1.contains(ballY: self.ball.y) {
+                self.ball.dx = 1;
+                let hitPos = self.paddle1.hitPosition(ballY: self.ball.y);
                 if hitPos == 0 {
-                    self.ballDY = -1;  // Top of paddle → up
-                } else if hitPos == self.paddleSize - 1 {
-                    self.ballDY = 1;   // Bottom of paddle → down
+                    self.ball.dy = -1;  // Top of paddle -> up
+                } else if hitPos == Config.paddleSize - 1 {
+                    self.ball.dy = 1;   // Bottom of paddle -> down
                 }
-                // Middle keeps current ballDY
             }
-        } else if self.ballX == self.width - 2 {
-            if self.ballY >= self.paddle2Y and self.ballY < self.paddle2Y + self.paddleSize {
-                self.ballDX = -1;
-                // Angle based on hit position
-                let hitPos = self.ballY - self.paddle2Y;
+        } else if self.ball.x == Config.gameWidth - 2 {
+            if self.paddle2.contains(ballY: self.ball.y) {
+                self.ball.dx = -1;
+                let hitPos = self.paddle2.hitPosition(ballY: self.ball.y);
                 if hitPos == 0 {
-                    self.ballDY = -1;  // Top of paddle → up
-                } else if hitPos == self.paddleSize - 1 {
-                    self.ballDY = 1;   // Bottom of paddle → down
+                    self.ball.dy = -1;  // Top of paddle -> up
+                } else if hitPos == Config.paddleSize - 1 {
+                    self.ball.dy = 1;   // Bottom of paddle -> down
                 }
-                // Middle keeps current ballDY
             }
         }
 
         // Score detection
-        if self.ballX < 0 {
+        if self.ball.x < 0 {
             self.score2 = self.score2 + 1;
-            self.resetBall();
-        } else if self.ballX >= self.width {
+            self.ball.reset();
+        } else if self.ball.x >= Config.gameWidth {
             self.score1 = self.score1 + 1;
-            self.resetBall();
+            self.ball.reset();
         }
     }
 
-    mutating func resetBall() {
-        self.ballX = self.width / 2;
-        self.ballY = self.height / 2;
-        self.ballDX = 0 - self.ballDX;
+    // ----------------------------------------
+    // Rendering
+    // ----------------------------------------
 
-        // Reset trail to new ball position
-        self.trailX1 = self.ballX;
-        self.trailY1 = self.ballY;
-        self.trailX2 = self.ballX;
-        self.trailY2 = self.ballY;
-        self.trailX3 = self.ballX;
-        self.trailY3 = self.ballY;
-    }
+    mutating func render() {
+        print(home());
 
-    func render() -> Result[(), Error] {
-        // ANSI: Move cursor to home position
-        print("\x1b[H");
-
-        // Top border: ╔═══...═══╗
-        print("\x1b[37m╔");
-        var i: Int64 = 0;
-        while i < self.width {
-            print("═");
-            i = i + 1;
-        }
-        println("╗\x1b[0m\x1b[K");
-
-        // Game field
-        let centerX = self.width / 2;
-        var y: Int64 = 0;
-        while y < self.height {
-            print("\x1b[37m║\x1b[0m");
-
-            var x: Int64 = 0;
-            while x < self.width {
-                if x == self.ballX and y == self.ballY {
-                    // Yellow ball
-                    print("\x1b[33m●\x1b[0m");
-                } else if self.isTrail(x: x, y: y) {
-                    // Gray trail
-                    print("\x1b[90m·\x1b[0m");
-                } else if x == 0 and self.isPaddle1(y: y) {
-                    // Green paddle 1
-                    print("\x1b[32m█\x1b[0m");
-                } else if x == self.width - 1 and self.isPaddle2(y: y) {
-                    // Cyan paddle 2
-                    print("\x1b[36m█\x1b[0m");
-                } else if x == centerX and y % 2 == 0 {
-                    // Center line (every other row, ball/trail takes priority)
-                    print("╎");
-                } else {
-                    print(" ");
-                }
-                x = x + 1;
-            }
-
-            println("\x1b[37m║\x1b[0m\x1b[K");
-            y = y + 1;
-        }
-
-        // Bottom border: ╚═══...═══╝
-        print("\x1b[37m╚");
-        i = 0;
-        while i < self.width {
-            print("═");
-            i = i + 1;
-        }
-        println("╝\x1b[0m\x1b[K");
-
-        // Score box
-        self.renderScoreBox();
-
-        .Ok(())
-    }
-
-    func renderScoreBox() {
-        // Simple score line
-        print("  \x1b[32mPLAYER 1:\x1b[0m \x1b[1;37m");
-        print(self.score1);
-        print("\x1b[0m");
+        // Score display
+        print(moveTo(x: 2, y: 0));
+        print(Styles.label("PLAYER 1: ") + Styles.paddle1(self.score1));
         print("                    ");
-        print("\x1b[36mPLAYER 2:\x1b[0m \x1b[1;37m");
-        print(self.score2);
-        println("\x1b[0m\x1b[K");
+        print(Styles.label("PLAYER 2: ") + Styles.paddle2(self.score2));
+        print(clearLine());
 
-        println("  W/S or Arrow Keys to move | Ctrl+C to exit\x1b[K");
+        // Game box (only needs to be drawn once, but redrawing is fine)
+        self.box.render();
+
+        // Clear old trail position (the one that's no longer displayed)
+        let centerX = Config.gameWidth / 2;
+        if self.prevTrailX3 == centerX and self.prevTrailY3 % 2 == 0 {
+            print(self.box.at(x: self.prevTrailX3, y: self.prevTrailY3) + Styles.centerLine("╎"));
+        } else {
+            print(self.box.at(x: self.prevTrailX3, y: self.prevTrailY3) + " ");
+        }
+
+        // Clear old paddle 1 positions that are no longer occupied
+        if self.prevPaddle1Y < self.paddle1.y {
+            // Paddle moved down, clear top
+            for i in Range[Int64](self.prevPaddle1Y, self.paddle1.y) {
+                print(self.box.at(x: 0, y: i) + " ");
+            }
+        } else if self.prevPaddle1Y > self.paddle1.y {
+            // Paddle moved up, clear bottom
+            for i in Range[Int64](self.paddle1.y + Config.paddleSize, self.prevPaddle1Y + Config.paddleSize) {
+                print(self.box.at(x: 0, y: i) + " ");
+            }
+        }
+
+        // Clear old paddle 2 positions that are no longer occupied
+        if self.prevPaddle2Y < self.paddle2.y {
+            for i in Range[Int64](self.prevPaddle2Y, self.paddle2.y) {
+                print(self.box.at(x: Config.gameWidth - 1, y: i) + " ");
+            }
+        } else if self.prevPaddle2Y > self.paddle2.y {
+            for i in Range[Int64](self.paddle2.y + Config.paddleSize, self.prevPaddle2Y + Config.paddleSize) {
+                print(self.box.at(x: Config.gameWidth - 1, y: i) + " ");
+            }
+        }
+
+        // Draw center line (only where not covered by ball/trail)
+        for y in Range[Int64](0, Config.gameHeight) {
+            if y % 2 == 0 {
+                print(self.box.at(x: centerX, y: y) + Styles.centerLine("╎"));
+            }
+        }
+
+        // Draw paddles
+        for i in Range[Int64](0, Config.paddleSize) {
+            print(self.box.at(x: 0, y: self.paddle1.y + i) + Styles.paddle1("█"));
+            print(self.box.at(x: Config.gameWidth - 1, y: self.paddle2.y + i) + Styles.paddle2("█"));
+        }
+
+        // Draw ball trail
+        print(self.box.at(x: self.ball.trailX1, y: self.ball.trailY1) + Styles.trail("·"));
+        print(self.box.at(x: self.ball.trailX2, y: self.ball.trailY2) + Styles.trail("·"));
+        print(self.box.at(x: self.ball.trailX3, y: self.ball.trailY3) + Styles.trail("·"));
+
+        // Draw ball
+        print(self.box.at(x: self.ball.x, y: self.ball.y) + Styles.ball("●"));
+
+        // Store previous positions for next frame
+        self.prevPaddle1Y = self.paddle1.y;
+        self.prevPaddle2Y = self.paddle2.y;
+        self.prevTrailX3 = self.ball.trailX3;
+        self.prevTrailY3 = self.ball.trailY3;
+
+        // Instructions
+        print(moveTo(x: 2, y: Config.gameHeight + 3));
+        print(Styles.label("W/S or Arrow Keys to move | Ctrl+C to exit") + clearLine());
     }
 }
 
-// Import usleep from C for timing
+// ============================================
+// External
+// ============================================
+
 @extern(.C, mangleName: "usleep")
 func usleep(usec: UInt32) -> Int32
 
-// Keyboard input helpers (from pong_input.c)
-@extern(.C, mangleName: "pong_init_terminal")
-func initTerminal() -> Int32
-
-@extern(.C, mangleName: "pong_restore_terminal")
-func restoreTerminal() -> Int32
-
-@extern(.C, mangleName: "pong_check_key")
-func checkKey() -> Int32
-
-// Key codes
-func KEY_W() -> Int32 { 119 }
-func KEY_S() -> Int32 { 115 }
-func KEY_UP() -> Int32 { 1001 }
-func KEY_DOWN() -> Int32 { 1002 }
+// ============================================
+// Main
+// ============================================
 
 func main() -> Result[(), Error] {
-    // Initialize terminal for non-blocking input
-    initTerminal();
-
-    // ANSI: Hide cursor and clear screen
-    print("\x1b[?25l");
-    print("\x1b[2J");
-
-    var game = Pong();
+    var game = Game();
 
     // Run until Ctrl+C
     while true {
@@ -357,11 +411,6 @@ func main() -> Result[(), Error] {
         game.render();
         usleep(16667); // ~60 FPS
     }
-
-    // Cleanup (unreachable with Ctrl+C, but good practice)
-    restoreTerminal();
-    print("\x1b[?25h");
-    println("\nGame demo complete.");
 
     .Ok(())
 }

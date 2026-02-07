@@ -7,12 +7,16 @@
 //! - If-let expressions
 //! - Guard-let statements
 //! - While-let expressions
+//! - For loops (desugared to while-let)
 //! - Exhaustiveness and irrefutability checking
 
+mod array_matchable;
 mod exhaustiveness;
+mod for_loops;
 mod guard_let;
 mod if_let;
 mod let_destructuring;
 mod match_expressions;
 mod pattern_types;
+mod range_matchable;
 mod while_let;

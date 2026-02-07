@@ -8,19 +8,23 @@ import std.num.(Int64)
 import std.memory.(Layout, Pointer, Slice, RawPointer, Allocator, GlobalAllocator)
 import std.ffi.(memcpy, memmove, memset)
 
+/// A contiguous memory region that owns its allocation.
+/// Not copyable to ensure unique ownership of the underlying memory.
+/// Used as a building block for higher-level collections.
 public struct Buffer[T, A]: not Copyable where A: Allocator {
     private var ptr: Pointer[T]
     private var cap: Int64
     private var allocator: A
 
-    // Allocate buffer with capacity using provided allocator
+    /// Allocates a buffer with the specified capacity using the provided allocator.
+    /// Panics if allocation fails.
     public init(capacity: Int64, allocator: A) {
         self.allocator = allocator;
         self.cap = capacity;
         let layout = Layout.array[T](capacity);
         let result = self.allocator.allocate(layout);
-        if result.isSome() {
-            self.ptr = result.unwrap().cast[T]()
+        if let .Some(rawPtr) = result {
+            self.ptr = rawPtr.cast[T]()
         } else {
             lang.panic("Buffer allocation failed")
         }
@@ -33,27 +37,33 @@ public struct Buffer[T, A]: not Copyable where A: Allocator {
         self.allocator = allocator;
     }
 
+    /// Destructor: deallocates the buffer memory.
     deinit {
         let layout = Layout.array[T](self.cap);
         self.allocator.deallocate(self.ptr.asRaw(), layout)
     }
 
+    /// The number of elements this buffer can hold.
     public var capacity: Int64 { self.cap }
 
+    /// A pointer to the buffer's element storage.
     public var pointer: Pointer[T] { self.ptr }
 
-    // Unchecked read - get element at index without bounds checking
+    /// Reads the element at the given index without bounds checking.
+    /// Undefined behavior if index is out of bounds.
     public func read(unchecked index: Int64) -> T {
         self.ptr.offset(by: index).read()
     }
 
-    // Unchecked write - set element at index without bounds checking
+    /// Writes a value at the given index without bounds checking.
+    /// Undefined behavior if index is out of bounds.
     public func write(unchecked index: Int64, value: T) {
         self.ptr.offset(by: index).write(value)
     }
 
-    // Safe read - returns Optional, bounds checked
-    public func read(at index: Int64) -> Optional[T] {
+    /// Reads the element at the given index with bounds checking.
+    /// Returns None if index is out of bounds.
+    public func read(at index: Int64) -> T? {
         if index >= 0 and index < self.cap {
             .Some(self.ptr.offset(by: index).read())
         } else {
@@ -61,7 +71,8 @@ public struct Buffer[T, A]: not Copyable where A: Allocator {
         }
     }
 
-    // Safe write - bounds checked, returns success
+    /// Writes a value at the given index with bounds checking.
+    /// Returns true on success, false if index is out of bounds.
     public func write(at index: Int64, value: T) -> Bool {
         if index >= 0 and index < self.cap {
             self.ptr.offset(by: index).write(value);
@@ -93,26 +104,29 @@ public struct Buffer[T, A]: not Copyable where A: Allocator {
     //     memset(self.ptr.asRaw().raw, 0, byteCount.raw);
     // }
 
-    // Resizing
+    /// Resizes the buffer to the new capacity.
+    /// Panics if reallocation fails.
     public mutating func resize(to newCapacity: Int64) {
         let oldLayout = Layout.array[T](self.cap);
         let newLayout = Layout.array[T](newCapacity);
 
         let result = self.allocator.reallocate(self.ptr.asRaw(), oldLayout, newLayout);
-        if result.isSome() {
-            self.ptr = result.unwrap().cast[T]();
+        if let .Some(rawPtr) = result {
+            self.ptr = rawPtr.cast[T]();
             self.cap = newCapacity
         } else {
             lang.panic("Buffer resize failed")
         }
     }
 
-    // Get slice view
+    /// Returns a slice view of the entire buffer.
     public func asSlice() -> Slice[T] {
         Slice(pointer: self.ptr, count: self.cap)
     }
 
-    public func slice(from start: Int64, to end: Int64) -> Optional[Slice[T]] {
+    /// Returns a slice view of a portion of the buffer.
+    /// Returns None if the range is out of bounds.
+    public func slice(from start: Int64, to end: Int64) -> Slice[T]? {
         if start >= 0 and end <= self.cap and start <= end {
             .Some(Slice(pointer: self.ptr.offset(by: start), count: end - start))
         } else {

@@ -45,13 +45,23 @@ pub enum Constructor {
     IntLiteral(i64),
 
     /// Integer range (inclusive on both ends after normalization)
-    IntRange { start: i64, end: i64 },
+    /// None for start means unbounded below (..=end, ..<end)
+    /// None for end means unbounded above (start..)
+    IntRange {
+        start: Option<i64>,
+        end: Option<i64>,
+    },
 
     /// Character literal
     CharLiteral(char),
 
     /// Character range (inclusive on both ends after normalization)
-    CharRange { start: char, end: char },
+    /// None for start means unbounded below (..=end, ..<end)
+    /// None for end means unbounded above (start..)
+    CharRange {
+        start: Option<char>,
+        end: Option<char>,
+    },
 
     /// String literal
     StringLiteral(String),
@@ -125,9 +135,13 @@ impl Constructor {
                 LiteralValue::Bool(true) => Constructor::True,
                 LiteralValue::Bool(false) => Constructor::False,
                 LiteralValue::Integer(n) => Constructor::IntLiteral(*n),
+                LiteralValue::Char(c) => {
+                    Constructor::CharLiteral(char::from_u32(*c).unwrap_or('\0'))
+                },
                 LiteralValue::String(s) => Constructor::StringLiteral(s.clone()),
                 LiteralValue::Float(_) => Constructor::NonExhaustive, // Floats can't be exhaustively matched
                 LiteralValue::Unit => Constructor::Unit,
+                LiteralValue::Null => Constructor::NonExhaustive, // Null literals handled via Optional pattern matching
             },
 
             PatternKind::EnumVariant {
@@ -184,27 +198,51 @@ impl Constructor {
                 start,
                 end,
                 inclusive,
-            } => match (start, end) {
-                (RangeBound::Integer(s), RangeBound::Integer(e)) => {
-                    let end_val = if *inclusive { *e } else { e - 1 };
+            } => {
+                // Determine if this is an integer or char range based on the bounds
+                let is_int_range = match (start, end) {
+                    (Some(RangeBound::Integer(_)), _) => true,
+                    (_, Some(RangeBound::Integer(_))) => true,
+                    (Some(RangeBound::Char(_)), _) => false,
+                    (_, Some(RangeBound::Char(_))) => false,
+                    (None, None) => return Constructor::NonExhaustive,
+                };
+
+                if is_int_range {
+                    let start_val = match start {
+                        Some(RangeBound::Integer(s)) => Some(*s),
+                        None => None,
+                        _ => return Constructor::NonExhaustive, // Mismatched types
+                    };
+                    let end_val = match end {
+                        Some(RangeBound::Integer(e)) => Some(if *inclusive { *e } else { e - 1 }),
+                        None => None,
+                        _ => return Constructor::NonExhaustive, // Mismatched types
+                    };
                     Constructor::IntRange {
-                        start: *s,
+                        start: start_val,
                         end: end_val,
                     }
-                },
-                (RangeBound::Char(s), RangeBound::Char(e)) => {
-                    let end_val = if *inclusive {
-                        *e
-                    } else {
-                        char::from_u32(*e as u32 - 1).unwrap_or(*e)
+                } else {
+                    let start_val = match start {
+                        Some(RangeBound::Char(s)) => Some(*s),
+                        None => None,
+                        _ => return Constructor::NonExhaustive, // Mismatched types
+                    };
+                    let end_val = match end {
+                        Some(RangeBound::Char(e)) => Some(if *inclusive {
+                            *e
+                        } else {
+                            char::from_u32(*e as u32 - 1).unwrap_or(*e)
+                        }),
+                        None => None,
+                        _ => return Constructor::NonExhaustive, // Mismatched types
                     };
                     Constructor::CharRange {
-                        start: *s,
+                        start: start_val,
                         end: end_val,
                     }
-                },
-                // Mismatched range bounds - treat as non-exhaustive
-                _ => Constructor::NonExhaustive,
+                }
             },
 
             PatternKind::Array {
@@ -242,6 +280,9 @@ impl Constructor {
     /// Returns `None` if the type has infinitely many constructors
     /// (Int, String, Float, arrays with variable length).
     pub fn all_constructors(ty: &Ty) -> Option<Vec<Constructor>> {
+        // Treat type aliases as transparent for pattern matching.
+        let ty = ty.expand_aliases();
+
         match ty.kind() {
             TyKind::Bool => Some(vec![Constructor::True, Constructor::False]),
 
@@ -273,6 +314,12 @@ impl Constructor {
             }]),
 
             TyKind::Struct { symbol, .. } => {
+                // Check for Array[T] struct - arrays have variable length
+                if symbol.metadata().name().value == "Array" && symbol.type_parameters().len() == 1
+                {
+                    return None;
+                }
+
                 // Check if this struct conforms to ExpressibleByBoolLiteral
                 // If so, use True/False constructors for exhaustiveness checking
                 use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
@@ -302,9 +349,6 @@ impl Constructor {
 
             // Infinite constructor spaces
             TyKind::Int(_) | TyKind::Float(_) | TyKind::String => None,
-
-            // Arrays have variable length
-            TyKind::Array(_) => None,
 
             // Unknown/error types - be conservative
             _ => None,
@@ -347,8 +391,16 @@ impl Constructor {
             },
             None => {
                 // Infinite constructors case
-                // For arrays, check if patterns cover all possible lengths
-                if matches!(ty.kind(), TyKind::Array(_)) {
+                // For arrays (both TyKind::Array and Array[T] struct), check if patterns cover all possible lengths
+                let is_array = match ty.kind() {
+                    TyKind::Struct { symbol, .. } => {
+                        symbol.metadata().name().value == "Array"
+                            && symbol.type_parameters().len() == 1
+                    },
+                    _ => false,
+                };
+
+                if is_array {
                     return Self::missing_array_constructors(covered);
                 }
 
@@ -431,9 +483,25 @@ impl Constructor {
             },
             Constructor::Struct { name, .. } => format!("{} {{ .. }}", name),
             Constructor::IntLiteral(n) => n.to_string(),
-            Constructor::IntRange { start, end } => format!("{}..={}", start, end),
+            Constructor::IntRange { start, end } => {
+                let start_str = start.map(|s| s.to_string()).unwrap_or_default();
+                let end_str = end.map(|e| e.to_string()).unwrap_or_default();
+                if end.is_none() {
+                    format!("{}..", start_str)
+                } else {
+                    format!("{}..={}", start_str, end_str)
+                }
+            },
             Constructor::CharLiteral(c) => format!("'{}'", c),
-            Constructor::CharRange { start, end } => format!("'{}'..='{}'", start, end),
+            Constructor::CharRange { start, end } => {
+                let start_str = start.map(|s| format!("'{}'", s)).unwrap_or_default();
+                let end_str = end.map(|e| format!("'{}'", e)).unwrap_or_default();
+                if end.is_none() {
+                    format!("{}..", start_str)
+                } else {
+                    format!("{}..={}", start_str, end_str)
+                }
+            },
             Constructor::StringLiteral(s) => format!("\"{}\"", s),
             Constructor::Unit => "()".to_string(),
             Constructor::Wildcard => "_".to_string(),

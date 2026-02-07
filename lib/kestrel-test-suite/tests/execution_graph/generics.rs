@@ -32,7 +32,7 @@ mod generic_functions {
         .expect(Compiles)
         .expect(Mir::compiles())
         .expect(
-            Mir::mir_function("Main.identity")
+            Mir::mir_function("Main.identity$x")
                 .has_type_params(1)
                 .has_param("x", MirTy::ref_(MirTy::type_param("T")))
                 .returns(MirTy::type_param("T")),
@@ -54,7 +54,7 @@ mod generic_functions {
         .expect(Compiles)
         .expect(Mir::compiles())
         .expect(
-            Mir::mir_function("Main.swap")
+            Mir::mir_function("Main.swap$a$b")
                 .has_type_params(2)
                 .has_param("a", MirTy::ref_(MirTy::type_param("A")))
                 .has_param("b", MirTy::ref_(MirTy::type_param("B"))),
@@ -76,7 +76,7 @@ mod generic_functions {
         )
         .expect(Compiles)
         .expect(Mir::compiles())
-        .expect(Mir::mir_function("Main.main").calls("Main.identity"));
+        .expect(Mir::mir_function("Main.main").calls("Main.identity$x"));
     }
 }
 
@@ -241,7 +241,7 @@ mod generic_methods {
 
             struct Box[T] {
                 let value: T
-                
+
                 func read() -> T {
                     self.value
                 }
@@ -424,7 +424,7 @@ mod generic_closures {
         .expect(Compiles)
         .expect(Mir::compiles())
         .expect(
-            Mir::mir_function("Main.apply")
+            Mir::mir_function("Main.apply$f$x")
                 .has_type_params(2)
                 .returns(MirTy::type_param("U"))
                 .calls_escaping(),
@@ -451,7 +451,7 @@ mod usage {
             struct Pair[A, B] {
                 let first: A
                 let second: B
-                
+
                 func getFirst() -> A { self.first }
                 func getSecond() -> B { self.second }
             }
@@ -473,7 +473,7 @@ mod usage {
         .expect(
             Mir::mir_function("Main.main")
                 .returns(MirTy::I64)
-                .calls("Main.identity")
+                .calls("Main.identity$x")
                 .calls("Main.Pair.getFirst")
                 .calls("Main.Pair.getSecond"),
         );

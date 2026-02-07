@@ -22,6 +22,6 @@ Welcome to the Kestrel programming language documentation.
 - **[Computed Properties](computed-properties.md)** - Getters and setters
 - **[Subscripts](subscripts.md)** - Index-based access
 
-## Roadmap
+## Design
 
-- **[Future](future.md)** - Planned language features
+- **[Future](../design/future.md)** - Planned language features and design ideas

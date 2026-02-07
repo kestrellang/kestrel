@@ -31,6 +31,10 @@ fn type_uses_self(mir: &MirContext, ty_id: Id<Ty>) -> bool {
     let ty = mir.ty(ty_id);
     match ty {
         MirTy::SelfType => true,
+        MirTy::AssociatedTypeProjection { base, .. } => {
+            // Associated type projections like `Self.Item` depend on Self
+            type_uses_self(mir, *base)
+        },
         MirTy::Ref(inner) | MirTy::RefMut(inner) | MirTy::Pointer(inner) => {
             type_uses_self(mir, *inner)
         },
@@ -51,13 +55,45 @@ fn func_uses_self(mir: &MirContext, func_def: &FunctionDef) -> bool {
     }) || type_uses_self(mir, func_def.ret)
 }
 
-/// Check if a function has a self receiver (first parameter named "self").
-/// This is used to determine if a witness call needs a self_type for mangling.
-fn has_self_receiver(mir: &MirContext, func_def: &FunctionDef) -> bool {
-    func_def.params.first().is_some_and(|&param_id| {
-        let param = &mir.params[param_id];
-        param.name == "self"
-    })
+/// Try to infer the Self type from a method's qualified name.
+///
+/// For a function like `Test.Widget.create`, this returns the type `Test.Widget`
+/// by looking up the parent name in structs and enums.
+fn infer_self_type_from_method_name(
+    ctx: &CodegenContext<'_>,
+    func_name: Id<QualifiedName>,
+) -> Option<Id<Ty>> {
+    let name_data = ctx.mir.name(func_name);
+    let parent = name_data.parent()?;
+
+    // Try to find a struct with this name
+    for (_, struct_def) in ctx.mir.structs.iter() {
+        if ctx.mir.name(struct_def.name) == &parent {
+            // Build the type: if the struct has type params, this won't work directly,
+            // but for non-generic types it will
+            if struct_def.type_params.is_empty() {
+                // Look up the type - it should already be interned
+                let mir_ty = MirTy::Named {
+                    name: struct_def.name,
+                    type_args: vec![],
+                };
+                return ctx.mir.lookup_type(&mir_ty);
+            }
+        }
+    }
+
+    // Try to find an enum with this name
+    for (_, enum_def) in ctx.mir.enums.iter() {
+        if ctx.mir.name(enum_def.name) == &parent && enum_def.type_params.is_empty() {
+            let mir_ty = MirTy::Named {
+                name: enum_def.name,
+                type_args: vec![],
+            };
+            return ctx.mir.lookup_type(&mir_ty);
+        }
+    }
+
+    None
 }
 
 fn is_main_function(ctx: &CodegenContext<'_>, func_def: &FunctionDef) -> bool {
@@ -91,6 +127,60 @@ fn is_aggregate_value_type(mir: &MirContext, ty_id: Id<Ty>) -> bool {
 
 fn needs_sret_for_type(mir: &MirContext, ty_id: Id<Ty>) -> bool {
     !matches!(mir.ty(ty_id), MirTy::Unit) && is_aggregate_value_type(mir, ty_id)
+}
+
+/// Convert alignment to the shift value needed by Cranelift.
+///
+/// Cranelift's StackSlotData uses `align_shift` which is the log2 of the alignment.
+/// For example:
+/// - alignment=1 → shift=0 (2^0 = 1)
+/// - alignment=4 → shift=2 (2^2 = 4)
+/// - alignment=8 → shift=3 (2^3 = 8)
+pub fn align_to_shift(align: usize) -> u8 {
+    if align == 0 {
+        return 0;
+    }
+    align.trailing_zeros() as u8
+}
+
+/// Zero-initialize a memory region pointed to by `ptr` with the given `size`.
+///
+/// Uses multi-byte stores for efficiency: 8-byte stores for the bulk,
+/// then 4/2/1-byte stores for any remainder. This ensures padding bytes
+/// and unused payload areas (e.g., in enum None variants) are zeroed,
+/// preventing reads of uninitialized stack memory.
+pub fn zero_memory(builder: &mut FunctionBuilder<'_>, ptr: CraneliftValue, size: usize) {
+    let mut offset = 0;
+    if size >= 8 {
+        let zero_i64 = builder.ins().iconst(cl_types::I64, 0);
+        while offset + 8 <= size {
+            builder
+                .ins()
+                .store(MemFlags::new(), zero_i64, ptr, offset as i32);
+            offset += 8;
+        }
+    }
+    let remaining = size - offset;
+    if remaining >= 4 {
+        let zero_i32 = builder.ins().iconst(cl_types::I32, 0);
+        builder
+            .ins()
+            .store(MemFlags::new(), zero_i32, ptr, offset as i32);
+        offset += 4;
+    }
+    if size - offset >= 2 {
+        let zero_i16 = builder.ins().iconst(cl_types::I16, 0);
+        builder
+            .ins()
+            .store(MemFlags::new(), zero_i16, ptr, offset as i32);
+        offset += 2;
+    }
+    if size - offset >= 1 {
+        let zero_i8 = builder.ins().iconst(cl_types::I8, 0);
+        builder
+            .ins()
+            .store(MemFlags::new(), zero_i8, ptr, offset as i32);
+    }
 }
 
 fn copy_aggregate_value(
@@ -458,6 +548,51 @@ pub fn compile_rvalue(
             }
         },
 
+        Rvalue::FloatFma { bits, a, b, c } => {
+            use kestrel_execution_graph::function::FloatBits;
+
+            let a_val = compile_value(ctx, func_def, subst, a, builder, local_map, stack_locals)?;
+            let b_val = compile_value(ctx, func_def, subst, b, builder, local_map, stack_locals)?;
+            let c_val = compile_value(ctx, func_def, subst, c, builder, local_map, stack_locals)?;
+
+            match bits {
+                FloatBits::F16 => Err(CodegenError::Unsupported("f16 not supported".into())),
+                FloatBits::F32 | FloatBits::F64 => Ok(builder.ins().fma(a_val, b_val, c_val)),
+            }
+        },
+
+        Rvalue::FloatCopysign {
+            bits,
+            magnitude,
+            sign_source,
+        } => {
+            use kestrel_execution_graph::function::FloatBits;
+
+            let mag_val = compile_value(
+                ctx,
+                func_def,
+                subst,
+                magnitude,
+                builder,
+                local_map,
+                stack_locals,
+            )?;
+            let sign_val = compile_value(
+                ctx,
+                func_def,
+                subst,
+                sign_source,
+                builder,
+                local_map,
+                stack_locals,
+            )?;
+
+            match bits {
+                FloatBits::F16 => Err(CodegenError::Unsupported("f16 not supported".into())),
+                FloatBits::F32 | FloatBits::F64 => Ok(builder.ins().fcopysign(mag_val, sign_val)),
+            }
+        },
+
         // === Pointer intrinsics ===
         Rvalue::PtrNull { .. } => {
             // Return a null pointer (integer 0)
@@ -679,6 +814,13 @@ pub fn compile_rvalue(
                 delta_val,
             ))
         },
+
+        Rvalue::StrConcat { .. } => {
+            // TODO: String concatenation is not yet implemented
+            // This should allocate a buffer and copy strings into it
+            // For now, return an error value
+            Ok(builder.ins().iconst(cranelift_codegen::ir::types::I64, 0))
+        },
     }
 }
 
@@ -731,7 +873,7 @@ fn compile_construct(
     };
 
     // Get struct layout with field offsets
-    let struct_layout = ctx.layouts.struct_layout(struct_id, &type_args);
+    let struct_layout = ctx.layouts.struct_layout(struct_id, &type_args, None);
     let layout = struct_layout.layout;
     let field_offsets = struct_layout.field_offsets.clone();
 
@@ -739,7 +881,7 @@ fn compile_construct(
     let slot = builder.create_sized_stack_slot(StackSlotData::new(
         StackSlotKind::ExplicitSlot,
         layout.size as u32,
-        layout.align as u8,
+        align_to_shift(layout.align),
     ));
 
     // Get pointer type for the target
@@ -751,6 +893,9 @@ fn compile_construct(
 
     // Get pointer to the stack slot
     let ptr = builder.ins().stack_addr(ptr_type, slot, 0);
+
+    // Zero-initialize the stack slot to prevent uninitialized padding bytes
+    zero_memory(builder, ptr, layout.size);
 
     // Store each field at its offset
     let struct_def = ctx.mir.struct_def(struct_id);
@@ -764,9 +909,14 @@ fn compile_construct(
     };
 
     for (field_name, field_value) in fields {
-        let offset = field_offsets
-            .get(field_name)
-            .ok_or_else(|| CodegenError::Unsupported(format!("unknown field: {}", field_name)))?;
+        let offset = field_offsets.get(field_name).ok_or_else(|| {
+            let struct_name = ctx.mir.name(struct_def.name);
+            let available_fields: Vec<_> = field_offsets.keys().collect();
+            CodegenError::Unsupported(format!(
+                "unknown field: {} in struct {} (available: {:?})",
+                field_name, struct_name, available_fields
+            ))
+        })?;
 
         // Find the field type
         let mut field_ty = None;
@@ -804,8 +954,17 @@ fn compile_construct(
                 .unwrap_or(field_ty)
         };
 
-        // Check if this is a nested aggregate - if so, copy its data
-        if is_aggregate_value_type(ctx.mir, concrete_field_ty) {
+        // Check if this is a nested aggregate that needs to be copied.
+        // We need to check both:
+        // 1. The MIR type is an aggregate (Named, Tuple, etc.)
+        // 2. The MIR value is a Place, not an Immediate
+        //
+        // Immediates (including enum discriminants and primitives in Named types)
+        // should be stored directly. Only Place values that point to aggregate
+        // memory need copy_aggregate_value.
+        let is_place_value = matches!(field_value, Value::Place(_));
+
+        if is_aggregate_value_type(ctx.mir, concrete_field_ty) && is_place_value {
             let dest_ptr = if *offset == 0 {
                 ptr
             } else {
@@ -868,7 +1027,7 @@ fn compile_tuple(
     let slot = builder.create_sized_stack_slot(StackSlotData::new(
         StackSlotKind::ExplicitSlot,
         total_size as u32,
-        max_align as u8,
+        align_to_shift(max_align),
     ));
 
     // Get pointer type for the target
@@ -880,6 +1039,9 @@ fn compile_tuple(
 
     // Get pointer to the stack slot
     let ptr = builder.ins().stack_addr(ptr_type, slot, 0);
+
+    // Zero-initialize the stack slot to prevent uninitialized padding bytes
+    zero_memory(builder, ptr, total_size);
 
     // Store each element at its offset
     for (i, value) in values.iter().enumerate() {
@@ -989,7 +1151,7 @@ fn compile_stack_alloc(
     let slot = builder.create_sized_stack_slot(StackSlotData::new(
         StackSlotKind::ExplicitSlot,
         total_size as u32,
-        align as u8,
+        align_to_shift(align),
     ));
 
     // Get pointer type for the target
@@ -1105,7 +1267,7 @@ fn compile_call_arg(
                 let slot = builder.create_sized_stack_slot(StackSlotData::new(
                     StackSlotKind::ExplicitSlot,
                     size as u32,
-                    align as u8,
+                    align_to_shift(align),
                 ));
                 let addr = builder.ins().stack_addr(ptr_type, slot, 0);
                 copy_aggregate_value(ctx, ty, addr, val, builder);
@@ -1160,7 +1322,7 @@ fn compile_call_arg(
                     let slot = builder.create_sized_stack_slot(StackSlotData::new(
                         StackSlotKind::ExplicitSlot,
                         size as u32,
-                        align as u8,
+                        align_to_shift(align),
                     ));
                     let addr = builder.ins().stack_addr(ptr_type, slot, 0);
                     builder.ins().store(MemFlags::new(), val, addr, 0);
@@ -1335,7 +1497,7 @@ fn compile_enum_variant(
     let slot = builder.create_sized_stack_slot(StackSlotData::new(
         StackSlotKind::ExplicitSlot,
         enum_layout.size as u32,
-        enum_layout.align as u8,
+        align_to_shift(enum_layout.align),
     ));
 
     // Get pointer type for the target
@@ -1347,6 +1509,10 @@ fn compile_enum_variant(
 
     // Get pointer to the stack slot
     let ptr = builder.ins().stack_addr(ptr_type, slot, 0);
+
+    // Zero-initialize the stack slot to prevent uninitialized payload bytes
+    // (e.g., None variant of Optional leaves payload area uninitialized)
+    zero_memory(builder, ptr, enum_layout.size);
 
     // Find the case and its discriminant
     let enum_def = ctx.mir.enum_def(enum_id);
@@ -1369,7 +1535,7 @@ fn compile_enum_variant(
         // Pass the enum's type_args since payload struct uses the same type parameters
         let payload_layout = ctx
             .layouts
-            .struct_layout(payload_struct_id, &enum_type_args);
+            .struct_layout(payload_struct_id, &enum_type_args, None);
         let field_offsets = payload_layout.field_offsets.clone();
 
         // Compute the payload offset based on the MAXIMUM payload alignment across all cases.
@@ -1379,7 +1545,7 @@ fn compile_enum_variant(
         for cid in &case_ids {
             let cd = &ctx.mir.enum_cases[*cid];
             if let Some(struct_id) = cd.struct_def {
-                let pl = ctx.layouts.struct_layout(struct_id, &enum_type_args);
+                let pl = ctx.layouts.struct_layout(struct_id, &enum_type_args, None);
                 if pl.layout.align > max_payload_layout.align
                     || (pl.layout.align == max_payload_layout.align
                         && pl.layout.size > max_payload_layout.size)
@@ -1491,6 +1657,31 @@ fn compile_ref(
     };
 
     match &place.kind {
+        PlaceKind::Global(name_id) => {
+            // Global/static variable - return its address
+            let global_name = ctx.mir.name(*name_id);
+            let mangled_name = format!("{}", global_name);
+
+            // Look up the global symbol
+            let global_ref = ctx
+                .module
+                .declare_data(
+                    &mangled_name,
+                    cranelift_module::Linkage::Import,
+                    false,
+                    false,
+                )
+                .map_err(|e| {
+                    CodegenError::Unsupported(format!("failed to declare global: {}", e))
+                })?;
+
+            // Get the global address
+            let global_addr = ctx.module.declare_data_in_func(global_ref, builder.func);
+
+            // Return the address of the global
+            Ok(builder.ins().global_value(ptr_type, global_addr))
+        },
+
         PlaceKind::Local(local_id) => {
             // For a local variable, get its address when it's memory-backed.
             let local_def = ctx.mir.local(*local_id);
@@ -1513,7 +1704,7 @@ fn compile_ref(
                 let slot = builder.create_sized_stack_slot(StackSlotData::new(
                     StackSlotKind::ExplicitSlot,
                     layout.size as u32,
-                    layout.align as u8,
+                    align_to_shift(layout.align),
                 ));
                 let addr = builder.ins().stack_addr(ptr_type, slot, 0);
                 builder.ins().store(MemFlags::new(), value, addr, 0);
@@ -1583,6 +1774,21 @@ fn get_place_type(
         PlaceKind::Local(local_id) => {
             let local_def = ctx.mir.local(*local_id);
             Ok(local_def.ty)
+        },
+
+        PlaceKind::Global(name_id) => {
+            // Find the static definition to get its type
+            let static_def = ctx
+                .mir
+                .statics
+                .iter()
+                .find(|(_, def)| def.name == *name_id)
+                .map(|(_, def)| def)
+                .ok_or_else(|| {
+                    let global_name = ctx.mir.name(*name_id);
+                    CodegenError::Unsupported(format!("static variable not found: {}", global_name))
+                })?;
+            Ok(static_def.ty)
         },
 
         PlaceKind::Field { parent, name } => {
@@ -1655,14 +1861,18 @@ fn get_field_info(
     };
 
     // Get field offset from layout (pass substituted type_args for generic structs)
-    let struct_layout = ctx.layouts.struct_layout(struct_id, &type_args);
-    let offset = *struct_layout
-        .field_offsets
-        .get(field_name)
-        .ok_or_else(|| CodegenError::Unsupported(format!("unknown field: {}", field_name)))?;
+    let struct_def = ctx.mir.struct_def(struct_id);
+    let struct_layout = ctx.layouts.struct_layout(struct_id, &type_args, None);
+    let offset = *struct_layout.field_offsets.get(field_name).ok_or_else(|| {
+        let struct_name = ctx.mir.name(struct_def.name);
+        let available_fields: Vec<_> = struct_layout.field_offsets.keys().collect();
+        CodegenError::Unsupported(format!(
+            "unknown field: {} in struct {} (available: {:?})",
+            field_name, struct_name, available_fields
+        ))
+    })?;
 
     // Get field type and apply substitution for generic structs
-    let struct_def = ctx.mir.struct_def(struct_id);
     let type_params = struct_def.type_params.clone();
     let mut field_ty = None;
     for field_id in &struct_def.fields {
@@ -1744,6 +1954,17 @@ fn get_field_by_index(
     }
 
     // Otherwise, it's a regular struct or tuple - look up by index
+    // Resolve AssociatedTypeProjection through substitution before matching
+    let parent_ty = if matches!(
+        ctx.mir.ty(parent_ty),
+        MirTy::AssociatedTypeProjection { .. }
+    ) {
+        subst
+            .apply_ty_readonly(ctx.mir, parent_ty)
+            .unwrap_or(parent_ty)
+    } else {
+        parent_ty
+    };
     let mir_ty = ctx.mir.ty(parent_ty);
 
     match mir_ty {
@@ -1830,7 +2051,9 @@ fn get_struct_field_by_index(
         .collect();
 
     // Get field offset from layout (pass substituted type_args for generic structs)
-    let struct_layout = ctx.layouts.struct_layout(struct_id, &concrete_type_args);
+    let struct_layout = ctx
+        .layouts
+        .struct_layout(struct_id, &concrete_type_args, None);
     let offset = *struct_layout.field_offsets.get(field_name).ok_or_else(|| {
         CodegenError::Unsupported(format!("field offset not found: {}", field_name))
     })?;
@@ -1935,7 +2158,7 @@ fn wrap_extern_return_value(
     let slot = builder.create_sized_stack_slot(StackSlotData::new(
         StackSlotKind::ExplicitSlot,
         size as u32,
-        align as u8,
+        align_to_shift(align),
     ));
     let struct_ptr = builder.ins().stack_addr(ptr_type, slot, 0);
 
@@ -1946,7 +2169,7 @@ fn wrap_extern_return_value(
             && struct_def.fields.len() == 1
         {
             let field_def = &ctx.mir.fields[struct_def.fields[0]];
-            let struct_layout = ctx.layouts.struct_layout(struct_id, &type_args);
+            let struct_layout = ctx.layouts.struct_layout(struct_id, &type_args, None);
             let field_offset = struct_layout
                 .field_offsets
                 .get(&field_def.name)
@@ -2107,12 +2330,19 @@ fn compile_immediate(
 
             let self_type = match func_lookup {
                 Some((_, def)) if func_uses_self(ctx.mir, def) => {
-                    let st = subst.get_self_type().ok_or_else(|| {
-                        CodegenError::Unsupported(format!(
-                            "function reference requires Self type: {}",
-                            ctx.mir.name(*name)
-                        ))
-                    })?;
+                    // First try to get self_type from substitution
+                    let st = match subst.get_self_type() {
+                        Some(st) => st,
+                        None => {
+                            // Try to infer self_type from the method's containing type
+                            infer_self_type_from_method_name(ctx, *name).ok_or_else(|| {
+                                CodegenError::Unsupported(format!(
+                                    "function reference requires Self type: {}",
+                                    ctx.mir.name(*name)
+                                ))
+                            })?
+                        },
+                    };
                     if !type_is_concrete(ctx.mir, st) {
                         return Err(CodegenError::Unsupported(format!(
                             "unresolved Self type for function reference: {}",
@@ -2146,7 +2376,7 @@ fn compile_immediate(
             let thick_slot = builder.create_sized_stack_slot(StackSlotData::new(
                 StackSlotKind::ExplicitSlot,
                 (ptr_size * 2) as u32,
-                ptr_size as u8,
+                align_to_shift(ptr_size),
             ));
             let thick_ptr = builder.ins().stack_addr(ptr_type, thick_slot, 0);
 
@@ -2156,7 +2386,7 @@ fn compile_immediate(
             let null_env = builder.ins().iconst(ptr_type, 0);
             builder
                 .ins()
-                .store(MemFlags::new(), null_env, thick_ptr, ptr_size);
+                .store(MemFlags::new(), null_env, thick_ptr, ptr_size as i32);
 
             Ok(thick_ptr)
         },
@@ -2193,20 +2423,11 @@ fn compile_immediate(
             };
             let ptr_size = if ctx.target.is_64bit() { 8 } else { 4 };
 
-            // Look up the function by name to get func_id for mangling
-            let func_lookup = ctx
-                .mir
-                .functions
-                .iter()
-                .find(|(_, def)| def.name == impl_name);
-
-            // For witness methods, check if the function has a self receiver to determine
-            // if we need to include self_type in the mangled name. This matches what the
-            // monomorphization collection phase does when creating FunctionInstantiation.
-            let self_type = match func_lookup {
-                Some((_, def)) if has_self_receiver(ctx.mir, def) => Some(concrete_for_type),
-                _ => None,
-            };
+            // For witness method references, ALWAYS use concrete_for_type as self_type.
+            // This matches what the monomorphization collection phase does - it uses
+            // FunctionInstantiation::with_self_type for ALL witness calls, not just
+            // those with self receivers.
+            let self_type = Some(concrete_for_type);
             let mangled_name = ctx.resolve_symbol_name(impl_name, &impl_type_args, self_type);
             let cl_func_id = ctx.func_ids_by_name.get(&mangled_name).ok_or_else(|| {
                 CodegenError::Unsupported(format!(
@@ -2226,7 +2447,7 @@ fn compile_immediate(
             let thick_slot = builder.create_sized_stack_slot(StackSlotData::new(
                 StackSlotKind::ExplicitSlot,
                 (ptr_size * 2) as u32,
-                ptr_size as u8,
+                align_to_shift(ptr_size),
             ));
             let thick_ptr = builder.ins().stack_addr(ptr_type, thick_slot, 0);
 
@@ -2236,7 +2457,7 @@ fn compile_immediate(
             let null_env = builder.ins().iconst(ptr_type, 0);
             builder
                 .ins()
-                .store(MemFlags::new(), null_env, thick_ptr, ptr_size);
+                .store(MemFlags::new(), null_env, thick_ptr, ptr_size as i32);
 
             Ok(thick_ptr)
         },
@@ -2277,7 +2498,7 @@ fn compile_string_literal(
     let slot = builder.create_sized_stack_slot(StackSlotData::new(
         StackSlotKind::ExplicitSlot,
         (ptr_size * 2) as u32,
-        ptr_size as u8,
+        align_to_shift(ptr_size),
     ));
     let struct_ptr = builder.ins().stack_addr(ptr_type, slot, 0);
 
@@ -2286,7 +2507,7 @@ fn compile_string_literal(
     // Store len at offset ptr_size
     builder
         .ins()
-        .store(MemFlags::new(), str_len, struct_ptr, ptr_size);
+        .store(MemFlags::new(), str_len, struct_ptr, ptr_size as i32);
 
     Ok(struct_ptr)
 }
@@ -2502,6 +2723,10 @@ fn compile_unop(
             let one = builder.ins().iconst(cl_types::I8, 1);
             builder.ins().bxor(operand, one)
         },
+        UnOp::Popcount => builder.ins().popcnt(operand),
+        UnOp::Clz => builder.ins().clz(operand),
+        UnOp::Ctz => builder.ins().ctz(operand),
+        UnOp::Bswap => builder.ins().bswap(operand),
     };
 
     Ok(result)
@@ -2524,7 +2749,7 @@ pub fn compile_call(
     match callee {
         Callee::Direct { name, type_args } => {
             // Apply substitution to type args
-            let concrete_args: Vec<_> = type_args
+            let mut concrete_args: Vec<_> = type_args
                 .iter()
                 .map(|ty| {
                     subst
@@ -2532,25 +2757,69 @@ pub fn compile_call(
                         .expect("type substitution failed for direct call")
                 })
                 .collect();
+
+            // Look up the Cranelift FuncId for this function.
+            // For extern functions, use the symbol name from extern_info.
+            // Otherwise, use the mangled name (with param types for overloads).
+            let callee_lookup = ctx.mir.functions.iter().find(|(_, def)| def.name == *name);
+            let callee_def = callee_lookup.map(|(_, def)| def);
+
+            // Some lowered direct calls (notably deinit-style methods) can omit explicit
+            // type args even when calling a generic method on a concrete receiver.
+            // Infer missing args from the first argument's concrete type.
+            if concrete_args.is_empty()
+                && let Some(def) = callee_def
+                && !def.type_params.is_empty()
+                && let Some(first_arg) = args.first()
+                && let Value::Place(place) = &first_arg.value
+                && let Ok(arg_ty) = get_place_type_for_call(ctx, place, local_map, subst)
+                && let Some(inferred) =
+                    extract_named_type_args_for_count(ctx.mir, arg_ty, def.type_params.len())
+            {
+                concrete_args = inferred;
+            }
+
             ensure_concrete_type_args(
                 ctx.mir,
                 &concrete_args,
                 &format!("direct call {}", ctx.mir.name(*name)),
             )?;
 
-            // Look up the Cranelift FuncId for this function.
-            // For extern functions, use the symbol name from extern_info.
-            // Otherwise, use the mangled name (with param types for overloads).
-            let callee_lookup = ctx.mir.functions.iter().find(|(_, def)| def.name == *name);
-
             let self_type = match callee_lookup {
                 Some((_, def)) if func_uses_self(ctx.mir, def) => {
-                    let st = subst.get_self_type().ok_or_else(|| {
-                        CodegenError::Unsupported(format!(
-                            "direct call requires Self type: {}",
-                            ctx.mir.name(*name)
-                        ))
-                    })?;
+                    // First try to get self_type from substitution
+                    let st = match subst.get_self_type() {
+                        Some(st) => st,
+                        None => {
+                            // Try to infer self_type from the receiver argument first.
+                            // This handles protocol-extension methods lowered as direct calls.
+                            let from_first_arg = args.first().and_then(|first_arg| {
+                                if let Value::Place(place) = &first_arg.value {
+                                    get_place_type_for_call(ctx, place, local_map, subst)
+                                        .ok()
+                                        .map(|ty| match ctx.mir.ty(ty) {
+                                            MirTy::Ref(inner) | MirTy::RefMut(inner) => *inner,
+                                            _ => ty,
+                                        })
+                                } else {
+                                    None
+                                }
+                            });
+
+                            if let Some(st) = from_first_arg {
+                                st
+                            } else {
+                                // Fallback: infer self_type from the method's containing type
+                                // e.g., Test.Widget.create -> Self = Test.Widget
+                                infer_self_type_from_method_name(ctx, *name).ok_or_else(|| {
+                                    CodegenError::Unsupported(format!(
+                                        "direct call requires Self type: {}",
+                                        ctx.mir.name(*name)
+                                    ))
+                                })?
+                            }
+                        },
+                    };
                     if !type_is_concrete(ctx.mir, st) {
                         return Err(CodegenError::Unsupported(format!(
                             "unresolved Self type for direct call: {}",
@@ -2571,7 +2840,6 @@ pub fn compile_call(
                 ))
             })?;
 
-            let callee_def = callee_lookup.map(|(_, def)| def);
             let is_extern = callee_def.map(|def| def.is_extern()).unwrap_or(false);
             let mut needs_sret = false;
             let mut ret_ptr = None;
@@ -2599,7 +2867,7 @@ pub fn compile_call(
                     let slot = builder.create_sized_stack_slot(StackSlotData::new(
                         StackSlotKind::ExplicitSlot,
                         size as u32,
-                        align as u8,
+                        align_to_shift(align),
                     ));
                     ret_ptr = Some(builder.ins().stack_addr(ptr_type, slot, 0));
                 }
@@ -2607,6 +2875,14 @@ pub fn compile_call(
 
             // Get the function reference for use in this function
             let func_ref = ctx.module.declare_func_in_func(*cl_func_id, builder.func);
+            // Align sret usage with the imported function signature. Some semantic
+            // return types (notably witness-backed calls) can overapproximate sret.
+            let sig_ref = builder.func.dfg.ext_funcs[func_ref].signature;
+            let expected_param_count = builder.func.dfg.signatures[sig_ref].params.len();
+            if needs_sret && expected_param_count == args.len() {
+                needs_sret = false;
+                ret_ptr = None;
+            }
 
             // Compile arguments with proper PassingMode handling
             let mut arg_values = Vec::with_capacity(args.len() + if needs_sret { 1 } else { 0 });
@@ -2690,9 +2966,15 @@ pub fn compile_call(
             protocol,
             method,
             for_type,
+            method_type_args,
         } => {
-            // If for_type uses SelfType, we need to resolve it from the substitution first
-            let concrete_for_type = if type_uses_self(ctx.mir, *for_type) {
+            // First apply substitution to for_type
+            let substituted_for_type = subst
+                .apply_ty_readonly(ctx.mir, *for_type)
+                .unwrap_or(*for_type);
+
+            // If substituted type uses SelfType, we need to resolve it further
+            let concrete_for_type = if type_uses_self(ctx.mir, substituted_for_type) {
                 // Get the self type from the substitution
                 let self_ty = subst.get_self_type().ok_or_else(|| {
                     CodegenError::Unsupported(format!(
@@ -2706,27 +2988,30 @@ pub fn compile_call(
                         ctx.mir.ty(self_ty)
                     )));
                 }
-                // Now apply substitution with self type resolved
-                subst
-                    .apply_ty_readonly(ctx.mir, *for_type)
-                    .unwrap_or(self_ty)
+                self_ty
             } else {
-                // No self type involved, just apply substitution
-                let applied = subst
-                    .apply_ty_readonly(ctx.mir, *for_type)
-                    .unwrap_or(*for_type);
-                if !type_is_concrete(ctx.mir, applied) {
+                // Substitution already applied, check if concrete
+                if !type_is_concrete(ctx.mir, substituted_for_type) {
                     return Err(CodegenError::Unsupported(format!(
                         "unresolved type for witness call: {:?}",
-                        ctx.mir.ty(applied)
+                        ctx.mir.ty(substituted_for_type)
                     )));
                 }
-                applied
+                substituted_for_type
             };
 
+            // Apply substitution to method_type_args (the method's own type parameters)
+            let concrete_method_type_args: Vec<_> = method_type_args
+                .iter()
+                .filter_map(|ty| subst.apply_ty_readonly(ctx.mir, *ty).ok())
+                .collect();
+
             // Resolve the witness to get the concrete implementation
-            let (impl_name, impl_type_args) =
+            let (impl_name, mut impl_type_args) =
                 resolve_witness(ctx.mir, *protocol, method, concrete_for_type)?;
+
+            // Append the method's own type arguments (e.g., H in hash[H])
+            impl_type_args.extend(concrete_method_type_args);
             ensure_concrete_type_args(
                 ctx.mir,
                 &impl_type_args,
@@ -2740,13 +3025,13 @@ pub fn compile_call(
                 .iter()
                 .find(|(_, def)| def.name == impl_name);
             let callee_def = func_lookup.map(|(_, def)| def);
-            // For witness calls, always use concrete_for_type as self_type if the function
-            // has a self receiver (first param named "self"). This matches what the
-            // monomorphization collection phase does when creating FunctionInstantiation.
-            let self_type = match callee_def {
-                Some(def) if has_self_receiver(ctx.mir, def) => Some(concrete_for_type),
-                _ => None,
-            };
+            // For witness calls, ALWAYS use concrete_for_type as self_type.
+            // This matches what the monomorphization collection phase does - it uses
+            // FunctionInstantiation::with_self_type for ALL witness calls, not just
+            // those with self receivers. This is necessary for extension methods like
+            // `fromResidual` which are static but still need the self_type to distinguish
+            // between different instantiations.
+            let self_type = Some(concrete_for_type);
             let mangled_name = ctx.resolve_symbol_name(impl_name, &impl_type_args, self_type);
             let cl_func_id = ctx.func_ids_by_name.get(&mangled_name).ok_or_else(|| {
                 CodegenError::Unsupported(format!(
@@ -2756,7 +3041,6 @@ pub fn compile_call(
                 ))
             })?;
 
-            let func_ref = ctx.module.declare_func_in_func(*cl_func_id, builder.func);
             let is_extern = callee_def.map(|def| def.is_extern()).unwrap_or(false);
             let mut needs_sret = false;
             let mut ret_ptr = None;
@@ -2784,10 +3068,18 @@ pub fn compile_call(
                     let slot = builder.create_sized_stack_slot(StackSlotData::new(
                         StackSlotKind::ExplicitSlot,
                         size as u32,
-                        align as u8,
+                        align_to_shift(align),
                     ));
                     ret_ptr = Some(builder.ins().stack_addr(ptr_type, slot, 0));
                 }
+            }
+            let func_ref = ctx.module.declare_func_in_func(*cl_func_id, builder.func);
+            // Keep witness call ABI consistent with the imported function signature.
+            let sig_ref = builder.func.dfg.ext_funcs[func_ref].signature;
+            let expected_param_count = builder.func.dfg.signatures[sig_ref].params.len();
+            if needs_sret && expected_param_count == args.len() {
+                needs_sret = false;
+                ret_ptr = None;
             }
 
             // Compile arguments with proper PassingMode handling
@@ -2854,7 +3146,9 @@ fn compile_cast(
         local_map,
         stack_locals,
     )?;
-    let target_ty = translate_type(ctx.mir, target, ctx.target);
+    // Apply substitution to target type before translation
+    let substituted_target = subst.apply_ty_readonly(ctx.mir, target).unwrap_or(target);
+    let target_ty = translate_type(ctx.mir, substituted_target, ctx.target);
 
     match kind {
         CastKind::IntWiden => {
@@ -2865,6 +3159,18 @@ fn compile_cast(
                 Ok(builder.ins().sextend(target_ty, val))
             } else {
                 // Same size or smaller - this shouldn't happen for IntWiden
+                // but handle gracefully
+                Ok(val)
+            }
+        },
+
+        CastKind::IntUnsignedWiden => {
+            // Unsigned integer widening - zero-extend to larger integer type
+            let src_ty = builder.func.dfg.value_type(val);
+            if target_ty.bits() > src_ty.bits() {
+                Ok(builder.ins().uextend(target_ty, val))
+            } else {
+                // Same size or smaller - this shouldn't happen for IntUnsignedWiden
                 // but handle gracefully
                 Ok(val)
             }
@@ -3005,7 +3311,7 @@ fn compile_str_from_parts(
     let slot = builder.create_sized_stack_slot(StackSlotData::new(
         StackSlotKind::ExplicitSlot,
         (ptr_size * 2) as u32,
-        ptr_size as u8,
+        align_to_shift(ptr_size as usize),
     ));
     let struct_ptr = builder.ins().stack_addr(ptr_type, slot, 0);
 
@@ -3058,27 +3364,52 @@ fn get_place_type_for_call(
     ctx: &CodegenContext<'_>,
     place: &Place,
     local_map: &HashMap<Id<Local>, Variable>,
+    subst: &Substitution,
 ) -> Result<Id<Ty>, CodegenError> {
     match &place.kind {
         PlaceKind::Local(local_id) => {
             let local_def = ctx.mir.local(*local_id);
-            Ok(local_def.ty)
+            // Apply substitution to the local's type to resolve type parameters
+            let ty = subst
+                .apply_ty_readonly(ctx.mir, local_def.ty)
+                .map_err(|e| {
+                    CodegenError::Unsupported(format!("failed to substitute local type: {:?}", e))
+                })?;
+            Ok(ty)
+        },
+
+        PlaceKind::Global(name_id) => {
+            // Find the static definition to get its type
+            let static_def = ctx
+                .mir
+                .statics
+                .iter()
+                .find(|(_, def)| def.name == *name_id)
+                .map(|(_, def)| def)
+                .ok_or_else(|| {
+                    let global_name = ctx.mir.name(*name_id);
+                    CodegenError::Unsupported(format!("static variable not found: {}", global_name))
+                })?;
+            // Globals/statics don't have type parameters, so no substitution needed
+            Ok(static_def.ty)
         },
 
         PlaceKind::Field { parent, name } => {
-            let parent_ty = get_place_type_for_call(ctx, parent, local_map)?;
+            let parent_ty = get_place_type_for_call(ctx, parent, local_map, subst)?;
             get_field_type_for_call(ctx, parent_ty, name)
         },
 
         PlaceKind::Index { parent, index } => {
-            let parent_ty = get_place_type_for_call(ctx, parent, local_map)?;
-            get_field_type_by_index_for_call(ctx, parent_ty, *index)
+            let parent_ty = get_place_type_for_call(ctx, parent, local_map, subst)?;
+            get_field_type_by_index_for_call(ctx, parent_ty, *index, subst)
         },
 
-        PlaceKind::Downcast { parent, .. } => get_place_type_for_call(ctx, parent, local_map),
+        PlaceKind::Downcast { parent, .. } => {
+            get_place_type_for_call(ctx, parent, local_map, subst)
+        },
 
         PlaceKind::Deref(inner) => {
-            let inner_ty = get_place_type_for_call(ctx, inner, local_map)?;
+            let inner_ty = get_place_type_for_call(ctx, inner, local_map, subst)?;
             match ctx.mir.ty(inner_ty) {
                 MirTy::Pointer(pointee) | MirTy::Ref(pointee) | MirTy::RefMut(pointee) => {
                     Ok(*pointee)
@@ -3089,6 +3420,24 @@ fn get_place_type_for_call(
                 ))),
             }
         },
+    }
+}
+
+fn extract_named_type_args_for_count(
+    mir: &MirContext,
+    mut ty: Id<Ty>,
+    expected_len: usize,
+) -> Option<Vec<Id<Ty>>> {
+    loop {
+        match mir.ty(ty) {
+            MirTy::Ref(inner) | MirTy::RefMut(inner) | MirTy::Pointer(inner) => {
+                ty = *inner;
+            },
+            MirTy::Named { type_args, .. } if type_args.len() == expected_len => {
+                return Some(type_args.clone());
+            },
+            _ => return None,
+        }
     }
 }
 
@@ -3136,7 +3485,19 @@ fn get_field_type_by_index_for_call(
     ctx: &CodegenContext<'_>,
     parent_ty: Id<Ty>,
     index: usize,
+    subst: &Substitution,
 ) -> Result<Id<Ty>, CodegenError> {
+    // Resolve AssociatedTypeProjection through substitution before matching
+    let parent_ty = if matches!(
+        ctx.mir.ty(parent_ty),
+        MirTy::AssociatedTypeProjection { .. }
+    ) {
+        subst
+            .apply_ty_readonly(ctx.mir, parent_ty)
+            .unwrap_or(parent_ty)
+    } else {
+        parent_ty
+    };
     let mir_ty = ctx.mir.ty(parent_ty);
 
     match mir_ty {
@@ -3274,23 +3635,58 @@ fn compile_apply_partial(
     // 1. Find the closure function and get its environment struct
     let (closure_func_id, env_struct_id) = find_closure_function_and_env(ctx, func)?;
     let closure_def = &ctx.mir.functions[closure_func_id];
-    if !closure_def.type_params.is_empty() {
-        return Err(CodegenError::Unsupported(format!(
-            "generic closure functions are not supported in apply partial: {}",
-            ctx.mir.name(func)
-        )));
+
+    // Closures inherit type parameters from their parent function.
+    // We need to apply the current substitution to get the concrete type args
+    // for this closure instantiation.
+    let mut closure_type_args = Vec::with_capacity(closure_def.type_params.len());
+    for &tp in &closure_def.type_params {
+        // Look up the type param in the substitution
+        if let Some(concrete_ty) = subst.get(tp) {
+            closure_type_args.push(concrete_ty);
+        } else {
+            // Type param not in substitution - this shouldn't happen for properly
+            // instantiated closures, but return an error if it does
+            return Err(CodegenError::Unsupported(format!(
+                "closure type param {:?} not in substitution for apply partial: {}",
+                tp,
+                ctx.mir.name(func)
+            )));
+        }
     }
-    if func_uses_self(ctx.mir, closure_def) {
-        return Err(CodegenError::Unsupported(format!(
-            "closure function uses Self type in apply partial: {}",
-            ctx.mir.name(func)
-        )));
+
+    // Check for any remaining type parameters or Self types after substitution
+    // (this would indicate incomplete monomorphization)
+    for &type_arg in &closure_type_args {
+        let ty = ctx.mir.ty(type_arg);
+        if matches!(ty, MirTy::TypeParam(_)) {
+            return Err(CodegenError::Unsupported(format!(
+                "closure has unsubstituted type parameter in apply partial: {}",
+                ctx.mir.name(func)
+            )));
+        }
+        if matches!(ty, MirTy::SelfType) {
+            return Err(CodegenError::Unsupported(format!(
+                "closure has unsubstituted Self type in apply partial: {}",
+                ctx.mir.name(func)
+            )));
+        }
     }
 
     // 2. Get the function pointer for the closure function
-    // The closure function is non-generic, so we use empty type args
-    // Use resolved symbol name with the func_id we already looked up
-    let mangled_name = ctx.symbol_name_for_function(closure_func_id, closure_def, &[], None);
+    // Use the instantiated type args derived from the parent function's substitution
+    // If the closure needs Self type (e.g., in protocol extension methods), get it from subst
+    let self_type_for_closure = if func_uses_self(ctx.mir, closure_def) {
+        subst.get_self_type()
+    } else {
+        None
+    };
+    let mangled_name = ctx.symbol_name_for_function(
+        closure_func_id,
+        closure_def,
+        &closure_type_args,
+        self_type_for_closure,
+    );
     let cl_func_id = ctx.func_ids_by_name.get(&mangled_name).ok_or_else(|| {
         CodegenError::Unsupported(format!(
             "closure function not found: {} (mangled: {})",
@@ -3304,8 +3700,12 @@ fn compile_apply_partial(
 
     // 3. Allocate and populate the environment struct
     let env_ptr = if let Some(env_struct_id) = env_struct_id {
-        // Get the environment struct layout (env structs are non-generic, so empty type_args)
-        let env_layout = ctx.layouts.struct_layout(env_struct_id, &[]);
+        // Get the environment struct layout.
+        // Env structs inherit type params from their parent closure function,
+        // so we pass the same type args used for the closure instantiation.
+        let env_layout =
+            ctx.layouts
+                .struct_layout(env_struct_id, &closure_type_args, self_type_for_closure);
         let layout = env_layout.layout;
         let field_offsets = env_layout.field_offsets.clone();
 
@@ -3317,7 +3717,7 @@ fn compile_apply_partial(
         let slot = builder.create_sized_stack_slot(StackSlotData::new(
             StackSlotKind::ExplicitSlot,
             alloc_size as u32,
-            alloc_align as u8,
+            align_to_shift(alloc_align),
         ));
         let env_ptr = builder.ins().stack_addr(ptr_type, slot, 0);
 
@@ -3362,6 +3762,9 @@ fn compile_apply_partial(
 
             if is_aggregate {
                 // Copy nested struct data
+                eprintln!("DEBUG: About to call layout_of for nested aggregate");
+                eprintln!("  concrete_field_ty: {:?}", concrete_field_ty);
+                eprintln!("  field_mir_ty: {:?}", field_mir_ty);
                 let nested_layout = ctx.layouts.layout_of(concrete_field_ty);
                 let dest_ptr = if offset == 0 {
                     env_ptr
@@ -3397,7 +3800,7 @@ fn compile_apply_partial(
     let thick_slot = builder.create_sized_stack_slot(StackSlotData::new(
         StackSlotKind::ExplicitSlot,
         (ptr_size * 2) as u32,
-        ptr_size as u8,
+        align_to_shift(ptr_size),
     ));
     let thick_ptr = builder.ins().stack_addr(ptr_type, thick_slot, 0);
 
@@ -3406,7 +3809,7 @@ fn compile_apply_partial(
     // Store env_ptr at offset ptr_size
     builder
         .ins()
-        .store(MemFlags::new(), env_ptr, thick_ptr, ptr_size);
+        .store(MemFlags::new(), env_ptr, thick_ptr, ptr_size as i32);
 
     Ok(thick_ptr)
 }
@@ -3500,7 +3903,7 @@ fn compile_func_to_escaping(
     let thick_slot = builder.create_sized_stack_slot(StackSlotData::new(
         StackSlotKind::ExplicitSlot,
         (ptr_size * 2) as u32,
-        ptr_size as u8,
+        align_to_shift(ptr_size),
     ));
     let thick_ptr = builder.ins().stack_addr(ptr_type, thick_slot, 0);
 
@@ -3509,7 +3912,7 @@ fn compile_func_to_escaping(
     // Store env_ptr at offset ptr_size
     builder
         .ins()
-        .store(MemFlags::new(), env_ptr, thick_ptr, ptr_size);
+        .store(MemFlags::new(), env_ptr, thick_ptr, ptr_size as i32);
 
     Ok(thick_ptr)
 }
@@ -3549,7 +3952,7 @@ fn compile_thin_call(
     };
 
     // Get the type of the place to determine the function signature
-    let func_ty = get_place_type_for_call(ctx, place, local_map)?;
+    let func_ty = get_place_type_for_call(ctx, place, local_map, subst)?;
     let resolved_ty = resolve_func_type(ctx, func_ty);
     let ret_ty = match ctx.mir.ty(resolved_ty) {
         MirTy::FuncThin { ret, .. } | MirTy::FuncThick { ret, .. } => *ret,
@@ -3569,13 +3972,20 @@ fn compile_thin_call(
         let slot = builder.create_sized_stack_slot(StackSlotData::new(
             StackSlotKind::ExplicitSlot,
             size as u32,
-            align as u8,
+            align_to_shift(align),
         ));
         ret_ptr = Some(builder.ins().stack_addr(ptr_type, slot, 0));
     }
 
     // Build the signature
-    let sig = build_signature_from_func_type(ctx, func_ty, builder)?;
+    // Apply substitution to the function type to resolve any type parameters or projections
+    let substituted_func_ty = subst.apply_ty_readonly(ctx.mir, func_ty).map_err(|e| {
+        CodegenError::Unsupported(format!(
+            "failed to substitute function type in thin call: {:?}",
+            e
+        ))
+    })?;
+    let sig = build_signature_from_func_type(ctx, substituted_func_ty, builder)?;
     let sig_ref = builder.import_signature(sig);
 
     // Compile arguments with proper PassingMode handling
@@ -3648,8 +4058,15 @@ fn compile_thick_call(
     let ptr_size = if ctx.target.is_64bit() { 8 } else { 4 };
 
     // Get the type of the place to determine how to handle the call
-    let func_ty = get_place_type_for_call(ctx, place, local_map)?;
-    let resolved_ty = resolve_func_type(ctx, func_ty);
+    let func_ty = get_place_type_for_call(ctx, place, local_map, subst)?;
+    // Apply substitution to resolve any type parameters or projections
+    let substituted_func_ty = subst.apply_ty_readonly(ctx.mir, func_ty).map_err(|e| {
+        CodegenError::Unsupported(format!(
+            "failed to substitute function type in thick call: {:?}",
+            e
+        ))
+    })?;
+    let resolved_ty = resolve_func_type(ctx, substituted_func_ty);
     let mir_ty = ctx.mir.ty(resolved_ty);
 
     // Check if this is actually a thin function type
@@ -3689,7 +4106,7 @@ fn compile_thick_call(
                 let slot = builder.create_sized_stack_slot(StackSlotData::new(
                     StackSlotKind::ExplicitSlot,
                     size as u32,
-                    align as u8,
+                    align_to_shift(align),
                 ));
                 ret_ptr = Some(builder.ins().stack_addr(ptr_type, slot, 0));
             }
@@ -3747,12 +4164,10 @@ fn compile_thick_call(
             }
         },
         MirTy::FuncThick { params, ret } => {
-            // Apply substitution to params and ret to handle generic closures
-            let params: Vec<_> = params
-                .iter()
-                .map(|&ty| subst.apply_ty_readonly(ctx.mir, ty).unwrap_or(ty))
-                .collect();
-            let ret = subst.apply_ty_readonly(ctx.mir, *ret).unwrap_or(*ret);
+            // Note: params and ret are already substituted since we applied substitution
+            // to the entire function type above (substituted_func_ty)
+            let params = params.clone();
+            let ret = *ret;
 
             // For thick function types, the value is a struct with func_ptr and env_ptr
             let place_value =
@@ -3793,7 +4208,7 @@ fn compile_thick_call(
                 let slot = builder.create_sized_stack_slot(StackSlotData::new(
                     StackSlotKind::ExplicitSlot,
                     size as u32,
-                    align as u8,
+                    align_to_shift(align),
                 ));
                 ret_ptr = Some(builder.ins().stack_addr(ptr_type, slot, 0));
             }
@@ -3887,7 +4302,7 @@ fn copy_string_return_value(
     let slot = builder.create_sized_stack_slot(StackSlotData::new(
         StackSlotKind::ExplicitSlot,
         (ptr_size * 2) as u32,
-        ptr_size as u8,
+        align_to_shift(ptr_size),
     ));
     let dest_ptr = builder.ins().stack_addr(ptr_type, slot, 0);
 
@@ -3898,10 +4313,10 @@ fn copy_string_return_value(
     // Copy the len field (offset ptr_size)
     let str_len = builder
         .ins()
-        .load(ptr_type, MemFlags::new(), src_ptr, ptr_size);
+        .load(ptr_type, MemFlags::new(), src_ptr, ptr_size as i32);
     builder
         .ins()
-        .store(MemFlags::new(), str_len, dest_ptr, ptr_size);
+        .store(MemFlags::new(), str_len, dest_ptr, ptr_size as i32);
 
     dest_ptr
 }

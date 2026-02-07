@@ -561,12 +561,15 @@ fn get_constructor_field_types(ctor: &Constructor, ty: &Ty) -> Vec<Ty> {
     use kestrel_semantic_tree::ty::TyKind;
     use semantic_tree::symbol::Symbol;
 
-    match (ctor, ty.kind()) {
+    // Treat type aliases as transparent for pattern matching.
+    let expanded_ty = ty.expand_aliases();
+
+    match (ctor, expanded_ty.kind()) {
         (Constructor::Tuple { arity }, TyKind::Tuple(elements)) => {
             if elements.len() == *arity {
                 elements.clone()
             } else {
-                vec![ty.clone(); *arity]
+                vec![expanded_ty.clone(); *arity]
             }
         },
 
@@ -589,7 +592,7 @@ fn get_constructor_field_types(ctor: &Constructor, ty: &Ty) -> Vec<Ty> {
                     .map(|p| substitutions.apply(&p.ty))
                     .collect();
             }
-            vec![ty.clone(); *arity]
+            vec![expanded_ty.clone(); *arity]
         },
 
         (
@@ -625,28 +628,61 @@ fn get_constructor_field_types(ctor: &Constructor, ty: &Ty) -> Vec<Ty> {
                     })
                     .collect()
             } else {
-                vec![ty.clone(); *arity]
+                vec![expanded_ty.clone(); *arity]
             }
         },
 
+        // Array[T] struct type
         (
             Constructor::Array {
                 prefix_len,
                 suffix_len,
                 has_rest,
             },
-            TyKind::Array(element_type),
+            TyKind::Struct { substitutions, .. },
         ) => {
-            let elem_ty = (**element_type).clone();
+            // Get element type from first substitution (T in Array[T])
+            let elem_ty = substitutions
+                .iter()
+                .next()
+                .map(|(_, t)| t.clone())
+                .unwrap_or_else(|| expanded_ty.clone());
             let mut types = vec![elem_ty.clone(); *prefix_len];
             if *has_rest {
-                types.push(ty.clone()); // Rest is an array/slice
+                types.push(expanded_ty.clone()); // Rest is an array/slice
             }
             types.extend(vec![elem_ty; *suffix_len]);
             types
         },
 
-        _ => vec![ty.clone(); ctor.arity()],
+        _ => vec![expanded_ty.clone(); ctor.arity()],
+    }
+}
+
+/// Collect all constructors from a pattern, expanding or-patterns recursively.
+fn collect_constructors_from_pattern(
+    pattern: &Pattern,
+    seen: &mut std::collections::HashSet<Constructor>,
+    result: &mut Vec<Constructor>,
+) {
+    match &pattern.kind {
+        PatternKind::Or { alternatives } => {
+            // Recursively collect from all alternatives
+            for alt in alternatives {
+                collect_constructors_from_pattern(alt, seen, result);
+            }
+        },
+        PatternKind::At { subpattern, .. } => {
+            // For @-patterns, collect from the subpattern
+            collect_constructors_from_pattern(subpattern, seen, result);
+        },
+        _ => {
+            // For all other patterns, extract the constructor
+            let ctor = Constructor::from_pattern(pattern);
+            if !ctor.is_wildcard() && seen.insert(ctor.clone()) {
+                result.push(ctor);
+            }
+        },
     }
 }
 
@@ -658,10 +694,8 @@ impl PatternMatrix {
         let mut result = Vec::new();
         for row in &self.rows {
             if let Some(pattern) = row.patterns.get(col) {
-                let ctor = Constructor::from_pattern(pattern);
-                if !ctor.is_wildcard() && seen.insert(ctor.clone()) {
-                    result.push(ctor);
-                }
+                // Collect all constructors from this pattern, expanding or-patterns
+                collect_constructors_from_pattern(pattern, &mut seen, &mut result);
             }
         }
         result
@@ -819,10 +853,43 @@ fn constructors_compatible(pattern_ctor: &Constructor, target_ctor: &Constructor
             Constructor::IntRange { start: s1, end: e1 },
             Constructor::IntRange { start: s2, end: e2 },
         ) => {
-            s1 <= e2 && s2 <= e1 // Overlapping ranges
+            // Overlapping ranges - handle optional bounds
+            // None means unbounded, so treat as -∞ or +∞
+            let overlap_start = match (s1, e2) {
+                (Some(s), Some(e)) => *s <= *e,
+                _ => true, // Unbounded always overlaps
+            };
+            let overlap_end = match (s2, e1) {
+                (Some(s), Some(e)) => *s <= *e,
+                _ => true, // Unbounded always overlaps
+            };
+            overlap_start && overlap_end
         },
         (Constructor::IntLiteral(v), Constructor::IntRange { start, end }) => {
-            *v >= *start && *v <= *end
+            let ge_start = start.map(|s| *v >= s).unwrap_or(true);
+            let le_end = end.map(|e| *v <= e).unwrap_or(true);
+            ge_start && le_end
+        },
+        (
+            Constructor::CharRange { start: s1, end: e1 },
+            Constructor::CharRange { start: s2, end: e2 },
+        ) => {
+            // Overlapping ranges - handle optional bounds
+            // None means unbounded, so treat as min/max char
+            let overlap_start = match (s1, e2) {
+                (Some(s), Some(e)) => *s <= *e,
+                _ => true, // Unbounded always overlaps
+            };
+            let overlap_end = match (s2, e1) {
+                (Some(s), Some(e)) => *s <= *e,
+                _ => true, // Unbounded always overlaps
+            };
+            overlap_start && overlap_end
+        },
+        (Constructor::CharLiteral(v), Constructor::CharRange { start, end }) => {
+            let ge_start = start.map(|s| *v >= s).unwrap_or(true);
+            let le_end = end.map(|e| *v <= e).unwrap_or(true);
+            ge_start && le_end
         },
         (
             Constructor::Array {

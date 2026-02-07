@@ -74,23 +74,51 @@ Source Code ("module Main\nstruct Point { ... }")
 │  ┌─────────────────────────────────────────────────────────────────────┐    │
 │  │  4c. VALIDATE                      [kestrel-semantic-analyzers]     │    │
 │  │  ───────────                                                        │    │
-│  │  Validation passes check semantic constraints:                      │    │
-│  │  - FunctionBodyPass: functions need bodies (except protocols)       │    │
-│  │  - ProtocolMethodPass: protocol methods can't have bodies           │    │
-│  │  - StaticContextPass: static only in struct/protocol                │    │
-│  │  - DuplicateSymbolPass: no duplicate types/members                  │    │
-│  │  - VisibilityConsistencyPass: public APIs consistency               │    │
+│  │  Three sub-phases of analysis (errors in earlier phases halt later): │    │
+│  │                                                                      │    │
+│  │  Phase 1 (pre-inference):                                           │    │
+│  │    Cycle detection, conformance, extension conflicts, field         │    │
+│  │    validation, definite assignment, dead code, closure analysis     │    │
+│  │                                                                      │    │
+│  │  Phase 2 (type resolution):                                         │    │
+│  │    TYPE INFERENCE (constraint solving per function/init/getter)     │    │
+│  │    Pattern checking, exhaustiveness, type checking                  │    │
+│  │    [kestrel-semantic-type-inference, kestrel-semantic-pattern-matching] │  │
+│  │                                                                      │    │
+│  │  Phase 3 (post-checking):                                           │    │
+│  │    Protocol methods, static context, duplicates, visibility,       │    │
+│  │    generics, recursive enums                                        │    │
+│  │                                                                      │    │
+│  │  See type-inference.md for details on the constraint solver.        │    │
 │  └─────────────────────────────────────────────────────────────────────┘    │
 └─────────────────────────────────────────────────────────────────────────────┘
        │
        ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│  OUTPUT                                             [kestrel-compiler]      │
-│  ──────                                                                     │
-│  Compilation {                                                              │
-│      semantic_model: SemanticModel, // Bound semantic model                 │
-│      diagnostics: Vec<Diagnostic>,  // Errors and warnings                  │
-│  }                                                                          │
+│  PHASE 5: MIR LOWERING                  [kestrel-execution-graph-lowering]  │
+│  ──────────────────────                                                     │
+│  Input:  SemanticModel (bound, validated)                                   │
+│  Output: MirContext (mid-level IR)                                          │
+│                                                                             │
+│  Lowers semantic tree to flat, explicit, place-based IR:                    │
+│  - Statements: assign, call, drop                                          │
+│  - Terminators: jump, branch, return                                       │
+│  - Places: locals, fields, indexed, derefs                                 │
+│  - Generates __kestrel_init_statics() for static initialization            │
+└─────────────────────────────────────────────────────────────────────────────┘
+       │
+       ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  PHASE 6: CODE GENERATION               [kestrel-codegen-cranelift]        │
+│  ────────────────────────                                                   │
+│  Input:  MirContext                                                         │
+│  Output: Native object code                                                 │
+│                                                                             │
+│  1. Monomorphization collection (BFS discovers generic instantiations)     │
+│  2. Define statics (data section)                                          │
+│  3. Declare functions (all signatures)                                     │
+│  4. Define functions (MIR -> Cranelift IR for each instantiation)          │
+│  5. Link to executable                                                     │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -123,9 +151,15 @@ query layer rather than ad-hoc traversals, even if the query currently computes 
 
 ```
 kestrel-compiler
-  ├─ kestrel-semantic-tree-builder   (BUILD/lowering)
-  ├─ kestrel-semantic-tree-binder    (BIND)
-  ├─ kestrel-semantic-analyzers      (VALIDATE)
+  ├─ kestrel-semantic-tree-builder     (BUILD)
+  ├─ kestrel-semantic-tree-binder      (BIND)
+  ├─ kestrel-semantic-analyzers        (VALIDATE)
+  │   ├─ kestrel-semantic-type-inference
+  │   └─ kestrel-semantic-pattern-matching
+  ├─ kestrel-execution-graph-lowering  (MIR lowering)
+  │   └─ kestrel-execution-graph       (MIR types)
+  ├─ kestrel-codegen-cranelift         (native codegen)
+  │   └─ kestrel-codegen               (layout, mangling)
   ├─ kestrel-parser / kestrel-lexer / kestrel-syntax-tree
   ├─ kestrel-semantic-model / kestrel-semantic-tree / semantic-tree
   └─ kestrel-reporting / kestrel-span
@@ -202,6 +236,35 @@ TypeResolver                // Resolves types (during binding/body resolution)
 BodyResolver                // Resolves expressions/statements
 ```
 
+### Phase 5: MIR
+```rust
+// kestrel-execution-graph
+MirContext             // Central context holding all MIR data
+MirTy                  // Type representation (primitives, pointers, named types, etc.)
+Statement / StatementKind  // IR operations: assign, call, drop
+Terminator / TerminatorKind // Block terminators: jump, branch, return
+Place / PlaceKind      // Memory locations: locals, fields, indexed, derefs
+Rvalue                 // Computed values: binops, unops, casts, calls, refs
+PassingMode            // Calling convention: Ref, MutRef, Copy, Move
+
+// kestrel-execution-graph-lowering
+lower_module(model, module) -> MirContext  // Main entry point
+```
+
+### Phase 6: Code Generation
+```rust
+// kestrel-codegen
+TargetConfig           // Target triple detection
+Layout / LayoutCache   // Type size and alignment calculation
+Mangler                // Linker symbol name mangling
+
+// kestrel-codegen-cranelift
+compile(mir, target, options)       // MIR -> object code bytes
+compile_and_link(mir, target, options, path) // MIR -> executable
+monomorphize::collect_all(mir)      // Discover all generic instantiations
+CodegenContext                      // Manages Cranelift ObjectModule
+```
+
 ## File Organization
 
 ```
@@ -275,6 +338,48 @@ lib/kestrel-semantic-tree-binder/
 
 lib/kestrel-semantic-analyzers/
 └── src/                    # Post-bind analyzers (VALIDATE)
+
+lib/kestrel-semantic-type-inference/
+└── src/
+    ├── lib.rs              # InferenceContext, Constraint, Solution
+    └── ...                 # Constraint generation, unification, solving
+
+lib/kestrel-semantic-pattern-matching/
+└── src/
+    ├── lib.rs              # is_irrefutable, check_exhaustiveness, is_useful
+    └── ...                 # Maranget's pattern matrix algorithm
+
+lib/kestrel-execution-graph/
+└── src/
+    ├── lib.rs              # MirContext, MirTy, Statement, Terminator, Place, Rvalue
+    └── ...                 # MIR type definitions and utilities
+
+lib/kestrel-execution-graph-lowering/
+└── src/
+    ├── lib.rs              # lower_module() entry point
+    ├── lowerer/            # Item-level lowering (functions, structs, enums, protocols)
+    ├── expr.rs             # Expression -> MIR lowering
+    ├── stmt.rs             # Statement -> MIR lowering
+    ├── pattern.rs          # Pattern -> MIR lowering
+    └── match_lowering.rs   # Match expressions -> control flow
+
+lib/kestrel-codegen/
+└── src/
+    ├── lib.rs              # TargetConfig, Layout, LayoutCache, Mangler
+    └── ...                 # Type layout calculation, name mangling
+
+lib/kestrel-codegen-cranelift/
+└── src/
+    ├── lib.rs              # compile(), compile_and_link()
+    ├── context.rs          # CodegenContext, Cranelift ObjectModule management
+    ├── monomorphize.rs     # Generic instantiation collection + substitution
+    ├── function.rs         # MIR function -> Cranelift IR
+    ├── block.rs            # Basic block lowering
+    ├── rvalue.rs           # Rvalue -> Cranelift instructions
+    ├── terminator.rs       # Terminator -> Cranelift branches
+    ├── types.rs            # MIR type -> Cranelift type translation
+    ├── place.rs            # Place -> memory address computation
+    └── link.rs             # Object file -> executable linking
 
 lib/kestrel-test-suite/
 └── src/lib.rs              # Test fluent API

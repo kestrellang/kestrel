@@ -519,9 +519,7 @@ tail_expr = expr
 
 ## Source Location
 
-- **Parser:** `lib/kestrel-parser/src/expr/closure.rs` (to be created)
+- **Parser:** `lib/kestrel-parser/src/expr/mod.rs` (closure parsing is inline)
 - **Syntax tree:** `lib/kestrel-syntax-tree/src/expr.rs`
-- **Semantic tree:** `lib/kestrel-semantic-tree/src/expr/closure.rs` (to be created)
-- **Closure behavior:** `lib/kestrel-semantic-tree/src/behavior/closure.rs` (to be created)
-- **Capture analysis:** `lib/kestrel-semantic-tree-binder/src/capture.rs` (to be created)
-- **Type inference:** `lib/kestrel-semantic-type-inference/src/closure.rs` (to be created)
+- **Body resolution:** `lib/kestrel-semantic-tree-binder/src/body_resolver/closures.rs`
+- **Analyzer:** `lib/kestrel-semantic-analyzers/src/analyzers/closure/`

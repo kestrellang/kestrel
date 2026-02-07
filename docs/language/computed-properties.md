@@ -146,7 +146,7 @@ enum Optional[T] {
     }
 }
 
-extension String {
+extend String {
     var isEmpty: Bool { self.count == 0 }
 }
 ```

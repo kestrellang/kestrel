@@ -148,6 +148,8 @@ Present to user:
 
 ## Step 7: Ask User
 
+If you run into issues, consult `docs/common-issues.md` for solutions to common problems.
+
 "I've identified the root cause above. Would you like me to:
 1. **Fix the bug** - Implement the suggested fix
 2. **Update the test** - If the test expectation is wrong

@@ -40,9 +40,12 @@ mod oracle;
 mod solution;
 mod solver;
 
-pub use apply::{apply_solution, apply_solution_to_locals};
+pub use apply::{
+    apply_solution, apply_solution_to_defaults, apply_solution_to_locals,
+    apply_solution_to_patterns, resolve_associated_types_in_locals,
+};
 pub use constraint::{Constraint, ProtocolRef};
-pub use constraint_generator::generate_constraints;
+pub use constraint_generator::{generate_constraints, generate_default_value_constraints};
 pub use context::InferenceContext;
 pub use error::InferenceError;
 pub use oracle::{MemberError, MemberResolution, TypeOracle};

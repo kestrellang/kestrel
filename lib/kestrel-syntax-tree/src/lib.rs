@@ -85,7 +85,8 @@ pub enum SyntaxKind {
     TypeParameterList, // [T, U, V]
     TypeParameter,     // T or T = Default
     TypeArgumentList,  // [Int, String] in type use position
-    DefaultType,       // = SomeType
+    DefaultType,       // = SomeType (for type parameters)
+    DefaultValue,      // = expression (for function parameters)
 
     // Where clause nodes
     WhereClause,         // where T: Proto, U: Other
@@ -108,8 +109,10 @@ pub enum SyntaxKind {
     TyTuple,
     TyFunction,
     TyPath,
-    TyArray,    // [T] - array/list type
-    TyOptional, // T? - optional type
+    TyArray,      // [T] - array/list type
+    TyDictionary, // [K: V] - dictionary/map type
+    TyOptional,   // T? - optional type
+    TyResult,     // T throws E - result type
     TyList,
     TyInferred, // _ - inferred type placeholder
 
@@ -133,8 +136,15 @@ pub enum SyntaxKind {
     ExprFloat,                // 3.14, 1.0e10
     ExprString,               // "hello"
     ExprRawString,            // """hello""" (raw/multi-line string)
+    ExprInterpolatedString,   // "Hello \(name)!" - string with interpolations
+    StringLiteralPart,        // Literal text segment in interpolated string
+    StringInterpolation,      // \(expr) or \(expr:format) segment
+    FormatSpecifier,          // :format_spec in string interpolation
+    ExprChar,                 // 'a', '\n', '\u{1F600}'
     ExprBool,                 // true, false
     ExprArray,                // [1, 2, 3]
+    ExprDictionary,           // ["key": value, ...]
+    DictionaryEntry,          // key: value (single entry in dictionary literal)
     ExprTuple,                // (1, 2, 3)
     ExprGrouping,             // (expr)
     ExprPath,                 // a.b.c (path expression)
@@ -144,15 +154,20 @@ pub enum SyntaxKind {
     ExprNull,                 // null
     ExprCall,                 // foo(1, 2) or expr(args)
     ExprAssignment,           // lhs = rhs
+    ExprCompoundAssignment,   // lhs += rhs, lhs -= rhs, etc.
     ExprIf,                   // if condition { then } else { else }
     IfLetCondition,           // let pattern = expr (in if-let condition)
     ElseClause,               // else { ... } or else if ...
     ExprWhile,                // while condition { body }
     WhileLetCondition,        // let pattern = expr (in while-let condition)
+    ExprFor,                  // for pattern in iterable { body }
+    ForPattern,               // pattern in `for pattern in ...`
+    ForIterable,              // iterable expression in `for ... in expression`
     ExprLoop,                 // loop { body }
     ExprBreak,                // break or break label
     ExprContinue,             // continue or continue label
     ExprReturn,               // return or return expr
+    ExprThrow,                // throw expr
     ExprTry,                  // try expr
     ExprTupleIndex,           // tuple.0, tuple.1 (tuple element access)
     ExprClosure,              // { params in body } or { body }
@@ -192,6 +207,7 @@ pub enum SyntaxKind {
     Identifier,
     String,
     RawString, // """...""" raw string literal
+    Char,      // 'a' character literal
     Integer,
     Float,
     Boolean,
@@ -207,6 +223,7 @@ pub enum SyntaxKind {
     Else,
     Enum,
     Extend,
+    For,
     Fileprivate,
     Func,
     If,
@@ -222,7 +239,9 @@ pub enum SyntaxKind {
     Protocol,
     Public,
     Return,
+    Throw,
     Try,
+    Throws,
     Static,
     Struct,
     Type,
@@ -263,6 +282,8 @@ pub enum SyntaxKind {
     DotDotEquals,
     DotDotLess,
     DotDot,
+    LessLessEquals,       // <<=
+    GreaterGreaterEquals, // >>=
     LessLess,
     GreaterGreater,
     LessEquals,
@@ -272,6 +293,15 @@ pub enum SyntaxKind {
     QuestionQuestion,
     Arrow,
     FatArrow,
+    // Compound assignment (2-char)
+    PlusEquals,      // +=
+    MinusEquals,     // -=
+    StarEquals,      // *=
+    SlashEquals,     // /=
+    PercentEquals,   // %=
+    AmpersandEquals, // &=
+    PipeEquals,      // |=
+    CaretEquals,     // ^=
     // Single-character
     Equals,
     Plus,
@@ -306,12 +336,14 @@ impl From<Token> for SyntaxKind {
         match token {
             // Trivia
             Token::Whitespace => SyntaxKind::Whitespace,
+            Token::Newline => SyntaxKind::Whitespace,
             Token::LineComment => SyntaxKind::LineComment,
             Token::BlockComment => SyntaxKind::BlockComment,
             // Literals
             Token::Identifier => SyntaxKind::Identifier,
             Token::String => SyntaxKind::String,
             Token::RawString => SyntaxKind::RawString,
+            Token::Char => SyntaxKind::Char,
             Token::Integer => SyntaxKind::Integer,
             Token::Float => SyntaxKind::Float,
             Token::Boolean => SyntaxKind::Boolean,
@@ -326,6 +358,7 @@ impl From<Token> for SyntaxKind {
             Token::Else => SyntaxKind::Else,
             Token::Enum => SyntaxKind::Enum,
             Token::Extend => SyntaxKind::Extend,
+            Token::For => SyntaxKind::For,
             Token::Fileprivate => SyntaxKind::Fileprivate,
             Token::Func => SyntaxKind::Func,
             Token::If => SyntaxKind::If,
@@ -341,7 +374,9 @@ impl From<Token> for SyntaxKind {
             Token::Protocol => SyntaxKind::Protocol,
             Token::Public => SyntaxKind::Public,
             Token::Return => SyntaxKind::Return,
+            Token::Throw => SyntaxKind::Throw,
             Token::Try => SyntaxKind::Try,
+            Token::Throws => SyntaxKind::Throws,
             Token::Static => SyntaxKind::Static,
             Token::Struct => SyntaxKind::Struct,
             Token::Type => SyntaxKind::Type,
@@ -377,6 +412,8 @@ impl From<Token> for SyntaxKind {
             Token::DotDotEquals => SyntaxKind::DotDotEquals,
             Token::DotDotLess => SyntaxKind::DotDotLess,
             Token::DotDot => SyntaxKind::DotDot,
+            Token::LessLessEquals => SyntaxKind::LessLessEquals,
+            Token::GreaterGreaterEquals => SyntaxKind::GreaterGreaterEquals,
             Token::LessLess => SyntaxKind::LessLess,
             Token::GreaterGreater => SyntaxKind::GreaterGreater,
             Token::LessEquals => SyntaxKind::LessEquals,
@@ -386,6 +423,14 @@ impl From<Token> for SyntaxKind {
             Token::QuestionQuestion => SyntaxKind::QuestionQuestion,
             Token::Arrow => SyntaxKind::Arrow,
             Token::FatArrow => SyntaxKind::FatArrow,
+            Token::PlusEquals => SyntaxKind::PlusEquals,
+            Token::MinusEquals => SyntaxKind::MinusEquals,
+            Token::StarEquals => SyntaxKind::StarEquals,
+            Token::SlashEquals => SyntaxKind::SlashEquals,
+            Token::PercentEquals => SyntaxKind::PercentEquals,
+            Token::AmpersandEquals => SyntaxKind::AmpersandEquals,
+            Token::PipeEquals => SyntaxKind::PipeEquals,
+            Token::CaretEquals => SyntaxKind::CaretEquals,
             Token::Equals => SyntaxKind::Equals,
             Token::Plus => SyntaxKind::Plus,
             Token::Minus => SyntaxKind::Minus,
@@ -456,6 +501,7 @@ impl Language for KestrelLanguage {
         const TYPE_PARAMETER: u16 = SyntaxKind::TypeParameter as u16;
         const TYPE_ARGUMENT_LIST: u16 = SyntaxKind::TypeArgumentList as u16;
         const DEFAULT_TYPE: u16 = SyntaxKind::DefaultType as u16;
+        const DEFAULT_VALUE: u16 = SyntaxKind::DefaultValue as u16;
         const WHERE_CLAUSE: u16 = SyntaxKind::WhereClause as u16;
         const TYPE_BOUND: u16 = SyntaxKind::TypeBound as u16;
         const TYPE_EQUALITY: u16 = SyntaxKind::TypeEquality as u16;
@@ -471,6 +517,8 @@ impl Language for KestrelLanguage {
         const TY_FUNCTION: u16 = SyntaxKind::TyFunction as u16;
         const TY_PATH: u16 = SyntaxKind::TyPath as u16;
         const TY_ARRAY: u16 = SyntaxKind::TyArray as u16;
+        const TY_DICTIONARY: u16 = SyntaxKind::TyDictionary as u16;
+        const TY_RESULT: u16 = SyntaxKind::TyResult as u16;
         const TY_LIST: u16 = SyntaxKind::TyList as u16;
         const TY_INFERRED: u16 = SyntaxKind::TyInferred as u16;
         const PATH: u16 = SyntaxKind::Path as u16;
@@ -487,8 +535,15 @@ impl Language for KestrelLanguage {
         const EXPR_INTEGER: u16 = SyntaxKind::ExprInteger as u16;
         const EXPR_FLOAT: u16 = SyntaxKind::ExprFloat as u16;
         const EXPR_STRING: u16 = SyntaxKind::ExprString as u16;
+        const EXPR_INTERPOLATED_STRING: u16 = SyntaxKind::ExprInterpolatedString as u16;
+        const STRING_LITERAL_PART: u16 = SyntaxKind::StringLiteralPart as u16;
+        const STRING_INTERPOLATION: u16 = SyntaxKind::StringInterpolation as u16;
+        const FORMAT_SPECIFIER: u16 = SyntaxKind::FormatSpecifier as u16;
+        const EXPR_CHAR: u16 = SyntaxKind::ExprChar as u16;
         const EXPR_BOOL: u16 = SyntaxKind::ExprBool as u16;
         const EXPR_ARRAY: u16 = SyntaxKind::ExprArray as u16;
+        const EXPR_DICTIONARY: u16 = SyntaxKind::ExprDictionary as u16;
+        const DICTIONARY_ENTRY: u16 = SyntaxKind::DictionaryEntry as u16;
         const EXPR_TUPLE: u16 = SyntaxKind::ExprTuple as u16;
         const EXPR_GROUPING: u16 = SyntaxKind::ExprGrouping as u16;
         const EXPR_PATH: u16 = SyntaxKind::ExprPath as u16;
@@ -498,15 +553,20 @@ impl Language for KestrelLanguage {
         const EXPR_NULL: u16 = SyntaxKind::ExprNull as u16;
         const EXPR_CALL: u16 = SyntaxKind::ExprCall as u16;
         const EXPR_ASSIGNMENT: u16 = SyntaxKind::ExprAssignment as u16;
+        const EXPR_COMPOUND_ASSIGNMENT: u16 = SyntaxKind::ExprCompoundAssignment as u16;
         const EXPR_IF: u16 = SyntaxKind::ExprIf as u16;
         const IF_LET_CONDITION: u16 = SyntaxKind::IfLetCondition as u16;
         const ELSE_CLAUSE: u16 = SyntaxKind::ElseClause as u16;
         const EXPR_WHILE: u16 = SyntaxKind::ExprWhile as u16;
         const WHILE_LET_CONDITION: u16 = SyntaxKind::WhileLetCondition as u16;
+        const EXPR_FOR: u16 = SyntaxKind::ExprFor as u16;
+        const FOR_PATTERN: u16 = SyntaxKind::ForPattern as u16;
+        const FOR_ITERABLE: u16 = SyntaxKind::ForIterable as u16;
         const EXPR_LOOP: u16 = SyntaxKind::ExprLoop as u16;
         const EXPR_BREAK: u16 = SyntaxKind::ExprBreak as u16;
         const EXPR_CONTINUE: u16 = SyntaxKind::ExprContinue as u16;
         const EXPR_RETURN: u16 = SyntaxKind::ExprReturn as u16;
+        const EXPR_THROW: u16 = SyntaxKind::ExprThrow as u16;
         const EXPR_TRY: u16 = SyntaxKind::ExprTry as u16;
         const EXPR_TUPLE_INDEX: u16 = SyntaxKind::ExprTupleIndex as u16;
         const EXPR_CLOSURE: u16 = SyntaxKind::ExprClosure as u16;
@@ -541,6 +601,7 @@ impl Language for KestrelLanguage {
         const ERROR_PATTERN: u16 = SyntaxKind::ErrorPattern as u16;
         const IDENTIFIER: u16 = SyntaxKind::Identifier as u16;
         const STRING: u16 = SyntaxKind::String as u16;
+        const CHAR: u16 = SyntaxKind::Char as u16;
         const INTEGER: u16 = SyntaxKind::Integer as u16;
         const FLOAT: u16 = SyntaxKind::Float as u16;
         const BOOLEAN: u16 = SyntaxKind::Boolean as u16;
@@ -554,6 +615,7 @@ impl Language for KestrelLanguage {
         const ELSE: u16 = SyntaxKind::Else as u16;
         const ENUM: u16 = SyntaxKind::Enum as u16;
         const EXTEND: u16 = SyntaxKind::Extend as u16;
+        const FOR: u16 = SyntaxKind::For as u16;
         const FILEPRIVATE: u16 = SyntaxKind::Fileprivate as u16;
         const FUNC: u16 = SyntaxKind::Func as u16;
         const IF: u16 = SyntaxKind::If as u16;
@@ -569,7 +631,9 @@ impl Language for KestrelLanguage {
         const PROTOCOL: u16 = SyntaxKind::Protocol as u16;
         const PUBLIC: u16 = SyntaxKind::Public as u16;
         const RETURN: u16 = SyntaxKind::Return as u16;
+        const THROW: u16 = SyntaxKind::Throw as u16;
         const TRY: u16 = SyntaxKind::Try as u16;
+        const THROWS: u16 = SyntaxKind::Throws as u16;
         const STATIC: u16 = SyntaxKind::Static as u16;
         const STRUCT: u16 = SyntaxKind::Struct as u16;
         const TYPE: u16 = SyntaxKind::Type as u16;
@@ -602,6 +666,8 @@ impl Language for KestrelLanguage {
         // Operators
         const DOT_DOT_EQUALS: u16 = SyntaxKind::DotDotEquals as u16;
         const DOT_DOT_LESS: u16 = SyntaxKind::DotDotLess as u16;
+        const LESS_LESS_EQUALS: u16 = SyntaxKind::LessLessEquals as u16;
+        const GREATER_GREATER_EQUALS: u16 = SyntaxKind::GreaterGreaterEquals as u16;
         const LESS_LESS: u16 = SyntaxKind::LessLess as u16;
         const GREATER_GREATER: u16 = SyntaxKind::GreaterGreater as u16;
         const LESS_EQUALS: u16 = SyntaxKind::LessEquals as u16;
@@ -611,6 +677,14 @@ impl Language for KestrelLanguage {
         const QUESTION_QUESTION: u16 = SyntaxKind::QuestionQuestion as u16;
         const ARROW: u16 = SyntaxKind::Arrow as u16;
         const FAT_ARROW: u16 = SyntaxKind::FatArrow as u16;
+        const PLUS_EQUALS: u16 = SyntaxKind::PlusEquals as u16;
+        const MINUS_EQUALS: u16 = SyntaxKind::MinusEquals as u16;
+        const STAR_EQUALS: u16 = SyntaxKind::StarEquals as u16;
+        const SLASH_EQUALS: u16 = SyntaxKind::SlashEquals as u16;
+        const PERCENT_EQUALS: u16 = SyntaxKind::PercentEquals as u16;
+        const AMPERSAND_EQUALS: u16 = SyntaxKind::AmpersandEquals as u16;
+        const PIPE_EQUALS: u16 = SyntaxKind::PipeEquals as u16;
+        const CARET_EQUALS: u16 = SyntaxKind::CaretEquals as u16;
         const EQUALS: u16 = SyntaxKind::Equals as u16;
         const PLUS: u16 = SyntaxKind::Plus as u16;
         const MINUS: u16 = SyntaxKind::Minus as u16;
@@ -677,6 +751,7 @@ impl Language for KestrelLanguage {
             TYPE_PARAMETER => SyntaxKind::TypeParameter,
             TYPE_ARGUMENT_LIST => SyntaxKind::TypeArgumentList,
             DEFAULT_TYPE => SyntaxKind::DefaultType,
+            DEFAULT_VALUE => SyntaxKind::DefaultValue,
             WHERE_CLAUSE => SyntaxKind::WhereClause,
             TYPE_BOUND => SyntaxKind::TypeBound,
             TYPE_EQUALITY => SyntaxKind::TypeEquality,
@@ -692,6 +767,8 @@ impl Language for KestrelLanguage {
             TY_FUNCTION => SyntaxKind::TyFunction,
             TY_PATH => SyntaxKind::TyPath,
             TY_ARRAY => SyntaxKind::TyArray,
+            TY_DICTIONARY => SyntaxKind::TyDictionary,
+            TY_RESULT => SyntaxKind::TyResult,
             TY_LIST => SyntaxKind::TyList,
             TY_INFERRED => SyntaxKind::TyInferred,
             TY_OPTIONAL => SyntaxKind::TyOptional,
@@ -709,8 +786,15 @@ impl Language for KestrelLanguage {
             EXPR_INTEGER => SyntaxKind::ExprInteger,
             EXPR_FLOAT => SyntaxKind::ExprFloat,
             EXPR_STRING => SyntaxKind::ExprString,
+            EXPR_INTERPOLATED_STRING => SyntaxKind::ExprInterpolatedString,
+            STRING_LITERAL_PART => SyntaxKind::StringLiteralPart,
+            STRING_INTERPOLATION => SyntaxKind::StringInterpolation,
+            FORMAT_SPECIFIER => SyntaxKind::FormatSpecifier,
+            EXPR_CHAR => SyntaxKind::ExprChar,
             EXPR_BOOL => SyntaxKind::ExprBool,
             EXPR_ARRAY => SyntaxKind::ExprArray,
+            EXPR_DICTIONARY => SyntaxKind::ExprDictionary,
+            DICTIONARY_ENTRY => SyntaxKind::DictionaryEntry,
             EXPR_TUPLE => SyntaxKind::ExprTuple,
             EXPR_GROUPING => SyntaxKind::ExprGrouping,
             EXPR_PATH => SyntaxKind::ExprPath,
@@ -720,15 +804,20 @@ impl Language for KestrelLanguage {
             EXPR_NULL => SyntaxKind::ExprNull,
             EXPR_CALL => SyntaxKind::ExprCall,
             EXPR_ASSIGNMENT => SyntaxKind::ExprAssignment,
+            EXPR_COMPOUND_ASSIGNMENT => SyntaxKind::ExprCompoundAssignment,
             EXPR_IF => SyntaxKind::ExprIf,
             IF_LET_CONDITION => SyntaxKind::IfLetCondition,
             ELSE_CLAUSE => SyntaxKind::ElseClause,
             EXPR_WHILE => SyntaxKind::ExprWhile,
             WHILE_LET_CONDITION => SyntaxKind::WhileLetCondition,
+            EXPR_FOR => SyntaxKind::ExprFor,
+            FOR_PATTERN => SyntaxKind::ForPattern,
+            FOR_ITERABLE => SyntaxKind::ForIterable,
             EXPR_LOOP => SyntaxKind::ExprLoop,
             EXPR_BREAK => SyntaxKind::ExprBreak,
             EXPR_CONTINUE => SyntaxKind::ExprContinue,
             EXPR_RETURN => SyntaxKind::ExprReturn,
+            EXPR_THROW => SyntaxKind::ExprThrow,
             EXPR_TRY => SyntaxKind::ExprTry,
             EXPR_TUPLE_INDEX => SyntaxKind::ExprTupleIndex,
             EXPR_CLOSURE => SyntaxKind::ExprClosure,
@@ -763,6 +852,7 @@ impl Language for KestrelLanguage {
             ERROR_PATTERN => SyntaxKind::ErrorPattern,
             IDENTIFIER => SyntaxKind::Identifier,
             STRING => SyntaxKind::String,
+            CHAR => SyntaxKind::Char,
             INTEGER => SyntaxKind::Integer,
             FLOAT => SyntaxKind::Float,
             BOOLEAN => SyntaxKind::Boolean,
@@ -776,6 +866,7 @@ impl Language for KestrelLanguage {
             ELSE => SyntaxKind::Else,
             ENUM => SyntaxKind::Enum,
             EXTEND => SyntaxKind::Extend,
+            FOR => SyntaxKind::For,
             FILEPRIVATE => SyntaxKind::Fileprivate,
             FUNC => SyntaxKind::Func,
             IF => SyntaxKind::If,
@@ -791,7 +882,9 @@ impl Language for KestrelLanguage {
             PROTOCOL => SyntaxKind::Protocol,
             PUBLIC => SyntaxKind::Public,
             RETURN => SyntaxKind::Return,
+            THROW => SyntaxKind::Throw,
             TRY => SyntaxKind::Try,
+            THROWS => SyntaxKind::Throws,
             STATIC => SyntaxKind::Static,
             STRUCT => SyntaxKind::Struct,
             TYPE => SyntaxKind::Type,
@@ -825,6 +918,8 @@ impl Language for KestrelLanguage {
             DOT_DOT_EQUALS => SyntaxKind::DotDotEquals,
             DOT_DOT_LESS => SyntaxKind::DotDotLess,
             DOT_DOT => SyntaxKind::DotDot,
+            LESS_LESS_EQUALS => SyntaxKind::LessLessEquals,
+            GREATER_GREATER_EQUALS => SyntaxKind::GreaterGreaterEquals,
             LESS_LESS => SyntaxKind::LessLess,
             GREATER_GREATER => SyntaxKind::GreaterGreater,
             LESS_EQUALS => SyntaxKind::LessEquals,
@@ -834,6 +929,14 @@ impl Language for KestrelLanguage {
             QUESTION_QUESTION => SyntaxKind::QuestionQuestion,
             ARROW => SyntaxKind::Arrow,
             FAT_ARROW => SyntaxKind::FatArrow,
+            PLUS_EQUALS => SyntaxKind::PlusEquals,
+            MINUS_EQUALS => SyntaxKind::MinusEquals,
+            STAR_EQUALS => SyntaxKind::StarEquals,
+            SLASH_EQUALS => SyntaxKind::SlashEquals,
+            PERCENT_EQUALS => SyntaxKind::PercentEquals,
+            AMPERSAND_EQUALS => SyntaxKind::AmpersandEquals,
+            PIPE_EQUALS => SyntaxKind::PipeEquals,
+            CARET_EQUALS => SyntaxKind::CaretEquals,
             EQUALS => SyntaxKind::Equals,
             PLUS => SyntaxKind::Plus,
             MINUS => SyntaxKind::Minus,

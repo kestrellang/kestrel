@@ -170,6 +170,10 @@ fn analyze_expression(expr: &Expression, errors: &mut Vec<UnreachableCodeWarning
             }
             Divergence::Returns
         },
+        ExprKind::Throw { value } => {
+            let _ = analyze_expression(value, errors);
+            Divergence::Returns
+        },
         ExprKind::Break { .. } => Divergence::Breaks,
         ExprKind::Continue { .. } => Divergence::Continues,
         ExprKind::If {
@@ -281,13 +285,12 @@ fn analyze_expression(expr: &Expression, errors: &mut Vec<UnreachableCodeWarning
                     has_break = true;
                 }
             }
-            if body_div == Divergence::Returns {
-                return Divergence::Returns;
-            }
-            if !has_break && body_div != Divergence::Returns {
-                Divergence::InfiniteLoop
-            } else {
+            if has_break {
                 Divergence::None
+            } else if body_div == Divergence::Returns {
+                Divergence::Returns
+            } else {
+                Divergence::InfiniteLoop
             }
         },
         ExprKind::Call {
@@ -322,6 +325,19 @@ fn analyze_expression(expr: &Expression, errors: &mut Vec<UnreachableCodeWarning
             }
             Divergence::None
         },
+        ExprKind::Dictionary(pairs) => {
+            for (k, v) in pairs {
+                let d = analyze_expression(k, errors);
+                if d.diverges() {
+                    return d;
+                }
+                let d = analyze_expression(v, errors);
+                if d.diverges() {
+                    return d;
+                }
+            }
+            Divergence::None
+        },
         ExprKind::Tuple(elements) => {
             for e in elements {
                 let d = analyze_expression(e, errors);
@@ -332,6 +348,7 @@ fn analyze_expression(expr: &Expression, errors: &mut Vec<UnreachableCodeWarning
             Divergence::None
         },
         ExprKind::FieldAccess { object, .. } => analyze_expression(object, errors),
+        ExprKind::ProtocolPropertyAccess { receiver, .. } => analyze_expression(receiver, errors),
         ExprKind::TupleIndex { tuple, .. } => analyze_expression(tuple, errors),
         ExprKind::MethodRef { receiver, .. } => analyze_expression(receiver, errors),
         ExprKind::PrimitiveMethodRef { receiver, .. } => analyze_expression(receiver, errors),
@@ -361,6 +378,15 @@ fn analyze_expression(expr: &Expression, errors: &mut Vec<UnreachableCodeWarning
             if d.diverges() {
                 return d;
             }
+            for arg in arguments {
+                let d = analyze_expression(&arg.value, errors);
+                if d.diverges() {
+                    return d;
+                }
+            }
+            Divergence::None
+        },
+        ExprKind::DeferredStaticCall { arguments, .. } => {
             for arg in arguments {
                 let d = analyze_expression(&arg.value, errors);
                 if d.diverges() {
@@ -466,6 +492,7 @@ fn analyze_expression(expr: &Expression, errors: &mut Vec<UnreachableCodeWarning
         | ExprKind::AssociatedTypeRef
         | ExprKind::EnumCase { .. }
         | ExprKind::LangIntrinsicRef(_)
+        | ExprKind::InterpolatedString { .. }
         | ExprKind::Error => Divergence::None,
 
         // Match expressions - all arms must diverge for the match to diverge
@@ -518,17 +545,22 @@ fn expression_contains_break(expr: &Expression) -> bool {
         ExprKind::Break { .. } => true,
         ExprKind::If {
             then_branch,
+            then_value,
             else_branch,
             ..
         } => {
             then_branch
                 .iter()
                 .any(|s| statement_contains_break(&s.kind))
+                || then_value
+                    .as_ref()
+                    .is_some_and(|v| expression_contains_break(v))
                 || else_branch
                     .as_ref()
                     .map(|b| match b {
-                        ElseBranch::Block { statements, .. } => {
+                        ElseBranch::Block { statements, value } => {
                             statements.iter().any(|s| statement_contains_break(&s.kind))
+                                || value.as_ref().is_some_and(|v| expression_contains_break(v))
                         },
                         ElseBranch::ElseIf(e) => expression_contains_break(e),
                     })
@@ -541,7 +573,11 @@ fn expression_contains_break(expr: &Expression) -> bool {
         ExprKind::Array(elements) | ExprKind::Tuple(elements) => {
             elements.iter().any(expression_contains_break)
         },
+        ExprKind::Dictionary(pairs) => pairs
+            .iter()
+            .any(|(k, v)| expression_contains_break(k) || expression_contains_break(v)),
         ExprKind::FieldAccess { object, .. } => expression_contains_break(object),
+        ExprKind::ProtocolPropertyAccess { receiver, .. } => expression_contains_break(receiver),
         ExprKind::TupleIndex { tuple, .. } => expression_contains_break(tuple),
         ExprKind::MethodRef { receiver, .. } => expression_contains_break(receiver),
         ExprKind::PrimitiveMethodRef { receiver, .. } => expression_contains_break(receiver),
@@ -568,6 +604,11 @@ fn expression_contains_break(expr: &Expression) -> bool {
             .any(|a| expression_contains_break(&a.value)),
         ExprKind::Assignment { target, value } => {
             expression_contains_break(target) || expression_contains_break(value)
+        },
+        ExprKind::Match { arms, .. } => arms.iter().any(|arm| expression_contains_break(&arm.body)),
+        ExprKind::Block { statements, value } => {
+            statements.iter().any(|s| statement_contains_break(&s.kind))
+                || value.as_ref().is_some_and(|v| expression_contains_break(v))
         },
         _ => false,
     }

@@ -481,105 +481,59 @@ Operators in Kestrel are protocol-based. Types implement operators by conforming
 
 ```kestrel
 // Arithmetic operators
-protocol AddOperatorProtocol {
-    func add(rhs: Self) -> Self
+protocol Addable {
+    func add(other: Self) -> Self
 }
 
-protocol SubtractOperatorProtocol {
-    func subtract(rhs: Self) -> Self
+protocol Subtractable {
+    func subtract(other: Self) -> Self
 }
 
-protocol MultiplyOperatorProtocol {
-    func multiply(rhs: Self) -> Self
+protocol Multipliable {
+    func multiply(other: Self) -> Self
 }
 
-protocol DivideOperatorProtocol {
-    func divide(rhs: Self) -> Self
-}
-
-protocol ModuloOperatorProtocol {
-    func modulo(rhs: Self) -> Self
+protocol Divisible {
+    func divide(other: Self) -> Self
 }
 
 // Comparison operators
-protocol EqualsOperatorProtocol {
-    func equals(rhs: Self) -> Bool
+protocol Equatable {
+    func equals(other: Self) -> Bool
 }
 
-protocol NotEqualsOperatorProtocol {
-    func notEquals(rhs: Self) -> Bool
-}
-
-protocol LessThanOperatorProtocol {
-    func lessThan(rhs: Self) -> Bool
-}
-
-protocol GreaterThanOperatorProtocol {
-    func greaterThan(rhs: Self) -> Bool
-}
-
-protocol LessOrEqualOperatorProtocol {
-    func lessThanOrEqual(rhs: Self) -> Bool
-}
-
-protocol GreaterOrEqualOperatorProtocol {
-    func greaterThanOrEqual(rhs: Self) -> Bool
-}
-
-// Bitwise operators
-protocol BitwiseAndOperatorProtocol {
-    func bitwiseAnd(rhs: Self) -> Self
-}
-
-protocol BitwiseOrOperatorProtocol {
-    func bitwiseOr(rhs: Self) -> Self
-}
-
-protocol BitwiseXorOperatorProtocol {
-    func bitwiseXor(rhs: Self) -> Self
-}
-
-protocol BitwiseNotOperatorProtocol {
-    func bitwiseNot() -> Self
-}
-
-protocol ShiftLeftOperatorProtocol {
-    func shiftLeft(rhs: Self) -> Self
-}
-
-protocol ShiftRightOperatorProtocol {
-    func shiftRight(rhs: Self) -> Self
+protocol Comparable {
+    func lessThan(other: Self) -> Bool
+    func greaterThan(other: Self) -> Bool
+    func lessThanOrEqual(other: Self) -> Bool
+    func greaterThanOrEqual(other: Self) -> Bool
 }
 
 // Unary operators
-protocol NegateOperatorProtocol {
+protocol Negatable {
     func negate() -> Self
-}
-
-protocol LogicalNotOperatorProtocol {
-    func logicalNot() -> Bool
 }
 ```
 
 Example implementation:
 
 ```kestrel
-struct Number: AddOperatorProtocol, SubtractOperatorProtocol {
+struct Number: Addable, Subtractable {
     var value: Int
 
-    func add(rhs: Number) -> Number {
-        Number(value: self.value + rhs.value)
+    func add(other: Number) -> Number {
+        Number(value: self.value + other.value)
     }
 
-    func subtract(rhs: Number) -> Number {
-        Number(value: self.value - rhs.value)
+    func subtract(other: Number) -> Number {
+        Number(value: self.value - other.value)
     }
 }
 
 let a = Number(value: 5)
 let b = Number(value: 3)
-let sum = a + b      // Calls a.add(b)
-let diff = a - b     // Calls a.subtract(b)
+let sum = a + b      // Calls a.add(other: b)
+let diff = a - b     // Calls a.subtract(other: b)
 ```
 
 ## The Self Type
@@ -856,20 +810,20 @@ struct IntArray: Collection {
 ### Complete Example: Operator Overloading
 
 ```kestrel
-struct Vector: AddOperatorProtocol, SubtractOperatorProtocol, EqualsOperatorProtocol {
+struct Vector: Addable, Subtractable, Equatable {
     var x: Int
     var y: Int
 
-    func add(rhs: Vector) -> Vector {
-        Vector(x: self.x + rhs.x, y: self.y + rhs.y)
+    func add(other: Vector) -> Vector {
+        Vector(x: self.x + other.x, y: self.y + other.y)
     }
 
-    func subtract(rhs: Vector) -> Vector {
-        Vector(x: self.x - rhs.x, y: self.y - rhs.y)
+    func subtract(other: Vector) -> Vector {
+        Vector(x: self.x - other.x, y: self.y - other.y)
     }
 
-    func equals(rhs: Vector) -> Bool {
-        self.x == rhs.x && self.y == rhs.y
+    func equals(other: Vector) -> Bool {
+        self.x == other.x && self.y == other.y
     }
 }
 

@@ -53,6 +53,45 @@ mod basic {
     }
 }
 
+mod execution {
+    use super::*;
+
+    /// Test that subscripts with their own type parameters work end-to-end.
+    /// This tests several fixes:
+    /// - Subscript getters are lowered (KestrelSymbolKind::Subscript in item.rs)
+    /// - Subscript getter parameters are mapped (not just self)
+    /// - Subscript's own type parameters are registered
+    /// - Subscript call type arguments are extracted from argument types
+    #[test]
+    fn generic_subscript_executes() {
+        Test::new(
+            r#"module Test
+            import std.text.Formattable
+            import std.text.String
+
+            struct Formatter {
+                public init() {}
+
+                public subscript[F](value: F) -> String where F: Formattable {
+                    get {
+                        value.format()
+                    }
+                }
+            }
+
+            func main() -> lang.i64 {
+                let f = Formatter();
+                let s = f(42);
+                // Return byte count of "42" which is 2
+                s.byteCount.raw
+            }
+        "#,
+        )
+        .with_stdlib()
+        .expect(ExitCode(2));
+    }
+}
+
 mod regression {
     use super::*;
 

@@ -1,0 +1,184 @@
+// Unicode case folding tables
+// Uses @fileconstant to load binary data from data/*.bin files
+// Run generate_data.py to regenerate the binary files if needed
+
+module std.text.unicode
+
+import std.text.(Char, String)
+import std.num.(Int64, Int32, UInt32)
+import std.core.(Bool)
+import std.memory.(LiteralSlice)
+
+// ============================================================================
+// TWO-STAGE LOOKUP TABLES (loaded from binary files)
+// ============================================================================
+
+/// FOLD case mapping stage 1 table (block indices)
+@fileconstant("data/fold_stage1.bin")
+let FOLD_STAGE1: LiteralSlice[Int32]
+
+/// FOLD case mapping stage 2 table (delta values)
+@fileconstant("data/fold_stage2.bin")
+let FOLD_STAGE2: LiteralSlice[Int32]
+
+// ============================================================================
+// EXPANSION ARRAY (kept as literal - small data)
+// ============================================================================
+
+/// Full case folding expansions: (codepoint, length, char1, char2, char3)
+let FOLD_EXPANSIONS_COUNT: Int64 = 104;
+let FOLD_EXPANSIONS: std.collections.Array[(Int32, Int32, Int32, Int32, Int32)] = [
+    (223, 2, 115, 115, 0),  // U+00DF
+    (304, 2, 105, 775, 0),  // U+0130
+    (329, 2, 700, 110, 0),  // U+0149
+    (496, 2, 106, 780, 0),  // U+01F0
+    (912, 3, 953, 776, 769),  // U+0390
+    (944, 3, 965, 776, 769),  // U+03B0
+    (1415, 2, 1381, 1410, 0),  // U+0587
+    (7830, 2, 104, 817, 0),  // U+1E96
+    (7831, 2, 116, 776, 0),  // U+1E97
+    (7832, 2, 119, 778, 0),  // U+1E98
+    (7833, 2, 121, 778, 0),  // U+1E99
+    (7834, 2, 97, 702, 0),  // U+1E9A
+    (7838, 2, 115, 115, 0),  // U+1E9E
+    (8016, 2, 965, 787, 0),  // U+1F50
+    (8018, 3, 965, 787, 768),  // U+1F52
+    (8020, 3, 965, 787, 769),  // U+1F54
+    (8022, 3, 965, 787, 834),  // U+1F56
+    (8064, 2, 7936, 953, 0),  // U+1F80
+    (8065, 2, 7937, 953, 0),  // U+1F81
+    (8066, 2, 7938, 953, 0),  // U+1F82
+    (8067, 2, 7939, 953, 0),  // U+1F83
+    (8068, 2, 7940, 953, 0),  // U+1F84
+    (8069, 2, 7941, 953, 0),  // U+1F85
+    (8070, 2, 7942, 953, 0),  // U+1F86
+    (8071, 2, 7943, 953, 0),  // U+1F87
+    (8072, 2, 7936, 953, 0),  // U+1F88
+    (8073, 2, 7937, 953, 0),  // U+1F89
+    (8074, 2, 7938, 953, 0),  // U+1F8A
+    (8075, 2, 7939, 953, 0),  // U+1F8B
+    (8076, 2, 7940, 953, 0),  // U+1F8C
+    (8077, 2, 7941, 953, 0),  // U+1F8D
+    (8078, 2, 7942, 953, 0),  // U+1F8E
+    (8079, 2, 7943, 953, 0),  // U+1F8F
+    (8080, 2, 7968, 953, 0),  // U+1F90
+    (8081, 2, 7969, 953, 0),  // U+1F91
+    (8082, 2, 7970, 953, 0),  // U+1F92
+    (8083, 2, 7971, 953, 0),  // U+1F93
+    (8084, 2, 7972, 953, 0),  // U+1F94
+    (8085, 2, 7973, 953, 0),  // U+1F95
+    (8086, 2, 7974, 953, 0),  // U+1F96
+    (8087, 2, 7975, 953, 0),  // U+1F97
+    (8088, 2, 7968, 953, 0),  // U+1F98
+    (8089, 2, 7969, 953, 0),  // U+1F99
+    (8090, 2, 7970, 953, 0),  // U+1F9A
+    (8091, 2, 7971, 953, 0),  // U+1F9B
+    (8092, 2, 7972, 953, 0),  // U+1F9C
+    (8093, 2, 7973, 953, 0),  // U+1F9D
+    (8094, 2, 7974, 953, 0),  // U+1F9E
+    (8095, 2, 7975, 953, 0),  // U+1F9F
+    (8096, 2, 8032, 953, 0),  // U+1FA0
+    (8097, 2, 8033, 953, 0),  // U+1FA1
+    (8098, 2, 8034, 953, 0),  // U+1FA2
+    (8099, 2, 8035, 953, 0),  // U+1FA3
+    (8100, 2, 8036, 953, 0),  // U+1FA4
+    (8101, 2, 8037, 953, 0),  // U+1FA5
+    (8102, 2, 8038, 953, 0),  // U+1FA6
+    (8103, 2, 8039, 953, 0),  // U+1FA7
+    (8104, 2, 8032, 953, 0),  // U+1FA8
+    (8105, 2, 8033, 953, 0),  // U+1FA9
+    (8106, 2, 8034, 953, 0),  // U+1FAA
+    (8107, 2, 8035, 953, 0),  // U+1FAB
+    (8108, 2, 8036, 953, 0),  // U+1FAC
+    (8109, 2, 8037, 953, 0),  // U+1FAD
+    (8110, 2, 8038, 953, 0),  // U+1FAE
+    (8111, 2, 8039, 953, 0),  // U+1FAF
+    (8114, 2, 8048, 953, 0),  // U+1FB2
+    (8115, 2, 945, 953, 0),  // U+1FB3
+    (8116, 2, 940, 953, 0),  // U+1FB4
+    (8118, 2, 945, 834, 0),  // U+1FB6
+    (8119, 3, 945, 834, 953),  // U+1FB7
+    (8124, 2, 945, 953, 0),  // U+1FBC
+    (8130, 2, 8052, 953, 0),  // U+1FC2
+    (8131, 2, 951, 953, 0),  // U+1FC3
+    (8132, 2, 942, 953, 0),  // U+1FC4
+    (8134, 2, 951, 834, 0),  // U+1FC6
+    (8135, 3, 951, 834, 953),  // U+1FC7
+    (8140, 2, 951, 953, 0),  // U+1FCC
+    (8146, 3, 953, 776, 768),  // U+1FD2
+    (8147, 3, 953, 776, 769),  // U+1FD3
+    (8150, 2, 953, 834, 0),  // U+1FD6
+    (8151, 3, 953, 776, 834),  // U+1FD7
+    (8162, 3, 965, 776, 768),  // U+1FE2
+    (8163, 3, 965, 776, 769),  // U+1FE3
+    (8164, 2, 961, 787, 0),  // U+1FE4
+    (8166, 2, 965, 834, 0),  // U+1FE6
+    (8167, 3, 965, 776, 834),  // U+1FE7
+    (8178, 2, 8060, 953, 0),  // U+1FF2
+    (8179, 2, 969, 953, 0),  // U+1FF3
+    (8180, 2, 974, 953, 0),  // U+1FF4
+    (8182, 2, 969, 834, 0),  // U+1FF6
+    (8183, 3, 969, 834, 953),  // U+1FF7
+    (8188, 2, 969, 953, 0),  // U+1FFC
+    (64256, 2, 102, 102, 0),  // U+FB00
+    (64257, 2, 102, 105, 0),  // U+FB01
+    (64258, 2, 102, 108, 0),  // U+FB02
+    (64259, 3, 102, 102, 105),  // U+FB03
+    (64260, 3, 102, 102, 108),  // U+FB04
+    (64261, 2, 115, 116, 0),  // U+FB05
+    (64262, 2, 115, 116, 0),  // U+FB06
+    (64275, 2, 1396, 1398, 0),  // U+FB13
+    (64276, 2, 1396, 1381, 0),  // U+FB14
+    (64277, 2, 1396, 1387, 0),  // U+FB15
+    (64278, 2, 1406, 1398, 0),  // U+FB16
+    (64279, 2, 1396, 1389, 0),  // U+FB17
+]
+
+// ============================================================================
+// CASE FOLDING FUNCTIONS
+// ============================================================================
+
+/// Returns the case-folded version of a character (for case-insensitive comparison).
+/// For characters with multi-char folding, returns the first char.
+public func caseFold(c: Char) -> Char {
+    let cp = c.value();
+    // ASCII fast path
+    if cp >= 65 and cp <= 90 {
+        return Char(cp + 32)
+    }
+    if cp > 0x10FFFF { return c }
+    let blockIdx = FOLD_STAGE1(unchecked: Int64(from: cp.shiftRight(by: 8)));
+    let delta = FOLD_STAGE2(unchecked: Int64(from: blockIdx) * 256 + Int64(from: cp.bitwiseAnd(UInt32(intLiteral: 0xFF))));
+    if delta == 0 { return c }
+    Char(UInt32(from: Int64(from: cp).add(Int64(from: delta))))
+}
+
+/// Returns true if the character has a multi-character case fold.
+public func hasCaseFoldExpansion(c: Char) -> Bool {
+    let cp = c.value();
+    var i: Int64 = 0;
+    while i < FOLD_EXPANSIONS_COUNT {
+        let entry = FOLD_EXPANSIONS(unchecked: i);
+        if UInt32(from: entry.0) == cp { return true }
+        i = i + 1
+    }
+    false
+}
+
+/// Returns the multi-character case fold for a character.
+public func caseFoldExpansion(c: Char) -> String {
+    let cp = c.value();
+    var i: Int64 = 0;
+    while i < FOLD_EXPANSIONS_COUNT {
+        let entry = FOLD_EXPANSIONS(unchecked: i);
+        if UInt32(from: entry.0) == cp {
+            var result = String();
+            result.appendChar(Char(UInt32(from: entry.2)));
+            if entry.1 >= 2 { result.appendChar(Char(UInt32(from: entry.3))) }
+            if entry.1 >= 3 { result.appendChar(Char(UInt32(from: entry.4))) }
+            return result
+        }
+        i = i + 1
+    }
+    ""
+}

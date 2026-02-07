@@ -16,6 +16,7 @@ use kestrel_semantic_tree::behavior::executable::ExecutableBehavior;
 use kestrel_semantic_tree::behavior::typed::TypedBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::enum_symbol::EnumSymbol;
+use kestrel_semantic_tree::symbol::extension::ExtensionSymbol;
 use kestrel_semantic_tree::symbol::field::FieldSymbol;
 use kestrel_semantic_tree::symbol::function::FunctionSymbol;
 use kestrel_semantic_tree::symbol::initializer::InitializerSymbol;
@@ -247,6 +248,9 @@ fn check_struct_conformance(
         return;
     }
 
+    // Check that extension-added conformances have their methods IN the extension
+    check_extension_conformances(struct_name, &extensions, model, ctx);
+
     let associated_type_bindings = model.query(AssociatedTypeBindingsForStruct { struct_id });
 
     // Compute self_type first - this is used for Self substitution in struct method signatures
@@ -366,6 +370,7 @@ fn check_struct_conformance(
                 struct_name,
                 protocol_name,
                 &required_properties,
+                &effective_bindings,
                 model,
                 ctx,
             );
@@ -519,11 +524,26 @@ fn substitute_associated_types_recursive(
 
     match sig_type {
         SignatureType::Named(path) if path.len() == 1 => {
+            // Simple name - direct lookup
             if let Some(replacement) = bindings.get(&path[0]) {
                 // Recursively substitute the replacement to handle chains like Rhs -> Self -> UInt8
                 substitute_associated_types_recursive(replacement, bindings, depth + 1)
             } else {
                 sig_type.clone()
+            }
+        },
+        SignatureType::Named(path) if path.len() == 2 => {
+            // Qualified name like ["Addable", "Output"] - join and lookup
+            let qualified_key = format!("{}.{}", path[0], path[1]);
+            if let Some(replacement) = bindings.get(&qualified_key) {
+                substitute_associated_types_recursive(replacement, bindings, depth + 1)
+            } else {
+                // Fall back to simple name lookup (for backward compatibility)
+                if let Some(replacement) = bindings.get(&path[1]) {
+                    substitute_associated_types_recursive(replacement, bindings, depth + 1)
+                } else {
+                    sig_type.clone()
+                }
             }
         },
         SignatureType::Tuple(elements) => SignatureType::Tuple(
@@ -774,6 +794,7 @@ fn check_property_requirements(
     struct_name: &str,
     protocol_name: &str,
     required_properties: &[PropertyRequirement],
+    effective_bindings: &HashMap<String, SignatureType>,
     model: &SemanticModel,
     ctx: &mut AnalysisContext,
 ) {
@@ -813,11 +834,6 @@ fn check_property_requirements(
         all_fields.iter().map(|f| (f.name.clone(), f)).collect();
 
     for requirement in required_properties {
-        // TODO: Handle static properties when needed
-        if requirement.is_static {
-            continue;
-        }
-
         match field_map.get(&requirement.name) {
             None => {
                 // Missing property
@@ -831,19 +847,21 @@ fn check_property_requirements(
                 });
             },
             Some(field_info) => {
-                // Check type compatibility
-                // TODO: More sophisticated type comparison with substitutions
-                let field_type_str = format!("{}", field_info.ty);
-                let required_type_str = format!("{}", requirement.property_type);
-                if field_type_str != required_type_str {
+                // Check type compatibility using SignatureType with Self substitution
+                let field_sig_type = SignatureType::from_ty(&field_info.ty);
+                let required_sig_type = SignatureType::from_ty(&requirement.property_type);
+                let substituted_required =
+                    substitute_associated_types(&required_sig_type, effective_bindings);
+
+                if field_sig_type != substituted_required {
                     let span = struct_sym.metadata().declaration_span().clone();
                     ctx.report(ProtocolPropertyTypeMismatchError {
                         span,
                         struct_name: struct_name.to_string(),
                         protocol_name: protocol_name.to_string(),
                         property_name: requirement.name.clone(),
-                        expected_type: required_type_str,
-                        actual_type: field_type_str,
+                        expected_type: format!("{:?}", substituted_required),
+                        actual_type: format!("{:?}", field_sig_type),
                     });
                     continue;
                 }
@@ -1059,6 +1077,9 @@ fn check_enum_conformance(
     if conformances.is_empty() {
         return;
     }
+
+    // Check that extension-added conformances have their methods IN the extension
+    check_extension_conformances(enum_name, &extensions, model, ctx);
 
     let associated_type_bindings = model.query(AssociatedTypeBindingsForEnum { enum_id });
 
@@ -1345,5 +1366,66 @@ fn resolve_protocol_type_for_link_enum(
             Some((symbol.clone(), bindings))
         },
         _ => None,
+    }
+}
+
+/// Check that extension-added conformances have their required methods defined in extensions.
+///
+/// When a conformance is added via extension (e.g., `extend Array[T]: Cloneable {}`),
+/// the required methods must be defined in an extension (either the same one or another),
+/// not just on the target type itself. This is because witness generation only looks
+/// in extensions for method bindings when the conformance comes from an extension.
+fn check_extension_conformances(
+    type_name: &str,
+    extensions: &[Arc<ExtensionSymbol>],
+    model: &SemanticModel,
+    ctx: &mut AnalysisContext,
+) {
+    // Collect methods from ALL extensions of this type
+    let mut all_extension_method_names: std::collections::HashSet<String> =
+        std::collections::HashSet::new();
+    for ext in extensions {
+        let ext_methods =
+            collect_methods_from_symbol(&(ext.clone() as Arc<dyn Symbol<KestrelLanguage>>));
+        for m in ext_methods {
+            all_extension_method_names.insert(m.metadata().name().value.clone());
+        }
+    }
+
+    for extension in extensions {
+        let ext_conformances = model.query(ConformancesForSymbol {
+            symbol_id: extension.metadata().id(),
+        });
+        if ext_conformances.is_empty() {
+            continue;
+        }
+
+        // Check each conformance added by this extension
+        for conformance_ty in &ext_conformances {
+            let (protocol_symbol, _) = match resolve_protocol_type(conformance_ty) {
+                Some(r) => r,
+                None => continue,
+            };
+            let protocol_name = &protocol_symbol.metadata().name().value;
+
+            // Get required methods for this protocol
+            let required_methods = model.query(ProtocolRequiredMethods {
+                protocol_id: protocol_symbol.metadata().id(),
+            });
+
+            // Check each required method is in some extension (not just on the struct)
+            for (_protocol_sig, method) in &required_methods {
+                let method_name = &method.metadata().name().value;
+                if !all_extension_method_names.contains(method_name) {
+                    let span = extension.metadata().declaration_span().clone();
+                    ctx.report(ExtensionMissingProtocolMethodError {
+                        span,
+                        type_name: type_name.to_string(),
+                        protocol_name: protocol_name.clone(),
+                        method_name: method_name.clone(),
+                    });
+                }
+            }
+        }
     }
 }

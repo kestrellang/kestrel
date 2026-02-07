@@ -64,6 +64,26 @@ func main() -> lang.i64 {
     .expect(Runs);
 }
 
+#[test]
+fn test_guard_let_optional_type_operator() {
+    Test::new(
+        r#"module Test
+
+func main() -> lang.i64 {
+    let opt: std.num.Int64? = .Some(1);
+    guard let .Some(v) = opt else {
+        return 1
+    }
+    if v != 1 { return 1 }
+    0
+}
+"#,
+    )
+    .with_stdlib()
+    .expect(Compiles)
+    .expect(Runs);
+}
+
 // =============================================================================
 // Comparison operator tests
 // =============================================================================
@@ -322,7 +342,7 @@ fn test_bool_or_true() {
 func main() -> lang.i64 {
     let a: std.core.Bool = false;
     let b: std.core.Bool = true;
-    if a.logicalOr(b) {
+    if a or b {
         0
     } else {
         1
@@ -343,7 +363,7 @@ fn test_bool_or_false() {
 func main() -> lang.i64 {
     let a: std.core.Bool = false;
     let b: std.core.Bool = false;
-    if a.logicalOr(b) {
+    if a or b {
         1
     } else {
         0

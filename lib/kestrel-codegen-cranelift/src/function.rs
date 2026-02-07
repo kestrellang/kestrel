@@ -3,6 +3,7 @@
 use crate::context::CodegenContext;
 use crate::error::CodegenError;
 use crate::monomorphize::Substitution;
+use crate::rvalue::{align_to_shift, zero_memory};
 use crate::types::translate_type_with_subst;
 
 use kestrel_execution_graph::{
@@ -69,6 +70,7 @@ fn add_call_arg_locals(result: &mut HashSet<Id<Local>>, args: &[kestrel_executio
 fn get_root_local(place: &Place) -> Option<Id<Local>> {
     match &place.kind {
         PlaceKind::Local(local_id) => Some(*local_id),
+        PlaceKind::Global(_) => None, // Globals don't have a root local
         PlaceKind::Field { parent, .. } => get_root_local(parent),
         PlaceKind::Index { parent, .. } => get_root_local(parent),
         PlaceKind::Downcast { parent, .. } => get_root_local(parent),
@@ -207,13 +209,18 @@ fn compile_blocks(
                 let concrete_ty = subst
                     .apply_ty_readonly(ctx.mir, param.ty)
                     .unwrap_or(param.ty);
+                eprintln!("DEBUG: layout_of for param on stack");
+                eprintln!("  param.ty: {:?}", param.ty);
+                eprintln!("  param.ty MirTy: {:?}", ctx.mir.ty(param.ty));
+                eprintln!("  concrete_ty: {:?}", concrete_ty);
+                eprintln!("  concrete_ty MirTy: {:?}", ctx.mir.ty(concrete_ty));
                 let layout = ctx.layouts.layout_of(concrete_ty);
                 let size = if layout.size == 0 { 1 } else { layout.size };
                 let align = if layout.align == 0 { 1 } else { layout.align };
                 let slot = builder.create_sized_stack_slot(StackSlotData::new(
                     StackSlotKind::ExplicitSlot,
                     size as u32,
-                    align as u8,
+                    align_to_shift(align),
                 ));
                 let addr = builder.ins().stack_addr(ptr_type, slot, 0);
                 builder
@@ -252,9 +259,12 @@ fn compile_blocks(
             let slot = builder.create_sized_stack_slot(StackSlotData::new(
                 StackSlotKind::ExplicitSlot,
                 size as u32,
-                align as u8,
+                align_to_shift(align),
             ));
             let addr = builder.ins().stack_addr(ptr_type, slot, 0);
+
+            // Zero-initialize the stack slot to prevent uninitialized memory reads
+            zero_memory(builder, addr, size);
 
             // Initialize the Variable to point to the stack slot
             let var = local_map[&local_id];

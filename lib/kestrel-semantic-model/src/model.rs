@@ -7,7 +7,12 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use kestrel_semantic_tree::builtins::{BuiltinRegistry, LanguageFeature};
 use kestrel_semantic_tree::language::KestrelLanguage;
+use kestrel_semantic_tree::symbol::extension::ExtensionSymbol;
+use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
+use kestrel_semantic_tree::ty::{Substitutions, Ty};
+use kestrel_span::Span;
 use kestrel_syntax_tree::SyntaxNode;
 use semantic_tree::behavior::Behavior;
 use semantic_tree::symbol::{Symbol, SymbolId};
@@ -15,8 +20,6 @@ use semantic_tree::symbol::{Symbol, SymbolId};
 use crate::extension_registry::ExtensionRegistry;
 use crate::query::Query;
 use crate::registry::SymbolRegistry;
-use kestrel_semantic_tree::builtins::BuiltinRegistry;
-use kestrel_semantic_tree::symbol::extension::ExtensionSymbol;
 
 /// The semantic model for a Kestrel program.
 ///
@@ -147,6 +150,56 @@ impl SemanticModel {
     /// Exposed for queries and binding phase to access.
     pub fn builtin_registry(&self) -> &Arc<BuiltinRegistry> {
         &self.builtin_registry
+    }
+
+    /// Create an Array[T] struct type given an element type.
+    ///
+    /// This is used to create array types for array literals instead of using TyKind::Array.
+    /// Returns None if the Array struct builtin is not registered (stdlib not loaded).
+    pub fn make_array_type(&self, element_ty: Ty, span: Span) -> Option<Ty> {
+        // Look up the Array struct symbol
+        let symbol_id = self
+            .builtin_registry
+            .builtin_struct(LanguageFeature::ArrayStruct)?;
+        let symbol = self.registry.get(symbol_id)?;
+
+        // Downcast to StructSymbol
+        let struct_symbol: Arc<StructSymbol> = symbol.into_any_arc().downcast().ok()?;
+
+        // Get the T type parameter
+        let type_params = struct_symbol.type_parameters();
+        let t_param = type_params.first()?;
+
+        // Create substitutions: T -> element_ty
+        let mut substitutions = Substitutions::new();
+        substitutions.insert(t_param.metadata().id(), element_ty);
+
+        Some(Ty::generic_struct(struct_symbol, substitutions, span))
+    }
+
+    /// Create a Slice[T] struct type given an element type.
+    ///
+    /// This is used to create slice types for array pattern rest bindings.
+    /// Returns None if the Slice struct builtin is not registered (stdlib not loaded).
+    pub fn make_slice_type(&self, element_ty: Ty, span: Span) -> Option<Ty> {
+        // Look up the Slice struct symbol
+        let symbol_id = self
+            .builtin_registry
+            .builtin_struct(LanguageFeature::SliceStruct)?;
+        let symbol = self.registry.get(symbol_id)?;
+
+        // Downcast to StructSymbol
+        let struct_symbol: Arc<StructSymbol> = symbol.into_any_arc().downcast().ok()?;
+
+        // Get the T type parameter
+        let type_params = struct_symbol.type_parameters();
+        let t_param = type_params.first()?;
+
+        // Create substitutions: T -> element_ty
+        let mut substitutions = Substitutions::new();
+        substitutions.insert(t_param.metadata().id(), element_ty);
+
+        Some(Ty::generic_struct(struct_symbol, substitutions, span))
     }
 
     /// Debug print the semantic model (symbol hierarchy).
@@ -326,9 +379,9 @@ impl SemanticModel {
                 use kestrel_semantic_tree::pattern::{Mutability, PatternKind};
                 use kestrel_semantic_tree::stmt::{Statement, StatementKind};
 
-                /// Format an expression as (value: type)
+                /// Format an expression with types shown
                 fn format_expr_with_type(expr: &Expression) -> String {
-                    format!("({}: {})", expr.debug_compact(), expr.ty)
+                    expr.debug_compact()
                 }
 
                 /// Format a statement with types shown

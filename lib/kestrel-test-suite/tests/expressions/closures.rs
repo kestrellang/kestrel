@@ -375,6 +375,10 @@ func test() -> (lang.i64) -> lang.i64 {
 mod captures {
     use super::*;
 
+    // TODO: Enable these tests once heap allocation for closure environments is implemented.
+    // Currently, capturing closures cannot escape their defining function because
+    // their environment is stack-allocated.
+
     #[test]
     fn capture_immutable_variable() {
         // Capture a let-bound variable
@@ -388,7 +392,7 @@ func test() -> () -> lang.i64 {
 }
 "#,
         )
-        .expect(Compiles);
+        .expect(HasError("cannot return a closure that captures variables"));
     }
 
     #[test]
@@ -404,7 +408,7 @@ func test() -> () -> lang.i64 {
 }
 "#,
         )
-        .expect(Compiles);
+        .expect(HasError("cannot return a closure that captures variables"));
     }
 
     #[test]
@@ -422,7 +426,7 @@ func test() -> () -> lang.i64 {
 }
 "#,
         )
-        .expect(Compiles);
+        .expect(HasError("cannot return a closure that captures variables"));
     }
 
     #[test]
@@ -437,7 +441,7 @@ func test(multiplier: lang.i64) -> (lang.i64) -> lang.i64 {
 }
 "#,
         )
-        .expect(Compiles);
+        .expect(HasError("cannot return a closure that captures variables"));
     }
 
     #[test]
@@ -914,6 +918,8 @@ func test() -> lang.i64 {
     #[test]
     fn closure_returned_from_function() {
         // Return closure from function
+        // TODO: Enable once heap allocation for closure environments is implemented.
+        // The closure captures `n` from makeAdder's scope.
         Test::new(
             r#"
 module Main
@@ -928,7 +934,7 @@ func test() -> lang.i64 {
 }
 "#,
         )
-        .expect(Compiles);
+        .expect(HasError("cannot return a closure that captures variables"));
     }
 
     #[test]
@@ -979,9 +985,14 @@ func test() -> lang.i64 {
 mod nested_closures {
     use super::*;
 
+    // TODO: Enable these tests once heap allocation for closure environments is implemented.
+    // Currently, capturing closures cannot escape their defining function because
+    // their environment is stack-allocated.
+
     #[test]
     fn closure_returning_closure() {
         // Closure that returns another closure
+        // The inner closure captures `x` from the outer closure
         Test::new(
             r#"
 module Main
@@ -991,7 +1002,7 @@ func test() -> (lang.i64) -> (lang.i64) -> lang.i64 {
 }
 "#,
         )
-        .expect(Compiles);
+        .expect(HasError("cannot return a closure that captures variables"));
     }
 
     #[test]
@@ -1008,12 +1019,13 @@ func test() -> lang.i64 {
 }
 "#,
         )
-        .expect(Compiles);
+        .expect(HasError("cannot return a closure that captures variables"));
     }
 
     #[test]
     fn deeply_nested_closures() {
         // Three levels of nested closures
+        // Inner closures capture from outer closures
         Test::new(
             r#"
 module Main
@@ -1023,7 +1035,7 @@ func test() -> (lang.i64) -> (lang.i64) -> (lang.i64) -> lang.i64 {
 }
 "#,
         )
-        .expect(Compiles);
+        .expect(HasError("cannot return a closure that captures variables"));
     }
 
     #[test]

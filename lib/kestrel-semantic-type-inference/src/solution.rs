@@ -42,11 +42,37 @@ impl ValueResolution {
     }
 }
 
+/// Information about a value promotion.
+///
+/// When an expression needs to be wrapped with `FromValue.from()`,
+/// this records the target type and resolved method for the transformation.
+#[derive(Debug, Clone)]
+pub struct PromotionInfo {
+    /// The target type (e.g., `Optional[Int]`)
+    pub target_ty: Ty,
+    /// The resolved `FromValue.from` method symbol
+    pub from_method: SymbolId,
+    /// Type substitutions for the method call
+    pub substitutions: Substitutions,
+}
+
+impl PromotionInfo {
+    /// Create a new promotion info.
+    pub fn new(target_ty: Ty, from_method: SymbolId, substitutions: Substitutions) -> Self {
+        Self {
+            target_ty,
+            from_method,
+            substitutions,
+        }
+    }
+}
+
 /// The solution to a set of type inference constraints.
 ///
 /// Contains:
 /// - Resolved types for all inference placeholders
 /// - Resolved symbols for type-directed member accesses
+/// - Promotions for expressions that need wrapping
 /// - Any errors encountered during inference
 #[derive(Debug, Clone, Default)]
 pub struct Solution {
@@ -62,6 +88,12 @@ pub struct Solution {
     /// with their resolved symbol and substitutions.
     pub values: HashMap<ExprId, ValueResolution>,
 
+    /// Promotions indexed by their ExprId.
+    ///
+    /// Expressions that need to be wrapped with `FromValue.from()` get entries
+    /// here with information about the target type and method to call.
+    pub promotions: HashMap<ExprId, PromotionInfo>,
+
     /// Errors encountered during type inference.
     ///
     /// The solver accumulates errors rather than failing fast, allowing
@@ -75,6 +107,7 @@ impl Solution {
         Self {
             types: HashMap::new(),
             values: HashMap::new(),
+            promotions: HashMap::new(),
             errors: Vec::new(),
         }
     }
@@ -87,6 +120,7 @@ impl Solution {
         Self {
             types,
             values,
+            promotions: HashMap::new(),
             errors: Vec::new(),
         }
     }
@@ -100,6 +134,22 @@ impl Solution {
         Self {
             types,
             values,
+            promotions: HashMap::new(),
+            errors,
+        }
+    }
+
+    /// Create a solution with all mappings including promotions.
+    pub fn with_promotions(
+        types: HashMap<TyId, Ty>,
+        values: HashMap<ExprId, ValueResolution>,
+        promotions: HashMap<ExprId, PromotionInfo>,
+        errors: Vec<InferenceError>,
+    ) -> Self {
+        Self {
+            types,
+            values,
+            promotions,
             errors,
         }
     }
@@ -112,6 +162,11 @@ impl Solution {
     /// Get the resolved value for an ExprId.
     pub fn get_value(&self, id: ExprId) -> Option<&ValueResolution> {
         self.values.get(&id)
+    }
+
+    /// Get the promotion info for an ExprId.
+    pub fn get_promotion(&self, id: ExprId) -> Option<&PromotionInfo> {
+        self.promotions.get(&id)
     }
 
     /// Check if a type has been resolved.

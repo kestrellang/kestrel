@@ -66,9 +66,9 @@ pub use id::{
     ProtocolMethod, QualifiedName, Statement, Static, Struct, Ty, TypeParam, Witness,
 };
 pub use item::{
-    AssociatedTypeDef, CallingConvention, EnumCaseDef, EnumDef, ExternInfo, FieldDef, FunctionDef,
-    ParamDef, ProtocolDef, ProtocolMethodDef, StaticDef, StructDef, WhereClause, WhereConstraint,
-    WitnessDef,
+    AssociatedTypeDef, CallingConvention, EnumCaseDef, EnumDef, ExternInfo, FieldDef,
+    FileConstantData, FunctionDef, ParamDef, ProtocolDef, ProtocolMethodDef, StaticDef, StructDef,
+    WhereClause, WhereConstraint, WitnessDef,
 };
 pub use metadata::{Metadata, Origin, Prior};
 pub use pass::{FunctionPass, FunctionPassAdapter, MirPass, PassManager, PassResult};
@@ -406,6 +406,24 @@ impl MirContext {
     /// Add a new static.
     pub fn add_static(&mut self, name: Id<QualifiedName>, ty: Id<Ty>) -> Id<Static> {
         let def = StaticDef::new(name, ty);
+        self.statics.alloc(def)
+    }
+
+    /// Add a new file constant static (for @fileconstant).
+    pub fn add_file_constant_static(
+        &mut self,
+        name: Id<QualifiedName>,
+        ty: Id<Ty>,
+        relative_path: String,
+        element_ty: Id<Ty>,
+        base_path: Option<std::path::PathBuf>,
+    ) -> Id<Static> {
+        let file_data = FileConstantData {
+            relative_path,
+            element_ty,
+            base_path,
+        };
+        let def = StaticDef::new(name, ty).with_file_constant(file_data);
         self.statics.alloc(def)
     }
 

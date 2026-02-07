@@ -93,6 +93,14 @@ pub enum ValuePathResolution {
         /// The type parameter symbol ID
         symbol_id: SymbolId,
     },
+    /// Resolved to an associated type (for static member access like Item.zero)
+    /// The remaining segments should be handled as member accesses by the caller.
+    AssociatedType {
+        /// The associated type symbol ID
+        symbol_id: SymbolId,
+        /// The container type (e.g., for I.Item, the container is I)
+        container: Option<Ty>,
+    },
     /// Resolved to an enum case value, but there are more path segments.
     /// The remaining segments should be handled as member accesses by the caller.
     /// This handles cases like `Player.player1.description()` where `player1` is an enum case
@@ -103,6 +111,19 @@ pub enum ValuePathResolution {
         /// The type of the enum case value (the enum type)
         ty: Ty,
         /// The index in the path where the enum case was found
+        /// (segments after this should be member accesses)
+        resolved_index: usize,
+    },
+    /// Resolved to a field/getter value, but there are more path segments.
+    /// The remaining segments should be handled as member accesses by the caller.
+    /// This handles cases like `Float64.e.subtract(1.0)` where `e` is a static field
+    /// and `subtract` is a method on the field's value type.
+    FieldValue {
+        /// The field symbol ID
+        symbol_id: SymbolId,
+        /// The type of the field value
+        ty: Ty,
+        /// The index in the path where the field was found
         /// (segments after this should be member accesses)
         resolved_index: usize,
     },
@@ -137,7 +158,9 @@ impl ValuePathResolution {
             ValuePathResolution::Symbol { .. }
                 | ValuePathResolution::Overloaded { .. }
                 | ValuePathResolution::TypeParameter { .. }
+                | ValuePathResolution::AssociatedType { .. }
                 | ValuePathResolution::EnumCaseValue { .. }
+                | ValuePathResolution::FieldValue { .. }
         )
     }
 

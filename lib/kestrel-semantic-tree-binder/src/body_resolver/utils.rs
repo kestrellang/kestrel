@@ -9,19 +9,21 @@ use kestrel_reporting::IntoDiagnostic;
 use kestrel_semantic_model::SymbolFor;
 use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
 use kestrel_semantic_tree::behavior::callable::CallableBehavior;
-use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
 use kestrel_semantic_tree::behavior::extension_target::ExtensionTargetBehavior;
+use kestrel_semantic_tree::behavior::generics::GenericsBehavior;
 use kestrel_semantic_tree::behavior::implements::ImplementsBehavior;
 use kestrel_semantic_tree::behavior::typed::TypedBehavior;
 use kestrel_semantic_tree::expr::{ExprKind, Expression};
 use kestrel_semantic_tree::language::KestrelLanguage;
+use kestrel_semantic_tree::symbol::associated_type::AssociatedTypeSymbol;
 use kestrel_semantic_tree::symbol::function::FunctionSymbol;
 use kestrel_semantic_tree::symbol::initializer::InitializerSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::symbol::protocol::ProtocolSymbol;
 use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
 use kestrel_semantic_tree::symbol::type_parameter::TypeParameterSymbol;
-use kestrel_semantic_tree::ty::{Substitutions, Ty, TyKind, WhereClause};
+use kestrel_semantic_tree::ty::{Constraint, ParamInfo, Substitutions, Ty, TyKind, WhereClause};
+use kestrel_semantic_type_inference::TypeOracle;
 use kestrel_span::Span;
 use kestrel_syntax_tree::SyntaxKind;
 use semantic_tree::symbol::{Symbol, SymbolId};
@@ -38,8 +40,10 @@ pub fn is_expression_kind(kind: SyntaxKind) -> bool {
             | SyntaxKind::ExprInteger
             | SyntaxKind::ExprFloat
             | SyntaxKind::ExprString
+            | SyntaxKind::ExprChar
             | SyntaxKind::ExprBool
             | SyntaxKind::ExprArray
+            | SyntaxKind::ExprDictionary
             | SyntaxKind::ExprTuple
             | SyntaxKind::ExprGrouping
             | SyntaxKind::ExprPath
@@ -49,12 +53,15 @@ pub fn is_expression_kind(kind: SyntaxKind) -> bool {
             | SyntaxKind::ExprNull
             | SyntaxKind::ExprCall
             | SyntaxKind::ExprAssignment
+            | SyntaxKind::ExprCompoundAssignment
             | SyntaxKind::ExprIf
             | SyntaxKind::ExprWhile
             | SyntaxKind::ExprLoop
+            | SyntaxKind::ExprFor
             | SyntaxKind::ExprBreak
             | SyntaxKind::ExprContinue
             | SyntaxKind::ExprReturn
+            | SyntaxKind::ExprThrow
             | SyntaxKind::ExprTry
             | SyntaxKind::ExprTupleIndex
             | SyntaxKind::ExprClosure
@@ -93,7 +100,11 @@ pub fn validate_not_standalone_type_param(
     expr
 }
 
-/// Check if a callable signature matches the given arity and labels
+/// Check if a callable signature matches the given arity and labels.
+///
+/// For parameters with default values, callers may omit trailing arguments.
+/// The arity must be between the number of required parameters (those without
+/// defaults) and the total number of parameters.
 pub fn matches_signature(
     callable: &CallableBehavior,
     arity: usize,
@@ -101,14 +112,20 @@ pub fn matches_signature(
 ) -> bool {
     let params = callable.parameters();
 
-    // Check arity
-    if params.len() != arity {
+    // Count required parameters (those without defaults)
+    let required_count = params.iter().filter(|p| !p.has_default()).count();
+
+    // Check arity: must be at least required_count and at most total params
+    if arity < required_count || arity > params.len() {
         return false;
     }
 
-    // Check labels match
-    for (param, label) in params.iter().zip(labels.iter()) {
-        let param_label = param.external_label();
+    // Check labels for provided arguments only (first `arity` parameters)
+    for (i, label) in labels.iter().enumerate() {
+        if i >= params.len() {
+            return false; // More labels than params - shouldn't happen
+        }
+        let param_label = params[i].external_label();
         let label_ref = label.as_deref();
         if param_label != label_ref {
             return false;
@@ -178,13 +195,15 @@ pub fn create_struct_type(struct_symbol: &Arc<dyn Symbol<KestrelLanguage>>, span
 /// * `struct_symbol` - The struct symbol
 /// * `type_args` - The explicit type arguments (already resolved in current scope by TypeResolver)
 /// * `span` - The span for the created type
-/// * `_ctx` - The body resolution context (unused but kept for API consistency)
+/// * `ctx` - The body resolution context (used for resolving default type arguments)
 pub fn create_struct_type_with_type_args(
     struct_symbol: &Arc<dyn Symbol<KestrelLanguage>>,
     type_args: &[Ty],
     span: Span,
-    _ctx: &super::context::BodyResolutionContext,
+    ctx: &super::context::BodyResolutionContext,
 ) -> Ty {
+    use kestrel_semantic_model::{ResolveTypePath, TypePathResolution};
+
     let sym_clone = Arc::clone(struct_symbol);
 
     match sym_clone.downcast_arc::<StructSymbol>() {
@@ -204,11 +223,28 @@ pub fn create_struct_type_with_type_args(
                 substitutions.insert(param.metadata().id(), arg_ty.clone());
             }
 
-            // Fill in any missing type parameters with inferred type
+            // Fill in any missing type parameters with defaults or inferred type
             for param in type_params {
                 let param_id = param.metadata().id();
                 if !substitutions.contains(param_id) {
-                    substitutions.insert(param_id, Ty::infer(span.clone()));
+                    // Try to use the parameter's default, resolving UnresolvedPath if needed
+                    let default_ty = if let Some(default) = param.default() {
+                        if let TyKind::UnresolvedPath { segments } = default.kind() {
+                            // Resolve the path using the struct's context
+                            match ctx.model.query(ResolveTypePath {
+                                path: segments.to_vec(),
+                                context: struct_arc.metadata().id(),
+                            }) {
+                                TypePathResolution::Resolved(resolved_ty) => resolved_ty,
+                                _ => Ty::infer(span.clone()), // Fallback to infer if resolution fails
+                            }
+                        } else {
+                            default.clone()
+                        }
+                    } else {
+                        Ty::infer(span.clone())
+                    };
+                    substitutions.insert(param_id, default_ty);
                 }
             }
 
@@ -414,31 +450,6 @@ fn filter_resolved_bounds(
         .collect()
 }
 
-/// Get the protocol bounds for a type parameter from the current resolution context.
-///
-/// This looks up the where clause from the current function (and its parent struct/protocol)
-/// to find all protocol bounds for the given type parameter.
-///
-/// Returns a list of protocol types that the type parameter is constrained to.
-pub fn get_type_parameter_bounds(type_param: &Arc<TypeParameterSymbol>) -> Vec<Ty> {
-    let param_id = type_param.metadata().id();
-    let mut bounds = Vec::new();
-
-    // Walk up from the type parameter's parent to find where clauses
-    // Note: The parent may be incorrectly set during symbol building,
-    // so we also try to get bounds directly from symbols that own this type parameter
-    let mut current: Option<Arc<dyn Symbol<KestrelLanguage>>> = type_param.metadata().parent();
-
-    while let Some(parent) = current {
-        if let Some(where_clause) = get_where_clause(parent.as_ref()) {
-            bounds.extend(extract_bounds_for_param(&where_clause, param_id));
-        }
-        current = parent.metadata().parent();
-    }
-
-    bounds
-}
-
 /// Get the protocol bounds for a type parameter from a specific context.
 ///
 /// This is used during body resolution where we know which function we're in.
@@ -466,7 +477,12 @@ pub fn get_type_parameter_bounds_by_id(
 ) -> Vec<Ty> {
     let mut bounds = Vec::new();
 
-    // Start from the current function
+    // First, check the context's where clause. This is important for subscripts
+    // where the where clause is attached to the subscript but the function_id
+    // points to the getter/setter (which don't have where clauses themselves).
+    bounds.extend(filter_resolved_bounds(ctx.where_clause(), param_id));
+
+    // Also check the function symbol and its parent for additional where clauses
     if let Some(function) = ctx.model.query(SymbolFor {
         id: ctx.function_id,
     }) {
@@ -488,6 +504,307 @@ pub fn get_type_parameter_bounds_by_id(
                 }
             } else if let Some(where_clause) = get_where_clause(parent.as_ref()) {
                 bounds.extend(filter_resolved_bounds(&where_clause, param_id));
+            }
+        }
+    }
+
+    bounds
+}
+
+/// Check if a constraint path matches an associated type with its container.
+///
+/// For example, for `where I.Item: Protocol`:
+/// - `path` would be `["I", "Item"]`
+/// - `assoc_name` would be `"Item"`
+/// - `container` would be the type for `I`
+///
+/// This function verifies that:
+/// 1. The last segment of the path matches the associated type name
+/// 2. The preceding segments match the container type chain
+fn path_matches_associated_type(path: &[String], assoc_name: &str, container: Option<&Ty>) -> bool {
+    if path.is_empty() {
+        return false;
+    }
+
+    // Last segment must match the associated type name
+    if path.last() != Some(&assoc_name.to_string()) {
+        return false;
+    }
+
+    // If path has only one segment (e.g., ["Item"]), it matches any container
+    // This is for simple constraints like `where Item: Protocol` in protocol extensions
+    if path.len() == 1 {
+        return true;
+    }
+
+    // For multi-segment paths, verify the container chain matches
+    // E.g., for path ["I", "Item"], container should be type parameter "I"
+    let prefix = &path[..path.len() - 1];
+
+    // Check if container matches the path prefix
+    match container {
+        None => {
+            // No container means this is a top-level associated type in a protocol
+            // Only single-segment paths should match (handled above)
+            false
+        },
+        Some(container_ty) => {
+            // Recursively check the container chain
+            container_matches_path(container_ty, prefix)
+        },
+    }
+}
+
+/// Check if a container type matches a path prefix.
+///
+/// For example, for path prefix ["I"]:
+/// - A type parameter named "I" would match
+///
+/// For path prefix ["I", "Item"]:
+/// - An associated type "Item" with container type parameter "I" would match
+fn container_matches_path(container: &Ty, path: &[String]) -> bool {
+    if path.is_empty() {
+        return true;
+    }
+
+    match container.kind() {
+        TyKind::TypeParameter(type_param) => {
+            // Type parameter matches if it's the only segment and names match
+            path.len() == 1 && path[0] == type_param.metadata().name().value
+        },
+        TyKind::AssociatedType {
+            symbol,
+            container: nested_container,
+        } => {
+            // Associated type matches if:
+            // 1. Last segment matches the associated type name
+            // 2. Remaining prefix matches the nested container
+            if path.is_empty() {
+                return false;
+            }
+            let assoc_name = symbol.metadata().name().value.clone();
+            if path.last() != Some(&assoc_name) {
+                return false;
+            }
+            let prefix = &path[..path.len() - 1];
+            match nested_container {
+                Some(c) => container_matches_path(c, prefix),
+                None => prefix.is_empty(),
+            }
+        },
+        TyKind::SelfType => {
+            // Self matches if it's the only segment and named "Self"
+            path.len() == 1 && path[0] == "Self"
+        },
+        _ => {
+            // Other types don't match path prefixes
+            false
+        },
+    }
+}
+
+/// Get the protocol bounds for an associated type from context.
+///
+/// This combines:
+/// 1. Direct bounds from the associated type symbol (e.g., `type Item: Protocol`)
+/// 2. Bounds from SelfBound constraints in the context's where clause (e.g., `where Item: Protocol`)
+///
+/// The `container` parameter is used to verify that nested path constraints like
+/// `where I.Item: Protocol` match the actual associated type being queried.
+///
+/// This is analogous to `get_type_parameter_bounds_from_context` but for associated types.
+pub fn get_associated_type_bounds_from_context(
+    assoc_type: &Arc<AssociatedTypeSymbol>,
+    container: Option<&Ty>,
+    ctx: &mut BodyResolutionContext,
+) -> Vec<Ty> {
+    let mut bounds = Vec::new();
+    let assoc_name = assoc_type.metadata().name().value.clone();
+
+    // 1. Get direct bounds from the associated type symbol
+    if let Some(direct_bounds) = assoc_type.bounds() {
+        for bound in direct_bounds {
+            if matches!(bound.kind(), TyKind::Protocol { .. }) {
+                bounds.push(bound.clone());
+            }
+        }
+    }
+
+    // 2. Check context's where clause for SelfBound constraints
+    // These are constraints like `where Item: Comparable` in protocol extensions
+    // or nested constraints like `where I.Item: Iterator`
+    for constraint in ctx.where_clause().constraints() {
+        if let Constraint::SelfBound {
+            associated_type_path,
+            bounds: self_bounds,
+            ..
+        } = constraint
+        {
+            // Match constraints on this associated type, verifying the full path
+            // Single-level: where Item: Protocol → path = ["Item"]
+            // Nested: where I.Item: Protocol → path = ["I", "Item"]
+            if path_matches_associated_type(associated_type_path, &assoc_name, container) {
+                for bound in self_bounds {
+                    if matches!(bound.kind(), TyKind::Protocol { .. }) {
+                        bounds.push(bound.clone());
+                    }
+                }
+            }
+        }
+        if let Constraint::InheritedAssociatedTypeBound {
+            path,
+            bounds: assoc_bounds,
+            ..
+        } = constraint
+        {
+            // Convert dot-separated path to vec for matching
+            let path_segments: Vec<String> = path.split('.').map(|s| s.to_string()).collect();
+            if path_matches_associated_type(&path_segments, &assoc_name, container) {
+                for bound in assoc_bounds {
+                    if matches!(bound.kind(), TyKind::Protocol { .. }) {
+                        bounds.push(bound.clone());
+                    }
+                }
+            }
+        }
+        if let Constraint::TypeBound {
+            param: None,
+            param_name,
+            bounds: param_bounds,
+            ..
+        } = constraint
+        {
+            // TypeBound with param: None is for simple associated type constraints
+            // Match when:
+            // 1. Name matches AND container is None (top-level associated type)
+            // 2. Name matches AND container is Self (protocol extension associated type)
+            // This handles `where Item: Protocol` in protocol extensions where Item
+            // has container Self (since it's implicitly Self.Item)
+            let container_is_self_or_none = match container {
+                None => true,
+                Some(ty) => matches!(ty.kind(), TyKind::SelfType),
+            };
+
+            if param_name == &assoc_name && container_is_self_or_none {
+                for bound in param_bounds {
+                    if matches!(bound.kind(), TyKind::Protocol { .. }) {
+                        bounds.push(bound.clone());
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. Also check function's parent where clause (for struct, enum, and extension)
+    // The context's where_clause contains the function's own constraints,
+    // but we also need to check the parent's where clause for inherited constraints
+    if let Some(function) = ctx.model.query(SymbolFor {
+        id: ctx.function_id,
+    }) && let Some(parent) = function.metadata().parent()
+    {
+        // Get the parent's where clause depending on its kind
+        let parent_where_clause = match parent.metadata().kind() {
+            KestrelSymbolKind::Extension => parent
+                .metadata()
+                .get_behavior::<ExtensionTargetBehavior>()
+                .map(|t| t.where_clause().clone()),
+            KestrelSymbolKind::Struct | KestrelSymbolKind::Enum => parent
+                .metadata()
+                .get_behavior::<GenericsBehavior>()
+                .map(|g| g.where_clause().clone()),
+            _ => None,
+        };
+
+        if let Some(where_clause) = parent_where_clause {
+            for constraint in where_clause.constraints() {
+                if let Constraint::SelfBound {
+                    associated_type_path,
+                    bounds: self_bounds,
+                    ..
+                } = constraint
+                    && path_matches_associated_type(associated_type_path, &assoc_name, container)
+                {
+                    for bound in self_bounds {
+                        if let TyKind::Protocol { symbol, .. } = bound.kind() {
+                            // Check if this protocol is already in bounds
+                            let already_present = bounds.iter().any(|b| {
+                                if let TyKind::Protocol {
+                                    symbol: existing, ..
+                                } = b.kind()
+                                {
+                                    existing.metadata().id() == symbol.metadata().id()
+                                } else {
+                                    false
+                                }
+                            });
+                            if !already_present {
+                                bounds.push(bound.clone());
+                            }
+                        }
+                    }
+                }
+                if let Constraint::InheritedAssociatedTypeBound {
+                    path,
+                    bounds: assoc_bounds,
+                    ..
+                } = constraint
+                {
+                    let path_segments: Vec<String> =
+                        path.split('.').map(|s| s.to_string()).collect();
+                    if path_matches_associated_type(&path_segments, &assoc_name, container) {
+                        for bound in assoc_bounds {
+                            if let TyKind::Protocol { symbol, .. } = bound.kind() {
+                                let already_present = bounds.iter().any(|b| {
+                                    if let TyKind::Protocol {
+                                        symbol: existing, ..
+                                    } = b.kind()
+                                    {
+                                        existing.metadata().id() == symbol.metadata().id()
+                                    } else {
+                                        false
+                                    }
+                                });
+                                if !already_present {
+                                    bounds.push(bound.clone());
+                                }
+                            }
+                        }
+                    }
+                }
+                if let Constraint::TypeBound {
+                    param: None,
+                    param_name,
+                    bounds: param_bounds,
+                    ..
+                } = constraint
+                {
+                    // TypeBound with param: None matches simple associated type constraints
+                    // Match when container is None or Self (for protocol extensions)
+                    let container_is_self_or_none = match container {
+                        None => true,
+                        Some(ty) => matches!(ty.kind(), TyKind::SelfType),
+                    };
+
+                    if param_name == &assoc_name && container_is_self_or_none {
+                        for bound in param_bounds {
+                            if let TyKind::Protocol { symbol, .. } = bound.kind() {
+                                let already_present = bounds.iter().any(|b| {
+                                    if let TyKind::Protocol {
+                                        symbol: existing, ..
+                                    } = b.kind()
+                                    {
+                                        existing.metadata().id() == symbol.metadata().id()
+                                    } else {
+                                        false
+                                    }
+                                });
+                                if !already_present {
+                                    bounds.push(bound.clone());
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -517,9 +834,7 @@ pub fn substitute_type(ty: &Ty, substitutions: &Substitutions) -> Ty {
                 .cloned()
                 .unwrap_or_else(|| ty.clone())
         },
-        TyKind::Array(element) => {
-            Ty::array(substitute_type(element, substitutions), ty.span().clone())
-        },
+        // Note: Array[T] struct types are handled by the Struct case above
         TyKind::Tuple(elements) => {
             let new_elements: Vec<Ty> = elements
                 .iter()
@@ -560,7 +875,147 @@ pub fn substitute_type(ty: &Ty, substitutions: &Substitutions) -> Ty {
             }
             Ty::generic_enum(symbol.clone(), new_subs, ty.span().clone())
         },
+        TyKind::TypeAlias {
+            symbol,
+            substitutions: inner_subs,
+        } => {
+            // Apply our substitutions to the inner substitutions
+            // This is important for type aliases like T? (OptionalTypeOperator[T])
+            let mut new_subs = Substitutions::new();
+            for (id, inner_ty) in inner_subs.iter() {
+                new_subs.insert(*id, substitute_type(inner_ty, substitutions));
+            }
+            Ty::generic_type_alias(symbol.clone(), new_subs, ty.span().clone())
+        },
+        TyKind::AssociatedType { symbol, container } => {
+            // Associated types need to recursively substitute in their container
+            if let Some(container_ty) = container {
+                let new_container = substitute_type(container_ty, substitutions);
+                Ty::qualified_associated_type(symbol.clone(), new_container, ty.span().clone())
+            } else {
+                // Unqualified associated type - no substitution needed
+                ty.clone()
+            }
+        },
         // For simple types, just return a clone
+        _ => ty.clone(),
+    }
+}
+
+/// Resolve associated types in a type using the TypeOracle.
+///
+/// This recursively traverses a type and resolves any AssociatedType projections
+/// to their concrete types. For example, `ArrayIterator[Int64].Item` resolves to `Int64`.
+///
+/// This is used when calling protocol extension methods, where associated types
+/// need to be resolved to their concrete implementations.
+///
+/// # Arguments
+/// * `ty` - The type to resolve
+/// * `ctx` - The body resolution context containing the TypeOracle
+///
+/// # Returns
+/// The type with all associated types resolved
+pub fn resolve_associated_types(ty: &Ty, ctx: &BodyResolutionContext) -> Ty {
+    match ty.kind() {
+        TyKind::AssociatedType { symbol, container } => {
+            if let Some(container_ty) = container {
+                // First resolve the container recursively
+                let resolved_container = resolve_associated_types(container_ty, ctx);
+
+                // Don't try to resolve if the container is an inference variable -
+                // resolution will happen later during type inference when concrete types are known
+                if matches!(resolved_container.kind(), TyKind::Infer) {
+                    return Ty::qualified_associated_type(
+                        symbol.clone(),
+                        resolved_container,
+                        ty.span().clone(),
+                    );
+                }
+
+                // Try to resolve the associated type using the TypeOracle
+                if let Some(resolved) = ctx
+                    .model
+                    .resolve_associated_type(&resolved_container, &symbol.metadata().name().value)
+                {
+                    // Recursively resolve in case the result also has associated types
+                    resolve_associated_types(&resolved, ctx)
+                } else {
+                    // Can't resolve - return the type with the resolved container
+                    Ty::qualified_associated_type(
+                        symbol.clone(),
+                        resolved_container,
+                        ty.span().clone(),
+                    )
+                }
+            } else {
+                // Unqualified associated type - can't resolve without container
+                ty.clone()
+            }
+        },
+        TyKind::Tuple(elements) => {
+            let new_elements: Vec<Ty> = elements
+                .iter()
+                .map(|e| resolve_associated_types(e, ctx))
+                .collect();
+            Ty::tuple(new_elements, ty.span().clone())
+        },
+        TyKind::Pointer(element_type) => {
+            let new_element = resolve_associated_types(element_type, ctx);
+            Ty::pointer(new_element, ty.span().clone())
+        },
+        TyKind::Function {
+            params,
+            return_type,
+        } => {
+            let new_params: Vec<Ty> = params
+                .iter()
+                .map(|p| resolve_associated_types(p, ctx))
+                .collect();
+            let new_return = resolve_associated_types(return_type, ctx);
+            Ty::function(new_params, new_return, ty.span().clone())
+        },
+        TyKind::Struct {
+            symbol,
+            substitutions,
+        } => {
+            let mut new_subs = Substitutions::new();
+            for (id, sub_ty) in substitutions.iter() {
+                new_subs.insert(*id, resolve_associated_types(sub_ty, ctx));
+            }
+            Ty::generic_struct(symbol.clone(), new_subs, ty.span().clone())
+        },
+        TyKind::Enum {
+            symbol,
+            substitutions,
+        } => {
+            let mut new_subs = Substitutions::new();
+            for (id, sub_ty) in substitutions.iter() {
+                new_subs.insert(*id, resolve_associated_types(sub_ty, ctx));
+            }
+            Ty::generic_enum(symbol.clone(), new_subs, ty.span().clone())
+        },
+        TyKind::Protocol {
+            symbol,
+            substitutions,
+        } => {
+            let mut new_subs = Substitutions::new();
+            for (id, sub_ty) in substitutions.iter() {
+                new_subs.insert(*id, resolve_associated_types(sub_ty, ctx));
+            }
+            Ty::generic_protocol(symbol.clone(), new_subs, ty.span().clone())
+        },
+        TyKind::TypeAlias {
+            symbol,
+            substitutions,
+        } => {
+            let mut new_subs = Substitutions::new();
+            for (id, sub_ty) in substitutions.iter() {
+                new_subs.insert(*id, resolve_associated_types(sub_ty, ctx));
+            }
+            Ty::generic_type_alias(symbol.clone(), new_subs, ty.span().clone())
+        },
+        // For simple types (primitives, type parameters, etc.), just return a clone
         _ => ty.clone(),
     }
 }
@@ -640,17 +1095,22 @@ fn infer_from_type(
             if type_params.iter().any(|tp| tp.metadata().id() == param_id) {
                 // Only insert if not already mapped (first match wins)
                 if !substitutions.contains(param_id) {
+                    // IMPORTANT: We DO map inference variables now! This is critical for
+                    // bidirectional type inference with generic methods. When a closure's
+                    // return type is an inference variable, we need to link the type parameter
+                    // to that same inference variable so the constraint solver can unify them.
+                    //
+                    // For example, for map[U](transform: (T) -> U) called with { (x) in x * 2 }:
+                    // - The closure has type (Int64) -> _ where _ is an inference variable
+                    // - We map U to that same _ inference variable
+                    // - Later, when the closure body is type-checked, _ gets unified with Int64
+                    // - This solves U = Int64
                     substitutions.insert(param_id, arg_ty.clone());
                 }
             }
         },
 
-        // For array types, recurse into element type
-        TyKind::Array(elem_ty) => {
-            if let TyKind::Array(arg_elem) = arg_ty.kind() {
-                infer_from_type(elem_ty, arg_elem, type_params, substitutions);
-            }
-        },
+        // Note: Array[T] types are handled by the Struct case above (via substitutions)
 
         // For tuple types, recurse into each element
         TyKind::Tuple(elems) => {
@@ -673,6 +1133,27 @@ fn infer_from_type(
             {
                 for (pp, ap) in params.iter().zip(arg_params.iter()) {
                     infer_from_type(pp, ap, type_params, substitutions);
+                }
+                infer_from_type(return_type, arg_ret, type_params, substitutions);
+            } else if let TyKind::UnresolvedFunction {
+                param_info,
+                return_type: arg_ret,
+            } = arg_ty.kind()
+            {
+                match param_info {
+                    ParamInfo::Unconstrained => {},
+                    ParamInfo::ImplicitIt { it_type } => {
+                        if params.len() == 1 {
+                            infer_from_type(&params[0], it_type, type_params, substitutions);
+                        }
+                    },
+                    ParamInfo::Explicit { param_types } => {
+                        if params.len() == param_types.len() {
+                            for (pp, ap) in params.iter().zip(param_types.iter()) {
+                                infer_from_type(pp, ap, type_params, substitutions);
+                            }
+                        }
+                    },
                 }
                 infer_from_type(return_type, arg_ret, type_params, substitutions);
             }
@@ -792,14 +1273,17 @@ pub fn verify_type_argument_constraints(
 
 /// Check if a type satisfies a protocol bound.
 ///
-/// This checks if a concrete type conforms to a protocol, either directly
-/// or transitively through other constraints.
+/// This checks if a concrete type conforms to a protocol, either directly,
+/// through extensions, or transitively through protocol extensions.
+///
+/// Uses the TypeOracle::conforms_to method which implements the full conformance
+/// checking logic including transitive conformance through protocol extensions.
 pub fn type_satisfies_bound(
     ty: &Ty,
     bound: &Ty,
     model: &kestrel_semantic_model::SemanticModel,
 ) -> bool {
-    use kestrel_semantic_model::ExtensionsFor;
+    use kestrel_semantic_type_inference::TypeOracle;
 
     // Get the protocol from the bound
     let TyKind::Protocol {
@@ -811,78 +1295,18 @@ pub fn type_satisfies_bound(
         return false;
     };
 
-    match ty.kind() {
-        // Concrete struct - check if it conforms to the protocol
-        TyKind::Struct { symbol, .. } => {
-            // Check direct conformances
-            if let Some(conformances) = symbol.metadata().get_behavior::<ConformancesBehavior>() {
-                for conf in conformances.conformances() {
-                    if let TyKind::Protocol {
-                        symbol: conf_proto, ..
-                    } = conf.kind()
-                        && conf_proto.metadata().id() == required_proto.metadata().id()
-                    {
-                        return true;
-                    }
-                    // TODO: Check inherited protocols
-                }
-            }
-
-            // Also check extension conformances
-            let struct_id = symbol.metadata().id();
-            let extensions = model.query(ExtensionsFor {
-                target_id: struct_id,
-            });
-            for extension in extensions {
-                if let Some(conformances) =
-                    extension.metadata().get_behavior::<ConformancesBehavior>()
-                {
-                    for conf in conformances.conformances() {
-                        if let TyKind::Protocol {
-                            symbol: conf_proto, ..
-                        } = conf.kind()
-                            && conf_proto.metadata().id() == required_proto.metadata().id()
-                        {
-                            return true;
-                        }
-                        // TODO: Check inherited protocols
-                    }
-                }
-            }
-
-            false
-        },
-
-        // Type parameter - check if its bounds satisfy the required bound
-        TyKind::TypeParameter(param) => {
-            let param_bounds = get_type_parameter_bounds(param);
-            for pb in &param_bounds {
-                if let TyKind::Protocol {
-                    symbol: pb_proto, ..
-                } = pb.kind()
-                    && pb_proto.metadata().id() == required_proto.metadata().id()
-                {
-                    return true;
-                }
-                // TODO: Check protocol inheritance
-            }
-            false
-        },
-
-        // Primitive types - check for built-in protocol conformances
-        // Currently primitives don't conform to user-defined protocols
-        TyKind::Int(_) | TyKind::Float(_) | TyKind::Bool | TyKind::String => {
-            // TODO: Add built-in protocol conformances (Equatable, etc.)
-            false
-        },
-
-        // Inference placeholders - optimistically assume they will satisfy bounds
-        // once resolved. Type inference will catch actual violations later.
-        TyKind::Infer => true,
-
-        // Other types don't satisfy protocol bounds
-        _ => false,
+    // Inference placeholders - optimistically assume they will satisfy bounds
+    // once resolved. Type inference will catch actual violations later.
+    if matches!(ty.kind(), TyKind::Infer) {
+        return true;
     }
+
+    // Use the TypeOracle::conforms_to method which handles:
+    // - Direct conformances
+    // - Extension conformances
+    // - Transitive conformance through protocol extensions
+    // - Protocol inheritance
+    model.conforms_to(ty, required_proto.metadata().id())
 }
 
 /// Replace any remaining type parameters in a type with inference placeholders.
@@ -903,11 +1327,6 @@ pub fn replace_unsubstituted_type_params(ty: &Ty, span: &Span) -> Ty {
                 .map(|e| replace_unsubstituted_type_params(e, span))
                 .collect();
             Ty::tuple(new_elements, ty.span().clone())
-        },
-
-        TyKind::Array(element) => {
-            let new_element = replace_unsubstituted_type_params(element, span);
-            Ty::array(new_element, ty.span().clone())
         },
 
         TyKind::Pointer(element) => {
@@ -992,11 +1411,6 @@ pub fn replace_type_params_except(
                 .map(|e| replace_type_params_except(e, preserved, span))
                 .collect();
             Ty::tuple(new_elements, ty.span().clone())
-        },
-
-        TyKind::Array(element) => {
-            let new_element = replace_type_params_except(element, preserved, span);
-            Ty::array(new_element, ty.span().clone())
         },
 
         TyKind::Pointer(element) => {

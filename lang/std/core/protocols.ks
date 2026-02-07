@@ -1,33 +1,91 @@
 // Core protocols
+// Fundamental protocols for equality, comparison, hashing, and defaults.
 
 module std.core
 
 import std.core.(Less, LessOrEqual, Greater, GreaterOrEqual, NotEqual, Equal)
 import std.text.(String)
+import std.memory.(Slice, Pointer)
+import std.num.(UInt64, Int64)
 
-// Equatable - types that can be compared for equality
+/// Protocol for types that can be compared for equality.
+/// Provides the foundation for the == operator via the Equal protocol extension.
 public protocol Equatable {
+    /// Returns true if this value equals the other.
     func equals(other: Self) -> Bool
 }
 
-// Matchable - types that can be matched in match expressions
+/// Protocol for types that can be matched in match expressions.
+/// Enables pattern matching support for custom types.
 @builtin(.Matchable)
 public protocol Matchable {
+    /// Returns true if this value matches the pattern.
     func matches(other: Self) -> Bool
 }
 
-// Default operator implementation for Equatable (provides ==)
-extend Equatable: Equal[Self] {
-    type Equal.Output = Bool
+/// Protocol for types that support range pattern matching.
+/// Enables patterns like `start..=end`, `start..<end`, `..=end`, `..<end`, `start..`
+///
+/// The Bound type parameter allows heterogeneous matching, e.g., matching
+/// an Int64 against Char bounds.
+@builtin(.RangeMatchable)
+public protocol RangeMatchable[Bound = Self] {
+    /// Returns true if self >= bound (for start.. patterns)
+    @builtin(.RangeMatchableIsAtLeast)
+    func isAtLeast(bound: Bound) -> Bool
+
+    /// Returns true if self <= bound (for ..=end patterns)
+    @builtin(.RangeMatchableIsAtMost)
+    func isAtMost(bound: Bound) -> Bool
+
+    /// Returns true if self < bound (for ..<end patterns)
+    @builtin(.RangeMatchableIsBelow)
+    func isBelow(bound: Bound) -> Bool
 }
 
-// Comparable - types that have a total ordering
+/// Protocol for types that support array pattern matching.
+/// Enables patterns like `[a, b]`, `[a, ..rest]`, `[a, .., z]`, `[a, ..rest, z]`
+///
+/// The protocol provides methods for length checking, element access, and slicing.
+/// Conforming types include Array[T] and Slice[T].
+@builtin(.ArrayMatchable)
+public protocol ArrayMatchable {
+    type Element
+
+    /// Returns the number of elements in the collection.
+    @builtin(.ArrayMatchableMatchLength)
+    func matchLength() -> Int64
+
+    /// Returns the element at the given index.
+    /// Caller guarantees index is valid (0 <= index < matchLength()).
+    @builtin(.ArrayMatchableMatchGet)
+    func matchGet(index: Int64) -> Element
+
+    /// Returns a slice from `from` (inclusive) to `to` (exclusive).
+    /// Caller guarantees valid bounds (0 <= from <= to <= matchLength()).
+    @builtin(.ArrayMatchableMatchSlice)
+    func matchSlice(from: Int64, to: Int64) -> Slice[Element]
+}
+
+/// Extension that provides == and != operators for all Equatable types.
+extend Equatable: Equal[Self], NotEqual[Self] {
+    type Equal.Output = Bool
+    type NotEqual.Output = Bool
+
+    /// Default implementation of inequality based on equality.
+    public func notEquals(other: Self) -> Bool {
+        if self.equals(other) { false } else { true }
+    }
+}
+
+/// Protocol for types that have a total ordering.
+/// Extends Equatable to add comparison capabilities.
 public protocol Comparable: Equatable {
+    /// Compares this value with another and returns their ordering.
     func compare(other: Self) -> Ordering
 }
 
-// Default operator implementations for Comparable
-// This extension provides <, <=, >, >=, != for any Comparable type
+/// Extension that provides <, <=, >, >=, != operators for all Comparable types.
 extend Comparable: Less[Self], LessOrEqual[Self], Greater[Self], GreaterOrEqual[Self], NotEqual[Self] {
     type Less.Output = Bool
     type LessOrEqual.Output = Bool
@@ -35,48 +93,75 @@ extend Comparable: Less[Self], LessOrEqual[Self], Greater[Self], GreaterOrEqual[
     type GreaterOrEqual.Output = Bool
     type NotEqual.Output = Bool
 
+    /// Returns true if this value is less than the other.
     public func lessThan(other: Self) -> Bool {
         self.compare(other) == Ordering.Less
     }
 
+    /// Returns true if this value is less than or equal to the other.
     public func lessThanOrEqual(other: Self) -> Bool {
         self.compare(other) != Ordering.Greater
     }
 
+    /// Returns true if this value is greater than the other.
     public func greaterThan(other: Self) -> Bool {
         self.compare(other) == Ordering.Greater
     }
 
+    /// Returns true if this value is greater than or equal to the other.
     public func greaterThanOrEqual(other: Self) -> Bool {
         self.compare(other) != Ordering.Less
     }
 
+    /// Returns true if this value is not equal to the other.
     public func notEquals(other: Self) -> Bool {
         self.compare(other) != Ordering.Equal
     }
 }
 
-// Hashable - types that can be hashed
-// Note: write(bytes:) requires Slice[UInt8] which comes later
-public protocol Hashable: Equatable {
+/// Extension that provides RangeMatchable for all Comparable types.
+/// This allows any Comparable type to be used in range patterns automatically.
+extend Comparable: RangeMatchable[Self] {
+    /// Returns true if self >= bound
+    public func isAtLeast(bound: Self) -> Bool {
+        // Use compare() instead of >= to avoid protocol lookup issues
+        self.compare(bound) != Ordering.Less
+    }
+
+    /// Returns true if self <= bound
+    public func isAtMost(bound: Self) -> Bool {
+        // Use compare() instead of <= to avoid protocol lookup issues
+        self.compare(bound) != Ordering.Greater
+    }
+
+    /// Returns true if self < bound
+    public func isBelow(bound: Self) -> Bool {
+        // Use compare() instead of < to avoid protocol lookup issues
+        self.compare(bound) == Ordering.Less
+    }
+}
+
+/// Protocol for types that can be hashed.
+/// Hashable types must also be equatable (equal values must have equal hashes).
+public protocol Hash: Equatable {
+    /// Feeds this value's bytes into the given hasher.
     func hash[H](mutating into hasher: H) where H: Hasher
 }
 
-// Hasher - types that can compute hash values
-// Note: Full implementation requires Slice and UInt64
+/// Protocol for hash algorithm implementations.
+/// Used by Hash-conforming types to compute hash values.
 public protocol Hasher {
-    //mutating func write(bytes: Slice[UInt8])
-    //mutating func finish() -> UInt64
+    /// Writes bytes to the hasher state.
+    mutating func write(bytes: Slice[UInt8])
+    /// Finalizes the hash computation and returns the hash value.
+    mutating func finish() -> UInt64
 }
 
-// DefaultHasher comes later when we have UInt64 and Slice
-
-// Defaultable - types with a default value
+/// Protocol for types that have a default value.
+/// Enables construction without arguments via init().
 public protocol Defaultable {
+    /// Creates an instance with the default value.
     init()
 }
 
-// Formattable - types that can be formatted as a string
-public protocol Formattable {
-    func format() -> String
-}
+// Note: Formattable protocol is now in std.text/format.ks

@@ -371,11 +371,17 @@ fn specialize_query(query: &PatternRow, ctor: &Constructor, ty: &Ty) -> PatternR
                 let target_arity =
                     target_prefix + target_suffix + if *target_has_rest { 1 } else { 0 };
 
-                // Get element type from array type
-                let elem_ty = if let TyKind::Array(elem_ty) = first.ty.kind() {
-                    (**elem_ty).clone()
-                } else {
-                    first.ty.clone()
+                // Get element type from Array[T] struct
+                let elem_ty = match first.ty.kind() {
+                    TyKind::Struct { substitutions, .. } => {
+                        // Array[T] - get T from substitutions
+                        substitutions
+                            .iter()
+                            .next()
+                            .map(|(_, t)| t.clone())
+                            .unwrap_or_else(|| first.ty.clone())
+                    },
+                    _ => first.ty.clone(),
                 };
 
                 if rest.is_some() && !target_has_rest {
@@ -583,15 +589,20 @@ fn get_constructor_field_types(ctor: &Constructor, ty: &Ty) -> Vec<Ty> {
             }
         },
 
+        // Array[T] struct type
         (
             Constructor::Array {
                 prefix_len,
                 suffix_len,
                 has_rest,
             },
-            TyKind::Array(element_type),
+            TyKind::Struct { substitutions, .. },
         ) => {
-            let elem_ty = (**element_type).clone();
+            let elem_ty = substitutions
+                .iter()
+                .next()
+                .map(|(_, t)| t.clone())
+                .unwrap_or_else(|| ty.clone());
             let mut types = vec![elem_ty.clone(); *prefix_len];
             if *has_rest {
                 types.push(ty.clone()); // Rest is an array/slice
@@ -623,12 +634,24 @@ fn ctor_to_witness(ctor: &Constructor, _ty: &Ty) -> Witness {
             args: vec![],
         },
         Constructor::IntLiteral(n) => Witness::integer(*n),
-        Constructor::IntRange { start, .. } => {
-            // For ranges, pick the start value as witness
-            Witness::integer(*start)
+        Constructor::IntRange { start, end } => {
+            // For ranges, pick the start value as witness (or 0 if unbounded)
+            match start {
+                Some(s) => Witness::integer(*s),
+                None => match end {
+                    Some(e) => Witness::integer(*e),
+                    None => Witness::any(),
+                },
+            }
         },
         Constructor::CharLiteral(c) => Witness::Literal(format!("'{}'", c)),
-        Constructor::CharRange { start, .. } => Witness::Literal(format!("'{}'", start)),
+        Constructor::CharRange { start, end } => match start {
+            Some(s) => Witness::Literal(format!("'{}'", s)),
+            None => match end {
+                Some(e) => Witness::Literal(format!("'{}'", e)),
+                None => Witness::any(),
+            },
+        },
         Constructor::StringLiteral(s) => Witness::string(s),
         Constructor::Unit => Witness::tuple(vec![]),
         Constructor::Wildcard => Witness::any(),

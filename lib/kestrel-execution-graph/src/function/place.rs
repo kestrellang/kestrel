@@ -1,7 +1,7 @@
 //! Place expressions (memory locations).
 
 use crate::MirContext;
-use crate::id::{Id, Local};
+use crate::id::{Id, Local, QualifiedName};
 use crate::metadata::Metadata;
 use std::fmt;
 
@@ -20,6 +20,9 @@ pub struct Place {
 pub enum PlaceKind {
     /// A local variable: `%x`
     Local(Id<Local>),
+
+    /// A global/static variable: `@Module.Path.static_var`
+    Global(Id<QualifiedName>),
 
     /// Field access: `<place>.field`
     Field { parent: Box<Place>, name: String },
@@ -41,6 +44,15 @@ impl Place {
             meta: Metadata::new(),
             inline_name: None,
             kind: PlaceKind::Local(id),
+        }
+    }
+
+    /// Create a place referencing a global/static variable.
+    pub fn global(name: Id<QualifiedName>) -> Self {
+        Self {
+            meta: Metadata::new(),
+            inline_name: None,
+            kind: PlaceKind::Global(name),
         }
     }
 
@@ -96,9 +108,11 @@ impl Place {
     }
 
     /// Get the root local of this place.
+    /// Panics if this is a global place (use is_global() to check first).
     pub fn root_local(&self) -> Id<Local> {
         match &self.kind {
             PlaceKind::Local(id) => *id,
+            PlaceKind::Global(_) => panic!("root_local() called on global place"),
             PlaceKind::Field { parent, .. } => parent.root_local(),
             PlaceKind::Index { parent, .. } => parent.root_local(),
             PlaceKind::Downcast { parent, .. } => parent.root_local(),
@@ -135,6 +149,9 @@ impl fmt::Display for PlaceDisplay<'_> {
         match &self.place.kind {
             PlaceKind::Local(id) => {
                 write!(f, "%{}", self.ctx.locals[*id].name)
+            },
+            PlaceKind::Global(name) => {
+                write!(f, "@{}", self.ctx.name(*name))
             },
             PlaceKind::Field { parent, name } => {
                 write!(f, "{}.{}", parent.display(self.ctx), name)

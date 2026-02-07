@@ -48,11 +48,23 @@ impl DeclarationBinder for GetterBinder {
             .unwrap_or_else(|| Ty::error(span.clone()));
 
         // Check if the field is static by downcasting to FieldSymbol
-        let is_static = parent
+        let explicit_static = parent
             .as_ref()
             .downcast_ref::<FieldSymbol>()
             .map(|f| f.is_static())
             .unwrap_or(false);
+
+        // Module-level fields are implicitly static even without the 'static' keyword
+        let is_module_level = parent
+            .metadata()
+            .parent()
+            .map(|gp| {
+                let kind = gp.metadata().kind();
+                kind == KestrelSymbolKind::Module || kind == KestrelSymbolKind::SourceFile
+            })
+            .unwrap_or(false);
+
+        let is_static = explicit_static || is_module_level;
 
         // Determine receiver kind: None for static getters, Borrowing for instance getters
         let receiver_kind = if is_static {

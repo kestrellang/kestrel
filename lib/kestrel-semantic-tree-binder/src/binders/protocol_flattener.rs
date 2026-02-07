@@ -4,9 +4,11 @@ use std::sync::Arc;
 use kestrel_semantic_model::SymbolFor;
 use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
 use kestrel_semantic_tree::symbol::associated_type::AssociatedTypeSymbol;
+use kestrel_semantic_tree::symbol::field::FieldSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::symbol::protocol::{
-    FlattenedAssociatedType, FlattenedMethod, FlattenedProtocolBehavior, ProtocolSymbol,
+    FlattenedAssociatedType, FlattenedMethod, FlattenedProperty, FlattenedProtocolBehavior,
+    ProtocolSymbol,
 };
 use kestrel_semantic_tree::ty::TyKind;
 use semantic_tree::cycle::{Cycle, CycleDetector};
@@ -37,12 +39,13 @@ fn is_ancestor_protocol(protocol: &Arc<ProtocolSymbol>, potential_ancestor_name:
     false
 }
 
-/// Flatten a protocol's inheritance hierarchy, collecting all methods and associated types.
+/// Flatten a protocol's inheritance hierarchy, collecting all methods, properties, and associated types.
 pub fn flatten_protocol(
     protocol: &Arc<ProtocolSymbol>,
     ctx: &mut BindingContext,
 ) -> Option<FlattenedProtocolBehavior> {
     let mut methods: HashMap<String, Vec<FlattenedMethod>> = HashMap::new();
+    let mut properties: HashMap<String, FlattenedProperty> = HashMap::new();
     let mut associated_types: HashMap<String, FlattenedAssociatedType> = HashMap::new();
     let mut cycle_detector = CycleDetector::new();
     let mut visited = std::collections::HashSet::new();
@@ -51,6 +54,7 @@ pub fn flatten_protocol(
     match flatten_protocol_recursive(
         protocol,
         &mut methods,
+        &mut properties,
         &mut associated_types,
         &mut cycle_detector,
         &mut visited,
@@ -60,6 +64,7 @@ pub fn flatten_protocol(
     ) {
         Ok(_) => Some(FlattenedProtocolBehavior::new(
             methods,
+            properties,
             associated_types,
             max_depth,
         )),
@@ -90,6 +95,7 @@ pub fn flatten_protocol(
 fn flatten_protocol_recursive(
     protocol: &Arc<ProtocolSymbol>,
     methods: &mut HashMap<String, Vec<FlattenedMethod>>,
+    properties: &mut HashMap<String, FlattenedProperty>,
     associated_types: &mut HashMap<String, FlattenedAssociatedType>,
     cycle_detector: &mut CycleDetector<semantic_tree::symbol::SymbolId>,
     visited: &mut std::collections::HashSet<semantic_tree::symbol::SymbolId>,
@@ -123,6 +129,7 @@ fn flatten_protocol_recursive(
                     && let Err(e) = flatten_protocol_recursive(
                         parent,
                         methods,
+                        properties,
                         associated_types,
                         cycle_detector,
                         visited,
@@ -208,6 +215,27 @@ fn flatten_protocol_recursive(
                             definition_span: child.metadata().name().span.clone(),
                         },
                     );
+                }
+            },
+            KestrelSymbolKind::Field => {
+                // Collect computed property requirements from protocol
+                if let Ok(field) = child.clone().downcast_arc::<FieldSymbol>() {
+                    // Only include computed properties (those with getter/setter requirements)
+                    if field.is_computed() {
+                        let field_name = field.metadata().name().value.clone();
+                        // Child protocol properties override inherited ones
+                        properties.insert(
+                            field_name,
+                            FlattenedProperty {
+                                symbol: field.clone(),
+                                source_protocol_name: protocol_name.clone(),
+                                definition_span: child.metadata().name().span.clone(),
+                                has_getter: field.getter().is_some(),
+                                has_setter: field.setter().is_some(),
+                                is_static: field.is_static(),
+                            },
+                        );
+                    }
                 }
             },
             _ => {},

@@ -518,7 +518,9 @@ mod try_expressions {
     use super::*;
 
     #[test]
-    fn try_expression_not_supported() {
+    fn try_on_non_tryable_type() {
+        // Trying to use `try` on a type that doesn't implement Tryable
+        // should produce an error about missing tryExtract method
         Test::new(
             r#"
 module Main
@@ -533,6 +535,6 @@ func test() {
 "#,
         )
         .expect(Fails)
-        .expect(HasError("not yet supported"));
+        .expect(HasError("tryExtract"));
     }
 }

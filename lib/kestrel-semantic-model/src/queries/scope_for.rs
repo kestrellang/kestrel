@@ -44,7 +44,12 @@ impl Query for ScopeFor {
                     if let Some(target_id) = item.target_id {
                         // Use alias if present, otherwise use original name
                         let name = item.alias.clone().unwrap_or_else(|| item.name.clone());
-                        imports.entry(name).or_default().push(target_id);
+                        let ids = imports.entry(name).or_default();
+                        // Deduplicate: only add if not already present
+                        // (multiple files in the same module may import the same symbol)
+                        if !ids.contains(&target_id) {
+                            ids.push(target_id);
+                        }
                     }
                 }
             }

@@ -1,0 +1,17 @@
+// Null coalescing operator protocol
+// The ?? operator provides a concise way to unwrap optionals with a default value.
+
+module std.core
+
+/// Protocol for types that support the null coalescing operator (??).
+/// Enables providing a default value when the receiver is None/null.
+/// Uses short-circuit evaluation: the default is only computed if needed.
+@builtin(.CoalesceOperatorProtocol)
+public protocol Coalesce[Default] {
+    type Output
+
+    /// Returns the contained value if present, otherwise evaluates and returns the default.
+    /// The closure is only called if self is None/null.
+    @builtin(.CoalesceOperatorMethod)
+    func coalesce(default: () -> Default) -> Output
+}

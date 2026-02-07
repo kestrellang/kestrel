@@ -108,6 +108,10 @@ mod non_capturing {
 mod capturing {
     use super::*;
 
+    // TODO: Enable these tests once heap allocation for closure environments is implemented.
+    // Currently, capturing closures cannot escape their defining function because
+    // their environment is stack-allocated.
+
     #[test]
     fn single_capture_from_parameter() {
         // Closure captures function parameter
@@ -120,9 +124,7 @@ mod capturing {
             }
         "#,
         )
-        .expect(Compiles)
-        .expect(Mir::compiles())
-        .expect(Mir::mir_closure("Test.test", 0).has_captures(1));
+        .expect(HasError("cannot return a closure that captures variables"));
     }
 
     #[test]
@@ -138,9 +140,7 @@ mod capturing {
             }
         "#,
         )
-        .expect(Compiles)
-        .expect(Mir::compiles())
-        .expect(Mir::mir_closure("Test.test", 0).has_captures(1));
+        .expect(HasError("cannot return a closure that captures variables"));
     }
 
     #[test]
@@ -158,9 +158,7 @@ mod capturing {
             }
         "#,
         )
-        .expect(Compiles)
-        .expect(Mir::compiles())
-        .expect(Mir::mir_closure("Test.test", 0).has_captures(1));
+        .expect(HasError("cannot return a closure that captures variables"));
     }
 
     #[test]
@@ -175,13 +173,7 @@ mod capturing {
             }
         "#,
         )
-        .expect(Compiles)
-        .expect(Mir::compiles())
-        .expect(
-            Mir::mir_closure("Test.test", 0)
-                .has_param("it", MirTy::I64)
-                .has_captures(1),
-        );
+        .expect(HasError("cannot return a closure that captures variables"));
     }
 }
 
@@ -298,8 +290,13 @@ mod multiple_closures {
 mod nested {
     use super::*;
 
+    // TODO: Enable these tests once heap allocation for closure environments is implemented.
+    // Currently, capturing closures cannot escape their defining function because
+    // their environment is stack-allocated.
+
     #[test]
     fn closure_returning_closure() {
+        // The inner closure { (y) in lang.i64_add(x, y) } captures `x` from outer closure
         Test::new(
             r#"
             module Test
@@ -309,15 +306,12 @@ mod nested {
             }
         "#,
         )
-        .expect(Compiles)
-        .expect(Mir::compiles())
-        // Outer closure
-        .expect(Mir::mir_closure("Test.test", 0).has_param("x", MirTy::I64));
-        // Inner closure would be at Test."test.closure.0".closure.0
+        .expect(HasError("cannot return a closure that captures variables"));
     }
 
     #[test]
     fn inner_closure_captures_outer_param() {
+        // The inner closure { (y) in lang.i64_add(x, y) } captures `x` from outer closure
         Test::new(
             r#"
             module Test
@@ -329,9 +323,7 @@ mod nested {
             }
         "#,
         )
-        .expect(Compiles)
-        .expect(Mir::compiles())
-        .expect(Mir::mir_closure("Test.test", 0).has_param("x", MirTy::I64));
+        .expect(HasError("cannot return a closure that captures variables"));
     }
 }
 
@@ -399,7 +391,7 @@ mod closure_as_parameter {
         .expect(Compiles)
         .expect(Mir::compiles())
         .expect(
-            Mir::mir_function("Main.apply")
+            Mir::mir_function("Main.apply$f$x")
                 .returns(MirTy::I64)
                 .has_param_count(2)
                 .calls_escaping(),
@@ -420,7 +412,7 @@ mod closure_as_parameter {
         .expect(Compiles)
         .expect(Mir::compiles())
         .expect(
-            Mir::mir_function("Main.compose")
+            Mir::mir_function("Main.compose$f$g$x")
                 .returns(MirTy::I64)
                 .has_param_count(3)
                 .calls_escaping(),
@@ -451,7 +443,7 @@ mod closure_as_parameter {
         )
         .expect(Compiles)
         .expect(Mir::compiles())
-        .expect(Mir::mir_function("Main.main").calls("Main.apply"))
+        .expect(Mir::mir_function("Main.main").calls("Main.apply$f$x"))
         .expect(
             Mir::mir_closure("Main.main", 0)
                 .any_block(|b| b.has_statement(StatementPattern::BinOp(BinOp::MulSigned))),
@@ -470,10 +462,14 @@ mod closure_as_parameter {
 mod make_adder {
     use super::*;
 
+    // TODO: Enable these tests once heap allocation for closure environments is implemented.
+    // Currently, capturing closures cannot escape their defining function because
+    // their environment is stack-allocated.
+
     #[test]
     fn make_adder_returns_closure() {
         // Based on tmp/13_closure_capture.ks
-        // Note: Function parameters default to borrow mode
+        // The closure captures `n` from makeAdder's scope
         Test::new(
             r#"
             module Main
@@ -483,23 +479,12 @@ mod make_adder {
             }
         "#,
         )
-        .expect(Compiles)
-        .expect(Mir::compiles())
-        .expect(
-            Mir::mir_function("Main.makeAdder")
-                .returns(MirTy::func_thick(vec![MirTy::I64], MirTy::I64))
-                .has_param("n", MirTy::ref_(MirTy::I64)),
-        )
-        .expect(
-            Mir::mir_closure("Main.makeAdder", 0)
-                .returns(MirTy::I64)
-                .has_param("x", MirTy::I64)
-                .has_captures(1),
-        );
+        .expect(HasError("cannot return a closure that captures variables"));
     }
 
     #[test]
     fn make_adder_usage() {
+        // The closure captures `n` from makeAdder's scope
         Test::new(
             r#"
             module Main
@@ -516,12 +501,6 @@ mod make_adder {
             }
         "#,
         )
-        .expect(Compiles)
-        .expect(Mir::compiles())
-        .expect(
-            Mir::mir_function("Main.main")
-                .calls("Main.makeAdder")
-                .calls_escaping(),
-        );
+        .expect(HasError("cannot return a closure that captures variables"));
     }
 }

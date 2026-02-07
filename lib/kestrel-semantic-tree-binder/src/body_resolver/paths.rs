@@ -8,6 +8,7 @@ use kestrel_semantic_model::{
     ResolveTypePath, ResolveValuePath, SymbolFor, TypePathResolution, ValuePathResolution,
 };
 use kestrel_semantic_tree::expr::Expression;
+use kestrel_semantic_tree::symbol::associated_type::AssociatedTypeSymbol;
 use kestrel_semantic_tree::symbol::function::FunctionSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
@@ -332,6 +333,22 @@ pub fn resolve_path_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContex
                 }
             }
 
+            // Check if this is a field - fields need special handling for mutability
+            if let Some(symbol) = ctx.model.query(SymbolFor { id: symbol_id })
+                && symbol.metadata().kind() == KestrelSymbolKind::Field
+            {
+                use kestrel_semantic_tree::symbol::field::FieldSymbol;
+
+                let is_mutable = symbol
+                    .as_ref()
+                    .downcast_ref::<FieldSymbol>()
+                    .map(|f| f.is_mutable())
+                    .unwrap_or(false);
+
+                // For module-level fields, create a SymbolRef with proper mutability
+                return Expression::symbol_ref(symbol_id, ty, is_mutable, span);
+            }
+
             // Original handling for non-static-method cases
             // Check if type arguments were provided
             let final_ty = if let Some(ref type_args) = explicit_type_args {
@@ -437,26 +454,33 @@ pub fn resolve_path_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContex
                     if let Some(parent) = symbol.metadata().parent() {
                         use super::utils::create_struct_type_with_type_args;
                         use kestrel_semantic_tree::behavior::typed::TypedBehavior;
+                        use kestrel_semantic_tree::symbol::enum_symbol::EnumSymbol;
 
                         let parent_id = parent.metadata().id();
-                        let parent_ty = parent
-                            .clone()
-                            .downcast_arc::<StructSymbol>()
-                            .ok()
-                            .map(|struct_sym| {
-                                create_struct_type_with_type_args(
-                                    &(struct_sym
-                                        as std::sync::Arc<
-                                            dyn Symbol<
-                                                kestrel_semantic_tree::language::KestrelLanguage,
-                                            >,
-                                        >),
-                                    &[],
-                                    span.clone(),
-                                    ctx,
-                                )
-                            })
-                            .unwrap_or_else(|| Ty::infer(span.clone()));
+
+                        // Try to create parent type - handle both struct and enum
+                        let parent_ty = if let Ok(struct_sym) =
+                            parent.clone().downcast_arc::<StructSymbol>()
+                        {
+                            // Parent is a struct
+                            create_struct_type_with_type_args(
+                                &(struct_sym
+                                    as std::sync::Arc<
+                                        dyn Symbol<
+                                            kestrel_semantic_tree::language::KestrelLanguage,
+                                        >,
+                                    >),
+                                &[],
+                                span.clone(),
+                                ctx,
+                            )
+                        } else if let Ok(enum_sym) = parent.clone().downcast_arc::<EnumSymbol>() {
+                            // Parent is an enum
+                            Ty::r#enum(enum_sym, span.clone())
+                        } else {
+                            // Unknown parent type - fallback to inference
+                            Ty::infer(span.clone())
+                        };
 
                         // Create TypeRef for the parent type
                         let type_ref = Expression::type_ref(parent_id, parent_ty, span.clone());
@@ -469,10 +493,20 @@ pub fn resolve_path_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContex
                             .unwrap_or_else(|| Ty::error(span.clone()));
 
                         let field_name = symbol.metadata().name().value.clone();
+
+                        // Get field mutability from FieldSymbol
+                        let field_mutable = symbol
+                            .as_ref()
+                            .downcast_ref::<FieldSymbol>()
+                            .map(|f| f.is_mutable())
+                            .unwrap_or(false);
+
                         return Expression::field_access(
-                            type_ref, field_name,
-                            false, // static fields are not mutable through this access
-                            field_ty, span,
+                            type_ref,
+                            field_name,
+                            field_mutable, // use actual mutability of the field
+                            field_ty,
+                            span,
                         );
                     }
                 }
@@ -531,6 +565,43 @@ pub fn resolve_path_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContex
                 base
             }
         },
+        ValuePathResolution::AssociatedType {
+            symbol_id,
+            container,
+        } => {
+            // This is an associated type reference (e.g., Item in `Item.zero`)
+            // For multi-segment paths like Item.zero, the db returns AssociatedType
+            // for just the first segment, and we need to handle the rest as member accesses
+            // This enables accessing static members from protocol bounds (e.g., Addable.zero)
+
+            // Look up the associated type symbol to create proper type
+            let assoc_type_ty = if let Some(symbol) = ctx.model.query(SymbolFor { id: symbol_id }) {
+                if let Ok(assoc_type_arc) = symbol.clone().downcast_arc::<AssociatedTypeSymbol>() {
+                    // Create the associated type with its container
+                    match container {
+                        Some(container_ty) => Ty::qualified_associated_type(
+                            assoc_type_arc,
+                            container_ty,
+                            first_span.clone(),
+                        ),
+                        None => Ty::associated_type(assoc_type_arc, first_span.clone()),
+                    }
+                } else {
+                    Ty::infer(first_span.clone())
+                }
+            } else {
+                Ty::infer(first_span.clone())
+            };
+
+            let base = Expression::associated_type_ref(assoc_type_ty, first_span.clone());
+
+            // If there are more segments, resolve them as member accesses
+            if path_with_spans.len() > 1 {
+                resolve_member_chain(base, &path_with_spans[1..], ctx)
+            } else {
+                base
+            }
+        },
         ValuePathResolution::EnumCaseValue {
             symbol_id,
             ty,
@@ -553,6 +624,91 @@ pub fn resolve_path_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContex
                 resolve_member_chain(base, &path_with_spans[resolved_index + 1..], ctx)
             } else {
                 base
+            }
+        },
+        ValuePathResolution::FieldValue {
+            symbol_id,
+            ty,
+            resolved_index,
+        } => {
+            // This is a field/getter value followed by more path segments
+            // e.g., `Float64.e.subtract(1.0)` where `e` is a static field
+            // and `subtract()` is a method call on that value
+            let field_span = if resolved_index < path_with_spans.len() {
+                path_with_spans[resolved_index].1.clone()
+            } else {
+                first_span.clone()
+            };
+
+            // Build the field access expression the same way as static field access
+            // in the NotAValue arm: create a TypeRef for the parent, then field_access
+            if let Some(symbol) = ctx.model.query(SymbolFor { id: symbol_id }) {
+                use kestrel_semantic_tree::symbol::field::FieldSymbol;
+
+                let is_mutable = symbol
+                    .as_ref()
+                    .downcast_ref::<FieldSymbol>()
+                    .map(|f| f.is_mutable())
+                    .unwrap_or(false);
+
+                // Get the parent type to build a TypeRef base
+                if let Some(parent) = symbol.metadata().parent() {
+                    use super::utils::create_struct_type_with_type_args;
+                    use kestrel_semantic_tree::behavior::typed::TypedBehavior;
+                    use kestrel_semantic_tree::symbol::enum_symbol::EnumSymbol;
+
+                    let parent_id = parent.metadata().id();
+
+                    let parent_ty = if let Ok(struct_sym) =
+                        parent.clone().downcast_arc::<StructSymbol>()
+                    {
+                        create_struct_type_with_type_args(
+                            &(struct_sym
+                                as std::sync::Arc<
+                                    dyn Symbol<kestrel_semantic_tree::language::KestrelLanguage>,
+                                >),
+                            &[],
+                            field_span.clone(),
+                            ctx,
+                        )
+                    } else if let Ok(enum_sym) = parent.clone().downcast_arc::<EnumSymbol>() {
+                        Ty::r#enum(enum_sym, field_span.clone())
+                    } else {
+                        Ty::infer(field_span.clone())
+                    };
+
+                    let type_ref = Expression::type_ref(parent_id, parent_ty, field_span.clone());
+
+                    let field_ty = symbol
+                        .metadata()
+                        .get_behavior::<TypedBehavior>()
+                        .map(|tb| tb.ty().clone())
+                        .unwrap_or_else(|| ty.clone());
+
+                    let field_name = symbol.metadata().name().value.clone();
+
+                    let base = Expression::field_access(
+                        type_ref, field_name, is_mutable, field_ty, field_span,
+                    );
+
+                    // Resolve remaining segments as member accesses
+                    if resolved_index + 1 < path_with_spans.len() {
+                        resolve_member_chain(base, &path_with_spans[resolved_index + 1..], ctx)
+                    } else {
+                        base
+                    }
+                } else {
+                    // No parent - fall back to simple symbol ref
+                    let base = Expression::symbol_ref(symbol_id, ty, is_mutable, field_span);
+                    if resolved_index + 1 < path_with_spans.len() {
+                        resolve_member_chain(base, &path_with_spans[resolved_index + 1..], ctx)
+                    } else {
+                        base
+                    }
+                }
+            } else {
+                // Symbol not found - error
+                Expression::error(span)
             }
         },
     }
@@ -620,11 +776,28 @@ fn extract_path_segments_with_spans(
                 if let Some(token) = elem.as_token()
                     && token.kind() == SyntaxKind::Identifier
                 {
-                    let span = token.text_range();
-                    segments.push((
-                        token.text().to_string(),
-                        Span::new(file_id, span.start().into()..span.end().into()),
-                    ));
+                    let range = token.text_range();
+                    let name = token.text().to_string();
+                    let range_start: usize = range.start().into();
+                    let range_end: usize = range.end().into();
+
+                    // Validate span
+                    let span =
+                        if range_end <= source.len() && source[range_start..range_end] == name {
+                            Span::new(file_id, range_start..range_end)
+                        } else {
+                            // Invalid span - use node range as fallback
+                            let node_range = node.text_range();
+                            let node_start: usize = node_range.start().into();
+                            let node_end: usize = node_range.end().into();
+                            if node_end <= source.len() {
+                                Span::new(file_id, node_start..node_end)
+                            } else {
+                                Span::new(file_id, 0..0)
+                            }
+                        };
+
+                    segments.push((name, span));
                 }
             }
         }
@@ -634,11 +807,40 @@ fn extract_path_segments_with_spans(
 }
 
 /// Extract the name and span from a PathElement node
+///
+/// Validates that the extracted span actually points to the token text in the source.
+/// If the span is invalid (out of bounds or mismatched text), uses a zero-length
+/// span at position 0 as a fallback to prevent incorrect error locations.
 fn extract_path_element_name_with_span(
     element: &SyntaxNode,
-    _source: &str,
+    source: &str,
     file_id: usize,
 ) -> Option<(String, Span)> {
+    // Helper to validate and potentially correct a span
+    let validate_span = |name: &str, range_start: usize, range_end: usize| -> Span {
+        // Check if span is within source bounds and matches the token text
+        if range_end <= source.len() {
+            let text_at_span = &source[range_start..range_end];
+            if text_at_span == name {
+                // Span is valid
+                return Span::new(file_id, range_start..range_end);
+            }
+        }
+        // Span is invalid - use a fallback based on the element's range
+        // This at least keeps the span in a reasonable location
+        let elem_range = element.text_range();
+        let elem_start: usize = elem_range.start().into();
+        let elem_end: usize = elem_range.end().into();
+        if elem_end <= source.len() {
+            Span::new(file_id, elem_start..elem_end)
+        } else {
+            // Last resort: use a zero-length span at a reasonable position
+            // Use source length as the position to at least point to end of file
+            let end_pos = source.len().saturating_sub(1);
+            Span::new(file_id, end_pos..end_pos)
+        }
+    };
+
     // PathElement contains Name or Identifier
     if let Some(name_node) = element.children().find(|c| c.kind() == SyntaxKind::Name) {
         return name_node
@@ -647,10 +849,9 @@ fn extract_path_element_name_with_span(
             .find(|t| t.kind() == SyntaxKind::Identifier)
             .map(|t| {
                 let range = t.text_range();
-                (
-                    t.text().to_string(),
-                    Span::new(file_id, range.start().into()..range.end().into()),
-                )
+                let name = t.text().to_string();
+                let span = validate_span(&name, range.start().into(), range.end().into());
+                (name, span)
             });
     }
 
@@ -661,10 +862,9 @@ fn extract_path_element_name_with_span(
         .find(|t| t.kind() == SyntaxKind::Identifier)
         .map(|t| {
             let range = t.text_range();
-            (
-                t.text().to_string(),
-                Span::new(file_id, range.start().into()..range.end().into()),
-            )
+            let name = t.text().to_string();
+            let span = validate_span(&name, range.start().into(), range.end().into());
+            (name, span)
         })
 }
 
@@ -675,22 +875,42 @@ fn extract_path_element_name_with_span(
 /// e.g., `obj.method().field` is parsed as ExprPath containing ExprCall
 fn find_nested_expression(node: &SyntaxNode) -> Option<SyntaxNode> {
     // We're looking inside an ExprPath node. Normally it contains only identifiers and dots.
-    // But when member access is on a call expression, the parser emits the call inside the ExprPath.
-    // We need to find such nested call expressions.
+    // But when member access is on a complex expression, the parser emits it inside the ExprPath.
+    // We need to find such nested expressions (calls, groupings, literals, etc.).
+
+    fn is_complex_expression(kind: SyntaxKind) -> bool {
+        matches!(
+            kind,
+            SyntaxKind::ExprCall
+                | SyntaxKind::ExprGrouping
+                | SyntaxKind::ExprBinary
+                // Include literal expressions to support method calls on literals
+                // like "hello".toCString() or 42.toString()
+                | SyntaxKind::ExprString
+                | SyntaxKind::ExprRawString
+                | SyntaxKind::ExprInteger
+                | SyntaxKind::ExprFloat
+                | SyntaxKind::ExprChar
+                | SyntaxKind::ExprBool
+                | SyntaxKind::ExprArray
+                | SyntaxKind::ExprDictionary
+                | SyntaxKind::ExprTuple
+        )
+    }
 
     for child in node.children() {
         // Look for Expression wrapper containing a non-path expression
         if child.kind() == SyntaxKind::Expression {
-            // Check if this Expression contains an ExprCall or other complex (non-path) expression
+            // Check if this Expression contains a complex (non-path) expression
             for inner in child.children() {
-                // Only return if it's a complex expression type, not just another path
-                if inner.kind() == SyntaxKind::ExprCall {
+                // Return if it's a complex expression type, not just another path
+                if is_complex_expression(inner.kind()) {
                     return Some(child);
                 }
             }
         }
-        // Also check for direct ExprCall nodes
-        if child.kind() == SyntaxKind::ExprCall {
+        // Also check for direct complex expression nodes
+        if is_complex_expression(child.kind()) {
             return Some(child);
         }
     }
@@ -703,7 +923,7 @@ fn find_nested_expression(node: &SyntaxNode) -> Option<SyntaxNode> {
 /// this extracts the identifiers that appear after the expression.
 fn extract_trailing_identifiers(
     node: &SyntaxNode,
-    _source: &str,
+    source: &str,
     file_id: usize,
 ) -> Vec<(String, Span)> {
     let mut identifiers = Vec::new();
@@ -719,10 +939,26 @@ fn extract_trailing_identifiers(
             // Only collect identifiers after the expression
             if found_expression && token.kind() == SyntaxKind::Identifier {
                 let range = token.text_range();
-                identifiers.push((
-                    token.text().to_string(),
-                    Span::new(file_id, range.start().into()..range.end().into()),
-                ));
+                let name = token.text().to_string();
+                let range_start: usize = range.start().into();
+                let range_end: usize = range.end().into();
+
+                // Validate span
+                let span = if range_end <= source.len() && source[range_start..range_end] == name {
+                    Span::new(file_id, range_start..range_end)
+                } else {
+                    // Invalid span - use node range as fallback
+                    let node_range = node.text_range();
+                    let node_start: usize = node_range.start().into();
+                    let node_end: usize = node_range.end().into();
+                    if node_end <= source.len() {
+                        Span::new(file_id, node_start..node_end)
+                    } else {
+                        Span::new(file_id, 0..0)
+                    }
+                };
+
+                identifiers.push((name, span));
             }
         }
     }
@@ -1032,57 +1268,92 @@ fn extract_qualified_type_from_path(
 
     let children: Vec<_> = expr_path.children_with_tokens().collect();
 
-    // Find if there's a dot (multi-segment path)
-    let first_dot_pos = children.iter().position(|c| {
-        c.as_token()
-            .map(|t| t.kind() == SyntaxKind::Dot)
+    // Find TypeArgumentList anywhere in the path.
+    // For paths like `std.memory.Pointer[Int64].nullPointer`, the TypeArgumentList
+    // appears after the type name, potentially deep in a multi-segment path.
+    let type_arg_pos = children.iter().position(|c| {
+        c.as_node()
+            .map(|n| n.kind() == SyntaxKind::TypeArgumentList)
             .unwrap_or(false)
     });
 
-    // If no dot, this is a single-segment path - return None
-    let first_dot_pos = first_dot_pos?;
+    // Verify there's a dot AFTER the TypeArgumentList (meaning there's a member access).
+    // If the TypeArgumentList is at the end, this is just a type reference, not qualified member access.
+    let has_trailing_member = if let Some(pos) = type_arg_pos {
+        children[pos + 1..].iter().any(|c| {
+            c.as_token()
+                .map(|t| t.kind() == SyntaxKind::Dot)
+                .unwrap_or(false)
+        })
+    } else {
+        false
+    };
 
-    // Get the first identifier (type name)
-    let first_ident = children
+    // If no TypeArgumentList with trailing member, check for generic type without explicit args
+    if !has_trailing_member {
+        // Find if there's a dot (multi-segment path)
+        let has_dot = children.iter().any(|c| {
+            c.as_token()
+                .map(|t| t.kind() == SyntaxKind::Dot)
+                .unwrap_or(false)
+        });
+        if !has_dot {
+            return None;
+        }
+
+        // Get the first identifier for single-segment type name fallback
+        let first_ident = children
+            .iter()
+            .filter_map(|c| c.as_token())
+            .find(|t| t.kind() == SyntaxKind::Identifier)?;
+        let type_name = first_ident.text().to_string();
+
+        let _span = get_node_span(node, ctx.file_id);
+        let base_ty = match ctx.model.query(ResolveTypePath {
+            path: vec![type_name],
+            context: ctx.function_id,
+        }) {
+            TypePathResolution::Resolved(ty) => ty,
+            _ => return None,
+        };
+
+        // Only return Some for generic types that need inference
+        return match base_ty.kind() {
+            TyKind::Struct { symbol, .. } if !symbol.type_parameters().is_empty() => Some(base_ty),
+            TyKind::Enum { symbol, .. } if !symbol.type_parameters().is_empty() => Some(base_ty),
+            _ => None,
+        };
+    }
+
+    // We have a TypeArgumentList with trailing member access.
+    // Collect all identifiers BEFORE the TypeArgumentList to form the type path.
+    let type_arg_pos = type_arg_pos.unwrap();
+    let type_path: Vec<String> = children[..type_arg_pos]
         .iter()
         .filter_map(|c| c.as_token())
-        .find(|t| t.kind() == SyntaxKind::Identifier)?;
-    let type_name = first_ident.text().to_string();
+        .filter(|t| t.kind() == SyntaxKind::Identifier)
+        .map(|t| t.text().to_string())
+        .collect();
 
-    // Look for TypeArgumentList before the first dot
-    let type_arg_list = children[..first_dot_pos]
-        .iter()
-        .filter_map(|c| c.as_node())
-        .find(|n| n.kind() == SyntaxKind::TypeArgumentList);
+    if type_path.is_empty() {
+        return None;
+    }
 
-    // Resolve the type name to get the base type
+    // Resolve the type path
     let span = get_node_span(node, ctx.file_id);
     let base_ty = match ctx.model.query(ResolveTypePath {
-        path: vec![type_name.clone()],
+        path: type_path,
         context: ctx.function_id,
     }) {
         TypePathResolution::Resolved(ty) => ty,
-        _ => return None, // Type not found - let normal error handling deal with it
+        _ => return None,
     };
 
-    // Apply type arguments if present
-    if let Some(type_arg_list) = type_arg_list {
-        // Resolve each type in the TypeArgumentList
-        let mut type_args = Vec::new();
-        for child in type_arg_list.children() {
-            if child.kind() == SyntaxKind::Ty {
-                let mut resolver = TypeResolver::new(
-                    ctx.model,
-                    ctx.diagnostics,
-                    ctx.source,
-                    ctx.file_id,
-                    ctx.function_id,
-                );
-                type_args.push(resolver.resolve(&child));
-            }
-        }
-
-        if !type_args.is_empty() {
+    // Extract and apply type arguments from the TypeArgumentList
+    let type_arg_node = children[type_arg_pos].as_node().unwrap();
+    let mut type_args = Vec::new();
+    for child in type_arg_node.children() {
+        if child.kind() == SyntaxKind::Ty {
             let mut resolver = TypeResolver::new(
                 ctx.model,
                 ctx.diagnostics,
@@ -1090,30 +1361,27 @@ fn extract_qualified_type_from_path(
                 ctx.file_id,
                 ctx.function_id,
             );
-            return Some(resolver.apply_type_arguments(&base_ty, type_args, span));
+            type_args.push(resolver.resolve(&child));
         }
     }
 
-    // No explicit type arguments - only return Some for generic types that need inference
-    // For non-generic types like Point, return None to use the original SymbolRef path
-    match base_ty.kind() {
-        TyKind::Struct { symbol, .. } => {
-            if !symbol.type_parameters().is_empty() {
-                // Generic type without explicit args - return base type for inference
-                return Some(base_ty);
-            }
-        },
-        TyKind::Enum { symbol, .. } => {
-            if !symbol.type_parameters().is_empty() {
-                // Generic enum without explicit args - return base type for inference
-                return Some(base_ty);
-            }
-        },
-        _ => {},
+    if !type_args.is_empty() {
+        let mut resolver = TypeResolver::new(
+            ctx.model,
+            ctx.diagnostics,
+            ctx.source,
+            ctx.file_id,
+            ctx.function_id,
+        );
+        Some(resolver.apply_type_arguments(&base_ty, type_args, span))
+    } else {
+        // TypeArgumentList present but empty - return base type for generic inference
+        match base_ty.kind() {
+            TyKind::Struct { symbol, .. } if !symbol.type_parameters().is_empty() => Some(base_ty),
+            TyKind::Enum { symbol, .. } if !symbol.type_parameters().is_empty() => Some(base_ty),
+            _ => None,
+        }
     }
-
-    // Non-generic type without type args - return None to use original path
-    None
 }
 
 /// Parse a lang intrinsic name like "i64_add", "i64_signed_div", "f64_mul", etc.
@@ -1227,6 +1495,23 @@ fn parse_int_op(
             primitive,
             op: IntUnaryOp::Not,
         }),
+        // Bit manipulation ops
+        "popcount" => Some(LangIntrinsic::IntUnary {
+            primitive,
+            op: IntUnaryOp::Popcount,
+        }),
+        "clz" => Some(LangIntrinsic::IntUnary {
+            primitive,
+            op: IntUnaryOp::Clz,
+        }),
+        "ctz" => Some(LangIntrinsic::IntUnary {
+            primitive,
+            op: IntUnaryOp::Ctz,
+        }),
+        "bswap" => Some(LangIntrinsic::IntUnary {
+            primitive,
+            op: IntUnaryOp::Bswap,
+        }),
         _ => None,
     }
 }
@@ -1326,6 +1611,10 @@ fn parse_float_op(
             primitive,
             op: FloatMathOp::Sqrt,
         }),
+        // Fused multiply-add (ternary)
+        "fma" => Some(LangIntrinsic::FloatFma { primitive }),
+        // Copy sign (binary)
+        "copysign" => Some(LangIntrinsic::FloatCopysign { primitive }),
         _ => None,
     }
 }

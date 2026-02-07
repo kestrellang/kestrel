@@ -34,6 +34,211 @@ use std::fmt;
 
 use crate::event::{Event, EventSink, TreeBuilder};
 
+/// Format a token for user-friendly display (not debug format)
+pub fn format_token_for_display(token: &Token) -> String {
+    match token {
+        // Trivia
+        Token::Whitespace => "whitespace".to_string(),
+        Token::Newline => "newline".to_string(),
+        Token::LineComment => "comment".to_string(),
+        Token::BlockComment => "comment".to_string(),
+
+        // Literals
+        Token::Underscore => "'_'".to_string(),
+        Token::Identifier => "identifier".to_string(),
+        Token::String => "string".to_string(),
+        Token::Char => "character".to_string(),
+        Token::RawString => "raw string".to_string(),
+        Token::Integer => "integer".to_string(),
+        Token::Float => "float".to_string(),
+        Token::Boolean => "boolean".to_string(),
+        Token::Null => "'null'".to_string(),
+
+        // Declaration Keywords
+        Token::Extend => "'extend'".to_string(),
+        Token::Fileprivate => "'fileprivate'".to_string(),
+        Token::Func => "'func'".to_string(),
+        Token::Import => "'import'".to_string(),
+        Token::Deinit => "'deinit'".to_string(),
+        Token::Init => "'init'".to_string(),
+        Token::Internal => "'internal'".to_string(),
+        Token::Let => "'let'".to_string(),
+        Token::Module => "'module'".to_string(),
+        Token::Mutating => "'mutating'".to_string(),
+        Token::Private => "'private'".to_string(),
+        Token::Protocol => "'protocol'".to_string(),
+        Token::Public => "'public'".to_string(),
+        Token::Static => "'static'".to_string(),
+        Token::Struct => "'struct'".to_string(),
+        Token::Type => "'type'".to_string(),
+        Token::Var => "'var'".to_string(),
+        Token::Where => "'where'".to_string(),
+
+        // Enum Keywords
+        Token::Enum => "'enum'".to_string(),
+        Token::Case => "'case'".to_string(),
+        Token::Indirect => "'indirect'".to_string(),
+
+        // Logical Keywords
+        Token::And => "'and'".to_string(),
+        Token::Not => "'not'".to_string(),
+        Token::Or => "'or'".to_string(),
+
+        // Statement Keywords
+        Token::As => "'as'".to_string(),
+        Token::Break => "'break'".to_string(),
+        Token::Consuming => "'consuming'".to_string(),
+        Token::Continue => "'continue'".to_string(),
+        Token::Else => "'else'".to_string(),
+        Token::For => "'for'".to_string(),
+        Token::If => "'if'".to_string(),
+        Token::In => "'in'".to_string(),
+        Token::Loop => "'loop'".to_string(),
+        Token::Return => "'return'".to_string(),
+        Token::Throw => "'throw'".to_string(),
+        Token::Try => "'try'".to_string(),
+        Token::Throws => "'throws'".to_string(),
+        Token::While => "'while'".to_string(),
+        Token::Match => "'match'".to_string(),
+        Token::Guard => "'guard'".to_string(),
+
+        // Property Accessor Keywords
+        Token::Get => "'get'".to_string(),
+        Token::Set => "'set'".to_string(),
+        Token::Subscript => "'subscript'".to_string(),
+
+        // Braces
+        Token::LParen => "'('".to_string(),
+        Token::RParen => "')'".to_string(),
+        Token::LBrace => "'{'".to_string(),
+        Token::RBrace => "'}'".to_string(),
+        Token::LBracket => "'['".to_string(),
+        Token::RBracket => "']'".to_string(),
+
+        // Punctuation
+        Token::Semicolon => "';'".to_string(),
+        Token::Comma => "','".to_string(),
+        Token::Dot => "'.'".to_string(),
+        Token::Colon => "':'".to_string(),
+        Token::Question => "'?'".to_string(),
+        Token::Bang => "'!'".to_string(),
+
+        // Operators
+        Token::DotDotEquals => "'..='".to_string(),
+        Token::DotDotLess => "'..<'".to_string(),
+        Token::DotDot => "'..'".to_string(),
+        Token::LessLessEquals => "'<<='".to_string(),
+        Token::GreaterGreaterEquals => "'>>='".to_string(),
+        Token::LessLess => "'<<'".to_string(),
+        Token::GreaterGreater => "'>>'".to_string(),
+        Token::LessEquals => "'<='".to_string(),
+        Token::GreaterEquals => "'>='".to_string(),
+        Token::EqualsEquals => "'=='".to_string(),
+        Token::BangEquals => "'!='".to_string(),
+        Token::QuestionQuestion => "'??'".to_string(),
+        Token::Arrow => "'->'".to_string(),
+        Token::FatArrow => "'=>'".to_string(),
+        Token::PlusEquals => "'+='".to_string(),
+        Token::MinusEquals => "'-='".to_string(),
+        Token::StarEquals => "'*='".to_string(),
+        Token::SlashEquals => "'/='".to_string(),
+        Token::PercentEquals => "'%='".to_string(),
+        Token::AmpersandEquals => "'&='".to_string(),
+        Token::PipeEquals => "'|='".to_string(),
+        Token::CaretEquals => "'^='".to_string(),
+        Token::Equals => "'='".to_string(),
+        Token::Plus => "'+'".to_string(),
+        Token::Minus => "'-'".to_string(),
+        Token::Star => "'*'".to_string(),
+        Token::Slash => "'/'".to_string(),
+        Token::Percent => "'%'".to_string(),
+        Token::Ampersand => "'&'".to_string(),
+        Token::Pipe => "'|'".to_string(),
+        Token::Caret => "'^'".to_string(),
+        Token::Less => "'<'".to_string(),
+        Token::Greater => "'>'".to_string(),
+        Token::At => "'@'".to_string(),
+    }
+}
+
+/// Generate a suggestion for common mistakes
+pub fn suggest_fix(found: Option<&str>, expected: &[String]) -> Option<String> {
+    let found = found?;
+
+    // Wrong function keyword
+    if found == "function" && expected.iter().any(|e| e.contains("func")) {
+        return Some("use 'func' instead of 'function' to declare functions".to_string());
+    }
+    if found == "fn" && expected.iter().any(|e| e.contains("func")) {
+        return Some("use 'func' instead of 'fn' to declare functions".to_string());
+    }
+
+    // Wrong variable keyword
+    if found == "const"
+        && expected
+            .iter()
+            .any(|e| e.contains("let") || e.contains("var"))
+    {
+        return Some("use 'let' for immutable bindings or 'var' for mutable bindings".to_string());
+    }
+
+    // Wrong arrow
+    if found == "=>" && expected.iter().any(|e| e.contains("->")) {
+        return Some("use '->' for return type annotations; '=>' is for match arms".to_string());
+    }
+    if found == "->" && expected.iter().any(|e| e.contains("=>")) {
+        return Some("use '=>' for match arms; '->' is for return type annotations".to_string());
+    }
+
+    // Missing semicolon hint
+    if expected.iter().any(|e| e.contains(";")) {
+        return Some("you may be missing a semicolon".to_string());
+    }
+
+    // Missing closing brace
+    if expected.iter().any(|e| e.contains("}")) {
+        return Some("you may have forgotten to close a block with '}'".to_string());
+    }
+
+    // Missing closing paren
+    if expected.iter().any(|e| e.contains(")")) {
+        return Some("you may have forgotten to close with ')'".to_string());
+    }
+
+    None
+}
+
+/// Build a human-readable error message from expected and found tokens
+fn build_error_message(expected: &[String], found: Option<&str>) -> String {
+    match (expected.len(), found) {
+        (0, Some(found)) => format!("unexpected {}", found),
+        (0, None) => "unexpected end of file".to_string(),
+        (1, Some(found)) => format!("expected {}, found {}", expected[0], found),
+        (1, None) => format!("expected {} before end of file", expected[0]),
+        (n, Some(found)) if n <= 3 => {
+            format!("expected one of {}, found {}", expected.join(", "), found)
+        },
+        (n, Some(found)) => {
+            format!(
+                "expected {}, or {} others, found {}",
+                expected[..2].join(", "),
+                n - 2,
+                found
+            )
+        },
+        (n, None) if n <= 3 => {
+            format!("expected one of {} before end of file", expected.join(", "))
+        },
+        (n, None) => {
+            format!(
+                "expected {}, or {} others before end of file",
+                expected[..2].join(", "),
+                n - 2
+            )
+        },
+    }
+}
+
 /// The kind of parse error
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ParseErrorKind {
@@ -85,7 +290,7 @@ impl ParseError {
         }
     }
 
-    /// Create a parse error from a chumsky 0.12 Rich error
+    /// Create a parse error from a chumsky 0.12 Rich error (generic version)
     pub fn from_rich_error<'a, T: fmt::Debug + fmt::Display>(
         error: &chumsky::error::Rich<'a, T>,
     ) -> Self {
@@ -100,8 +305,8 @@ impl ParseError {
             ParseErrorKind::UnexpectedToken
         };
 
-        // Format found token
-        let found = error.found().map(|t| format!("{:?}", t));
+        // Format found token using Display
+        let found = error.found().map(|t| format!("{}", t));
 
         // Build user-friendly message from the Rich error
         let message = format!("{}", error.reason());
@@ -110,7 +315,48 @@ impl ParseError {
             kind,
             message,
             span,
-            expected: Vec::new(), // Rich errors don't expose expected tokens the same way
+            expected: Vec::new(),
+            found,
+        }
+    }
+
+    /// Create a parse error from a chumsky 0.12 Rich error with Token type
+    /// This version provides better formatting for Kestrel tokens
+    pub fn from_token_error<'a>(error: &chumsky::error::Rich<'a, Token>) -> Self {
+        use crate::input::to_kestrel_span;
+        use chumsky::error::RichPattern;
+
+        let span = Some(to_kestrel_span(*error.span()));
+
+        // Determine error kind based on what was found
+        let kind = if error.found().is_none() {
+            ParseErrorKind::UnexpectedEof
+        } else {
+            ParseErrorKind::UnexpectedToken
+        };
+
+        // Format found token using our display helper
+        let found = error.found().map(format_token_for_display);
+
+        // Extract expected tokens from the error
+        let expected: Vec<String> = error
+            .expected()
+            .filter_map(|pattern| match pattern {
+                RichPattern::Token(token) => Some(format_token_for_display(token)),
+                RichPattern::Label(label) => Some(label.to_string()),
+                RichPattern::EndOfInput => Some("end of input".to_string()),
+                _ => None, // Handle future RichPattern variants
+            })
+            .collect();
+
+        // Build human-readable message
+        let message = build_error_message(&expected, found.as_deref());
+
+        Self {
+            kind,
+            message,
+            span,
+            expected,
             found,
         }
     }

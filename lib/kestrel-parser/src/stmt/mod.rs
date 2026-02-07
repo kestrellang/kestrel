@@ -97,7 +97,7 @@ fn skip_trivia<'tokens>()
         .filter(|token: &Token| {
             matches!(
                 token,
-                Token::Whitespace | Token::LineComment | Token::BlockComment
+                Token::Whitespace | Token::Newline | Token::LineComment | Token::BlockComment
             )
         })
         .repeated()
@@ -303,8 +303,7 @@ where
         },
         Err(errors) => {
             for error in errors {
-                let span = error.span();
-                sink.error_at(format!("Parse error: {:?}", error), *span);
+                sink.error_from_rich(&error);
             }
         },
     }

@@ -405,7 +405,7 @@ The loop exits when the pattern fails to match.
 Use `guard let` for early exit when a pattern doesn't match:
 
 ```kestrel
-fn process(opt: Option[Int]) -> Int {
+func process(opt: Option[Int]) -> Int {
     guard let .Some(value) = opt else {
         return 0
     }

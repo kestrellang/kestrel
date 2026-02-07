@@ -81,8 +81,8 @@ Source:   lib/kestrel-semantic-tree/src/error.rs
 
 **Example:**
 ```kestrel
-// Other.MyClass is a struct, not a module
-import Other.MyClass    // ERROR: cannot import from struct
+// Other.MyStruct is a struct, not a module
+import Other.MyStruct    // ERROR: cannot import from struct
 ```
 
 ---

@@ -22,17 +22,28 @@ pub enum LanguageFeature {
 
     // Protocol builtins - pattern matching
     Matchable,
+    RangeMatchable,
+    RangeMatchableIsAtLeast,
+    RangeMatchableIsAtMost,
+    RangeMatchableIsBelow,
+    ArrayMatchable,
+    ArrayMatchableMatchLength,
+    ArrayMatchableMatchGet,
+    ArrayMatchableMatchSlice,
 
     // Protocol builtins - literal expressibility
     ExpressibleByIntLiteral,
     ExpressibleByFloatLiteral,
     ExpressibleByStringLiteral,
+    ExpressibleByCharLiteral,
     ExpressibleByBoolLiteral,
-    ExpressibleByNilLiteral,
+    ExpressibleByNullLiteral,
     ExpressibleByArrayLiteral,
     #[allow(non_camel_case_types)]
     _ExpressibleByArrayLiteral,
     ExpressibleByDictionaryLiteral,
+    #[allow(non_camel_case_types)]
+    _ExpressibleByDictionaryLiteral,
 
     // Protocol builtins - FFI
     FFISafe,
@@ -42,6 +53,9 @@ pub enum LanguageFeature {
     DefaultFloatLiteralType,
     DefaultStringLiteralType,
     DefaultBooleanLiteralType,
+    DefaultCharLiteralType,
+    DefaultNullLiteralType,
+    DefaultDictionaryLiteralType,
 
     // Operator protocols - arithmetic
     AddOperatorProtocol,
@@ -93,6 +107,10 @@ pub enum LanguageFeature {
     LogicalNotOperatorProtocol,
     LogicalNotOperatorMethod,
 
+    // Operator protocols - null coalescing
+    CoalesceOperatorProtocol,
+    CoalesceOperatorMethod,
+
     // Boolean conditional protocol (for if/while conditions)
     BooleanConditional,
 
@@ -108,6 +126,66 @@ pub enum LanguageFeature {
     TryExtractMethod,
     FromResidualProtocol,
     FromResidualMethod,
+
+    // Value promotion
+    FromValueProtocol,
+    FromValueMethod,
+
+    // Iterator protocol
+    IteratorProtocol,
+    IteratorNextMethod,
+
+    // Iterable protocol
+    IterableProtocol,
+    IterableIterMethod,
+
+    // Optional enum
+    OptionalEnum,
+    OptionalSomeCase,
+    OptionalNoneCase,
+
+    // Type operator type aliases
+    OptionalTypeOperator,
+    ArrayTypeOperator,
+    DictionaryTypeOperator,
+    ResultTypeOperator,
+
+    // Array struct builtin (for detecting Array[T] types)
+    ArrayStruct,
+
+    // Slice struct builtin (for array pattern rest bindings)
+    SliceStruct,
+
+    // String interpolation
+    DefaultStringInterpolation,
+    DefaultStringInterpolationInit,
+    DefaultStringInterpolationAppendLiteral,
+    DefaultStringInterpolationAppendInterpolation,
+    DefaultStringInterpolationBuild,
+    FormattableProtocol,
+    FormattableFormat,
+
+    // Compound assignment protocols
+    AddAssignProtocol,
+    AddAssignMethod,
+    SubtractAssignProtocol,
+    SubtractAssignMethod,
+    MultiplyAssignProtocol,
+    MultiplyAssignMethod,
+    DivideAssignProtocol,
+    DivideAssignMethod,
+    ModuloAssignProtocol,
+    ModuloAssignMethod,
+    BitwiseAndAssignProtocol,
+    BitwiseAndAssignMethod,
+    BitwiseOrAssignProtocol,
+    BitwiseOrAssignMethod,
+    BitwiseXorAssignProtocol,
+    BitwiseXorAssignMethod,
+    ShiftLeftAssignProtocol,
+    ShiftLeftAssignMethod,
+    ShiftRightAssignProtocol,
+    ShiftRightAssignMethod,
 }
 
 impl LanguageFeature {
@@ -118,19 +196,32 @@ impl LanguageFeature {
             "Cloneable" => Some(Self::Cloneable),
             "Clone" => Some(Self::Clone),
             "Matchable" => Some(Self::Matchable),
+            "RangeMatchable" => Some(Self::RangeMatchable),
+            "RangeMatchableIsAtLeast" => Some(Self::RangeMatchableIsAtLeast),
+            "RangeMatchableIsAtMost" => Some(Self::RangeMatchableIsAtMost),
+            "RangeMatchableIsBelow" => Some(Self::RangeMatchableIsBelow),
+            "ArrayMatchable" => Some(Self::ArrayMatchable),
+            "ArrayMatchableMatchLength" => Some(Self::ArrayMatchableMatchLength),
+            "ArrayMatchableMatchGet" => Some(Self::ArrayMatchableMatchGet),
+            "ArrayMatchableMatchSlice" => Some(Self::ArrayMatchableMatchSlice),
             "ExpressibleByIntLiteral" => Some(Self::ExpressibleByIntLiteral),
             "ExpressibleByFloatLiteral" => Some(Self::ExpressibleByFloatLiteral),
             "ExpressibleByStringLiteral" => Some(Self::ExpressibleByStringLiteral),
+            "ExpressibleByCharLiteral" => Some(Self::ExpressibleByCharLiteral),
             "ExpressibleByBoolLiteral" => Some(Self::ExpressibleByBoolLiteral),
-            "ExpressibleByNilLiteral" => Some(Self::ExpressibleByNilLiteral),
+            "ExpressibleByNullLiteral" => Some(Self::ExpressibleByNullLiteral),
             "ExpressibleByArrayLiteral" => Some(Self::ExpressibleByArrayLiteral),
             "_ExpressibleByArrayLiteral" => Some(Self::_ExpressibleByArrayLiteral),
             "ExpressibleByDictionaryLiteral" => Some(Self::ExpressibleByDictionaryLiteral),
+            "_ExpressibleByDictionaryLiteral" => Some(Self::_ExpressibleByDictionaryLiteral),
             "FFISafe" => Some(Self::FFISafe),
             "DefaultIntegerLiteralType" => Some(Self::DefaultIntegerLiteralType),
             "DefaultFloatLiteralType" => Some(Self::DefaultFloatLiteralType),
             "DefaultStringLiteralType" => Some(Self::DefaultStringLiteralType),
             "DefaultBooleanLiteralType" => Some(Self::DefaultBooleanLiteralType),
+            "DefaultCharLiteralType" => Some(Self::DefaultCharLiteralType),
+            "DefaultNullLiteralType" => Some(Self::DefaultNullLiteralType),
+            "DefaultDictionaryLiteralType" => Some(Self::DefaultDictionaryLiteralType),
             // Operator protocols - arithmetic
             "AddOperatorProtocol" => Some(Self::AddOperatorProtocol),
             "AddOperatorMethod" => Some(Self::AddOperatorMethod),
@@ -177,6 +268,9 @@ impl LanguageFeature {
             "LogicalOrOperatorMethod" => Some(Self::LogicalOrOperatorMethod),
             "LogicalNotOperatorProtocol" => Some(Self::LogicalNotOperatorProtocol),
             "LogicalNotOperatorMethod" => Some(Self::LogicalNotOperatorMethod),
+            // Operator protocols - null coalescing
+            "CoalesceOperatorProtocol" => Some(Self::CoalesceOperatorProtocol),
+            "CoalesceOperatorMethod" => Some(Self::CoalesceOperatorMethod),
             // Boolean conditional protocol
             "BooleanConditional" => Some(Self::BooleanConditional),
             // Operator protocols - range
@@ -190,6 +284,61 @@ impl LanguageFeature {
             "TryExtractMethod" => Some(Self::TryExtractMethod),
             "FromResidualProtocol" => Some(Self::FromResidualProtocol),
             "FromResidualMethod" => Some(Self::FromResidualMethod),
+            // Value promotion
+            "FromValueProtocol" => Some(Self::FromValueProtocol),
+            "FromValueMethod" => Some(Self::FromValueMethod),
+            // Iterator protocol
+            "IteratorProtocol" => Some(Self::IteratorProtocol),
+            "IteratorNextMethod" => Some(Self::IteratorNextMethod),
+            // Iterable protocol
+            "IterableProtocol" => Some(Self::IterableProtocol),
+            "IterableIterMethod" => Some(Self::IterableIterMethod),
+            // Optional enum
+            "OptionalEnum" => Some(Self::OptionalEnum),
+            "OptionalSomeCase" => Some(Self::OptionalSomeCase),
+            "OptionalNoneCase" => Some(Self::OptionalNoneCase),
+            // Type operator type aliases
+            "OptionalTypeOperator" => Some(Self::OptionalTypeOperator),
+            "ArrayTypeOperator" => Some(Self::ArrayTypeOperator),
+            "DictionaryTypeOperator" => Some(Self::DictionaryTypeOperator),
+            "ResultTypeOperator" => Some(Self::ResultTypeOperator),
+            // Array struct builtin
+            "ArrayStruct" => Some(Self::ArrayStruct),
+            // Slice struct builtin
+            "SliceStruct" => Some(Self::SliceStruct),
+            // String interpolation
+            "DefaultStringInterpolation" => Some(Self::DefaultStringInterpolation),
+            "DefaultStringInterpolationInit" => Some(Self::DefaultStringInterpolationInit),
+            "DefaultStringInterpolationAppendLiteral" => {
+                Some(Self::DefaultStringInterpolationAppendLiteral)
+            },
+            "DefaultStringInterpolationAppendInterpolation" => {
+                Some(Self::DefaultStringInterpolationAppendInterpolation)
+            },
+            "DefaultStringInterpolationBuild" => Some(Self::DefaultStringInterpolationBuild),
+            "FormattableProtocol" => Some(Self::FormattableProtocol),
+            "FormattableFormat" => Some(Self::FormattableFormat),
+            // Compound assignment protocols
+            "AddAssignProtocol" => Some(Self::AddAssignProtocol),
+            "AddAssignMethod" => Some(Self::AddAssignMethod),
+            "SubtractAssignProtocol" => Some(Self::SubtractAssignProtocol),
+            "SubtractAssignMethod" => Some(Self::SubtractAssignMethod),
+            "MultiplyAssignProtocol" => Some(Self::MultiplyAssignProtocol),
+            "MultiplyAssignMethod" => Some(Self::MultiplyAssignMethod),
+            "DivideAssignProtocol" => Some(Self::DivideAssignProtocol),
+            "DivideAssignMethod" => Some(Self::DivideAssignMethod),
+            "ModuloAssignProtocol" => Some(Self::ModuloAssignProtocol),
+            "ModuloAssignMethod" => Some(Self::ModuloAssignMethod),
+            "BitwiseAndAssignProtocol" => Some(Self::BitwiseAndAssignProtocol),
+            "BitwiseAndAssignMethod" => Some(Self::BitwiseAndAssignMethod),
+            "BitwiseOrAssignProtocol" => Some(Self::BitwiseOrAssignProtocol),
+            "BitwiseOrAssignMethod" => Some(Self::BitwiseOrAssignMethod),
+            "BitwiseXorAssignProtocol" => Some(Self::BitwiseXorAssignProtocol),
+            "BitwiseXorAssignMethod" => Some(Self::BitwiseXorAssignMethod),
+            "ShiftLeftAssignProtocol" => Some(Self::ShiftLeftAssignProtocol),
+            "ShiftLeftAssignMethod" => Some(Self::ShiftLeftAssignMethod),
+            "ShiftRightAssignProtocol" => Some(Self::ShiftRightAssignProtocol),
+            "ShiftRightAssignMethod" => Some(Self::ShiftRightAssignMethod),
             _ => None,
         }
     }
@@ -201,19 +350,32 @@ impl LanguageFeature {
             Self::Cloneable => "Cloneable",
             Self::Clone => "Clone",
             Self::Matchable => "Matchable",
+            Self::RangeMatchable => "RangeMatchable",
+            Self::RangeMatchableIsAtLeast => "RangeMatchableIsAtLeast",
+            Self::RangeMatchableIsAtMost => "RangeMatchableIsAtMost",
+            Self::RangeMatchableIsBelow => "RangeMatchableIsBelow",
+            Self::ArrayMatchable => "ArrayMatchable",
+            Self::ArrayMatchableMatchLength => "ArrayMatchableMatchLength",
+            Self::ArrayMatchableMatchGet => "ArrayMatchableMatchGet",
+            Self::ArrayMatchableMatchSlice => "ArrayMatchableMatchSlice",
             Self::ExpressibleByIntLiteral => "ExpressibleByIntLiteral",
             Self::ExpressibleByFloatLiteral => "ExpressibleByFloatLiteral",
             Self::ExpressibleByStringLiteral => "ExpressibleByStringLiteral",
+            Self::ExpressibleByCharLiteral => "ExpressibleByCharLiteral",
             Self::ExpressibleByBoolLiteral => "ExpressibleByBoolLiteral",
-            Self::ExpressibleByNilLiteral => "ExpressibleByNilLiteral",
+            Self::ExpressibleByNullLiteral => "ExpressibleByNullLiteral",
             Self::ExpressibleByArrayLiteral => "ExpressibleByArrayLiteral",
             Self::_ExpressibleByArrayLiteral => "_ExpressibleByArrayLiteral",
             Self::ExpressibleByDictionaryLiteral => "ExpressibleByDictionaryLiteral",
+            Self::_ExpressibleByDictionaryLiteral => "_ExpressibleByDictionaryLiteral",
             Self::FFISafe => "FFISafe",
             Self::DefaultIntegerLiteralType => "DefaultIntegerLiteralType",
             Self::DefaultFloatLiteralType => "DefaultFloatLiteralType",
             Self::DefaultStringLiteralType => "DefaultStringLiteralType",
             Self::DefaultBooleanLiteralType => "DefaultBooleanLiteralType",
+            Self::DefaultCharLiteralType => "DefaultCharLiteralType",
+            Self::DefaultNullLiteralType => "DefaultNullLiteralType",
+            Self::DefaultDictionaryLiteralType => "DefaultDictionaryLiteralType",
             // Operator protocols - arithmetic
             Self::AddOperatorProtocol => "AddOperatorProtocol",
             Self::AddOperatorMethod => "AddOperatorMethod",
@@ -260,6 +422,9 @@ impl LanguageFeature {
             Self::LogicalOrOperatorMethod => "LogicalOrOperatorMethod",
             Self::LogicalNotOperatorProtocol => "LogicalNotOperatorProtocol",
             Self::LogicalNotOperatorMethod => "LogicalNotOperatorMethod",
+            // Operator protocols - null coalescing
+            Self::CoalesceOperatorProtocol => "CoalesceOperatorProtocol",
+            Self::CoalesceOperatorMethod => "CoalesceOperatorMethod",
             // Boolean conditional protocol
             Self::BooleanConditional => "BooleanConditional",
             // Operator protocols - range
@@ -273,6 +438,61 @@ impl LanguageFeature {
             Self::TryExtractMethod => "TryExtractMethod",
             Self::FromResidualProtocol => "FromResidualProtocol",
             Self::FromResidualMethod => "FromResidualMethod",
+            // Value promotion
+            Self::FromValueProtocol => "FromValueProtocol",
+            Self::FromValueMethod => "FromValueMethod",
+            // Iterator protocol
+            Self::IteratorProtocol => "IteratorProtocol",
+            Self::IteratorNextMethod => "IteratorNextMethod",
+            // Iterable protocol
+            Self::IterableProtocol => "IterableProtocol",
+            Self::IterableIterMethod => "IterableIterMethod",
+            // Optional enum
+            Self::OptionalEnum => "OptionalEnum",
+            Self::OptionalSomeCase => "OptionalSomeCase",
+            Self::OptionalNoneCase => "OptionalNoneCase",
+            // Type operator type aliases
+            Self::OptionalTypeOperator => "OptionalTypeOperator",
+            Self::ArrayTypeOperator => "ArrayTypeOperator",
+            Self::DictionaryTypeOperator => "DictionaryTypeOperator",
+            Self::ResultTypeOperator => "ResultTypeOperator",
+            // Array struct builtin
+            Self::ArrayStruct => "ArrayStruct",
+            // Slice struct builtin
+            Self::SliceStruct => "SliceStruct",
+            // String interpolation
+            Self::DefaultStringInterpolation => "DefaultStringInterpolation",
+            Self::DefaultStringInterpolationInit => "DefaultStringInterpolationInit",
+            Self::DefaultStringInterpolationAppendLiteral => {
+                "DefaultStringInterpolationAppendLiteral"
+            },
+            Self::DefaultStringInterpolationAppendInterpolation => {
+                "DefaultStringInterpolationAppendInterpolation"
+            },
+            Self::DefaultStringInterpolationBuild => "DefaultStringInterpolationBuild",
+            Self::FormattableProtocol => "FormattableProtocol",
+            Self::FormattableFormat => "FormattableFormat",
+            // Compound assignment protocols
+            Self::AddAssignProtocol => "AddAssignProtocol",
+            Self::AddAssignMethod => "AddAssignMethod",
+            Self::SubtractAssignProtocol => "SubtractAssignProtocol",
+            Self::SubtractAssignMethod => "SubtractAssignMethod",
+            Self::MultiplyAssignProtocol => "MultiplyAssignProtocol",
+            Self::MultiplyAssignMethod => "MultiplyAssignMethod",
+            Self::DivideAssignProtocol => "DivideAssignProtocol",
+            Self::DivideAssignMethod => "DivideAssignMethod",
+            Self::ModuloAssignProtocol => "ModuloAssignProtocol",
+            Self::ModuloAssignMethod => "ModuloAssignMethod",
+            Self::BitwiseAndAssignProtocol => "BitwiseAndAssignProtocol",
+            Self::BitwiseAndAssignMethod => "BitwiseAndAssignMethod",
+            Self::BitwiseOrAssignProtocol => "BitwiseOrAssignProtocol",
+            Self::BitwiseOrAssignMethod => "BitwiseOrAssignMethod",
+            Self::BitwiseXorAssignProtocol => "BitwiseXorAssignProtocol",
+            Self::BitwiseXorAssignMethod => "BitwiseXorAssignMethod",
+            Self::ShiftLeftAssignProtocol => "ShiftLeftAssignProtocol",
+            Self::ShiftLeftAssignMethod => "ShiftLeftAssignMethod",
+            Self::ShiftRightAssignProtocol => "ShiftRightAssignProtocol",
+            Self::ShiftRightAssignMethod => "ShiftRightAssignMethod",
         }
     }
 
@@ -315,6 +535,62 @@ impl LanguageFeature {
                     disallow_enum_conformance: false,
                 },
             },
+            Self::RangeMatchable => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::Protocol {
+                    implicit_conformance: false,
+                    must_be_marker: false,
+                    tuple_conformance_propagation: false,
+                    requires_fields_conform: false,
+                    disallow_enum_conformance: false,
+                },
+            },
+            Self::RangeMatchableIsAtLeast => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::ProtocolMethod {
+                    protocol_feature: LanguageFeature::RangeMatchable,
+                },
+            },
+            Self::RangeMatchableIsAtMost => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::ProtocolMethod {
+                    protocol_feature: LanguageFeature::RangeMatchable,
+                },
+            },
+            Self::RangeMatchableIsBelow => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::ProtocolMethod {
+                    protocol_feature: LanguageFeature::RangeMatchable,
+                },
+            },
+            Self::ArrayMatchable => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::Protocol {
+                    implicit_conformance: false,
+                    must_be_marker: false,
+                    tuple_conformance_propagation: false,
+                    requires_fields_conform: false,
+                    disallow_enum_conformance: false,
+                },
+            },
+            Self::ArrayMatchableMatchLength => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::ProtocolMethod {
+                    protocol_feature: LanguageFeature::ArrayMatchable,
+                },
+            },
+            Self::ArrayMatchableMatchGet => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::ProtocolMethod {
+                    protocol_feature: LanguageFeature::ArrayMatchable,
+                },
+            },
+            Self::ArrayMatchableMatchSlice => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::ProtocolMethod {
+                    protocol_feature: LanguageFeature::ArrayMatchable,
+                },
+            },
             Self::ExpressibleByIntLiteral => BuiltinDefinition {
                 feature: *self,
                 kind: BuiltinKind::Protocol {
@@ -345,6 +621,16 @@ impl LanguageFeature {
                     disallow_enum_conformance: false,
                 },
             },
+            Self::ExpressibleByCharLiteral => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::Protocol {
+                    implicit_conformance: false,
+                    must_be_marker: false,
+                    tuple_conformance_propagation: false,
+                    requires_fields_conform: false,
+                    disallow_enum_conformance: false,
+                },
+            },
             Self::ExpressibleByBoolLiteral => BuiltinDefinition {
                 feature: *self,
                 kind: BuiltinKind::Protocol {
@@ -355,7 +641,7 @@ impl LanguageFeature {
                     disallow_enum_conformance: false,
                 },
             },
-            Self::ExpressibleByNilLiteral => BuiltinDefinition {
+            Self::ExpressibleByNullLiteral => BuiltinDefinition {
                 feature: *self,
                 kind: BuiltinKind::Protocol {
                     implicit_conformance: false,
@@ -395,6 +681,16 @@ impl LanguageFeature {
                     disallow_enum_conformance: false,
                 },
             },
+            Self::_ExpressibleByDictionaryLiteral => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::Protocol {
+                    implicit_conformance: false,
+                    must_be_marker: false,
+                    tuple_conformance_propagation: false,
+                    requires_fields_conform: false,
+                    disallow_enum_conformance: false,
+                },
+            },
             Self::FFISafe => BuiltinDefinition {
                 feature: *self,
                 kind: BuiltinKind::Protocol {
@@ -418,6 +714,18 @@ impl LanguageFeature {
                 kind: BuiltinKind::TypeAlias,
             },
             Self::DefaultBooleanLiteralType => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::TypeAlias,
+            },
+            Self::DefaultCharLiteralType => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::TypeAlias,
+            },
+            Self::DefaultNullLiteralType => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::TypeAlias,
+            },
+            Self::DefaultDictionaryLiteralType => BuiltinDefinition {
                 feature: *self,
                 kind: BuiltinKind::TypeAlias,
             },
@@ -446,6 +754,8 @@ impl LanguageFeature {
             | Self::LogicalAndOperatorProtocol
             | Self::LogicalOrOperatorProtocol
             | Self::LogicalNotOperatorProtocol
+            // Operator protocols - null coalescing
+            | Self::CoalesceOperatorProtocol
             // Boolean conditional protocol
             | Self::BooleanConditional
             // Operator protocols - range
@@ -590,6 +900,13 @@ impl LanguageFeature {
                     protocol_feature: LanguageFeature::LogicalNotOperatorProtocol,
                 },
             },
+            // Operator methods - null coalescing
+            Self::CoalesceOperatorMethod => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::ProtocolMethod {
+                    protocol_feature: LanguageFeature::CoalesceOperatorProtocol,
+                },
+            },
             // Operator methods - range
             Self::ExclusiveRangeOperatorMethod => BuiltinDefinition {
                 feature: *self,
@@ -608,15 +925,17 @@ impl LanguageFeature {
                 feature: *self,
                 kind: BuiltinKind::Enum,
             },
-            Self::TryableProtocol | Self::FromResidualProtocol => BuiltinDefinition {
-                feature: *self,
-                kind: BuiltinKind::Protocol {
-                    implicit_conformance: false,
-                    must_be_marker: false,
-                    tuple_conformance_propagation: false,
-                    requires_fields_conform: false,
-                    disallow_enum_conformance: false,
-                },
+            Self::TryableProtocol | Self::FromResidualProtocol | Self::FromValueProtocol => {
+                BuiltinDefinition {
+                    feature: *self,
+                    kind: BuiltinKind::Protocol {
+                        implicit_conformance: false,
+                        must_be_marker: false,
+                        tuple_conformance_propagation: false,
+                        requires_fields_conform: false,
+                        disallow_enum_conformance: false,
+                    },
+                }
             },
             Self::TryExtractMethod => BuiltinDefinition {
                 feature: *self,
@@ -628,6 +947,199 @@ impl LanguageFeature {
                 feature: *self,
                 kind: BuiltinKind::ProtocolMethod {
                     protocol_feature: LanguageFeature::FromResidualProtocol,
+                },
+            },
+            Self::FromValueMethod => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::ProtocolMethod {
+                    protocol_feature: LanguageFeature::FromValueProtocol,
+                },
+            },
+            // Iterator protocol
+            Self::IteratorProtocol => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::Protocol {
+                    implicit_conformance: false,
+                    must_be_marker: false,
+                    tuple_conformance_propagation: false,
+                    requires_fields_conform: false,
+                    disallow_enum_conformance: false,
+                },
+            },
+            Self::IteratorNextMethod => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::ProtocolMethod {
+                    protocol_feature: LanguageFeature::IteratorProtocol,
+                },
+            },
+            // Iterable protocol
+            Self::IterableProtocol => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::Protocol {
+                    implicit_conformance: false,
+                    must_be_marker: false,
+                    tuple_conformance_propagation: false,
+                    requires_fields_conform: false,
+                    disallow_enum_conformance: false,
+                },
+            },
+            Self::IterableIterMethod => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::ProtocolMethod {
+                    protocol_feature: LanguageFeature::IterableProtocol,
+                },
+            },
+            // Optional enum
+            Self::OptionalEnum => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::Enum,
+            },
+            Self::OptionalSomeCase => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::EnumCase {
+                    enum_feature: LanguageFeature::OptionalEnum,
+                },
+            },
+            Self::OptionalNoneCase => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::EnumCase {
+                    enum_feature: LanguageFeature::OptionalEnum,
+                },
+            },
+            // Type operator type aliases
+            Self::OptionalTypeOperator
+            | Self::ArrayTypeOperator
+            | Self::DictionaryTypeOperator
+            | Self::ResultTypeOperator => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::TypeAlias,
+            },
+            // Array struct builtin
+            Self::ArrayStruct => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::Struct,
+            },
+            // Slice struct builtin
+            Self::SliceStruct => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::Struct,
+            },
+            // String interpolation
+            Self::DefaultStringInterpolation => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::Struct,
+            },
+            Self::DefaultStringInterpolationInit => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::Function,
+            },
+            Self::DefaultStringInterpolationAppendLiteral => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::Function,
+            },
+            Self::DefaultStringInterpolationAppendInterpolation => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::Function,
+            },
+            Self::DefaultStringInterpolationBuild => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::Function,
+            },
+            Self::FormattableProtocol => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::Protocol {
+                    implicit_conformance: false,
+                    must_be_marker: false,
+                    tuple_conformance_propagation: false,
+                    requires_fields_conform: false,
+                    disallow_enum_conformance: false,
+                },
+            },
+            Self::FormattableFormat => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::ProtocolMethod {
+                    protocol_feature: LanguageFeature::FormattableProtocol,
+                },
+            },
+            // Compound assignment protocols
+            Self::AddAssignProtocol
+            | Self::SubtractAssignProtocol
+            | Self::MultiplyAssignProtocol
+            | Self::DivideAssignProtocol
+            | Self::ModuloAssignProtocol
+            | Self::BitwiseAndAssignProtocol
+            | Self::BitwiseOrAssignProtocol
+            | Self::BitwiseXorAssignProtocol
+            | Self::ShiftLeftAssignProtocol
+            | Self::ShiftRightAssignProtocol => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::Protocol {
+                    implicit_conformance: false,
+                    must_be_marker: false,
+                    tuple_conformance_propagation: false,
+                    requires_fields_conform: false,
+                    disallow_enum_conformance: false,
+                },
+            },
+            // Compound assignment methods
+            Self::AddAssignMethod => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::ProtocolMethod {
+                    protocol_feature: LanguageFeature::AddAssignProtocol,
+                },
+            },
+            Self::SubtractAssignMethod => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::ProtocolMethod {
+                    protocol_feature: LanguageFeature::SubtractAssignProtocol,
+                },
+            },
+            Self::MultiplyAssignMethod => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::ProtocolMethod {
+                    protocol_feature: LanguageFeature::MultiplyAssignProtocol,
+                },
+            },
+            Self::DivideAssignMethod => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::ProtocolMethod {
+                    protocol_feature: LanguageFeature::DivideAssignProtocol,
+                },
+            },
+            Self::ModuloAssignMethod => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::ProtocolMethod {
+                    protocol_feature: LanguageFeature::ModuloAssignProtocol,
+                },
+            },
+            Self::BitwiseAndAssignMethod => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::ProtocolMethod {
+                    protocol_feature: LanguageFeature::BitwiseAndAssignProtocol,
+                },
+            },
+            Self::BitwiseOrAssignMethod => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::ProtocolMethod {
+                    protocol_feature: LanguageFeature::BitwiseOrAssignProtocol,
+                },
+            },
+            Self::BitwiseXorAssignMethod => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::ProtocolMethod {
+                    protocol_feature: LanguageFeature::BitwiseXorAssignProtocol,
+                },
+            },
+            Self::ShiftLeftAssignMethod => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::ProtocolMethod {
+                    protocol_feature: LanguageFeature::ShiftLeftAssignProtocol,
+                },
+            },
+            Self::ShiftRightAssignMethod => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::ProtocolMethod {
+                    protocol_feature: LanguageFeature::ShiftRightAssignProtocol,
                 },
             },
         }
@@ -659,6 +1171,11 @@ pub enum BuiltinKind {
     Struct,
     /// A builtin enum (e.g., Ordering, Optional).
     Enum,
+    /// A builtin enum case.
+    EnumCase {
+        /// The enum feature this case belongs to.
+        enum_feature: LanguageFeature,
+    },
     /// A builtin function (e.g., sizeof, alignof).
     Function,
     /// A builtin variable/constant.
@@ -688,6 +1205,11 @@ impl BuiltinKind {
         matches!(self, Self::Enum)
     }
 
+    /// Check if this kind is for an enum case.
+    pub fn is_enum_case(&self) -> bool {
+        matches!(self, Self::EnumCase { .. })
+    }
+
     /// Check if this kind is for a function.
     pub fn is_function(&self) -> bool {
         matches!(self, Self::Function)
@@ -710,6 +1232,7 @@ impl BuiltinKind {
             Self::ProtocolMethod { .. } => "protocol method",
             Self::Struct => "struct",
             Self::Enum => "enum",
+            Self::EnumCase { .. } => "enum case",
             Self::Function => "function",
             Self::Variable => "variable",
             Self::TypeAlias => "type alias",
@@ -743,6 +1266,10 @@ pub struct BuiltinRegistry {
     // Enum builtins
     enums: RwLock<HashMap<LanguageFeature, SymbolId>>,
     enum_features: RwLock<HashMap<SymbolId, LanguageFeature>>,
+
+    // Enum case builtins
+    enum_cases: RwLock<HashMap<LanguageFeature, SymbolId>>,
+    enum_case_features: RwLock<HashMap<SymbolId, LanguageFeature>>,
 
     // Function builtins
     functions: RwLock<HashMap<LanguageFeature, SymbolId>>,
@@ -813,6 +1340,16 @@ impl BuiltinRegistry {
         self.protocol(LanguageFeature::Matchable)
     }
 
+    /// Convenience: Get the RangeMatchable protocol.
+    pub fn range_matchable_protocol(&self) -> Option<SymbolId> {
+        self.protocol(LanguageFeature::RangeMatchable)
+    }
+
+    /// Convenience: Get the ArrayMatchable protocol.
+    pub fn array_matchable_protocol(&self) -> Option<SymbolId> {
+        self.protocol(LanguageFeature::ArrayMatchable)
+    }
+
     // =========================================================================
     // Struct methods
     // =========================================================================
@@ -873,6 +1410,37 @@ impl BuiltinRegistry {
     /// Get the feature for a builtin enum.
     pub fn enum_feature(&self, id: SymbolId) -> Option<LanguageFeature> {
         self.enum_features.read().get(&id).copied()
+    }
+
+    // =========================================================================
+    // Enum case methods
+    // =========================================================================
+
+    /// Register an enum case as a builtin. Returns true if successful,
+    /// false if the feature was already registered.
+    pub fn register_enum_case(&self, feature: LanguageFeature, id: SymbolId) -> bool {
+        let mut enum_cases = self.enum_cases.write();
+        if enum_cases.contains_key(&feature) {
+            return false;
+        }
+        enum_cases.insert(feature, id);
+        self.enum_case_features.write().insert(id, feature);
+        true
+    }
+
+    /// Get the symbol ID for a builtin enum case.
+    pub fn enum_case(&self, feature: LanguageFeature) -> Option<SymbolId> {
+        self.enum_cases.read().get(&feature).copied()
+    }
+
+    /// Check if a symbol is a builtin enum case.
+    pub fn is_builtin_enum_case(&self, id: SymbolId) -> bool {
+        self.enum_case_features.read().contains_key(&id)
+    }
+
+    /// Get the feature for a builtin enum case.
+    pub fn enum_case_feature(&self, id: SymbolId) -> Option<LanguageFeature> {
+        self.enum_case_features.read().get(&id).copied()
     }
 
     // =========================================================================
@@ -973,6 +1541,41 @@ impl BuiltinRegistry {
         self.method(LanguageFeature::Clone)
     }
 
+    /// Convenience: Get the Formattable protocol.
+    pub fn formattable_protocol(&self) -> Option<SymbolId> {
+        self.protocol(LanguageFeature::FormattableProtocol)
+    }
+
+    /// Convenience: Get the Formattable.format method.
+    pub fn formattable_format_method(&self) -> Option<SymbolId> {
+        self.method(LanguageFeature::FormattableFormat)
+    }
+
+    /// Convenience: Get the DefaultStringInterpolation struct.
+    pub fn default_string_interpolation(&self) -> Option<SymbolId> {
+        self.builtin_struct(LanguageFeature::DefaultStringInterpolation)
+    }
+
+    /// Convenience: Get the DefaultStringInterpolation init.
+    pub fn default_string_interpolation_init(&self) -> Option<SymbolId> {
+        self.builtin_function(LanguageFeature::DefaultStringInterpolationInit)
+    }
+
+    /// Convenience: Get the DefaultStringInterpolation.appendLiteral method.
+    pub fn default_string_interpolation_append_literal(&self) -> Option<SymbolId> {
+        self.builtin_function(LanguageFeature::DefaultStringInterpolationAppendLiteral)
+    }
+
+    /// Convenience: Get the DefaultStringInterpolation.appendInterpolation method.
+    pub fn default_string_interpolation_append_interpolation(&self) -> Option<SymbolId> {
+        self.builtin_function(LanguageFeature::DefaultStringInterpolationAppendInterpolation)
+    }
+
+    /// Convenience: Get the DefaultStringInterpolation.build method.
+    pub fn default_string_interpolation_build(&self) -> Option<SymbolId> {
+        self.builtin_function(LanguageFeature::DefaultStringInterpolationBuild)
+    }
+
     // =========================================================================
     // Type alias methods
     // =========================================================================
@@ -1013,6 +1616,7 @@ impl BuiltinRegistry {
         self.protocols.read().contains_key(&feature)
             || self.structs.read().contains_key(&feature)
             || self.enums.read().contains_key(&feature)
+            || self.enum_cases.read().contains_key(&feature)
             || self.functions.read().contains_key(&feature)
             || self.variables.read().contains_key(&feature)
             || self.methods.read().contains_key(&feature)

@@ -589,24 +589,112 @@ See [docs/memory-model/implementation-plan.md](docs/memory-model/implementation-
 
 ### Types
 
-- [ ] Array Type Syntax
-- [ ] Dictionary Type Syntax
-- [ ] Optional Type Syntax
-- [ ] Result Type Syntax
+- [x] Array Type Syntax
+- [x] Dictionary Type Syntax
+- [x] Optional Type Syntax
+- [x] Result Type Syntax
+
+### Type Promotion
+
+- [x] Optional Promotion - Implicit wrapping of values into Optional
+- [x] Result Promotion - Implicit wrapping of values into Result
+
+### Error Handling
+
+- [x] Throw Expression - Early return with error value
 
 ### Expressions
 
-- [ ] Try Operator
-- [ ] For Loops
-- [ ] And / Or Short Circuiting
-- [ ] Null Coalescing Operator
-- [ ] Optional Chaining
-- [ ] Compound Assignment Operator
-- [ ] Character Literals
-- [ ] String Interpolation
+- [x] Try Operator
+- [x] For Loops
+- [x] And / Or Short Circuiting
+- [x] Null Coalescing Operator
+- [x] Range Operators (`..=`, `..<`)
+- [x] Compound Assignment Operators
+- [x] Character Literals
+- [x] String Interpolation
+- [x] Null Literals
+- [x] Dictionary Literals
 
-### Goals
+### Standard Library
 
+- [x] Create real hash implementation
+- [x] Improve numeric implementation
+- [x] Improve iterators
+- [x] Improve collections
+- [x] Improve strings
+- [x] Improve options / results
+- [x] CString
+
+### Core Features
+
+- [x] Range Patterns (`0..=9`, `0..<10`, `'a'..='z'`)
+- [x] Array Patterns (`[a, b, ..rest]`)
+- [x] Irrefutable patterns in function parameters
+- [x] Refactor Matchable for range patterns and array patterns
+- [x] Let/var static variable consistency
+- [x] Default function parameters
+- [x] End compilation when there are errors
+- [x] Improve parser errors
+- [x] Expression bodied functions
+
+## Phase 15 Compiler Infrastructure
+
+### Architecture
+
+- [ ] Refactor semantic model and passes
+- [ ] Incremental compilation
+
+### Tooling
+
+- [ ] Language Server Protocol (LSP)
 - [ ] Web Server
 - [ ] Flock package manager
 - [ ] Jessup version manager
+
+### Documentation
+
+- [ ] Doc comments - `///` with structured sections
+
+## Phase 16+ Advanced Types & Runtime
+
+### Types
+
+- [ ] Opaque types (`some Protocol`)
+- [ ] Existential types (`any Protocol`)
+
+### Classes
+
+- [ ] Class runtime completeness (identity, RTTI, weak/unowned references)
+
+### Async & Generators
+
+- [ ] `async` / `await`
+- [ ] `generator` / `yield`
+- [ ] `async generator`
+
+### Partial Application
+
+- [ ] Pipe Operator (`|>`)
+- [ ] Placeholder Arguments (`_` for partial application)
+
+### Implicits
+
+- [ ] `using` / `given` implicit parameters
+
+### Syntax & Sugar
+
+- [ ] Optional Chaining
+
+### Properties
+
+- [ ] Lazy properties - `lazy let expensive = compute()`
+- [ ] Property observers - `willSet` / `didSet` blocks
+
+### Metaprogramming
+
+- [ ] Auto-derived protocols - `@derive(Equatable, Hashable)`
+
+### Standard Library
+
+- [ ] Expand stdlib

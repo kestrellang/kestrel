@@ -52,7 +52,7 @@ use semantic_tree::symbol::Symbol;
 use crate::context::LoweringContext;
 use crate::error::LoweringError;
 use crate::expr::lower_expression;
-use crate::name::qualified_name_for_symbol;
+use crate::name::{init_name_suffix_from_callable, qualified_name_for_symbol};
 use crate::ty::{lower_type, make_int_immediate};
 
 /// Lower a match expression to MIR.
@@ -279,7 +279,10 @@ fn emit_switch(
     // Get the place to switch on
     let switch_place = apply_path(scrutinee, path);
 
-    match ty.kind() {
+    // Expand type aliases so enum/bool/etc. switches work with alias types (e.g., T?).
+    let expanded_ty = ty.expand_aliases();
+
+    match expanded_ty.kind() {
         TyKind::Bool => {
             emit_bool_switch(
                 ctx,
@@ -619,48 +622,210 @@ fn emit_comparison_chain_int(
             },
 
             Constructor::IntRange { start, end } => {
-                // Range check: start <= switch_place && switch_place <= end
+                // Range check with optional bounds
                 let match_block = ctx.create_block();
                 let next_block = ctx.create_block();
 
-                // start <= value
-                let cmp1_ty = ctx.mir.ty_bool();
-                let cmp1_local = ctx.create_temp("cmp_lo", cmp1_ty);
-                let cmp1_place = Place::local(cmp1_local);
-                ctx.emit_assign(
-                    cmp1_place.clone(),
-                    Rvalue::BinaryOp {
-                        op: BinOp::LeSigned,
-                        lhs: Value::Immediate(make_int_immediate(int_bits, *start)),
-                        rhs: Value::Place(switch_place.clone()),
-                    },
-                );
+                // Build comparison for the range bounds we have
+                let cmp_place = match (start, end) {
+                    (Some(s), Some(e)) => {
+                        // Full range: start <= value && value <= end
+                        let cmp1_ty = ctx.mir.ty_bool();
+                        let cmp1_local = ctx.create_temp("cmp_lo", cmp1_ty);
+                        let cmp1_place = Place::local(cmp1_local);
+                        ctx.emit_assign(
+                            cmp1_place.clone(),
+                            Rvalue::BinaryOp {
+                                op: BinOp::LeSigned,
+                                lhs: Value::Immediate(make_int_immediate(int_bits, *s)),
+                                rhs: Value::Place(switch_place.clone()),
+                            },
+                        );
 
-                // value <= end
-                let cmp2_ty = ctx.mir.ty_bool();
-                let cmp2_local = ctx.create_temp("cmp_hi", cmp2_ty);
-                let cmp2_place = Place::local(cmp2_local);
-                ctx.emit_assign(
-                    cmp2_place.clone(),
-                    Rvalue::BinaryOp {
-                        op: BinOp::LeSigned,
-                        lhs: Value::Place(switch_place.clone()),
-                        rhs: Value::Immediate(make_int_immediate(int_bits, *end)),
-                    },
-                );
+                        let cmp2_ty = ctx.mir.ty_bool();
+                        let cmp2_local = ctx.create_temp("cmp_hi", cmp2_ty);
+                        let cmp2_place = Place::local(cmp2_local);
+                        ctx.emit_assign(
+                            cmp2_place.clone(),
+                            Rvalue::BinaryOp {
+                                op: BinOp::LeSigned,
+                                lhs: Value::Place(switch_place.clone()),
+                                rhs: Value::Immediate(make_int_immediate(int_bits, *e)),
+                            },
+                        );
 
-                // cmp1 && cmp2
+                        let cmp_ty = ctx.mir.ty_bool();
+                        let cmp_local = ctx.create_temp("cmp_range", cmp_ty);
+                        let cmp_place = Place::local(cmp_local);
+                        ctx.emit_assign(
+                            cmp_place.clone(),
+                            Rvalue::BinaryOp {
+                                op: BinOp::BoolAnd,
+                                lhs: Value::Place(cmp1_place),
+                                rhs: Value::Place(cmp2_place),
+                            },
+                        );
+                        cmp_place
+                    },
+                    (Some(s), None) => {
+                        // Range from: start <= value
+                        let cmp_ty = ctx.mir.ty_bool();
+                        let cmp_local = ctx.create_temp("cmp_lo", cmp_ty);
+                        let cmp_place = Place::local(cmp_local);
+                        ctx.emit_assign(
+                            cmp_place.clone(),
+                            Rvalue::BinaryOp {
+                                op: BinOp::LeSigned,
+                                lhs: Value::Immediate(make_int_immediate(int_bits, *s)),
+                                rhs: Value::Place(switch_place.clone()),
+                            },
+                        );
+                        cmp_place
+                    },
+                    (None, Some(e)) => {
+                        // Range to: value <= end
+                        let cmp_ty = ctx.mir.ty_bool();
+                        let cmp_local = ctx.create_temp("cmp_hi", cmp_ty);
+                        let cmp_place = Place::local(cmp_local);
+                        ctx.emit_assign(
+                            cmp_place.clone(),
+                            Rvalue::BinaryOp {
+                                op: BinOp::LeSigned,
+                                lhs: Value::Place(switch_place.clone()),
+                                rhs: Value::Immediate(make_int_immediate(int_bits, *e)),
+                            },
+                        );
+                        cmp_place
+                    },
+                    (None, None) => {
+                        // Unbounded range - always matches (shouldn't happen)
+                        emit_decision_tree(ctx, tree, scrutinee, arms, result_place, join_block);
+                        continue;
+                    },
+                };
+
+                // Branch
+                ctx.emit_branch(Value::Place(cmp_place), match_block, next_block);
+
+                // Emit match body
+                ctx.set_current_block(match_block);
+                emit_decision_tree(ctx, tree, scrutinee, arms, result_place, join_block);
+
+                // Continue with next comparison
+                ctx.set_current_block(next_block);
+            },
+
+            Constructor::CharLiteral(c) => {
+                // Char literals are just integers - treat as i32 comparison
+                let match_block = ctx.create_block();
+                let next_block = ctx.create_block();
+
+                // Compare: switch_place == char value
                 let cmp_ty = ctx.mir.ty_bool();
-                let cmp_local = ctx.create_temp("cmp_range", cmp_ty);
+                let cmp_local = ctx.create_temp("cmp", cmp_ty);
                 let cmp_place = Place::local(cmp_local);
                 ctx.emit_assign(
                     cmp_place.clone(),
                     Rvalue::BinaryOp {
-                        op: BinOp::BoolAnd,
-                        lhs: Value::Place(cmp1_place),
-                        rhs: Value::Place(cmp2_place),
+                        op: BinOp::Eq,
+                        lhs: Value::Place(switch_place.clone()),
+                        rhs: Value::Immediate(make_int_immediate(int_bits, *c as i64)),
                     },
                 );
+
+                // Branch
+                ctx.emit_branch(Value::Place(cmp_place), match_block, next_block);
+
+                // Emit match body
+                ctx.set_current_block(match_block);
+                emit_decision_tree(ctx, tree, scrutinee, arms, result_place, join_block);
+
+                // Continue with next comparison
+                ctx.set_current_block(next_block);
+            },
+
+            Constructor::CharRange { start, end } => {
+                // Char range check with optional bounds
+                let match_block = ctx.create_block();
+                let next_block = ctx.create_block();
+
+                // Build comparison for the range bounds we have
+                let cmp_place = match (start, end) {
+                    (Some(s), Some(e)) => {
+                        // Full range: start <= value && value <= end
+                        let cmp1_ty = ctx.mir.ty_bool();
+                        let cmp1_local = ctx.create_temp("cmp_lo", cmp1_ty);
+                        let cmp1_place = Place::local(cmp1_local);
+                        ctx.emit_assign(
+                            cmp1_place.clone(),
+                            Rvalue::BinaryOp {
+                                op: BinOp::LeSigned,
+                                lhs: Value::Immediate(make_int_immediate(int_bits, *s as i64)),
+                                rhs: Value::Place(switch_place.clone()),
+                            },
+                        );
+
+                        let cmp2_ty = ctx.mir.ty_bool();
+                        let cmp2_local = ctx.create_temp("cmp_hi", cmp2_ty);
+                        let cmp2_place = Place::local(cmp2_local);
+                        ctx.emit_assign(
+                            cmp2_place.clone(),
+                            Rvalue::BinaryOp {
+                                op: BinOp::LeSigned,
+                                lhs: Value::Place(switch_place.clone()),
+                                rhs: Value::Immediate(make_int_immediate(int_bits, *e as i64)),
+                            },
+                        );
+
+                        let cmp_ty = ctx.mir.ty_bool();
+                        let cmp_local = ctx.create_temp("cmp_range", cmp_ty);
+                        let cmp_place = Place::local(cmp_local);
+                        ctx.emit_assign(
+                            cmp_place.clone(),
+                            Rvalue::BinaryOp {
+                                op: BinOp::BoolAnd,
+                                lhs: Value::Place(cmp1_place),
+                                rhs: Value::Place(cmp2_place),
+                            },
+                        );
+                        cmp_place
+                    },
+                    (Some(s), None) => {
+                        // Range from: start <= value
+                        let cmp_ty = ctx.mir.ty_bool();
+                        let cmp_local = ctx.create_temp("cmp_lo", cmp_ty);
+                        let cmp_place = Place::local(cmp_local);
+                        ctx.emit_assign(
+                            cmp_place.clone(),
+                            Rvalue::BinaryOp {
+                                op: BinOp::LeSigned,
+                                lhs: Value::Immediate(make_int_immediate(int_bits, *s as i64)),
+                                rhs: Value::Place(switch_place.clone()),
+                            },
+                        );
+                        cmp_place
+                    },
+                    (None, Some(e)) => {
+                        // Range to: value <= end
+                        let cmp_ty = ctx.mir.ty_bool();
+                        let cmp_local = ctx.create_temp("cmp_hi", cmp_ty);
+                        let cmp_place = Place::local(cmp_local);
+                        ctx.emit_assign(
+                            cmp_place.clone(),
+                            Rvalue::BinaryOp {
+                                op: BinOp::LeSigned,
+                                lhs: Value::Place(switch_place.clone()),
+                                rhs: Value::Immediate(make_int_immediate(int_bits, *e as i64)),
+                            },
+                        );
+                        cmp_place
+                    },
+                    (None, None) => {
+                        // Unbounded range - always matches (shouldn't happen)
+                        emit_decision_tree(ctx, tree, scrutinee, arms, result_place, join_block);
+                        continue;
+                    },
+                };
 
                 // Branch
                 ctx.emit_branch(Value::Place(cmp_place), match_block, next_block);
@@ -766,7 +931,8 @@ fn emit_comparison_chain(
     join_block: kestrel_execution_graph::Id<kestrel_execution_graph::Block>,
 ) {
     // For unsupported types, just try int comparison chain as fallback
-    match ty.kind() {
+    let expanded_ty = ty.expand_aliases();
+    match expanded_ty.kind() {
         TyKind::Int(int_bits) => {
             emit_comparison_chain_int(
                 ctx,
@@ -874,7 +1040,8 @@ fn type_conforms_to_matchable(ctx: &LoweringContext, ty: &Ty) -> bool {
     }
 
     // Check if the type is a struct or enum that conforms to Matchable
-    match ty.kind() {
+    let expanded_ty = ty.expand_aliases();
+    match expanded_ty.kind() {
         TyKind::Struct { symbol, .. } => check_conformances(symbol.as_ref(), matchable_id),
         TyKind::Enum { symbol, .. } => check_conformances(symbol.as_ref(), matchable_id),
         _ => false,
@@ -996,7 +1163,8 @@ fn emit_matchable_switch(
     };
 
     let protocol_name = qualified_name_for_symbol(ctx, &matchable_symbol);
-    let for_type = lower_type(ctx, ty);
+    let expanded_ty = ty.expand_aliases();
+    let for_type = lower_type(ctx, &expanded_ty);
 
     // Build a chain of Matchable.matches() calls
     for (i, (ctor, tree)) in cases.iter().enumerate() {
@@ -1024,7 +1192,7 @@ fn emit_matchable_switch(
                 if let TyKind::Struct {
                     symbol: struct_symbol,
                     ..
-                } = ty.kind()
+                } = expanded_ty.kind()
                 {
                     // Find the init with the intLiteral label
                     let init_symbol =
@@ -1061,20 +1229,11 @@ fn emit_matchable_switch(
                             &mut name_parts,
                         );
 
-                        // Get all labels from the found init symbol
+                        // Get init name suffix from the found init symbol (uses helper for consistency)
                         let init_name_suffix = if let Some(callable) =
                             init_sym.metadata().get_behavior::<CallableBehavior>()
                         {
-                            let labels: Vec<&str> = callable
-                                .parameters()
-                                .iter()
-                                .filter_map(|p| p.external_label())
-                                .collect();
-                            if labels.is_empty() {
-                                "init".to_string()
-                            } else {
-                                format!("init${}", labels.join("$"))
-                            }
+                            init_name_suffix_from_callable(&callable)
                         } else {
                             "init$intLiteral".to_string()
                         };
@@ -1122,7 +1281,8 @@ fn emit_matchable_switch(
                 let result_local = ctx.create_temp("matches_result", bool_mir_ty);
                 let result_place_local = Place::local(result_local);
 
-                let callee = Callee::witness(protocol_name, "matches", for_type);
+                // matches() has no method-level type parameters
+                let callee = Callee::witness(protocol_name, "matches", for_type, vec![]);
                 let call_args = vec![
                     CallArg::borrow(Value::Place(switch_place.clone())),
                     CallArg::borrow(Value::Place(literal_place)),
@@ -1157,7 +1317,7 @@ fn emit_matchable_switch(
                 if let TyKind::Struct {
                     symbol: struct_symbol,
                     ..
-                } = ty.kind()
+                } = expanded_ty.kind()
                 {
                     // Find the init with the boolLiteral label
                     let init_symbol =
@@ -1194,20 +1354,11 @@ fn emit_matchable_switch(
                             &mut name_parts,
                         );
 
-                        // Get all labels from the found init symbol
+                        // Get init name suffix from the found init symbol (uses helper for consistency)
                         let init_name_suffix = if let Some(callable) =
                             init_sym.metadata().get_behavior::<CallableBehavior>()
                         {
-                            let labels: Vec<&str> = callable
-                                .parameters()
-                                .iter()
-                                .filter_map(|p| p.external_label())
-                                .collect();
-                            if labels.is_empty() {
-                                "init".to_string()
-                            } else {
-                                format!("init${}", labels.join("$"))
-                            }
+                            init_name_suffix_from_callable(&callable)
                         } else {
                             "init$boolLiteral".to_string()
                         };
@@ -1259,7 +1410,8 @@ fn emit_matchable_switch(
                 let result_local = ctx.create_temp("matches_result", bool_mir_ty);
                 let result_place_local = Place::local(result_local);
 
-                let callee = Callee::witness(protocol_name, "matches", for_type);
+                // matches() has no method-level type parameters
+                let callee = Callee::witness(protocol_name, "matches", for_type, vec![]);
                 let call_args = vec![
                     CallArg::borrow(Value::Place(switch_place.clone())),
                     CallArg::borrow(Value::Place(literal_place)),
@@ -1287,6 +1439,336 @@ fn emit_matchable_switch(
                     None,
                 ));
                 continue;
+            },
+
+            Constructor::CharLiteral(c) => {
+                // Create blocks for this case
+                let match_block = ctx.create_block();
+                let next_block = ctx.create_block();
+
+                // Create a temporary to hold the literal value
+                // The type must conform to ExpressibleByCharLiteral
+                let literal_local = ctx.create_temp("literal", for_type);
+                let literal_place = Place::local(literal_local);
+
+                // Initialize the struct from the literal using the ExpressibleByCharLiteral init
+                if let TyKind::Struct {
+                    symbol: struct_symbol,
+                    ..
+                } = expanded_ty.kind()
+                {
+                    // Find the init$charLiteral method
+                    let init_sym = struct_symbol
+                        .metadata()
+                        .children()
+                        .into_iter()
+                        .find(|child| {
+                            child.metadata().kind() == KestrelSymbolKind::Initializer
+                                && child
+                                    .metadata()
+                                    .get_behavior::<CallableBehavior>()
+                                    .map(|c| {
+                                        c.parameters().first().and_then(|p| p.external_label())
+                                            == Some("charLiteral")
+                                    })
+                                    .unwrap_or(false)
+                        });
+
+                    if let Some(init_sym) = init_sym {
+                        // Build the qualified name for the init function
+                        let mut name_parts = Vec::new();
+                        collect_symbol_name_parts(
+                            &(struct_symbol.clone()
+                                as std::sync::Arc<
+                                    dyn Symbol<kestrel_semantic_tree::language::KestrelLanguage>,
+                                >),
+                            &mut name_parts,
+                        );
+
+                        // Get init name suffix from the found init symbol (uses helper for consistency)
+                        let init_name_suffix = if let Some(callable) =
+                            init_sym.metadata().get_behavior::<CallableBehavior>()
+                        {
+                            init_name_suffix_from_callable(&callable)
+                        } else {
+                            "init$charLiteral".to_string()
+                        };
+                        name_parts.push(init_name_suffix);
+
+                        let init_name = ctx.mir.intern_name(QualifiedNameData::new(name_parts));
+
+                        // Create a mutable reference to the result place
+                        let ref_ty = ctx.mir.ty_ref_mut(for_type);
+                        let self_ref_local = ctx.create_temp("self_ref", ref_ty);
+                        let self_ref_place = Place::local(self_ref_local);
+
+                        // Emit: %self_ref = ref var %literal
+                        ctx.emit_assign(
+                            self_ref_place.clone(),
+                            Rvalue::RefMut(literal_place.clone()),
+                        );
+
+                        // Build call args: self_ref first (MutRef), then the i32 char literal value (Borrow)
+                        let call_args = vec![
+                            CallArg::mutating(Value::Place(self_ref_place)),
+                            CallArg::borrow(Value::Immediate(Immediate::i32(*c as i32))),
+                        ];
+
+                        // Create a temp for the unit return value of init
+                        let unit_ty = ctx.mir.ty_unit();
+                        let unit_local = ctx.create_temp("init_ret", unit_ty);
+                        let unit_place = Place::local(unit_local);
+
+                        // Call the init function
+                        let mir_callee = Callee::direct(init_name);
+                        ctx.emit_call_with_modes(unit_place, mir_callee, call_args);
+                    } else {
+                        // No init found - fall back to direct assignment (shouldn't happen for Matchable types)
+                        ctx.emit_assign(
+                            literal_place.clone(),
+                            Rvalue::Use(Immediate::i32(*c as i32)),
+                        );
+                    }
+                } else {
+                    // Not a struct type - fall back to direct assignment
+                    ctx.emit_assign(
+                        literal_place.clone(),
+                        Rvalue::Use(Immediate::i32(*c as i32)),
+                    );
+                }
+
+                // Call Matchable.matches(switch_place, literal_place)
+                let result_local = ctx.create_temp("matches_result", bool_mir_ty);
+                let result_place_local = Place::local(result_local);
+
+                // matches() has no method-level type parameters
+                let callee = Callee::witness(protocol_name, "matches", for_type, vec![]);
+                let call_args = vec![
+                    CallArg::borrow(Value::Place(switch_place.clone())),
+                    CallArg::borrow(Value::Place(literal_place)),
+                ];
+
+                ctx.emit_call_with_modes(result_place_local.clone(), callee, call_args);
+
+                // Branch based on the bool result
+                ctx.emit_branch(Value::Place(result_place_local), match_block, next_block);
+
+                // Emit match body
+                ctx.set_current_block(match_block);
+                emit_decision_tree(ctx, tree, scrutinee, arms, result_place, join_block);
+
+                // Continue with next comparison
+                ctx.set_current_block(next_block);
+            },
+
+            Constructor::CharRange { start, end } => {
+                // Char ranges for Matchable types - create temporaries for bounds and check
+                // using LessOrEqual.lessThanOrEqual
+                let match_block = ctx.create_block();
+                let next_block = ctx.create_block();
+
+                // Helper to create a char literal temp
+                let create_char_temp = |ctx: &mut LoweringContext, c: char, name: &str| -> Place {
+                    let char_local = ctx.create_temp(name, for_type);
+                    let char_place = Place::local(char_local);
+
+                    if let TyKind::Struct {
+                        symbol: struct_symbol,
+                        ..
+                    } = expanded_ty.kind()
+                    {
+                        // Find the init$charLiteral method
+                        let init_sym =
+                            struct_symbol
+                                .metadata()
+                                .children()
+                                .into_iter()
+                                .find(|child| {
+                                    child.metadata().kind() == KestrelSymbolKind::Initializer
+                                        && child
+                                            .metadata()
+                                            .get_behavior::<CallableBehavior>()
+                                            .map(|c| {
+                                                c.parameters()
+                                                    .first()
+                                                    .and_then(|p| p.external_label())
+                                                    == Some("charLiteral")
+                                            })
+                                            .unwrap_or(false)
+                                });
+
+                        if let Some(init_sym) = init_sym {
+                            let mut name_parts = Vec::new();
+                            collect_symbol_name_parts(
+                                &(struct_symbol.clone()
+                                    as std::sync::Arc<
+                                        dyn Symbol<
+                                            kestrel_semantic_tree::language::KestrelLanguage,
+                                        >,
+                                    >),
+                                &mut name_parts,
+                            );
+
+                            // Get init name suffix from the found init symbol (includes types for disambiguation)
+                            let init_name_suffix = if let Some(callable) =
+                                init_sym.metadata().get_behavior::<CallableBehavior>()
+                            {
+                                init_name_suffix_from_callable(&callable)
+                            } else {
+                                "init$charLiteral_I32".to_string()
+                            };
+                            name_parts.push(init_name_suffix);
+
+                            let init_name = ctx.mir.intern_name(QualifiedNameData::new(name_parts));
+
+                            let ref_ty = ctx.mir.ty_ref_mut(for_type);
+                            let self_ref_local = ctx.create_temp("self_ref", ref_ty);
+                            let self_ref_place = Place::local(self_ref_local);
+
+                            ctx.emit_assign(
+                                self_ref_place.clone(),
+                                Rvalue::RefMut(char_place.clone()),
+                            );
+
+                            let call_args = vec![
+                                CallArg::mutating(Value::Place(self_ref_place)),
+                                CallArg::borrow(Value::Immediate(Immediate::i32(c as i32))),
+                            ];
+
+                            let unit_ty = ctx.mir.ty_unit();
+                            let unit_local = ctx.create_temp("init_ret", unit_ty);
+                            let unit_place = Place::local(unit_local);
+
+                            let mir_callee = Callee::direct(init_name);
+                            ctx.emit_call_with_modes(unit_place, mir_callee, call_args);
+                        } else {
+                            // No init$charLiteral found - fall back to direct assignment
+                            // This shouldn't happen for proper Char types
+                            ctx.emit_assign(
+                                char_place.clone(),
+                                Rvalue::Use(Immediate::i32(c as i32)),
+                            );
+                        }
+                    } else {
+                        // Not a struct type - fall back to direct assignment
+                        ctx.emit_assign(char_place.clone(), Rvalue::Use(Immediate::i32(c as i32)));
+                    }
+
+                    char_place
+                };
+
+                // Get the RangeMatchable protocol for witness calls
+                let range_matchable_protocol_name =
+                    if let Some(rm_id) = ctx.model.builtin_registry().range_matchable_protocol() {
+                        if let Some(rm_symbol) = ctx.model.query(SymbolFor { id: rm_id }) {
+                            qualified_name_for_symbol(ctx, &rm_symbol)
+                        } else {
+                            // Fallback to manual construction
+                            ctx.mir.intern_name(QualifiedNameData::new(vec![
+                                "std".to_string(),
+                                "core".to_string(),
+                                "RangeMatchable".to_string(),
+                            ]))
+                        }
+                    } else {
+                        // Fallback to manual construction
+                        ctx.mir.intern_name(QualifiedNameData::new(vec![
+                            "std".to_string(),
+                            "core".to_string(),
+                            "RangeMatchable".to_string(),
+                        ]))
+                    };
+
+                // Handle optional bounds
+                match (start, end) {
+                    (Some(s), Some(e)) => {
+                        // Full range: scrutinee >= start && scrutinee <= end
+                        let check_hi_block = ctx.create_block();
+
+                        let start_place = create_char_temp(ctx, *s, "range_start");
+                        let end_place = create_char_temp(ctx, *e, "range_end");
+
+                        // Check: scrutinee >= start (scrutinee.isAtLeast(start))
+                        let cmp1_local = ctx.create_temp("cmp_lo", bool_mir_ty);
+                        let cmp1_place = Place::local(cmp1_local);
+                        let callee1 = Callee::witness(
+                            range_matchable_protocol_name,
+                            "isAtLeast",
+                            for_type,
+                            vec![],
+                        );
+                        let call_args1 = vec![
+                            CallArg::borrow(Value::Place(switch_place.clone())),
+                            CallArg::borrow(Value::Place(start_place)),
+                        ];
+                        ctx.emit_call_with_modes(cmp1_place.clone(), callee1, call_args1);
+                        ctx.emit_branch(Value::Place(cmp1_place), check_hi_block, next_block);
+
+                        // Check: scrutinee <= end (scrutinee.isAtMost(end))
+                        ctx.set_current_block(check_hi_block);
+                        let cmp2_local = ctx.create_temp("cmp_hi", bool_mir_ty);
+                        let cmp2_place = Place::local(cmp2_local);
+                        let callee2 = Callee::witness(
+                            range_matchable_protocol_name,
+                            "isAtMost",
+                            for_type,
+                            vec![],
+                        );
+                        let call_args2 = vec![
+                            CallArg::borrow(Value::Place(switch_place.clone())),
+                            CallArg::borrow(Value::Place(end_place)),
+                        ];
+                        ctx.emit_call_with_modes(cmp2_place.clone(), callee2, call_args2);
+                        ctx.emit_branch(Value::Place(cmp2_place), match_block, next_block);
+                    },
+                    (Some(s), None) => {
+                        // Range from: scrutinee >= start (scrutinee.isAtLeast(start))
+                        let start_place = create_char_temp(ctx, *s, "range_start");
+                        let cmp_local = ctx.create_temp("cmp_lo", bool_mir_ty);
+                        let cmp_place = Place::local(cmp_local);
+                        let callee = Callee::witness(
+                            range_matchable_protocol_name,
+                            "isAtLeast",
+                            for_type,
+                            vec![],
+                        );
+                        let call_args = vec![
+                            CallArg::borrow(Value::Place(switch_place.clone())),
+                            CallArg::borrow(Value::Place(start_place)),
+                        ];
+                        ctx.emit_call_with_modes(cmp_place.clone(), callee, call_args);
+                        ctx.emit_branch(Value::Place(cmp_place), match_block, next_block);
+                    },
+                    (None, Some(e)) => {
+                        // Range to: scrutinee <= end (scrutinee.isAtMost(end))
+                        let end_place = create_char_temp(ctx, *e, "range_end");
+                        let cmp_local = ctx.create_temp("cmp_hi", bool_mir_ty);
+                        let cmp_place = Place::local(cmp_local);
+                        let callee = Callee::witness(
+                            range_matchable_protocol_name,
+                            "isAtMost",
+                            for_type,
+                            vec![],
+                        );
+                        let call_args = vec![
+                            CallArg::borrow(Value::Place(switch_place.clone())),
+                            CallArg::borrow(Value::Place(end_place)),
+                        ];
+                        ctx.emit_call_with_modes(cmp_place.clone(), callee, call_args);
+                        ctx.emit_branch(Value::Place(cmp_place), match_block, next_block);
+                    },
+                    (None, None) => {
+                        // Unbounded - always matches
+                        ctx.emit_jump(match_block);
+                    },
+                }
+
+                // Emit match body
+                ctx.set_current_block(match_block);
+                emit_decision_tree(ctx, tree, scrutinee, arms, result_place, join_block);
+
+                // Continue with next comparison
+                ctx.set_current_block(next_block);
             },
 
             _ => {

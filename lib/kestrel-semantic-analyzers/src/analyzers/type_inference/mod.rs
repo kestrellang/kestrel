@@ -10,6 +10,7 @@ use kestrel_semantic_tree::behavior::executable::{ExecutableBehavior, ResolvedEx
 use kestrel_semantic_tree::behavior::extension_target::ExtensionTargetBehavior;
 use kestrel_semantic_tree::behavior::generics::GenericsBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
+use kestrel_semantic_tree::symbol::deinit::DeinitSymbol;
 use kestrel_semantic_tree::symbol::enum_symbol::EnumSymbol;
 use kestrel_semantic_tree::symbol::function::FunctionSymbol;
 use kestrel_semantic_tree::symbol::initializer::InitializerSymbol;
@@ -17,7 +18,10 @@ use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::symbol::local::LocalContainer;
 use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
 use kestrel_semantic_tree::ty::{Substitutions, Ty};
-use kestrel_semantic_type_inference::{apply_solution, apply_solution_to_locals};
+use kestrel_semantic_type_inference::{
+    apply_solution, apply_solution_to_defaults, apply_solution_to_locals,
+    apply_solution_to_patterns,
+};
 use semantic_tree::symbol::Symbol;
 
 use crate::analyzer::Analyzer;
@@ -126,11 +130,13 @@ impl Analyzer for TypeInferenceAnalyzer {
     ) {
         let kind = symbol.metadata().kind();
 
-        // Only process functions, initializers, getters, and setters
+        // Only process functions, initializers, getters, setters, deinits, and fields (static initializers)
         if kind != KestrelSymbolKind::Function
             && kind != KestrelSymbolKind::Initializer
             && kind != KestrelSymbolKind::Getter
             && kind != KestrelSymbolKind::Setter
+            && kind != KestrelSymbolKind::Deinit
+            && kind != KestrelSymbolKind::Field
         {
             return;
         }
@@ -153,9 +159,19 @@ impl Analyzer for TypeInferenceAnalyzer {
         }
 
         // Apply solution to create resolved body (even if there are errors)
-        let resolved_body = apply_solution(executable.body(), &solution);
+        // Pass the model as a TypeOracle to resolve associated types during the same pass
+        let resolved_body = apply_solution(executable.body(), &solution, ctx.model);
 
-        // Update local variables in the container with resolved types.
+        // Apply solution to parameter patterns for destructuring support
+        let resolved_patterns =
+            apply_solution_to_patterns(executable.parameter_patterns(), &solution, ctx.model);
+
+        // Apply solution to default value expressions
+        let resolved_defaults =
+            apply_solution_to_defaults(executable.default_values(), &solution, ctx.model);
+
+        // Update local variables in the container with resolved types, including
+        // resolving associated type projections inline during the same pass.
         // This is necessary because pattern-bound locals are created with Ty::infer()
         // placeholder types, and subsequent code reads the type from the LocalContainer.
         // Also resolves SelfType to the concrete type for the `self` local.
@@ -164,19 +180,32 @@ impl Analyzer for TypeInferenceAnalyzer {
             apply_solution_to_locals(
                 func as &dyn LocalContainer,
                 &solution,
+                ctx.model,
                 concrete_self_type.as_ref(),
             );
         } else if let Some(init) = symbol.as_ref().downcast_ref::<InitializerSymbol>() {
             apply_solution_to_locals(
                 init as &dyn LocalContainer,
                 &solution,
+                ctx.model,
+                concrete_self_type.as_ref(),
+            );
+        } else if let Some(deinit) = symbol.as_ref().downcast_ref::<DeinitSymbol>() {
+            apply_solution_to_locals(
+                deinit as &dyn LocalContainer,
+                &solution,
+                ctx.model,
                 concrete_self_type.as_ref(),
             );
         }
 
-        // Add ResolvedExecutableBehavior to the symbol
+        // Add ResolvedExecutableBehavior to the symbol with parameter patterns and defaults
         symbol
             .metadata()
-            .add_behavior(ResolvedExecutableBehavior::new(resolved_body));
+            .add_behavior(ResolvedExecutableBehavior::with_defaults(
+                resolved_body,
+                resolved_patterns,
+                resolved_defaults,
+            ));
     }
 }

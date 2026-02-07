@@ -8,6 +8,8 @@ use std::sync::Arc;
 use kestrel_prelude::lang;
 use kestrel_reporting::DiagnosticContext;
 use kestrel_semantic_model::{ResolveTypePath, SemanticModel, TypePathResolution};
+use kestrel_semantic_tree::builtins::LanguageFeature;
+use kestrel_semantic_tree::symbol::type_alias::TypeAliasSymbol;
 use kestrel_semantic_tree::symbol::type_parameter::TypeParameterSymbol;
 use kestrel_semantic_tree::ty::{FloatBits, IntBits, Substitutions, Ty, TyKind};
 use kestrel_span::Span;
@@ -16,7 +18,8 @@ use semantic_tree::symbol::{Symbol, SymbolId};
 
 use crate::diagnostics::{
     AmbiguousTypeError, LangPtrArityError, NotATypeError, NotGenericError,
-    TooFewTypeArgumentsError, TooManyTypeArgumentsError, UnresolvedTypeError,
+    TooFewTypeArgumentsError, TooManyTypeArgumentsError, TypeOperatorInvalidSymbolError,
+    TypeOperatorNotDefinedError, TypeOperatorSymbolNotFoundError, UnresolvedTypeError,
 };
 use kestrel_syntax_tree::utils::{extract_path_segments, get_node_span};
 
@@ -126,7 +129,7 @@ impl<'a> TypeResolver<'a> {
             return Ty::tuple(element_types, ty_span);
         }
 
-        // Try TyArray
+        // Try TyArray - [T] desugars to ArrayTypeOperator[T]
         if let Some(array_node) = ty_node
             .children()
             .find(|child| child.kind() == SyntaxKind::TyArray)
@@ -135,7 +138,76 @@ impl<'a> TypeResolver<'a> {
                 array_node.children().find(|c| c.kind() == SyntaxKind::Ty)
             {
                 let element_ty = self.resolve(&element_ty_node);
-                return Ty::array(element_ty, ty_span);
+                return self.resolve_type_operator(
+                    LanguageFeature::ArrayTypeOperator,
+                    vec![element_ty],
+                    ty_span,
+                    "Array type operator",
+                );
+            }
+            return Ty::error(ty_span);
+        }
+
+        // Try TyDictionary - [K: V] desugars to DictionaryTypeOperator[K, V]
+        if let Some(dict_node) = ty_node
+            .children()
+            .find(|child| child.kind() == SyntaxKind::TyDictionary)
+        {
+            let ty_nodes: Vec<_> = dict_node
+                .children()
+                .filter(|c| c.kind() == SyntaxKind::Ty)
+                .collect();
+            if ty_nodes.len() >= 2 {
+                let key_ty = self.resolve(&ty_nodes[0]);
+                let value_ty = self.resolve(&ty_nodes[1]);
+                return self.resolve_type_operator(
+                    LanguageFeature::DictionaryTypeOperator,
+                    vec![key_ty, value_ty],
+                    ty_span,
+                    "Dictionary type operator",
+                );
+            }
+            return Ty::error(ty_span);
+        }
+
+        // Try TyOptional - T? desugars to OptionalTypeOperator[T]
+        if let Some(optional_node) = ty_node
+            .children()
+            .find(|child| child.kind() == SyntaxKind::TyOptional)
+        {
+            if let Some(base_ty_node) = optional_node
+                .children()
+                .find(|c| c.kind() == SyntaxKind::Ty)
+            {
+                let base_ty = self.resolve(&base_ty_node);
+                return self.resolve_type_operator(
+                    LanguageFeature::OptionalTypeOperator,
+                    vec![base_ty],
+                    ty_span,
+                    "Optional type operator",
+                );
+            }
+            return Ty::error(ty_span);
+        }
+
+        // Try TyResult - T throws E desugars to ResultTypeOperator[T, E]
+        if let Some(result_node) = ty_node
+            .children()
+            .find(|child| child.kind() == SyntaxKind::TyResult)
+        {
+            let ty_nodes: Vec<_> = result_node
+                .children()
+                .filter(|c| c.kind() == SyntaxKind::Ty)
+                .collect();
+            if ty_nodes.len() >= 2 {
+                let success_ty = self.resolve(&ty_nodes[0]);
+                let error_ty = self.resolve(&ty_nodes[1]);
+                return self.resolve_type_operator(
+                    LanguageFeature::ResultTypeOperator,
+                    vec![success_ty, error_ty],
+                    ty_span,
+                    "Result type operator",
+                );
             }
             return Ty::error(ty_span);
         }
@@ -158,6 +230,53 @@ impl<'a> TypeResolver<'a> {
             return self.resolve(&ty_node);
         }
         Ty::error(Span::new(self.file_id, 0..0))
+    }
+
+    /// Resolve a type operator by looking up the builtin type alias and applying type arguments.
+    ///
+    /// Type operators like `T?`, `[T]`, `[K: V]`, and `T throws E` desugar to type aliases
+    /// defined in the standard library with `@builtin` attributes.
+    fn resolve_type_operator(
+        &mut self,
+        feature: LanguageFeature,
+        type_args: Vec<Ty>,
+        span: Span,
+        operator_name: &str,
+    ) -> Ty {
+        // Look up the builtin type alias
+        let builtin_registry = self.model.builtin_registry();
+        let Some(symbol_id) = builtin_registry.type_alias(feature) else {
+            // Type operator not defined - the stdlib is not properly imported
+            self.diagnostics.throw(TypeOperatorNotDefinedError {
+                span: span.clone(),
+                operator_name: operator_name.to_string(),
+            });
+            return Ty::error(span);
+        };
+
+        // Get the type alias symbol from the symbol registry
+        let Some(symbol) = self.model.registry().get(symbol_id) else {
+            self.diagnostics.throw(TypeOperatorSymbolNotFoundError {
+                span: span.clone(),
+                operator_name: operator_name.to_string(),
+            });
+            return Ty::error(span);
+        };
+
+        // Downcast Arc<dyn Symbol> to Arc<TypeAliasSymbol>
+        let Ok(type_alias_arc) = symbol.into_any_arc().downcast::<TypeAliasSymbol>() else {
+            self.diagnostics.throw(TypeOperatorInvalidSymbolError {
+                span: span.clone(),
+                operator_name: operator_name.to_string(),
+            });
+            return Ty::error(span);
+        };
+
+        // Create the type with substitutions
+        let base_ty = Ty::type_alias(type_alias_arc, span.clone());
+
+        // Apply the type arguments
+        self.apply_type_arguments(&base_ty, type_args, span)
     }
 
     /// Apply type arguments to a generic type
@@ -522,13 +641,15 @@ impl<'a> TypeResolver<'a> {
 
         // Check arity.
         //
-        // Language rule: if the user wrote a type argument list (including an empty list like `Foo[]`),
-        // they must provide the exact number of type arguments. Defaults do not allow partial lists.
-        if actual < max_args {
+        // Calculate minimum required args (parameters without defaults).
+        // Defaults must be at the end, so count parameters until we hit one with a default.
+        let min_args = type_params.iter().take_while(|p| !p.has_default()).count();
+
+        if actual < min_args {
             self.diagnostics.throw(TooFewTypeArgumentsError {
                 span: span.clone(),
                 type_name: type_name.to_string(),
-                min_expected: max_args,
+                min_expected: min_args,
                 got: actual,
             });
             return Ty::error(span);
@@ -543,9 +664,21 @@ impl<'a> TypeResolver<'a> {
             return Ty::error(span);
         }
 
-        // Build substitutions.
+        // Build substitutions, filling in defaults for missing trailing arguments.
         let mut substitutions = Substitutions::new();
-        for (param, arg) in type_params.iter().zip(type_args.into_iter()) {
+        for (i, param) in type_params.iter().enumerate() {
+            let arg = if i < type_args.len() {
+                type_args[i].clone()
+            } else {
+                // Use the default - we've already verified this exists via min_args check
+                let default_ty = param.default().expect("missing default for type parameter");
+                // Resolve UnresolvedPath types that couldn't be resolved at build time
+                if let TyKind::UnresolvedPath { segments } = default_ty.kind() {
+                    self.resolve_path(segments, default_ty.span().clone())
+                } else {
+                    default_ty.clone()
+                }
+            };
             substitutions.insert(param.metadata().id(), arg);
         }
 

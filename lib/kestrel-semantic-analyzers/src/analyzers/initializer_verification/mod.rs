@@ -315,6 +315,12 @@ fn analyze_expression(
                 state = analyze_expression(elem, state, false, ctx);
             }
         },
+        ExprKind::Dictionary(pairs) => {
+            for (k, v) in pairs {
+                state = analyze_expression(k, state, false, ctx);
+                state = analyze_expression(v, state, false, ctx);
+            }
+        },
         ExprKind::Grouping(inner) => {
             state = analyze_expression(inner, state, false, ctx);
         },
@@ -334,6 +340,11 @@ fn analyze_expression(
             ..
         } => {
             state = analyze_expression(receiver, state, false, ctx);
+            for arg in arguments {
+                state = analyze_expression(&arg.value, state, false, ctx);
+            }
+        },
+        ExprKind::DeferredStaticCall { arguments, .. } => {
             for arg in arguments {
                 state = analyze_expression(&arg.value, state, false, ctx);
             }
@@ -522,6 +533,23 @@ fn analyze_expression(
             }
             state.diverged = true;
         },
+        ExprKind::Throw { value } => {
+            state = analyze_expression(value, state, false, ctx);
+            let uninitialized: Vec<String> = ctx
+                .all_fields
+                .iter()
+                .filter(|f| !state.assigned.contains(*f))
+                .cloned()
+                .collect();
+            if !uninitialized.is_empty() {
+                ctx.errors
+                    .push(InitializerError::ReturnBeforeFullyInitialized {
+                        span: expr.span.clone(),
+                        uninitialized,
+                    });
+            }
+            state.diverged = true;
+        },
         ExprKind::Closure {
             body, tail_expr, ..
         } => {
@@ -592,7 +620,7 @@ fn analyze_expression(
                 state.diverged = true;
             }
         },
-        ExprKind::LangIntrinsicRef(_) | ExprKind::Error => {},
+        ExprKind::LangIntrinsicRef(_) | ExprKind::InterpolatedString { .. } | ExprKind::Error => {},
         ExprKind::SubscriptCall {
             receiver,
             arguments,
@@ -602,6 +630,9 @@ fn analyze_expression(
             for arg in arguments {
                 state = analyze_expression(&arg.value, state, false, ctx);
             }
+        },
+        ExprKind::ProtocolPropertyAccess { receiver, .. } => {
+            state = analyze_expression(receiver, state, false, ctx);
         },
     }
     state

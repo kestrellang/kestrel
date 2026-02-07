@@ -284,7 +284,6 @@ fn type_contains_enum(
         TyKind::Tuple(elements) => elements
             .iter()
             .any(|e| type_contains_enum(e, enum_id, model, visited)),
-        TyKind::Array(_) => false, // Arrays provide heap indirection
         TyKind::Struct { symbol, .. } => {
             let struct_id = symbol.metadata().id();
             // Avoid infinite loops on struct cycles

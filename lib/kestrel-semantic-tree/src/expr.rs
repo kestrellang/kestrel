@@ -9,6 +9,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use kestrel_span::Span;
 use semantic_tree::symbol::SymbolId;
 
+use crate::pattern::Pattern;
 use crate::stmt::{Statement, StatementKind};
 use crate::symbol::local::LocalId;
 use crate::ty::{IntBits, Substitutions, Ty};
@@ -373,8 +374,12 @@ pub enum LiteralValue {
     Float(f64),
     /// String literal: `"hello"`
     String(String),
+    /// Character literal: `'a'`, `'\n'`, `'\u{1F600}'`
+    Char(u32),
     /// Boolean literal: `true`, `false`
     Bool(bool),
+    /// Null literal: `null`
+    Null,
 }
 
 /// Primitive types available in the `lang` namespace.
@@ -384,14 +389,22 @@ pub enum LiteralValue {
 pub enum LangPrimitive {
     /// 1-bit integer (boolean)
     I1,
-    /// 8-bit integer
+    /// 8-bit signed integer
     I8,
-    /// 16-bit integer
+    /// 16-bit signed integer
     I16,
-    /// 32-bit integer
+    /// 32-bit signed integer
     I32,
-    /// 64-bit integer
+    /// 64-bit signed integer
     I64,
+    /// 8-bit unsigned integer
+    U8,
+    /// 16-bit unsigned integer
+    U16,
+    /// 32-bit unsigned integer
+    U32,
+    /// 64-bit unsigned integer
+    U64,
     /// 16-bit floating point
     F16,
     /// 32-bit floating point
@@ -410,6 +423,10 @@ impl LangPrimitive {
             "i16" => Some(LangPrimitive::I16),
             "i32" => Some(LangPrimitive::I32),
             "i64" => Some(LangPrimitive::I64),
+            "u8" => Some(LangPrimitive::U8),
+            "u16" => Some(LangPrimitive::U16),
+            "u32" => Some(LangPrimitive::U32),
+            "u64" => Some(LangPrimitive::U64),
             "f16" => Some(LangPrimitive::F16),
             "f32" => Some(LangPrimitive::F32),
             "f64" => Some(LangPrimitive::F64),
@@ -425,6 +442,10 @@ impl LangPrimitive {
             LangPrimitive::I16 => "i16",
             LangPrimitive::I32 => "i32",
             LangPrimitive::I64 => "i64",
+            LangPrimitive::U8 => "u8",
+            LangPrimitive::U16 => "u16",
+            LangPrimitive::U32 => "u32",
+            LangPrimitive::U64 => "u64",
             LangPrimitive::F16 => "f16",
             LangPrimitive::F32 => "f32",
             LangPrimitive::F64 => "f64",
@@ -440,6 +461,18 @@ impl LangPrimitive {
                 | LangPrimitive::I16
                 | LangPrimitive::I32
                 | LangPrimitive::I64
+                | LangPrimitive::U8
+                | LangPrimitive::U16
+                | LangPrimitive::U32
+                | LangPrimitive::U64
+        )
+    }
+
+    /// Check if this is an unsigned integer type.
+    pub fn is_unsigned(&self) -> bool {
+        matches!(
+            self,
+            LangPrimitive::U8 | LangPrimitive::U16 | LangPrimitive::U32 | LangPrimitive::U64
         )
     }
 
@@ -455,23 +488,24 @@ impl LangPrimitive {
     pub fn bit_width(&self) -> u32 {
         match self {
             LangPrimitive::I1 => 1,
-            LangPrimitive::I8 => 8,
-            LangPrimitive::I16 => 16,
-            LangPrimitive::F16 => 16,
-            LangPrimitive::I32 | LangPrimitive::F32 => 32,
-            LangPrimitive::I64 | LangPrimitive::F64 => 64,
+            LangPrimitive::I8 | LangPrimitive::U8 => 8,
+            LangPrimitive::I16 | LangPrimitive::U16 | LangPrimitive::F16 => 16,
+            LangPrimitive::I32 | LangPrimitive::U32 | LangPrimitive::F32 => 32,
+            LangPrimitive::I64 | LangPrimitive::U64 | LangPrimitive::F64 => 64,
         }
     }
 
     /// Convert this primitive to a semantic type.
+    /// Note: Unsigned primitives map to the same-sized signed int types,
+    /// since signedness is a runtime property in Kestrel (2's complement).
     pub fn to_ty(&self, span: Span) -> crate::ty::Ty {
         use crate::ty::{FloatBits, IntBits, Ty};
         match self {
             LangPrimitive::I1 => Ty::bool(span),
-            LangPrimitive::I8 => Ty::int(IntBits::I8, span),
-            LangPrimitive::I16 => Ty::int(IntBits::I16, span),
-            LangPrimitive::I32 => Ty::int(IntBits::I32, span),
-            LangPrimitive::I64 => Ty::int(IntBits::I64, span),
+            LangPrimitive::I8 | LangPrimitive::U8 => Ty::int(IntBits::I8, span),
+            LangPrimitive::I16 | LangPrimitive::U16 => Ty::int(IntBits::I16, span),
+            LangPrimitive::I32 | LangPrimitive::U32 => Ty::int(IntBits::I32, span),
+            LangPrimitive::I64 | LangPrimitive::U64 => Ty::int(IntBits::I64, span),
             LangPrimitive::F16 => Ty::float(FloatBits::F16, span),
             LangPrimitive::F32 => Ty::float(FloatBits::F32, span),
             LangPrimitive::F64 => Ty::float(FloatBits::F64, span),
@@ -528,6 +562,14 @@ pub enum IntUnaryOp {
     Neg,
     /// Bitwise NOT
     Not,
+    /// Population count (count of 1-bits)
+    Popcount,
+    /// Count leading zeros
+    Clz,
+    /// Count trailing zeros
+    Ctz,
+    /// Byte swap (reverse byte order)
+    Bswap,
 }
 
 /// Float binary operations.
@@ -658,6 +700,14 @@ pub enum LangIntrinsic {
         op: FloatMathOp,
     },
 
+    /// Fused multiply-add (ternary, arity 3).
+    /// `lang.f64_fma(a, b, c)` computes `a * b + c` with a single rounding.
+    FloatFma { primitive: LangPrimitive },
+
+    /// Copy sign (binary, arity 2).
+    /// `lang.f64_copysign(magnitude, sign)` returns magnitude with sign from sign.
+    FloatCopysign { primitive: LangPrimitive },
+
     // === Pointer intrinsics ===
     /// `lang.ptr_null[T]()` - Create null pointer of type T
     PtrNull { pointee_ty: Ty },
@@ -728,6 +778,8 @@ impl LangIntrinsic {
             LangIntrinsic::FloatConst { .. } => 0,
             LangIntrinsic::FloatPred { .. } => 1,
             LangIntrinsic::FloatMath { .. } => 1,
+            LangIntrinsic::FloatFma { .. } => 3,
+            LangIntrinsic::FloatCopysign { .. } => 2,
             // Pointer intrinsics
             LangIntrinsic::PtrNull { .. } => 0,
             LangIntrinsic::PtrFromAddress { .. } => 1,
@@ -800,6 +852,10 @@ impl LangIntrinsic {
                 let op_str = match op {
                     IntUnaryOp::Neg => "neg",
                     IntUnaryOp::Not => "not",
+                    IntUnaryOp::Popcount => "popcount",
+                    IntUnaryOp::Clz => "clz",
+                    IntUnaryOp::Ctz => "ctz",
+                    IntUnaryOp::Bswap => "bswap",
                 };
                 format!("lang.{}_{}", primitive.as_str(), op_str)
             },
@@ -850,6 +906,12 @@ impl LangIntrinsic {
                     FloatMathOp::Sqrt => "sqrt",
                 };
                 format!("lang.{}_{}", primitive.as_str(), op_str)
+            },
+            LangIntrinsic::FloatFma { primitive } => {
+                format!("lang.{}_fma", primitive.as_str())
+            },
+            LangIntrinsic::FloatCopysign { primitive } => {
+                format!("lang.{}_copysign", primitive.as_str())
             },
             // Pointer intrinsics
             LangIntrinsic::PtrNull { .. } => "lang.ptr_null".to_string(),
@@ -916,13 +978,44 @@ impl LangIntrinsic {
 ///
 /// All variants represent resolved expressions - there is no `Path` variant
 /// because expressions are only created after path resolution during bind phase.
+/// A part of an interpolated string.
+///
+/// Interpolated strings like `"Hello \(name)!"` are broken down into parts:
+/// - Literal text segments: "Hello ", "!"
+/// - Interpolation expressions: \(name)
+#[derive(Debug, Clone)]
+pub enum InterpolationPart {
+    /// A literal text segment (already unescaped)
+    Literal { text: String, span: Span },
+    /// An interpolation expression `\(expr)` or `\(expr:format)`
+    Interpolation {
+        /// The expression to be formatted
+        expr: Box<Expression>,
+        /// Format specification (if provided, e.g., `:>8` or `:08x`)
+        /// Stored as raw string; parsed later when applying formatting
+        format_spec: Option<String>,
+        /// Span of the entire interpolation `\(expr:format)`
+        span: Span,
+    },
+}
+
 #[derive(Debug, Clone)]
 pub enum ExprKind {
     // Literals
     /// Literal expression (integer, float, string, bool, unit)
     Literal(LiteralValue),
+    /// Interpolated string literal: `"Hello \(name)!"`
+    ///
+    /// Contains parts that are either literal text or interpolation expressions.
+    /// The result type is always String (or a type conforming to ExpressibleByStringInterpolation).
+    InterpolatedString {
+        /// The parts of the interpolated string
+        parts: Vec<InterpolationPart>,
+    },
     /// Array literal: `[1, 2, 3]`
     Array(Vec<Expression>),
+    /// Dictionary literal: `["key": value, ...]`
+    Dictionary(Vec<(Expression, Expression)>),
     /// Tuple literal: `(1, 2, 3)`
     Tuple(Vec<Expression>),
     /// Grouping expression: `(expr)`
@@ -957,6 +1050,24 @@ pub enum ExprKind {
     FieldAccess {
         object: Box<Expression>,
         field: String,
+    },
+
+    /// Protocol property access on type parameter: `T.property` or `t.property` where T: Protocol.
+    /// This is used when accessing a computed property requirement from a protocol bound.
+    /// At codegen, this generates witness calls to `get:property` or `set:property`.
+    ProtocolPropertyAccess {
+        /// The receiver - either TypeParameterRef (static) or instance expression (instance property)
+        receiver: Box<Expression>,
+        /// The field symbol from the protocol
+        field_id: SymbolId,
+        /// The property name
+        property_name: String,
+        /// The protocol symbol that declares this property
+        protocol_id: SymbolId,
+        /// Whether this is a static property
+        is_static: bool,
+        /// Whether this property has a setter (determines mutability)
+        has_setter: bool,
     },
 
     /// Tuple index: `tuple.0`, `tuple.1`
@@ -1024,6 +1135,23 @@ pub enum ExprKind {
         receiver: Box<Expression>,
         method_name: String,
         arguments: Vec<CallArgument>,
+    },
+
+    /// Deferred static method call on a type that may contain inference variables.
+    /// Used for `try` expressions where we need to call `R.fromResidual(early)`
+    /// and R is the function's return type (which may have inference variables).
+    ///
+    /// Type inference will resolve this when the target type becomes concrete.
+    DeferredStaticCall {
+        /// The type to call the static method on (may contain inference variables)
+        target_ty: Ty,
+        /// The static method name
+        method_name: String,
+        /// Arguments to the method call
+        arguments: Vec<CallArgument>,
+        /// Protocol method candidates for conformance checking.
+        /// If present, generates "does not conform to X" errors instead of "no member Y".
+        protocol_candidates: Vec<SymbolId>,
     },
 
     /// Implicit struct initialization: `Point(x: 1, y: 2)` when no explicit init exists.
@@ -1112,6 +1240,9 @@ pub enum ExprKind {
         conditions: Vec<IfCondition>,
         /// Statements in the loop body
         body: Vec<crate::stmt::Statement>,
+        /// True if this while-let was desugared from a for-loop.
+        /// For-loops require the user's pattern to be irrefutable.
+        from_for_loop: bool,
     },
 
     /// Infinite loop expression: `label: loop { body }`
@@ -1153,6 +1284,15 @@ pub enum ExprKind {
     Return {
         /// The optional value to return (None means return unit)
         value: Option<Box<Expression>>,
+    },
+
+    /// Throw expression: `throw expr`
+    ///
+    /// Desugars to `return R.fromResidual(expr)` where R is the function return type.
+    /// Type is `Never` - control transfers out of the function.
+    Throw {
+        /// The error value to throw
+        value: Box<Expression>,
     },
 
     /// Closure expression: `{ params in body }` or `{ body }`
@@ -1234,18 +1374,18 @@ pub enum ExprKind {
 }
 
 /// A closure parameter.
+///
+/// Supports destructuring patterns like `(a, b)` or `Point { x, y }`.
 #[derive(Debug, Clone)]
 pub struct ClosureParam {
-    /// Parameter name
-    pub name: String,
+    /// Pattern for the parameter (may contain multiple bindings)
+    pub pattern: Pattern,
     /// Parameter type (may be inferred initially)
     pub ty: Ty,
     /// Whether the type was explicitly annotated
     pub is_type_annotated: bool,
     /// Source span
     pub span: Span,
-    /// The local variable ID for this parameter
-    pub local_id: LocalId,
 }
 
 /// A captured variable from an enclosing scope.
@@ -1434,271 +1574,418 @@ impl Expression {
 
     /// Return a compact debug representation of this expression.
     pub fn debug_compact(&self) -> String {
-        match &self.kind {
-            ExprKind::Literal(lit) => match lit {
-                LiteralValue::Unit => "()".to_string(),
-                LiteralValue::Integer(n) => n.to_string(),
-                LiteralValue::Float(f) => f.to_string(),
-                LiteralValue::String(s) => format!("\"{}\"", s),
-                LiteralValue::Bool(b) => b.to_string(),
-            },
-            ExprKind::Array(elements) => {
-                let items: Vec<_> = elements.iter().map(|e| e.debug_compact()).collect();
-                format!("[{}]", items.join(", "))
-            },
-            ExprKind::Tuple(elements) => {
-                let items: Vec<_> = elements.iter().map(|e| e.debug_compact()).collect();
-                format!("({})", items.join(", "))
-            },
-            ExprKind::Grouping(inner) => format!("({})", inner.debug_compact()),
-            ExprKind::LocalRef(id) => format!("local_{}", id.0),
-            ExprKind::SymbolRef(id) => format!("symbol_{:?}", id),
-            ExprKind::OverloadedRef(_) => "overloaded".to_string(),
-            ExprKind::TypeRef(id) => format!("type_{:?}", id),
-            ExprKind::TypeParameterRef(_) => "<type_param>".to_string(),
-            ExprKind::AssociatedTypeRef => "<assoc_type>".to_string(),
-            ExprKind::FieldAccess { object, field } => {
-                format!("{}.{}", object.debug_compact(), field)
-            },
-            ExprKind::TupleIndex { tuple, index } => {
-                format!("{}.{}", tuple.debug_compact(), index)
-            },
-            ExprKind::MethodRef {
-                receiver,
-                method_name,
-                ..
-            } => format!("{}.{}", receiver.debug_compact(), method_name),
-            ExprKind::Call {
-                callee, arguments, ..
-            } => {
-                let args: Vec<String> = arguments
-                    .iter()
-                    .map(|a| {
-                        if let Some(ref label) = a.label {
-                            format!("{}: {}", label, a.value.debug_compact())
-                        } else {
-                            a.value.debug_compact()
-                        }
-                    })
-                    .collect();
-                format!("{}({})", callee.debug_compact(), args.join(", "))
-            },
-            ExprKind::PrimitiveMethodCall {
-                receiver,
-                method,
-                arguments,
-            } => {
-                let args: Vec<String> = arguments.iter().map(|a| a.value.debug_compact()).collect();
-                format!(
-                    "{}.{}({})",
-                    receiver.debug_compact(),
-                    method.name(),
-                    args.join(", ")
-                )
-            },
-            ExprKind::PrimitiveMethodRef { receiver, method } => {
-                format!("{}.{}", receiver.debug_compact(), method.name())
-            },
-            ExprKind::DeferredMethodCall {
-                receiver,
-                method_name,
-                arguments,
-            } => {
-                let args: Vec<String> = arguments.iter().map(|a| a.value.debug_compact()).collect();
-                format!(
-                    "{}.{}({})",
-                    receiver.debug_compact(),
-                    method_name,
-                    args.join(", ")
-                )
-            },
-            ExprKind::ImplicitStructInit {
-                struct_type,
-                arguments,
-            } => {
-                let args: Vec<String> = arguments
-                    .iter()
-                    .map(|a| {
-                        if let Some(ref label) = a.label {
-                            format!("{}: {}", label, a.value.debug_compact())
-                        } else {
-                            a.value.debug_compact()
-                        }
-                    })
-                    .collect();
-                format!("{}({})", struct_type, args.join(", "))
-            },
-            ExprKind::DelegatingInit { arguments, .. } => {
-                let args: Vec<String> = arguments
-                    .iter()
-                    .map(|a| {
-                        if let Some(ref label) = a.label {
-                            format!("{}: {}", label, a.value.debug_compact())
-                        } else {
-                            a.value.debug_compact()
-                        }
-                    })
-                    .collect();
-                format!("self.init({})", args.join(", "))
-            },
-            ExprKind::Assignment { target, value } => {
-                format!("{} = {}", target.debug_compact(), value.debug_compact())
-            },
-            ExprKind::If {
-                conditions,
-                then_value,
-                else_branch,
-                ..
-            } => {
-                let cond_strs: Vec<String> = conditions
-                    .iter()
-                    .map(|c| match c {
-                        IfCondition::Expr(e) => e.debug_compact(),
-                        IfCondition::Let { pattern, value, .. } => {
-                            format!("let {:?} = {}", pattern, value.debug_compact())
-                        },
-                    })
-                    .collect();
-                let cond_str = cond_strs.join(", ");
-                let then_str = if let Some(v) = then_value {
-                    v.debug_compact()
-                } else {
-                    "...".to_string()
-                };
-                let else_str = if let Some(else_b) = else_branch {
-                    match else_b {
-                        ElseBranch::Block { value, .. } => {
-                            if let Some(v) = value {
-                                format!(" else {{ {} }}", v.debug_compact())
-                            } else {
-                                " else { ... }".to_string()
-                            }
-                        },
-                        ElseBranch::ElseIf(_) => " else if ...".to_string(),
+        /// Format a pattern compactly with type annotations.
+        fn format_pattern_with_type(pattern: &crate::pattern::Pattern) -> String {
+            use crate::pattern::PatternKind;
+            let inner = match &pattern.kind {
+                PatternKind::Local { name, .. } => name.clone(),
+                PatternKind::Wildcard => "_".to_string(),
+                PatternKind::Literal { value } => format!("{:?}", value),
+                PatternKind::Tuple {
+                    prefix,
+                    has_rest,
+                    suffix,
+                } => {
+                    let mut parts: Vec<String> =
+                        prefix.iter().map(format_pattern_with_type).collect();
+                    if *has_rest {
+                        parts.push("..".to_string());
                     }
-                } else {
-                    String::new()
-                };
-                format!("if {} {{ {} }}{}", cond_str, then_str, else_str)
-            },
-            ExprKind::While { condition, .. } => {
-                format!("while {} {{ ... }}", condition.debug_compact())
-            },
-            ExprKind::WhileLet { conditions, .. } => {
-                let conds: Vec<_> = conditions
-                    .iter()
-                    .map(|c| match c {
-                        IfCondition::Let { pattern, value, .. } => {
-                            format!("let {:?} = {}", pattern, value.debug_compact())
-                        },
-                        IfCondition::Expr(e) => e.debug_compact(),
-                    })
-                    .collect();
-                format!("while {} {{ ... }}", conds.join(", "))
-            },
-            ExprKind::Loop { .. } => "loop { ... }".to_string(),
-            ExprKind::Break { label, .. } => {
-                if let Some(l) = label {
-                    format!("break {}", l.name)
-                } else {
-                    "break".to_string()
-                }
-            },
-            ExprKind::Continue { label, .. } => {
-                if let Some(l) = label {
-                    format!("continue {}", l.name)
-                } else {
-                    "continue".to_string()
-                }
-            },
-            ExprKind::Return { value } => {
-                if let Some(v) = value {
-                    format!("return {}", v.debug_compact())
-                } else {
-                    "return".to_string()
-                }
-            },
-            ExprKind::Closure {
-                params,
-                tail_expr,
-                uses_it: _,
-                ..
-            } => {
-                let params_str = match params {
-                    Some(ps) => {
-                        let p: Vec<_> = ps.iter().map(|p| p.name.clone()).collect();
-                        format!("({}) in ", p.join(", "))
+                    parts.extend(suffix.iter().map(format_pattern_with_type));
+                    format!("({})", parts.join(", "))
+                },
+                PatternKind::EnumVariant {
+                    case_name,
+                    bindings,
+                    ..
+                } => {
+                    if bindings.is_empty() {
+                        format!(".{}", case_name)
+                    } else {
+                        let bindings_str: Vec<String> = bindings
+                            .iter()
+                            .map(|b| format_pattern_with_type(&b.pattern))
+                            .collect();
+                        format!(".{}({})", case_name, bindings_str.join(", "))
+                    }
+                },
+                PatternKind::At {
+                    name, subpattern, ..
+                } => {
+                    format!(
+                        "({}: {}) @ {}",
+                        name,
+                        pattern.ty,
+                        format_pattern_with_type(subpattern)
+                    )
+                },
+                PatternKind::Range { .. } => "<range>".to_string(),
+                PatternKind::Struct { struct_name, .. } => format!("{} {{ .. }}", struct_name),
+                PatternKind::Array { .. } => "[..]".to_string(),
+                PatternKind::Or { alternatives } => {
+                    let alts: Vec<String> =
+                        alternatives.iter().map(format_pattern_with_type).collect();
+                    alts.join(" or ")
+                },
+                PatternKind::Rest => "..".to_string(),
+                PatternKind::Error => "<error>".to_string(),
+            };
+            // Add type annotation for bindings
+            match &pattern.kind {
+                PatternKind::Local { .. } | PatternKind::Wildcard => {
+                    format!("({}: {})", inner, pattern.ty)
+                },
+                _ => inner,
+            }
+        }
+
+        /// Format an expression with its type shown only for key expressions
+        fn format_expr(expr: &Expression) -> String {
+            // Helper to wrap with type annotation
+            fn with_type(s: String, ty: &Ty) -> String {
+                format!("({}): {}", s, ty)
+            }
+
+            match &expr.kind {
+                // Literals - show type only for non-obvious ones
+                ExprKind::Literal(lit) => match lit {
+                    LiteralValue::Unit => "()".to_string(),
+                    LiteralValue::Integer(n) => format!("{}: {}", n, expr.ty),
+                    LiteralValue::Float(f) => format!("{}: {}", f, expr.ty),
+                    LiteralValue::String(s) => format!("\"{}\"", s),
+                    LiteralValue::Char(c) => {
+                        if let Some(ch) = char::from_u32(*c) {
+                            format!("'{}'", ch)
+                        } else {
+                            format!("'\\u{{{:X}}}'", c)
+                        }
                     },
-                    None => String::new(), // No explicit params (may use `it` implicitly)
-                };
-                let body_str = tail_expr
-                    .as_ref()
-                    .map(|e| e.debug_compact())
-                    .unwrap_or_else(|| "...".to_string());
-                format!("{{ {}{} }}", params_str, body_str)
-            },
-            ExprKind::EnumCase { case_id } => format!("case_{:?}", case_id),
-            ExprKind::ImplicitMemberAccess {
-                member_name,
-                arguments,
-            } => {
-                if let Some(args) = arguments {
-                    let args_str: Vec<String> = args
+                    LiteralValue::Bool(b) => b.to_string(),
+                    LiteralValue::Null => format!("null: {}", expr.ty),
+                },
+                ExprKind::InterpolatedString { parts } => {
+                    let parts_str: Vec<_> = parts
+                        .iter()
+                        .map(|p| match p {
+                            InterpolationPart::Literal { text, .. } => format!("\"{}\"", text),
+                            InterpolationPart::Interpolation {
+                                expr, format_spec, ..
+                            } => {
+                                if let Some(spec) = format_spec {
+                                    format!("\\({}:{})", format_expr(expr), spec)
+                                } else {
+                                    format!("\\({})", format_expr(expr))
+                                }
+                            },
+                        })
+                        .collect();
+                    format!("interpolated_string[{}]", parts_str.join(", "))
+                },
+                ExprKind::Array(elements) => {
+                    let items: Vec<_> = elements.iter().map(format_expr).collect();
+                    with_type(format!("[{}]", items.join(", ")), &expr.ty)
+                },
+                ExprKind::Dictionary(pairs) => {
+                    let items: Vec<_> = pairs
+                        .iter()
+                        .map(|(k, v)| format!("{}: {}", format_expr(k), format_expr(v)))
+                        .collect();
+                    with_type(format!("[{}]", items.join(", ")), &expr.ty)
+                },
+                ExprKind::Tuple(elements) => {
+                    let items: Vec<_> = elements.iter().map(format_expr).collect();
+                    format!("({})", items.join(", "))
+                },
+                ExprKind::Grouping(inner) => format!("({})", format_expr(inner)),
+                // Local refs - always show type
+                ExprKind::LocalRef(id) => format!("local_{}: {}", id.0, expr.ty),
+                ExprKind::SymbolRef(id) => format!("symbol_{:?}", id),
+                ExprKind::OverloadedRef(_) => "overloaded".to_string(),
+                ExprKind::TypeRef(id) => format!("type_{:?}", id),
+                ExprKind::TypeParameterRef(_) => "<type_param>".to_string(),
+                ExprKind::AssociatedTypeRef => "<assoc_type>".to_string(),
+                ExprKind::FieldAccess { object, field } => {
+                    format!("{}.{}", format_expr(object), field)
+                },
+                ExprKind::ProtocolPropertyAccess {
+                    receiver,
+                    property_name,
+                    ..
+                } => {
+                    format!("{}.{}", format_expr(receiver), property_name)
+                },
+                ExprKind::TupleIndex { tuple, index } => {
+                    format!("{}.{}", format_expr(tuple), index)
+                },
+                ExprKind::MethodRef {
+                    receiver,
+                    method_name,
+                    ..
+                } => format!("{}.{}", format_expr(receiver), method_name),
+                ExprKind::Call {
+                    callee, arguments, ..
+                } => {
+                    let args: Vec<String> = arguments
                         .iter()
                         .map(|a| {
                             if let Some(ref label) = a.label {
-                                format!("{}: {}", label, a.value.debug_compact())
+                                format!("{}: {}", label, format_expr(&a.value))
                             } else {
-                                a.value.debug_compact()
+                                format_expr(&a.value)
                             }
                         })
                         .collect();
-                    format!(".{}({})", member_name, args_str.join(", "))
-                } else {
-                    format!(".{}", member_name)
-                }
-            },
-            ExprKind::Match { scrutinee, arms } => {
-                format!(
-                    "match {} {{ {} arms }}",
-                    scrutinee.debug_compact(),
-                    arms.len()
-                )
-            },
-            ExprKind::Block { value, .. } => {
-                let body_str = value
-                    .as_ref()
-                    .map(|e| e.debug_compact())
-                    .unwrap_or_else(|| "...".to_string());
-                format!("{{ {} }}", body_str)
-            },
-            ExprKind::Error => "<error>".to_string(),
-            ExprKind::LangIntrinsic {
-                intrinsic,
-                arguments,
-            } => {
-                let args: Vec<String> = arguments.iter().map(|a| a.value.debug_compact()).collect();
-                format!("{}({})", intrinsic.name(), args.join(", "))
-            },
-            ExprKind::LangIntrinsicRef(intrinsic) => intrinsic.name(),
-            ExprKind::SubscriptCall {
-                receiver,
-                getter: _,
-                arguments,
-            } => {
-                let args: Vec<String> = arguments
-                    .iter()
-                    .map(|a| {
-                        if let Some(ref label) = a.label {
-                            format!("{}: {}", label, a.value.debug_compact())
-                        } else {
-                            a.value.debug_compact()
+                    with_type(
+                        format!("{}({})", format_expr(callee), args.join(", ")),
+                        &expr.ty,
+                    )
+                },
+                ExprKind::PrimitiveMethodCall {
+                    receiver,
+                    method,
+                    arguments,
+                } => {
+                    let args: Vec<String> =
+                        arguments.iter().map(|a| format_expr(&a.value)).collect();
+                    format!(
+                        "{}.{}({})",
+                        format_expr(receiver),
+                        method.name(),
+                        args.join(", ")
+                    )
+                },
+                ExprKind::PrimitiveMethodRef { receiver, method } => {
+                    format!("{}.{}", format_expr(receiver), method.name())
+                },
+                ExprKind::DeferredMethodCall {
+                    receiver,
+                    method_name,
+                    arguments,
+                } => {
+                    let args: Vec<String> =
+                        arguments.iter().map(|a| format_expr(&a.value)).collect();
+                    format!(
+                        "{}.{}({})",
+                        format_expr(receiver),
+                        method_name,
+                        args.join(", ")
+                    )
+                },
+                ExprKind::DeferredStaticCall {
+                    target_ty,
+                    method_name,
+                    arguments,
+                    ..
+                } => {
+                    let args: Vec<String> =
+                        arguments.iter().map(|a| format_expr(&a.value)).collect();
+                    format!("{}.{}({})", target_ty, method_name, args.join(", "))
+                },
+                ExprKind::ImplicitStructInit {
+                    struct_type,
+                    arguments,
+                } => {
+                    let args: Vec<String> = arguments
+                        .iter()
+                        .map(|a| {
+                            if let Some(ref label) = a.label {
+                                format!("{}: {}", label, format_expr(&a.value))
+                            } else {
+                                format_expr(&a.value)
+                            }
+                        })
+                        .collect();
+                    format!("{}({})", struct_type, args.join(", "))
+                },
+                ExprKind::DelegatingInit { arguments, .. } => {
+                    let args: Vec<String> = arguments
+                        .iter()
+                        .map(|a| {
+                            if let Some(ref label) = a.label {
+                                format!("{}: {}", label, format_expr(&a.value))
+                            } else {
+                                format_expr(&a.value)
+                            }
+                        })
+                        .collect();
+                    format!("self.init({})", args.join(", "))
+                },
+                ExprKind::Assignment { target, value } => {
+                    format!("{} = {}", format_expr(target), format_expr(value))
+                },
+                ExprKind::If {
+                    conditions,
+                    then_value,
+                    else_branch,
+                    ..
+                } => {
+                    let cond_strs: Vec<String> = conditions
+                        .iter()
+                        .map(|c| match c {
+                            IfCondition::Expr(e) => format_expr(e),
+                            IfCondition::Let { pattern, value, .. } => {
+                                format!(
+                                    "let {} = {}",
+                                    format_pattern_with_type(pattern),
+                                    format_expr(value)
+                                )
+                            },
+                        })
+                        .collect();
+                    let cond_str = cond_strs.join(", ");
+                    let then_str = if let Some(v) = then_value {
+                        format_expr(v)
+                    } else {
+                        "...".to_string()
+                    };
+                    let else_str = if let Some(else_b) = else_branch {
+                        match else_b {
+                            ElseBranch::Block { value, .. } => {
+                                if let Some(v) = value {
+                                    format!(" else {{ {} }}", format_expr(v))
+                                } else {
+                                    " else { ... }".to_string()
+                                }
+                            },
+                            ElseBranch::ElseIf(_) => " else if ...".to_string(),
                         }
-                    })
-                    .collect();
-                format!("{}({})", receiver.debug_compact(), args.join(", "))
-            },
+                    } else {
+                        String::new()
+                    };
+                    with_type(
+                        format!("if {} {{ {} }}{}", cond_str, then_str, else_str),
+                        &expr.ty,
+                    )
+                },
+                ExprKind::While { condition, .. } => {
+                    format!("while {} {{ ... }}", format_expr(condition))
+                },
+                ExprKind::WhileLet { conditions, .. } => {
+                    let conds: Vec<_> = conditions
+                        .iter()
+                        .map(|c| match c {
+                            IfCondition::Let { pattern, value, .. } => {
+                                format!(
+                                    "let {} = {}",
+                                    format_pattern_with_type(pattern),
+                                    format_expr(value)
+                                )
+                            },
+                            IfCondition::Expr(e) => format_expr(e),
+                        })
+                        .collect();
+                    format!("while {} {{ ... }}", conds.join(", "))
+                },
+                ExprKind::Loop { .. } => "loop { ... }".to_string(),
+                ExprKind::Break { label, .. } => {
+                    if let Some(l) = label {
+                        format!("break {}", l.name)
+                    } else {
+                        "break".to_string()
+                    }
+                },
+                ExprKind::Continue { label, .. } => {
+                    if let Some(l) = label {
+                        format!("continue {}", l.name)
+                    } else {
+                        "continue".to_string()
+                    }
+                },
+                ExprKind::Return { value } => {
+                    if let Some(v) = value {
+                        format!("return {}", format_expr(v))
+                    } else {
+                        "return".to_string()
+                    }
+                },
+                ExprKind::Throw { value } => {
+                    format!("throw {}", format_expr(value))
+                },
+                ExprKind::Closure {
+                    params, tail_expr, ..
+                } => {
+                    let params_str = match params {
+                        Some(ps) => {
+                            let p: Vec<_> = ps
+                                .iter()
+                                .map(|p| format!("{:?}: {}", p.pattern, p.ty))
+                                .collect();
+                            format!("({}) in ", p.join(", "))
+                        },
+                        None => String::new(),
+                    };
+                    let body_str = tail_expr
+                        .as_ref()
+                        .map(|e| format_expr(e))
+                        .unwrap_or_else(|| "...".to_string());
+                    format!("{{ {}{} }}", params_str, body_str)
+                },
+                ExprKind::EnumCase { case_id } => format!("case_{:?}", case_id),
+                ExprKind::ImplicitMemberAccess {
+                    member_name,
+                    arguments,
+                } => {
+                    if let Some(args) = arguments {
+                        let args_str: Vec<String> = args
+                            .iter()
+                            .map(|a| {
+                                if let Some(ref label) = a.label {
+                                    format!("{}: {}", label, format_expr(&a.value))
+                                } else {
+                                    format_expr(&a.value)
+                                }
+                            })
+                            .collect();
+                        format!(".{}({})", member_name, args_str.join(", "))
+                    } else {
+                        format!(".{}", member_name)
+                    }
+                },
+                ExprKind::Match { scrutinee, arms } => with_type(
+                    format!("match {} {{ {} arms }}", format_expr(scrutinee), arms.len()),
+                    &expr.ty,
+                ),
+                ExprKind::Block { value, .. } => {
+                    let body_str = value
+                        .as_ref()
+                        .map(|e| format_expr(e))
+                        .unwrap_or_else(|| "...".to_string());
+                    with_type(format!("{{ {} }}", body_str), &expr.ty)
+                },
+                ExprKind::Error => "<error>".to_string(),
+                ExprKind::LangIntrinsic {
+                    intrinsic,
+                    arguments,
+                } => {
+                    let args: Vec<String> =
+                        arguments.iter().map(|a| format_expr(&a.value)).collect();
+                    format!("{}({})", intrinsic.name(), args.join(", "))
+                },
+                ExprKind::LangIntrinsicRef(intrinsic) => intrinsic.name(),
+                ExprKind::SubscriptCall {
+                    receiver,
+                    arguments,
+                    ..
+                } => {
+                    let args: Vec<String> = arguments
+                        .iter()
+                        .map(|a| {
+                            if let Some(ref label) = a.label {
+                                format!("{}: {}", label, format_expr(&a.value))
+                            } else {
+                                format_expr(&a.value)
+                            }
+                        })
+                        .collect();
+                    with_type(
+                        format!("{}[{}]", format_expr(receiver), args.join(", ")),
+                        &expr.ty,
+                    )
+                },
+            }
         }
+
+        format_expr(self)
     }
 
     /// Create a unit literal expression.
@@ -1793,6 +2080,34 @@ impl Expression {
         }
     }
 
+    /// Create an interpolated string expression.
+    ///
+    /// During type inference, the result type is inferred (defaulting to String).
+    /// Each interpolation expression must conform to Formattable.
+    pub fn interpolated_string(parts: Vec<InterpolationPart>, span: Span) -> Self {
+        Expression {
+            id: ExprId::new(),
+            kind: ExprKind::InterpolatedString { parts },
+            ty: Ty::infer(span.clone()),
+            span,
+            mutable: false,
+        }
+    }
+
+    /// Create a character literal expression with an inferred type.
+    ///
+    /// During type inference, an ExpressibleByCharLiteral constraint will be added
+    /// and the type will be resolved based on context (defaulting to i32 if ambiguous).
+    pub fn char_infer(value: u32, span: Span) -> Self {
+        Expression {
+            id: ExprId::new(),
+            kind: ExprKind::Literal(LiteralValue::Char(value)),
+            ty: Ty::infer(span.clone()),
+            span,
+            mutable: false,
+        }
+    }
+
     /// Create a boolean literal expression with default type Bool.
     ///
     /// For protocol-based literal inference, use `bool_infer` instead.
@@ -1820,12 +2135,36 @@ impl Expression {
         }
     }
 
-    /// Create an array literal expression.
-    pub fn array(elements: Vec<Expression>, element_ty: Ty, span: Span) -> Self {
-        let ty = Ty::array(element_ty, span.clone());
+    /// Create a null literal expression.
+    ///
+    /// During type inference, an ExpressibleByNullLiteral constraint will be added
+    /// and the type will be resolved based on context (defaulting to Optional[T] if ambiguous).
+    pub fn null_literal(span: Span) -> Self {
+        Expression {
+            id: ExprId::new(),
+            kind: ExprKind::Literal(LiteralValue::Null),
+            ty: Ty::infer(span.clone()),
+            span,
+            mutable: false,
+        }
+    }
+
+    /// Create an array literal expression with an explicit type.
+    pub fn array(elements: Vec<Expression>, ty: Ty, span: Span) -> Self {
         Expression {
             id: ExprId::new(),
             kind: ExprKind::Array(elements),
+            ty,
+            span,
+            mutable: false,
+        }
+    }
+
+    /// Create a dictionary literal expression with an explicit type.
+    pub fn dictionary(pairs: Vec<(Expression, Expression)>, ty: Ty, span: Span) -> Self {
+        Expression {
+            id: ExprId::new(),
+            kind: ExprKind::Dictionary(pairs),
             ty,
             span,
             mutable: false,
@@ -1941,6 +2280,7 @@ impl Expression {
 
     /// Create a field access expression.
     /// Mutability is computed as: field_mutable AND object.mutable
+    /// Exception: For static field access (object is TypeRef), mutability only depends on field_mutable
     pub fn field_access(
         object: Expression,
         field: String,
@@ -1948,12 +2288,48 @@ impl Expression {
         ty: Ty,
         span: Span,
     ) -> Self {
-        let mutable = field_mutable && object.mutable;
+        // For static field access (TypeRef base), mutability only depends on the field itself
+        // TypeRef expressions aren't lvalues - static fields are global storage
+        let mutable = if matches!(object.kind, ExprKind::TypeRef(_)) {
+            field_mutable
+        } else {
+            field_mutable && object.mutable
+        };
         Expression {
             id: ExprId::new(),
             kind: ExprKind::FieldAccess {
                 object: Box::new(object),
                 field,
+            },
+            ty,
+            span,
+            mutable,
+        }
+    }
+
+    /// Create a protocol property access expression.
+    /// This is used for property access on type parameters through protocol bounds.
+    pub fn protocol_property_access(
+        receiver: Expression,
+        field_id: SymbolId,
+        property_name: String,
+        protocol_id: SymbolId,
+        is_static: bool,
+        has_setter: bool,
+        ty: Ty,
+        span: Span,
+    ) -> Self {
+        // Mutable only if has_setter and (static or receiver is mutable)
+        let mutable = has_setter && (is_static || receiver.mutable);
+        Expression {
+            id: ExprId::new(),
+            kind: ExprKind::ProtocolPropertyAccess {
+                receiver: Box::new(receiver),
+                field_id,
+                property_name,
+                protocol_id,
+                is_static,
+                has_setter,
             },
             ty,
             span,
@@ -1978,7 +2354,8 @@ impl Expression {
     }
 
     /// Create a method reference expression.
-    /// Type is inferred later when call resolution happens.
+    /// Uses unit type as placeholder since the actual result type comes from
+    /// the Call expression that wraps this MethodRef.
     /// Method references are not mutable lvalues.
     pub fn method_ref(
         receiver: Expression,
@@ -1986,6 +2363,9 @@ impl Expression {
         method_name: String,
         span: Span,
     ) -> Self {
+        // Use unit type as placeholder since MethodRef's type is not used directly.
+        // The actual result type comes from the Call expression that wraps this MethodRef.
+        // Using Ty::infer would create an unresolved inference variable.
         Expression {
             id: ExprId::new(),
             kind: ExprKind::MethodRef {
@@ -1993,7 +2373,7 @@ impl Expression {
                 candidates,
                 method_name,
             },
-            ty: Ty::infer(span.clone()),
+            ty: Ty::unit(span.clone()),
             span,
             mutable: false,
         }
@@ -2144,6 +2524,35 @@ impl Expression {
                 receiver: Box::new(receiver),
                 method_name,
                 arguments,
+            },
+            ty: result_ty,
+            span,
+            mutable: false,
+        }
+    }
+
+    /// Create a deferred static method call expression.
+    /// Used for `try` expressions where we call `R.fromResidual(early)` and R is
+    /// the function's return type (which may have inference variables).
+    ///
+    /// If `protocol_candidates` is non-empty, the constraint generator will emit
+    /// conformance constraints for better error messages ("does not conform to X"
+    /// instead of "no member Y").
+    pub fn deferred_static_call(
+        target_ty: Ty,
+        method_name: String,
+        arguments: Vec<CallArgument>,
+        protocol_candidates: Vec<SymbolId>,
+        result_ty: Ty,
+        span: Span,
+    ) -> Self {
+        Expression {
+            id: ExprId::new(),
+            kind: ExprKind::DeferredStaticCall {
+                target_ty,
+                method_name,
+                arguments,
+                protocol_candidates,
             },
             ty: result_ty,
             span,
@@ -2368,6 +2777,32 @@ impl Expression {
                 label,
                 conditions,
                 body,
+                from_for_loop: false,
+            },
+            ty: Ty::unit(span.clone()),
+            span,
+            mutable: false,
+        }
+    }
+
+    /// Create a while-let loop expression that came from a for-loop desugaring.
+    ///
+    /// This is used to mark while-let loops that require irrefutable patterns.
+    pub fn while_let_from_for(
+        loop_id: LoopId,
+        label: Option<LabelInfo>,
+        conditions: Vec<IfCondition>,
+        body: Vec<crate::stmt::Statement>,
+        span: Span,
+    ) -> Self {
+        Expression {
+            id: ExprId::new(),
+            kind: ExprKind::WhileLet {
+                loop_id,
+                label,
+                conditions,
+                body,
+                from_for_loop: true,
             },
             ty: Ty::unit(span.clone()),
             span,
@@ -2431,6 +2866,22 @@ impl Expression {
             id: ExprId::new(),
             kind: ExprKind::Return {
                 value: value.map(Box::new),
+            },
+            ty: Ty::never(span.clone()),
+            span,
+            mutable: false,
+        }
+    }
+
+    /// Create a throw expression.
+    ///
+    /// Type is `Never` - control transfers out of the function.
+    /// The throw desugars to `return R.fromResidual(value)` during body resolution.
+    pub fn throw_expr(value: Expression, span: Span) -> Self {
+        Expression {
+            id: ExprId::new(),
+            kind: ExprKind::Throw {
+                value: Box::new(value),
             },
             ty: Ty::never(span.clone()),
             span,
@@ -2599,6 +3050,10 @@ impl Expression {
             LangIntrinsic::FloatPred { .. } => Ty::bool(span.clone()),
             // FloatMath returns the float type
             LangIntrinsic::FloatMath { primitive, .. } => primitive.to_ty(span.clone()),
+            // FloatFma returns the float type (fused multiply-add)
+            LangIntrinsic::FloatFma { primitive } => primitive.to_ty(span.clone()),
+            // FloatCopysign returns the float type
+            LangIntrinsic::FloatCopysign { primitive } => primitive.to_ty(span.clone()),
             // Pointer intrinsics
             LangIntrinsic::PtrNull { pointee_ty } => Ty::pointer(pointee_ty.clone(), span.clone()),
             LangIntrinsic::PtrFromAddress { pointee_ty } => {
@@ -2731,6 +3186,24 @@ impl Expression {
                 let prim_ty = primitive.to_ty(span.clone());
                 Ty::function(vec![prim_ty.clone()], prim_ty, span.clone())
             },
+            LangIntrinsic::FloatFma { primitive } => {
+                // (T, T, T) -> T (fused multiply-add: a * b + c)
+                let prim_ty = primitive.to_ty(span.clone());
+                Ty::function(
+                    vec![prim_ty.clone(), prim_ty.clone(), prim_ty.clone()],
+                    prim_ty,
+                    span.clone(),
+                )
+            },
+            LangIntrinsic::FloatCopysign { primitive } => {
+                // (T, T) -> T (magnitude, sign_source)
+                let prim_ty = primitive.to_ty(span.clone());
+                Ty::function(
+                    vec![prim_ty.clone(), prim_ty.clone()],
+                    prim_ty,
+                    span.clone(),
+                )
+            },
             // Pointer intrinsics
             LangIntrinsic::PtrNull { pointee_ty } => {
                 // () -> lang.ptr[T]
@@ -2822,6 +3295,672 @@ impl Expression {
             ty,
             span,
             mutable: false,
+        }
+    }
+
+    /// Apply type substitutions to this expression and all nested expressions.
+    ///
+    /// This recursively walks the expression tree and applies the given substitutions
+    /// to all `Ty` fields. Used when lowering default argument expressions that were
+    /// resolved in the callee's context but need to be lowered in the caller's context
+    /// with concrete type arguments.
+    pub fn apply_substitutions(&self, subs: &Substitutions) -> Expression {
+        if subs.is_empty() {
+            return self.clone();
+        }
+
+        let new_ty = self.ty.apply_substitutions(subs);
+        let new_kind = self.apply_substitutions_to_kind(subs);
+
+        Expression {
+            id: ExprId::new(), // Fresh ID for the substituted expression
+            kind: new_kind,
+            ty: new_ty,
+            span: self.span.clone(),
+            mutable: self.mutable,
+        }
+    }
+
+    /// Apply substitutions to the ExprKind, handling all variants.
+    fn apply_substitutions_to_kind(&self, subs: &Substitutions) -> ExprKind {
+        match &self.kind {
+            // Literals don't contain types that need substitution
+            ExprKind::Literal(lit) => ExprKind::Literal(lit.clone()),
+
+            ExprKind::InterpolatedString { parts } => {
+                let new_parts = parts
+                    .iter()
+                    .map(|part| match part {
+                        InterpolationPart::Literal { text, span } => InterpolationPart::Literal {
+                            text: text.clone(),
+                            span: span.clone(),
+                        },
+                        InterpolationPart::Interpolation {
+                            expr,
+                            format_spec,
+                            span,
+                        } => InterpolationPart::Interpolation {
+                            expr: Box::new(expr.apply_substitutions(subs)),
+                            format_spec: format_spec.clone(),
+                            span: span.clone(),
+                        },
+                    })
+                    .collect();
+                ExprKind::InterpolatedString { parts: new_parts }
+            },
+
+            ExprKind::Array(elements) => ExprKind::Array(
+                elements
+                    .iter()
+                    .map(|e| e.apply_substitutions(subs))
+                    .collect(),
+            ),
+
+            ExprKind::Dictionary(pairs) => ExprKind::Dictionary(
+                pairs
+                    .iter()
+                    .map(|(k, v)| (k.apply_substitutions(subs), v.apply_substitutions(subs)))
+                    .collect(),
+            ),
+
+            ExprKind::Tuple(elements) => ExprKind::Tuple(
+                elements
+                    .iter()
+                    .map(|e| e.apply_substitutions(subs))
+                    .collect(),
+            ),
+
+            ExprKind::Grouping(inner) => {
+                ExprKind::Grouping(Box::new(inner.apply_substitutions(subs)))
+            },
+
+            // References don't contain nested expressions with types
+            ExprKind::LocalRef(id) => ExprKind::LocalRef(*id),
+            ExprKind::SymbolRef(id) => ExprKind::SymbolRef(*id),
+            ExprKind::OverloadedRef(ids) => ExprKind::OverloadedRef(ids.clone()),
+            ExprKind::TypeRef(id) => ExprKind::TypeRef(*id),
+            ExprKind::TypeParameterRef(id) => ExprKind::TypeParameterRef(*id),
+            ExprKind::AssociatedTypeRef => ExprKind::AssociatedTypeRef,
+
+            ExprKind::FieldAccess { object, field } => ExprKind::FieldAccess {
+                object: Box::new(object.apply_substitutions(subs)),
+                field: field.clone(),
+            },
+
+            ExprKind::ProtocolPropertyAccess {
+                receiver,
+                field_id,
+                property_name,
+                protocol_id,
+                is_static,
+                has_setter,
+            } => ExprKind::ProtocolPropertyAccess {
+                receiver: Box::new(receiver.apply_substitutions(subs)),
+                field_id: *field_id,
+                property_name: property_name.clone(),
+                protocol_id: *protocol_id,
+                is_static: *is_static,
+                has_setter: *has_setter,
+            },
+
+            ExprKind::TupleIndex { tuple, index } => ExprKind::TupleIndex {
+                tuple: Box::new(tuple.apply_substitutions(subs)),
+                index: *index,
+            },
+
+            ExprKind::MethodRef {
+                receiver,
+                candidates,
+                method_name,
+            } => ExprKind::MethodRef {
+                receiver: Box::new(receiver.apply_substitutions(subs)),
+                candidates: candidates.clone(),
+                method_name: method_name.clone(),
+            },
+
+            ExprKind::Call {
+                callee,
+                arguments,
+                substitutions: call_subs,
+            } => ExprKind::Call {
+                callee: Box::new(callee.apply_substitutions(subs)),
+                arguments: arguments
+                    .iter()
+                    .map(|arg| CallArgument {
+                        label: arg.label.clone(),
+                        value: arg.value.apply_substitutions(subs),
+                        span: arg.span.clone(),
+                    })
+                    .collect(),
+                substitutions: Self::apply_to_substitutions(call_subs, subs),
+            },
+
+            ExprKind::SubscriptCall {
+                receiver,
+                getter,
+                arguments,
+            } => ExprKind::SubscriptCall {
+                receiver: Box::new(receiver.apply_substitutions(subs)),
+                getter: *getter,
+                arguments: arguments
+                    .iter()
+                    .map(|arg| CallArgument {
+                        label: arg.label.clone(),
+                        value: arg.value.apply_substitutions(subs),
+                        span: arg.span.clone(),
+                    })
+                    .collect(),
+            },
+
+            ExprKind::PrimitiveMethodCall {
+                receiver,
+                method,
+                arguments,
+            } => ExprKind::PrimitiveMethodCall {
+                receiver: Box::new(receiver.apply_substitutions(subs)),
+                method: *method,
+                arguments: arguments
+                    .iter()
+                    .map(|arg| CallArgument {
+                        label: arg.label.clone(),
+                        value: arg.value.apply_substitutions(subs),
+                        span: arg.span.clone(),
+                    })
+                    .collect(),
+            },
+
+            ExprKind::PrimitiveMethodRef { receiver, method } => ExprKind::PrimitiveMethodRef {
+                receiver: Box::new(receiver.apply_substitutions(subs)),
+                method: *method,
+            },
+
+            ExprKind::DeferredMethodCall {
+                receiver,
+                method_name,
+                arguments,
+            } => ExprKind::DeferredMethodCall {
+                receiver: Box::new(receiver.apply_substitutions(subs)),
+                method_name: method_name.clone(),
+                arguments: arguments
+                    .iter()
+                    .map(|arg| CallArgument {
+                        label: arg.label.clone(),
+                        value: arg.value.apply_substitutions(subs),
+                        span: arg.span.clone(),
+                    })
+                    .collect(),
+            },
+
+            ExprKind::DeferredStaticCall {
+                target_ty,
+                method_name,
+                arguments,
+                protocol_candidates,
+            } => ExprKind::DeferredStaticCall {
+                target_ty: target_ty.apply_substitutions(subs),
+                method_name: method_name.clone(),
+                arguments: arguments
+                    .iter()
+                    .map(|arg| CallArgument {
+                        label: arg.label.clone(),
+                        value: arg.value.apply_substitutions(subs),
+                        span: arg.span.clone(),
+                    })
+                    .collect(),
+                protocol_candidates: protocol_candidates.clone(),
+            },
+
+            ExprKind::ImplicitStructInit {
+                struct_type,
+                arguments,
+            } => ExprKind::ImplicitStructInit {
+                struct_type: struct_type.apply_substitutions(subs),
+                arguments: arguments
+                    .iter()
+                    .map(|arg| CallArgument {
+                        label: arg.label.clone(),
+                        value: arg.value.apply_substitutions(subs),
+                        span: arg.span.clone(),
+                    })
+                    .collect(),
+            },
+
+            ExprKind::DelegatingInit {
+                initializer,
+                arguments,
+                substitutions: init_subs,
+            } => ExprKind::DelegatingInit {
+                initializer: *initializer,
+                arguments: arguments
+                    .iter()
+                    .map(|arg| CallArgument {
+                        label: arg.label.clone(),
+                        value: arg.value.apply_substitutions(subs),
+                        span: arg.span.clone(),
+                    })
+                    .collect(),
+                substitutions: Self::apply_to_substitutions(init_subs, subs),
+            },
+
+            ExprKind::Assignment { target, value } => ExprKind::Assignment {
+                target: Box::new(target.apply_substitutions(subs)),
+                value: Box::new(value.apply_substitutions(subs)),
+            },
+
+            ExprKind::If {
+                conditions,
+                then_branch,
+                then_value,
+                else_branch,
+            } => ExprKind::If {
+                conditions: conditions
+                    .iter()
+                    .map(|c| Self::apply_substitutions_to_if_condition(c, subs))
+                    .collect(),
+                then_branch: then_branch
+                    .iter()
+                    .map(|s| Self::apply_substitutions_to_statement(s, subs))
+                    .collect(),
+                then_value: then_value
+                    .as_ref()
+                    .map(|v| Box::new(v.apply_substitutions(subs))),
+                else_branch: else_branch
+                    .as_ref()
+                    .map(|eb| Self::apply_substitutions_to_else_branch(eb, subs)),
+            },
+
+            ExprKind::While {
+                loop_id,
+                label,
+                condition,
+                body,
+            } => ExprKind::While {
+                loop_id: *loop_id,
+                label: label.clone(),
+                condition: Box::new(condition.apply_substitutions(subs)),
+                body: body
+                    .iter()
+                    .map(|s| Self::apply_substitutions_to_statement(s, subs))
+                    .collect(),
+            },
+
+            ExprKind::WhileLet {
+                loop_id,
+                label,
+                conditions,
+                body,
+                from_for_loop,
+            } => ExprKind::WhileLet {
+                loop_id: *loop_id,
+                label: label.clone(),
+                conditions: conditions
+                    .iter()
+                    .map(|c| Self::apply_substitutions_to_if_condition(c, subs))
+                    .collect(),
+                body: body
+                    .iter()
+                    .map(|s| Self::apply_substitutions_to_statement(s, subs))
+                    .collect(),
+                from_for_loop: *from_for_loop,
+            },
+
+            ExprKind::Loop {
+                loop_id,
+                label,
+                body,
+            } => ExprKind::Loop {
+                loop_id: *loop_id,
+                label: label.clone(),
+                body: body
+                    .iter()
+                    .map(|s| Self::apply_substitutions_to_statement(s, subs))
+                    .collect(),
+            },
+
+            ExprKind::Break { loop_id, label } => ExprKind::Break {
+                loop_id: *loop_id,
+                label: label.clone(),
+            },
+
+            ExprKind::Continue { loop_id, label } => ExprKind::Continue {
+                loop_id: *loop_id,
+                label: label.clone(),
+            },
+
+            ExprKind::Return { value } => ExprKind::Return {
+                value: value
+                    .as_ref()
+                    .map(|v| Box::new(v.apply_substitutions(subs))),
+            },
+
+            ExprKind::Throw { value } => ExprKind::Throw {
+                value: Box::new(value.apply_substitutions(subs)),
+            },
+
+            ExprKind::Closure {
+                params,
+                body,
+                tail_expr,
+                captures,
+                uses_it,
+                implicit_param,
+            } => ExprKind::Closure {
+                params: params.as_ref().map(|ps| {
+                    ps.iter()
+                        .map(|p| ClosureParam {
+                            pattern: Self::apply_substitutions_to_pattern(&p.pattern, subs),
+                            ty: p.ty.apply_substitutions(subs),
+                            is_type_annotated: p.is_type_annotated,
+                            span: p.span.clone(),
+                        })
+                        .collect()
+                }),
+                body: body
+                    .iter()
+                    .map(|s| Self::apply_substitutions_to_statement(s, subs))
+                    .collect(),
+                tail_expr: tail_expr
+                    .as_ref()
+                    .map(|e| Box::new(e.apply_substitutions(subs))),
+                captures: captures
+                    .iter()
+                    .map(|c| Capture {
+                        local_id: c.local_id,
+                        name: c.name.clone(),
+                        ty: c.ty.apply_substitutions(subs),
+                        kind: c.kind,
+                        span: c.span.clone(),
+                    })
+                    .collect(),
+                uses_it: *uses_it,
+                implicit_param: implicit_param
+                    .as_ref()
+                    .map(|(id, ty, span)| (*id, ty.apply_substitutions(subs), span.clone())),
+            },
+
+            ExprKind::EnumCase { case_id } => ExprKind::EnumCase { case_id: *case_id },
+
+            ExprKind::ImplicitMemberAccess {
+                member_name,
+                arguments,
+            } => ExprKind::ImplicitMemberAccess {
+                member_name: member_name.clone(),
+                arguments: arguments.as_ref().map(|args| {
+                    args.iter()
+                        .map(|arg| CallArgument {
+                            label: arg.label.clone(),
+                            value: arg.value.apply_substitutions(subs),
+                            span: arg.span.clone(),
+                        })
+                        .collect()
+                }),
+            },
+
+            ExprKind::Match { scrutinee, arms } => ExprKind::Match {
+                scrutinee: Box::new(scrutinee.apply_substitutions(subs)),
+                arms: arms
+                    .iter()
+                    .map(|arm| MatchArm {
+                        pattern: Self::apply_substitutions_to_pattern(&arm.pattern, subs),
+                        guard: arm.guard.as_ref().map(|g| g.apply_substitutions(subs)),
+                        body: arm.body.apply_substitutions(subs),
+                        span: arm.span.clone(),
+                    })
+                    .collect(),
+            },
+
+            ExprKind::Block { statements, value } => ExprKind::Block {
+                statements: statements
+                    .iter()
+                    .map(|s| Self::apply_substitutions_to_statement(s, subs))
+                    .collect(),
+                value: value
+                    .as_ref()
+                    .map(|v| Box::new(v.apply_substitutions(subs))),
+            },
+
+            ExprKind::Error => ExprKind::Error,
+
+            ExprKind::LangIntrinsic {
+                intrinsic,
+                arguments,
+            } => ExprKind::LangIntrinsic {
+                intrinsic: intrinsic.clone(),
+                arguments: arguments
+                    .iter()
+                    .map(|arg| CallArgument {
+                        label: arg.label.clone(),
+                        value: arg.value.apply_substitutions(subs),
+                        span: arg.span.clone(),
+                    })
+                    .collect(),
+            },
+
+            ExprKind::LangIntrinsicRef(intrinsic) => ExprKind::LangIntrinsicRef(intrinsic.clone()),
+        }
+    }
+
+    /// Apply substitutions to nested Substitutions (for generic calls within the expression).
+    fn apply_to_substitutions(inner: &Substitutions, outer: &Substitutions) -> Substitutions {
+        let mut result = Substitutions::new();
+        for (id, ty) in inner.iter() {
+            result.insert(*id, ty.apply_substitutions(outer));
+        }
+        result
+    }
+
+    /// Apply substitutions to an IfCondition.
+    fn apply_substitutions_to_if_condition(
+        cond: &IfCondition,
+        subs: &Substitutions,
+    ) -> IfCondition {
+        match cond {
+            IfCondition::Expr(expr) => IfCondition::Expr(expr.apply_substitutions(subs)),
+            IfCondition::Let {
+                pattern,
+                value,
+                span,
+            } => IfCondition::Let {
+                pattern: Self::apply_substitutions_to_pattern(pattern, subs),
+                value: value.apply_substitutions(subs),
+                span: span.clone(),
+            },
+        }
+    }
+
+    /// Apply substitutions to an ElseBranch.
+    fn apply_substitutions_to_else_branch(branch: &ElseBranch, subs: &Substitutions) -> ElseBranch {
+        match branch {
+            ElseBranch::Block { statements, value } => ElseBranch::Block {
+                statements: statements
+                    .iter()
+                    .map(|s| Self::apply_substitutions_to_statement(s, subs))
+                    .collect(),
+                value: value
+                    .as_ref()
+                    .map(|v| Box::new(v.apply_substitutions(subs))),
+            },
+            ElseBranch::ElseIf(if_expr) => {
+                ElseBranch::ElseIf(Box::new(if_expr.apply_substitutions(subs)))
+            },
+        }
+    }
+
+    /// Apply substitutions to a Statement.
+    fn apply_substitutions_to_statement(
+        stmt: &crate::stmt::Statement,
+        subs: &Substitutions,
+    ) -> crate::stmt::Statement {
+        use crate::stmt::{Statement, StatementKind};
+
+        let new_kind = match &stmt.kind {
+            StatementKind::Expr(expr) => StatementKind::Expr(expr.apply_substitutions(subs)),
+            StatementKind::Binding { pattern, value } => StatementKind::Binding {
+                pattern: Self::apply_substitutions_to_pattern(pattern, subs),
+                value: value.as_ref().map(|e| e.apply_substitutions(subs)),
+            },
+            StatementKind::GuardLet {
+                conditions,
+                else_block,
+            } => StatementKind::GuardLet {
+                conditions: conditions
+                    .iter()
+                    .map(|c| Self::apply_substitutions_to_if_condition(c, subs))
+                    .collect(),
+                else_block: Self::apply_substitutions_to_code_block(else_block, subs),
+            },
+            StatementKind::Deinit { local_id, name } => StatementKind::Deinit {
+                local_id: *local_id,
+                name: name.clone(),
+            },
+        };
+
+        Statement {
+            kind: new_kind,
+            span: stmt.span.clone(),
+        }
+    }
+
+    /// Apply substitutions to a CodeBlock.
+    fn apply_substitutions_to_code_block(
+        block: &crate::behavior::executable::CodeBlock,
+        subs: &Substitutions,
+    ) -> crate::behavior::executable::CodeBlock {
+        use crate::behavior::executable::CodeBlock;
+        CodeBlock::new(
+            block
+                .statements
+                .iter()
+                .map(|s| Self::apply_substitutions_to_statement(s, subs))
+                .collect(),
+            block
+                .yield_expr
+                .as_ref()
+                .map(|e| e.apply_substitutions(subs)),
+        )
+    }
+
+    /// Apply substitutions to a Pattern.
+    fn apply_substitutions_to_pattern(
+        pattern: &crate::pattern::Pattern,
+        subs: &Substitutions,
+    ) -> crate::pattern::Pattern {
+        use crate::pattern::{EnumPatternBinding, Pattern, PatternKind, StructPatternField};
+
+        let new_kind = match &pattern.kind {
+            PatternKind::Local {
+                local_id,
+                name,
+                mutability,
+            } => PatternKind::Local {
+                local_id: *local_id,
+                name: name.clone(),
+                mutability: *mutability,
+            },
+            PatternKind::Wildcard => PatternKind::Wildcard,
+            PatternKind::Literal { value } => PatternKind::Literal {
+                value: value.clone(),
+            },
+            PatternKind::Tuple {
+                prefix,
+                has_rest,
+                suffix,
+            } => PatternKind::Tuple {
+                prefix: prefix
+                    .iter()
+                    .map(|p| Self::apply_substitutions_to_pattern(p, subs))
+                    .collect(),
+                has_rest: *has_rest,
+                suffix: suffix
+                    .iter()
+                    .map(|p| Self::apply_substitutions_to_pattern(p, subs))
+                    .collect(),
+            },
+            PatternKind::EnumVariant {
+                case_id,
+                case_name,
+                bindings,
+            } => PatternKind::EnumVariant {
+                case_id: *case_id,
+                case_name: case_name.clone(),
+                bindings: bindings
+                    .iter()
+                    .map(|b| EnumPatternBinding {
+                        label: b.label.clone(),
+                        pattern: Box::new(Self::apply_substitutions_to_pattern(&b.pattern, subs)),
+                        span: b.span.clone(),
+                    })
+                    .collect(),
+            },
+            PatternKind::Struct {
+                struct_id,
+                struct_name,
+                fields,
+                has_rest,
+            } => PatternKind::Struct {
+                struct_id: *struct_id,
+                struct_name: struct_name.clone(),
+                fields: fields
+                    .iter()
+                    .map(|f| StructPatternField {
+                        field_name: f.field_name.clone(),
+                        pattern: Self::apply_substitutions_to_pattern(&f.pattern, subs),
+                        span: f.span.clone(),
+                    })
+                    .collect(),
+                has_rest: *has_rest,
+            },
+            PatternKind::Array {
+                prefix,
+                rest,
+                suffix,
+            } => PatternKind::Array {
+                prefix: prefix
+                    .iter()
+                    .map(|p| Self::apply_substitutions_to_pattern(p, subs))
+                    .collect(),
+                // rest is (Option<String>, Option<LocalId>) - no types to substitute
+                rest: rest.clone(),
+                suffix: suffix
+                    .iter()
+                    .map(|p| Self::apply_substitutions_to_pattern(p, subs))
+                    .collect(),
+            },
+            PatternKind::Range {
+                start,
+                end,
+                inclusive,
+            } => PatternKind::Range {
+                // RangeBound is Integer(i64) or Char(char) - no types to substitute
+                start: start.clone(),
+                end: end.clone(),
+                inclusive: *inclusive,
+            },
+            PatternKind::Or { alternatives } => PatternKind::Or {
+                alternatives: alternatives
+                    .iter()
+                    .map(|p| Self::apply_substitutions_to_pattern(p, subs))
+                    .collect(),
+            },
+            PatternKind::At {
+                local_id,
+                name,
+                mutability,
+                subpattern,
+            } => PatternKind::At {
+                local_id: *local_id,
+                name: name.clone(),
+                mutability: *mutability,
+                subpattern: Box::new(Self::apply_substitutions_to_pattern(subpattern, subs)),
+            },
+            PatternKind::Rest => PatternKind::Rest,
+            PatternKind::Error => PatternKind::Error,
+        };
+
+        Pattern {
+            kind: new_kind,
+            ty: pattern.ty.apply_substitutions(subs),
+            span: pattern.span.clone(),
         }
     }
 }

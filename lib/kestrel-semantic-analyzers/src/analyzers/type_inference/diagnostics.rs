@@ -54,15 +54,27 @@ impl IntoDiagnostic for InferenceErrorDiagnostic {
                 receiver,
                 member,
                 span,
-            } => Diagnostic::error()
-                .with_message(format!(
-                    "member not found: `{}` on type `{}`",
-                    member, receiver
-                ))
-                .with_labels(vec![
-                    Label::primary(span.file_id, span.range())
-                        .with_message(format!("`{}` has no member `{}`", receiver, member)),
-                ]),
+            } => {
+                // Special case for iter() method - provide better error for for-loops
+                let message = if member == "iter" {
+                    format!(
+                        "type `{}` does not conform to `Iterable` (missing method `iter`)",
+                        receiver
+                    )
+                } else {
+                    format!("member not found: `{}` on type `{}`", member, receiver)
+                };
+
+                let label_message = if member == "iter" {
+                    format!("`{}` does not implement `Iterable`", receiver)
+                } else {
+                    format!("`{}` has no member `{}`", receiver, member)
+                };
+
+                Diagnostic::error().with_message(message).with_labels(vec![
+                    Label::primary(span.file_id, span.range()).with_message(label_message),
+                ])
+            },
 
             InferenceError::AssociatedTypeNotFound {
                 container,
@@ -255,6 +267,27 @@ impl IntoDiagnostic for InferenceErrorDiagnostic {
                 .with_labels(vec![
                     Label::primary(span.file_id, span.range())
                         .with_message("add () to call this method"),
+                ]),
+
+            InferenceError::TupleIndexOutOfBounds {
+                index,
+                tuple_length,
+                span,
+            } => Diagnostic::error()
+                .with_message(format!(
+                    "tuple index {} is out of bounds for tuple with {} elements",
+                    index, tuple_length
+                ))
+                .with_labels(vec![
+                    Label::primary(span.file_id, span.range())
+                        .with_message(format!("tuple has only {} elements", tuple_length)),
+                ]),
+
+            InferenceError::TupleIndexOnNonTuple { ty, span } => Diagnostic::error()
+                .with_message(format!("cannot index into non-tuple type `{}`", ty))
+                .with_labels(vec![
+                    Label::primary(span.file_id, span.range())
+                        .with_message(format!("`{}` is not a tuple", ty)),
                 ]),
         }
     }

@@ -1,3 +1,4 @@
+use crate::builder::SourceEntry;
 use crate::error::CompileError;
 use crate::run::RunResult;
 use crate::source_file::SourceFile;
@@ -41,7 +42,7 @@ impl Compilation {
     }
 
     /// Internal method to create a compilation from source files.
-    pub(crate) fn from_sources(sources: Vec<(String, String)>, stdlib_enabled: bool) -> Self {
+    pub(crate) fn from_sources(sources: Vec<SourceEntry>, stdlib_enabled: bool) -> Self {
         let mut diagnostics = DiagnosticContext::new();
         let mut source_files = Vec::new();
 
@@ -52,7 +53,11 @@ impl Compilation {
         }
 
         // Phase 1, 2 & 3: Lex, parse, and add each file to the semantic tree
-        for (name, source) in sources {
+        for entry in sources {
+            let name = entry.name;
+            let source = entry.content;
+            let path = entry.path;
+
             // Add source file to diagnostics context
             let file_id = diagnostics.add_file(name.clone(), source.clone());
 
@@ -85,6 +90,8 @@ impl Compilation {
                 let error_diag = ParseErrorDiagnostic {
                     message: error.message.clone(),
                     span: error.span.clone(),
+                    expected: error.expected.clone(),
+                    found: error.found.clone(),
                 };
                 diagnostics.throw(error_diag);
             }
@@ -98,26 +105,133 @@ impl Compilation {
                 &mut diagnostics,
             );
 
-            // Create source file
-            let source_file = SourceFile::new(name, source, parse_result.tree);
+            // Create source file with path if available
+            let source_file = if let Some(p) = path {
+                SourceFile::with_path(name, source, parse_result.tree, p)
+            } else {
+                SourceFile::new(name, source, parse_result.tree)
+            };
 
             source_files.push(source_file);
+        }
+
+        // Stop if there are lex/parse errors
+        if diagnostics.has_errors() {
+            return Self {
+                source_files,
+                semantic_model: None,
+                diagnostics,
+            };
         }
 
         // Build the semantic model (lowering)
         let model = builder.build();
 
+        // Stop if there are semantic tree building errors
+        if diagnostics.has_errors() {
+            return Self {
+                source_files,
+                semantic_model: Some(model),
+                diagnostics,
+            };
+        }
+
         // Run binding phase on the built model
         let model = SemanticBinder::bind(model, &mut diagnostics);
 
-        // Run extracted analyzers after binding (keeps output consistent during migration)
+        // Stop if there are binding errors
+        if diagnostics.has_errors() {
+            return Self {
+                source_files,
+                semantic_model: Some(model),
+                diagnostics,
+            };
+        }
+
+        // Run analyzers in phases, stopping if errors occur after each phase
+        use kestrel_semantic_analyzers::analyzers::{
+            AssignmentValidationAnalyzer, ClosureAnalyzer, ConformanceAnalyzer,
+            ConstraintCycleAnalyzer, DeadCodeAnalyzer, DefiniteAssignmentAnalyzer,
+            DuplicateCallableAnalyzer, DuplicateCaseAnalyzer, DuplicateLabelAnalyzer,
+            DuplicateSymbolAnalyzer, ExhaustiveReturnAnalyzer, ExhaustivenessAnalyzer,
+            ExtensionConflictAnalyzer, FieldAnalyzer, ForLoopPatternAnalyzer, FunctionBodyAnalyzer,
+            GenericsAnalyzer, GuardLetDivergenceAnalyzer, ImportAnalyzer,
+            InitializerVerificationAnalyzer, IrrefutablePatternAnalyzer, ProtocolMethodAnalyzer,
+            RecursiveEnumAnalyzer, RefutablePatternAnalyzer, StaticContextAnalyzer,
+            StructCycleAnalyzer, SubscriptValidationAnalyzer, TypeAliasCycleAnalyzer,
+            TypeCheckAnalyzer, TypeInferenceAnalyzer, VisibilityConsistencyAnalyzer,
+        };
+
+        // Phase 1: Pre-inference analyzers (cycle detection, conformance, validation)
         {
-            // Build default analyzers; expand as more validators migrate
-            let mut owned = kestrel_semantic_analyzers::default_analyzers();
-            let mut analyzers: Vec<&mut dyn Analyzer> = Vec::new();
-            for a in owned.iter_mut() {
-                analyzers.push(a.as_mut());
-            }
+            let mut a0 = TypeAliasCycleAnalyzer::new();
+            let mut a1 = StructCycleAnalyzer::new();
+            let mut a2 = ConstraintCycleAnalyzer::new();
+            let mut a3 = ConformanceAnalyzer::new();
+            let mut a4 = ExtensionConflictAnalyzer::new();
+            let mut a5 = FieldAnalyzer::new();
+            let mut a6 = InitializerVerificationAnalyzer::new();
+            let mut a7 = AssignmentValidationAnalyzer::new();
+            let mut a8 = DefiniteAssignmentAnalyzer::new();
+            let mut a9 = DeadCodeAnalyzer::new();
+            let mut a10 = ExhaustiveReturnAnalyzer::new();
+            let mut a11 = GuardLetDivergenceAnalyzer::new();
+            let mut a12 = ClosureAnalyzer::new();
+            let mut analyzers: Vec<&mut dyn Analyzer> = vec![
+                &mut a0, &mut a1, &mut a2, &mut a3, &mut a4, &mut a5, &mut a6, &mut a7, &mut a8,
+                &mut a9, &mut a10, &mut a11, &mut a12,
+            ];
+            let mut ctx = AnalysisContext::new(&model, &mut diagnostics);
+            run_all(&mut analyzers, &model, &mut ctx);
+        }
+        if diagnostics.has_errors() {
+            return Self {
+                source_files,
+                semantic_model: Some(model),
+                diagnostics,
+            };
+        }
+
+        // Phase 2: Type resolution (inference, pattern matching, type checking)
+        {
+            let mut a0 = TypeInferenceAnalyzer::new();
+            let mut a1 = RefutablePatternAnalyzer::new();
+            let mut a2 = ForLoopPatternAnalyzer::new();
+            let mut a3 = IrrefutablePatternAnalyzer::new();
+            let mut a4 = ExhaustivenessAnalyzer::new();
+            let mut a5 = TypeCheckAnalyzer::new();
+            let mut a6 = FunctionBodyAnalyzer::new();
+            let mut a7 = SubscriptValidationAnalyzer::new();
+            let mut analyzers: Vec<&mut dyn Analyzer> = vec![
+                &mut a0, &mut a1, &mut a2, &mut a3, &mut a4, &mut a5, &mut a6, &mut a7,
+            ];
+            let mut ctx = AnalysisContext::new(&model, &mut diagnostics);
+            run_all(&mut analyzers, &model, &mut ctx);
+        }
+        if diagnostics.has_errors() {
+            return Self {
+                source_files,
+                semantic_model: Some(model),
+                diagnostics,
+            };
+        }
+
+        // Phase 3: Post-checking validators (duplicates, visibility, etc.)
+        {
+            let mut a0 = ProtocolMethodAnalyzer::new();
+            let mut a1 = StaticContextAnalyzer::new();
+            let mut a2 = DuplicateSymbolAnalyzer::new();
+            let mut a3 = DuplicateCallableAnalyzer::new();
+            let mut a4 = DuplicateCaseAnalyzer::new();
+            let mut a5 = DuplicateLabelAnalyzer::new();
+            let mut a6 = RecursiveEnumAnalyzer::new();
+            let mut a7 = VisibilityConsistencyAnalyzer::new();
+            let mut a8 = GenericsAnalyzer::new();
+            let mut a9 = ImportAnalyzer::new();
+            let mut analyzers: Vec<&mut dyn Analyzer> = vec![
+                &mut a0, &mut a1, &mut a2, &mut a3, &mut a4, &mut a5, &mut a6, &mut a7, &mut a8,
+                &mut a9,
+            ];
             let mut ctx = AnalysisContext::new(&model, &mut diagnostics);
             run_all(&mut analyzers, &model, &mut ctx);
         }
@@ -157,6 +271,11 @@ impl Compilation {
         self.source_files.iter().find(|f| f.name() == name)
     }
 
+    /// Get the directory containing a source file by name.
+    pub fn source_directory(&self, name: &str) -> Option<std::path::PathBuf> {
+        self.get_source_file(name).and_then(|f| f.directory())
+    }
+
     /// Lower the compilation to an execution graph (MIR).
     ///
     /// Returns an error if there are semantic errors or no semantic model.
@@ -170,8 +289,17 @@ impl Compilation {
             .as_ref()
             .ok_or(CompileError::NoSemanticModel)?;
 
+        // Build file_id -> directory mapping for @fileconstant path resolution
+        let file_paths: std::collections::HashMap<usize, std::path::PathBuf> = self
+            .source_files
+            .iter()
+            .enumerate()
+            .filter_map(|(file_id, sf)| sf.directory().map(|dir| (file_id, dir)))
+            .collect();
+
         let root = model.root();
-        let result = kestrel_execution_graph_lowering::lower_module(model, root);
+        let result =
+            kestrel_execution_graph_lowering::lower_module_with_file_paths(model, root, file_paths);
 
         if result.has_errors() {
             return Err(CompileError::LoweringFailed(result.diagnostics));
@@ -302,6 +430,8 @@ impl IntoDiagnostic for LexError {
 struct ParseErrorDiagnostic {
     message: String,
     span: Option<Span>,
+    expected: Vec<String>,
+    found: Option<String>,
 }
 
 impl IntoDiagnostic for ParseErrorDiagnostic {
@@ -310,9 +440,34 @@ impl IntoDiagnostic for ParseErrorDiagnostic {
 
         // Add span label if available
         if let Some(span) = &self.span {
+            // Create a more specific label based on what we know
+            let label_message = if !self.expected.is_empty() {
+                if self.expected.len() == 1 {
+                    format!("expected {}", self.expected[0])
+                } else if self.expected.len() <= 3 {
+                    format!("expected one of: {}", self.expected.join(", "))
+                } else {
+                    format!(
+                        "expected one of: {}, or {} others",
+                        self.expected[..2].join(", "),
+                        self.expected.len() - 2
+                    )
+                }
+            } else if self.found.is_some() {
+                "unexpected token".to_string()
+            } else {
+                "error occurred here".to_string()
+            };
+
             diagnostic = diagnostic.with_labels(vec![
-                Label::primary(span.file_id, span.range()).with_message("error occurred here"),
+                Label::primary(span.file_id, span.range()).with_message(label_message),
             ]);
+        }
+
+        // Add suggestion as a note if we can generate one
+        if let Some(suggestion) = kestrel_parser::suggest_fix(self.found.as_deref(), &self.expected)
+        {
+            diagnostic = diagnostic.with_notes(vec![format!("help: {}", suggestion)]);
         }
 
         diagnostic

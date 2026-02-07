@@ -22,9 +22,30 @@
 | Type resolution (BIND) | `lib/kestrel-semantic-tree-binder/src/resolution/type_resolver.rs` |
 | Add analyzer (VALIDATE) | `lib/kestrel-semantic-analyzers/src/analyzers/{name}/mod.rs` |
 | Register analyzer (VALIDATE) | `lib/kestrel-semantic-analyzers/src/lib.rs` |
+| Type representation | `lib/kestrel-semantic-tree/src/ty/mod.rs` (Ty, TyId) |
+| Type variants | `lib/kestrel-semantic-tree/src/ty/kind.rs` (TyKind enum) |
+| Type substitutions | `lib/kestrel-semantic-tree/src/ty/substitutions.rs` (Substitutions) |
+| Self type substitution | `lib/kestrel-semantic-tree/src/ty/mod.rs` → `substitute_self()` |
+| Type alias expansion | `lib/kestrel-semantic-tree/src/ty/mod.rs` → `expand_aliases()` |
+| Where clauses | `lib/kestrel-semantic-tree/src/ty/where_clause.rs` |
+| Inference context | `lib/kestrel-semantic-type-inference/src/context.rs` |
+| Constraint types | `lib/kestrel-semantic-type-inference/src/constraint.rs` |
+| Constraint generation | `lib/kestrel-semantic-type-inference/src/constraint_generator.rs` |
+| Constraint solver | `lib/kestrel-semantic-type-inference/src/solver.rs` |
+| Type oracle trait | `lib/kestrel-semantic-type-inference/src/oracle.rs` |
+| Solution application | `lib/kestrel-semantic-type-inference/src/apply.rs` |
+| TypeInference analyzer | `lib/kestrel-semantic-analyzers/src/analyzers/type_inference/mod.rs` |
+| Pattern exhaustiveness | `lib/kestrel-semantic-pattern-matching/src/lib.rs` |
+| MIR types | `lib/kestrel-execution-graph/src/lib.rs` |
+| MIR lowering entry point | `lib/kestrel-execution-graph-lowering/src/lib.rs` |
+| Codegen entry point | `lib/kestrel-codegen-cranelift/src/lib.rs` |
+| Monomorphization | `lib/kestrel-codegen-cranelift/src/monomorphize.rs` |
+| Type layout / mangling | `lib/kestrel-codegen/src/lib.rs` |
 | Primitive types | `lib/kestrel-prelude/src/lib.rs` |
 | Add integration test | `lib/kestrel-test-suite/tests/{name}.rs` |
 | Test utilities | `lib/kestrel-test-suite/src/lib.rs` |
+| Stdlib source | `lang/std/{module}/{type}.ks` |
+| Stdlib tests | `lib/kestrel-test-suite/tests/stdlib/{type}.rs` |
 
 ## Common Imports
 

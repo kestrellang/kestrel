@@ -13,18 +13,20 @@ struct RcBoxStorage[T] {
     var value: T
 }
 
-// RcBox[T] - reference-counted heap allocation
-// Used for implementing copy-on-write semantics in types like String and Array
+/// A reference-counted heap allocation for implementing copy-on-write semantics.
+/// Used internally by types like String, Array, and Dictionary to enable
+/// efficient copies that share storage until mutation occurs.
 public struct RcBox[T] {
     private var ptr: Pointer[RcBoxStorage[T]]
 
-    // Create new RcBox with initial value
+    /// Creates a new RcBox containing the given value.
+    /// Allocates heap storage with an initial reference count of 1.
     public init(value: T) {
         let layout: Layout = Layout.of[RcBoxStorage[T]]();
         var allocator: SystemAllocator = SystemAllocator();
-        let result: Optional[RawPointer] = allocator.allocate(layout);
-        if result.isSome() {
-            self.ptr = result.unwrap().cast[RcBoxStorage[T]]();
+        let result: RawPointer? = allocator.allocate(layout);
+        if let .Some(rawPtr) = result {
+            self.ptr = rawPtr.cast[RcBoxStorage[T]]();
             self.ptr.write(RcBoxStorage(refCount: Int64(intLiteral: 1), value: value));
         } else {
             lang.panic("RcBox allocation failed")
@@ -36,29 +38,31 @@ public struct RcBox[T] {
         self.ptr = inner;
     }
 
-    // Access the stored value
+    /// Returns the stored value.
     public func getValue() -> T {
         self.ptr.read().value
     }
 
-    // Set the stored value (for in-place mutation)
+    /// Sets the stored value (for in-place mutation when unique).
     public func setValue(value: T) {
         var storage = self.ptr.read();
         storage.value = value;
         self.ptr.write(storage);
     }
 
-    // Check if this is the only reference
+    /// Returns true if this is the only reference to the storage.
+    /// Used to determine if mutation requires copying.
     public func isUnique() -> Bool {
         self.ptr.read().refCount == Int64(intLiteral: 1)
     }
 
-    // Get current reference count
+    /// Returns the current reference count.
     public func refCount() -> Int64 {
         self.ptr.read().refCount
     }
 
-    // Shallow clone - increments refcount, shares storage
+    /// Creates a shallow clone that shares storage.
+    /// Increments the reference count without copying the value.
     public func clone() -> RcBox[T] {
         // TODO: Should use atomic increment
         var storage = self.ptr.read();
@@ -67,9 +71,10 @@ public struct RcBox[T] {
         RcBox(inner: self.ptr)
     }
 
-    // Deep clone - creates new storage with cloned value
-    public func deepClone() -> RcBox[T] where T: Cloneable {
-        RcBox(self.ptr.read().value.clone())
+    /// Creates a deep clone with new storage and a copied value.
+    /// Used when mutation is needed on shared storage.
+    public func deepClone() -> RcBox[T] {
+        RcBox(self.ptr.read().value)
     }
 
     // Release reference (called by deinit)
@@ -88,6 +93,7 @@ public struct RcBox[T] {
         }
     }
 
+    /// Destructor: decrements reference count and deallocates when zero.
     deinit {
         self.release()
     }

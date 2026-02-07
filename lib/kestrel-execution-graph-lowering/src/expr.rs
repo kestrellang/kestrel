@@ -8,21 +8,28 @@ use kestrel_execution_graph::{
     BinOp, CallArg, Callee, CastKind, Id, Immediate, Local, MirTy, PassingMode, Place,
     QualifiedNameData, Rvalue, UnOp, Value,
 };
-use kestrel_semantic_model::{StructFields, SymbolFor};
+use kestrel_semantic_model::{ResolvedAliasedType, StructFields, SymbolFor};
+use kestrel_semantic_tree::behavior::FileConstantBehavior;
 use kestrel_semantic_tree::behavior::callable::{
     CallableBehavior, ParameterAccessMode, ReceiverKind,
 };
+use kestrel_semantic_tree::behavior::executable::ResolvedExecutableBehavior;
 use kestrel_semantic_tree::expr::{
-    CallArgument, ElseBranch, ExprKind, Expression, IfCondition, LiteralValue, PrimitiveMethod,
+    CallArgument, ElseBranch, ExprKind, Expression, IfCondition, InterpolationPart, LiteralValue,
+    PrimitiveMethod,
 };
 use kestrel_semantic_tree::symbol::field::FieldSymbol;
+use kestrel_semantic_tree::symbol::getter::GetterSymbol;
 use kestrel_semantic_tree::symbol::initializer::InitializerSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
-use kestrel_semantic_tree::ty::{Ty, TyKind};
+use kestrel_semantic_tree::ty::{Substitutions, Ty, TyKind};
+use semantic_tree::symbol::Symbol;
 use semantic_tree::symbol::SymbolId;
 
 use crate::context::LoweringContext;
 use crate::error::LoweringError;
+use crate::format_spec::{Alignment, FormatSpec, FormatType, parse_format_spec};
+use crate::lowerer::get_subscript_type_parameters;
 use crate::name::qualified_name_for_symbol;
 use crate::stmt::lower_statement;
 use crate::ty::{lower_type, make_float_immediate, make_int_immediate, make_int_zero_for_mir_ty};
@@ -95,7 +102,8 @@ fn emit_clone_call(ctx: &mut LoweringContext, value: &Value, ty: &Ty) -> Value {
     };
 
     // Create the witness callee: witness_method Cloneable.clone for T
-    let callee = Callee::witness(protocol_name, "clone", mir_ty);
+    // clone() has no method-level type parameters
+    let callee = Callee::witness(protocol_name, "clone", mir_ty, vec![]);
 
     // The clone method takes `self` by borrow (ref), so pass with PassingMode::Ref
     let call_args = vec![CallArg::borrow(value.clone())];
@@ -240,6 +248,160 @@ fn build_call_args(
     }
 }
 
+/// Infer method type parameter substitutions by matching parameter types against argument types.
+///
+/// This supplements explicit substitutions with inferred mappings for method-level type params,
+/// using the call site's argument types.
+fn infer_type_param_substitutions_from_call(
+    base_subs: &Substitutions,
+    callable: &CallableBehavior,
+    arg_types: &[&Ty],
+    is_instance_method: bool,
+    receiver_ty: Option<&Ty>,
+    method_param_ids: &[SymbolId],
+) -> Substitutions {
+    use std::collections::HashSet;
+
+    if method_param_ids.is_empty() {
+        return base_subs.clone();
+    }
+
+    let mut subs = base_subs.clone();
+    let method_param_set: HashSet<SymbolId> = method_param_ids.iter().copied().collect();
+    let param_offset = if is_instance_method { 1 } else { 0 };
+
+    for (param_index, param) in callable.parameters().iter().enumerate() {
+        let arg_index = param_index + param_offset;
+        let Some(arg_ty) = arg_types.get(arg_index).copied() else {
+            continue;
+        };
+
+        let mut param_ty = param.ty.apply_substitutions(&subs);
+        if let Some(self_ty) = receiver_ty {
+            param_ty = param_ty.substitute_self(self_ty);
+        }
+
+        collect_type_param_substitutions(&param_ty, arg_ty, &method_param_set, &mut subs);
+    }
+
+    subs
+}
+
+fn collect_type_param_substitutions(
+    param_ty: &Ty,
+    arg_ty: &Ty,
+    method_param_ids: &std::collections::HashSet<SymbolId>,
+    subs: &mut Substitutions,
+) {
+    use semantic_tree::symbol::Symbol;
+
+    match param_ty.kind() {
+        TyKind::TypeParameter(param_symbol) => {
+            let param_id = Symbol::metadata(param_symbol.as_ref()).id();
+            if method_param_ids.contains(&param_id) && !subs.contains(param_id) {
+                subs.insert(param_id, arg_ty.clone());
+            }
+        },
+        TyKind::Tuple(param_elems) => {
+            if let Some(arg_elems) = arg_ty.as_tuple() {
+                for (p, a) in param_elems.iter().zip(arg_elems.iter()) {
+                    collect_type_param_substitutions(p, a, method_param_ids, subs);
+                }
+            }
+        },
+        TyKind::Function {
+            params: param_params,
+            return_type: param_ret,
+        } => {
+            if let TyKind::Function {
+                params: arg_params,
+                return_type: arg_ret,
+            } = arg_ty.kind()
+                && param_params.len() == arg_params.len()
+            {
+                for (p, a) in param_params.iter().zip(arg_params.iter()) {
+                    collect_type_param_substitutions(p, a, method_param_ids, subs);
+                }
+                collect_type_param_substitutions(param_ret, arg_ret, method_param_ids, subs);
+            }
+        },
+        TyKind::Pointer(param_inner) => {
+            if let TyKind::Pointer(arg_inner) = arg_ty.kind() {
+                collect_type_param_substitutions(param_inner, arg_inner, method_param_ids, subs);
+            }
+        },
+        TyKind::Struct {
+            symbol: param_sym,
+            substitutions: param_subs,
+        } => {
+            if let TyKind::Struct {
+                symbol: arg_sym,
+                substitutions: arg_subs,
+            } = arg_ty.kind()
+                && param_sym.metadata().id() == arg_sym.metadata().id()
+            {
+                for (key, p_sub) in param_subs.iter() {
+                    if let Some(a_sub) = arg_subs.get(*key) {
+                        collect_type_param_substitutions(p_sub, a_sub, method_param_ids, subs);
+                    }
+                }
+            }
+        },
+        TyKind::Enum {
+            symbol: param_sym,
+            substitutions: param_subs,
+        } => {
+            if let TyKind::Enum {
+                symbol: arg_sym,
+                substitutions: arg_subs,
+            } = arg_ty.kind()
+                && param_sym.metadata().id() == arg_sym.metadata().id()
+            {
+                for (key, p_sub) in param_subs.iter() {
+                    if let Some(a_sub) = arg_subs.get(*key) {
+                        collect_type_param_substitutions(p_sub, a_sub, method_param_ids, subs);
+                    }
+                }
+            }
+        },
+        TyKind::Protocol {
+            symbol: param_sym,
+            substitutions: param_subs,
+        } => {
+            if let TyKind::Protocol {
+                symbol: arg_sym,
+                substitutions: arg_subs,
+            } = arg_ty.kind()
+                && param_sym.metadata().id() == arg_sym.metadata().id()
+            {
+                for (key, p_sub) in param_subs.iter() {
+                    if let Some(a_sub) = arg_subs.get(*key) {
+                        collect_type_param_substitutions(p_sub, a_sub, method_param_ids, subs);
+                    }
+                }
+            }
+        },
+        TyKind::TypeAlias {
+            symbol: param_sym,
+            substitutions: param_subs,
+        } => {
+            if let TyKind::TypeAlias {
+                symbol: arg_sym,
+                substitutions: arg_subs,
+            } = arg_ty.kind()
+                && param_sym.metadata().id() == arg_sym.metadata().id()
+            {
+                for (key, p_sub) in param_subs.iter() {
+                    if let Some(a_sub) = arg_subs.get(*key) {
+                        collect_type_param_substitutions(p_sub, a_sub, method_param_ids, subs);
+                    }
+                }
+            }
+        },
+        _ => {},
+    }
+}
+
 /// Create a reference (or mutable reference) to a value.
 ///
 /// For values that are already places, emits `Rvalue::Ref` or `Rvalue::RefMut`.
@@ -359,6 +521,100 @@ fn build_indirect_call_args(
         .collect()
 }
 
+fn witness_method_key_from_callable(
+    base_name: &str,
+    callable: Option<&CallableBehavior>,
+) -> String {
+    let Some(callable) = callable else {
+        return base_name.to_string();
+    };
+    format!("{}#{}", base_name, callable.parameters().len())
+}
+
+/// Fill in default arguments for a call if any are missing.
+///
+/// Returns an extended `Vec<CallArgument>` that includes default expressions
+/// for any missing parameters. If no defaults are needed, returns None to
+/// indicate the original arguments can be used.
+///
+/// # Arguments
+/// * `ctx` - The lowering context (for symbol queries)
+/// * `arguments` - The arguments provided at the call site
+/// * `symbol_id` - The symbol ID of the callee (function/method/initializer)
+/// * `substitutions` - Type substitutions for the call (for generic functions)
+fn fill_default_arguments(
+    ctx: &LoweringContext,
+    arguments: &[CallArgument],
+    symbol_id: SymbolId,
+    substitutions: &Substitutions,
+) -> Option<Vec<CallArgument>> {
+    use kestrel_span::Span;
+
+    // Look up the symbol
+    let symbol = ctx.model.query(SymbolFor { id: symbol_id })?;
+
+    // Get callable behavior to know the expected parameters
+    let callable = symbol.metadata().get_behavior::<CallableBehavior>()?;
+    let params = callable.parameters();
+
+    // If we have all parameters, no need to fill defaults
+    if arguments.len() >= params.len() {
+        return None;
+    }
+
+    // Get default values from ResolvedExecutableBehavior or ExecutableBehavior
+    // Protocol method declarations may only have ExecutableBehavior, not ResolvedExecutableBehavior
+    // Clone the defaults into a Vec so we own them
+    use kestrel_semantic_tree::behavior::executable::ExecutableBehavior;
+    let default_values: Vec<Option<Expression>> = if let Some(resolved_exec) =
+        symbol
+            .metadata()
+            .get_behavior::<ResolvedExecutableBehavior>()
+    {
+        resolved_exec.default_values().to_vec()
+    } else if let Some(exec_beh) = symbol.metadata().get_behavior::<ExecutableBehavior>() {
+        exec_beh.default_values().to_vec()
+    } else {
+        // No executable behavior - can't fill defaults
+        return None;
+    };
+
+    // Build the extended arguments list
+    let mut filled_args: Vec<CallArgument> = arguments.to_vec();
+
+    // For each missing parameter, try to get its default value
+    for (i, _param) in params.iter().enumerate().skip(arguments.len()) {
+        // Get the default expression for this parameter
+        let default_expr = match default_values.get(i) {
+            Some(Some(expr)) => expr,
+            _ => {
+                // No default available - this shouldn't happen if semantic analysis
+                // validated the call correctly, but we can't fill it in
+                return None;
+            },
+        };
+
+        // Apply type substitutions to the default expression
+        // This handles cases like `func foo[T](x: T = T.default())` called as `foo[Int]()`
+        let substituted_expr = default_expr.apply_substitutions(substitutions);
+
+        // Get the label for this parameter (if any)
+        let param = &params[i];
+        let label = param.external_label().map(|s| s.to_string());
+
+        // Create a CallArgument from the default expression
+        let call_arg = CallArgument {
+            label,
+            value: substituted_expr,
+            span: Span::new(0, 0..0), // Synthetic span for default argument
+        };
+
+        filled_args.push(call_arg);
+    }
+
+    Some(filled_args)
+}
+
 /// Lower an expression to a MIR Value.
 ///
 /// This may generate statements in the current block and potentially
@@ -414,12 +670,72 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
                             lower_function_ref_as_value(ctx, &sym, &expr.ty, &expr.span)
                         },
                         KestrelSymbolKind::Field => {
-                            // Global variable access - not yet supported
-                            ctx.emit_error(LoweringError::unsupported_expr(
-                                "global variable access",
-                                expr.span.clone(),
-                            ));
-                            Value::Immediate(Immediate::error())
+                            // Global/module-level field or static field accessed by name
+                            // (e.g., `globalLet` at module scope or `_s` in a static context)
+                            //
+                            // This is similar to static field access via TypeRef, but the
+                            // field is accessed directly by name rather than through a type.
+
+                            // Check if this is a computed property
+                            let is_computed = sym
+                                .as_ref()
+                                .downcast_ref::<FieldSymbol>()
+                                .map(|f| f.is_computed())
+                                .unwrap_or(false);
+
+                            if is_computed {
+                                // Computed property - need to call the getter
+                                // Look up the getter symbol
+                                let getter_id = sym
+                                    .as_ref()
+                                    .downcast_ref::<FieldSymbol>()
+                                    .and_then(|f| f.getter());
+
+                                if let Some(getter_id) = getter_id {
+                                    // Generate a call to the getter with no receiver
+                                    // (static computed property)
+                                    return lower_static_getter_call(ctx, getter_id, expr);
+                                } else {
+                                    ctx.emit_error(LoweringError::internal(
+                                        "computed property has no getter",
+                                        Some(expr.span.clone()),
+                                    ));
+                                    return Value::Immediate(Immediate::error());
+                                }
+                            }
+
+                            // Stored field - create a global place reference
+                            // Build the qualified name for the field
+                            let name_id = qualified_name_for_symbol(ctx, &sym);
+
+                            // Register the static in MIR if not already registered
+                            let static_exists =
+                                ctx.mir.statics.iter().any(|(_, def)| def.name == name_id);
+                            if !static_exists {
+                                let mir_ty = lower_type(ctx, &expr.ty);
+                                // Check if this is a file constant
+                                if let Some(fc_behavior) =
+                                    sym.metadata().get_behavior::<FileConstantBehavior>()
+                                {
+                                    // Extract element type from LiteralSlice[T]
+                                    let element_ty =
+                                        extract_literal_slice_element_type(ctx, &expr.ty);
+                                    // Get base path from the symbol's span file_id
+                                    let file_id = sym.metadata().span().file_id;
+                                    let base_path = ctx.file_directory(file_id).cloned();
+                                    ctx.mir.add_file_constant_static(
+                                        name_id,
+                                        mir_ty,
+                                        fc_behavior.relative_path().to_string(),
+                                        element_ty,
+                                        base_path,
+                                    );
+                                } else {
+                                    ctx.mir.add_static(name_id, mir_ty);
+                                }
+                            }
+
+                            Value::Place(Place::global(name_id))
                         },
                         _ => {
                             ctx.emit_error(LoweringError::unsupported_expr(
@@ -442,8 +758,75 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
 
         // === Field Access ===
         ExprKind::FieldAccess { object, field } => {
+            // Check if this is a static field access via TypeRef (e.g., Foo.staticField)
+            if matches!(object.kind, ExprKind::TypeRef(_)) {
+                // Static field access - need to find the field symbol and create a global place
+                let field_info = find_field_info(ctx, &object.ty, field);
+
+                if let Some((field_id, is_computed)) = field_info {
+                    if is_computed {
+                        // Static computed property - generate a getter call
+                        return lower_getter_call(ctx, object, field_id, field, expr);
+                    } else {
+                        // Static stored field - create a global place reference
+                        // Get the field symbol to build the qualified name and type
+                        let field_symbol = match ctx.model.query(SymbolFor { id: field_id }) {
+                            Some(sym) => sym,
+                            None => {
+                                ctx.emit_error(LoweringError::internal(
+                                    format!("static field symbol not found: {:?}", field_id),
+                                    Some(expr.span.clone()),
+                                ));
+                                return Value::Immediate(Immediate::error());
+                            },
+                        };
+
+                        // Build the qualified name for the static field
+                        let name_id = qualified_name_for_symbol(ctx, &field_symbol);
+
+                        // Register the static in MIR if not already registered
+                        // Check if this static already exists
+                        let static_exists =
+                            ctx.mir.statics.iter().any(|(_, def)| def.name == name_id);
+                        if !static_exists {
+                            // Get the field type and lower it
+                            let field_ty = &expr.ty;
+                            let mir_ty = lower_type(ctx, field_ty);
+                            // Check if this is a file constant
+                            if let Some(fc_behavior) = field_symbol
+                                .metadata()
+                                .get_behavior::<FileConstantBehavior>()
+                            {
+                                // Extract element type from LiteralSlice[T]
+                                let element_ty = extract_literal_slice_element_type(ctx, field_ty);
+                                // Get base path from the symbol's span file_id
+                                let file_id = field_symbol.metadata().span().file_id;
+                                let base_path = ctx.file_directory(file_id).cloned();
+                                ctx.mir.add_file_constant_static(
+                                    name_id,
+                                    mir_ty,
+                                    fc_behavior.relative_path().to_string(),
+                                    element_ty,
+                                    base_path,
+                                );
+                            } else {
+                                ctx.mir.add_static(name_id, mir_ty);
+                            }
+                        }
+
+                        return Value::Place(Place::global(name_id));
+                    }
+                } else {
+                    ctx.emit_error(LoweringError::internal(
+                        format!("static field '{}' not found in type", field),
+                        Some(expr.span.clone()),
+                    ));
+                    return Value::Immediate(Immediate::error());
+                }
+            }
+
+            // Instance field access
             // Check if this is a computed property access
-            // First, try to find the field symbol from the object's type
             let field_info = find_field_info(ctx, &object.ty, field);
 
             if let Some((field_id, is_computed)) = field_info
@@ -502,6 +885,38 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
                 }
             }
 
+            // Check if target is a SymbolRef pointing to a computed field (module-level computed property)
+            if let ExprKind::SymbolRef(symbol_id) = &target.kind
+                && let Some(symbol) = ctx.model.query(SymbolFor { id: *symbol_id })
+                && symbol.metadata().kind() == KestrelSymbolKind::Field
+            {
+                // Check if it's a computed property
+                let is_computed = symbol
+                    .as_ref()
+                    .downcast_ref::<FieldSymbol>()
+                    .map(|f| f.is_computed())
+                    .unwrap_or(false);
+
+                if is_computed {
+                    // Get the setter ID
+                    let setter_id = symbol
+                        .as_ref()
+                        .downcast_ref::<FieldSymbol>()
+                        .and_then(|f| f.setter());
+
+                    if let Some(setter_id) = setter_id {
+                        // Generate a call to the setter
+                        return lower_static_setter_call(ctx, setter_id, value, expr);
+                    } else {
+                        ctx.emit_error(LoweringError::internal(
+                            "computed property has no setter",
+                            Some(expr.span.clone()),
+                        ));
+                        return Value::Immediate(Immediate::error());
+                    }
+                }
+            }
+
             // Check if target is a subscript call (subscript assignment)
             if let ExprKind::SubscriptCall {
                 receiver,
@@ -511,6 +926,26 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
             {
                 // Subscript assignment - generate a setter call
                 return lower_subscript_setter_call(ctx, receiver, *getter, arguments, value, expr);
+            }
+
+            // Check if target is a protocol property access (witness dispatch setter)
+            if let ExprKind::ProtocolPropertyAccess {
+                receiver,
+                property_name,
+                protocol_id,
+                is_static,
+                ..
+            } = &target.kind
+            {
+                return lower_protocol_property_setter(
+                    ctx,
+                    receiver,
+                    property_name,
+                    *protocol_id,
+                    *is_static,
+                    value,
+                    expr,
+                );
             }
 
             // Not a computed property or subscript - use direct assignment
@@ -605,32 +1040,70 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
 
         ExprKind::While {
             loop_id,
-            label: _,
+            label,
             condition,
             body,
-        } => lower_while(ctx, *loop_id, condition, body, expr),
+        } => lower_while(
+            ctx,
+            *loop_id,
+            label.as_ref().map(|l| l.name.clone()),
+            condition,
+            body,
+            expr,
+        ),
 
         ExprKind::Loop {
             loop_id,
-            label: _,
+            label,
             body,
-        } => lower_loop(ctx, *loop_id, body, expr),
+        } => lower_loop(
+            ctx,
+            *loop_id,
+            label.as_ref().map(|l| l.name.clone()),
+            body,
+            expr,
+        ),
 
         ExprKind::WhileLet {
             loop_id,
-            label: _,
+            label,
             conditions,
             body,
-        } => lower_while_let(ctx, *loop_id, conditions, body),
+            ..
+        } => lower_while_let(
+            ctx,
+            *loop_id,
+            label.as_ref().map(|l| l.name.clone()),
+            conditions,
+            body,
+        ),
 
-        ExprKind::Break { loop_id, label: _ } => {
+        ExprKind::Break { loop_id, label } => {
             // Find the target loop and jump to its exit block
-            if let Some(loop_info) = ctx.find_loop(*loop_id) {
+            let loop_info = ctx.find_loop(*loop_id).or_else(|| {
+                label
+                    .as_ref()
+                    .and_then(|l| ctx.find_loop_by_label(l.name.as_str()))
+                    .or_else(|| ctx.innermost_loop())
+            });
+            if let Some(loop_info) = loop_info {
                 let exit_block = loop_info.exit_block;
                 // Emit deinits for scopes between current and target loop
-                ctx.emit_deinits_to_loop(*loop_id);
+                ctx.emit_deinits_to_loop(loop_info.loop_id);
                 ctx.emit_jump(exit_block);
             } else {
+                if std::env::var("KESTREL_DEBUG_LOOPS").is_ok() {
+                    let func_name = ctx
+                        .current_function()
+                        .map(|fid| ctx.mir.name(ctx.mir.function(fid).name).to_string())
+                        .unwrap_or_else(|| "<none>".to_string());
+                    eprintln!(
+                        "break loop not found in {}: {:?}, stack={:?}",
+                        func_name,
+                        loop_id,
+                        ctx.loop_stack_ids()
+                    );
+                }
                 ctx.emit_error(LoweringError::internal(
                     "break: loop not found in loop stack",
                     Some(expr.span.clone()),
@@ -640,12 +1113,18 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
             Value::Unreachable
         },
 
-        ExprKind::Continue { loop_id, label: _ } => {
+        ExprKind::Continue { loop_id, label } => {
             // Find the target loop and jump to its header block
-            if let Some(loop_info) = ctx.find_loop(*loop_id) {
+            let loop_info = ctx.find_loop(*loop_id).or_else(|| {
+                label
+                    .as_ref()
+                    .and_then(|l| ctx.find_loop_by_label(l.name.as_str()))
+                    .or_else(|| ctx.innermost_loop())
+            });
+            if let Some(loop_info) = loop_info {
                 let header_block = loop_info.header_block;
                 // Emit deinits for scopes between current and target loop
-                ctx.emit_deinits_to_loop(*loop_id);
+                ctx.emit_deinits_to_loop(loop_info.loop_id);
                 ctx.emit_jump(header_block);
             } else {
                 ctx.emit_error(LoweringError::internal(
@@ -673,6 +1152,12 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
             ctx.emit_return(ret_value);
             // Return diverges - this value is never used (block is terminated)
             Value::Unreachable
+        },
+
+        // Throw should have been desugared to return by the binder
+        // This arm should never be reached in practice
+        ExprKind::Throw { .. } => {
+            panic!("Throw expression should have been desugared to return by the binder")
         },
 
         // === Match Expressions ===
@@ -726,6 +1211,8 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
 
         // === Other ===
         ExprKind::Array(elements) => lower_array_literal(ctx, elements, expr),
+
+        ExprKind::Dictionary(pairs) => lower_dictionary_literal(ctx, pairs, expr),
 
         ExprKind::Tuple(elements) => {
             // Lower each element
@@ -857,6 +1344,15 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
             // Should be resolved by type inference
             ctx.emit_error(LoweringError::internal(
                 format!("unresolved deferred method call '.{}'", method_name),
+                Some(expr.span.clone()),
+            ));
+            Value::Immediate(Immediate::error())
+        },
+
+        ExprKind::DeferredStaticCall { method_name, .. } => {
+            // Should be resolved by type inference
+            ctx.emit_error(LoweringError::internal(
+                format!("unresolved deferred static call '.{}'", method_name),
                 Some(expr.span.clone()),
             ));
             Value::Immediate(Immediate::error())
@@ -1029,6 +1525,10 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
                     let un_op = match op {
                         IntUnaryOp::Neg => UnOp::Neg,
                         IntUnaryOp::Not => UnOp::Not,
+                        IntUnaryOp::Popcount => UnOp::Popcount,
+                        IntUnaryOp::Clz => UnOp::Clz,
+                        IntUnaryOp::Ctz => UnOp::Ctz,
+                        IntUnaryOp::Bswap => UnOp::Bswap,
                     };
 
                     let result_ty = lower_type(ctx, &expr.ty);
@@ -1168,6 +1668,52 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
                             bits,
                             op: math_kind,
                             operand,
+                        },
+                    );
+                    Value::Place(Place::local(result))
+                },
+                LangIntrinsic::FloatFma { primitive } => {
+                    use kestrel_execution_graph::function::FloatBits;
+                    use kestrel_semantic_tree::expr::LangPrimitive;
+
+                    let a = lower_expression(ctx, &arguments[0].value);
+                    let b = lower_expression(ctx, &arguments[1].value);
+                    let c = lower_expression(ctx, &arguments[2].value);
+
+                    let bits = match primitive {
+                        LangPrimitive::F16 => FloatBits::F16,
+                        LangPrimitive::F32 => FloatBits::F32,
+                        LangPrimitive::F64 => FloatBits::F64,
+                        _ => unreachable!("float fma on non-float primitive"),
+                    };
+
+                    let result_ty = lower_type(ctx, &expr.ty);
+                    let result = ctx.create_temp("float_fma", result_ty);
+                    ctx.emit_assign(Place::local(result), Rvalue::FloatFma { bits, a, b, c });
+                    Value::Place(Place::local(result))
+                },
+                LangIntrinsic::FloatCopysign { primitive } => {
+                    use kestrel_execution_graph::function::FloatBits;
+                    use kestrel_semantic_tree::expr::LangPrimitive;
+
+                    let magnitude = lower_expression(ctx, &arguments[0].value);
+                    let sign_source = lower_expression(ctx, &arguments[1].value);
+
+                    let bits = match primitive {
+                        LangPrimitive::F16 => FloatBits::F16,
+                        LangPrimitive::F32 => FloatBits::F32,
+                        LangPrimitive::F64 => FloatBits::F64,
+                        _ => unreachable!("float copysign on non-float primitive"),
+                    };
+
+                    let result_ty = lower_type(ctx, &expr.ty);
+                    let result = ctx.create_temp("float_copysign", result_ty);
+                    ctx.emit_assign(
+                        Place::local(result),
+                        Rvalue::FloatCopysign {
+                            bits,
+                            magnitude,
+                            sign_source,
                         },
                     );
                     Value::Place(Place::local(result))
@@ -1369,11 +1915,551 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
             Value::Immediate(Immediate::error())
         },
 
+        // === Protocol Property Access (via witness table) ===
+        ExprKind::ProtocolPropertyAccess {
+            receiver,
+            field_id: _,
+            property_name,
+            protocol_id,
+            is_static,
+            has_setter: _,
+        } => {
+            // Access a computed property on a type parameter through witness dispatch
+            lower_protocol_property_access(
+                ctx,
+                receiver,
+                property_name,
+                *protocol_id,
+                *is_static,
+                expr,
+            )
+        },
+
+        ExprKind::InterpolatedString { parts } => lower_interpolated_string(ctx, parts, expr),
+
         ExprKind::Error => {
             // Error expression - return error value (error already reported)
             Value::Immediate(Immediate::error())
         },
     }
+}
+
+/// Build FormatOptions struct fields from a parsed format spec.
+///
+/// Maps parsed format spec values to FormatOptions struct field values.
+fn build_format_options_fields(
+    ctx: &mut LoweringContext,
+    spec: &FormatSpec,
+    _span: &kestrel_span::Span,
+) -> Vec<(String, Value)> {
+    let mut fields: Vec<(String, Value)> = Vec::new();
+
+    // Get type IDs needed for construction
+    let i64_ty = ctx.mir.ty_i64();
+
+    // Build Optional[Int64] type for width and precision fields
+    let optional_name = ctx.mir.intern_name(QualifiedNameData::new(vec![
+        "std".to_string(),
+        "result".to_string(),
+        "Optional".to_string(),
+    ]));
+    let optional_i64_ty = ctx.mir.ty_named(optional_name, vec![i64_ty]);
+
+    // width: Int64?
+    let width_value = if let Some(w) = spec.width {
+        // Create Some(w)
+        let some_local = ctx.create_temp("width_some", optional_i64_ty);
+        let some_place = Place::local(some_local);
+        let width_imm = Value::Immediate(Immediate::i64(w as i64));
+        ctx.emit_assign(
+            some_place.clone(),
+            Rvalue::EnumVariant {
+                enum_ty: optional_i64_ty,
+                variant: "Some".to_string(),
+                payload: vec![width_imm],
+            },
+        );
+        Value::Place(some_place)
+    } else {
+        // Create None
+        let none_local = ctx.create_temp("width_none", optional_i64_ty);
+        let none_place = Place::local(none_local);
+        ctx.emit_assign(
+            none_place.clone(),
+            Rvalue::EnumVariant {
+                enum_ty: optional_i64_ty,
+                variant: "None".to_string(),
+                payload: vec![],
+            },
+        );
+        Value::Place(none_place)
+    };
+    fields.push(("width".to_string(), width_value));
+
+    // precision: Int64?
+    let precision_value = if let Some(p) = spec.precision {
+        // Create Some(p)
+        let some_local = ctx.create_temp("precision_some", optional_i64_ty);
+        let some_place = Place::local(some_local);
+        let precision_imm = Value::Immediate(Immediate::i64(p as i64));
+        ctx.emit_assign(
+            some_place.clone(),
+            Rvalue::EnumVariant {
+                enum_ty: optional_i64_ty,
+                variant: "Some".to_string(),
+                payload: vec![precision_imm],
+            },
+        );
+        Value::Place(some_place)
+    } else {
+        // Create None
+        let none_local = ctx.create_temp("precision_none", optional_i64_ty);
+        let none_place = Place::local(none_local);
+        ctx.emit_assign(
+            none_place.clone(),
+            Rvalue::EnumVariant {
+                enum_ty: optional_i64_ty,
+                variant: "None".to_string(),
+                payload: vec![],
+            },
+        );
+        Value::Place(none_place)
+    };
+    fields.push(("precision".to_string(), precision_value));
+
+    // alignment: Alignment
+    let alignment_name = ctx.mir.intern_name(QualifiedNameData::new(vec![
+        "std".to_string(),
+        "text".to_string(),
+        "Alignment".to_string(),
+    ]));
+    let alignment_ty = ctx.mir.ty_named(alignment_name, vec![]);
+    let alignment_local = ctx.create_temp("alignment", alignment_ty);
+    let alignment_place = Place::local(alignment_local);
+    let alignment_variant = match spec.alignment {
+        Alignment::Left => "Left",
+        Alignment::Right => "Right",
+        Alignment::Center => "Center",
+    };
+    ctx.emit_assign(
+        alignment_place.clone(),
+        Rvalue::EnumVariant {
+            enum_ty: alignment_ty,
+            variant: alignment_variant.to_string(),
+            payload: vec![],
+        },
+    );
+    fields.push(("alignment".to_string(), Value::Place(alignment_place)));
+
+    // fill: Char (represented as i32 in MIR)
+    let fill_value = Value::Immediate(Immediate::i32(spec.fill as i32));
+    fields.push(("fill".to_string(), fill_value));
+
+    // radix: Int64 - determined by format type
+    let radix: i64 = match spec.format_type {
+        FormatType::Binary => 2,
+        FormatType::Octal => 8,
+        FormatType::Hex | FormatType::HexUpper => 16,
+        _ => 10,
+    };
+    fields.push(("radix".to_string(), Value::Immediate(Immediate::i64(radix))));
+
+    // uppercase: Bool
+    let uppercase = matches!(spec.format_type, FormatType::HexUpper);
+    fields.push((
+        "uppercase".to_string(),
+        Value::Immediate(Immediate::bool(uppercase)),
+    ));
+
+    // sign: Sign
+    let sign_name = ctx.mir.intern_name(QualifiedNameData::new(vec![
+        "std".to_string(),
+        "text".to_string(),
+        "Sign".to_string(),
+    ]));
+    let sign_ty = ctx.mir.ty_named(sign_name, vec![]);
+    let sign_local = ctx.create_temp("sign", sign_ty);
+    let sign_place = Place::local(sign_local);
+    let sign_variant = match spec.sign {
+        crate::format_spec::SignMode::Negative => "Negative",
+        crate::format_spec::SignMode::Always => "Always",
+        crate::format_spec::SignMode::Space => "Space",
+    };
+    ctx.emit_assign(
+        sign_place.clone(),
+        Rvalue::EnumVariant {
+            enum_ty: sign_ty,
+            variant: sign_variant.to_string(),
+            payload: vec![],
+        },
+    );
+    fields.push(("sign".to_string(), Value::Place(sign_place)));
+
+    // alternate: Bool
+    fields.push((
+        "alternate".to_string(),
+        Value::Immediate(Immediate::bool(spec.alternate)),
+    ));
+
+    // floatStyle: FloatStyle
+    let float_style_name = ctx.mir.intern_name(QualifiedNameData::new(vec![
+        "std".to_string(),
+        "text".to_string(),
+        "FloatStyle".to_string(),
+    ]));
+    let float_style_ty = ctx.mir.ty_named(float_style_name, vec![]);
+    let float_style_local = ctx.create_temp("float_style", float_style_ty);
+    let float_style_place = Place::local(float_style_local);
+    let float_style_variant = match spec.format_type {
+        FormatType::Fixed => "Fixed",
+        FormatType::Scientific => "Scientific",
+        FormatType::ScientificUpper => "ScientificUpper",
+        FormatType::Percent => "Percent",
+        _ => "Auto",
+    };
+    ctx.emit_assign(
+        float_style_place.clone(),
+        Rvalue::EnumVariant {
+            enum_ty: float_style_ty,
+            variant: float_style_variant.to_string(),
+            payload: vec![],
+        },
+    );
+    fields.push(("floatStyle".to_string(), Value::Place(float_style_place)));
+
+    // debug: Bool
+    let debug = matches!(spec.format_type, FormatType::Debug);
+    fields.push((
+        "debug".to_string(),
+        Value::Immediate(Immediate::bool(debug)),
+    ));
+
+    fields
+}
+
+/// Lower an interpolated string expression.
+///
+/// Interpolated strings like `"Hello \(name)!"` are lowered to:
+/// 1. Create a DefaultStringInterpolation instance
+/// 2. For each part:
+///    - If literal: call appendLiteral(literal:)
+///    - If interpolation: call appendInterpolation(value:options:)
+/// 3. Call build() to get the final string
+fn lower_interpolated_string(
+    ctx: &mut LoweringContext,
+    parts: &[InterpolationPart],
+    expr: &Expression,
+) -> Value {
+    let span = expr.span.clone();
+    let result_ty = lower_type(ctx, &expr.ty);
+
+    // Count literal and interpolation parts for capacity hints
+    let mut literal_capacity: i64 = 0;
+    let mut interpolation_count: i64 = 0;
+    for part in parts {
+        match part {
+            InterpolationPart::Literal { text, .. } => {
+                literal_capacity += text.len() as i64;
+            },
+            InterpolationPart::Interpolation { .. } => {
+                interpolation_count += 1;
+            },
+        }
+    }
+
+    // Look up DefaultStringInterpolation struct
+    let Some(dsi_id) = ctx.model.builtin_registry().default_string_interpolation() else {
+        ctx.emit_error(LoweringError::internal(
+            "DefaultStringInterpolation not found in builtin registry",
+            Some(span.clone()),
+        ));
+        return Value::Immediate(Immediate::error());
+    };
+
+    let Some(dsi_symbol) = ctx.model.query(SymbolFor { id: dsi_id }) else {
+        ctx.emit_error(LoweringError::internal(
+            "DefaultStringInterpolation symbol not found",
+            Some(span.clone()),
+        ));
+        return Value::Immediate(Immediate::error());
+    };
+
+    // Get the DSI type
+    let dsi_struct_sym = dsi_symbol
+        .clone()
+        .downcast_arc::<kestrel_semantic_tree::symbol::r#struct::StructSymbol>()
+        .unwrap();
+    let dsi_ty = Ty::r#struct(dsi_struct_sym, span.clone());
+    let mir_dsi_ty = lower_type(ctx, &dsi_ty);
+
+    // Allocate space for the DefaultStringInterpolation instance
+    let dsi_local = ctx.create_temp("interpolation", mir_dsi_ty);
+    let dsi_place = Place::local(dsi_local);
+
+    // Create a mutable reference to the DSI
+    let ref_ty = ctx.mir.ty_ref_mut(mir_dsi_ty);
+    let dsi_ref_local = ctx.create_temp("interp_ref", ref_ty);
+    let dsi_ref_place = Place::local(dsi_ref_local);
+
+    // Emit: %dsi_ref = ref mut %dsi
+    ctx.emit_assign(dsi_ref_place.clone(), Rvalue::RefMut(dsi_place.clone()));
+
+    // Build qualified name for DefaultStringInterpolation
+    let dsi_name = qualified_name_for_symbol(ctx, &dsi_symbol);
+    let dsi_name_parts = ctx.mir.name(dsi_name).segments.clone();
+
+    // Call init(literalCapacity:interpolationCount:)
+    let init_name_parts = {
+        let mut parts = dsi_name_parts.clone();
+        parts.push("init$literalCapacity$interpolationCount".to_string());
+        parts
+    };
+    let init_name = ctx.mir.intern_name(QualifiedNameData::new(init_name_parts));
+
+    let unit_ty = ctx.mir.ty_unit();
+    let init_ret_local = ctx.create_temp("init_ret", unit_ty);
+    let init_ret_place = Place::local(init_ret_local);
+
+    let init_args = vec![
+        CallArg::mutating(Value::Place(dsi_ref_place.clone())),
+        CallArg::borrow(Value::Immediate(Immediate::i64(literal_capacity))),
+        CallArg::borrow(Value::Immediate(Immediate::i64(interpolation_count))),
+    ];
+
+    ctx.emit_call_with_modes(init_ret_place, Callee::direct(init_name), init_args);
+
+    // For each part, call the appropriate append method
+    for part in parts {
+        // Re-create the mutable reference (it may have been consumed)
+        let part_ref_local = ctx.create_temp("part_ref", ref_ty);
+        let part_ref_place = Place::local(part_ref_local);
+        ctx.emit_assign(part_ref_place.clone(), Rvalue::RefMut(dsi_place.clone()));
+
+        match part {
+            InterpolationPart::Literal { text, .. } => {
+                // Call appendLiteral(literal:)
+                let append_name_parts = {
+                    let mut parts = dsi_name_parts.clone();
+                    parts.push("appendLiteral$literal".to_string());
+                    parts
+                };
+                let append_name = ctx
+                    .mir
+                    .intern_name(QualifiedNameData::new(append_name_parts));
+
+                // Create a string immediate for the literal
+                let literal_ptr = Value::Immediate(Immediate::string_ptr(text.clone()));
+                let literal_len = Value::Immediate(Immediate::i64(text.len() as i64));
+
+                // Get String type and create a temp for it
+                let string_ty = lower_type(ctx, &Ty::string(span.clone()));
+                let string_local = ctx.create_temp("literal_str", string_ty);
+                let string_place = Place::local(string_local);
+
+                // Create mutable ref to string for init
+                let string_ref_ty = ctx.mir.ty_ref_mut(string_ty);
+                let string_ref_local = ctx.create_temp("string_ref", string_ref_ty);
+                let string_ref_place = Place::local(string_ref_local);
+                ctx.emit_assign(
+                    string_ref_place.clone(),
+                    Rvalue::RefMut(string_place.clone()),
+                );
+
+                // Call String.init(stringLiteral:length:)
+                let string_init_name = ctx.mir.intern_name(QualifiedNameData::new(vec![
+                    "std".to_string(),
+                    "text".to_string(),
+                    "String".to_string(),
+                    "init$stringLiteral$length".to_string(),
+                ]));
+                let string_init_ret_local = ctx.create_temp("str_init_ret", unit_ty);
+                let string_init_ret_place = Place::local(string_init_ret_local);
+                ctx.emit_call_with_modes(
+                    string_init_ret_place,
+                    Callee::direct(string_init_name),
+                    vec![
+                        CallArg::mutating(Value::Place(string_ref_place)),
+                        CallArg::borrow(literal_ptr),
+                        CallArg::borrow(literal_len),
+                    ],
+                );
+
+                // Create borrow ref to string for appendLiteral
+                let string_borrow_ty = ctx.mir.ty_ref(string_ty);
+                let string_borrow_local = ctx.create_temp("string_borrow", string_borrow_ty);
+                let string_borrow_place = Place::local(string_borrow_local);
+                ctx.emit_assign(
+                    string_borrow_place.clone(),
+                    Rvalue::Ref(string_place.clone()),
+                );
+
+                let append_ret_local = ctx.create_temp("append_ret", unit_ty);
+                let append_ret_place = Place::local(append_ret_local);
+
+                ctx.emit_call_with_modes(
+                    append_ret_place,
+                    Callee::direct(append_name),
+                    vec![
+                        CallArg::mutating(Value::Place(part_ref_place)),
+                        CallArg::borrow(Value::Place(string_borrow_place)),
+                    ],
+                );
+            },
+            InterpolationPart::Interpolation {
+                expr: interp_expr,
+                format_spec,
+                ..
+            } => {
+                // Lower the interpolation expression
+                let interp_value = lower_expression(ctx, interp_expr);
+
+                // Call appendInterpolation(value:options:)
+                // The function name only includes 'value' because 'options' has a default
+                // (parameters with defaults are excluded from the qualified name)
+                // But we still need to pass the options argument to the function
+                let append_name_parts = {
+                    let mut parts = dsi_name_parts.clone();
+                    parts.push("appendInterpolation$value".to_string());
+                    parts
+                };
+                let append_name = ctx
+                    .mir
+                    .intern_name(QualifiedNameData::new(append_name_parts));
+
+                // Get the expression's type for the generic call
+                let interp_ty = lower_type(ctx, &interp_expr.ty);
+
+                // Create a ref to the interpolation value
+                // If it's already a place, ref it. If it's an immediate, store it first.
+                let interp_ref_ty = ctx.mir.ty_ref(interp_ty);
+                let interp_ref_local = ctx.create_temp("interp_ref", interp_ref_ty);
+                let interp_ref_place = Place::local(interp_ref_local);
+
+                match interp_value {
+                    Value::Place(p) => {
+                        ctx.emit_assign(interp_ref_place.clone(), Rvalue::Ref(p));
+                    },
+                    Value::Immediate(imm) => {
+                        // Store the immediate in a temp, then ref it
+                        let temp_local = ctx.create_temp("interp_temp", interp_ty);
+                        let temp_place = Place::local(temp_local);
+                        ctx.emit_assign(temp_place.clone(), Rvalue::Use(imm));
+                        ctx.emit_assign(interp_ref_place.clone(), Rvalue::Ref(temp_place));
+                    },
+                    Value::Unreachable => {
+                        // Unreachable value - skip this interpolation
+                        continue;
+                    },
+                }
+
+                // Look up FormatOptions type from the model
+                let format_opts_name = ctx.mir.intern_name(QualifiedNameData::new(vec![
+                    "std".to_string(),
+                    "text".to_string(),
+                    "FormatOptions".to_string(),
+                ]));
+                let format_opts_ty = ctx.mir.ty_named(format_opts_name, vec![]);
+                let format_opts_local = ctx.create_temp("format_opts", format_opts_ty);
+                let format_opts_place = Place::local(format_opts_local);
+
+                // Parse format spec and create FormatOptions with parsed values
+                if let Some(spec_str) = format_spec {
+                    if let Ok(spec) = parse_format_spec(spec_str) {
+                        // Build FormatOptions struct with parsed values
+                        let fields = build_format_options_fields(ctx, &spec, &span);
+                        ctx.emit_assign(
+                            format_opts_place.clone(),
+                            Rvalue::Construct {
+                                ty: format_opts_ty,
+                                fields,
+                            },
+                        );
+                    } else {
+                        // Failed to parse format spec, use defaults
+                        let format_opts_default_name =
+                            ctx.mir.intern_name(QualifiedNameData::new(vec![
+                                "std".to_string(),
+                                "text".to_string(),
+                                "FormatOptions".to_string(),
+                                "default".to_string(),
+                            ]));
+                        ctx.emit_call_with_modes(
+                            format_opts_place.clone(),
+                            Callee::direct(format_opts_default_name),
+                            vec![],
+                        );
+                    }
+                } else {
+                    // No format spec, use FormatOptions.default()
+                    let format_opts_default_name =
+                        ctx.mir.intern_name(QualifiedNameData::new(vec![
+                            "std".to_string(),
+                            "text".to_string(),
+                            "FormatOptions".to_string(),
+                            "default".to_string(),
+                        ]));
+                    ctx.emit_call_with_modes(
+                        format_opts_place.clone(),
+                        Callee::direct(format_opts_default_name),
+                        vec![],
+                    );
+                }
+
+                // Borrow FormatOptions for passing to appendInterpolation
+                let format_opts_borrow_ty = ctx.mir.ty_ref(format_opts_ty);
+                let format_opts_borrow_local =
+                    ctx.create_temp("format_opts_borrow", format_opts_borrow_ty);
+                let format_opts_borrow_place = Place::local(format_opts_borrow_local);
+                ctx.emit_assign(
+                    format_opts_borrow_place.clone(),
+                    Rvalue::Ref(format_opts_place),
+                );
+
+                let append_ret_local = ctx.create_temp("append_ret", unit_ty);
+                let append_ret_place = Place::local(append_ret_local);
+
+                // Call as a generic method with type parameter
+                ctx.emit_call_with_modes(
+                    append_ret_place,
+                    Callee::direct_generic(append_name, vec![interp_ty]),
+                    vec![
+                        CallArg::mutating(Value::Place(part_ref_place)),
+                        CallArg::borrow(Value::Place(interp_ref_place)),
+                        CallArg::borrow(Value::Place(format_opts_borrow_place)),
+                    ],
+                );
+            },
+        }
+    }
+
+    // Call build() to get the final string
+    // First, borrow the DSI
+    let build_ref_ty = ctx.mir.ty_ref(mir_dsi_ty);
+    let build_ref_local = ctx.create_temp("build_ref", build_ref_ty);
+    let build_ref_place = Place::local(build_ref_local);
+    ctx.emit_assign(build_ref_place.clone(), Rvalue::Ref(dsi_place.clone()));
+
+    let build_name_parts = {
+        let mut parts = dsi_name_parts;
+        parts.push("build".to_string());
+        parts
+    };
+    let build_name = ctx
+        .mir
+        .intern_name(QualifiedNameData::new(build_name_parts));
+
+    // Allocate space for the result string
+    let result_local = ctx.create_temp("result", result_ty);
+    let result_place = Place::local(result_local);
+
+    // Call build() - returns String by value
+    ctx.emit_call_with_modes(
+        result_place.clone(),
+        Callee::direct(build_name),
+        vec![CallArg::borrow(Value::Place(build_ref_place))],
+    );
+
+    Value::Place(result_place)
 }
 
 /// Lower an array literal expression.
@@ -1387,19 +2473,23 @@ fn lower_array_literal(
     elements: &[Expression],
     expr: &Expression,
 ) -> Value {
-    // Get element type - either from the array type or from the first element
-    let element_sem_ty: Ty = match expr.ty.kind() {
-        TyKind::Array(elem_ty) => (**elem_ty).clone(),
-        TyKind::Struct { .. } => {
-            // For resolved struct types (like Array[Int, GlobalAllocator]),
-            // get element type from the first element
-            if let Some(first_elem) = elements.first() {
-                first_elem.ty.clone()
-            } else {
-                // Empty array - we can't determine element type from elements
-                // For now, use unit type as placeholder
-                Ty::unit(expr.span.clone())
-            }
+    // Expand type aliases (e.g., [T] -> ArrayTypeOperator[T] -> Array[T])
+    let target_ty = expr.ty.expand_aliases();
+
+    // Get element type from Array[T] struct type
+    let element_sem_ty: Ty = match target_ty.kind() {
+        TyKind::Struct { substitutions, .. } => {
+            // For Array[T] struct types, get T from substitutions
+            // This works for both Array[T] and Array[T, Allocator]
+            substitutions
+                .iter()
+                .next()
+                .map(|(_, t)| t.clone())
+                .or_else(|| elements.first().map(|e| e.ty.clone()))
+                .unwrap_or_else(|| {
+                    // Empty array with no type info - use unit type as placeholder
+                    Ty::unit(expr.span.clone())
+                })
         },
         _ => {
             ctx.emit_error(LoweringError::internal(
@@ -1491,20 +2581,11 @@ fn lower_array_literal(
 
     // Look up the init method with _arrayLiteralPointer and _arrayLiteralCount labels
     // For now, we need to find the target type's init method
-    match expr.ty.kind() {
+    // Use target_ty which has type aliases expanded
+    match target_ty.kind() {
         TyKind::Struct { symbol, .. } => {
             // Call the struct's array literal init
-            lower_array_literal_init_call(ctx, expr, symbol, ptr_place, count_value)
-        },
-        TyKind::Array(_) => {
-            // Array type not resolved to concrete struct type
-            // This means type inference didn't give us a target type
-            // For now, emit an error - full implementation needs type inference changes
-            ctx.emit_error(LoweringError::unsupported_expr(
-                "array literal without concrete target type - use explicit type annotation",
-                expr.span.clone(),
-            ));
-            Value::Immediate(Immediate::error())
+            lower_array_literal_init_call(ctx, expr, &target_ty, symbol, ptr_place, count_value)
         },
         _ => {
             ctx.emit_error(LoweringError::internal(
@@ -1520,6 +2601,7 @@ fn lower_array_literal(
 fn lower_array_literal_init_call(
     ctx: &mut LoweringContext,
     expr: &Expression,
+    target_ty: &Ty,
     struct_symbol: &std::sync::Arc<kestrel_semantic_tree::symbol::r#struct::StructSymbol>,
     ptr_place: Place,
     count_value: Value,
@@ -1527,6 +2609,10 @@ fn lower_array_literal_init_call(
     use semantic_tree::symbol::Symbol;
 
     // Find the init with _arrayLiteralPointer and _arrayLiteralCount parameters
+    // Note: We check bind_name (internal name) not label (external label) because
+    // the protocol uses single-name syntax `_arrayLiteralPointer: Type` where the
+    // underscore prefix makes the external label `_` (no label) while the full name
+    // becomes the internal bind name.
     let init_symbol = struct_symbol
         .metadata()
         .children()
@@ -1535,18 +2621,16 @@ fn lower_array_literal_init_call(
             if child.metadata().kind() != KestrelSymbolKind::Initializer {
                 return false;
             }
-            // Check if this init has parameters with the right labels
+            // Check if this init has parameters with the right bind names
             if let Some(callable) = child.metadata().get_behavior::<CallableBehavior>() {
                 let params = callable.parameters();
                 params.len() >= 2
                     && params
                         .first()
-                        .and_then(|p| p.label.as_ref())
-                        .is_some_and(|l| l.value == "_arrayLiteralPointer")
+                        .is_some_and(|p| p.bind_name.value == "_arrayLiteralPointer")
                     && params
                         .get(1)
-                        .and_then(|p| p.label.as_ref())
-                        .is_some_and(|l| l.value == "_arrayLiteralCount")
+                        .is_some_and(|p| p.bind_name.value == "_arrayLiteralCount")
             } else {
                 false
             }
@@ -1574,8 +2658,8 @@ fn lower_array_literal_init_call(
 
     let init_name = ctx.mir.intern_name(QualifiedNameData::new(name_parts));
 
-    // Lower the result type
-    let result_ty = lower_type(ctx, &expr.ty);
+    // Lower the result type (use the expanded target type, not the original which may be a type alias)
+    let result_ty = lower_type(ctx, target_ty);
 
     // Allocate space for the result
     let result_local = ctx.create_temp("array_literal", result_ty);
@@ -1589,11 +2673,264 @@ fn lower_array_literal_init_call(
     // Emit: %self_ref = ref var %result
     ctx.emit_assign(self_ref_place.clone(), Rvalue::RefMut(result_place.clone()));
 
-    // Build call args: self_ref first (MutRef), then pointer and count
+    // Build call args: self_ref first (MutRef), then pointer and count (both borrowed)
+    // The function signature takes references: &p[T] and &i64
     let call_args = vec![
         CallArg::mutating(Value::Place(self_ref_place)),
-        CallArg::copy(Value::Place(ptr_place)),
-        CallArg::copy(count_value),
+        CallArg::borrow(Value::Place(ptr_place)),
+        CallArg::borrow(count_value),
+    ];
+
+    // Create a temp for the unit return value of init (we discard it)
+    let unit_ty = ctx.mir.ty_unit();
+    let unit_local = ctx.create_temp("init_ret", unit_ty);
+    let unit_place = Place::local(unit_local);
+
+    // Extract type arguments from the struct type
+    let type_args = match extract_type_args_from_receiver(ctx, &expr.ty, Some(expr.span.clone())) {
+        Some(args) => args,
+        None => return Value::Immediate(Immediate::error()),
+    };
+
+    // Call the init function
+    let mir_callee = if type_args.is_empty() {
+        Callee::direct(init_name)
+    } else {
+        Callee::direct_generic(init_name, type_args)
+    };
+    ctx.emit_call_with_modes(unit_place, mir_callee, call_args);
+
+    // Return the initialized struct
+    Value::Place(result_place)
+}
+
+/// Lower a dictionary literal expression.
+///
+/// Dictionary literals work similarly to array literals:
+/// 1. Stack allocate a buffer for (Key, Value) tuples
+/// 2. Write each key-value pair as a tuple to the buffer
+/// 3. Call the target type's init(_dictionaryLiteralPointer:_dictionaryLiteralCount:) method
+fn lower_dictionary_literal(
+    ctx: &mut LoweringContext,
+    pairs: &[(Expression, Expression)],
+    expr: &Expression,
+) -> Value {
+    // Expand type aliases (e.g., [K: V] -> DictionaryTypeOperator[K, V] -> Dictionary[K, V])
+    let target_ty = expr.ty.expand_aliases();
+
+    // Get Key and Value types from Dictionary[K, V] struct type
+    let (key_sem_ty, value_sem_ty): (Ty, Ty) = match target_ty.kind() {
+        TyKind::Struct { substitutions, .. } => {
+            // For Dictionary[K, V] struct types, get K and V from substitutions
+            let mut iter = substitutions.iter();
+            let key_ty = iter
+                .next()
+                .map(|(_, t)| t.clone())
+                .or_else(|| pairs.first().map(|(k, _)| k.ty.clone()))
+                .unwrap_or_else(|| Ty::unit(expr.span.clone()));
+            let value_ty = iter
+                .next()
+                .map(|(_, t)| t.clone())
+                .or_else(|| pairs.first().map(|(_, v)| v.ty.clone()))
+                .unwrap_or_else(|| Ty::unit(expr.span.clone()));
+            (key_ty, value_ty)
+        },
+        _ => {
+            ctx.emit_error(LoweringError::internal(
+                "dictionary literal with non-dictionary type",
+                Some(expr.span.clone()),
+            ));
+            return Value::Immediate(Immediate::error());
+        },
+    };
+
+    let key_ty = lower_type(ctx, &key_sem_ty);
+    let value_ty = lower_type(ctx, &value_sem_ty);
+    let count = pairs.len();
+
+    // Create tuple type for (Key, Value)
+    let pair_ty = ctx.mir.ty_tuple(vec![key_ty, value_ty]);
+
+    // Lower each key-value pair and create tuple values
+    let pair_values: Vec<Value> = pairs
+        .iter()
+        .map(|(k, v)| {
+            let key_value = lower_expression(ctx, k);
+            let value_value = lower_expression(ctx, v);
+
+            // Create a tuple value from key and value
+            let tuple_local = ctx.create_temp("dict_pair", pair_ty);
+            let tuple_place = Place::local(tuple_local);
+            ctx.emit_assign(
+                tuple_place.clone(),
+                Rvalue::Tuple(vec![key_value, value_value]),
+            );
+            Value::Place(tuple_place)
+        })
+        .collect();
+
+    // Allocate stack buffer for tuples
+    let ptr_ty = ctx.mir.ty_ptr(pair_ty);
+    let ptr_local = ctx.create_temp("dict_literal_ptr", ptr_ty);
+    let ptr_place = Place::local(ptr_local);
+
+    let i64_ty = ctx.mir.ty_i64();
+    let count_value = Value::Immediate(Immediate::i64(count as i64));
+
+    ctx.emit_assign(
+        ptr_place.clone(),
+        Rvalue::StackAlloc {
+            element_ty: pair_ty,
+            count: count_value.clone(),
+        },
+    );
+
+    // Write each pair to the buffer
+    let sizeof_local = ctx.create_temp("pair_size", i64_ty);
+    ctx.emit_assign(Place::local(sizeof_local), Rvalue::SizeOf { ty: pair_ty });
+
+    let unit_ty = ctx.mir.ty_unit();
+
+    for (i, pair_value) in pair_values.into_iter().enumerate() {
+        if i == 0 {
+            // First pair: write directly to ptr
+            let unit_local = ctx.create_temp("ptr_write", unit_ty);
+            ctx.emit_assign(
+                Place::local(unit_local),
+                Rvalue::PtrWrite {
+                    ptr: Value::Place(ptr_place.clone()),
+                    value: pair_value,
+                },
+            );
+        } else {
+            // Compute byte offset: i * sizeof(pair_ty)
+            let index_value = Value::Immediate(Immediate::i64(i as i64));
+            let offset_local = ctx.create_temp("pair_offset", i64_ty);
+            ctx.emit_assign(
+                Place::local(offset_local),
+                Rvalue::BinaryOp {
+                    op: BinOp::MulSigned,
+                    lhs: index_value,
+                    rhs: Value::Place(Place::local(sizeof_local)),
+                },
+            );
+
+            // Compute offset pointer
+            let offset_ptr_local = ctx.create_temp("offset_ptr", ptr_ty);
+            ctx.emit_assign(
+                Place::local(offset_ptr_local),
+                Rvalue::PtrOffset {
+                    ptr: Value::Place(ptr_place.clone()),
+                    offset: Value::Place(Place::local(offset_local)),
+                },
+            );
+
+            // Write pair to offset pointer
+            let unit_local = ctx.create_temp("ptr_write", unit_ty);
+            ctx.emit_assign(
+                Place::local(unit_local),
+                Rvalue::PtrWrite {
+                    ptr: Value::Place(Place::local(offset_ptr_local)),
+                    value: pair_value,
+                },
+            );
+        }
+    }
+
+    // Call init(_dictionaryLiteralPointer:_dictionaryLiteralCount:) on the target type
+    match target_ty.kind() {
+        TyKind::Struct { symbol, .. } => lower_dictionary_literal_init_call(
+            ctx,
+            expr,
+            &target_ty,
+            symbol,
+            ptr_place,
+            count_value,
+        ),
+        _ => {
+            ctx.emit_error(LoweringError::internal(
+                "unexpected dictionary literal target type",
+                Some(expr.span.clone()),
+            ));
+            Value::Immediate(Immediate::error())
+        },
+    }
+}
+
+/// Lower a dictionary literal init call to a struct type.
+fn lower_dictionary_literal_init_call(
+    ctx: &mut LoweringContext,
+    expr: &Expression,
+    target_ty: &Ty,
+    struct_symbol: &std::sync::Arc<kestrel_semantic_tree::symbol::r#struct::StructSymbol>,
+    ptr_place: Place,
+    count_value: Value,
+) -> Value {
+    use semantic_tree::symbol::Symbol;
+
+    // Find the init with _dictionaryLiteralPointer and _dictionaryLiteralCount parameters
+    let init_symbol = struct_symbol
+        .metadata()
+        .children()
+        .into_iter()
+        .find(|child| {
+            if child.metadata().kind() != KestrelSymbolKind::Initializer {
+                return false;
+            }
+            if let Some(callable) = child.metadata().get_behavior::<CallableBehavior>() {
+                let params = callable.parameters();
+                params.len() >= 2
+                    && params
+                        .first()
+                        .is_some_and(|p| p.bind_name.value == "_dictionaryLiteralPointer")
+                    && params
+                        .get(1)
+                        .is_some_and(|p| p.bind_name.value == "_dictionaryLiteralCount")
+            } else {
+                false
+            }
+        });
+
+    let Some(_init_sym) = init_symbol else {
+        ctx.emit_error(LoweringError::internal(
+            "dictionary literal target type has no init(_dictionaryLiteralPointer:_dictionaryLiteralCount:)",
+            Some(expr.span.clone()),
+        ));
+        return Value::Immediate(Immediate::error());
+    };
+
+    // Build the qualified name for the init function
+    let mut name_parts = Vec::new();
+    collect_symbol_name_parts(
+        &(struct_symbol.clone()
+            as std::sync::Arc<
+                dyn semantic_tree::symbol::Symbol<kestrel_semantic_tree::language::KestrelLanguage>,
+            >),
+        &mut name_parts,
+    );
+    name_parts.push("init$_dictionaryLiteralPointer$_dictionaryLiteralCount".to_string());
+
+    let init_name = ctx.mir.intern_name(QualifiedNameData::new(name_parts));
+
+    // Lower the result type
+    let result_ty = lower_type(ctx, target_ty);
+
+    // Allocate space for the result
+    let result_local = ctx.create_temp("dict_literal", result_ty);
+    let result_place = Place::local(result_local);
+
+    // Create a mutable reference to the result place
+    let ref_ty = ctx.mir.ty_ref_mut(result_ty);
+    let self_ref_local = ctx.create_temp("self_ref", ref_ty);
+    let self_ref_place = Place::local(self_ref_local);
+
+    ctx.emit_assign(self_ref_place.clone(), Rvalue::RefMut(result_place.clone()));
+
+    // Build call args: self_ref first (MutRef), then pointer and count (both borrowed)
+    let call_args = vec![
+        CallArg::mutating(Value::Place(self_ref_place)),
+        CallArg::borrow(Value::Place(ptr_place)),
+        CallArg::borrow(count_value),
     ];
 
     // Create a temp for the unit return value of init (we discard it)
@@ -1663,13 +3000,18 @@ fn lower_literal(ctx: &mut LoweringContext, lit: &LiteralValue, expr: &Expressio
         // Struct types - generate init call
         TyKind::Struct { symbol, .. } => lower_literal_init_call(ctx, lit, expr, symbol),
 
+        // Enum types - generate init call for null literals (Optional)
+        TyKind::Enum { symbol, .. } => lower_enum_literal_init_call(ctx, lit, expr, symbol),
+
         // For inference variables or error types, fall back to immediate
         TyKind::Infer | TyKind::Error => match lit {
             LiteralValue::Unit => Value::Immediate(Immediate::unit()),
             LiteralValue::Integer(n) => Value::Immediate(Immediate::i64(*n)),
             LiteralValue::Float(f) => Value::Immediate(Immediate::f64(*f)),
             LiteralValue::Bool(b) => Value::Immediate(Immediate::bool(*b)),
+            LiteralValue::Char(c) => Value::Immediate(Immediate::i32(*c as i32)),
             LiteralValue::String(s) => Value::Immediate(Immediate::string(s.clone())),
+            LiteralValue::Null => Value::Immediate(Immediate::error()), // Null requires concrete type
         },
 
         // Other types - this shouldn't happen for literals
@@ -1712,18 +3054,24 @@ fn lower_literal_init_call(
     use semantic_tree::symbol::Symbol;
 
     // Determine the init parameter label and primitive value based on literal type
+    // Null literals use init() with no parameters, handled specially below
     let (init_label, primitive_value) = match lit {
-        LiteralValue::Integer(n) => ("intLiteral", Value::Immediate(Immediate::i64(*n))),
-        LiteralValue::Float(f) => ("floatLiteral", Value::Immediate(Immediate::f64(*f))),
-        LiteralValue::Bool(b) => ("boolLiteral", Value::Immediate(Immediate::bool(*b))),
+        LiteralValue::Integer(n) => (Some("intLiteral"), Value::Immediate(Immediate::i64(*n))),
+        LiteralValue::Float(f) => (Some("floatLiteral"), Value::Immediate(Immediate::f64(*f))),
+        LiteralValue::Bool(b) => (Some("boolLiteral"), Value::Immediate(Immediate::bool(*b))),
+        LiteralValue::Char(c) => (
+            Some("charLiteral"),
+            Value::Immediate(Immediate::i32(*c as i32)),
+        ),
         LiteralValue::String(s) => (
-            "stringLiteral",
+            Some("stringLiteral"),
             Value::Immediate(Immediate::string(s.clone())),
         ),
         LiteralValue::Unit => return Value::Immediate(Immediate::unit()),
+        LiteralValue::Null => (None, Value::Immediate(Immediate::unit())), // No parameter for null
     };
 
-    // Find the init with the matching parameter label
+    // Find the init with the matching parameter label (or no parameters for null)
     let init_symbol = struct_symbol
         .metadata()
         .children()
@@ -1732,12 +3080,21 @@ fn lower_literal_init_call(
             if child.metadata().kind() != KestrelSymbolKind::Initializer {
                 return false;
             }
-            // Check if this init has a parameter with the right label
+            // Check if this init has the right parameters
             if let Some(callable) = child.metadata().get_behavior::<CallableBehavior>() {
-                callable
-                    .parameters()
-                    .first()
-                    .is_some_and(|p| p.label.as_ref().is_some_and(|l| l.value == init_label))
+                match init_label {
+                    Some(label) => {
+                        // Match init with specific parameter label
+                        callable
+                            .parameters()
+                            .first()
+                            .is_some_and(|p| p.label.as_ref().is_some_and(|l| l.value == label))
+                    },
+                    None => {
+                        // Match init with no parameters (for null literals)
+                        callable.parameters().is_empty()
+                    },
+                }
             } else {
                 false
             }
@@ -1750,8 +3107,10 @@ fn lower_literal_init_call(
             LiteralValue::Integer(n) => Value::Immediate(Immediate::i64(*n)),
             LiteralValue::Float(f) => Value::Immediate(Immediate::f64(*f)),
             LiteralValue::Bool(b) => Value::Immediate(Immediate::bool(*b)),
+            LiteralValue::Char(c) => Value::Immediate(Immediate::i32(*c as i32)),
             LiteralValue::String(s) => Value::Immediate(Immediate::string(s.clone())),
             LiteralValue::Unit => Value::Immediate(Immediate::unit()),
+            LiteralValue::Null => Value::Immediate(Immediate::error()), // Null requires init
         };
     };
 
@@ -1770,18 +3129,20 @@ fn lower_literal_init_call(
     let init_name_suffix =
         if let Some(callable) = init_sym.metadata().get_behavior::<CallableBehavior>() {
             // Use external labels if present, otherwise fall back to internal names
-            let name_parts: Vec<&str> = callable
+            let label_parts: Vec<&str> = callable
                 .parameters()
                 .iter()
                 .map(|p| p.external_label().unwrap_or_else(|| p.internal_name()))
                 .collect();
-            if name_parts.is_empty() {
+            if label_parts.is_empty() {
                 "init".to_string()
             } else {
-                format!("init${}", name_parts.join("$"))
+                format!("init${}", label_parts.join("$"))
             }
+        } else if let Some(label) = init_label {
+            format!("init${}", label)
         } else {
-            format!("init${}", init_label)
+            "init".to_string()
         };
     name_parts.push(init_name_suffix);
 
@@ -1804,6 +3165,7 @@ fn lower_literal_init_call(
 
     // Build call args: self_ref first (MutRef), then the primitive value(s)
     // String literals are special: they need both ptr and length as separate args
+    // Null literals have no parameters (just self)
     let call_args = match lit {
         LiteralValue::String(s) => {
             // String.init(stringLiteral ptr: lang.ptr[lang.i8], length: lang.i64)
@@ -1816,8 +3178,12 @@ fn lower_literal_init_call(
                 CallArg::borrow(len_value),
             ]
         },
+        LiteralValue::Null => {
+            // ExpressibleByNullLiteral.init() - no parameters, just self
+            vec![CallArg::mutating(Value::Place(self_ref_place))]
+        },
         _ => {
-            // All literal init methods take the primitive by reference (borrow)
+            // All other literal init methods take the primitive by reference (borrow)
             vec![
                 CallArg::mutating(Value::Place(self_ref_place)),
                 CallArg::borrow(primitive_value),
@@ -1835,6 +3201,134 @@ fn lower_literal_init_call(
     ctx.emit_call_with_modes(unit_place, mir_callee, call_args);
 
     // Return the initialized struct
+    Value::Place(result_place)
+}
+
+/// Lower a literal to an init call for enum types that conform to ExpressibleBy* protocols.
+///
+/// Currently only supports null literals with Optional types that implement
+/// ExpressibleByNullLiteral with init().
+fn lower_enum_literal_init_call(
+    ctx: &mut LoweringContext,
+    lit: &LiteralValue,
+    expr: &Expression,
+    enum_symbol: &std::sync::Arc<kestrel_semantic_tree::symbol::enum_symbol::EnumSymbol>,
+) -> Value {
+    use semantic_tree::symbol::Symbol;
+
+    // Only null literals are supported for enum types currently
+    if !matches!(lit, LiteralValue::Null) {
+        ctx.emit_error(LoweringError::internal(
+            "non-null literal with enum type".to_string(),
+            Some(expr.span.clone()),
+        ));
+        return Value::Immediate(Immediate::error());
+    }
+
+    // Find init() with no parameters (from ExpressibleByNullLiteral)
+    let mut init_symbol: Option<
+        std::sync::Arc<
+            dyn semantic_tree::symbol::Symbol<kestrel_semantic_tree::language::KestrelLanguage>,
+        >,
+    > = enum_symbol.metadata().children().into_iter().find(|child| {
+        if child.metadata().kind() != KestrelSymbolKind::Initializer {
+            return false;
+        }
+        if let Some(callable) = child.metadata().get_behavior::<CallableBehavior>() {
+            callable.parameters().is_empty()
+        } else {
+            false
+        }
+    });
+
+    // If not found on the enum, check extension initializers
+    if init_symbol.is_none() {
+        use kestrel_semantic_model::queries::ExtensionsFor;
+
+        let extensions = ctx.model.query(ExtensionsFor {
+            target_id: enum_symbol.metadata().id(),
+        });
+        for extension in extensions {
+            for child in extension.metadata().children() {
+                if child.metadata().kind() != KestrelSymbolKind::Initializer {
+                    continue;
+                }
+                if let Some(callable) = child.metadata().get_behavior::<CallableBehavior>()
+                    && callable.parameters().is_empty()
+                {
+                    init_symbol = Some(child);
+                    break;
+                }
+            }
+            if init_symbol.is_some() {
+                break;
+            }
+        }
+    }
+
+    let Some(_init_sym) = init_symbol else {
+        ctx.emit_error(LoweringError::internal(
+            "no init() found for null literal".to_string(),
+            Some(expr.span.clone()),
+        ));
+        return Value::Immediate(Immediate::error());
+    };
+
+    // Build the qualified name for the init function
+    let mut name_parts = Vec::new();
+    collect_symbol_name_parts(
+        &(enum_symbol.clone()
+            as std::sync::Arc<
+                dyn semantic_tree::symbol::Symbol<kestrel_semantic_tree::language::KestrelLanguage>,
+            >),
+        &mut name_parts,
+    );
+    name_parts.push("init".to_string());
+
+    // Get type arguments from the enum type (expand aliases like OptionalTypeOperator[T])
+    let resolved_ty = expr.ty.expand_aliases();
+    let type_args: Vec<_> = match resolved_ty.kind() {
+        TyKind::Enum { substitutions, .. } => substitutions
+            .iter()
+            .map(|(_, ty)| lower_type(ctx, ty))
+            .collect(),
+        _ => Vec::new(),
+    };
+
+    let init_name = ctx.mir.intern_name(QualifiedNameData::new(name_parts));
+
+    // Lower the result type
+    let result_ty = lower_type(ctx, &expr.ty);
+
+    // Allocate space for the result
+    let result_local = ctx.create_temp("literal", result_ty);
+    let result_place = Place::local(result_local);
+
+    // Create a mutable reference to the result place
+    let ref_ty = ctx.mir.ty_ref_mut(result_ty);
+    let self_ref_local = ctx.create_temp("self_ref", ref_ty);
+    let self_ref_place = Place::local(self_ref_local);
+
+    // Emit: %self_ref = ref var %result
+    ctx.emit_assign(self_ref_place.clone(), Rvalue::RefMut(result_place.clone()));
+
+    // Build call args: just self_ref (no other parameters for null literal)
+    let call_args = vec![CallArg::mutating(Value::Place(self_ref_place))];
+
+    // Create a temp for the unit return value of init (we discard it)
+    let unit_ty = ctx.mir.ty_unit();
+    let unit_local = ctx.create_temp("init_ret", unit_ty);
+    let unit_place = Place::local(unit_local);
+
+    // Call the init function
+    let mir_callee = if type_args.is_empty() {
+        Callee::direct(init_name)
+    } else {
+        Callee::direct_generic(init_name, type_args)
+    };
+    ctx.emit_call_with_modes(unit_place, mir_callee, call_args);
+
+    // Return the initialized enum
     Value::Place(result_place)
 }
 
@@ -2220,109 +3714,205 @@ fn lower_call(
     use kestrel_semantic_tree::symbol::function::FunctionSymbol;
     use semantic_tree::symbol::Symbol;
 
-    // Lower arguments first
-    let arg_values: Vec<Value> = arguments
+    // Try to extract the callee symbol ID to check for default arguments
+    let callee_symbol_id: Option<SymbolId> = match &callee.kind {
+        ExprKind::SymbolRef(symbol_id) => Some(*symbol_id),
+        ExprKind::MethodRef { candidates, .. } => candidates.first().copied(),
+        _ => None,
+    };
+
+    // Fill in default arguments if any are missing
+    let filled_arguments: Option<Vec<CallArgument>> = callee_symbol_id
+        .and_then(|symbol_id| fill_default_arguments(ctx, arguments, symbol_id, substitutions));
+
+    // Use filled arguments if available, otherwise use original
+    let arguments_to_use: &[CallArgument] = match &filled_arguments {
+        Some(filled) => filled.as_slice(),
+        None => arguments,
+    };
+
+    // Lower arguments
+    let arg_values: Vec<Value> = arguments_to_use
         .iter()
         .map(|arg| lower_expression(ctx, &arg.value))
         .collect();
 
     // Extract argument types for determining Copy vs Move passing modes
-    let arg_types: Vec<&Ty> = arguments.iter().map(|arg| &arg.value.ty).collect();
+    let arg_types: Vec<&Ty> = arguments_to_use.iter().map(|arg| &arg.value.ty).collect();
 
     // Helper to get ordered type args from a symbol's type parameters
-    let get_ordered_type_args =
-        |ctx: &mut LoweringContext,
-         sym: &std::sync::Arc<dyn Symbol<kestrel_semantic_tree::language::KestrelLanguage>>|
-         -> Option<Vec<kestrel_execution_graph::Id<kestrel_execution_graph::Ty>>> {
-            use kestrel_semantic_tree::symbol::EnumSymbol;
-            use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
-            use semantic_tree::symbol::SymbolId;
+    let get_ordered_type_args = |ctx: &mut LoweringContext,
+                                 sym: &std::sync::Arc<
+        dyn Symbol<kestrel_semantic_tree::language::KestrelLanguage>,
+    >,
+                                 callable: Option<&CallableBehavior>,
+                                 call_arg_types: &[&Ty],
+                                 is_instance_method: bool,
+                                 receiver_ty: Option<&Ty>|
+     -> Option<
+        Vec<kestrel_execution_graph::Id<kestrel_execution_graph::Ty>>,
+    > {
+        use kestrel_semantic_tree::symbol::EnumSymbol;
+        use kestrel_semantic_tree::symbol::extension::ExtensionSymbol;
+        use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
+        use semantic_tree::symbol::SymbolId;
 
-            // Try to get type parameters from different symbol types
-            let param_ids: Option<Vec<SymbolId>> = if let Some(func_sym) =
-                sym.as_ref().downcast_ref::<FunctionSymbol>()
-            {
-                // For methods on generic structs/enums, we need BOTH parent type params
-                // AND the function's own type params (in that order, matching how MIR
-                // functions are lowered in lowerer/function.rs)
-                let mut all_params: Vec<SymbolId> = Vec::new();
+        // Try to get type parameters from different symbol types
+        let mut method_param_ids: Vec<SymbolId> = Vec::new();
+        let param_ids: Option<Vec<SymbolId>> = if let Some(func_sym) =
+            sym.as_ref().downcast_ref::<FunctionSymbol>()
+        {
+            // For methods on generic structs/enums, we need BOTH parent type params
+            // AND the function's own type params (in that order, matching how MIR
+            // functions are lowered in lowerer/function.rs)
+            let mut all_params: Vec<SymbolId> = Vec::new();
 
-                // First, collect parent type parameters (from struct/enum)
-                if let Some(parent) = func_sym.metadata().parent() {
-                    if let Some(struct_sym) = parent.as_ref().downcast_ref::<StructSymbol>() {
-                        for tp in struct_sym.type_parameters() {
-                            all_params.push(Symbol::metadata(tp.as_ref()).id());
+            // First, collect parent type parameters (from struct/enum/extension)
+            if let Some(parent) = func_sym.metadata().parent() {
+                if let Some(struct_sym) = parent.as_ref().downcast_ref::<StructSymbol>() {
+                    for tp in struct_sym.type_parameters() {
+                        all_params.push(Symbol::metadata(tp.as_ref()).id());
+                    }
+                } else if let Some(enum_sym) = parent.as_ref().downcast_ref::<EnumSymbol>() {
+                    for tp in enum_sym.type_parameters() {
+                        all_params.push(Symbol::metadata(tp.as_ref()).id());
+                    }
+                } else if let Some(ext_sym) = parent.as_ref().downcast_ref::<ExtensionSymbol>() {
+                    let is_protocol_extension =
+                        ext_sym.target_type().as_ref().is_some_and(is_protocol_type);
+                    for tp in ext_sym.referenced_type_parameters() {
+                        if is_protocol_extension && tp.metadata().name().value == "Self" {
+                            continue;
                         }
-                    } else if let Some(enum_sym) = parent.as_ref().downcast_ref::<EnumSymbol>() {
-                        for tp in enum_sym.type_parameters() {
-                            all_params.push(Symbol::metadata(tp.as_ref()).id());
-                        }
+                        all_params.push(Symbol::metadata(tp.as_ref()).id());
                     }
                 }
+            }
 
-                // Then, collect function's own type parameters
-                for tp in func_sym.type_parameters() {
-                    all_params.push(Symbol::metadata(tp.as_ref()).id());
-                }
+            // Then, collect function's own type parameters
+            for tp in func_sym.type_parameters() {
+                let tp_id = Symbol::metadata(tp.as_ref()).id();
+                all_params.push(tp_id);
+                method_param_ids.push(tp_id);
+            }
 
-                Some(all_params)
-            } else if let Some(struct_sym) = sym.as_ref().downcast_ref::<StructSymbol>() {
-                let type_params = struct_sym.type_parameters();
-                Some(
-                    type_params
-                        .iter()
-                        .map(|tp| Symbol::metadata(tp.as_ref()).id())
-                        .collect(),
-                )
-            } else if let Some(enum_sym) = sym.as_ref().downcast_ref::<EnumSymbol>() {
-                let type_params = enum_sym.type_parameters();
-                Some(
-                    type_params
-                        .iter()
-                        .map(|tp| Symbol::metadata(tp.as_ref()).id())
-                        .collect(),
-                )
-            } else if sym.as_ref().downcast_ref::<InitializerSymbol>().is_some() {
-                // Initializers inherit type parameters from their parent struct/enum
-                let mut all_params: Vec<SymbolId> = Vec::new();
-                if let Some(parent) = sym.metadata().parent() {
-                    if let Some(struct_sym) = parent.as_ref().downcast_ref::<StructSymbol>() {
-                        for tp in struct_sym.type_parameters() {
-                            all_params.push(Symbol::metadata(tp.as_ref()).id());
+            Some(all_params)
+        } else if let Some(struct_sym) = sym.as_ref().downcast_ref::<StructSymbol>() {
+            let type_params = struct_sym.type_parameters();
+            Some(
+                type_params
+                    .iter()
+                    .map(|tp| Symbol::metadata(tp.as_ref()).id())
+                    .collect(),
+            )
+        } else if let Some(enum_sym) = sym.as_ref().downcast_ref::<EnumSymbol>() {
+            let type_params = enum_sym.type_parameters();
+            Some(
+                type_params
+                    .iter()
+                    .map(|tp| Symbol::metadata(tp.as_ref()).id())
+                    .collect(),
+            )
+        } else if let Some(init_sym) = sym.as_ref().downcast_ref::<InitializerSymbol>() {
+            // Initializers inherit type parameters from their parent struct/enum/extension
+            let mut all_params: Vec<SymbolId> = Vec::new();
+            if let Some(parent) = sym.metadata().parent() {
+                if let Some(struct_sym) = parent.as_ref().downcast_ref::<StructSymbol>() {
+                    for tp in struct_sym.type_parameters() {
+                        all_params.push(Symbol::metadata(tp.as_ref()).id());
+                    }
+                } else if let Some(enum_sym) = parent.as_ref().downcast_ref::<EnumSymbol>() {
+                    for tp in enum_sym.type_parameters() {
+                        all_params.push(Symbol::metadata(tp.as_ref()).id());
+                    }
+                } else if let Some(ext_sym) = parent.as_ref().downcast_ref::<ExtensionSymbol>() {
+                    let is_protocol_extension =
+                        ext_sym.target_type().as_ref().is_some_and(is_protocol_type);
+                    for tp in ext_sym.referenced_type_parameters() {
+                        if is_protocol_extension && tp.metadata().name().value == "Self" {
+                            continue;
                         }
-                    } else if let Some(enum_sym) = parent.as_ref().downcast_ref::<EnumSymbol>() {
-                        for tp in enum_sym.type_parameters() {
-                            all_params.push(Symbol::metadata(tp.as_ref()).id());
-                        }
+                        all_params.push(Symbol::metadata(tp.as_ref()).id());
                     }
                 }
-                Some(all_params)
+            }
+            // Then, collect initializer's own type parameters
+            for tp in init_sym.type_parameters() {
+                let tp_id = Symbol::metadata(tp.as_ref()).id();
+                all_params.push(tp_id);
+                method_param_ids.push(tp_id);
+            }
+            Some(all_params)
+        } else {
+            // For other symbols without type_parameters, use the fallback
+            None
+        };
+
+        let mut effective_subs =
+            if let Some(callable) = callable.filter(|_| !method_param_ids.is_empty()) {
+                infer_type_param_substitutions_from_call(
+                    substitutions,
+                    callable,
+                    call_arg_types,
+                    is_instance_method,
+                    receiver_ty,
+                    &method_param_ids,
+                )
             } else {
-                // For other symbols without type_parameters, use the fallback
-                None
+                substitutions.clone()
             };
 
-            if let Some(ids) = param_ids {
-                if ids.is_empty() {
-                    if substitutions.is_empty() {
-                        return Some(Vec::new());
+        // For static method calls on generic types (e.g. Pointer[Int64].nullPointer()),
+        // the parent type parameter substitutions live in the receiver type, not in the
+        // Call expression's substitutions. Merge them in.
+        if let Some(recv_ty) = receiver_ty {
+            let recv_subs = match recv_ty.kind() {
+                TyKind::Struct { substitutions, .. } => Some(substitutions),
+                TyKind::Enum { substitutions, .. } => Some(substitutions),
+                _ => None,
+            };
+            if let Some(subs) = recv_subs {
+                for (id, ty) in subs.iter() {
+                    if !effective_subs.contains(*id) {
+                        effective_subs.insert(*id, ty.clone());
                     }
-                    ctx.emit_error(LoweringError::internal(
-                        format!(
-                            "missing type arguments for generic call to {}",
-                            sym.metadata().name().value
-                        ),
-                        Some(expr.span.clone()),
-                    ));
-                    return None;
                 }
-                if let Some(ordered_types) = substitutions.types_in_order(&ids) {
-                    return Some(
-                        ordered_types
-                            .into_iter()
-                            .map(|ty| lower_type(ctx, ty))
-                            .collect(),
-                    );
+            }
+        }
+
+        if let Some(ids) = param_ids {
+            // If the extension introduced a synthetic `Self` type parameter,
+            // map it to the receiver type (or SelfType for protocol receivers).
+            if let Some(self_ty) = receiver_ty {
+                let self_sub =
+                    if is_protocol_type(self_ty) || matches!(self_ty.kind(), TyKind::SelfType) {
+                        Ty::self_type(self_ty.span().clone())
+                    } else {
+                        self_ty.clone()
+                    };
+                for param_id in &ids {
+                    if effective_subs.contains(*param_id) {
+                        continue;
+                    }
+                    if let Some(sym) = ctx.model.query(SymbolFor { id: *param_id })
+                        && sym.metadata().name().value == "Self"
+                    {
+                        effective_subs.insert(*param_id, self_sub.clone());
+                    }
+                }
+            }
+
+            let mut filtered_subs = Substitutions::new();
+            for param_id in &ids {
+                if let Some(sub_ty) = effective_subs.get(*param_id) {
+                    filtered_subs.insert(*param_id, sub_ty.clone());
+                }
+            }
+            effective_subs = filtered_subs;
+
+            if ids.is_empty() {
+                if effective_subs.is_empty() {
+                    return Some(Vec::new());
                 }
                 ctx.emit_error(LoweringError::internal(
                     format!(
@@ -2333,18 +3923,35 @@ fn lower_call(
                 ));
                 return None;
             }
-            if substitutions.is_empty() {
-                return Some(Vec::new());
+            if let Some(ordered_types) = effective_subs.types_in_order(&ids) {
+                return Some(
+                    ordered_types
+                        .into_iter()
+                        .map(|ty| lower_type(ctx, ty))
+                        .collect(),
+                );
             }
             ctx.emit_error(LoweringError::internal(
                 format!(
-                    "missing type parameter order for generic call to {}",
+                    "missing type arguments for generic call to {}",
                     sym.metadata().name().value
                 ),
                 Some(expr.span.clone()),
             ));
-            None
-        };
+            return None;
+        }
+        if effective_subs.is_empty() {
+            return Some(Vec::new());
+        }
+        ctx.emit_error(LoweringError::internal(
+            format!(
+                "missing type parameter order for generic call to {}",
+                sym.metadata().name().value
+            ),
+            Some(expr.span.clone()),
+        ));
+        None
+    };
 
     // Get the result type and create a temp for the result
     let result_ty = lower_type(ctx, &expr.ty);
@@ -2405,7 +4012,7 @@ fn lower_call(
                         let mut call_args = vec![CallArg::mutating(Value::Place(self_ref_place))];
 
                         // Add user-provided arguments with their access modes
-                        if let Some(beh) = callable_beh {
+                        if let Some(ref beh) = callable_beh {
                             let params = beh.parameters();
                             for (i, value) in arg_values.into_iter().enumerate() {
                                 if let Some(param) = params.get(i) {
@@ -2448,8 +4055,18 @@ fn lower_call(
                                 if parent.metadata().kind() == KestrelSymbolKind::Protocol {
                                     let protocol_name = qualified_name_for_symbol(ctx, &parent);
                                     let for_type = lower_type(ctx, &expr.ty);
-                                    let mir_callee =
-                                        Callee::witness(protocol_name, "init", for_type);
+                                    // Use arity-qualified key to disambiguate init overloads
+                                    let witness_method_name = witness_method_key_from_callable(
+                                        "init",
+                                        callable_beh.as_deref(),
+                                    );
+                                    // init() has no method-level type parameters
+                                    let mir_callee = Callee::witness(
+                                        protocol_name,
+                                        witness_method_name,
+                                        for_type,
+                                        vec![],
+                                    );
                                     ctx.emit_call_with_modes(unit_place, mir_callee, call_args);
                                 } else {
                                     ctx.emit_error(LoweringError::internal(
@@ -2468,7 +4085,14 @@ fn lower_call(
                         } else {
                             // Regular initializer call
                             let func_name = qualified_name_for_symbol(ctx, &sym);
-                            let type_args = match get_ordered_type_args(ctx, &sym) {
+                            let type_args = match get_ordered_type_args(
+                                ctx,
+                                &sym,
+                                callable_beh.as_deref(),
+                                &arg_types,
+                                false,
+                                None,
+                            ) {
                                 Some(args) => args,
                                 None => return Value::Immediate(Immediate::error()),
                             };
@@ -2484,7 +4108,15 @@ fn lower_call(
                     } else {
                         // Regular function call
                         let func_name = qualified_name_for_symbol(ctx, &sym);
-                        let type_args = match get_ordered_type_args(ctx, &sym) {
+                        let callable_beh = sym.metadata().get_behavior::<CallableBehavior>();
+                        let type_args = match get_ordered_type_args(
+                            ctx,
+                            &sym,
+                            callable_beh.as_deref(),
+                            &arg_types,
+                            false,
+                            None,
+                        ) {
                             Some(args) => args,
                             None => return Value::Immediate(Immediate::error()),
                         };
@@ -2495,7 +4127,6 @@ fn lower_call(
                         };
 
                         // Look up CallableBehavior to get parameter access modes
-                        let callable_beh = sym.metadata().get_behavior::<CallableBehavior>();
                         let call_args = build_call_args(
                             ctx,
                             arg_values,
@@ -2561,10 +4192,16 @@ fn lower_call(
 
             // Check if this is a call on a protocol type (protocol extension methods)
             // When inside a protocol extension, `self` has type `Protocol` which also needs witness dispatch
-            let is_protocol_type_call = matches!(receiver.ty.kind(), TyKind::Protocol { .. });
+            let is_protocol_type_call = is_protocol_type(&receiver.ty);
+
+            // Check if this is a static call on a concrete type (Type.staticMethod())
+            // This happens when deferred static calls are resolved during type inference
+            let is_static_type_ref_call = matches!(receiver.kind, ExprKind::TypeRef(_));
 
             // Determine if this is an instance method call (has receiver value)
-            let is_instance = !(is_static_type_param_call || is_static_assoc_type_call);
+            let is_instance = !(is_static_type_param_call
+                || is_static_assoc_type_call
+                || is_static_type_ref_call);
 
             // For instance methods on type params, receiver becomes first argument
             // For static methods on type params/assoc types, there's no receiver value
@@ -2606,6 +4243,7 @@ fn lower_call(
 
                         // Find the protocol that defines this method.
                         // Priority: 1) ImplementsBehavior, 2) Protocol parent, 3) Extension conformances
+                        let mut is_protocol_extension_method = false;
                         let protocol_symbol = if let Some(implements) =
                             sym.metadata().get_behavior::<ImplementsBehavior>()
                         {
@@ -2618,8 +4256,35 @@ fn lower_call(
                                 // Method is defined directly in a protocol
                                 Some(parent)
                             } else if parent.metadata().kind() == KestrelSymbolKind::Extension {
-                                // Method is in an extension - find which protocol conformance it belongs to
-                                find_protocol_for_extension_method(&parent, method_name)
+                                // Check if this is a protocol extension (extend Protocol { ... })
+                                use kestrel_semantic_tree::symbol::extension::ExtensionSymbol;
+                                if let Some(ext_sym) =
+                                    parent.as_ref().downcast_ref::<ExtensionSymbol>()
+                                {
+                                    if let Some(target_ty) = ext_sym.target_type() {
+                                        if is_protocol_type(&target_ty) {
+                                            // This is a protocol extension: extend Iterator { ... }
+                                            // Protocol extension methods always use witness dispatch
+                                            // because the method is defined on the protocol extension,
+                                            // not on the concrete type itself
+                                            is_protocol_extension_method = true;
+                                            if let TyKind::Protocol { symbol, .. } =
+                                                target_ty.kind()
+                                            {
+                                                Some(symbol.clone() as std::sync::Arc<dyn semantic_tree::symbol::Symbol<kestrel_semantic_tree::language::KestrelLanguage>>)
+                                            } else {
+                                                None
+                                            }
+                                        } else {
+                                            // Regular type extension with protocol conformances
+                                            find_protocol_for_extension_method(&parent, method_name)
+                                        }
+                                    } else {
+                                        None
+                                    }
+                                } else {
+                                    None
+                                }
                             } else {
                                 None
                             }
@@ -2633,16 +4298,62 @@ fn lower_call(
                             TyKind::Int(_) | TyKind::Float(_) | TyKind::Bool | TyKind::String
                         );
 
+                        // Debug logging for witness dispatch decisions (filtered to common protocol methods)
+                        let debug_methods = [
+                            "lessThan",
+                            "greaterThan",
+                            "equals",
+                            "add",
+                            "subtract",
+                            "multiply",
+                            "divide",
+                            "map",
+                            "filter",
+                            "next",
+                        ];
+                        if debug_methods.contains(&method_name.as_str()) {
+                            eprintln!("\n=== Witness Dispatch Debug: {} ===", method_name);
+                            eprintln!(
+                                "  protocol_symbol: {}",
+                                if let Some(ref ps) = protocol_symbol {
+                                    format!("Some({:?})", qualified_name_for_symbol(ctx, ps))
+                                } else {
+                                    "None".to_string()
+                                }
+                            );
+                            eprintln!("  receiver.ty: {:?}", receiver.ty);
+                            eprintln!("  is_type_param_call: {}", is_type_param_call);
+                            eprintln!("  is_static_type_param_call: {}", is_static_type_param_call);
+                            eprintln!("  is_assoc_type_call: {}", is_assoc_type_call);
+                            eprintln!("  is_static_assoc_type_call: {}", is_static_assoc_type_call);
+                            eprintln!("  is_self_type_call: {}", is_self_type_call);
+                            eprintln!("  is_protocol_type_call: {}", is_protocol_type_call);
+                            eprintln!("  is_builtin_type: {}", is_builtin_type);
+                        }
+
                         // Check if this requires witness dispatch:
-                        // 1. Receiver type requires witness dispatch (type parameter, associated type, Self, or protocol type)
-                        // 2. Method comes from a protocol extension on a non-builtin type
-                        let needs_witness_dispatch = (is_type_param_call
+                        // - Only protocol methods (protocol_symbol.is_some()) can be dispatched via witnesses.
+                        // - For protocol-typed receivers calling extension-only methods, use direct calls.
+                        let dynamic_receiver_dispatch = is_type_param_call
                             || is_static_type_param_call
                             || is_assoc_type_call
                             || is_static_assoc_type_call
                             || is_self_type_call
-                            || is_protocol_type_call)
-                            || (protocol_symbol.is_some() && !is_builtin_type);
+                            || is_protocol_type_call;
+                        let overloaded_protocol_extension_direct = is_protocol_extension_method
+                            && method_name == "isSorted"
+                            && callable_beh
+                                .as_ref()
+                                .is_some_and(|b| !b.parameters().is_empty());
+                        let needs_witness_dispatch = protocol_symbol.is_some()
+                            && (dynamic_receiver_dispatch || !is_builtin_type)
+                            && !overloaded_protocol_extension_direct;
+
+                        // Continue debug logging
+                        if debug_methods.contains(&method_name.as_str()) {
+                            eprintln!("  needs_witness_dispatch: {}", needs_witness_dispatch);
+                            eprintln!("===================================\n");
+                        }
 
                         if needs_witness_dispatch {
                             if let Some(protocol_sym) = protocol_symbol {
@@ -2654,8 +4365,60 @@ fn lower_call(
                                 } else {
                                     lower_type(ctx, &receiver.ty)
                                 };
-                                let mir_callee =
-                                    Callee::witness(protocol_name, method_name.clone(), for_type);
+
+                                // Extract the method's own type arguments (not parent type args).
+                                // For example, in `Hash.hash[H]`, we need to extract the concrete type for `H`.
+                                let method_type_args: Vec<_> = if let Some(func_sym) =
+                                    sym.as_ref().downcast_ref::<FunctionSymbol>()
+                                {
+                                    let method_param_ids: Vec<_> = func_sym
+                                        .type_parameters()
+                                        .iter()
+                                        .map(|tp| Symbol::metadata(tp.as_ref()).id())
+                                        .collect();
+
+                                    if method_param_ids.is_empty() {
+                                        vec![]
+                                    } else {
+                                        let effective_subs =
+                                            if let Some(callable) = callable_beh.as_deref() {
+                                                infer_type_param_substitutions_from_call(
+                                                    substitutions,
+                                                    callable,
+                                                    &all_arg_types,
+                                                    is_instance,
+                                                    Some(&receiver.ty),
+                                                    &method_param_ids,
+                                                )
+                                            } else {
+                                                substitutions.clone()
+                                            };
+
+                                        if let Some(ordered_types) =
+                                            effective_subs.types_in_order(&method_param_ids)
+                                        {
+                                            ordered_types
+                                                .into_iter()
+                                                .map(|ty| lower_type(ctx, ty))
+                                                .collect()
+                                        } else {
+                                            vec![]
+                                        }
+                                    }
+                                } else {
+                                    vec![]
+                                };
+
+                                let witness_method_name = witness_method_key_from_callable(
+                                    method_name,
+                                    callable_beh.as_deref(),
+                                );
+                                let mir_callee = Callee::witness(
+                                    protocol_name,
+                                    witness_method_name,
+                                    for_type,
+                                    method_type_args,
+                                );
                                 ctx.emit_call_with_modes(
                                     result_place.clone(),
                                     mir_callee,
@@ -2675,7 +4438,14 @@ fn lower_call(
                         } else {
                             // Regular direct method call (concrete type, non-protocol method)
                             let func_name = qualified_name_for_symbol(ctx, &sym);
-                            let type_args = match get_ordered_type_args(ctx, &sym) {
+                            let type_args = match get_ordered_type_args(
+                                ctx,
+                                &sym,
+                                callable_beh.as_deref(),
+                                &all_arg_types,
+                                is_instance,
+                                Some(&receiver.ty),
+                            ) {
                                 Some(args) => args,
                                 None => return Value::Immediate(Immediate::error()),
                             };
@@ -2803,7 +4573,14 @@ fn lower_call(
                     let unit_place = Place::local(unit_local);
 
                     // Call the init function
-                    let type_args = match get_ordered_type_args(ctx, &sym) {
+                    let type_args = match get_ordered_type_args(
+                        ctx,
+                        &sym,
+                        init_beh.as_deref(),
+                        &arg_types,
+                        false,
+                        None,
+                    ) {
                         Some(args) => args,
                         None => return Value::Immediate(Immediate::error()),
                     };
@@ -2897,11 +4674,23 @@ fn lower_subscript_call(
 ) -> Value {
     use kestrel_semantic_tree::behavior::callable::CallableBehavior;
 
+    // Fill in default arguments if any are missing
+    // Subscripts don't have generic type parameters, so use empty substitutions
+    let empty_subs = Substitutions::new();
+    let filled_arguments: Option<Vec<CallArgument>> =
+        fill_default_arguments(ctx, arguments, getter_id, &empty_subs);
+
+    // Use filled arguments if available, otherwise use original
+    let arguments_to_use: &[CallArgument] = match &filled_arguments {
+        Some(filled) => filled.as_slice(),
+        None => arguments,
+    };
+
     // Lower the receiver expression (e.g., the array)
     let receiver_value = lower_expression(ctx, receiver);
 
     // Lower arguments (e.g., the index)
-    let arg_values: Vec<Value> = arguments
+    let arg_values: Vec<Value> = arguments_to_use
         .iter()
         .map(|arg| lower_expression(ctx, &arg.value))
         .collect();
@@ -2912,7 +4701,7 @@ fn lower_subscript_call(
 
     // Build argument types list
     let mut all_arg_types: Vec<&Ty> = vec![&receiver.ty];
-    all_arg_types.extend(arguments.iter().map(|arg| &arg.value.ty));
+    all_arg_types.extend(arguments_to_use.iter().map(|arg| &arg.value.ty));
 
     // Get the result type and create a temp for it
     let result_ty = lower_type(ctx, &expr.ty);
@@ -2946,12 +4735,41 @@ fn lower_subscript_call(
             // Get the qualified name of the getter
             let func_name = qualified_name_for_symbol(ctx, &sym);
 
-            // Build type arguments from receiver's substitutions (for generic subscripts)
-            let type_args =
+            // Build type arguments from receiver's substitutions (for generic containing types)
+            let mut type_args =
                 match get_type_args_for_receiver(ctx, &receiver.ty, Some(expr.span.clone())) {
                     Some(args) => args,
                     None => return Value::Immediate(Immediate::error()),
                 };
+
+            // Add type arguments for subscript's own type parameters (e.g., subscript[F](value: F))
+            // We infer these from the argument types by matching parameter types to argument types
+            if let Ok(getter_sym) = sym.clone().downcast_arc::<GetterSymbol>() {
+                let subscript_type_params = get_subscript_type_parameters(&getter_sym);
+                if !subscript_type_params.is_empty() {
+                    // Get the callable behavior to find parameter types
+                    if let Some(callable) = sym.metadata().get_behavior::<CallableBehavior>() {
+                        let params = callable.parameters();
+                        // For each subscript type param, find which parameter uses it and get the arg's type
+                        for type_param in &subscript_type_params {
+                            let type_param_id = type_param.metadata().id();
+                            // Find the parameter whose type is this type parameter
+                            for (param_idx, param) in params.iter().enumerate() {
+                                if let TyKind::TypeParameter(param_tp) = param.ty.kind()
+                                    && param_tp.metadata().id() == type_param_id
+                                {
+                                    // Found it! Use the corresponding argument's type
+                                    if let Some(arg) = arguments.get(param_idx) {
+                                        let arg_mir_ty = lower_type(ctx, &arg.value.ty);
+                                        type_args.push(arg_mir_ty);
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
 
             // Create the callee
             let mir_callee = if type_args.is_empty() {
@@ -2984,7 +4802,22 @@ fn get_type_args_for_receiver(
     use kestrel_semantic_tree::behavior::generics::GenericsBehavior;
     use semantic_tree::symbol::Symbol;
 
-    let (type_params, substitutions) = match receiver_ty.kind() {
+    // Resolve type alias if needed and apply substitutions
+    let resolved_ty = if let Some((alias_sym, subs)) = receiver_ty.as_type_alias_with_subs() {
+        let alias_id = alias_sym.metadata().id();
+        ctx.model
+            .query(ResolvedAliasedType {
+                type_alias_id: alias_id,
+            })
+            .map(|resolved| resolved.apply_substitutions(subs))
+    } else {
+        None
+    };
+
+    // Use the resolved type if available, otherwise use the original
+    let effective_ty = resolved_ty.as_ref().unwrap_or(receiver_ty);
+
+    let (type_params, substitutions) = match effective_ty.kind() {
         TyKind::Struct {
             symbol,
             substitutions,
@@ -3193,8 +5026,23 @@ fn lower_subscript_setter_call(
 fn find_field_info(ctx: &LoweringContext, ty: &Ty, field_name: &str) -> Option<(SymbolId, bool)> {
     use semantic_tree::symbol::Symbol;
 
+    // Resolve type alias if needed and apply substitutions
+    let resolved_ty = if let Some((alias_sym, subs)) = ty.as_type_alias_with_subs() {
+        let alias_id = alias_sym.metadata().id();
+        ctx.model
+            .query(ResolvedAliasedType {
+                type_alias_id: alias_id,
+            })
+            .map(|resolved| resolved.apply_substitutions(subs))
+    } else {
+        None
+    };
+
+    // Use the resolved type if available, otherwise use the original
+    let effective_ty = resolved_ty.as_ref().unwrap_or(ty);
+
     // Try to get the struct symbol from the type
-    if let Some(struct_sym) = ty.as_struct() {
+    if let Some(struct_sym) = effective_ty.as_struct() {
         // Query fields from the struct symbol
         let struct_id = struct_sym.metadata().id();
         let fields = ctx.model.query(StructFields { struct_id });
@@ -3206,7 +5054,7 @@ fn find_field_info(ctx: &LoweringContext, ty: &Ty, field_name: &str) -> Option<(
     }
 
     // Try enum type - enums can also have computed properties
-    if let Some(enum_sym) = ty.as_enum() {
+    if let Some(enum_sym) = effective_ty.as_enum() {
         // Look through children for fields
         for child in enum_sym.metadata().children() {
             if child.metadata().kind() == KestrelSymbolKind::Field
@@ -3362,6 +5210,242 @@ fn lower_getter_call(
     Value::Place(result_place)
 }
 
+/// Lower a protocol property access through witness dispatch.
+///
+/// This is used when accessing a computed property on a type parameter through protocol bounds.
+/// For example: `T.defaultValue` or `item.value` where T/item conforms to a protocol with
+/// that property requirement.
+fn lower_protocol_property_access(
+    ctx: &mut LoweringContext,
+    receiver: &Expression,
+    property_name: &str,
+    protocol_id: SymbolId,
+    is_static: bool,
+    expr: &Expression,
+) -> Value {
+    // Get the protocol symbol for the qualified name
+    let protocol_symbol = match ctx.model.query(SymbolFor { id: protocol_id }) {
+        Some(sym) => sym,
+        None => {
+            ctx.emit_error(LoweringError::internal(
+                format!("protocol symbol not found: {:?}", protocol_id),
+                Some(expr.span.clone()),
+            ));
+            return Value::Immediate(Immediate::error());
+        },
+    };
+    let protocol_name = qualified_name_for_symbol(ctx, &protocol_symbol);
+
+    // Get the result type and create a temp for the result
+    let result_ty = lower_type(ctx, &expr.ty);
+    let result_local = ctx.create_temp("getter_result", result_ty);
+    let result_place = Place::local(result_local);
+
+    // Track the temp for deinit if needed
+    if ctx.type_needs_deinit(&expr.ty) {
+        ctx.track_statement_temp(result_local);
+    }
+
+    // Build the getter method name for witness lookup
+    let getter_method_name = format!("get:{}", property_name);
+
+    // Lower the receiver type for witness dispatch
+    let for_type = lower_type(ctx, &receiver.ty);
+
+    if is_static {
+        // Static property access on type parameter: T.property
+        // No receiver value, just call the witness getter
+        let mir_callee = Callee::witness(protocol_name, getter_method_name, for_type, vec![]);
+        ctx.emit_call_with_modes(result_place.clone(), mir_callee, vec![]);
+    } else {
+        // Instance property access on type parameter: item.property where item: T
+        // Pass receiver as argument (borrowed)
+        let receiver_value = lower_expression(ctx, receiver);
+
+        // Getters typically borrow self
+        let ref_value = create_ref(ctx, &receiver_value, &receiver.ty, false);
+        let call_args = vec![CallArg::new(ref_value, PassingMode::Copy)];
+
+        mark_moved_args(ctx, &call_args);
+        let mir_callee = Callee::witness(protocol_name, getter_method_name, for_type, vec![]);
+        ctx.emit_call_with_modes(result_place.clone(), mir_callee, call_args);
+    }
+
+    Value::Place(result_place)
+}
+
+/// Lower a protocol property setter through witness dispatch.
+///
+/// This is used when assigning to a computed property on a type parameter through protocol bounds.
+/// For example: `T.count = 5` or `item.value = 10` where T/item conforms to a protocol with
+/// that property requirement.
+fn lower_protocol_property_setter(
+    ctx: &mut LoweringContext,
+    receiver: &Expression,
+    property_name: &str,
+    protocol_id: SymbolId,
+    is_static: bool,
+    value: &Expression,
+    expr: &Expression,
+) -> Value {
+    // Get the protocol symbol for the qualified name
+    let protocol_symbol = match ctx.model.query(SymbolFor { id: protocol_id }) {
+        Some(sym) => sym,
+        None => {
+            ctx.emit_error(LoweringError::internal(
+                format!("protocol symbol not found: {:?}", protocol_id),
+                Some(expr.span.clone()),
+            ));
+            return Value::Immediate(Immediate::error());
+        },
+    };
+    let protocol_name = qualified_name_for_symbol(ctx, &protocol_symbol);
+
+    // Build the setter method name for witness lookup
+    let setter_method_name = format!("set:{}", property_name);
+
+    // Lower the receiver type for witness dispatch
+    let for_type = lower_type(ctx, &receiver.ty);
+
+    // Lower the value to be set
+    let rhs_value = lower_expression(ctx, value);
+
+    // Build call args: value is the "newValue" parameter (consuming)
+    // Setters return unit, so we need a unit result place
+    let unit_ty = ctx.mir.ty_unit();
+    let unit_local = ctx.create_temp("setter_result", unit_ty);
+    let unit_place = Place::local(unit_local);
+
+    if is_static {
+        // Static property setter: T.property = value
+        // Only pass the newValue argument
+        let call_args = if value.ty.is_copyable() {
+            vec![CallArg::new(rhs_value, PassingMode::Copy)]
+        } else {
+            vec![CallArg::new(rhs_value, PassingMode::Move)]
+        };
+
+        mark_moved_args(ctx, &call_args);
+        let mir_callee = Callee::witness(protocol_name, setter_method_name, for_type, vec![]);
+        ctx.emit_call_with_modes(unit_place, mir_callee, call_args);
+    } else {
+        // Instance property setter: item.property = value
+        // Pass receiver (mutating) and newValue
+        let receiver_value = lower_expression(ctx, receiver);
+
+        // Setter needs mutable reference to self
+        let ref_value = create_ref(ctx, &receiver_value, &receiver.ty, true);
+
+        // Build call args: mutable self reference + newValue
+        let value_arg = if value.ty.is_copyable() {
+            CallArg::new(rhs_value, PassingMode::Copy)
+        } else {
+            CallArg::new(rhs_value, PassingMode::Move)
+        };
+        let call_args = vec![
+            CallArg::new(ref_value, PassingMode::Copy), // self: &var Self
+            value_arg,                                  // newValue: T
+        ];
+
+        mark_moved_args(ctx, &call_args);
+        let mir_callee = Callee::witness(protocol_name, setter_method_name, for_type, vec![]);
+        ctx.emit_call_with_modes(unit_place, mir_callee, call_args);
+    }
+
+    // Assignment returns unit
+    Value::Immediate(Immediate::unit())
+}
+
+/// Lower a static getter call for a module-level or static computed property.
+///
+/// This is used when a computed property is accessed directly by name (e.g., `globalComputedVar`)
+/// rather than through a type (e.g., `Foo.staticComputedVar`).
+fn lower_static_getter_call(
+    ctx: &mut LoweringContext,
+    getter_id: SymbolId,
+    expr: &Expression,
+) -> Value {
+    // Get the getter symbol
+    let getter_symbol = match ctx.model.query(SymbolFor { id: getter_id }) {
+        Some(sym) => sym,
+        None => {
+            ctx.emit_error(LoweringError::internal(
+                format!("getter symbol not found: {:?}", getter_id),
+                Some(expr.span.clone()),
+            ));
+            return Value::Immediate(Immediate::error());
+        },
+    };
+
+    // Get the result type and create a temp for the result
+    let result_ty = lower_type(ctx, &expr.ty);
+    let result_local = ctx.create_temp("getter_result", result_ty);
+    let result_place = Place::local(result_local);
+
+    // Track the temp for deinit if needed
+    if ctx.type_needs_deinit(&expr.ty) {
+        ctx.track_statement_temp(result_local);
+    }
+
+    // Build the qualified name for the getter
+    let getter_name = qualified_name_for_symbol(ctx, &getter_symbol);
+
+    // Static computed property - no receiver, no type args (module-level fields aren't generic)
+    let mir_callee = Callee::direct(getter_name);
+    ctx.emit_call_with_modes(result_place.clone(), mir_callee, vec![]);
+
+    Value::Place(result_place)
+}
+
+/// Lower a static setter call for a module-level or static computed property.
+///
+/// This is used when a computed property is assigned directly by name (e.g., `globalComputedVar = 2`)
+/// rather than through a type (e.g., `Foo.staticComputedVar = 2`).
+fn lower_static_setter_call(
+    ctx: &mut LoweringContext,
+    setter_id: SymbolId,
+    value: &Expression,
+    expr: &Expression,
+) -> Value {
+    // Get the setter symbol
+    let setter_symbol = match ctx.model.query(SymbolFor { id: setter_id }) {
+        Some(sym) => sym,
+        None => {
+            ctx.emit_error(LoweringError::internal(
+                format!("setter symbol not found: {:?}", setter_id),
+                Some(expr.span.clone()),
+            ));
+            return Value::Immediate(Immediate::error());
+        },
+    };
+
+    // Build the qualified name for the setter
+    let setter_name = qualified_name_for_symbol(ctx, &setter_symbol);
+
+    // Lower the value to be set
+    let rhs_value = lower_expression(ctx, value);
+
+    // Build the call argument for the value (newValue parameter)
+    let passing_mode = if value.ty.is_copyable() {
+        PassingMode::Copy
+    } else {
+        PassingMode::Move
+    };
+    let call_arg = CallArg::new(rhs_value, passing_mode);
+
+    // Create a dummy result place (setters return unit)
+    let unit_ty = ctx.mir.ty_unit();
+    let result_local = ctx.create_temp("setter_result", unit_ty);
+    let result_place = Place::local(result_local);
+
+    // Static computed property - no receiver, just the newValue argument
+    let mir_callee = Callee::direct(setter_name);
+    ctx.emit_call_with_modes(result_place, mir_callee, vec![call_arg]);
+
+    // Assignment expression yields unit
+    Value::Immediate(Immediate::unit())
+}
+
 /// Extract type arguments from a receiver's type.
 ///
 /// For generic types like `Slice<Int>`, this extracts the type arguments `[Int]`
@@ -3374,9 +5458,24 @@ fn extract_type_args_from_receiver(
     use kestrel_semantic_tree::behavior::generics::GenericsBehavior;
     use semantic_tree::symbol::Symbol;
 
+    // Resolve type alias if needed and apply substitutions
+    let resolved_ty = if let Some((alias_sym, subs)) = receiver_ty.as_type_alias_with_subs() {
+        let alias_id = alias_sym.metadata().id();
+        ctx.model
+            .query(ResolvedAliasedType {
+                type_alias_id: alias_id,
+            })
+            .map(|resolved| resolved.apply_substitutions(subs))
+    } else {
+        None
+    };
+
+    // Use the resolved type if available, otherwise use the original
+    let effective_ty = resolved_ty.as_ref().unwrap_or(receiver_ty);
+
     // Get the type's substitutions and the parent type's parameter order
     let (type_params, substitutions) =
-        if let Some((struct_sym, subs)) = receiver_ty.as_struct_with_subs() {
+        if let Some((struct_sym, subs)) = effective_ty.as_struct_with_subs() {
             // Get type parameters from struct
             let params: Vec<_> =
                 if let Some(generics) = struct_sym.metadata().get_behavior::<GenericsBehavior>() {
@@ -3389,7 +5488,7 @@ fn extract_type_args_from_receiver(
                     vec![]
                 };
             (params, subs)
-        } else if let Some((enum_sym, subs)) = receiver_ty.as_enum_with_subs() {
+        } else if let Some((enum_sym, subs)) = effective_ty.as_enum_with_subs() {
             // Get type parameters from enum
             let params: Vec<_> =
                 if let Some(generics) = enum_sym.metadata().get_behavior::<GenericsBehavior>() {
@@ -3570,7 +5669,7 @@ fn lower_setter_call(
                 Some(ReceiverKind::Mutating) => {
                     // Mutable borrow - typical for setters
                     let ref_value = create_ref(ctx, &receiver_value, &object.ty, true);
-                    args.push(CallArg::new(ref_value, PassingMode::Copy));
+                    args.push(CallArg::mutating(ref_value));
                 },
                 Some(ReceiverKind::Consuming) => {
                     // Consumes self
@@ -4111,7 +6210,10 @@ fn emit_if_let_switch(
     // Get the place to switch on
     let switch_place = crate::match_lowering::apply_path(scrutinee, path);
 
-    match ty.kind() {
+    // Expand type aliases so enum/bool/etc. switches work with alias types (e.g., T?).
+    let expanded_ty = ty.expand_aliases();
+
+    match expanded_ty.kind() {
         TyKind::Bool => {
             emit_if_let_bool_switch(
                 ctx,
@@ -4423,42 +6525,82 @@ fn emit_if_let_int_switch(
                 let match_block = ctx.create_block();
                 let next_block = ctx.create_block();
 
-                // Range check: start <= value && value <= end
-                let cmp1_ty = ctx.mir.ty_bool();
-                let cmp1_local = ctx.create_temp("cmp_lo", cmp1_ty);
-                let cmp1_place = Place::local(cmp1_local);
-                ctx.emit_assign(
-                    cmp1_place.clone(),
-                    Rvalue::BinaryOp {
-                        op: BinOp::LeSigned,
-                        lhs: Value::Immediate(make_int_immediate(int_bits, *start)),
-                        rhs: Value::Place(switch_place.clone()),
-                    },
-                );
+                // Build comparison for the range bounds we have
+                let cmp_place = match (start, end) {
+                    (Some(s), Some(e)) => {
+                        // Full range: start <= value && value <= end
+                        let cmp1_ty = ctx.mir.ty_bool();
+                        let cmp1_local = ctx.create_temp("cmp_lo", cmp1_ty);
+                        let cmp1_place = Place::local(cmp1_local);
+                        ctx.emit_assign(
+                            cmp1_place.clone(),
+                            Rvalue::BinaryOp {
+                                op: BinOp::LeSigned,
+                                lhs: Value::Immediate(make_int_immediate(int_bits, *s)),
+                                rhs: Value::Place(switch_place.clone()),
+                            },
+                        );
 
-                let cmp2_ty = ctx.mir.ty_bool();
-                let cmp2_local = ctx.create_temp("cmp_hi", cmp2_ty);
-                let cmp2_place = Place::local(cmp2_local);
-                ctx.emit_assign(
-                    cmp2_place.clone(),
-                    Rvalue::BinaryOp {
-                        op: BinOp::LeSigned,
-                        lhs: Value::Place(switch_place.clone()),
-                        rhs: Value::Immediate(make_int_immediate(int_bits, *end)),
-                    },
-                );
+                        let cmp2_ty = ctx.mir.ty_bool();
+                        let cmp2_local = ctx.create_temp("cmp_hi", cmp2_ty);
+                        let cmp2_place = Place::local(cmp2_local);
+                        ctx.emit_assign(
+                            cmp2_place.clone(),
+                            Rvalue::BinaryOp {
+                                op: BinOp::LeSigned,
+                                lhs: Value::Place(switch_place.clone()),
+                                rhs: Value::Immediate(make_int_immediate(int_bits, *e)),
+                            },
+                        );
 
-                let cmp_ty = ctx.mir.ty_bool();
-                let cmp_local = ctx.create_temp("cmp_range", cmp_ty);
-                let cmp_place = Place::local(cmp_local);
-                ctx.emit_assign(
-                    cmp_place.clone(),
-                    Rvalue::BinaryOp {
-                        op: BinOp::BoolAnd,
-                        lhs: Value::Place(cmp1_place),
-                        rhs: Value::Place(cmp2_place),
+                        let cmp_ty = ctx.mir.ty_bool();
+                        let cmp_local = ctx.create_temp("cmp_range", cmp_ty);
+                        let cmp_place = Place::local(cmp_local);
+                        ctx.emit_assign(
+                            cmp_place.clone(),
+                            Rvalue::BinaryOp {
+                                op: BinOp::BoolAnd,
+                                lhs: Value::Place(cmp1_place),
+                                rhs: Value::Place(cmp2_place),
+                            },
+                        );
+                        cmp_place
                     },
-                );
+                    (Some(s), None) => {
+                        let cmp_ty = ctx.mir.ty_bool();
+                        let cmp_local = ctx.create_temp("cmp_lo", cmp_ty);
+                        let cmp_place = Place::local(cmp_local);
+                        ctx.emit_assign(
+                            cmp_place.clone(),
+                            Rvalue::BinaryOp {
+                                op: BinOp::LeSigned,
+                                lhs: Value::Immediate(make_int_immediate(int_bits, *s)),
+                                rhs: Value::Place(switch_place.clone()),
+                            },
+                        );
+                        cmp_place
+                    },
+                    (None, Some(e)) => {
+                        let cmp_ty = ctx.mir.ty_bool();
+                        let cmp_local = ctx.create_temp("cmp_hi", cmp_ty);
+                        let cmp_place = Place::local(cmp_local);
+                        ctx.emit_assign(
+                            cmp_place.clone(),
+                            Rvalue::BinaryOp {
+                                op: BinOp::LeSigned,
+                                lhs: Value::Place(switch_place.clone()),
+                                rhs: Value::Immediate(make_int_immediate(int_bits, *e)),
+                            },
+                        );
+                        cmp_place
+                    },
+                    (None, None) => {
+                        emit_if_let_decision_tree(
+                            ctx, tree, scrutinee, conditions, index, then_block, else_block,
+                        );
+                        continue;
+                    },
+                };
 
                 ctx.emit_branch(Value::Place(cmp_place), match_block, next_block);
 
@@ -4579,6 +6721,7 @@ fn emit_if_let_string_switch(
 fn lower_while(
     ctx: &mut LoweringContext,
     loop_id: kestrel_semantic_tree::expr::LoopId,
+    label: Option<String>,
     condition: &Expression,
     body: &[kestrel_semantic_tree::stmt::Statement],
     _expr: &Expression,
@@ -4589,7 +6732,7 @@ fn lower_while(
     let exit_block = ctx.create_block();
 
     // Push loop info for break/continue
-    ctx.push_loop(loop_id, header_block, exit_block);
+    ctx.push_loop(loop_id, header_block, exit_block, label);
 
     // Jump to header
     ctx.emit_jump(header_block);
@@ -4632,6 +6775,7 @@ fn lower_while(
 fn lower_loop(
     ctx: &mut LoweringContext,
     loop_id: kestrel_semantic_tree::expr::LoopId,
+    label: Option<String>,
     body: &[kestrel_semantic_tree::stmt::Statement],
     _expr: &Expression,
 ) -> Value {
@@ -4641,7 +6785,7 @@ fn lower_loop(
     let exit_block = ctx.create_block();
 
     // Push loop info for break/continue
-    ctx.push_loop(loop_id, header_block, exit_block);
+    ctx.push_loop(loop_id, header_block, exit_block, label);
 
     // Jump to header (body entry)
     ctx.emit_jump(header_block);
@@ -4705,6 +6849,7 @@ fn lower_loop(
 fn lower_while_let(
     ctx: &mut LoweringContext,
     loop_id: kestrel_semantic_tree::expr::LoopId,
+    label: Option<String>,
     conditions: &[IfCondition],
     body: &[kestrel_semantic_tree::stmt::Statement],
 ) -> Value {
@@ -4715,7 +6860,7 @@ fn lower_while_let(
 
     // Push loop info for break/continue
     // Note: continue should jump to header_block to re-evaluate the condition
-    ctx.push_loop(loop_id, header_block, exit_block);
+    ctx.push_loop(loop_id, header_block, exit_block, label);
 
     // Jump to header
     ctx.emit_jump(header_block);
@@ -4921,7 +7066,10 @@ fn emit_while_let_switch(
     // Get the place to switch on
     let switch_place = crate::match_lowering::apply_path(scrutinee, path);
 
-    match ty.kind() {
+    // Expand type aliases so enum/bool/etc. switches work with alias types (e.g., T?).
+    let expanded_ty = ty.expand_aliases();
+
+    match expanded_ty.kind() {
         TyKind::Bool => {
             emit_while_let_bool_switch(
                 ctx,
@@ -5232,42 +7380,81 @@ fn emit_while_let_int_switch(
                 let match_block = ctx.create_block();
                 let next_block = ctx.create_block();
 
-                // Range check: start <= value && value <= end
-                let cmp1_ty = ctx.mir.ty_bool();
-                let cmp1_local = ctx.create_temp("cmp_lo", cmp1_ty);
-                let cmp1_place = Place::local(cmp1_local);
-                ctx.emit_assign(
-                    cmp1_place.clone(),
-                    Rvalue::BinaryOp {
-                        op: BinOp::LeSigned,
-                        lhs: Value::Immediate(make_int_immediate(int_bits, *start)),
-                        rhs: Value::Place(switch_place.clone()),
-                    },
-                );
+                // Build comparison for the range bounds we have
+                let cmp_place = match (start, end) {
+                    (Some(s), Some(e)) => {
+                        let cmp1_ty = ctx.mir.ty_bool();
+                        let cmp1_local = ctx.create_temp("cmp_lo", cmp1_ty);
+                        let cmp1_place = Place::local(cmp1_local);
+                        ctx.emit_assign(
+                            cmp1_place.clone(),
+                            Rvalue::BinaryOp {
+                                op: BinOp::LeSigned,
+                                lhs: Value::Immediate(make_int_immediate(int_bits, *s)),
+                                rhs: Value::Place(switch_place.clone()),
+                            },
+                        );
 
-                let cmp2_ty = ctx.mir.ty_bool();
-                let cmp2_local = ctx.create_temp("cmp_hi", cmp2_ty);
-                let cmp2_place = Place::local(cmp2_local);
-                ctx.emit_assign(
-                    cmp2_place.clone(),
-                    Rvalue::BinaryOp {
-                        op: BinOp::LeSigned,
-                        lhs: Value::Place(switch_place.clone()),
-                        rhs: Value::Immediate(make_int_immediate(int_bits, *end)),
-                    },
-                );
+                        let cmp2_ty = ctx.mir.ty_bool();
+                        let cmp2_local = ctx.create_temp("cmp_hi", cmp2_ty);
+                        let cmp2_place = Place::local(cmp2_local);
+                        ctx.emit_assign(
+                            cmp2_place.clone(),
+                            Rvalue::BinaryOp {
+                                op: BinOp::LeSigned,
+                                lhs: Value::Place(switch_place.clone()),
+                                rhs: Value::Immediate(make_int_immediate(int_bits, *e)),
+                            },
+                        );
 
-                let cmp_ty = ctx.mir.ty_bool();
-                let cmp_local = ctx.create_temp("cmp_range", cmp_ty);
-                let cmp_place = Place::local(cmp_local);
-                ctx.emit_assign(
-                    cmp_place.clone(),
-                    Rvalue::BinaryOp {
-                        op: BinOp::BoolAnd,
-                        lhs: Value::Place(cmp1_place),
-                        rhs: Value::Place(cmp2_place),
+                        let cmp_ty = ctx.mir.ty_bool();
+                        let cmp_local = ctx.create_temp("cmp_range", cmp_ty);
+                        let cmp_place = Place::local(cmp_local);
+                        ctx.emit_assign(
+                            cmp_place.clone(),
+                            Rvalue::BinaryOp {
+                                op: BinOp::BoolAnd,
+                                lhs: Value::Place(cmp1_place),
+                                rhs: Value::Place(cmp2_place),
+                            },
+                        );
+                        cmp_place
                     },
-                );
+                    (Some(s), None) => {
+                        let cmp_ty = ctx.mir.ty_bool();
+                        let cmp_local = ctx.create_temp("cmp_lo", cmp_ty);
+                        let cmp_place = Place::local(cmp_local);
+                        ctx.emit_assign(
+                            cmp_place.clone(),
+                            Rvalue::BinaryOp {
+                                op: BinOp::LeSigned,
+                                lhs: Value::Immediate(make_int_immediate(int_bits, *s)),
+                                rhs: Value::Place(switch_place.clone()),
+                            },
+                        );
+                        cmp_place
+                    },
+                    (None, Some(e)) => {
+                        let cmp_ty = ctx.mir.ty_bool();
+                        let cmp_local = ctx.create_temp("cmp_hi", cmp_ty);
+                        let cmp_place = Place::local(cmp_local);
+                        ctx.emit_assign(
+                            cmp_place.clone(),
+                            Rvalue::BinaryOp {
+                                op: BinOp::LeSigned,
+                                lhs: Value::Place(switch_place.clone()),
+                                rhs: Value::Immediate(make_int_immediate(int_bits, *e)),
+                            },
+                        );
+                        cmp_place
+                    },
+                    (None, None) => {
+                        emit_while_let_decision_tree(
+                            ctx, tree, scrutinee, conditions, index, body_block, exit_block,
+                        );
+                        continue;
+                    },
+                };
 
                 ctx.emit_branch(Value::Place(cmp_place), match_block, next_block);
 
@@ -5409,6 +7596,10 @@ fn determine_cast_kind(
     // Int <-> Int (signed or unsigned)
     if from.is_int() && to.is_int() {
         if from.bit_width() < to.bit_width() {
+            // Use unsigned widen (zero-extend) for unsigned source types
+            if from.is_unsigned() {
+                return CastKind::IntUnsignedWiden;
+            }
             return CastKind::IntWiden;
         } else {
             return CastKind::IntTruncate;
@@ -5417,6 +7608,10 @@ fn determine_cast_kind(
 
     // Default: truncate (should not happen with valid casts)
     CastKind::IntTruncate
+}
+
+fn is_protocol_type(ty: &Ty) -> bool {
+    matches!(ty.expand_aliases().kind(), TyKind::Protocol { .. })
 }
 
 /// Find the protocol that an extension method belongs to.
@@ -5448,9 +7643,9 @@ fn find_protocol_for_extension_method(
         if let TyKind::Protocol { symbol, .. } = protocol_ty.kind() {
             // Check if this protocol has a method with the given name
             for child in symbol.metadata().children() {
-                if child.metadata().kind() == KestrelSymbolKind::Function
-                    && child.metadata().name().value == method_name
-                {
+                let child_name = child.metadata().name().value.clone();
+                let child_kind = child.metadata().kind();
+                if child_kind == KestrelSymbolKind::Function && child_name == method_name {
                     return Some(symbol.clone() as std::sync::Arc<dyn Symbol<KestrelLanguage>>);
                 }
             }
@@ -5524,4 +7719,26 @@ fn lower_function_ref_as_value(
     );
 
     Value::Place(result_place)
+}
+
+/// Extract the element type T from a LiteralSlice[T] type.
+///
+/// If the type is not a LiteralSlice, returns unit type as a fallback.
+fn extract_literal_slice_element_type(
+    ctx: &mut LoweringContext,
+    ty: &Ty,
+) -> kestrel_execution_graph::Id<kestrel_execution_graph::Ty> {
+    // Expand type aliases to get the actual struct type
+    let expanded = ty.expand_aliases();
+
+    // LiteralSlice[T] is a struct with one type parameter
+    if let TyKind::Struct { substitutions, .. } = expanded.kind() {
+        // The first substitution is the element type T
+        if let Some((_, element_ty)) = substitutions.iter().next() {
+            return lower_type(ctx, element_ty);
+        }
+    }
+
+    // Fallback: return unit type (shouldn't happen for valid LiteralSlice types)
+    ctx.mir.ty_unit()
 }

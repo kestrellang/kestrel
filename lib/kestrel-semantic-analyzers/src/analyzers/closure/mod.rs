@@ -175,8 +175,20 @@ fn validate_parameter_assignments(
     // This would require walking the closure body and detecting assignments
 
     // Build a set of parameter names for detection
+    // For patterns, we need to collect names from all bindings in the pattern
     if let Some(param_list) = params {
-        let _param_names: Vec<_> = param_list.iter().map(|p| p.name.clone()).collect();
+        let _param_names: Vec<_> = param_list
+            .iter()
+            .filter_map(|p| {
+                // For simple binding patterns, extract the name
+                // For complex patterns, this placeholder just gets the first name (if any)
+                use kestrel_semantic_tree::pattern::PatternKind;
+                match &p.pattern.kind {
+                    PatternKind::Local { name, .. } => Some(name.clone()),
+                    _ => None, // Complex patterns - would need full traversal
+                }
+            })
+            .collect();
 
         // Similar to capture validation, we'd need to walk the closure body
         // and check for assignments to these parameters
@@ -317,12 +329,23 @@ fn find_assignments_to_locals(
             }
         },
 
+        ExprKind::Dictionary(pairs) => {
+            for (k, v) in pairs {
+                find_assignments_to_locals(k, target_locals, container_id, ctx);
+                find_assignments_to_locals(v, target_locals, container_id, ctx);
+            }
+        },
+
         ExprKind::Grouping(inner) => {
             find_assignments_to_locals(inner, target_locals, container_id, ctx);
         },
 
         ExprKind::FieldAccess { object, .. } => {
             find_assignments_to_locals(object, target_locals, container_id, ctx);
+        },
+
+        ExprKind::ProtocolPropertyAccess { receiver, .. } => {
+            find_assignments_to_locals(receiver, target_locals, container_id, ctx);
         },
 
         ExprKind::TupleIndex { tuple, .. } => {
@@ -368,6 +391,12 @@ fn find_assignments_to_locals(
             }
         },
 
+        ExprKind::DeferredStaticCall { arguments, .. } => {
+            for arg in arguments {
+                find_assignments_to_locals(&arg.value, target_locals, container_id, ctx);
+            }
+        },
+
         ExprKind::ImplicitStructInit { arguments, .. } => {
             for arg in arguments {
                 find_assignments_to_locals(&arg.value, target_locals, container_id, ctx);
@@ -384,6 +413,9 @@ fn find_assignments_to_locals(
             if let Some(val) = value {
                 find_assignments_to_locals(val, target_locals, container_id, ctx);
             }
+        },
+        ExprKind::Throw { value } => {
+            find_assignments_to_locals(value, target_locals, container_id, ctx);
         },
 
         // Implicit member access - check arguments if present
@@ -426,6 +458,7 @@ fn find_assignments_to_locals(
         | ExprKind::Break { .. }
         | ExprKind::Continue { .. }
         | ExprKind::LangIntrinsicRef(_)
+        | ExprKind::InterpolatedString { .. }
         | ExprKind::Error => {},
 
         ExprKind::Match { scrutinee, arms } => {

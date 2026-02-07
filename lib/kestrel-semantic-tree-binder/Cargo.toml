@@ -14,9 +14,8 @@ kestrel-semantic-type-inference = { path = "../kestrel-semantic-type-inference" 
 kestrel-prelude = { path = "../kestrel-prelude" }
 kestrel-span = { path = "../kestrel-span" }
 kestrel-reporting = { path = "../kestrel-reporting" }
+kestrel-lexer = { path = "../kestrel-lexer" }
+kestrel-parser = { path = "../kestrel-parser" }
 semantic-tree = { path = "../semantic-tree" }
 downcast-rs = { workspace = true }
 parking_lot = { workspace = true }
-
-[dev-dependencies]
-kestrel-lexer = { path = "../kestrel-lexer" }

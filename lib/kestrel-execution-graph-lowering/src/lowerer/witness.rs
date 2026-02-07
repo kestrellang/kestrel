@@ -7,12 +7,14 @@
 use kestrel_execution_graph::{Id, TypeParam};
 use kestrel_semantic_model::SymbolFor;
 use kestrel_semantic_model::queries::ExtensionsFor;
+use kestrel_semantic_tree::behavior::callable::CallableBehavior;
 use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
 use kestrel_semantic_tree::behavior::conforms_to::ConformsToBehavior;
 use kestrel_semantic_tree::behavior::implements::ImplementsBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::enum_symbol::EnumSymbol;
 use kestrel_semantic_tree::symbol::extension::ExtensionSymbol;
+use kestrel_semantic_tree::symbol::field::FieldSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
 use kestrel_semantic_tree::symbol::type_alias::TypeAliasSymbol;
@@ -24,6 +26,16 @@ use std::sync::Arc;
 use crate::context::LoweringContext;
 use crate::name::qualified_name_for_symbol;
 use crate::ty::lower_type;
+
+fn witness_method_key(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> String {
+    symbol.metadata().name().value.clone()
+}
+
+fn witness_method_arity_key(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> Option<String> {
+    let base = symbol.metadata().name().value.clone();
+    let callable = symbol.metadata().get_behavior::<CallableBehavior>()?;
+    Some(format!("{}#{}", base, callable.parameters().len()))
+}
 
 /// Generate witnesses for all protocol conformances on a struct.
 pub fn generate_witnesses_for_struct(ctx: &mut LoweringContext, struct_symbol: &Arc<StructSymbol>) {
@@ -364,10 +376,10 @@ fn generate_witness_for_protocol(
     protocol_ty: &Ty,
     type_param_ids: &[Id<TypeParam>],
 ) {
-    // Get the protocol symbol from the type
+    // Get the protocol symbol and substitutions from the type
     let TyKind::Protocol {
         symbol: protocol_symbol,
-        ..
+        substitutions,
     } = protocol_ty.kind()
     else {
         return;
@@ -382,11 +394,34 @@ fn generate_witness_for_protocol(
     // Store the type parameters on the witness so monomorphization can use them
     ctx.mir.witnesses[witness_id].type_params = type_param_ids.to_vec();
 
+    // Store protocol type arguments (e.g., Rhs -> Bool for And[Bool])
+    // This captures the type arguments used when conforming to a parameterized protocol.
+    let protocol_type_params = protocol_symbol.type_parameters();
+    for type_param in &protocol_type_params {
+        let param_name = type_param.metadata().name().value.clone();
+        let param_id = type_param.metadata().id();
+        if let Some(sub_ty) = substitutions.get(param_id) {
+            let mir_ty = lower_type(ctx, sub_ty);
+            ctx.mir.witnesses[witness_id]
+                .protocol_type_args
+                .insert(param_name, mir_ty);
+        }
+    }
+
     // Bind associated types
     bind_associated_types(ctx, witness_id, implementing_symbol, protocol_symbol);
 
     // Bind methods
     bind_methods(ctx, witness_id, implementing_symbol, protocol_symbol);
+
+    // Bind extension methods from protocol extensions
+    bind_extension_methods(
+        ctx,
+        witness_id,
+        implementing_type,
+        implementing_symbol,
+        protocol_symbol,
+    );
 }
 
 /// Bind associated types in the witness from type alias children with ConformsToBehavior.
@@ -435,32 +470,203 @@ fn bind_methods(
 ) {
     let protocol_id = protocol_symbol.metadata().id();
 
+    // Collect protocol method names for fallback matching (including initializers)
+    let protocol_method_names: std::collections::HashSet<String> = protocol_symbol
+        .metadata()
+        .children()
+        .into_iter()
+        .filter(|c| {
+            let kind = c.metadata().kind();
+            kind == KestrelSymbolKind::Function || kind == KestrelSymbolKind::Initializer
+        })
+        .map(|c| c.metadata().name().value.clone())
+        .collect();
+
     for child in implementing_symbol.metadata().children() {
-        if child.metadata().kind() != KestrelSymbolKind::Function {
+        let child_kind = child.metadata().kind();
+        // Handle both functions and initializers (for protocols like Defaultable with init())
+        if child_kind != KestrelSymbolKind::Function && child_kind != KestrelSymbolKind::Initializer
+        {
             continue;
         }
 
-        // Check if this method implements a protocol method
-        if let Some(implements) = child.metadata().get_behavior::<ImplementsBehavior>() {
-            if implements.protocol() != protocol_id {
-                continue;
-            }
+        let func_name = child.metadata().name().value.clone();
 
+        // First try: Check for ImplementsBehavior pointing to this protocol
+        if let Some(implements) = child.metadata().get_behavior::<ImplementsBehavior>()
+            && implements.protocol() == protocol_id
+        {
             // Get the protocol method name by looking up the symbol
             let protocol_method_id = implements.protocol_method();
             let method_name = if let Some(method_symbol) = ctx.model.query(SymbolFor {
                 id: protocol_method_id,
             }) {
-                method_symbol.metadata().name().value.clone()
+                witness_method_key(&method_symbol)
             } else {
-                // Fallback to the implementing method's name
-                child.metadata().name().value.clone()
+                witness_method_key(&child)
             };
 
-            // Get the implementation function's qualified name
             let impl_name = qualified_name_for_symbol(ctx, &child);
-
             ctx.mir.witnesses[witness_id].bind_method(method_name, impl_name, vec![]);
+            if let Some(arity_key) = witness_method_arity_key(&child) {
+                ctx.mir.witnesses[witness_id].bind_method(arity_key, impl_name, vec![]);
+            }
+            continue;
+        }
+
+        // Fallback: For extension methods implementing protocol requirements from the same
+        // extension's conformance, ImplementsBehavior may not be set (due to signature matching
+        // complexities with Self). If the method name matches a protocol method name, bind it.
+        if protocol_method_names.contains(&func_name) {
+            let impl_name = qualified_name_for_symbol(ctx, &child);
+            let method_key = witness_method_key(&child);
+            ctx.mir.witnesses[witness_id].bind_method(method_key, impl_name, vec![]);
+            if let Some(arity_key) = witness_method_arity_key(&child) {
+                ctx.mir.witnesses[witness_id].bind_method(arity_key, impl_name, vec![]);
+            }
+        }
+    }
+
+    // Bind property getters and setters
+    // Protocol property requirements need their getters/setters in the witness table
+    // so that T.property can be resolved through witness lookup.
+    bind_property_accessors(ctx, witness_id, implementing_symbol, protocol_symbol);
+}
+
+/// Bind extension methods from protocol extensions to the witness.
+///
+/// When a type conforms to a protocol, it should have access to default implementations
+/// provided by extensions on that protocol. This function finds all extensions on the
+/// protocol and binds their methods to the witness, unless the implementing type provides
+/// its own implementation.
+///
+/// For example:
+/// - Protocol: `protocol Iterator { func next() -> Element? }`
+/// - Extension: `extend Iterator { func map[U](f: (Element) -> U) -> MapAdapter[Self, U] }`
+/// - Conformance: `struct Range: Iterator { func next() -> Int? { ... } }`
+/// - Result: Range's Iterator witness includes both `next` (from Range) and `map` (from extension)
+fn bind_extension_methods(
+    ctx: &mut LoweringContext,
+    witness_id: Id<kestrel_execution_graph::Witness>,
+    _implementing_type: Id<kestrel_execution_graph::Ty>,
+    implementing_symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+    protocol_symbol: &Arc<kestrel_semantic_tree::symbol::protocol::ProtocolSymbol>,
+) {
+    let protocol_id = protocol_symbol.metadata().id();
+
+    // Find all extensions on this protocol
+    let extensions = ctx.model.query(ExtensionsFor {
+        target_id: protocol_id,
+    });
+
+    // Collect already-bound methods from the implementing type
+    // (we don't want to override these with extension defaults)
+    let mut bound_methods = std::collections::HashSet::new();
+    for child in implementing_symbol.metadata().children() {
+        if child.metadata().kind() == KestrelSymbolKind::Function {
+            bound_methods.insert(child.metadata().name().value.clone());
+        }
+    }
+
+    // Process each extension on the protocol
+    for extension in &extensions {
+        // Note: Extensions that have conformances (e.g., `extend Comparable: Less[Self]`)
+        // will have their derived witnesses created separately by
+        // generate_derived_witnesses_for_protocol_extensions(). However, we still need to
+        // bind their methods here to the implementing type's witness.
+
+        // Iterate through the extension's methods
+        for child in extension.metadata().children() {
+            if child.metadata().kind() != KestrelSymbolKind::Function {
+                continue;
+            }
+
+            let method_name = child.metadata().name().value.clone();
+
+            // Skip if the implementing type provides its own implementation
+            if bound_methods.contains(&method_name) {
+                continue;
+            }
+
+            // Bind the extension method
+            let impl_name = qualified_name_for_symbol(ctx, &child);
+            let method_key = witness_method_key(&child);
+            ctx.mir.witnesses[witness_id].bind_method(method_key, impl_name, vec![]);
+            if let Some(arity_key) = witness_method_arity_key(&child) {
+                ctx.mir.witnesses[witness_id].bind_method(arity_key, impl_name, vec![]);
+            }
+
+            // Mark as bound so we don't bind it again from another extension
+            bound_methods.insert(method_name);
+        }
+    }
+}
+
+/// Bind computed property getters and setters to the witness table.
+///
+/// For a protocol property requirement like `var value: Int { get set }`,
+/// we need witness entries for "get:value" and "set:value" pointing to
+/// the implementing type's getter/setter functions.
+fn bind_property_accessors(
+    ctx: &mut LoweringContext,
+    witness_id: Id<kestrel_execution_graph::Witness>,
+    implementing_symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+    protocol_symbol: &Arc<kestrel_semantic_tree::symbol::protocol::ProtocolSymbol>,
+) {
+    // Collect protocol property names for fallback matching
+    let protocol_property_names: std::collections::HashSet<String> = protocol_symbol
+        .metadata()
+        .children()
+        .into_iter()
+        .filter(|c| c.metadata().kind() == KestrelSymbolKind::Field)
+        .filter_map(|c| {
+            let field = c.downcast_arc::<FieldSymbol>().ok()?;
+            if field.is_computed() {
+                Some(field.metadata().name().value.clone())
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    // Find implementing fields (computed properties)
+    for child in implementing_symbol.metadata().children() {
+        if child.metadata().kind() != KestrelSymbolKind::Field {
+            continue;
+        }
+
+        let Ok(field) = child.clone().downcast_arc::<FieldSymbol>() else {
+            continue;
+        };
+
+        // Only process computed properties
+        if !field.is_computed() {
+            continue;
+        }
+
+        let field_name = field.metadata().name().value.clone();
+
+        // Check if this field implements a protocol property requirement
+        if !protocol_property_names.contains(&field_name) {
+            continue;
+        }
+
+        // Bind getter if present
+        if let Some(getter_id) = field.getter()
+            && let Some(getter_sym) = ctx.model.query(SymbolFor { id: getter_id })
+        {
+            let getter_method_name = format!("get:{}", field_name);
+            let impl_name = qualified_name_for_symbol(ctx, &getter_sym);
+            ctx.mir.witnesses[witness_id].bind_method(getter_method_name, impl_name, vec![]);
+        }
+
+        // Bind setter if present
+        if let Some(setter_id) = field.setter()
+            && let Some(setter_sym) = ctx.model.query(SymbolFor { id: setter_id })
+        {
+            let setter_method_name = format!("set:{}", field_name);
+            let impl_name = qualified_name_for_symbol(ctx, &setter_sym);
+            ctx.mir.witnesses[witness_id].bind_method(setter_method_name, impl_name, vec![]);
         }
     }
 }
@@ -610,7 +816,11 @@ fn bind_methods_from_extension(
             // during monomorphization via FunctionInstantiation.self_type.
             // We don't need to pass type args here - the collector will set self_type
             // when creating the FunctionInstantiation.
-            ctx.mir.witnesses[witness_id].bind_method(method_name, impl_name, vec![]);
+            let method_key = witness_method_key(&impl_method);
+            ctx.mir.witnesses[witness_id].bind_method(method_key, impl_name, vec![]);
+            if let Some(arity_key) = witness_method_arity_key(&impl_method) {
+                ctx.mir.witnesses[witness_id].bind_method(arity_key, impl_name, vec![]);
+            }
         }
     }
 }

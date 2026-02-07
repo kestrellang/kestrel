@@ -140,7 +140,14 @@ impl DeclarationBinder for TypeAliasBinder {
                         );
 
                         // Add ConformsToBehavior to track which protocol's associated type this binds
-                        add_conforms_to_behavior(symbol, &name, &parent);
+                        // For qualified bindings, only add for the specified protocol
+                        let qualified_protocol_name = extract_qualified_protocol_name(syntax);
+                        add_conforms_to_behavior(
+                            symbol,
+                            &name,
+                            &parent,
+                            qualified_protocol_name.as_deref(),
+                        );
                     }
 
                     let type_alias_typed_behavior = TypeAliasTypedBehavior::new(resolved_type);
@@ -337,7 +344,7 @@ fn get_type_display_name(ty: &Ty) -> String {
         TyKind::Bool => "lang.i1".to_string(),
         TyKind::String => "lang.str".to_string(),
         TyKind::Tuple(_) => "tuple".to_string(),
-        TyKind::Array(_) => "lang.array[*]".to_string(),
+        // Note: Array[T] types are TyKind::Struct now
         TyKind::Pointer(_) => "pointer".to_string(),
         TyKind::Function { .. } => "function".to_string(),
         TyKind::Error => "error".to_string(),
@@ -350,6 +357,7 @@ fn get_type_display_name(ty: &Ty) -> String {
         TyKind::TypeAlias { symbol, .. } => symbol.metadata().name().value.clone(),
         TyKind::AssociatedType { symbol, .. } => symbol.metadata().name().value.clone(),
         TyKind::UnresolvedFunction { .. } => "closure".to_string(),
+        TyKind::UnresolvedPath { segments } => segments.join("."),
     }
 }
 
@@ -684,6 +692,12 @@ fn validate_type_satisfies_bounds(
                     // A more sophisticated implementation would check the type parameter's bounds
                     true
                 },
+                TyKind::SelfType => {
+                    // In protocol extensions, Self represents "any type conforming to the protocol"
+                    // so it should satisfy protocol bounds (the extension targets a protocol that
+                    // the conforming type will implement)
+                    true
+                },
                 TyKind::Error => {
                     // Don't report additional errors for error types
                     true
@@ -814,15 +828,33 @@ fn validate_inherited_where_clause_constraints(
     }
 }
 
+/// Extract the qualified protocol name from a type alias syntax node.
+///
+/// For qualified bindings like `type Addable.Output = Int64`, returns `Some("Addable")`.
+/// For unqualified bindings like `type Output = Int64`, returns `None`.
+/// Extract the qualified protocol name from a type alias syntax node.
+///
+/// For qualified bindings like `type Addable.Output = Int64`, returns `Some("Addable")`.
+/// For unqualified bindings like `type Output = Int64`, returns `None`.
+fn extract_qualified_protocol_name(syntax: &SyntaxNode) -> Option<String> {
+    let target_node = find_child(syntax, SyntaxKind::AssociatedTypeTarget)?;
+    let ty_node = find_child(&target_node, SyntaxKind::Ty)?;
+    extract_path_name_from_ty_node(&ty_node)
+}
+
 /// Add ConformsToBehavior to a type alias that binds an associated type in a struct.
 ///
 /// This finds the protocol(s) that define the associated type and creates a
 /// ConformsToBehavior for each one, allowing witness generation to properly
 /// bind associated types.
+///
+/// If `qualified_protocol_name` is Some, only add for that specific protocol.
+/// Otherwise, add for all protocols with a matching associated type name.
 fn add_conforms_to_behavior(
     symbol: &Arc<dyn Symbol<KestrelLanguage>>,
     type_name: &str,
     parent: &Arc<dyn Symbol<KestrelLanguage>>,
+    qualified_protocol_name: Option<&str>,
 ) {
     // Get the struct's conformances
     let conformances = parent
@@ -858,6 +890,13 @@ fn add_conforms_to_behavior(
 
     // Find protocols that define this associated type and add ConformsToBehavior for each
     for protocol_symbol in all_protocols {
+        // For qualified bindings, only add for the specified protocol
+        if let Some(qualified_name) = qualified_protocol_name
+            && protocol_symbol.metadata().name().value != qualified_name
+        {
+            continue;
+        }
+
         let protocol_dyn = protocol_symbol.clone() as Arc<dyn Symbol<KestrelLanguage>>;
 
         // Find the associated type in this protocol
@@ -873,8 +912,9 @@ fn add_conforms_to_behavior(
                 );
                 symbol.metadata().add_behavior(conforms_to);
 
-                // Note: We add behavior for each protocol that defines this associated type.
-                // This handles the case where multiple protocols have the same associated type name.
+                // Note: For unqualified bindings, we add behavior for each protocol
+                // that defines this associated type. For qualified bindings, we only
+                // add for the specified protocol.
                 break; // Only one per protocol
             }
         }

@@ -95,7 +95,18 @@ pub fn compile_terminator(
                         local_map,
                         stack_locals,
                     )?;
-                    builder.ins().return_(&[val]);
+
+                    // For main(), if the return type is an aggregate (Named type), the value
+                    // we get is a pointer to the struct. We need to load the actual i64 value
+                    // since main's C ABI signature returns i64.
+                    if is_main && matches!(ret_ty, MirTy::Named { .. }) {
+                        // Load the first i64 from the struct pointer.
+                        // This handles wrapper types like std.num.Int64 which wrap a primitive.
+                        let loaded = builder.ins().load(cl_types::I64, MemFlags::new(), val, 0);
+                        builder.ins().return_(&[loaded]);
+                    } else {
+                        builder.ins().return_(&[val]);
+                    }
                 }
             }
         },
@@ -312,6 +323,20 @@ fn get_place_type(
         PlaceKind::Local(local_id) => {
             let local_def = ctx.mir.local(*local_id);
             Ok(local_def.ty)
+        },
+        PlaceKind::Global(name_id) => {
+            // Find the static definition to get its type
+            let static_def = ctx
+                .mir
+                .statics
+                .iter()
+                .find(|(_, def)| def.name == *name_id)
+                .map(|(_, def)| def)
+                .ok_or_else(|| {
+                    let global_name = ctx.mir.name(*name_id);
+                    CodegenError::Unsupported(format!("static variable not found: {}", global_name))
+                })?;
+            Ok(static_def.ty)
         },
         PlaceKind::Field { parent, name } => {
             // Get the parent's type, then look up the field type

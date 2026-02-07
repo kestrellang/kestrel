@@ -171,6 +171,18 @@ fn walk_expression(
                     }
                 }
             },
+            ExprKind::Dictionary(pairs) => {
+                for (k, v) in pairs {
+                    walk_expression(k, analyzers, model, ctx);
+                    if ctx.stopped {
+                        return;
+                    }
+                    walk_expression(v, analyzers, model, ctx);
+                    if ctx.stopped {
+                        return;
+                    }
+                }
+            },
             ExprKind::OverloadedRef(_) => { /* leaf */ },
             ExprKind::Loop { body, .. } => {
                 for stmt in body {
@@ -193,6 +205,9 @@ fn walk_expression(
             },
             ExprKind::FieldAccess { object, .. } => {
                 walk_expression(object, analyzers, model, ctx);
+            },
+            ExprKind::ProtocolPropertyAccess { receiver, .. } => {
+                walk_expression(receiver, analyzers, model, ctx);
             },
             ExprKind::TupleIndex { tuple, .. } => {
                 walk_expression(tuple, analyzers, model, ctx);
@@ -233,6 +248,15 @@ fn walk_expression(
                 ..
             } => {
                 walk_expression(receiver, analyzers, model, ctx);
+                for arg in arguments {
+                    walk_expression(&arg.value, analyzers, model, ctx);
+                    if ctx.stopped {
+                        return;
+                    }
+                }
+            },
+            ExprKind::DeferredStaticCall { arguments, .. } => {
+                // Only walk arguments - target_ty is a type, not an expression
                 for arg in arguments {
                     walk_expression(&arg.value, analyzers, model, ctx);
                     if ctx.stopped {
@@ -375,6 +399,18 @@ fn walk_expression(
                     }
                 }
             },
+            // Interpolated strings - walk interpolation expressions
+            ExprKind::InterpolatedString { parts } => {
+                use kestrel_semantic_tree::expr::InterpolationPart;
+                for part in parts {
+                    if let InterpolationPart::Interpolation { expr, .. } = part {
+                        walk_expression(expr, analyzers, model, ctx);
+                        if ctx.stopped {
+                            return;
+                        }
+                    }
+                }
+            },
             // Leaf kinds or handled elsewhere
             ExprKind::Literal(_)
             | ExprKind::LocalRef(_)
@@ -389,6 +425,9 @@ fn walk_expression(
             | ExprKind::Error => {},
             ExprKind::Return { value: Some(v) } => {
                 walk_expression(v, analyzers, model, ctx);
+            },
+            ExprKind::Throw { value } => {
+                walk_expression(value, analyzers, model, ctx);
             },
             ExprKind::Match { scrutinee, arms } => {
                 walk_expression(scrutinee, analyzers, model, ctx);

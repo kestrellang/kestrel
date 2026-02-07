@@ -179,7 +179,6 @@ fn contains_infer_type(ty: &Ty) -> bool {
     match ty.kind() {
         TyKind::Infer => true,
         TyKind::Pointer(inner) => contains_infer_type(inner),
-        TyKind::Array(inner) => contains_infer_type(inner),
         TyKind::Tuple(elements) => elements.iter().any(contains_infer_type),
         TyKind::Function {
             params,

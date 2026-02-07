@@ -67,6 +67,7 @@ mod local_variables {
         Test::new(
             "module Main\nfunc getArray() -> [lang.i64] { let arr: [lang.i64] = [1, 2, 3]; arr }",
         )
+        .with_stdlib()
         .expect(Compiles)
         .expect(
             Symbol::new("getArray")
@@ -96,6 +97,7 @@ mod local_variables {
     fn mixed_variable_types() {
         // Mix of lang.i64, lang.str, and array variables in single function
         Test::new("module Main\nfunc mixed() -> lang.i64 { let num: lang.i64 = 42; let text: lang.str = \"x\"; let items: [lang.i64] = [1]; num }")
+            .with_stdlib()
             .expect(Compiles)
             .expect(Symbol::new("mixed").is(SymbolKind::Function)
                 .has(Behavior::HasBody(true)));

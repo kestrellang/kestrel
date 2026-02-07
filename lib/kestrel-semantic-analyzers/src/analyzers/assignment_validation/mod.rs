@@ -98,19 +98,73 @@ fn validate_assignment_target(
                 ));
             }
         },
+        // Protocol property access is valid if the property has a setter
+        ExprKind::ProtocolPropertyAccess {
+            property_name,
+            has_setter,
+            ..
+        } => {
+            if !has_setter {
+                out.push(AssignmentError::ImmutableField(
+                    CannotAssignToImmutableFieldError {
+                        span: target.span.clone(),
+                        field_name: property_name.clone(),
+                    },
+                ));
+            }
+        },
+        // SymbolRef can be a valid assignment target for module-level/static fields
+        ExprKind::SymbolRef(symbol_id) => {
+            use kestrel_semantic_model::SymbolFor;
+            use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
+
+            // Check if this is a field symbol
+            let is_field = ctx
+                .model
+                .query(SymbolFor { id: *symbol_id })
+                .map(|s| s.metadata().kind() == KestrelSymbolKind::Field)
+                .unwrap_or(false);
+
+            if is_field {
+                // It's a field - check mutability using the expression's mutable flag
+                if !target.is_mutable() {
+                    // Get field name for error message
+                    let field_name = ctx
+                        .model
+                        .query(SymbolFor { id: *symbol_id })
+                        .map(|s| s.metadata().name().value.clone())
+                        .unwrap_or_else(|| "<unknown>".to_string());
+
+                    out.push(AssignmentError::ImmutableField(
+                        CannotAssignToImmutableFieldError {
+                            span: target.span.clone(),
+                            field_name,
+                        },
+                    ));
+                }
+            } else {
+                // Not a field - invalid target
+                out.push(AssignmentError::InvalidTarget(
+                    CannotAssignToExpressionError {
+                        span: target.span.clone(),
+                    },
+                ));
+            }
+        },
         // Invalid targets
         ExprKind::Literal(_)
         | ExprKind::Array(_)
+        | ExprKind::Dictionary(_)
         | ExprKind::Tuple(_)
         | ExprKind::Grouping(_)
         | ExprKind::Call { .. }
         | ExprKind::PrimitiveMethodCall { .. }
         | ExprKind::PrimitiveMethodRef { .. }
         | ExprKind::DeferredMethodCall { .. }
+        | ExprKind::DeferredStaticCall { .. }
         | ExprKind::ImplicitStructInit { .. }
         | ExprKind::DelegatingInit { .. }
         | ExprKind::MethodRef { .. }
-        | ExprKind::SymbolRef(_)
         | ExprKind::OverloadedRef(_)
         | ExprKind::TypeRef(_)
         | ExprKind::TypeParameterRef(_)
@@ -125,12 +179,14 @@ fn validate_assignment_target(
         | ExprKind::Break { .. }
         | ExprKind::Continue { .. }
         | ExprKind::Return { .. }
+        | ExprKind::Throw { .. }
         | ExprKind::Closure { .. }
         | ExprKind::Match { .. }
         | ExprKind::Block { .. }
         | ExprKind::LangIntrinsic { .. }
         | ExprKind::LangIntrinsicRef(_)
         | ExprKind::SubscriptCall { .. }
+        | ExprKind::InterpolatedString { .. }
         | ExprKind::Error => {
             // Note: SubscriptCall could be a valid assignment target if the subscript
             // has a setter, but that validation is deferred to call resolution.

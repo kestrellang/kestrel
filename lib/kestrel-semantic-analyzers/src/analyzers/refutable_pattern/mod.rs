@@ -103,8 +103,16 @@ fn is_pattern_irrefutable(pattern: &Pattern) -> bool {
             fields.iter().all(|f| is_pattern_irrefutable(&f.pattern))
         },
 
-        // Array patterns are REFUTABLE - they check array length
-        PatternKind::Array { .. } => false,
+        // Array patterns: [..] and [..rest] are irrefutable (capture all elements)
+        // But [a, ..] or [.., z] require at least one element, so they're refutable
+        PatternKind::Array {
+            prefix,
+            rest,
+            suffix,
+        } => {
+            // Irrefutable only if: has rest AND no prefix AND no suffix
+            rest.is_some() && prefix.is_empty() && suffix.is_empty()
+        },
 
         // Or-patterns are irrefutable if ANY alternative is irrefutable
         PatternKind::Or { alternatives } => alternatives.iter().any(is_pattern_irrefutable),
@@ -127,7 +135,15 @@ fn format_literal_value(value: &LiteralValue) -> String {
         LiteralValue::Integer(i) => i.to_string(),
         LiteralValue::Float(f) => f.to_string(),
         LiteralValue::String(s) => format!("\"{}\"", s),
+        LiteralValue::Char(c) => {
+            if let Some(ch) = char::from_u32(*c) {
+                format!("'{}'", ch)
+            } else {
+                format!("'\\u{{{:X}}}'", c)
+            }
+        },
         LiteralValue::Bool(b) => b.to_string(),
+        LiteralValue::Null => "null".to_string(),
     }
 }
 
@@ -177,14 +193,22 @@ fn describe_pattern(pattern: &Pattern) -> String {
         } => {
             use kestrel_semantic_tree::pattern::RangeBound;
             let start_str = match start {
-                RangeBound::Integer(i) => i.to_string(),
-                RangeBound::Char(c) => format!("'{}'", c),
+                Some(RangeBound::Integer(i)) => i.to_string(),
+                Some(RangeBound::Char(c)) => format!("'{}'", c),
+                None => String::new(),
             };
             let end_str = match end {
-                RangeBound::Integer(i) => i.to_string(),
-                RangeBound::Char(c) => format!("'{}'", c),
+                Some(RangeBound::Integer(i)) => i.to_string(),
+                Some(RangeBound::Char(c)) => format!("'{}'", c),
+                None => String::new(),
             };
-            let op = if *inclusive { "..=" } else { "..<" };
+            let op = if end.is_none() {
+                ".."
+            } else if *inclusive {
+                "..="
+            } else {
+                "..<"
+            };
             format!("{}{}{}", start_str, op, end_str)
         },
         PatternKind::Struct {

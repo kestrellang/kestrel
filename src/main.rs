@@ -1,6 +1,5 @@
 use clap::{Parser, Subcommand};
 use kestrel_compiler::{Compilation, CompileError, TargetConfig};
-use std::fs;
 use std::path::Path;
 use std::process::ExitCode;
 
@@ -99,16 +98,6 @@ enum Commands {
     },
 }
 
-fn read_source(path: &str) -> Option<String> {
-    match fs::read_to_string(path) {
-        Ok(c) => Some(c),
-        Err(e) => {
-            eprintln!("error: cannot read '{}': {}", path, e);
-            None
-        },
-    }
-}
-
 fn get_target_config(target: Option<&str>) -> Result<TargetConfig, ExitCode> {
     match target {
         Some(triple) => TargetConfig::from_triple(triple).map_err(|e| {
@@ -142,10 +131,14 @@ fn add_source_files(
         if verbose {
             eprintln!("  Reading {}", file);
         }
-        let Some(content) = read_source(file) else {
-            return Err(ExitCode::from(1));
+        // Use add_file to preserve path info for @fileconstant resolution
+        builder = match builder.add_file(file) {
+            Ok(b) => b,
+            Err(e) => {
+                eprintln!("error: failed to read {}: {}", file, e);
+                return Err(ExitCode::from(1));
+            },
         };
-        builder = builder.add_source(file.clone(), content);
     }
     Ok(builder)
 }

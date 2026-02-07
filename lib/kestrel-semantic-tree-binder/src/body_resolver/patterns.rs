@@ -241,6 +241,20 @@ fn resolve_tuple_pattern(
         }
     });
 
+    // Validate: if we have an expected type that's not a tuple, that's an error
+    if let Some(ty) = expected_ty
+        && expected_element_types.is_none()
+        && !matches!(ty.kind(), TyKind::Infer | TyKind::Error)
+    {
+        use crate::diagnostics::TuplePatternOnNonTupleError;
+        let error = TuplePatternOnNonTupleError {
+            span: span.clone(),
+            actual_type: format!("{}", ty),
+        };
+        ctx.diagnostics.add_diagnostic(error.into_diagnostic());
+        return Pattern::error(span);
+    }
+
     // Find rest pattern indices
     let mut rest_indices: Vec<usize> = Vec::new();
     for (i, elem_node) in element_nodes.iter().enumerate() {
@@ -273,6 +287,22 @@ fn resolve_tuple_pattern(
     } else {
         (element_nodes, vec![])
     };
+
+    // Validate arity: if no rest pattern, the number of pattern elements must match expected
+    if !has_rest && let Some(expected_tys) = &expected_element_types {
+        let pattern_count = prefix_nodes.len();
+        let expected_count = expected_tys.len();
+        if pattern_count != expected_count {
+            use crate::diagnostics::TuplePatternArityMismatchError;
+            let error = TuplePatternArityMismatchError {
+                span: span.clone(),
+                expected: expected_count,
+                found: pattern_count,
+            };
+            ctx.diagnostics.add_diagnostic(error.into_diagnostic());
+            return Pattern::error(span);
+        }
+    }
 
     // Resolve prefix patterns
     let prefix: Vec<Pattern> = prefix_nodes
@@ -359,7 +389,10 @@ fn resolve_literal_pattern(
             let text = token.text();
             match token.kind() {
                 SyntaxKind::Integer => {
-                    let value = parse_integer(text);
+                    let text_range = token.text_range();
+                    let token_start: usize = text_range.start().into();
+                    let token_span = Span::new(ctx.file_id, token_start..token_start + text.len());
+                    let value = parse_integer(text, token_span, ctx);
                     // Use inference placeholder - let type inference determine the actual type
                     // based on the scrutinee type and ExpressibleByIntLiteral conformance
                     let ty = Ty::infer(span.clone());
@@ -408,6 +441,57 @@ fn resolve_literal_pattern(
                     let ty = Ty::infer(span.clone());
                     return Pattern::literal(LiteralValue::Bool(value), ty, span);
                 },
+                SyntaxKind::Char => {
+                    // Process char literal: strip quotes, process escapes, validate single codepoint
+                    let text_range = token.text_range();
+                    let token_start: usize = text_range.start().into();
+                    let token_span = Span::new(ctx.file_id, token_start..token_start + text.len());
+
+                    let value = if text.len() >= 2 {
+                        let inner = &text[1..text.len() - 1];
+
+                        if inner.is_empty() {
+                            // Empty character literal ''
+                            use crate::diagnostics::EmptyCharacterLiteralError;
+                            let error = EmptyCharacterLiteralError { span: token_span };
+                            ctx.diagnostics.add_diagnostic(error.into_diagnostic());
+                            0
+                        } else {
+                            // Process escape sequences
+                            let unescaped = super::expressions::unescape_string(
+                                inner,
+                                ctx.file_id,
+                                token_start + 1,
+                                ctx,
+                            );
+                            let code_points: Vec<char> = unescaped.chars().collect();
+
+                            if code_points.is_empty() {
+                                use crate::diagnostics::EmptyCharacterLiteralError;
+                                let error = EmptyCharacterLiteralError { span: token_span };
+                                ctx.diagnostics.add_diagnostic(error.into_diagnostic());
+                                0
+                            } else if code_points.len() > 1 {
+                                use crate::diagnostics::MultipleCodepointsInCharLiteralError;
+                                let error = MultipleCodepointsInCharLiteralError {
+                                    span: token_span,
+                                    count: code_points.len(),
+                                };
+                                ctx.diagnostics.add_diagnostic(error.into_diagnostic());
+                                code_points[0] as u32
+                            } else {
+                                code_points[0] as u32
+                            }
+                        }
+                    } else {
+                        0
+                    };
+
+                    // Use infer type so type inference can unify with scrutinee type
+                    // based on the scrutinee type and ExpressibleByCharLiteral conformance
+                    let ty = Ty::infer(span.clone());
+                    return Pattern::literal(LiteralValue::Char(value), ty, span);
+                },
                 _ => {},
             }
         }
@@ -417,15 +501,29 @@ fn resolve_literal_pattern(
 }
 
 /// Parse an integer literal (handles hex, binary, octal).
-fn parse_integer(text: &str) -> i64 {
-    if text.starts_with("0x") || text.starts_with("0X") {
-        i64::from_str_radix(&text[2..], 16).unwrap_or(0)
-    } else if text.starts_with("0b") || text.starts_with("0B") {
-        i64::from_str_radix(&text[2..], 2).unwrap_or(0)
-    } else if text.starts_with("0o") || text.starts_with("0O") {
-        i64::from_str_radix(&text[2..], 8).unwrap_or(0)
+fn parse_integer(text: &str, token_span: Span, ctx: &mut BodyResolutionContext) -> i64 {
+    let text_clean = text.replace('_', "");
+    let parsed = if text_clean.starts_with("0x") || text_clean.starts_with("0X") {
+        u64::from_str_radix(&text_clean[2..], 16)
+    } else if text_clean.starts_with("0b") || text_clean.starts_with("0B") {
+        u64::from_str_radix(&text_clean[2..], 2)
+    } else if text_clean.starts_with("0o") || text_clean.starts_with("0O") {
+        u64::from_str_radix(&text_clean[2..], 8)
     } else {
-        text.parse::<i64>().unwrap_or(0)
+        text_clean.parse::<u64>()
+    };
+
+    match parsed {
+        Ok(value) => i64::from_ne_bytes(value.to_ne_bytes()),
+        Err(_) => {
+            use crate::diagnostics::IntegerLiteralOverflowError;
+            let error = IntegerLiteralOverflowError {
+                span: token_span,
+                literal: text.to_string(),
+            };
+            ctx.diagnostics.add_diagnostic(error.into_diagnostic());
+            0
+        },
     }
 }
 
@@ -485,7 +583,7 @@ fn resolve_enum_pattern(
 /// If `expected_ty` is an enum type and we can find the case, returns the
 /// parameter types from the case's CallableBehavior, with substitutions applied.
 fn get_enum_case_binding_types(expected_ty: Option<&Ty>, case_name: &str) -> Option<Vec<Ty>> {
-    let ty = expected_ty?;
+    let ty = expected_ty?.expand_aliases();
 
     // Check if the expected type is an enum
     let (enum_sym, substitutions) = match ty.kind() {
@@ -694,7 +792,7 @@ fn resolve_struct_pattern_field(
     }
 }
 
-/// Resolve a range pattern (`0..=9` or `0..<10`).
+/// Resolve a range pattern (`0..=9`, `0..<10`, `..=9`, `..<10`, `0..`).
 fn resolve_range_pattern(
     node: &SyntaxNode,
     ctx: &mut BodyResolutionContext,
@@ -708,18 +806,24 @@ fn resolve_range_pattern(
         .filter_map(|elem| elem.into_token())
         .collect();
 
-    // We expect: start_literal, range_operator, end_literal
-    // The range operator is ..= (inclusive) or ..< (exclusive)
+    // We support:
+    // - Full range: start..=end, start..<end
+    // - Range to: ..=end, ..<end
+    // - Range from: start..
     let mut start_bound: Option<RangeBound> = None;
     let mut end_bound: Option<RangeBound> = None;
     let mut inclusive = true;
     let mut found_operator = false;
+    let mut is_range_from = false; // start.. pattern (uses DotDot)
 
     for token in &tokens {
         match token.kind() {
             SyntaxKind::Integer => {
                 let text = token.text();
-                let value = parse_integer(text);
+                let text_range = token.text_range();
+                let token_start: usize = text_range.start().into();
+                let token_span = Span::new(ctx.file_id, token_start..token_start + text.len());
+                let value = parse_integer(text, token_span, ctx);
                 let bound = RangeBound::Integer(value);
                 if !found_operator {
                     start_bound = Some(bound);
@@ -727,17 +831,29 @@ fn resolve_range_pattern(
                     end_bound = Some(bound);
                 }
             },
-            SyntaxKind::String => {
-                // Handle char literals (single-char strings like 'a')
+            SyntaxKind::Char => {
+                // Handle char literals like 'a', '\n', '\u{1F600}'
                 let text = token.text();
-                // Remove quotes and handle escape sequences
-                let inner = text.trim_matches('"').trim_matches('\'');
-                if let Some(c) = inner.chars().next() {
-                    let bound = RangeBound::Char(c);
-                    if !found_operator {
-                        start_bound = Some(bound);
-                    } else {
-                        end_bound = Some(bound);
+                let text_range = token.text_range();
+                let token_start: usize = text_range.start().into();
+
+                if text.len() >= 2 {
+                    let inner = &text[1..text.len() - 1];
+                    // Process escape sequences
+                    let unescaped = super::expressions::unescape_string(
+                        inner,
+                        ctx.file_id,
+                        token_start + 1,
+                        ctx,
+                    );
+
+                    if let Some(c) = unescaped.chars().next() {
+                        let bound = RangeBound::Char(c);
+                        if !found_operator {
+                            start_bound = Some(bound);
+                        } else {
+                            end_bound = Some(bound);
+                        }
                     }
                 }
             },
@@ -749,61 +865,71 @@ fn resolve_range_pattern(
                 found_operator = true;
                 inclusive = false;
             },
+            SyntaxKind::DotDot => {
+                // This is for `start..` patterns (range from)
+                found_operator = true;
+                is_range_from = true;
+                inclusive = false; // No end to be inclusive of
+            },
             _ => {},
         }
     }
 
-    // Validate we have both bounds
-    let (start, end) = match (start_bound, end_bound) {
-        (Some(s), Some(e)) => (s, e),
-        _ => return Pattern::error(span),
-    };
-
-    // Validate that start <= end (or start < end for exclusive ranges)
-    let is_valid_range = match (&start, &end) {
-        (RangeBound::Integer(s), RangeBound::Integer(e)) => {
-            if inclusive {
-                *s <= *e
-            } else {
-                *s < *e
-            }
-        },
-        (RangeBound::Char(s), RangeBound::Char(e)) => {
-            if inclusive {
-                *s <= *e
-            } else {
-                *s < *e
-            }
-        },
-        _ => false, // Mismatched types are invalid
-    };
-
-    if !is_valid_range {
-        use crate::diagnostics::InvalidRangeBoundsError;
-        let error = InvalidRangeBoundsError {
-            span: span.clone(),
-            inclusive,
-        };
-        ctx.diagnostics.add_diagnostic(error.into_diagnostic());
+    // Validate we have at least one bound (or it's a range_from pattern)
+    if start_bound.is_none() && end_bound.is_none() {
         return Pattern::error(span);
     }
 
-    // Determine the type based on the bounds
-    let ty = match (&start, &end) {
-        (RangeBound::Integer(_), RangeBound::Integer(_)) => expected_ty
+    // For full ranges, validate that start <= end (or start < end for exclusive ranges)
+    if let (Some(start), Some(end)) = (&start_bound, &end_bound) {
+        let is_valid_range = match (start, end) {
+            (RangeBound::Integer(s), RangeBound::Integer(e)) => {
+                if inclusive {
+                    *s <= *e
+                } else {
+                    *s < *e
+                }
+            },
+            (RangeBound::Char(s), RangeBound::Char(e)) => {
+                if inclusive {
+                    *s <= *e
+                } else {
+                    *s < *e
+                }
+            },
+            _ => false, // Mismatched types are invalid
+        };
+
+        if !is_valid_range {
+            use crate::diagnostics::InvalidRangeBoundsError;
+            let error = InvalidRangeBoundsError {
+                span: span.clone(),
+                inclusive,
+            };
+            ctx.diagnostics.add_diagnostic(error.into_diagnostic());
+            return Pattern::error(span);
+        }
+    }
+
+    // Determine the type based on the bounds we have
+    let bound_for_type = start_bound.as_ref().or(end_bound.as_ref());
+    let ty = match bound_for_type {
+        Some(RangeBound::Integer(_)) => expected_ty
             .cloned()
             .unwrap_or_else(|| Ty::int(kestrel_semantic_tree::ty::IntBits::I64, span.clone())),
-        (RangeBound::Char(_), RangeBound::Char(_)) => {
-            // We'd need a Char type here - for now use infer
+        Some(RangeBound::Char(_)) => {
+            // We'd need a Char type here - for now use expected or infer
             expected_ty
                 .cloned()
                 .unwrap_or_else(|| Ty::infer(span.clone()))
         },
-        // Mismatched bounds (e.g., int..=char) - error
-        _ => return Pattern::error(span),
+        None => return Pattern::error(span),
     };
 
-    Pattern::range(start, end, inclusive, ty, span)
+    // For range_from patterns, ensure inclusive is false (no end to be inclusive of)
+    let final_inclusive = if is_range_from { false } else { inclusive };
+
+    Pattern::range(start_bound, end_bound, final_inclusive, ty, span)
 }
 
 /// Resolve an or-pattern (`p1 or p2 or ...`).
@@ -940,12 +1066,25 @@ fn resolve_array_pattern(
 ) -> Pattern {
     let span = get_node_span(node, ctx.file_id);
 
-    // Get expected element type if we have an array type
-    let expected_element_ty: Option<&Ty> = expected_ty.and_then(|ty| {
-        if let kestrel_semantic_tree::ty::TyKind::Array(element_type) = ty.kind() {
-            Some(element_type.as_ref())
-        } else {
-            None
+    // Get expected element type if we have an array type (Array[T] struct)
+    // Note: [T] is a type alias for Array[T], so we need to expand aliases first
+    let expected_element_ty: Option<Ty> = expected_ty.and_then(|ty| {
+        let expanded = ty.expand_aliases();
+        match expanded.kind() {
+            kestrel_semantic_tree::ty::TyKind::Struct { substitutions, .. } => {
+                // Check if this is Array[T] or Slice[T] by looking at substitutions
+                if expanded.is_array_struct(ctx.model.builtin_registry())
+                    || expanded.is_slice_struct(ctx.model.builtin_registry())
+                {
+                    substitutions
+                        .iter()
+                        .next()
+                        .map(|(_, elem_ty)| elem_ty.clone())
+                } else {
+                    None
+                }
+            },
+            _ => None,
         }
     });
 
@@ -962,7 +1101,12 @@ fn resolve_array_pattern(
             SyntaxKind::ArrayPatternElement => {
                 // Get the inner pattern
                 let pattern = if let Some(inner) = child.children().next() {
-                    resolve_pattern_with_mutability(&inner, ctx, expected_element_ty, force_mutable)
+                    resolve_pattern_with_mutability(
+                        &inner,
+                        ctx,
+                        expected_element_ty.as_ref(),
+                        force_mutable,
+                    )
                 } else {
                     Pattern::error(get_node_span(&child, ctx.file_id))
                 };
@@ -993,10 +1137,10 @@ fn resolve_array_pattern(
                         )
                     };
 
-                    // The rest binding will be a slice/array of the element type
+                    // The rest binding will be a Slice[T] of the element type
                     let rest_ty = expected_element_ty
-                        .cloned()
-                        .map(|elem_ty| Ty::array(elem_ty, span.clone()))
+                        .clone()
+                        .and_then(|elem_ty| ctx.model.make_slice_type(elem_ty, span.clone()))
                         .unwrap_or_else(|| Ty::infer(span.clone()));
 
                     let is_mutable = force_mutable;
@@ -1013,26 +1157,19 @@ fn resolve_array_pattern(
         }
     }
 
-    // Check for suffix elements - not yet supported
-    if !suffix.is_empty() {
-        use crate::diagnostics::ArraySuffixPatternError;
-        let error = ArraySuffixPatternError { span: span.clone() };
-        ctx.diagnostics.add_diagnostic(error.into_diagnostic());
-        return Pattern::error(span);
-    }
-
     // Build element type from patterns
     let element_ty = if let Some(first) = prefix.first() {
         first.ty.clone()
     } else {
         expected_element_ty
-            .cloned()
+            .clone()
             .unwrap_or_else(|| Ty::infer(span.clone()))
     };
 
     let ty = expected_ty
         .cloned()
-        .unwrap_or_else(|| Ty::array(element_ty, span.clone()));
+        .or_else(|| ctx.model.make_array_type(element_ty, span.clone()))
+        .unwrap_or_else(|| Ty::infer(span.clone()));
 
     Pattern::array(prefix, rest, suffix, ty, span)
 }

@@ -130,7 +130,8 @@ func test() -> lang.i64 {
 }
 "#,
         )
-        .expect(HasError("type mismatch"));
+        .with_stdlib()
+        .expect(HasError("does not conform to protocol"));
     }
 
     #[test]
@@ -317,7 +318,8 @@ func test() {
 }
 "#,
         )
-        .expect(HasError("type mismatch"));
+        .with_stdlib()
+        .expect(HasError("does not conform to protocol"));
     }
 
     #[test]
@@ -884,7 +886,7 @@ func test() {
 }
 "#,
         )
-        .expect(HasError("does not conform to protocol"));
+        .expect(HasError("type mismatch"));
     }
 
     #[test]
@@ -898,7 +900,7 @@ func test() {
 }
 "#,
         )
-        .expect(HasError("does not conform to protocol"));
+        .expect(HasError("type mismatch"));
     }
 
     #[test]
@@ -912,7 +914,7 @@ func test() {
 }
 "#,
         )
-        .expect(HasError("does not conform to protocol"));
+        .expect(HasError("type mismatch"));
     }
 
     #[test]
@@ -928,6 +930,7 @@ func test() {
 }
 "#,
         )
+        .with_stdlib()
         .expect(Compiles);
     }
 
@@ -942,6 +945,7 @@ func test() {
 }
 "#,
         )
+        .with_stdlib()
         .expect(Compiles);
     }
 
@@ -957,7 +961,7 @@ func test() {
 }
 "#,
         )
-        .expect(HasError("does not conform to protocol"));
+        .expect(HasError("type mismatch"));
     }
 }
 
@@ -1409,7 +1413,7 @@ func test() {
 }
 "#,
         )
-        .expect(HasError("cannot use tuple index"));
+        .expect(HasError("cannot index into non-tuple type"));
     }
 
     #[test]
@@ -1476,6 +1480,28 @@ func getTuple() -> (lang.i64, lang.str) {
 func test() {
     let x: lang.i64 = getTuple().0;
     let y: lang.str = getTuple().1;
+}
+"#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn tuple_index_with_associated_type_equality() {
+        Test::new(
+            r#"
+module Main
+
+protocol Iterable {
+    type Item
+}
+
+extend Iterable {
+    func split[A, B](pair: Item) -> (A, B) where Item = (A, B) {
+        let first: A = pair.0;
+        let second: B = pair.1;
+        return (first, second);
+    }
 }
 "#,
         )

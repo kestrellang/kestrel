@@ -96,8 +96,8 @@ Types defined by declarations, identified by name.
 
 | Category | Created By | Example |
 |----------|-----------|---------|
-| Struct | `struct` declaration | `struct MyStruct { }` |
 | Struct | `struct` declaration | `struct Point { }` |
+| Enum | `enum` declaration | `enum Color { }` |
 | Protocol | `protocol` declaration | `protocol Drawable { }` |
 | TypeAlias | `type` declaration | `type ID = Int` |
 
@@ -106,8 +106,8 @@ Types defined by declarations, identified by name.
 Nominal types are referenced by path:
 
 ```kestrel
-MyClass                    // Simple name
-MyModule.MyClass           // Qualified name
+MyStruct                   // Simple name
+MyModule.MyStruct          // Qualified name
 Outer.Inner.DeepType       // Deeply nested
 ```
 
@@ -130,10 +130,10 @@ This represents the syntax `A.B.C` but doesn't yet know what it refers to.
 After the bind phase, paths are resolved to concrete types:
 
 ```
-TyKind::Class(Arc<ClassSymbol>)
-TyKind::Struct(Arc<StructSymbol>)
-TyKind::Protocol(Arc<ProtocolSymbol>)
-TyKind::TypeAlias(Arc<TypeAliasSymbol>)
+TyKind::Struct { symbol: Arc<StructSymbol>, substitutions }
+TyKind::Enum { symbol: Arc<EnumSymbol>, substitutions }
+TyKind::Protocol { symbol: Arc<ProtocolSymbol>, substitutions }
+TyKind::TypeAlias { symbol: Arc<TypeAliasSymbol>, substitutions }
 ```
 
 ## Type Kind Enumeration
@@ -148,7 +148,7 @@ enum TyKind {
     Bool,                           // Bool
     String,                         // String
     Int(IntBits),                   // Int8, Int16, Int32, Int64
-    Float(FloatBits),               // Float32, Float64
+    Float(FloatBits),               // Float16, Float32, Float64
 
     // Composites
     Tuple(Vec<Ty>),                 // (T1, T2, ...)
@@ -158,13 +158,24 @@ enum TyKind {
     },                              // (P1, P2) -> R
 
     // Unresolved
-    Path(Vec<String>),              // A.B.C (before resolution)
+    UnresolvedPath { segments: Vec<String> },  // A.B.C (before resolution)
+    UnresolvedFunction { .. },      // Before resolution
 
     // Nominal (resolved)
-    Class(Arc<ClassSymbol>),
-    Struct(Arc<StructSymbol>),
-    Protocol(Arc<ProtocolSymbol>),
-    TypeAlias(Arc<TypeAliasSymbol>),
+    Struct { symbol, substitutions },
+    Enum { symbol, substitutions },
+    Protocol { symbol, substitutions },
+    TypeAlias { symbol, substitutions },
+
+    // Generics & inference
+    TypeParameter(Arc<TypeParameterSymbol>),
+    AssociatedType { symbol, container },
+    SelfType,                       // Self in protocols/extensions
+    Infer,                          // Type to be inferred
+
+    // Special
+    Pointer(Box<Ty>),               // lang.ptr[T]
+    Error,                          // Error recovery
 }
 ```
 
@@ -258,11 +269,11 @@ let producer: () -> Int
 ### Nominal Types
 
 ```kestrel
-// Class type
+// Struct type
 struct User { }
 let user: User
 
-// Struct type
+// Another struct type
 struct Config { }
 let config: Config
 
@@ -304,6 +315,7 @@ Each type carries a source span for error reporting:
 
 ```rust
 struct Ty {
+    id: TyId,      // Unique identifier for type inference
     kind: TyKind,
     span: Span,    // Source location
 }

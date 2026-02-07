@@ -1464,3 +1464,178 @@ mod protocol_extensions {
     //    - Protocol extension on Derived should access Base protocol methods via self
     //    - Method resolution should traverse protocol inheritance chain
 }
+
+// ============================================================================
+// Transitive Conformance Tests
+// ============================================================================
+//
+// Tests for transitive conformance through protocol extensions.
+// When a type conforms to protocol P, and there's "extend P: Q", the type
+// should transitively conform to Q.
+
+mod transitive_conformance {
+    use super::*;
+
+    #[test]
+    fn basic_transitive_conformance_via_protocol_extension() {
+        // MyInt conforms to Comparable, and extend Comparable: Less
+        // So MyInt should transitively conform to Less
+        Test::new(
+            r#"module Test
+            protocol Comparable {
+                func compare(other: Self)
+            }
+            protocol Less {
+                func lessThan(other: Self)
+            }
+            extend Comparable: Less {
+                func lessThan(other: Self) { }
+            }
+            struct MyInt: Comparable {
+                func compare(other: MyInt) { }
+            }
+            // This function requires T: Less, and MyInt should satisfy it
+            // because MyInt: Comparable and extend Comparable: Less
+            func requiresLess[T](a: T, b: T) where T: Less {
+                a.lessThan(b);
+            }
+            func test() {
+                let a = MyInt();
+                let b = MyInt();
+                requiresLess(a, b);
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn transitive_conformance_multiple_protocols() {
+        // A single protocol extension can add conformances to multiple protocols
+        Test::new(
+            r#"module Test
+            protocol Comparable {
+                func compare(other: Self)
+            }
+            protocol Less {
+                func lessThan(other: Self)
+            }
+            protocol Greater {
+                func greaterThan(other: Self)
+            }
+            extend Comparable: Less, Greater {
+                func lessThan(other: Self) { }
+                func greaterThan(other: Self) { }
+            }
+            struct MyInt: Comparable {
+                func compare(other: MyInt) { }
+            }
+            func requiresLess[T](a: T, b: T) where T: Less {
+                a.lessThan(b);
+            }
+            func requiresGreater[T](a: T, b: T) where T: Greater {
+                a.greaterThan(b);
+            }
+            func test() {
+                let a = MyInt();
+                let b = MyInt();
+                requiresLess(a, b);
+                requiresGreater(a, b);
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn no_transitive_conformance_when_chain_broken() {
+        // MyInt does NOT conform to Comparable, so it should NOT conform to Less
+        Test::new(
+            r#"module Test
+            protocol Comparable {
+                func compare(other: Self)
+            }
+            protocol Less {
+                func lessThan(other: Self)
+            }
+            extend Comparable: Less {
+                func lessThan(other: Self) { }
+            }
+            struct MyInt { }
+            func requiresLess[T](a: T, b: T) where T: Less {
+                a.lessThan(b);
+            }
+            func test() {
+                let a = MyInt();
+                let b = MyInt();
+                requiresLess(a, b);
+            }
+        "#,
+        )
+        .expect(HasError("does not satisfy constraint"));
+    }
+
+    #[test]
+    fn transitive_conformance_chain() {
+        // A conforms to B, B has extension to C, C has extension to D
+        // A should transitively conform to C and D
+        Test::new(
+            r#"module Test
+            protocol D {
+                func methodD()
+            }
+            protocol C {
+                func methodC()
+            }
+            protocol B {
+                func methodB()
+            }
+            extend B: C {
+                func methodC() { }
+            }
+            extend C: D {
+                func methodD() { }
+            }
+            struct A: B {
+                func methodB() { }
+            }
+            func requiresD[T](x: T) where T: D {
+                x.methodD();
+            }
+            func test() {
+                let a = A();
+                requiresD(a);
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn transitive_conformance_uses_method_from_protocol_extension() {
+        // The protocol extension method should be callable on the type
+        Test::new(
+            r#"module Test
+            protocol Comparable {
+                func compare(other: Self)
+            }
+            protocol Less {
+                func lessThan(other: Self)
+            }
+            extend Comparable: Less {
+                func lessThan(other: Self) { }
+            }
+            struct MyInt: Comparable {
+                func compare(other: MyInt) { }
+            }
+            func test() {
+                let a = MyInt();
+                let b = MyInt();
+                // Direct call to the method provided by protocol extension
+                a.lessThan(b);
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+}

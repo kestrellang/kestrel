@@ -36,7 +36,7 @@ mod basic_functions {
         .expect(Compiles)
         .expect(Mir::compiles())
         .expect(
-            Mir::mir_function("Main.add")
+            Mir::mir_function("Main.add$a$b")
                 .returns(MirTy::I64)
                 .has_param("a", MirTy::ref_(MirTy::I64))
                 .has_param("b", MirTy::ref_(MirTy::I64))
@@ -59,7 +59,7 @@ mod basic_functions {
         .expect(Compiles)
         .expect(Mir::compiles())
         .expect(
-            Mir::mir_function("Main.calculate")
+            Mir::mir_function("Main.calculate$x$y")
                 .returns(MirTy::I64)
                 .has_param_count(2)
                 .has_local("sum", MirTy::I64)
@@ -102,7 +102,7 @@ mod control_flow {
         .expect(Compiles)
         .expect(Mir::compiles())
         .expect(
-            Mir::mir_function("Main.abs")
+            Mir::mir_function("Main.abs$x")
                 .returns(MirTy::I64)
                 .has_at_least_blocks(3) // entry, then, else (maybe join)
                 .any_block(|b| b.terminates_with(TerminatorPattern::Branch)),
@@ -122,7 +122,7 @@ mod control_flow {
         .expect(Compiles)
         .expect(Mir::compiles())
         .expect(
-            Mir::mir_function("Main.max")
+            Mir::mir_function("Main.max$a$b")
                 .any_block(|b| b.has_statement(StatementPattern::BinOp(BinOp::GtSigned))),
         );
     }
@@ -256,7 +256,7 @@ mod enums {
         .expect(Compiles)
         .expect(Mir::compiles())
         .expect(
-            Mir::mir_function("Main.toInt")
+            Mir::mir_function("Main.toInt$c")
                 .any_block(|b| b.terminates_with(TerminatorPattern::Switch)),
         );
     }

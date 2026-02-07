@@ -14,7 +14,8 @@ use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::symbol::protocol::ProtocolSymbol;
 use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
 use kestrel_semantic_tree::symbol::type_parameter::TypeParameterSymbol;
-use kestrel_semantic_tree::ty::{Ty, TyKind, WhereClause};
+use kestrel_semantic_tree::ty::{Constraint, Ty, TyKind, WhereClause};
+use kestrel_span::Spanned;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
 
@@ -61,8 +62,25 @@ impl DeclarationBinder for ExtensionBinder {
             );
 
             // Combine inherited and extension constraints
-            let combined_where_clause =
+            let mut combined_where_clause =
                 combine_where_clauses(inherited_where_clause, extension_where_clause);
+
+            // For protocol extensions, add implicit Self: Protocol bound
+            if target_symbol.is_protocol() {
+                // Find the synthetic Self type parameter we created
+                if let Some(self_param) = referenced_params
+                    .iter()
+                    .find(|p| p.metadata().name().value == "Self")
+                {
+                    let self_constraint = Constraint::type_bound(
+                        self_param.metadata().id(),
+                        "Self".to_string(),
+                        self_param.metadata().span().clone(),
+                        vec![target_ty.clone()],
+                    );
+                    combined_where_clause.add_constraint(self_constraint);
+                }
+            }
 
             // Create and add ExtensionTargetBehavior
             let target_behavior = ExtensionTargetBehavior::new(
@@ -129,7 +147,6 @@ impl ExtendableSymbol {
         }
     }
 
-    #[allow(dead_code)]
     fn is_protocol(&self) -> bool {
         matches!(self, ExtendableSymbol::Protocol(_))
     }
@@ -208,52 +225,86 @@ fn resolve_extension_target(
         ctx,
     )?;
 
-    // Collect referenced type parameters from the type arguments
-    let referenced_params = collect_referenced_type_params(&type_args);
+    // Collect referenced type parameters from the type arguments.
+    // If no explicit type arguments are given (e.g., `extend Pointer` instead of `extend Pointer[T]`),
+    // implicitly reference all of the target's type parameters so that where clauses can use them.
+    // This enables conditional conformances like `extend Pointer: FFISafe where T: FFISafe`.
+    let mut referenced_params = if type_args.is_empty() && !target_type_params.is_empty() {
+        // No explicit type args - reference all of the target's type parameters
+        target_type_params.clone()
+    } else {
+        collect_referenced_type_params(&type_args)
+    };
+
+    // For protocol extensions, create a synthetic "Self" type parameter
+    // This allows Self and Self.Item to be resolved as type parameters with protocol bounds
+    if matches!(&target_symbol, ExtendableSymbol::Protocol(_)) {
+        let self_param = Arc::new(TypeParameterSymbol::new(
+            Spanned::new("Self".to_string(), ty_span.clone()),
+            ty_span.clone(),
+            None,
+        ));
+        // Register the synthetic Self with the symbol registry so SymbolFor can find it
+        ctx.model.registry().register(self_param.clone());
+
+        referenced_params.push(self_param);
+    }
 
     // Build the final type with substitutions
     // For generic extensions like `extend Pair[T, U]`, validate that type parameters
     // appear in their declared positions (T must be in position 0, U in position 1)
     let mut substitutions = kestrel_semantic_tree::ty::Substitutions::new();
-    for (index, (param, arg)) in target_type_params.iter().zip(type_args.iter()).enumerate() {
-        let param_id = param.metadata().id();
 
-        // Check if arg is a type parameter reference
-        if let kestrel_semantic_tree::ty::TyKind::TypeParameter(arg_param) = arg.kind() {
-            let arg_param_id = arg_param.metadata().id();
+    // If no explicit type arguments are given (e.g., `extend Pointer` instead of `extend Pointer[T]`),
+    // create self-referential substitutions (T -> T) for each type parameter.
+    // This ensures the extension's target type is `Pointer[T]` (fully generic), not `Pointer[]` (no type args).
+    if type_args.is_empty() && !target_type_params.is_empty() {
+        for param in &target_type_params {
+            let param_id = param.metadata().id();
+            let param_ty = Ty::type_parameter(param.clone(), ty_span.clone());
+            substitutions.insert(param_id, param_ty);
+        }
+    } else {
+        for (index, (param, arg)) in target_type_params.iter().zip(type_args.iter()).enumerate() {
+            let param_id = param.metadata().id();
 
-            // Check if it's a different type parameter in this position
-            // (not self-referential, e.g., U in T's position)
-            if arg_param_id != param_id {
-                // Check if it's actually one of the target's type parameters but in wrong position
-                let is_target_param_wrong_position =
-                    target_type_params
-                        .iter()
-                        .enumerate()
-                        .any(|(other_index, other_param)| {
-                            other_param.metadata().id() == arg_param_id && other_index != index
-                        });
+            // Check if arg is a type parameter reference
+            if let kestrel_semantic_tree::ty::TyKind::TypeParameter(arg_param) = arg.kind() {
+                let arg_param_id = arg_param.metadata().id();
 
-                if is_target_param_wrong_position {
-                    // Error: type parameter in wrong position (e.g., extend Pair[U, T])
-                    let param_name = param.metadata().name().value.clone();
-                    let arg_name = arg_param.metadata().name().value.clone();
-                    ctx.diagnostics.throw(
-                        crate::diagnostics::TypeParameterWrongPositionError {
-                            span: ty_span.clone(),
-                            message: format!(
-                                "type parameter '{}' used in wrong position (expected '{}' in position {})",
-                                arg_name, param_name, index
-                            ),
-                        });
-                    return None;
+                // Check if it's a different type parameter in this position
+                // (not self-referential, e.g., U in T's position)
+                if arg_param_id != param_id {
+                    // Check if it's actually one of the target's type parameters but in wrong position
+                    let is_target_param_wrong_position =
+                        target_type_params
+                            .iter()
+                            .enumerate()
+                            .any(|(other_index, other_param)| {
+                                other_param.metadata().id() == arg_param_id && other_index != index
+                            });
+
+                    if is_target_param_wrong_position {
+                        // Error: type parameter in wrong position (e.g., extend Pair[U, T])
+                        let param_name = param.metadata().name().value.clone();
+                        let arg_name = arg_param.metadata().name().value.clone();
+                        ctx.diagnostics.throw(
+                            crate::diagnostics::TypeParameterWrongPositionError {
+                                span: ty_span.clone(),
+                                message: format!(
+                                    "type parameter '{}' used in wrong position (expected '{}' in position {})",
+                                    arg_name, param_name, index
+                                ),
+                            });
+                        return None;
+                    }
                 }
             }
-        }
 
-        // Add all substitutions, including self-referential ones (T -> T)
-        // The cycle detection in Substitutions::apply will handle self-referential cases gracefully
-        substitutions.insert(param_id, arg.clone());
+            // Add all substitutions, including self-referential ones (T -> T)
+            // The cycle detection in Substitutions::apply will handle self-referential cases gracefully
+            substitutions.insert(param_id, arg.clone());
+        }
     }
 
     // Build the resolved type based on target symbol type

@@ -80,6 +80,35 @@ func test() -> lang.i64 {
 }
 
 // ============================================================================
+// TYPE OPERATOR (T?)
+// ============================================================================
+
+mod type_operator {
+    use super::*;
+
+    #[test]
+    fn while_let_optional_type_operator() {
+        Test::new(
+            r#"
+module Main
+
+func test() -> lang.i64 {
+    var opt: std.num.Int64? = .Some(1);
+    var seen: lang.i64 = 0;
+    while let .Some(_v) = opt {
+        seen = 1;
+        opt = .None;
+    }
+    seen
+}
+"#,
+        )
+        .with_stdlib()
+        .expect(Compiles);
+    }
+}
+
+// ============================================================================
 // SCOPING
 // ============================================================================
 

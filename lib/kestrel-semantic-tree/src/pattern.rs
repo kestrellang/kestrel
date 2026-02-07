@@ -167,17 +167,21 @@ pub enum PatternKind {
         bindings: Vec<EnumPatternBinding>,
     },
 
-    /// Range pattern: `0..=9` or `0..<10`
+    /// Range pattern: `0..=9`, `0..<10`, `..=9`, `..<10`, `0..`
     ///
-    /// Matches values within a range. Only valid for integers and characters.
+    /// Matches values within a range. Supports types conforming to RangeMatchable.
     /// - `0..=9` matches 0, 1, 2, ..., 9 (inclusive)
     /// - `0..<10` matches 0, 1, 2, ..., 9 (exclusive)
+    /// - `..=9` matches anything <= 9
+    /// - `..<10` matches anything < 10
+    /// - `0..` matches anything >= 0
     Range {
-        /// The start bound of the range
-        start: RangeBound,
-        /// The end bound of the range
-        end: RangeBound,
+        /// The start bound of the range (None for `..=end` or `..<end`)
+        start: Option<RangeBound>,
+        /// The end bound of the range (None for `start..`)
+        end: Option<RangeBound>,
         /// Whether the end is inclusive (..=) or exclusive (..<)
+        /// For `start..` patterns, this is always false (no end to be inclusive of)
         inclusive: bool,
     },
 
@@ -398,8 +402,17 @@ impl Pattern {
 
     /// Create a range pattern.
     ///
-    /// The type should be Int for integer ranges or Char for character ranges.
-    pub fn range(start: RangeBound, end: RangeBound, inclusive: bool, ty: Ty, span: Span) -> Self {
+    /// Supports full ranges (`start..=end`, `start..<end`) and open-ended ranges
+    /// (`..=end`, `..<end`, `start..`).
+    ///
+    /// The type should be a type conforming to RangeMatchable.
+    pub fn range(
+        start: Option<RangeBound>,
+        end: Option<RangeBound>,
+        inclusive: bool,
+        ty: Ty,
+        span: Span,
+    ) -> Self {
         Pattern {
             kind: PatternKind::Range {
                 start,

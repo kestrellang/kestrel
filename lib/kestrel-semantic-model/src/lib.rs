@@ -33,4 +33,4 @@ pub use query::Query;
 pub use registry::SymbolRegistry;
 pub use resolution::{SymbolResolution, TypePathResolution, ValuePathResolution};
 pub use scope::{Import, ImportItem, Scope};
-pub use type_oracle::ContextualOracle;
+pub use type_oracle::{ContextualOracle, resolve_all_associated_types};

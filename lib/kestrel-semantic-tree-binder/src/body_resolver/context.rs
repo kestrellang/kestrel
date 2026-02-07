@@ -5,19 +5,20 @@
 
 use std::sync::Arc;
 
-use kestrel_reporting::DiagnosticContext;
-use kestrel_semantic_model::SemanticModel;
+use kestrel_reporting::{DiagnosticContext, IntoDiagnostic};
+use kestrel_semantic_model::{SemanticModel, SymbolFor};
 use kestrel_semantic_tree::behavior::executable::{CodeBlock, ExecutableBehavior};
 use kestrel_semantic_tree::behavior::generics::GenericsBehavior;
 use kestrel_semantic_tree::expr::LoopId;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::stmt::Statement;
 use kestrel_semantic_tree::symbol::function::FunctionSymbol;
-use kestrel_semantic_tree::ty::WhereClause;
+use kestrel_semantic_tree::ty::{Ty, WhereClause};
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::{Symbol, SymbolId};
 
+use crate::diagnostics::CapturingClosureEscapeError;
 use crate::resolution::LocalScope;
 use kestrel_syntax_tree::utils::get_node_span;
 
@@ -178,6 +179,35 @@ impl<'a> BodyResolutionContext<'a> {
     pub fn move_tracker(&self) -> &MoveTracker {
         &self.move_tracker
     }
+
+    /// Get the return type of the current function.
+    ///
+    /// Used for try expressions to determine R in `R.fromResidual(early)`.
+    /// Returns None if the function cannot be found or has no callable behavior.
+    pub fn function_return_type(&self) -> Option<Ty> {
+        use super::utils::get_callable_behavior;
+
+        let symbol = self.model.query(SymbolFor {
+            id: self.function_id,
+        })?;
+        let callable = get_callable_behavior(&symbol)?;
+        Some(callable.return_type().clone())
+    }
+
+    /// Check if we're currently in an initializer context.
+    ///
+    /// In initializers, assignment to `let` fields on `self` is allowed
+    /// since this is when they are being initialized.
+    pub fn is_initializer_context(&self) -> bool {
+        use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
+
+        if let Some(symbol) = self.model.query(SymbolFor {
+            id: self.function_id,
+        }) {
+            return symbol.metadata().kind() == KestrelSymbolKind::Initializer;
+        }
+        false
+    }
 }
 
 /// Resolve a function body syntax node into a CodeBlock
@@ -204,6 +234,21 @@ pub fn resolve_function_body(body_node: &SyntaxNode, ctx: &mut BodyResolutionCon
 
     // Empty body
     CodeBlock::empty()
+}
+
+/// Resolve a standalone expression into a CodeBlock with that expression as the yield value.
+/// This is useful for field initializers and similar constructs that are just expressions.
+pub fn resolve_expression_to_code_block(
+    expr_node: &SyntaxNode,
+    ctx: &mut BodyResolutionContext,
+) -> CodeBlock {
+    use super::expressions::resolve_expression;
+
+    let resolved_expr = resolve_expression(expr_node, ctx);
+    CodeBlock {
+        statements: vec![],
+        yield_expr: Some(Box::new(resolved_expr)),
+    }
 }
 
 /// Resolve a code block (statements + optional yield expression)
@@ -342,7 +387,7 @@ fn can_be_yield_expression(expr_node: &SyntaxNode) -> bool {
                 // Match expressions are always exhaustive and can be yield expressions
                 return true;
             },
-            SyntaxKind::ExprLoop | SyntaxKind::ExprWhile => {
+            SyntaxKind::ExprLoop | SyntaxKind::ExprWhile | SyntaxKind::ExprFor => {
                 // Loops cannot be yield expressions - they return () or Never
                 return false;
             },
@@ -530,8 +575,54 @@ pub(crate) fn resolve_body_and_attach_executable(
     body_syntax: &SyntaxNode,
     ctx: &mut BodyResolutionContext,
 ) {
+    resolve_body_and_attach_executable_with_patterns(function_symbol, body_syntax, ctx, Vec::new());
+}
+
+/// Resolve a function's body and attach ExecutableBehavior with parameter patterns.
+pub(crate) fn resolve_body_and_attach_executable_with_patterns(
+    function_symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+    body_syntax: &SyntaxNode,
+    ctx: &mut BodyResolutionContext,
+    parameter_patterns: Vec<kestrel_semantic_tree::pattern::Pattern>,
+) {
+    resolve_body_and_attach_executable_with_defaults(
+        function_symbol,
+        body_syntax,
+        ctx,
+        parameter_patterns,
+        Vec::new(),
+    );
+}
+
+/// Resolve a function's body and attach ExecutableBehavior with parameter patterns and default values.
+pub(crate) fn resolve_body_and_attach_executable_with_defaults(
+    function_symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+    body_syntax: &SyntaxNode,
+    ctx: &mut BodyResolutionContext,
+    parameter_patterns: Vec<kestrel_semantic_tree::pattern::Pattern>,
+    default_values: Vec<Option<kestrel_semantic_tree::expr::Expression>>,
+) {
     let code_block = resolve_function_body(body_syntax, ctx);
-    let executable = ExecutableBehavior::new(code_block);
+
+    // Check for escaping capturing closure in tail expression (implicit return)
+    // TODO: Remove this restriction once heap allocation for closure environments is implemented.
+    if let Some(ref tail) = code_block.yield_expr {
+        use kestrel_semantic_tree::expr::ExprKind;
+        if let ExprKind::Closure { captures, .. } = &tail.kind
+            && !captures.is_empty()
+        {
+            let captured_names: Vec<String> = captures.iter().map(|c| c.name.clone()).collect();
+            let error = CapturingClosureEscapeError {
+                closure_span: tail.span.clone(),
+                return_span: tail.span.clone(), // Use closure span as return span for implicit returns
+                captured_names,
+            };
+            ctx.diagnostics.add_diagnostic(error.into_diagnostic());
+        }
+    }
+
+    let executable =
+        ExecutableBehavior::with_defaults(code_block, parameter_patterns, default_values);
     function_symbol.metadata().add_behavior(executable);
 }
 

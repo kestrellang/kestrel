@@ -48,17 +48,7 @@ pub fn lower_type(ctx: &mut LoweringContext, ty: &Ty) -> Id<MirTyMarker> {
             ctx.mir.ty_tuple(mir_elements)
         },
 
-        TyKind::Array(_element_ty) => {
-            // Array literal types [T] should be resolved to concrete types
-            // (like Array[T, GlobalAllocator]) during type inference.
-            // If we hit this, type inference didn't resolve the array type.
-            ctx.emit_error(LoweringError::unsupported_type(
-                "Unresolved array type '[T]' - should be resolved to concrete type during type inference".to_string(),
-                ty.span().clone(),
-            ));
-            ctx.mir.ty_error()
-        },
-
+        // Note: Array[T] types are now represented as TyKind::Struct and handled above
         TyKind::Pointer(element_ty) => {
             let element = lower_type(ctx, element_ty);
             ctx.mir.ty_ptr(element)
@@ -166,6 +156,12 @@ pub fn lower_type(ctx: &mut LoweringContext, ty: &Ty) -> Id<MirTyMarker> {
 
         // === Type Parameters ===
         TyKind::TypeParameter(param_symbol) => {
+            let param_name = param_symbol.metadata().name().value.clone();
+            if param_name == "Self" {
+                // Treat synthetic `Self` type parameters as the protocol Self type
+                // so protocol extension methods can be monomorphized correctly.
+                return ctx.mir.ty_self();
+            }
             // Look up the MIR type param from our mapping
             let symbol_id = param_symbol.metadata().id();
             if let Some(mir_type_param) = ctx.get_type_param(symbol_id) {
@@ -174,10 +170,7 @@ pub fn lower_type(ctx: &mut LoweringContext, ty: &Ty) -> Id<MirTyMarker> {
                 // Type parameter not in scope - this can happen when lowering
                 // a generic definition without entering its context first
                 ctx.emit_error(LoweringError::unsupported_type(
-                    format!(
-                        "type parameter '{}' not in scope",
-                        param_symbol.metadata().name().value
-                    ),
+                    format!("type parameter '{}' not in scope", param_name),
                     ty.span().clone(),
                 ));
                 ctx.mir.ty_error()
@@ -230,11 +223,6 @@ pub fn lower_type(ctx: &mut LoweringContext, ty: &Ty) -> Id<MirTyMarker> {
         // === Inference Placeholder ===
         TyKind::Infer => {
             // This shouldn't appear after type inference
-            eprintln!(
-                "[DEBUG] Lowering TyKind::Infer - ty.id={:?} span={:?}",
-                ty.id(),
-                ty.span()
-            );
             ctx.emit_error(LoweringError::unsupported_type(
                 "unresolved inference type",
                 ty.span().clone(),
@@ -245,6 +233,16 @@ pub fn lower_type(ctx: &mut LoweringContext, ty: &Ty) -> Id<MirTyMarker> {
         // === Error Type ===
         TyKind::Error => {
             // Error types are poison values
+            ctx.mir.ty_error()
+        },
+
+        // === Unresolved Path Type ===
+        TyKind::UnresolvedPath { segments } => {
+            // Unresolved paths should have been resolved by this point
+            ctx.emit_error(LoweringError::unsupported_type(
+                format!("unresolved type path: {}", segments.join(".")),
+                ty.span().clone(),
+            ));
             ctx.mir.ty_error()
         },
     }

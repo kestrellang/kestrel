@@ -12,6 +12,7 @@ use crate::{
 };
 
 use super::associated_type::AssociatedTypeSymbol;
+use super::field::FieldSymbol;
 
 /// Represents a protocol declaration in the semantic tree.
 ///
@@ -117,12 +118,15 @@ impl ProtocolSymbol {
     }
 }
 
-/// Flattened view of a protocol's methods and associated types including inheritance.
+/// Flattened view of a protocol's methods, properties, and associated types including inheritance.
 /// Computed during BIND phase to enable O(1) member lookups.
 #[derive(Debug, Clone)]
 pub struct FlattenedProtocolBehavior {
     /// All methods (direct + inherited), grouped by name
     methods: HashMap<String, Vec<FlattenedMethod>>,
+
+    /// All computed property requirements (direct + inherited)
+    properties: HashMap<String, FlattenedProperty>,
 
     /// All associated types (direct + inherited)
     associated_types: HashMap<String, FlattenedAssociatedType>,
@@ -155,14 +159,38 @@ pub struct FlattenedAssociatedType {
     pub definition_span: Span,
 }
 
+/// Flattened property requirement from a protocol (computed properties only).
+#[derive(Debug, Clone)]
+pub struct FlattenedProperty {
+    /// The field symbol (computed property)
+    pub symbol: Arc<FieldSymbol>,
+
+    /// Which protocol defined this property
+    pub source_protocol_name: String,
+
+    /// Span where it was defined (for error messages)
+    pub definition_span: Span,
+
+    /// Whether this property has a getter requirement
+    pub has_getter: bool,
+
+    /// Whether this property has a setter requirement
+    pub has_setter: bool,
+
+    /// Whether this is a static property
+    pub is_static: bool,
+}
+
 impl FlattenedProtocolBehavior {
     pub fn new(
         methods: HashMap<String, Vec<FlattenedMethod>>,
+        properties: HashMap<String, FlattenedProperty>,
         associated_types: HashMap<String, FlattenedAssociatedType>,
         inheritance_depth: usize,
     ) -> Self {
         Self {
             methods,
+            properties,
             associated_types,
             inheritance_depth,
         }
@@ -170,6 +198,10 @@ impl FlattenedProtocolBehavior {
 
     pub fn methods(&self) -> &HashMap<String, Vec<FlattenedMethod>> {
         &self.methods
+    }
+
+    pub fn properties(&self) -> &HashMap<String, FlattenedProperty> {
+        &self.properties
     }
 
     pub fn associated_types(&self) -> &HashMap<String, FlattenedAssociatedType> {

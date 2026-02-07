@@ -91,6 +91,7 @@ func getMultiElementArray() -> [lang.i64] {
 }
 "#,
         )
+        .with_stdlib()
         .expect(Compiles)
         .expect(
             Symbol::new("getSimpleArray")

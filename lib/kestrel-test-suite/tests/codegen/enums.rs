@@ -95,6 +95,27 @@ func main() -> lang.i64 {
 }
 
 #[test]
+fn match_optional_type_operator() {
+    Test::new(
+        r#"module Test
+
+func main() -> lang.i64 {
+    let opt: std.num.Int64? = .Some(7);
+    let val = match opt {
+        .Some(v) => v,
+        .None => 0
+    };
+    if val != 7 { return 1 }
+    0
+}
+"#,
+    )
+    .with_stdlib()
+    .expect(Compiles)
+    .expect(Runs);
+}
+
+#[test]
 fn enum_multiple_payloads() {
     Test::new(
         r#"module Test

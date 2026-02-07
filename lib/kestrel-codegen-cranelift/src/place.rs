@@ -12,6 +12,7 @@ use kestrel_execution_graph::{Id, Local, MirTy, Place, PlaceKind, Ty};
 use cranelift_codegen::ir::types as cl_types;
 use cranelift_codegen::ir::{InstBuilder, MemFlags, Value as CraneliftValue};
 use cranelift_frontend::{FunctionBuilder, Variable};
+use cranelift_module::Module;
 
 use std::collections::{HashMap, HashSet};
 
@@ -37,6 +38,66 @@ pub fn compile_place_read(
             } else {
                 // Both aggregate and non-aggregate types use the variable directly
                 Ok(builder.use_var(*var))
+            }
+        },
+
+        PlaceKind::Global(name_id) => {
+            // Global/static variable access
+            let global_name = ctx.mir.name(*name_id);
+            let mangled_name = format!("{}", global_name);
+
+            // Look up the global symbol
+            let global_ref = ctx
+                .module
+                .declare_data(
+                    &mangled_name,
+                    cranelift_module::Linkage::Import,
+                    false,
+                    false,
+                )
+                .map_err(|e| {
+                    CodegenError::Unsupported(format!("failed to declare global: {}", e))
+                })?;
+
+            // Get the global address
+            let global_addr = ctx.module.declare_data_in_func(global_ref, builder.func);
+
+            // Find the static definition to get its type
+            let static_def = ctx
+                .mir
+                .statics
+                .iter()
+                .find(|(_, def)| def.name == *name_id)
+                .map(|(_, def)| def)
+                .ok_or_else(|| {
+                    CodegenError::Unsupported(format!(
+                        "static variable not found: {}",
+                        mangled_name
+                    ))
+                })?;
+
+            let static_ty = static_def.ty;
+            let concrete_ty = subst
+                .apply_ty_readonly(ctx.mir, static_ty)
+                .unwrap_or(static_ty);
+
+            // Compute pointer type
+            let ptr_type = if ctx.target.is_64bit() {
+                cl_types::I64
+            } else {
+                cl_types::I32
+            };
+
+            // Get pointer to the global
+            let ptr = builder.ins().global_value(ptr_type, global_addr);
+
+            // For aggregate types, return the pointer (like stack-allocated locals)
+            // For scalar types, load the value
+            if is_aggregate_type(ctx, concrete_ty) {
+                Ok(ptr)
+            } else {
+                let cl_type = translate_type_with_subst(ctx.mir, static_ty, ctx.target, subst);
+                Ok(builder.ins().load(cl_type, MemFlags::new(), ptr, 0))
             }
         },
 
@@ -241,7 +302,7 @@ pub(crate) fn get_enum_payload_offset(
     for case_id in &case_ids {
         let case_def = &ctx.mir.enum_cases[*case_id];
         if let Some(struct_id) = case_def.struct_def {
-            let payload_layout = ctx.layouts.struct_layout(struct_id, &type_args);
+            let payload_layout = ctx.layouts.struct_layout(struct_id, &type_args, None);
             // Track the maximum alignment and size
             if payload_layout.layout.align > max_payload_layout.align
                 || (payload_layout.layout.align == max_payload_layout.align
@@ -298,6 +359,21 @@ fn get_place_type(
         PlaceKind::Local(local_id) => {
             let local_def = ctx.mir.local(*local_id);
             Ok(local_def.ty)
+        },
+
+        PlaceKind::Global(name_id) => {
+            // Find the static definition to get its type
+            let static_def = ctx
+                .mir
+                .statics
+                .iter()
+                .find(|(_, def)| def.name == *name_id)
+                .map(|(_, def)| def)
+                .ok_or_else(|| {
+                    let global_name = ctx.mir.name(*name_id);
+                    CodegenError::Unsupported(format!("static variable not found: {}", global_name))
+                })?;
+            Ok(static_def.ty)
         },
 
         PlaceKind::Field { parent, name } => {
@@ -404,14 +480,22 @@ fn get_field_info(
     };
 
     // Get field offset from layout (pass type_args for generic structs)
-    let struct_layout = ctx.layouts.struct_layout(struct_id, &type_args);
-    let offset = *struct_layout
-        .field_offsets
-        .get(field_name)
-        .ok_or_else(|| CodegenError::Unsupported(format!("unknown field: {}", field_name)))?;
+    // Also pass self_type from the substitution context - this is needed for closure
+    // environment structs in protocol extension methods where fields may have
+    // associated type projections like AssociatedTypeProjection { base: SelfType, ... }
+    let struct_def = ctx.mir.struct_def(struct_id);
+    let self_type = subst.get_self_type();
+    let struct_layout = ctx.layouts.struct_layout(struct_id, &type_args, self_type);
+    let offset = *struct_layout.field_offsets.get(field_name).ok_or_else(|| {
+        let struct_name = ctx.mir.name(struct_def.name);
+        let available_fields: Vec<_> = struct_layout.field_offsets.keys().collect();
+        CodegenError::Unsupported(format!(
+            "unknown field: {} in struct {} (available: {:?})",
+            field_name, struct_name, available_fields
+        ))
+    })?;
 
     // Get field type
-    let struct_def = ctx.mir.struct_def(struct_id);
     let type_params: Vec<_> = struct_def.type_params.clone();
     let mut field_ty = None;
     for field_id in &struct_def.fields {
@@ -493,6 +577,17 @@ fn get_field_by_index(
     }
 
     // Otherwise, it's a regular struct or tuple - look up by index
+    // Resolve AssociatedTypeProjection through substitution before matching
+    let parent_ty = if matches!(
+        ctx.mir.ty(parent_ty),
+        MirTy::AssociatedTypeProjection { .. }
+    ) {
+        subst
+            .apply_ty_readonly(ctx.mir, parent_ty)
+            .unwrap_or(parent_ty)
+    } else {
+        parent_ty
+    };
     let mir_ty = ctx.mir.ty(parent_ty);
 
     match mir_ty {
@@ -580,7 +675,9 @@ fn get_struct_field_by_index(
         .collect();
 
     // Get field offset from layout (pass substituted type_args for generic structs)
-    let struct_layout = ctx.layouts.struct_layout(struct_id, &concrete_type_args);
+    let struct_layout = ctx
+        .layouts
+        .struct_layout(struct_id, &concrete_type_args, None);
     let offset = *struct_layout.field_offsets.get(field_name).ok_or_else(|| {
         CodegenError::Unsupported(format!("field offset not found: {}", field_name))
     })?;
@@ -639,6 +736,64 @@ pub fn compile_place_write(
             }
 
             builder.def_var(*var, value);
+            Ok(())
+        },
+
+        PlaceKind::Global(name_id) => {
+            // Global/static variable write
+            let global_name = ctx.mir.name(*name_id);
+            let mangled_name = format!("{}", global_name);
+
+            // Look up the global symbol
+            let global_ref = ctx
+                .module
+                .declare_data(
+                    &mangled_name,
+                    cranelift_module::Linkage::Import,
+                    true,
+                    false,
+                )
+                .map_err(|e| {
+                    CodegenError::Unsupported(format!("failed to declare global: {}", e))
+                })?;
+
+            // Get the global address
+            let global_addr = ctx.module.declare_data_in_func(global_ref, builder.func);
+
+            // Find the static definition to get its type
+            let static_def = ctx
+                .mir
+                .statics
+                .iter()
+                .find(|(_, def)| def.name == *name_id)
+                .map(|(_, def)| def)
+                .ok_or_else(|| {
+                    let global_name = ctx.mir.name(*name_id);
+                    CodegenError::Unsupported(format!("static variable not found: {}", global_name))
+                })?;
+
+            let static_ty = static_def.ty;
+            let concrete_ty = subst
+                .apply_ty_readonly(ctx.mir, static_ty)
+                .unwrap_or(static_ty);
+
+            // Compute pointer type
+            let ptr_type = if ctx.target.is_64bit() {
+                cl_types::I64
+            } else {
+                cl_types::I32
+            };
+
+            // Get the pointer to the global
+            let ptr = builder.ins().global_value(ptr_type, global_addr);
+
+            // Handle aggregate types (structs, tuples) by copying the data
+            if is_aggregate_type(ctx, concrete_ty) {
+                copy_aggregate_value(ctx, concrete_ty, ptr, value, builder);
+            } else {
+                // Store scalar value directly to the global
+                builder.ins().store(MemFlags::new(), value, ptr, 0);
+            }
             Ok(())
         },
 
@@ -768,6 +923,31 @@ pub fn compile_place_addr(
                 )
             })?;
             Ok(builder.ins().stack_addr(ptr_type, *slot, 0))
+        },
+
+        PlaceKind::Global(name_id) => {
+            // Global/static variable - return the address of the global
+            let global_name = ctx.mir.name(*name_id);
+            let mangled_name = format!("{}", global_name);
+
+            // Look up the global symbol
+            let global_ref = ctx
+                .module
+                .declare_data(
+                    &mangled_name,
+                    cranelift_module::Linkage::Import,
+                    false,
+                    false,
+                )
+                .map_err(|e| {
+                    CodegenError::Unsupported(format!("failed to declare global: {}", e))
+                })?;
+
+            // Get the global address
+            let global_addr = ctx.module.declare_data_in_func(global_ref, builder.func);
+
+            // Return the address of the global
+            Ok(builder.ins().global_value(ptr_type, global_addr))
         },
 
         PlaceKind::Field { parent, name } => {

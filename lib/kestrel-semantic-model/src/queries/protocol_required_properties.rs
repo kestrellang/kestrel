@@ -107,40 +107,6 @@ fn collect_property_requirements_from_symbol(
         .filter_map(|child| {
             let field: Arc<FieldSymbol> = child.clone().into_any_arc().downcast().ok()?;
 
-            // Only computed properties can be protocol requirements
-            if !field.is_computed() {
-                return None;
-            }
-
-            // Check if this is a requirement (getter/setter without body) or an implementation
-            let getter_id = field.getter()?;
-            let getter_sym = model.query(SymbolFor { id: getter_id })?;
-
-            // If the getter has ExecutableBehavior, it has a body and is a default implementation,
-            // not a requirement
-            if getter_sym
-                .metadata()
-                .get_behavior::<ExecutableBehavior>()
-                .is_some()
-            {
-                return None;
-            }
-
-            // Check if there's a setter requirement
-            let has_setter = if let Some(setter_id) = field.setter() {
-                // If setter exists but has no body, it's required
-                if let Some(setter_sym) = model.query(SymbolFor { id: setter_id }) {
-                    setter_sym
-                        .metadata()
-                        .get_behavior::<ExecutableBehavior>()
-                        .is_none()
-                } else {
-                    false
-                }
-            } else {
-                false
-            };
-
             // Get the resolved type from TypedBehavior (set by binder)
             // Fall back to field_type if no behavior found
             let field_dyn: Arc<dyn Symbol<KestrelLanguage>> = field.clone();
@@ -150,10 +116,46 @@ fn collect_property_requirements_from_symbol(
                 .map(|typed| typed.ty().clone())
                 .unwrap_or_else(|| field.field_type().clone());
 
+            let has_setter = if field.is_computed() {
+                // For computed properties, check if this is a requirement (getter without body)
+                let getter_id = field.getter()?;
+                let getter_sym = model.query(SymbolFor { id: getter_id })?;
+
+                // If the getter has ExecutableBehavior, it has a body and is a default implementation,
+                // not a requirement
+                if getter_sym
+                    .metadata()
+                    .get_behavior::<ExecutableBehavior>()
+                    .is_some()
+                {
+                    return None;
+                }
+
+                // Check if there's a setter requirement
+                if let Some(setter_id) = field.setter() {
+                    // If setter exists but has no body, it's required
+                    if let Some(setter_sym) = model.query(SymbolFor { id: setter_id }) {
+                        setter_sym
+                            .metadata()
+                            .get_behavior::<ExecutableBehavior>()
+                            .is_none()
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            } else {
+                // For stored properties (let/var without getter/setter):
+                // - `let` (immutable) -> has_setter = false
+                // - `var` (mutable) -> has_setter = true
+                field.is_mutable()
+            };
+
             Some(PropertyRequirement {
                 name: field.metadata().name().value.clone(),
                 property_type,
-                has_getter: true, // Always true for computed property requirements
+                has_getter: true, // Always true for property requirements
                 has_setter,
                 is_static: field.is_static(),
                 field_id: field.metadata().id(),

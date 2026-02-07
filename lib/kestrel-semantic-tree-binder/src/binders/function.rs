@@ -4,12 +4,13 @@ use kestrel_semantic_tree::behavior::attributes::AttributesBehavior;
 use kestrel_semantic_tree::behavior::callable::{
     CallableBehavior, ParameterAccessMode, ReceiverKind,
 };
+use kestrel_semantic_tree::behavior::extension_target::ExtensionTargetBehavior;
 use kestrel_semantic_tree::behavior::generics::GenericsBehavior;
 use kestrel_semantic_tree::builtins::{BuiltinKind, LanguageFeature};
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::function::Parameter;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
-use kestrel_semantic_tree::ty::Ty;
+use kestrel_semantic_tree::ty::{Ty, WhereClause};
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
@@ -20,7 +21,8 @@ use crate::binders::utils::attributes::{
 use crate::declaration_binder::{BindingContext, DeclarationBinder};
 use crate::diagnostics::{
     BuiltinMethodNotInProtocolError, BuiltinMethodWrongSignatureError, BuiltinWrongKindError,
-    DuplicateBuiltinError, ExternFunctionCannotBeGenericError, ExternFunctionCannotHaveBodyError,
+    DefaultValueReferencesParameterError, DefaultValueTypeMismatchError, DuplicateBuiltinError,
+    ExternFunctionCannotBeGenericError, ExternFunctionCannotHaveBodyError,
     ExternParameterNotConsumingError, TypeNotFFISafeError,
 };
 use crate::resolution::LocalScope;
@@ -390,6 +392,12 @@ impl DeclarationBinder for FunctionBinder {
             syntax, &source, file_id, symbol_id, context, false,
         );
 
+        // Validate parameter ordering: required parameters cannot follow default parameters
+        crate::binders::utils::parameters::validate_default_parameter_order(
+            &resolved_params,
+            context.diagnostics,
+        );
+
         // Extract and resolve return type from syntax (T.Item will work)
         let resolved_return =
             resolve_return_type_from_syntax(syntax, &source, file_id, symbol_id, context);
@@ -471,7 +479,19 @@ impl DeclarationBinder for FunctionBinder {
         if let Some(body_node) = find_child(syntax, SyntaxKind::FunctionBody) {
             resolve_function_body(
                 symbol,
+                syntax, // Pass full syntax for parameter pattern access
                 &body_node,
+                &resolved_params,
+                context,
+                &source,
+                file_id,
+            );
+        } else {
+            // No body (e.g., protocol method declaration) - but still resolve defaults
+            // This is needed so that calls to protocol methods can fill in default arguments
+            resolve_defaults_for_bodyless_function(
+                symbol,
+                syntax,
                 &resolved_params,
                 context,
                 &source,
@@ -484,6 +504,7 @@ impl DeclarationBinder for FunctionBinder {
 /// Resolve a function's body and attach ExecutableBehavior to the symbol
 fn resolve_function_body(
     symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+    func_syntax: &SyntaxNode, // Full function syntax for parameter pattern access
     body_node: &SyntaxNode,
     params: &[Parameter],
     context: &mut BindingContext,
@@ -492,9 +513,11 @@ fn resolve_function_body(
 ) {
     use crate::body_resolver::BodyResolutionContext;
     use crate::body_resolver::context::{
-        create_local_scope_for_body, resolve_body_and_attach_executable,
+        create_local_scope_for_body, resolve_body_and_attach_executable_with_defaults,
     };
+    use crate::body_resolver::patterns::resolve_pattern_with_mutability;
     use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
+    use kestrel_semantic_tree::pattern::{Mutability, Pattern};
     use kestrel_semantic_tree::symbol::function::FunctionSymbol;
 
     // Downcast to FunctionSymbol to get Arc<FunctionSymbol> for LocalScope
@@ -534,32 +557,39 @@ fn resolve_function_body(
         );
     }
 
-    // Add parameters to local scope
-    // Mutability depends on access mode:
-    // - Borrow: immutable (read-only)
-    // - Mutating: mutable (read-write, but caller keeps ownership)
-    // - Consuming: mutable (takes ownership, can modify)
-    for param in params {
-        use kestrel_semantic_tree::behavior::callable::ParameterAccessMode;
-        let param_ty = param.ty.clone();
-        let param_name = param.bind_name.value.clone();
-        let param_span = param.bind_name.span.clone();
-        let is_mutable = match param.access_mode {
-            ParameterAccessMode::Borrow => false,
-            ParameterAccessMode::Mutating => true,
-            ParameterAccessMode::Consuming => true,
-        };
-        // Add to local scope (this also adds it to the FunctionSymbol's locals)
-        local_scope.bind(param_name, param_ty, is_mutable, param_span);
-    }
-
     // Get the where clause from the function's generics behavior
-    let where_clause = symbol
+    let func_where_clause = symbol
         .metadata()
         .get_behavior::<GenericsBehavior>()
         .map(|g| g.where_clause().clone());
 
-    // Create body resolution context
+    // If inside an extension, combine with extension's where clause.
+    // This ensures constraints like `T: Equatable` from `extend Array[T] where T: Equatable`
+    // are available when resolving the function body.
+    let where_clause = if let Some(parent) = symbol.metadata().parent()
+        && parent.metadata().kind() == KestrelSymbolKind::Extension
+        && let Some(target_beh) = parent.metadata().get_behavior::<ExtensionTargetBehavior>()
+    {
+        let ext_where = target_beh.where_clause();
+        match func_where_clause {
+            Some(func_wc) => {
+                // Combine function's constraints with extension's constraints
+                let combined_constraints: Vec<_> = func_wc
+                    .constraints()
+                    .iter()
+                    .chain(ext_where.constraints().iter())
+                    .cloned()
+                    .collect();
+                Some(WhereClause::with_constraints(combined_constraints))
+            },
+            None if !ext_where.is_empty() => Some(ext_where.clone()),
+            None => None,
+        }
+    } else {
+        func_where_clause
+    };
+
+    // Create body resolution context early so we can use pattern resolution
     let mut body_ctx = BodyResolutionContext::new_with_scope(
         context.model,
         context.diagnostics,
@@ -570,7 +600,183 @@ fn resolve_function_body(
         where_clause,
     );
 
-    resolve_body_and_attach_executable(symbol, body_node, &mut body_ctx);
+    // Get parameter syntax nodes from the function declaration
+    let param_syntax_nodes: Vec<SyntaxNode> = find_child(func_syntax, SyntaxKind::ParameterList)
+        .map(|param_list| {
+            param_list
+                .children()
+                .filter(|c| c.kind() == SyntaxKind::Parameter)
+                .collect()
+        })
+        .unwrap_or_default();
+
+    // Collect parameter patterns for lowering support
+    let mut parameter_patterns: Vec<Pattern> = Vec::new();
+
+    // Add parameters to local scope using proper pattern resolution
+    // Mutability depends on access mode:
+    // - Borrow: immutable (read-only)
+    // - Mutating: mutable (read-write, but caller keeps ownership)
+    // - Consuming: mutable (takes ownership, can modify)
+    for (i, param) in params.iter().enumerate() {
+        use kestrel_semantic_tree::behavior::callable::ParameterAccessMode;
+        let param_ty = param.ty.clone();
+        let is_mutable = match param.access_mode {
+            ParameterAccessMode::Borrow => false,
+            ParameterAccessMode::Mutating => true,
+            ParameterAccessMode::Consuming => true,
+        };
+        let mutability = if is_mutable {
+            Mutability::Mutable
+        } else {
+            Mutability::Immutable
+        };
+
+        // Try to find the Pattern node in the parameter syntax
+        if let Some(param_syntax) = param_syntax_nodes.get(i) {
+            if let Some(pattern_node) = param_syntax
+                .children()
+                .find(|c| c.kind() == SyntaxKind::Pattern)
+            {
+                // Use the existing pattern resolution machinery
+                // This properly handles tuple/struct destructuring with correct types
+                let pattern = resolve_pattern_with_mutability(
+                    &pattern_node,
+                    &mut body_ctx,
+                    Some(&param_ty),
+                    is_mutable,
+                );
+                // Store the pattern for lowering
+                parameter_patterns.push(pattern);
+                // The pattern resolution automatically binds names to local scope
+                continue;
+            }
+
+            // Fallback: look for Name nodes (backward compat with old syntax)
+            let name_nodes: Vec<SyntaxNode> = param_syntax
+                .children()
+                .filter(|c| c.kind() == SyntaxKind::Name)
+                .collect();
+
+            if let Some(name_node) = name_nodes.last() {
+                // Try to extract a simple binding
+                for child in name_node.children_with_tokens() {
+                    if let Some(token) = child.as_token()
+                        && token.kind() == SyntaxKind::Identifier
+                    {
+                        let span = kestrel_syntax_tree::utils::get_node_span(name_node, file_id);
+                        let local_id = body_ctx.local_scope.bind(
+                            token.text().to_string(),
+                            param_ty.clone(),
+                            is_mutable,
+                            span.clone(),
+                        );
+                        // Create simple binding pattern for lowering
+                        let pattern = Pattern::local(
+                            local_id,
+                            mutability,
+                            token.text().to_string(),
+                            param_ty.clone(),
+                            span,
+                        );
+                        parameter_patterns.push(pattern);
+                        break;
+                    }
+                }
+                continue;
+            }
+        }
+
+        // Final fallback: use bind_name from semantic parameter data
+        let param_name = param.bind_name.value.clone();
+        let param_span = param.bind_name.span.clone();
+        let local_id = body_ctx.local_scope.bind(
+            param_name.clone(),
+            param_ty.clone(),
+            is_mutable,
+            param_span.clone(),
+        );
+        // Create simple binding pattern for lowering
+        let pattern = Pattern::local(local_id, mutability, param_name, param_ty, param_span);
+        parameter_patterns.push(pattern);
+    }
+
+    // Resolve and validate default value expressions before resolving body
+    let default_values = resolve_default_values(&param_syntax_nodes, params, &mut body_ctx);
+
+    resolve_body_and_attach_executable_with_defaults(
+        symbol,
+        body_node,
+        &mut body_ctx,
+        parameter_patterns,
+        default_values,
+    );
+}
+
+/// Resolve default values for a function without a body (e.g., protocol method declaration).
+///
+/// For protocol methods like `func format(options: FormatOptions = FormatOptions.default()) -> String`,
+/// we need to store the default expressions so that calls can fill them in.
+fn resolve_defaults_for_bodyless_function(
+    symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+    func_syntax: &SyntaxNode,
+    params: &[Parameter],
+    context: &mut BindingContext,
+    source: &str,
+    file_id: usize,
+) {
+    use crate::body_resolver::BodyResolutionContext;
+    use crate::body_resolver::context::create_local_scope_for_body;
+    use kestrel_semantic_tree::behavior::executable::{CodeBlock, ExecutableBehavior};
+
+    // Check if any parameters have defaults
+    let has_any_defaults = params.iter().any(|p| p.has_default);
+    if !has_any_defaults {
+        return; // No defaults to resolve
+    }
+
+    let symbol_id = symbol.metadata().id();
+
+    // Create a BodyResolutionContext for resolving default expressions
+    // We need to create a local scope (even though it's empty for protocol methods)
+    let where_clause = symbol
+        .metadata()
+        .get_behavior::<kestrel_semantic_tree::behavior::generics::GenericsBehavior>()
+        .map(|g| g.where_clause().clone());
+
+    let local_scope = create_local_scope_for_body(symbol.clone(), "__protocol_default_temp");
+
+    let mut body_ctx = BodyResolutionContext::new_with_scope(
+        context.model,
+        context.diagnostics,
+        source,
+        file_id,
+        symbol_id,
+        local_scope,
+        where_clause,
+    );
+
+    // Get parameter syntax nodes
+    let param_syntax_nodes: Vec<SyntaxNode> = find_child(func_syntax, SyntaxKind::ParameterList)
+        .map(|param_list| {
+            param_list
+                .children()
+                .filter(|c| c.kind() == SyntaxKind::Parameter)
+                .collect()
+        })
+        .unwrap_or_default();
+
+    // Resolve default values
+    let default_values = resolve_default_values(&param_syntax_nodes, params, &mut body_ctx);
+
+    // Only attach behavior if we resolved any defaults
+    if default_values.iter().any(|d| d.is_some()) {
+        // Create an empty body since this is a declaration
+        let empty_body = CodeBlock::empty();
+        let exec_behavior =
+            ExecutableBehavior::with_defaults(empty_body, Vec::new(), default_values);
+        symbol.metadata().add_behavior(exec_behavior);
+    }
 }
 
 /// Resolve return type from a FunctionDeclaration syntax node during bind phase
@@ -709,5 +915,214 @@ fn determine_receiver_kind(
         (true, _) => Some(ReceiverKind::Mutating),
         (_, true) => Some(ReceiverKind::Consuming),
         _ => Some(ReceiverKind::Borrowing), // Default for instance methods
+    }
+}
+
+/// Validate default value expressions for parameters.
+///
+/// Resolve default value expressions and validate them.
+///
+/// Returns a Vec of Option<Expression> for each parameter (None if no default).
+/// Also validates:
+/// 1. Default value type matches parameter type
+/// 2. Default value does not reference other parameters
+fn resolve_default_values(
+    param_syntax_nodes: &[SyntaxNode],
+    params: &[Parameter],
+    ctx: &mut crate::body_resolver::BodyResolutionContext,
+) -> Vec<Option<kestrel_semantic_tree::expr::Expression>> {
+    use crate::body_resolver::resolve_expression;
+    use kestrel_semantic_tree::symbol::local::LocalId;
+    use std::collections::HashSet;
+
+    // Collect parameter names and their LocalIds for reference checking
+    let param_names: HashSet<String> = params.iter().map(|p| p.bind_name.value.clone()).collect();
+    let param_local_ids: HashSet<LocalId> = param_names
+        .iter()
+        .filter_map(|name| ctx.local_scope.lookup(name))
+        .collect();
+
+    let mut default_values = Vec::with_capacity(params.len());
+
+    for (i, param) in params.iter().enumerate() {
+        // Skip parameters without defaults
+        if !param.has_default {
+            default_values.push(None);
+            continue;
+        }
+
+        // Find the DefaultValue syntax node
+        let Some(param_syntax) = param_syntax_nodes.get(i) else {
+            default_values.push(None);
+            continue;
+        };
+
+        let Some(default_node) = param_syntax
+            .children()
+            .find(|c| c.kind() == SyntaxKind::DefaultValue)
+        else {
+            default_values.push(None);
+            continue;
+        };
+
+        // Find the Expression inside DefaultValue
+        let Some(expr_node) = default_node
+            .children()
+            .find(|c| c.kind() == SyntaxKind::Expression)
+        else {
+            default_values.push(None);
+            continue;
+        };
+
+        // Resolve the default expression
+        let default_expr = resolve_expression(&expr_node, ctx);
+
+        // Check 1: Type compatibility
+        let param_ty = &param.ty;
+        let default_ty = &default_expr.ty;
+
+        if !default_ty.is_assignable_to(param_ty) {
+            ctx.diagnostics.throw(DefaultValueTypeMismatchError {
+                param_name: param.bind_name.value.clone(),
+                expected_type: format!("{}", param_ty),
+                actual_type: format!("{}", default_ty),
+                default_span: default_expr.span.clone(),
+                param_type_span: param_ty.span().clone(),
+            });
+        }
+
+        // Check 2: No references to other parameters
+        check_expr_for_param_refs(&default_expr, &param_local_ids, &param.bind_name.value, ctx);
+
+        default_values.push(Some(default_expr));
+    }
+
+    default_values
+}
+
+/// Recursively check an expression for references to parameter LocalIds.
+fn check_expr_for_param_refs(
+    expr: &kestrel_semantic_tree::expr::Expression,
+    param_local_ids: &std::collections::HashSet<kestrel_semantic_tree::symbol::local::LocalId>,
+    current_param_name: &str,
+    ctx: &mut crate::body_resolver::BodyResolutionContext,
+) {
+    use kestrel_semantic_tree::expr::ExprKind;
+
+    match &expr.kind {
+        ExprKind::LocalRef(local_id) => {
+            if param_local_ids.contains(local_id) {
+                // Find the parameter name for better error message
+                let referenced_name = ctx
+                    .local_scope
+                    .get_local(*local_id)
+                    .map(|local| local.name().to_string())
+                    .unwrap_or_else(|| "unknown".to_string());
+                ctx.diagnostics.throw(DefaultValueReferencesParameterError {
+                    param_name: current_param_name.to_string(),
+                    referenced_param: referenced_name,
+                    reference_span: expr.span.clone(),
+                });
+            }
+        },
+        // Grouping
+        ExprKind::Grouping(inner) => {
+            check_expr_for_param_refs(inner, param_local_ids, current_param_name, ctx);
+        },
+        // Calls
+        ExprKind::Call {
+            callee, arguments, ..
+        } => {
+            check_expr_for_param_refs(callee, param_local_ids, current_param_name, ctx);
+            for arg in arguments {
+                check_expr_for_param_refs(&arg.value, param_local_ids, current_param_name, ctx);
+            }
+        },
+        // Field access
+        ExprKind::FieldAccess { object, .. } => {
+            check_expr_for_param_refs(object, param_local_ids, current_param_name, ctx);
+        },
+        // Tuple/Array
+        ExprKind::Tuple(elements) | ExprKind::Array(elements) => {
+            for elem in elements {
+                check_expr_for_param_refs(elem, param_local_ids, current_param_name, ctx);
+            }
+        },
+        // If expression
+        ExprKind::If {
+            conditions,
+            then_branch,
+            then_value,
+            else_branch,
+        } => {
+            // Check conditions
+            for cond in conditions {
+                match cond {
+                    kestrel_semantic_tree::expr::IfCondition::Expr(e) => {
+                        check_expr_for_param_refs(e, param_local_ids, current_param_name, ctx);
+                    },
+                    kestrel_semantic_tree::expr::IfCondition::Let { value, .. } => {
+                        check_expr_for_param_refs(value, param_local_ids, current_param_name, ctx);
+                    },
+                }
+            }
+            // Check then branch statements
+            for stmt in then_branch {
+                check_stmt_for_param_refs(stmt, param_local_ids, current_param_name, ctx);
+            }
+            if let Some(val) = then_value {
+                check_expr_for_param_refs(val, param_local_ids, current_param_name, ctx);
+            }
+            // Check else branch
+            if let Some(else_br) = else_branch {
+                check_else_branch_for_param_refs(else_br, param_local_ids, current_param_name, ctx);
+            }
+        },
+        // Other expression kinds - literals, type refs, etc. don't contain LocalRefs
+        _ => {},
+    }
+}
+
+/// Check a statement for parameter references
+fn check_stmt_for_param_refs(
+    stmt: &kestrel_semantic_tree::stmt::Statement,
+    param_local_ids: &std::collections::HashSet<kestrel_semantic_tree::symbol::local::LocalId>,
+    current_param_name: &str,
+    ctx: &mut crate::body_resolver::BodyResolutionContext,
+) {
+    use kestrel_semantic_tree::stmt::StatementKind;
+    match &stmt.kind {
+        StatementKind::Binding {
+            value: Some(val), ..
+        } => {
+            check_expr_for_param_refs(val, param_local_ids, current_param_name, ctx);
+        },
+        StatementKind::Expr(expr) => {
+            check_expr_for_param_refs(expr, param_local_ids, current_param_name, ctx);
+        },
+        _ => {},
+    }
+}
+
+/// Check an else branch for parameter references
+fn check_else_branch_for_param_refs(
+    else_br: &kestrel_semantic_tree::expr::ElseBranch,
+    param_local_ids: &std::collections::HashSet<kestrel_semantic_tree::symbol::local::LocalId>,
+    current_param_name: &str,
+    ctx: &mut crate::body_resolver::BodyResolutionContext,
+) {
+    use kestrel_semantic_tree::expr::ElseBranch;
+    match else_br {
+        ElseBranch::Block { statements, value } => {
+            for stmt in statements {
+                check_stmt_for_param_refs(stmt, param_local_ids, current_param_name, ctx);
+            }
+            if let Some(val) = value {
+                check_expr_for_param_refs(val, param_local_ids, current_param_name, ctx);
+            }
+        },
+        ElseBranch::ElseIf(if_expr) => {
+            check_expr_for_param_refs(if_expr, param_local_ids, current_param_name, ctx);
+        },
     }
 }

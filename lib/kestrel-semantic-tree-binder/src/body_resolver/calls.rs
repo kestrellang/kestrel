@@ -10,6 +10,7 @@ use kestrel_semantic_model::queries::ExtensionsFor;
 use kestrel_semantic_model::{IsVisibleFrom, SemanticModel, SymbolFor};
 use kestrel_semantic_tree::behavior::callable::{CallableBehavior, ParameterAccessMode};
 use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
+use kestrel_semantic_tree::behavior::extension_target::ExtensionTargetBehavior;
 use kestrel_semantic_tree::behavior::subscript::SubscriptBehavior;
 use kestrel_semantic_tree::expr::{CallArgument, ExprId, ExprKind, Expression};
 use kestrel_semantic_tree::language::KestrelLanguage;
@@ -33,13 +34,13 @@ use crate::resolution::type_resolver::TypeResolver;
 use crate::diagnostics::{
     AmbiguousTypeParameterInitError, CannotMutateThroughImmutableBindingError,
     CannotPassImmutableFieldToMutatingError, CannotPassLetToMutatingError,
-    CannotPassTemporaryToMutatingError, ClosureArityError, FieldNotVisibleForInitError,
-    ImplicitInitArityError, ImplicitInitLabelError, InstanceMethodOnTypeError,
-    MemberNotVisibleError, NoInitInTypeParameterBoundsError, NoMatchingInitializerError,
-    NoMatchingMethodError, NoMatchingOverloadError, NoMatchingTypeParameterInitError,
-    NonCallableError, NotGenericError, OverloadDescription, PrimitiveMethodArityError,
-    TooFewTypeArgumentsError, TooManyTypeArgumentsError, TypeArgsOnNonGenericError,
-    UnconstrainedTypeParameterMemberError,
+    CannotPassTemporaryToMutatingError, ClosureArityError, ConstraintNotSatisfiedError,
+    FieldNotVisibleForInitError, ImplicitInitArityError, ImplicitInitLabelError,
+    InstanceMethodOnTypeError, MemberNotVisibleError, NoInitInTypeParameterBoundsError,
+    NoMatchingInitializerError, NoMatchingMethodError, NoMatchingOverloadError,
+    NoMatchingTypeParameterInitError, NonCallableError, NotGenericError, OverloadDescription,
+    PrimitiveMethodArityError, TooFewTypeArgumentsError, TooManyTypeArgumentsError,
+    TypeArgsOnNonGenericError, UnconstrainedTypeParameterMemberError,
 };
 use kestrel_syntax_tree::utils::get_node_span;
 
@@ -51,11 +52,127 @@ use super::members::{
 };
 use super::utils::{
     create_generic_struct_type, create_struct_type, create_struct_type_with_type_args,
-    find_type_directed_match, get_callable_behavior, get_type_container,
-    get_type_parameter_bounds_by_id, infer_type_arguments, is_expression_kind, matches_signature,
-    replace_type_params_except, substitute_self, substitute_type,
-    validate_not_standalone_type_param, verify_type_argument_constraints,
+    find_type_directed_match, get_associated_type_bounds_from_context, get_callable_behavior,
+    get_type_container, get_type_parameter_bounds_by_id, infer_type_arguments, is_expression_kind,
+    matches_signature, replace_type_params_except, resolve_associated_types, substitute_self,
+    substitute_type, type_satisfies_bound, validate_not_standalone_type_param,
+    verify_type_argument_constraints,
 };
+
+fn verify_where_clause_constraints_from_substitutions(
+    where_clause: &kestrel_semantic_tree::ty::WhereClause,
+    substitutions: &Substitutions,
+    self_ty: Option<&Ty>,
+    call_span: &Span,
+    model: &kestrel_semantic_model::SemanticModel,
+    diagnostics: &mut kestrel_reporting::DiagnosticContext,
+) -> bool {
+    use kestrel_semantic_tree::ty::Constraint;
+
+    let mut all_satisfied = true;
+
+    for constraint in where_clause.constraints() {
+        match constraint {
+            Constraint::TypeBound {
+                param: Some(param_id),
+                param_name,
+                param_span,
+                bounds,
+            } => {
+                let actual_ty = substitutions
+                    .get(*param_id)
+                    .or_else(|| if param_name == "Self" { self_ty } else { None });
+                if let Some(actual_ty) = actual_ty {
+                    // Defer checks for unresolved placeholders and generic type parameters.
+                    // These must be validated after concrete instantiation.
+                    if matches!(
+                        actual_ty.kind(),
+                        TyKind::Infer | TyKind::TypeParameter(_) | TyKind::SelfType
+                    ) {
+                        continue;
+                    }
+                    for bound in bounds {
+                        if !type_satisfies_bound(actual_ty, bound, model) {
+                            diagnostics.add_diagnostic(
+                                ConstraintNotSatisfiedError {
+                                    call_span: call_span.clone(),
+                                    type_name: actual_ty.to_string(),
+                                    constraint_name: bound.to_string(),
+                                    type_param_name: param_name.clone(),
+                                    constraint_span: Some(param_span.clone()),
+                                }
+                                .into_diagnostic(),
+                            );
+                            all_satisfied = false;
+                        }
+                    }
+                }
+            },
+            Constraint::TypeBound {
+                param: None,
+                param_name,
+                param_span,
+                bounds,
+            } if param_name == "Self" => {
+                if let Some(actual_self_ty) = self_ty {
+                    if matches!(
+                        actual_self_ty.kind(),
+                        TyKind::Infer | TyKind::TypeParameter(_) | TyKind::SelfType
+                    ) {
+                        continue;
+                    }
+                    for bound in bounds {
+                        if !type_satisfies_bound(actual_self_ty, bound, model) {
+                            diagnostics.add_diagnostic(
+                                ConstraintNotSatisfiedError {
+                                    call_span: call_span.clone(),
+                                    type_name: actual_self_ty.to_string(),
+                                    constraint_name: bound.to_string(),
+                                    type_param_name: "Self".to_string(),
+                                    constraint_span: Some(param_span.clone()),
+                                }
+                                .into_diagnostic(),
+                            );
+                            all_satisfied = false;
+                        }
+                    }
+                }
+            },
+            Constraint::SelfBound {
+                associated_type_path,
+                path_span,
+                bounds,
+            } if associated_type_path.is_empty() => {
+                if let Some(actual_self_ty) = self_ty {
+                    if matches!(
+                        actual_self_ty.kind(),
+                        TyKind::Infer | TyKind::TypeParameter(_) | TyKind::SelfType
+                    ) {
+                        continue;
+                    }
+                    for bound in bounds {
+                        if !type_satisfies_bound(actual_self_ty, bound, model) {
+                            diagnostics.add_diagnostic(
+                                ConstraintNotSatisfiedError {
+                                    call_span: call_span.clone(),
+                                    type_name: actual_self_ty.to_string(),
+                                    constraint_name: bound.to_string(),
+                                    type_param_name: "Self".to_string(),
+                                    constraint_span: Some(path_span.clone()),
+                                }
+                                .into_diagnostic(),
+                            );
+                            all_satisfied = false;
+                        }
+                    }
+                }
+            },
+            _ => {},
+        }
+    }
+
+    all_satisfied
+}
 
 /// Resolve a call expression: callee(arg1, arg2, ...) or callee[T](arg1, ...)
 pub fn resolve_call_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> Expression {
@@ -337,15 +454,31 @@ pub fn resolve_call(
     let callee_ty = callee.ty.clone();
 
     match callee_kind {
-        // Direct function reference
-        ExprKind::SymbolRef(symbol_id) => resolve_single_function_call(
-            symbol_id,
-            callee,
-            arguments,
-            explicit_type_args,
-            span,
-            ctx,
-        ),
+        // Direct function/field reference
+        ExprKind::SymbolRef(symbol_id) => {
+            // Check if this is a field symbol - if so, and the field's type has subscripts,
+            // try subscript resolution first. This handles cases like Foo.staticField(arg)
+            // where staticField is a computed property returning a type with subscripts.
+            if let Some(symbol) = ctx.model.query(SymbolFor { id: symbol_id })
+                && symbol.metadata().kind() == KestrelSymbolKind::Field
+            {
+                // Try subscript call on the field's type
+                if let Some(subscript_expr) =
+                    try_resolve_subscript_call(&callee, &arguments, arg_labels, &span, ctx)
+                {
+                    return subscript_expr;
+                }
+            }
+            // Not a field, or field type has no subscripts - try function call
+            resolve_single_function_call(
+                symbol_id,
+                callee,
+                arguments,
+                explicit_type_args,
+                span,
+                ctx,
+            )
+        },
 
         // Overloaded function reference - need to pick one
         ExprKind::OverloadedRef(ref candidates) => {
@@ -373,6 +506,21 @@ pub fn resolve_call(
             ref object,
             ref field,
         } => {
+            // For static field access (object is TypeRef), the callee expression represents
+            // the field's value. If that value type has subscripts, use subscript resolution.
+            // Otherwise, fall through to method call resolution.
+            //
+            // Example: Foo.myStyle("test") where myStyle is a static computed property
+            // returning Style, and Style has subscripts - we want to call the subscript
+            // on the Style value, not look for a method named "myStyle" on Foo.
+            if matches!(object.kind, ExprKind::TypeRef(_)) {
+                // Check if the callee's type (the field's type) has subscripts
+                if let Some(subscript_expr) =
+                    try_resolve_subscript_call(&callee, &arguments, arg_labels, &span, ctx)
+                {
+                    return subscript_expr;
+                }
+            }
             // This could be:
             // 1. A field with callable type (first-class function)
             // 2. A method call
@@ -699,6 +847,8 @@ fn find_matching_subscript(
 }
 
 /// Check if a subscript's parameter signature matches the given arguments.
+///
+/// For parameters with default values, callers may omit trailing arguments.
 fn matches_subscript_signature(
     subscript: &SubscriptSymbol,
     arguments: &[CallArgument],
@@ -711,8 +861,11 @@ fn matches_subscript_signature(
 
     let params = behavior.parameters();
 
-    // Check argument count
-    if arguments.len() != params.len() {
+    // Count required parameters (those without defaults)
+    let required_count = params.iter().filter(|p| !p.has_default()).count();
+
+    // Check arity: must be at least required_count and at most total params
+    if arguments.len() < required_count || arguments.len() > params.len() {
         return false;
     }
 
@@ -733,6 +886,16 @@ fn substitute_receiver_type_args(ty: &Ty, receiver_ty: &Ty) -> Ty {
             } else {
                 // Substitute the type arguments
                 substitute_type(ty, substitutions)
+            }
+        },
+        TyKind::TypeAlias { .. } => {
+            // Expand the type alias and recurse to substitute on the underlying type
+            let expanded = receiver_ty.expand_aliases();
+            // Avoid infinite recursion if expand_aliases returns the same type
+            if !matches!(expanded.kind(), TyKind::TypeAlias { .. }) {
+                substitute_receiver_type_args(ty, &expanded)
+            } else {
+                ty.clone()
             }
         },
         _ => ty.clone(),
@@ -1263,32 +1426,13 @@ fn resolve_explicit_init_call(
                     let mut init_substitutions =
                         infer_type_arguments(&init_type_params, callable, &arg_types);
 
-                    // Build inferred type args, using Infer for parameters that couldn't be determined
-                    let inferred_args: Vec<Ty> = init_type_params
-                        .iter()
-                        .map(|tp| {
-                            let tp_id = tp.metadata().id();
-                            if let Some(inferred_ty) = init_substitutions.get(tp_id) {
-                                inferred_ty.clone()
-                            } else {
-                                // Create fresh inference variable for this type parameter
-                                let infer_ty = Ty::infer(span.clone());
-                                init_substitutions.insert(tp_id, infer_ty.clone());
-                                infer_ty
-                            }
-                        })
-                        .collect();
-
-                    // Verify where clause constraints are satisfied
-                    let where_clause = init_symbol.where_clause();
-                    verify_type_argument_constraints(
-                        &init_type_params,
-                        &inferred_args,
-                        &where_clause,
-                        span.clone(),
-                        ctx.model,
-                        ctx.diagnostics,
-                    );
+                    // Ensure every initializer type parameter has a substitution entry.
+                    for tp in &init_type_params {
+                        let tp_id = tp.metadata().id();
+                        if !init_substitutions.contains(tp_id) {
+                            init_substitutions.insert(tp_id, Ty::infer(span.clone()));
+                        }
+                    }
 
                     init_substitutions
                 } else {
@@ -1302,6 +1446,21 @@ fn resolve_explicit_init_call(
         let mut combined_subs = struct_subs.clone();
         for (key, ty) in init_subs.iter() {
             combined_subs.insert(*key, ty.clone());
+        }
+
+        // Validate initializer where-clause constraints using the full substitution map.
+        // This covers both initializer-owned generic params and enclosing receiver type params
+        // referenced in constraints (e.g., Array[T].init(... ) where T: Cloneable).
+        if let Some(init_symbol) = init_sym.as_any().downcast_ref::<InitializerSymbol>() {
+            let where_clause = init_symbol.where_clause();
+            verify_where_clause_constraints_from_substitutions(
+                &where_clause,
+                &combined_subs,
+                Some(&struct_ty),
+                &span,
+                ctx.model,
+                ctx.diagnostics,
+            );
         }
 
         // Build the function type for the initializer, applying combined substitutions
@@ -1503,14 +1662,26 @@ pub fn resolve_method_call(
     use super::utils::substitute_self;
     use kestrel_semantic_tree::symbol::function::FunctionSymbol;
 
+    debug_trace!(
+        "[METHOD_CALL] Resolving method call '{}' with {} candidates (receiver type: {})",
+        method_name,
+        candidates.len(),
+        receiver.ty
+    );
+
     // Find matching overload
     let mut invisible_matches = Vec::new();
 
     for &candidate_id in candidates {
         if let Some(symbol) = ctx.model.query(SymbolFor { id: candidate_id })
-            && let Some(callable) = get_callable_behavior(&symbol)
-            && matches_signature(&callable, arguments.len(), arg_labels)
+            && let Some(orig_callable) = get_callable_behavior(&symbol)
+            && matches_signature(&orig_callable, arguments.len(), arg_labels)
         {
+            debug_trace!(
+                "[METHOD_CALL] Candidate '{}' matches signature (symbol: {})",
+                method_name,
+                symbol.metadata().name().value
+            );
             // Check visibility
             if !ctx.model.query(IsVisibleFrom {
                 target: candidate_id,
@@ -1519,12 +1690,19 @@ pub fn resolve_method_call(
                 invisible_matches.push(symbol);
                 continue;
             }
+            debug_trace!(
+                "[METHOD_CALL] Candidate '{}' is visible, proceeding with resolution",
+                method_name
+            );
 
             // Build substitutions from the receiver type
             // e.g., for Box[Int], we get {T -> Int}
             // For static methods (TypeRef receiver), get the struct type from the symbol
             // For instance methods, resolve Self to concrete type
-            use super::members::resolve_self_type_to_concrete;
+            use super::members::{
+                resolve_callable_associated_types, resolve_self_type_to_concrete,
+                substitute_callable_self,
+            };
             use kestrel_semantic_tree::behavior::typed::TypedBehavior;
             let resolved_receiver_ty = match &receiver.kind {
                 ExprKind::TypeRef(type_symbol_id) => {
@@ -1563,9 +1741,19 @@ pub fn resolve_method_call(
                 },
                 _ => resolve_self_type_to_concrete(&receiver.ty, ctx), // Instance method
             };
+            // Expand type aliases to get the underlying type with substitutions
+            // e.g., OptionalTypeOperator[Int] -> Optional[Int]
+            let resolved_receiver_ty = resolved_receiver_ty.expand_aliases();
+
+            // Substitute Self in the callable and resolve associated types
+            // This ensures parameter types like ArrayIterator[Int64].Item become Int64
+            let mut callable = substitute_callable_self(&orig_callable, &resolved_receiver_ty);
+            callable = resolve_callable_associated_types(&callable, ctx);
 
             // Get return type, substituting Self with the resolved receiver type
             let mut return_ty = substitute_self(callable.return_type(), &resolved_receiver_ty);
+            // Resolve associated types in the return type (e.g., ArrayIterator[Int64].Item -> Int64)
+            return_ty = resolve_associated_types(&return_ty, ctx);
             let mut call_substitutions = Substitutions::new();
             let mut resolved_receiver_ty = resolved_receiver_ty;
 
@@ -1591,11 +1779,11 @@ pub fn resolve_method_call(
                         }
                     },
                     TyKind::Struct { substitutions, .. } | TyKind::Enum { substitutions, .. } => {
+                        // Note: Array[T] types are handled here too
                         for (_, sub_ty) in substitutions.iter() {
                             collect_type_params_from_ty(sub_ty, params);
                         }
                     },
-                    TyKind::Array(elem) => collect_type_params_from_ty(elem, params),
                     TyKind::Tuple(elems) => {
                         for elem in elems {
                             collect_type_params_from_ty(elem, params);
@@ -1676,6 +1864,168 @@ pub fn resolve_method_call(
                     }
                 }
             }
+            // Handle instance method calls where receiver's TYPE is an AssociatedType
+            // e.g., item.myEquals(target) where item: Item and Item: MyEqual[Rhs = Self]
+            // The default Rhs = Self needs to be substituted with the associated type (Item)
+            else if let TyKind::AssociatedType {
+                symbol: assoc_type,
+                container,
+            } = receiver.ty.kind()
+            {
+                // Get bounds for this associated type from its definition and context
+                let bounds = get_associated_type_bounds_from_context(
+                    assoc_type,
+                    container.as_ref().map(|v| &**v),
+                    ctx,
+                );
+
+                // Find the protocol that contains this method and get composed substitutions
+                for bound in &bounds {
+                    // Apply protocol defaults with Self = the associated type (receiver.ty)
+                    // This substitutes defaults like Rhs = Self with Rhs = Item
+                    let bound = apply_protocol_defaults_with_self(bound, &receiver.ty);
+
+                    if let TyKind::Protocol {
+                        symbol: proto,
+                        substitutions: proto_subs,
+                    } = bound.kind()
+                    {
+                        // Get composed substitutions tracing through inheritance
+                        if let Some(mut composed_subs) =
+                            get_method_protocol_substitutions(&symbol, proto, proto_subs)
+                        {
+                            // Also include the proto_subs which have defaults applied
+                            for (param_id, ty) in proto_subs.iter() {
+                                if !composed_subs.contains(*param_id) {
+                                    composed_subs.insert(*param_id, ty.clone());
+                                }
+                            }
+                            // Apply composed substitutions to return type and callable
+                            if !composed_subs.is_empty() {
+                                return_ty = substitute_type(&return_ty, &composed_subs);
+                                for (param_id, ty) in composed_subs.iter() {
+                                    call_substitutions.insert(*param_id, ty.clone());
+                                }
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+            // Handle methods from protocol conformances for concrete types
+            // e.g., for Int64 conforming to NotEqual[Int64], when calling notEquals(other: Rhs),
+            // we need to substitute Rhs with Int64
+            //
+            // Check if this method comes from a protocol or protocol extension
+            if let Some(method_parent) = symbol.metadata().parent() {
+                // The method could come from:
+                // 1. A protocol directly (parent is Protocol)
+                // 2. A protocol extension (parent is Extension that targets a Protocol)
+                let target_protocol_opt = if method_parent.metadata().kind()
+                    == KestrelSymbolKind::Protocol
+                {
+                    // Direct protocol method
+                    Some((method_parent.metadata().id(), None))
+                } else if method_parent.metadata().kind() == KestrelSymbolKind::Extension {
+                    // Protocol extension method - get the protocol being extended
+                    use kestrel_semantic_tree::behavior::extension_target::ExtensionTargetBehavior;
+                    if let Some(ext_behavior) = method_parent
+                        .metadata()
+                        .get_behavior::<ExtensionTargetBehavior>()
+                        && ext_behavior.is_protocol_extension()
+                    {
+                        let target_ty = ext_behavior.target_type();
+                        // Extract protocol symbol from the target type
+                        if let TyKind::Protocol {
+                            symbol: target_proto,
+                            ..
+                        } = target_ty.kind()
+                        {
+                            // For protocol extensions, we need to use the target protocol directly
+                            Some((target_proto.metadata().id(), Some(target_proto.clone())))
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+
+                if let Some((target_protocol_id, target_protocol_opt)) = target_protocol_opt {
+                    // Find the receiver type's conformance to this protocol
+                    let conformances = ctx
+                        .model
+                        .protocol_conformances_for_type(&resolved_receiver_ty);
+
+                    for conformance_ty in conformances {
+                        if let TyKind::Protocol {
+                            symbol: proto,
+                            substitutions: proto_subs,
+                        } = conformance_ty.kind()
+                        {
+                            // Check if this conformance is for the target protocol (or an ancestor)
+                            let protocol_matches = if proto.metadata().id() == target_protocol_id {
+                                // Direct match
+                                true
+                            } else if let Some(_target_proto) = &target_protocol_opt {
+                                // Check if the conformance protocol inherits from the target
+                                // This handles cases where we have Protocol A: B and the method is from B
+                                get_method_protocol_substitutions(&symbol, proto, proto_subs)
+                                    .is_some()
+                            } else {
+                                // For direct protocol methods, use get_method_protocol_substitutions
+                                get_method_protocol_substitutions(&symbol, proto, proto_subs)
+                                    .is_some()
+                            };
+
+                            if protocol_matches {
+                                // For protocol extension methods, use the conformance substitutions directly
+                                // For direct protocol methods, compose through inheritance
+                                let subs_to_apply = if target_protocol_opt.is_some() {
+                                    // Protocol extension: use conformance substitutions directly
+                                    proto_subs.clone()
+                                } else {
+                                    // Direct protocol method: trace through inheritance
+                                    get_method_protocol_substitutions(&symbol, proto, proto_subs)
+                                        .unwrap_or_default()
+                                };
+
+                                // Apply protocol substitutions to callable and return type
+                                if !subs_to_apply.is_empty() {
+                                    callable = substitute_callable_with_substitutions(
+                                        &callable,
+                                        &subs_to_apply,
+                                    );
+                                    return_ty = substitute_type(&return_ty, &subs_to_apply);
+
+                                    // Add to call_substitutions for later use
+                                    for (param_id, ty) in subs_to_apply.iter() {
+                                        call_substitutions.insert(*param_id, ty.clone());
+                                    }
+                                }
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Protocol(-extension) methods should use conformance substitutions and Self substitution,
+            // not the receiver nominal type's generic substitutions.
+            let method_is_protocol_scoped = symbol.metadata().parent().is_some_and(|parent| {
+                if parent.metadata().kind() == KestrelSymbolKind::Protocol {
+                    return true;
+                }
+                if parent.metadata().kind() == KestrelSymbolKind::Extension
+                    && let Some(ext_behavior) =
+                        parent.metadata().get_behavior::<ExtensionTargetBehavior>()
+                {
+                    return ext_behavior.is_protocol_extension();
+                }
+                false
+            });
 
             // Handle struct receiver types (e.g., Box[Int])
             if let Some((struct_sym, substitutions)) = resolved_receiver_ty.as_struct_with_subs() {
@@ -1736,10 +2086,12 @@ pub fn resolve_method_call(
                     }
                 } else {
                     // Add receiver's substitutions to call_substitutions
-                    for (param_id, ty) in substitutions.iter() {
-                        call_substitutions.insert(*param_id, ty.clone());
+                    if !method_is_protocol_scoped {
+                        for (param_id, ty) in substitutions.iter() {
+                            call_substitutions.insert(*param_id, ty.clone());
+                        }
+                        return_ty = return_ty.apply_substitutions(substitutions);
                     }
-                    return_ty = return_ty.apply_substitutions(substitutions);
                 }
             }
             // Handle enum receiver types (e.g., Optional[Int])
@@ -1789,7 +2141,7 @@ pub fn resolve_method_call(
                             .return_type()
                             .apply_substitutions(&call_substitutions);
                     }
-                } else {
+                } else if !method_is_protocol_scoped {
                     for (param_id, ty) in substitutions.iter() {
                         call_substitutions.insert(*param_id, ty.clone());
                     }
@@ -1815,11 +2167,17 @@ pub fn resolve_method_call(
                         for (param_id, ty) in method_subs.iter() {
                             call_substitutions.insert(*param_id, ty.clone());
                         }
-                        // Reapply substitutions to return type with inferred types
-                        if !method_subs.is_empty() {
-                            return_ty = callable.return_type().clone();
-                            return_ty = return_ty.apply_substitutions(&call_substitutions);
+                        // For any type parameters that couldn't be inferred (not in method_subs),
+                        // add them as inference variables so the type inference solver can solve for them
+                        for param in method_type_params {
+                            let param_id = param.metadata().id();
+                            if !call_substitutions.contains(param_id) {
+                                call_substitutions.insert(param_id, Ty::infer(span.clone()));
+                            }
                         }
+                        // Reapply substitutions to return type (now including inference variables for uninferred params)
+                        return_ty = callable.return_type().clone();
+                        return_ty = return_ty.apply_substitutions(&call_substitutions);
                     }
                 }
             }
@@ -1835,21 +2193,55 @@ pub fn resolve_method_call(
                 return_ty = substitute_type(&return_ty, &call_substitutions);
             }
 
+            // Validate method where-clause constraints against final substitutions.
+            if let Some(func_sym) = symbol.as_any().downcast_ref::<FunctionSymbol>() {
+                let where_clause = func_sym.where_clause();
+                verify_where_clause_constraints_from_substitutions(
+                    &where_clause,
+                    &call_substitutions,
+                    Some(&resolved_receiver_ty),
+                    &span,
+                    ctx.model,
+                    ctx.diagnostics,
+                );
+            }
+
+            // If this method comes from an extension, also validate extension target constraints.
+            // This closes gaps where extension where-clauses were accepted during candidate
+            // selection with inference placeholders but become invalid once concrete types are known.
+            if let Some(parent) = symbol.metadata().parent()
+                && parent.metadata().kind() == KestrelSymbolKind::Extension
+                && let Some(ext_behavior) =
+                    parent.metadata().get_behavior::<ExtensionTargetBehavior>()
+            {
+                let where_clause = ext_behavior.where_clause();
+                verify_where_clause_constraints_from_substitutions(
+                    where_clause,
+                    &call_substitutions,
+                    Some(&resolved_receiver_ty),
+                    &span,
+                    ctx.model,
+                    ctx.diagnostics,
+                );
+            }
+
             // Validate access modes for arguments
             validate_argument_access_modes(&callable, &arguments, &span, ctx);
 
             // Compute the function type with substitutions applied
-            // Must substitute both type parameters AND Self
+            // Must substitute both type parameters AND Self, then resolve associated types
             let method_fn_ty = {
                 let param_tys: Vec<Ty> = callable
                     .parameters()
                     .iter()
                     .map(|p| {
                         let ty = substitute_type(&p.ty, &call_substitutions);
-                        substitute_self(&ty, &resolved_receiver_ty)
+                        let ty = substitute_self(&ty, &resolved_receiver_ty);
+                        resolve_associated_types(&ty, ctx)
                     })
                     .collect();
                 let ret_ty = substitute_type(&return_ty, &call_substitutions);
+                let ret_ty = resolve_associated_types(&ret_ty, ctx);
                 Ty::function(param_tys, ret_ty, span.clone())
             };
 
@@ -1861,10 +2253,26 @@ pub fn resolve_method_call(
                     candidates: vec![candidate_id],
                     method_name: method_name.to_string(),
                 },
-                ty: method_fn_ty,
+                ty: method_fn_ty.clone(),
                 span: span.clone(),
                 mutable: false,
             };
+
+            // Resolve associated types in the return type (e.g., Array[Int64].Item -> Int64)
+            return_ty = resolve_associated_types(&return_ty, ctx);
+
+            debug_trace!(
+                "[METHOD_CALL] Successfully resolved '{}' to function (return type: {})",
+                method_name,
+                return_ty
+            );
+            debug_trace!(
+                "[METHOD_CALL] Call substitutions: {:?}",
+                call_substitutions
+                    .iter()
+                    .map(|(id, ty)| format!("{:?}={}", id, ty))
+                    .collect::<Vec<_>>()
+            );
 
             return Expression::generic_call(
                 method_ref,
@@ -2129,6 +2537,47 @@ fn resolve_type_parameter_init_call(
     )
 }
 
+/// Apply protocol default type parameters and substitute Self with the provided type.
+///
+/// For example, `MyEqual` with default `Rhs = Self` becomes `MyEqual[Rhs = Item]`
+/// when `self_ty` is `Item` (an associated type).
+///
+/// This function:
+/// 1. Fills in any missing type parameters with their defaults
+/// 2. Substitutes Self with self_ty in all substitutions (including defaults and existing ones)
+fn apply_protocol_defaults_with_self(bound: &Ty, self_ty: &Ty) -> Ty {
+    let TyKind::Protocol {
+        symbol,
+        substitutions,
+    } = bound.kind()
+    else {
+        return bound.clone();
+    };
+
+    let type_params = symbol.type_parameters();
+
+    // Start with existing substitutions, but substitute Self in each one
+    let mut new_subs = Substitutions::new();
+    for (param_id, ty) in substitutions.iter() {
+        let resolved = ty.substitute_self(self_ty);
+        new_subs.insert(*param_id, resolved);
+    }
+
+    // Fill in missing defaults, also substituting Self
+    for param in &type_params {
+        let param_id = param.metadata().id();
+        if !new_subs.contains(param_id)
+            && let Some(default_ty) = param.default()
+        {
+            // Substitute Self in the default type with the concrete type
+            let resolved_default = default_ty.substitute_self(self_ty);
+            new_subs.insert(param_id, resolved_default);
+        }
+    }
+
+    Ty::generic_protocol(symbol.clone(), new_subs, bound.span().clone())
+}
+
 /// Find the substitutions needed to use a method from a protocol, tracing through inheritance.
 ///
 /// Returns Some(substitutions) if the method is from the protocol or its ancestors,
@@ -2268,6 +2717,7 @@ fn substitute_callable_with_substitutions(
             ty: substitute_type(&p.ty, substitutions),
             label: p.label.clone(),
             bind_name: p.bind_name.clone(),
+            has_default: p.has_default,
         })
         .collect();
 
@@ -2300,7 +2750,7 @@ fn compose_substitutions(outer: &Substitutions, inner: &Substitutions) -> Substi
 
 /// Result of classifying an expression's mutability for access mode validation.
 #[derive(Debug)]
-enum MutabilityClassification {
+pub(crate) enum MutabilityClassification {
     /// Expression is a mutable lvalue (var binding or mutable field chain)
     Mutable,
     /// Expression is an immutable local binding (let)
@@ -2325,7 +2775,10 @@ enum MutabilityClassification {
 /// This walks the expression tree to determine:
 /// - Whether it's an lvalue (can be assigned to)
 /// - If so, whether it's mutable throughout the entire access chain
-fn classify_mutability(expr: &Expression, ctx: &BodyResolutionContext) -> MutabilityClassification {
+pub(crate) fn classify_mutability(
+    expr: &Expression,
+    ctx: &BodyResolutionContext,
+) -> MutabilityClassification {
     match &expr.kind {
         // Local variable reference
         ExprKind::LocalRef(local_id) => {
@@ -2369,6 +2822,51 @@ fn classify_mutability(expr: &Expression, ctx: &BodyResolutionContext) -> Mutabi
         // Grouping expression: (expr)
         ExprKind::Grouping(inner) => classify_mutability(inner, ctx),
 
+        // Symbol reference: could be a module-level field
+        ExprKind::SymbolRef(symbol_id) => {
+            use kestrel_semantic_tree::symbol::field::FieldSymbol;
+
+            // Check if this is a field symbol
+            if let Some(symbol) = ctx.model.query(SymbolFor { id: *symbol_id })
+                && symbol.metadata().kind() == KestrelSymbolKind::Field
+            {
+                // Use the expression's mutable flag (set during path resolution)
+                if expr.mutable {
+                    return MutabilityClassification::Mutable;
+                }
+
+                // Not mutable - check if it's an immutable field (let)
+                if let Some(field) = symbol.as_ref().downcast_ref::<FieldSymbol>()
+                    && !field.is_mutable()
+                {
+                    return MutabilityClassification::ImmutableField {
+                        field_name: symbol.metadata().name().value.clone(),
+                        field_span: Some(symbol.metadata().span().clone()),
+                    };
+                }
+            }
+
+            // Not a field, or not found - treat as temporary
+            MutabilityClassification::Temporary
+        },
+
+        // Protocol property access on type parameters
+        ExprKind::ProtocolPropertyAccess {
+            property_name,
+            has_setter,
+            ..
+        } => {
+            // Protocol property is mutable only if it has a setter
+            if *has_setter {
+                MutabilityClassification::Mutable
+            } else {
+                MutabilityClassification::ImmutableField {
+                    field_name: property_name.clone(),
+                    field_span: None,
+                }
+            }
+        },
+
         // Everything else is a temporary (call results, literals, etc.)
         _ => MutabilityClassification::Temporary,
     }
@@ -2383,20 +2881,57 @@ fn classify_field_chain_mutability(
     use kestrel_semantic_tree::symbol::field::FieldSymbol;
 
     // First, check if the field itself is immutable
-    // Look up the field in the object's type
+    // Look up the field in the object's type (struct or enum)
     if let Some((struct_symbol, _)) = object.ty.as_struct_with_subs() {
         for child in struct_symbol.metadata().children() {
             if child.metadata().kind() == KestrelSymbolKind::Field
                 && child.metadata().name().value == current_field
             {
-                if let Some(field_sym) = child.as_any().downcast_ref::<FieldSymbol>()
-                    && !field_sym.is_mutable()
-                {
-                    // The field itself is immutable (let field)
-                    return MutabilityClassification::ImmutableField {
-                        field_name: current_field.to_string(),
-                        field_span: Some(child.metadata().name().span.clone()),
-                    };
+                if let Some(field_sym) = child.as_any().downcast_ref::<FieldSymbol>() {
+                    // Computed properties with setters are assignable
+                    if field_sym.is_computed() {
+                        if field_sym.setter().is_none() {
+                            // Read-only computed property (no setter)
+                            return MutabilityClassification::ImmutableField {
+                                field_name: current_field.to_string(),
+                                field_span: Some(child.metadata().name().span.clone()),
+                            };
+                        }
+                        // Has setter - assignment is allowed, continue checking the chain
+                    } else if !field_sym.is_mutable() {
+                        // Stored field declared with `let`
+                        return MutabilityClassification::ImmutableField {
+                            field_name: current_field.to_string(),
+                            field_span: Some(child.metadata().name().span.clone()),
+                        };
+                    }
+                }
+                break;
+            }
+        }
+    } else if let Some(enum_symbol) = object.ty.as_enum() {
+        for child in enum_symbol.metadata().children() {
+            if child.metadata().kind() == KestrelSymbolKind::Field
+                && child.metadata().name().value == current_field
+            {
+                if let Some(field_sym) = child.as_any().downcast_ref::<FieldSymbol>() {
+                    // Computed properties with setters are assignable
+                    if field_sym.is_computed() {
+                        if field_sym.setter().is_none() {
+                            // Read-only computed property (no setter)
+                            return MutabilityClassification::ImmutableField {
+                                field_name: current_field.to_string(),
+                                field_span: Some(child.metadata().name().span.clone()),
+                            };
+                        }
+                        // Has setter - assignment is allowed, continue checking the chain
+                    } else if !field_sym.is_mutable() {
+                        // Stored field declared with `let`
+                        return MutabilityClassification::ImmutableField {
+                            field_name: current_field.to_string(),
+                            field_span: Some(child.metadata().name().span.clone()),
+                        };
+                    }
                 }
                 break;
             }
@@ -2420,6 +2955,14 @@ fn classify_field_chain_mutability(
             } else {
                 MutabilityClassification::Temporary
             }
+        },
+
+        ExprKind::TypeRef(_) => {
+            // Static field access (e.g., Foo.staticField)
+            // Static fields are always mutable from a classification perspective
+            // (their mutability is determined by whether the field is `let` or `var`,
+            // which was already checked above)
+            MutabilityClassification::Mutable
         },
 
         ExprKind::FieldAccess {

@@ -20,6 +20,7 @@ use kestrel_execution_graph::{
     Id, MirTy, Origin, Place, QualifiedName, QualifiedNameData, Rvalue, Struct, Ty, Value,
 };
 use kestrel_semantic_tree::expr::{Capture, ClosureParam, Expression};
+use kestrel_semantic_tree::pattern::{Pattern, PatternKind};
 use kestrel_semantic_tree::stmt::Statement;
 use kestrel_semantic_tree::symbol::local::LocalId;
 use kestrel_semantic_tree::ty::{Ty as SemanticTy, TyKind};
@@ -27,14 +28,21 @@ use kestrel_span::Span;
 
 use crate::context::LoweringContext;
 use crate::expr::lower_expression;
+use crate::pattern::lower_pattern;
 use crate::stmt::lower_statement;
 use crate::ty::lower_type;
 
 /// An effective parameter for a closure (either explicit or implicit `it`).
+///
+/// For destructuring patterns, `pattern` contains the full pattern structure
+/// and `name` is a generated name for the MIR parameter.
 struct EffectiveParam {
+    /// Name for the MIR parameter (generated for destructuring patterns)
     name: String,
+    /// Full parameter type
     ty: SemanticTy,
-    local_id: LocalId,
+    /// The pattern for this parameter (used for destructuring)
+    pattern: Pattern,
 }
 
 /// Lower a closure expression to MIR.
@@ -139,23 +147,44 @@ fn build_effective_params(
     implicit_param: &Option<(LocalId, SemanticTy, Span)>,
     uses_it: bool,
 ) -> Vec<EffectiveParam> {
+    use kestrel_semantic_tree::pattern::{Mutability, PatternKind};
+
     if let Some(explicit_params) = params {
-        // Explicit parameters - use the LocalId from the ClosureParam
+        // Explicit parameters - extract pattern and generate MIR parameter name
         explicit_params
             .iter()
-            .map(|p| EffectiveParam {
-                name: p.name.clone(),
-                ty: p.ty.clone(),
-                local_id: p.local_id,
+            .enumerate()
+            .map(|(i, p)| {
+                // For simple binding patterns, use the binding name
+                // For complex patterns, generate a name like __param0
+                let name = match &p.pattern.kind {
+                    PatternKind::Local { name, .. } => name.clone(),
+                    _ => format!("__param{}", i),
+                };
+                EffectiveParam {
+                    name,
+                    ty: p.ty.clone(),
+                    pattern: p.pattern.clone(),
+                }
             })
             .collect()
     } else if uses_it {
         // Implicit `it` parameter was used - include it
-        if let Some((local_id, ty, _span)) = implicit_param {
+        if let Some((local_id, ty, span)) = implicit_param {
+            // Create a simple binding pattern for `it`
+            let it_pattern = Pattern {
+                kind: PatternKind::Local {
+                    local_id: *local_id,
+                    mutability: Mutability::Immutable,
+                    name: "it".to_string(),
+                },
+                ty: ty.clone(),
+                span: span.clone(),
+            };
             vec![EffectiveParam {
                 name: "it".to_string(),
                 ty: ty.clone(),
-                local_id: *local_id,
+                pattern: it_pattern,
             }]
         } else {
             vec![]
@@ -217,8 +246,16 @@ fn lower_capturing_closure(
     return_ty: &SemanticTy,
     span: &Span,
 ) -> Value {
+    // Get parent function's type parameters - env struct inherits these
+    let parent_type_params = if let Some(parent_func) = ctx.current_function() {
+        ctx.mir.function(parent_func).type_params.clone()
+    } else {
+        vec![]
+    };
+
     // 1. Generate environment struct with captured variables
-    let env_struct_id = generate_env_struct(ctx, env_struct_name, captures, span);
+    let env_struct_id =
+        generate_env_struct(ctx, env_struct_name, captures, &parent_type_params, span);
 
     // 2. Collect the captured values from current context BEFORE switching context
     let capture_values: Vec<Value> = captures
@@ -259,13 +296,22 @@ fn lower_capturing_closure(
 }
 
 /// Generate the environment struct for captured variables.
+///
+/// The env struct inherits type parameters from the parent function so that
+/// captured variables with generic types can be properly monomorphized.
 fn generate_env_struct(
     ctx: &mut LoweringContext,
     name: Id<QualifiedName>,
     captures: &[Capture],
+    parent_type_params: &[Id<kestrel_execution_graph::TypeParam>],
     span: &Span,
 ) -> Id<Struct> {
     let struct_id = ctx.mir.add_struct(name);
+
+    // Inherit type parameters from parent function.
+    // This allows captured variables with generic types (e.g., `K`) to be
+    // properly substituted during monomorphization.
+    ctx.mir.structs[struct_id].type_params = parent_type_params.to_vec();
 
     // Add fields for each capture
     for capture in captures {
@@ -319,9 +365,22 @@ fn create_closure_function(
     // Save current context
     let saved_func = ctx.current_function();
     let saved_local_map = ctx.save_local_map();
+    let saved_loop_stack = ctx.save_loop_stack();
+    let saved_scope_stack = ctx.save_scope_stack();
+    let saved_statement_temps = ctx.save_statement_temps();
     let saved_block = ctx.current_block();
     let saved_closure_counter = ctx.get_closure_counter();
     let saved_temp_counter = ctx.get_temp_counter();
+    let saved_deinit_flag_counter = ctx.get_deinit_flag_counter();
+
+    // Get the parent function's type parameters - closures inherit these so that
+    // type parameter references in the closure body can be properly substituted
+    // during monomorphization.
+    let parent_type_params = if let Some(parent_func) = saved_func {
+        ctx.mir.function(parent_func).type_params.clone()
+    } else {
+        vec![]
+    };
 
     // Pre-compute types for env parameter and regular parameters to avoid borrow issues
     // All closures get an env parameter for ABI consistency with thick calls.
@@ -329,7 +388,14 @@ fn create_closure_function(
     // For non-capturing closures, it's a raw pointer (unused but required for calling convention).
     let env_param_ty = match env_info.as_ref() {
         Some((_, env_struct_name)) => {
-            let env_struct_ty = ctx.mir.ty_named(*env_struct_name, vec![]);
+            // Build type args from parent's type params.
+            // The env struct is generic with the same type params as the closure,
+            // so we use TypeParam references as type args here.
+            let type_args: Vec<_> = parent_type_params
+                .iter()
+                .map(|&tp| ctx.mir.intern_type(MirTy::TypeParam(tp)))
+                .collect();
+            let env_struct_ty = ctx.mir.ty_named(*env_struct_name, type_args);
             ctx.mir.ty_ref(env_struct_ty)
         },
         None => {
@@ -359,6 +425,11 @@ fn create_closure_function(
         func.id()
     };
 
+    // Inherit type parameters from the parent function.
+    // This ensures that when the closure is instantiated during monomorphization,
+    // the type args from the parent function instantiation are passed to the closure too.
+    ctx.mir.function_mut(func_id).type_params = parent_type_params;
+
     // Set Origin metadata for closure call function
     if let Some((env_struct_id, _)) = env_info {
         ctx.mir.functions[func_id].meta.origin = Some(Origin::ClosureCall {
@@ -376,16 +447,26 @@ fn create_closure_function(
     // Calculate the offset for regular params (always skip env param at index 0)
     let param_offset = 1;
 
-    // Map regular parameters to their MIR locals
-    for (i, param) in params.iter().enumerate() {
-        let mir_local_id = mir_locals[param_offset + i];
-        ctx.map_local(param.local_id, mir_local_id);
-    }
-
-    // Create entry block
+    // Create entry block first so we can emit pattern decomposition code
     let entry_block = ctx.create_block();
     ctx.set_current_block(entry_block);
     ctx.mir.function_mut(func_id).entry_block = Some(entry_block);
+
+    // For each parameter, handle pattern decomposition:
+    // - Simple binding patterns: map LocalId directly to MIR param local (no decomposition needed)
+    // - Complex patterns: call lower_pattern to generate decomposition code
+    for (i, param) in params.iter().enumerate() {
+        let mir_local_id = mir_locals[param_offset + i];
+
+        if let PatternKind::Local { local_id, .. } = &param.pattern.kind {
+            // Simple binding pattern - map directly to MIR param local
+            ctx.map_local(*local_id, mir_local_id);
+        } else {
+            // Complex pattern - generate decomposition code
+            let param_value = Value::Place(Place::local(mir_local_id));
+            lower_pattern(ctx, &param.pattern, param_value);
+        }
+    }
 
     // If we have captures, set up access by loading from the env struct
     if env_info.is_some() {
@@ -439,8 +520,12 @@ fn create_closure_function(
     ctx.exit_function();
     ctx.set_current_function(saved_func);
     ctx.restore_local_map(saved_local_map);
+    ctx.restore_loop_stack(saved_loop_stack);
+    ctx.restore_scope_stack(saved_scope_stack);
+    ctx.restore_statement_temps(saved_statement_temps);
     ctx.set_closure_counter(saved_closure_counter);
     ctx.set_temp_counter(saved_temp_counter);
+    ctx.set_deinit_flag_counter(saved_deinit_flag_counter);
     if let Some(block) = saved_block {
         ctx.set_current_block(block);
     }

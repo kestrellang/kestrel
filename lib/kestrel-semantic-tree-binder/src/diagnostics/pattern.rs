@@ -192,6 +192,26 @@ impl IntoDiagnostic for TuplePatternArityMismatchError {
     }
 }
 
+/// Error when a tuple pattern is used with a non-tuple type
+pub struct TuplePatternOnNonTupleError {
+    pub span: Span,
+    pub actual_type: String,
+}
+
+impl IntoDiagnostic for TuplePatternOnNonTupleError {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
+        Diagnostic::error()
+            .with_message(format!(
+                "tuple pattern cannot match non-tuple type `{}`",
+                self.actual_type
+            ))
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message(format!("expected tuple, found `{}`", self.actual_type)),
+            ])
+    }
+}
+
 /// Error when a pattern contains multiple rest patterns (`..`)
 pub struct MultipleRestPatternsError {
     pub span: Span,
@@ -231,22 +251,26 @@ impl IntoDiagnostic for NestedAtPatternError {
     }
 }
 
-/// Error when an array pattern has suffix elements after a rest pattern
-pub struct ArraySuffixPatternError {
+/// Error when a refutable pattern is used in a for-loop
+pub struct RefutableForLoopPatternError {
     pub span: Span,
+    pub pattern_description: String,
 }
 
-impl IntoDiagnostic for ArraySuffixPatternError {
+impl IntoDiagnostic for RefutableForLoopPatternError {
     fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
-            .with_message("array patterns with suffix elements are not yet supported")
+            .with_message(format!(
+                "refutable pattern `{}` in for loop",
+                self.pattern_description
+            ))
             .with_labels(vec![
                 Label::primary(self.span.file_id, self.span.range())
-                    .with_message("suffix elements after `..` are not supported"),
+                    .with_message("pattern must be irrefutable"),
             ])
             .with_notes(vec![
-                "only prefix patterns are currently supported: `[a, b, ..]` or `[a, b, ..rest]`"
-                    .to_string(),
+                "for-loop patterns must match all items from the iterator".to_string(),
+                "consider using `while let` if you want to match a refutable pattern".to_string(),
             ])
     }
 }

@@ -11,12 +11,14 @@ use kestrel_semantic_tree::behavior::callable::{
 use kestrel_semantic_tree::behavior::executable::{CodeBlock, ResolvedExecutableBehavior};
 use kestrel_semantic_tree::behavior::extern_fn::{CallingConvention, ExternBehavior};
 use kestrel_semantic_tree::expr::{ElseBranch, ExprKind, Expression, IfCondition};
+use kestrel_semantic_tree::pattern::{Pattern, PatternKind};
 use kestrel_semantic_tree::stmt::{Statement, StatementKind};
+use kestrel_semantic_tree::symbol::deinit::DeinitSymbol;
 use kestrel_semantic_tree::symbol::enum_symbol::EnumSymbol;
 use kestrel_semantic_tree::symbol::function::FunctionSymbol;
 use kestrel_semantic_tree::symbol::getter::GetterSymbol;
 use kestrel_semantic_tree::symbol::initializer::InitializerSymbol;
-use kestrel_semantic_tree::symbol::local::LocalId;
+use kestrel_semantic_tree::symbol::local::{LocalContainer, LocalId};
 use kestrel_semantic_tree::symbol::setter::SetterSymbol;
 use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
 use kestrel_semantic_tree::symbol::type_parameter::TypeParameterSymbol;
@@ -39,25 +41,19 @@ pub fn lower_function(ctx: &mut LoweringContext, func_symbol: &Arc<FunctionSymbo
         return;
     }
 
-    // Get the resolved body (not required for extern functions)
-    let body = if extern_behavior.is_some() {
-        // Extern functions have no body
-        None
-    } else {
-        match func_symbol
+    // Check for resolved body (not required for extern functions)
+    if extern_behavior.is_none()
+        && func_symbol
             .metadata()
             .get_behavior::<ResolvedExecutableBehavior>()
-        {
-            Some(behavior) => Some(behavior.body().clone()),
-            None => {
-                ctx.emit_error(LoweringError::missing_body(
-                    func_symbol.metadata().name().value.clone(),
-                    func_symbol.metadata().span().clone(),
-                ));
-                return;
-            },
-        }
-    };
+            .is_none()
+    {
+        ctx.emit_error(LoweringError::missing_body(
+            func_symbol.metadata().name().value.clone(),
+            func_symbol.metadata().span().clone(),
+        ));
+        return;
+    }
 
     // Get callable behavior for parameter info
     let callable = func_symbol.metadata().get_behavior::<CallableBehavior>();
@@ -147,8 +143,13 @@ pub fn lower_function(ctx: &mut LoweringContext, func_symbol: &Arc<FunctionSymbo
         return;
     }
 
-    // Get the body (we know it's Some because we checked above)
-    let body = body.unwrap();
+    // Get the body and parameter patterns (we know body is Some because we checked above)
+    let resolved = func_symbol
+        .metadata()
+        .get_behavior::<ResolvedExecutableBehavior>()
+        .unwrap();
+    let body = resolved.body().clone();
+    let parameter_patterns = resolved.parameter_patterns().to_vec();
 
     // Enter the function context
     ctx.enter_function(func_id);
@@ -158,27 +159,56 @@ pub fn lower_function(ctx: &mut LoweringContext, func_symbol: &Arc<FunctionSymbo
     // created when the closure function is lowered.
     let closure_local_ids = collect_closure_local_ids(&body);
 
-    // Map semantic locals to MIR locals
-    // Parameters are already created, map them first
-    // Copy the locals vector to avoid borrow issues
-    let (param_count, mir_locals) = {
-        let func_def = ctx.mir.function(func_id);
-        (func_def.params.len(), func_def.locals.clone())
-    };
-
     // Get all locals from the semantic function
     let locals = func_symbol.locals();
 
-    // First, map parameter locals (they were already created)
-    for (i, local) in locals.iter().take(param_count).enumerate() {
-        let mir_local_id = mir_locals[i];
-        ctx.map_local(local.id(), mir_local_id);
+    // Get MIR parameter count (one per CallableParameter, not per pattern binding)
+    let mir_param_count = ctx.mir.function(func_id).params.len();
+
+    // For simple binding patterns (e.g., `x: Int64`), we need to map the semantic
+    // LocalId directly to the MIR param local. This preserves the correct type
+    // (including reference wrappers for borrow/mutating modes).
+    // For complex patterns (tuples, structs), we create new locals for the bindings
+    // and lower_pattern will decompose the parameter value into them.
+    let has_self = callable.as_ref().is_some_and(|c| c.receiver().is_some());
+    let param_mir_offset = if has_self { 1 } else { 0 };
+
+    // Collect LocalIds that are directly mapped to MIR param locals
+    let mut param_direct_local_ids = std::collections::HashSet::new();
+
+    // Map `self` parameter if present. The `self` local is implicit (not in parameter_patterns)
+    // but needs to be mapped to MIR param local at index 0.
+    if has_self {
+        // Find the `self` local - it's typically the first local named "self"
+        if let Some(self_local) = locals.iter().find(|l| l.name() == "self") {
+            let mir_param_local = ctx.mir.function(func_id).locals[0];
+            ctx.map_local(self_local.id(), mir_param_local);
+            param_direct_local_ids.insert(self_local.id());
+        }
     }
 
-    // Then create and map non-parameter locals, excluding closure parameters
-    for local in locals.iter().skip(param_count) {
+    // Map explicit parameter patterns
+    for (i, pattern) in parameter_patterns.iter().enumerate() {
+        if let PatternKind::Local { local_id, .. } = &pattern.kind {
+            // Simple binding pattern - map directly to MIR param
+            let mir_param_index = param_mir_offset + i;
+            if mir_param_index < mir_param_count {
+                let mir_param_local = ctx.mir.function(func_id).locals[mir_param_index];
+                ctx.map_local(*local_id, mir_param_local);
+                param_direct_local_ids.insert(*local_id);
+            }
+        }
+    }
+
+    // Create MIR locals for ALL semantic locals (except closure ones and direct param bindings)
+    // This includes locals created by complex parameter patterns (tuple, struct destructuring)
+    for local in locals.iter() {
         // Skip locals that belong to closures
         if closure_local_ids.contains(&local.id()) {
+            continue;
+        }
+        // Skip locals that are directly mapped to MIR param locals
+        if param_direct_local_ids.contains(&local.id()) {
             continue;
         }
         let mir_ty = lower_type(ctx, local.ty());
@@ -190,6 +220,31 @@ pub fn lower_function(ctx: &mut LoweringContext, func_symbol: &Arc<FunctionSymbo
     let entry_block = ctx.create_block();
     ctx.set_current_block(entry_block);
     ctx.mir.function_mut(func_id).entry_block = Some(entry_block);
+
+    // Generate parameter pattern decomposition at function entry.
+    // For complex patterns (tuples, structs), emit code to decompose the parameter
+    // value into the pattern bindings. Simple binding patterns are already mapped
+    // directly to MIR param locals and don't need decomposition.
+    for (i, pattern) in parameter_patterns.iter().enumerate() {
+        // Skip simple binding patterns - they're already mapped to MIR param locals
+        if matches!(&pattern.kind, PatternKind::Local { .. }) {
+            continue;
+        }
+
+        // Get the MIR parameter local (created during param setup)
+        let mir_param_index = param_mir_offset + i;
+        if mir_param_index >= mir_param_count {
+            // Safety check - shouldn't happen if semantic and lowering are in sync
+            continue;
+        }
+        let mir_param_local = ctx.mir.function(func_id).locals[mir_param_index];
+        let param_value = kestrel_execution_graph::Value::Place(
+            kestrel_execution_graph::Place::local(mir_param_local),
+        );
+
+        // Lower the pattern to generate decomposition code
+        crate::pattern::lower_pattern(ctx, pattern, param_value);
+    }
 
     // Enter the function body scope for deinit tracking
     ctx.enter_scope();
@@ -268,6 +323,16 @@ pub fn lower_initializer(ctx: &mut LoweringContext, init_symbol: &Arc<Initialize
     // Get parent type parameters (for initializers inside generic structs/enums)
     let parent_type_params = get_initializer_parent_type_parameters(init_symbol);
     for tp in &parent_type_params {
+        let tp_name = tp.metadata().name().value.clone();
+        let tp_def =
+            kestrel_execution_graph::TypeParamDef::new(tp_name, TypeParamOwner::Function(func_id));
+        let tp_id = ctx.mir.type_params.alloc(tp_def);
+        ctx.mir.function_mut(func_id).type_params.push(tp_id);
+        ctx.map_type_param(tp.metadata().id(), tp_id);
+    }
+
+    // Then register the initializer's own type parameters
+    for tp in init_symbol.type_parameters() {
         let tp_name = tp.metadata().name().value.clone();
         let tp_def =
             kestrel_execution_graph::TypeParamDef::new(tp_name, TypeParamOwner::Function(func_id));
@@ -369,6 +434,127 @@ pub fn lower_initializer(ctx: &mut LoweringContext, init_symbol: &Arc<Initialize
     ctx.exit_function();
 }
 
+/// Lower a deinit to MIR.
+///
+/// Deinits are lowered as functions with signature:
+/// `func Type.deinit(self: &var Type) -> ()`
+pub fn lower_deinit(ctx: &mut LoweringContext, deinit_symbol: &Arc<DeinitSymbol>) {
+    // Get the resolved body
+    let body = match deinit_symbol
+        .metadata()
+        .get_behavior::<ResolvedExecutableBehavior>()
+    {
+        Some(behavior) => behavior.body().clone(),
+        None => {
+            ctx.emit_error(LoweringError::missing_body(
+                "deinit",
+                deinit_symbol.metadata().span().clone(),
+            ));
+            return;
+        },
+    };
+
+    // Generate qualified name
+    let name = qualified_name_for_symbol(ctx, &(deinit_symbol.clone() as _));
+
+    // Deinits always return unit
+    let mir_ret_ty = ctx.mir.ty_unit();
+
+    // Create the function
+    let func_id = ctx.mir.add_function(name, mir_ret_ty).id();
+
+    // IMPORTANT: Register type parameters BEFORE lowering any types.
+    // Get parent type parameters (for deinits inside generic structs/enums)
+    let parent_type_params = get_deinit_parent_type_parameters(deinit_symbol);
+    for tp in &parent_type_params {
+        let tp_name = tp.metadata().name().value.clone();
+        let tp_def =
+            kestrel_execution_graph::TypeParamDef::new(tp_name, TypeParamOwner::Function(func_id));
+        let tp_id = ctx.mir.type_params.alloc(tp_def);
+        ctx.mir.function_mut(func_id).type_params.push(tp_id);
+        ctx.map_type_param(tp.metadata().id(), tp_id);
+    }
+
+    // NOW we can lower types with type parameters in scope
+
+    // Prepare self parameter type (&var Type)
+    let self_param_ty = if let Some(parent) = deinit_symbol.metadata().parent() {
+        let parent_name = qualified_name_for_symbol(ctx, &parent);
+        // Build type arguments from parent's type parameters
+        let type_args: Vec<_> = parent_type_params
+            .iter()
+            .filter_map(|tp| {
+                ctx.get_type_param(tp.metadata().id()).map(|mir_tp| {
+                    ctx.mir
+                        .intern_type(kestrel_execution_graph::MirTy::TypeParam(mir_tp))
+                })
+            })
+            .collect();
+        let parent_ty = ctx.mir.ty_named(parent_name, type_args);
+        Some(ctx.mir.ty_ref_mut(parent_ty))
+    } else {
+        None
+    };
+
+    // Add self parameter
+    if let Some(self_ty) = self_param_ty {
+        ctx.mir.function_builder(func_id).param("self", self_ty);
+    }
+
+    // Deinit has no other parameters
+
+    // Enter the function context
+    ctx.enter_function(func_id);
+
+    // Map semantic locals to MIR locals
+    // Copy the locals vector to avoid borrow issues
+    let (param_count, mir_locals) = {
+        let func_def = ctx.mir.function(func_id);
+        (func_def.params.len(), func_def.locals.clone())
+    };
+
+    let locals = deinit_symbol.locals();
+
+    // Map parameter locals (just self)
+    for (i, local) in locals.iter().take(param_count).enumerate() {
+        let mir_local_id = mir_locals[i];
+        ctx.map_local(local.id(), mir_local_id);
+    }
+
+    // Create and map non-parameter locals
+    for local in locals.iter().skip(param_count) {
+        let mir_ty = lower_type(ctx, local.ty());
+        let mir_local_id = ctx.create_local(local.name().to_string(), mir_ty);
+        ctx.map_local(local.id(), mir_local_id);
+    }
+
+    // Create entry block
+    let entry_block = ctx.create_block();
+    ctx.set_current_block(entry_block);
+    ctx.mir.function_mut(func_id).entry_block = Some(entry_block);
+
+    // Lower statements
+    for stmt in &body.statements {
+        lower_statement(ctx, stmt);
+
+        if ctx.is_block_terminated() {
+            break;
+        }
+    }
+
+    // Lower yield expression (if any) for side effects, then return unit.
+    if !ctx.is_block_terminated() {
+        if let Some(yield_expr) = body.yield_expr.as_ref() {
+            let _ = lower_expression(ctx, yield_expr);
+        }
+        if !ctx.is_block_terminated() {
+            ctx.emit_return_unit();
+        }
+    }
+
+    ctx.exit_function();
+}
+
 /// Lower a getter to MIR.
 ///
 /// Getters are lowered as functions with signature:
@@ -404,9 +590,20 @@ pub fn lower_getter(ctx: &mut LoweringContext, getter_symbol: &Arc<GetterSymbol>
     // Create the function
     let func_id = ctx.mir.add_function(name, placeholder_ret).id();
 
-    // Register parent type parameters (getter is nested: Type -> Field -> Getter)
+    // Register parent type parameters (getter is nested: Type -> Field/Subscript -> Getter)
     let parent_type_params = get_getter_parent_type_parameters(getter_symbol);
     for tp in &parent_type_params {
+        let tp_name = tp.metadata().name().value.clone();
+        let tp_def =
+            kestrel_execution_graph::TypeParamDef::new(tp_name, TypeParamOwner::Function(func_id));
+        let tp_id = ctx.mir.type_params.alloc(tp_def);
+        ctx.mir.function_mut(func_id).type_params.push(tp_id);
+        ctx.map_type_param(tp.metadata().id(), tp_id);
+    }
+
+    // Register subscript's own type parameters (for subscript getters)
+    let subscript_type_params = get_subscript_type_parameters(getter_symbol);
+    for tp in &subscript_type_params {
         let tp_name = tp.metadata().name().value.clone();
         let tp_def =
             kestrel_execution_graph::TypeParamDef::new(tp_name, TypeParamOwner::Function(func_id));
@@ -427,20 +624,30 @@ pub fn lower_getter(ctx: &mut LoweringContext, getter_symbol: &Arc<GetterSymbol>
         ctx.mir.function_builder(func_id).param("self", self_ty);
     }
 
+    // Add additional parameters (for subscript getters which have index/key parameters)
+    for param in callable.parameters() {
+        let param_name = param.internal_name().to_string();
+        let base_mir_ty = lower_type(ctx, &param.ty);
+        let mir_ty = match param.access_mode() {
+            ParameterAccessMode::Borrow => ctx.mir.ty_ref(base_mir_ty),
+            ParameterAccessMode::Mutating => ctx.mir.ty_ref_mut(base_mir_ty),
+            ParameterAccessMode::Consuming => base_mir_ty,
+        };
+        ctx.mir.function_builder(func_id).param(param_name, mir_ty);
+    }
+
     // Enter the function context
     ctx.enter_function(func_id);
 
-    // Map the self local if it exists (parameter 0)
+    // Map parameter locals
+    // The getter body references parameters via LocalId starting from 0.
+    // LocalId(0) is typically self, and additional parameters follow.
     let param_count = ctx.mir.function(func_id).params.len();
     let mir_locals = ctx.mir.function(func_id).locals.clone();
 
-    // Map parameter locals (just self for getters)
-    // The getter body references `self` via LocalId(0) from the temporary local scope
-    // created during binding. We map it to the MIR self parameter.
-    if param_count > 0 {
-        // Map LocalId(0) (self) to the first MIR local (the self parameter)
-        let mir_self_local = mir_locals[0];
-        ctx.map_local(LocalId(0), mir_self_local);
+    // Map all parameter locals to their MIR counterparts
+    for (i, &mir_local) in mir_locals.iter().enumerate().take(param_count) {
+        ctx.map_local(LocalId(i), mir_local);
     }
 
     // Create entry block
@@ -521,9 +728,20 @@ pub fn lower_setter(ctx: &mut LoweringContext, setter_symbol: &Arc<SetterSymbol>
     // Create the function
     let func_id = ctx.mir.add_function(name, mir_ret_ty).id();
 
-    // Register parent type parameters (setter is nested: Type -> Field -> Setter)
+    // Register parent type parameters (setter is nested: Type -> Field/Subscript -> Setter)
     let parent_type_params = get_setter_parent_type_parameters(setter_symbol);
     for tp in &parent_type_params {
+        let tp_name = tp.metadata().name().value.clone();
+        let tp_def =
+            kestrel_execution_graph::TypeParamDef::new(tp_name, TypeParamOwner::Function(func_id));
+        let tp_id = ctx.mir.type_params.alloc(tp_def);
+        ctx.mir.function_mut(func_id).type_params.push(tp_id);
+        ctx.map_type_param(tp.metadata().id(), tp_id);
+    }
+
+    // Register subscript's own type parameters (for subscript setters)
+    let subscript_type_params = get_subscript_type_parameters_for_setter(setter_symbol);
+    for tp in &subscript_type_params {
         let tp_name = tp.metadata().name().value.clone();
         let tp_def =
             kestrel_execution_graph::TypeParamDef::new(tp_name, TypeParamOwner::Function(func_id));
@@ -584,6 +802,15 @@ pub fn lower_setter(ctx: &mut LoweringContext, setter_symbol: &Arc<SetterSymbol>
         }
     }
 
+    // Lower yield expression if present (for side effects like assignment)
+    // Setter bodies like `{ self._v = newValue }` have no statements but a yield expression
+    if !ctx.is_block_terminated()
+        && let Some(yield_expr) = body.yield_expr.as_ref()
+    {
+        // Lower the expression for its side effects (result is discarded)
+        let _value = lower_expression(ctx, yield_expr);
+    }
+
     // Setters return unit
     if !ctx.is_block_terminated() {
         ctx.emit_all_scope_deinits();
@@ -603,56 +830,159 @@ fn get_getter_parent_type_parameters(
     getter_symbol: &Arc<GetterSymbol>,
 ) -> Vec<Arc<TypeParameterSymbol>> {
     use kestrel_semantic_tree::symbol::extension::ExtensionSymbol;
+    use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
+    use kestrel_semantic_tree::ty::TyKind;
 
-    // Getter's parent is Field, Field's parent is the type
-    let Some(field) = getter_symbol.metadata().parent() else {
+    // Getter's parent is either Field or Subscript
+    let Some(parent) = getter_symbol.metadata().parent() else {
         return vec![];
     };
-    let Some(type_parent) = field.metadata().parent() else {
+
+    // Get to the containing type (struct/enum/extension)
+    let type_parent = if parent.metadata().kind() == KestrelSymbolKind::Subscript {
+        // Subscript's parent is the type
+        parent.metadata().parent()
+    } else {
+        // Field's parent is the type
+        parent.metadata().parent()
+    };
+
+    let Some(type_parent) = type_parent else {
         return vec![];
     };
 
-    // Try to downcast to get type parameters
+    // Get type parameters from containing struct/enum/extension only
     if let Ok(struct_symbol) = type_parent.clone().downcast_arc::<StructSymbol>() {
-        return struct_symbol.type_parameters();
+        struct_symbol.type_parameters()
+    } else if let Ok(enum_symbol) = type_parent.clone().downcast_arc::<EnumSymbol>() {
+        enum_symbol.type_parameters()
+    } else if let Ok(extension_symbol) = type_parent.downcast_arc::<ExtensionSymbol>() {
+        let params = extension_symbol.referenced_type_parameters();
+        if extension_symbol
+            .target_type()
+            .is_some_and(|ty| matches!(ty.kind(), TyKind::Protocol { .. }))
+        {
+            params
+                .into_iter()
+                .filter(|tp| tp.metadata().name().value != "Self")
+                .collect()
+        } else {
+            params
+        }
+    } else {
+        vec![]
     }
-    if let Ok(enum_symbol) = type_parent.clone().downcast_arc::<EnumSymbol>() {
-        return enum_symbol.type_parameters();
-    }
-    if let Ok(extension_symbol) = type_parent.downcast_arc::<ExtensionSymbol>() {
-        return extension_symbol.referenced_type_parameters();
+}
+
+/// Get type parameters from the subscript itself (for subscript getters/setters).
+pub fn get_subscript_type_parameters(
+    getter_symbol: &Arc<GetterSymbol>,
+) -> Vec<Arc<TypeParameterSymbol>> {
+    use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
+    use kestrel_semantic_tree::symbol::subscript::SubscriptSymbol;
+
+    // Getter's parent might be a Subscript
+    let Some(parent) = getter_symbol.metadata().parent() else {
+        return vec![];
+    };
+
+    if parent.metadata().kind() != KestrelSymbolKind::Subscript {
+        return vec![];
     }
 
-    vec![]
+    let Ok(subscript) = parent.downcast_arc::<SubscriptSymbol>() else {
+        return vec![];
+    };
+
+    // Get type parameters from subscript's children
+    subscript
+        .metadata()
+        .children()
+        .into_iter()
+        .filter(|child| child.metadata().kind() == KestrelSymbolKind::TypeParameter)
+        .filter_map(|child| child.downcast_arc::<TypeParameterSymbol>().ok())
+        .collect()
 }
 
 /// Get type parameters from the grandparent struct/enum/extension (for setters).
 /// Hierarchy: Struct/Enum/Extension -> Field -> Setter
+/// Or: Struct/Enum/Extension -> Subscript -> Setter
 fn get_setter_parent_type_parameters(
     setter_symbol: &Arc<SetterSymbol>,
 ) -> Vec<Arc<TypeParameterSymbol>> {
     use kestrel_semantic_tree::symbol::extension::ExtensionSymbol;
+    use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
+    use kestrel_semantic_tree::ty::TyKind;
 
-    // Setter's parent is Field, Field's parent is the type
-    let Some(field) = setter_symbol.metadata().parent() else {
+    // Setter's parent is either Field or Subscript
+    let Some(parent) = setter_symbol.metadata().parent() else {
         return vec![];
     };
-    let Some(type_parent) = field.metadata().parent() else {
+
+    // Get to the containing type (struct/enum/extension)
+    let type_parent = if parent.metadata().kind() == KestrelSymbolKind::Subscript {
+        // Subscript's parent is the type
+        parent.metadata().parent()
+    } else {
+        // Field's parent is the type
+        parent.metadata().parent()
+    };
+
+    let Some(type_parent) = type_parent else {
         return vec![];
     };
 
-    // Try to downcast to get type parameters
+    // Get type parameters from containing struct/enum/extension only
     if let Ok(struct_symbol) = type_parent.clone().downcast_arc::<StructSymbol>() {
-        return struct_symbol.type_parameters();
+        struct_symbol.type_parameters()
+    } else if let Ok(enum_symbol) = type_parent.clone().downcast_arc::<EnumSymbol>() {
+        enum_symbol.type_parameters()
+    } else if let Ok(extension_symbol) = type_parent.downcast_arc::<ExtensionSymbol>() {
+        let params = extension_symbol.referenced_type_parameters();
+        if extension_symbol
+            .target_type()
+            .is_some_and(|ty| matches!(ty.kind(), TyKind::Protocol { .. }))
+        {
+            params
+                .into_iter()
+                .filter(|tp| tp.metadata().name().value != "Self")
+                .collect()
+        } else {
+            params
+        }
+    } else {
+        vec![]
     }
-    if let Ok(enum_symbol) = type_parent.clone().downcast_arc::<EnumSymbol>() {
-        return enum_symbol.type_parameters();
-    }
-    if let Ok(extension_symbol) = type_parent.downcast_arc::<ExtensionSymbol>() {
-        return extension_symbol.referenced_type_parameters();
+}
+
+/// Get type parameters from the subscript itself (for subscript setters).
+fn get_subscript_type_parameters_for_setter(
+    setter_symbol: &Arc<SetterSymbol>,
+) -> Vec<Arc<TypeParameterSymbol>> {
+    use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
+    use kestrel_semantic_tree::symbol::subscript::SubscriptSymbol;
+
+    // Setter's parent might be a Subscript
+    let Some(parent) = setter_symbol.metadata().parent() else {
+        return vec![];
+    };
+
+    if parent.metadata().kind() != KestrelSymbolKind::Subscript {
+        return vec![];
     }
 
-    vec![]
+    let Ok(subscript) = parent.downcast_arc::<SubscriptSymbol>() else {
+        return vec![];
+    };
+
+    // Get type parameters from subscript's children
+    subscript
+        .metadata()
+        .children()
+        .into_iter()
+        .filter(|child| child.metadata().kind() == KestrelSymbolKind::TypeParameter)
+        .filter_map(|child| child.downcast_arc::<TypeParameterSymbol>().ok())
+        .collect()
 }
 
 /// Compute the self parameter type for a getter.
@@ -662,9 +992,29 @@ fn compute_getter_self_param_type(
     getter_symbol: &Arc<GetterSymbol>,
     parent_type_params: &[Arc<TypeParameterSymbol>],
 ) -> Option<kestrel_execution_graph::Id<kestrel_execution_graph::Ty>> {
+    use kestrel_semantic_tree::symbol::extension::ExtensionSymbol;
+    use kestrel_semantic_tree::ty::TyKind;
+
     // Getter's grandparent is the type (Getter -> Field -> Type)
     let field = getter_symbol.metadata().parent()?;
     let type_parent = field.metadata().parent()?;
+
+    if let Ok(extension_symbol) = type_parent.clone().downcast_arc::<ExtensionSymbol>() {
+        let is_protocol_extension = extension_symbol
+            .target_type()
+            .as_ref()
+            .is_some_and(|ty| matches!(ty.expand_aliases().kind(), TyKind::Protocol { .. }));
+        if is_protocol_extension {
+            let base_self = ctx.mir.ty_self();
+            let self_ty = match receiver {
+                ReceiverKind::Borrowing => ctx.mir.ty_ref(base_self),
+                ReceiverKind::Mutating => ctx.mir.ty_ref_mut(base_self),
+                ReceiverKind::Consuming => base_self,
+                ReceiverKind::Initializing => ctx.mir.ty_ref_mut(base_self),
+            };
+            return Some(self_ty);
+        }
+    }
 
     let parent_name = qualified_name_for_symbol(ctx, &type_parent);
 
@@ -699,9 +1049,29 @@ fn compute_setter_self_param_type(
     setter_symbol: &Arc<SetterSymbol>,
     parent_type_params: &[Arc<TypeParameterSymbol>],
 ) -> Option<kestrel_execution_graph::Id<kestrel_execution_graph::Ty>> {
+    use kestrel_semantic_tree::symbol::extension::ExtensionSymbol;
+    use kestrel_semantic_tree::ty::TyKind;
+
     // Setter's grandparent is the type (Setter -> Field -> Type)
     let field = setter_symbol.metadata().parent()?;
     let type_parent = field.metadata().parent()?;
+
+    if let Ok(extension_symbol) = type_parent.clone().downcast_arc::<ExtensionSymbol>() {
+        let is_protocol_extension = extension_symbol
+            .target_type()
+            .as_ref()
+            .is_some_and(|ty| matches!(ty.expand_aliases().kind(), TyKind::Protocol { .. }));
+        if is_protocol_extension {
+            let base_self = ctx.mir.ty_self();
+            let self_ty = match receiver {
+                ReceiverKind::Borrowing => ctx.mir.ty_ref(base_self),
+                ReceiverKind::Mutating => ctx.mir.ty_ref_mut(base_self),
+                ReceiverKind::Consuming => base_self,
+                ReceiverKind::Initializing => ctx.mir.ty_ref_mut(base_self),
+            };
+            return Some(self_ty);
+        }
+    }
 
     let parent_name = qualified_name_for_symbol(ctx, &type_parent);
 
@@ -736,8 +1106,28 @@ fn compute_self_param_type(
     func_symbol: &Arc<FunctionSymbol>,
     parent_type_params: &[Arc<TypeParameterSymbol>],
 ) -> Option<kestrel_execution_graph::Id<kestrel_execution_graph::Ty>> {
+    use kestrel_semantic_tree::symbol::extension::ExtensionSymbol;
+    use kestrel_semantic_tree::ty::TyKind;
+
     // Get the parent type for self
     let parent = func_symbol.metadata().parent()?;
+
+    if let Ok(extension_symbol) = parent.clone().downcast_arc::<ExtensionSymbol>() {
+        let is_protocol_extension = extension_symbol
+            .target_type()
+            .as_ref()
+            .is_some_and(|ty| matches!(ty.expand_aliases().kind(), TyKind::Protocol { .. }));
+        if is_protocol_extension {
+            let base_self = ctx.mir.ty_self();
+            let self_ty = match receiver {
+                ReceiverKind::Borrowing => ctx.mir.ty_ref(base_self),
+                ReceiverKind::Mutating => ctx.mir.ty_ref_mut(base_self),
+                ReceiverKind::Consuming => base_self,
+                ReceiverKind::Initializing => ctx.mir.ty_ref_mut(base_self),
+            };
+            return Some(self_ty);
+        }
+    }
 
     let parent_name = qualified_name_for_symbol(ctx, &parent);
 
@@ -769,6 +1159,7 @@ fn compute_self_param_type(
 /// Get type parameters from the parent struct, enum, or extension (for methods).
 fn get_parent_type_parameters(func_symbol: &Arc<FunctionSymbol>) -> Vec<Arc<TypeParameterSymbol>> {
     use kestrel_semantic_tree::symbol::extension::ExtensionSymbol;
+    use kestrel_semantic_tree::ty::TyKind;
 
     if let Some(parent) = func_symbol.metadata().parent() {
         // Try to downcast to StructSymbol
@@ -781,7 +1172,17 @@ fn get_parent_type_parameters(func_symbol: &Arc<FunctionSymbol>) -> Vec<Arc<Type
         }
         // Try to downcast to ExtensionSymbol
         if let Ok(extension_symbol) = parent.downcast_arc::<ExtensionSymbol>() {
-            return extension_symbol.referenced_type_parameters();
+            let params = extension_symbol.referenced_type_parameters();
+            if extension_symbol
+                .target_type()
+                .is_some_and(|ty| matches!(ty.kind(), TyKind::Protocol { .. }))
+            {
+                return params
+                    .into_iter()
+                    .filter(|tp| tp.metadata().name().value != "Self")
+                    .collect();
+            }
+            return params;
         }
     }
     vec![]
@@ -792,6 +1193,7 @@ fn get_initializer_parent_type_parameters(
     init_symbol: &Arc<InitializerSymbol>,
 ) -> Vec<Arc<TypeParameterSymbol>> {
     use kestrel_semantic_tree::symbol::extension::ExtensionSymbol;
+    use kestrel_semantic_tree::ty::TyKind;
 
     if let Some(parent) = init_symbol.metadata().parent() {
         // Try to downcast to StructSymbol
@@ -804,7 +1206,51 @@ fn get_initializer_parent_type_parameters(
         }
         // Try to downcast to ExtensionSymbol
         if let Ok(extension_symbol) = parent.downcast_arc::<ExtensionSymbol>() {
-            return extension_symbol.referenced_type_parameters();
+            let params = extension_symbol.referenced_type_parameters();
+            if extension_symbol
+                .target_type()
+                .is_some_and(|ty| matches!(ty.kind(), TyKind::Protocol { .. }))
+            {
+                return params
+                    .into_iter()
+                    .filter(|tp| tp.metadata().name().value != "Self")
+                    .collect();
+            }
+            return params;
+        }
+    }
+    vec![]
+}
+
+/// Get type parameters from the parent struct, enum, or extension (for deinits).
+fn get_deinit_parent_type_parameters(
+    deinit_symbol: &Arc<DeinitSymbol>,
+) -> Vec<Arc<TypeParameterSymbol>> {
+    use kestrel_semantic_tree::symbol::extension::ExtensionSymbol;
+    use kestrel_semantic_tree::ty::TyKind;
+
+    if let Some(parent) = deinit_symbol.metadata().parent() {
+        // Try to downcast to StructSymbol
+        if let Ok(struct_symbol) = parent.clone().downcast_arc::<StructSymbol>() {
+            return struct_symbol.type_parameters();
+        }
+        // Try to downcast to EnumSymbol
+        if let Ok(enum_symbol) = parent.clone().downcast_arc::<EnumSymbol>() {
+            return enum_symbol.type_parameters();
+        }
+        // Try to downcast to ExtensionSymbol
+        if let Ok(extension_symbol) = parent.downcast_arc::<ExtensionSymbol>() {
+            let params = extension_symbol.referenced_type_parameters();
+            if extension_symbol
+                .target_type()
+                .is_some_and(|ty| matches!(ty.kind(), TyKind::Protocol { .. }))
+            {
+                return params
+                    .into_iter()
+                    .filter(|tp| tp.metadata().name().value != "Self")
+                    .collect();
+            }
+            return params;
         }
     }
     vec![]
@@ -878,10 +1324,10 @@ fn collect_closure_local_ids_from_expr(expr: &Expression, ids: &mut HashSet<Loca
             implicit_param,
             ..
         } => {
-            // Collect explicit parameter LocalIds
+            // Collect explicit parameter LocalIds from patterns
             if let Some(param_list) = params {
                 for param in param_list {
-                    ids.insert(param.local_id);
+                    collect_closure_local_ids_from_pattern(&param.pattern, ids);
                 }
             }
             // Collect implicit `it` parameter LocalId
@@ -922,6 +1368,11 @@ fn collect_closure_local_ids_from_expr(expr: &Expression, ids: &mut HashSet<Loca
             ..
         } => {
             collect_closure_local_ids_from_expr(receiver, ids);
+            for arg in arguments {
+                collect_closure_local_ids_from_expr(&arg.value, ids);
+            }
+        },
+        ExprKind::DeferredStaticCall { arguments, .. } => {
             for arg in arguments {
                 collect_closure_local_ids_from_expr(&arg.value, ids);
             }
@@ -1016,11 +1467,20 @@ fn collect_closure_local_ids_from_expr(expr: &Expression, ids: &mut HashSet<Loca
                 collect_closure_local_ids_from_expr(e, ids);
             }
         },
+        ExprKind::Dictionary(pairs) => {
+            for (k, v) in pairs {
+                collect_closure_local_ids_from_expr(k, ids);
+                collect_closure_local_ids_from_expr(v, ids);
+            }
+        },
         ExprKind::Grouping(inner) => {
             collect_closure_local_ids_from_expr(inner, ids);
         },
         ExprKind::FieldAccess { object, .. } => {
             collect_closure_local_ids_from_expr(object, ids);
+        },
+        ExprKind::ProtocolPropertyAccess { receiver, .. } => {
+            collect_closure_local_ids_from_expr(receiver, ids);
         },
         ExprKind::TupleIndex { tuple, .. } => {
             collect_closure_local_ids_from_expr(tuple, ids);
@@ -1035,6 +1495,9 @@ fn collect_closure_local_ids_from_expr(expr: &Expression, ids: &mut HashSet<Loca
             if let Some(e) = value {
                 collect_closure_local_ids_from_expr(e, ids);
             }
+        },
+        ExprKind::Throw { value } => {
+            collect_closure_local_ids_from_expr(value, ids);
         },
         ExprKind::ImplicitMemberAccess { arguments, .. } => {
             if let Some(args) = arguments {
@@ -1076,5 +1539,70 @@ fn collect_closure_local_ids_from_expr(expr: &Expression, ids: &mut HashSet<Loca
         | ExprKind::Continue { .. }
         | ExprKind::LangIntrinsicRef(_)
         | ExprKind::Error => {},
+
+        ExprKind::InterpolatedString { parts } => {
+            use kestrel_semantic_tree::expr::InterpolationPart;
+            for part in parts {
+                if let InterpolationPart::Interpolation { expr, .. } = part {
+                    collect_closure_local_ids_from_expr(expr, ids);
+                }
+            }
+        },
+    }
+}
+
+/// Collect all LocalIds from a pattern (for destructuring closure parameters).
+fn collect_closure_local_ids_from_pattern(pattern: &Pattern, ids: &mut HashSet<LocalId>) {
+    match &pattern.kind {
+        PatternKind::Local { local_id, .. } => {
+            ids.insert(*local_id);
+        },
+        PatternKind::Wildcard => {},
+        PatternKind::Tuple { prefix, suffix, .. } => {
+            for elem in prefix.iter().chain(suffix.iter()) {
+                collect_closure_local_ids_from_pattern(elem, ids);
+            }
+        },
+        PatternKind::Literal { .. } => {},
+        PatternKind::EnumVariant { bindings, .. } => {
+            for binding in bindings {
+                collect_closure_local_ids_from_pattern(&binding.pattern, ids);
+            }
+        },
+        PatternKind::Range { .. } => {},
+        PatternKind::Struct { fields, .. } => {
+            for field in fields {
+                collect_closure_local_ids_from_pattern(&field.pattern, ids);
+            }
+        },
+        PatternKind::Array {
+            prefix,
+            suffix,
+            rest,
+        } => {
+            for elem in prefix {
+                collect_closure_local_ids_from_pattern(elem, ids);
+            }
+            for elem in suffix {
+                collect_closure_local_ids_from_pattern(elem, ids);
+            }
+            if let Some((Some(_name), Some(local_id))) = rest {
+                ids.insert(*local_id);
+            }
+        },
+        PatternKind::Or { alternatives } => {
+            if let Some(first) = alternatives.first() {
+                collect_closure_local_ids_from_pattern(first, ids);
+            }
+        },
+        PatternKind::At {
+            local_id,
+            subpattern,
+            ..
+        } => {
+            ids.insert(*local_id);
+            collect_closure_local_ids_from_pattern(subpattern, ids);
+        },
+        PatternKind::Rest | PatternKind::Error => {},
     }
 }

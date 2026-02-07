@@ -6,6 +6,18 @@ use crate::id::{Id, QualifiedName, Ty};
 use crate::metadata::{Metadata, Prior};
 use std::fmt;
 
+/// Data for a file constant static (embedded binary data).
+#[derive(Debug, Clone)]
+pub struct FileConstantData {
+    /// Relative path to the file (as specified in @fileconstant).
+    pub relative_path: String,
+    /// Element type for the LiteralSlice.
+    pub element_ty: Id<Ty>,
+    /// Base directory to resolve the relative path against (if any).
+    /// If None, resolves against the current working directory.
+    pub base_path: Option<std::path::PathBuf>,
+}
+
 /// A static variable (global constant or mutable static).
 ///
 /// ```text
@@ -24,6 +36,8 @@ pub struct StaticDef {
     pub is_mutable: bool,
     /// Initial value (if known at compile time).
     pub initializer: Option<Immediate>,
+    /// Embedded file constant data (if this is a @fileconstant static).
+    pub file_constant_data: Option<FileConstantData>,
 }
 
 impl StaticDef {
@@ -35,7 +49,14 @@ impl StaticDef {
             ty,
             is_mutable: false,
             initializer: None,
+            file_constant_data: None,
         }
+    }
+
+    /// Set file constant data for this static.
+    pub fn with_file_constant(mut self, data: FileConstantData) -> Self {
+        self.file_constant_data = Some(data);
+        self
     }
 
     pub fn mutable(mut self) -> Self {

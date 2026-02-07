@@ -4,13 +4,41 @@ use std::fs;
 use std::io;
 use std::path::PathBuf;
 
+/// A source file entry with optional path information.
+#[derive(Clone)]
+pub struct SourceEntry {
+    pub name: String,
+    pub content: String,
+    pub path: Option<PathBuf>,
+}
+
+impl SourceEntry {
+    /// Create a source entry without a path (from string).
+    pub fn from_string(name: String, content: String) -> Self {
+        Self {
+            name,
+            content,
+            path: None,
+        }
+    }
+
+    /// Create a source entry with a path (from file).
+    pub fn from_file(name: String, content: String, path: PathBuf) -> Self {
+        Self {
+            name,
+            content,
+            path: Some(path),
+        }
+    }
+}
+
 /// Builder for creating a `Compilation`.
 ///
 /// Use this to add source files from strings or file paths,
 /// then call `build()` to compile all sources.
 #[derive(Default)]
 pub struct CompilationBuilder {
-    sources: Vec<(String, String)>, // (name, content) pairs
+    sources: Vec<SourceEntry>,
     stdlib_config: StdLibConfig,
 }
 
@@ -48,7 +76,8 @@ impl CompilationBuilder {
     ///     .add_source("main.ks", "module Main\nclass Foo {}");
     /// ```
     pub fn add_source(mut self, name: impl Into<String>, source: impl Into<String>) -> Self {
-        self.sources.push((name.into(), source.into()));
+        self.sources
+            .push(SourceEntry::from_string(name.into(), source.into()));
         self
     }
 
@@ -77,7 +106,10 @@ impl CompilationBuilder {
             .and_then(|n| n.to_str())
             .unwrap_or("unknown")
             .to_string();
-        self.sources.push((name, source));
+        // Canonicalize the path so we have an absolute path for file constant resolution
+        let full_path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+        self.sources
+            .push(SourceEntry::from_file(name, source, full_path));
         Ok(self)
     }
 
@@ -100,8 +132,13 @@ impl CompilationBuilder {
     /// ```
     pub fn build(self) -> Result<Compilation, StdLibError> {
         // Load stdlib first if enabled
-        let stdlib_sources = StdLib::load(&self.stdlib_config)?
-            .map(|s| s.sources)
+        let stdlib_sources: Vec<SourceEntry> = StdLib::load(&self.stdlib_config)?
+            .map(|s| {
+                s.sources
+                    .into_iter()
+                    .map(|(name, content, path)| SourceEntry::from_file(name, content, path))
+                    .collect()
+            })
             .unwrap_or_default();
 
         // Combine: stdlib first, then user sources

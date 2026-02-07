@@ -278,6 +278,9 @@ impl PatternMatrix {
     fn get_sub_type(&self, parent_ty: &Ty, ctor: &Constructor, index: usize) -> Ty {
         use kestrel_semantic_tree::ty::TyKind;
 
+        // Treat type aliases as transparent for pattern matching.
+        let parent_ty = parent_ty.expand_aliases();
+
         match (parent_ty.kind(), ctor) {
             (TyKind::Tuple(elements), Constructor::Tuple { .. }) => elements
                 .get(index)
@@ -451,13 +454,17 @@ impl PatternMatrix {
                     let target_arity =
                         target_prefix + target_suffix + if *target_has_rest { 1 } else { 0 };
 
-                    // Get element type from array type
-                    let elem_ty = if let kestrel_semantic_tree::ty::TyKind::Array(elem_ty) =
-                        pattern.ty.kind()
-                    {
-                        (**elem_ty).clone()
-                    } else {
-                        pattern.ty.clone()
+                    // Get element type from Array[T] struct
+                    let elem_ty = match pattern.ty.kind() {
+                        kestrel_semantic_tree::ty::TyKind::Struct { substitutions, .. } => {
+                            // Array[T] - get T from substitutions
+                            substitutions
+                                .iter()
+                                .next()
+                                .map(|(_, t)| t.clone())
+                                .unwrap_or_else(|| pattern.ty.clone())
+                        },
+                        _ => pattern.ty.clone(),
                     };
 
                     if rest.is_some() && !target_has_rest {
@@ -624,24 +631,46 @@ fn constructors_match(pattern_ctor: &Constructor, target_ctor: &Constructor) -> 
 
         (Constructor::IntLiteral(v1), Constructor::IntLiteral(v2)) => v1 == v2,
         (Constructor::IntLiteral(v), Constructor::IntRange { start, end }) => {
-            *v >= *start && *v <= *end
+            let ge_start = start.map(|s| *v >= s).unwrap_or(true);
+            let le_end = end.map(|e| *v <= e).unwrap_or(true);
+            ge_start && le_end
         },
         (
             Constructor::IntRange { start: s1, end: e1 },
             Constructor::IntRange { start: s2, end: e2 },
         ) => {
-            // Ranges match if they overlap
-            s1 <= e2 && s2 <= e1
+            // Ranges match if they overlap - handle optional bounds
+            let overlap_start = match (s1, e2) {
+                (Some(s), Some(e)) => *s <= *e,
+                _ => true,
+            };
+            let overlap_end = match (s2, e1) {
+                (Some(s), Some(e)) => *s <= *e,
+                _ => true,
+            };
+            overlap_start && overlap_end
         },
 
         (Constructor::CharLiteral(v1), Constructor::CharLiteral(v2)) => v1 == v2,
         (Constructor::CharLiteral(v), Constructor::CharRange { start, end }) => {
-            *v >= *start && *v <= *end
+            let ge_start = start.map(|s| *v >= s).unwrap_or(true);
+            let le_end = end.map(|e| *v <= e).unwrap_or(true);
+            ge_start && le_end
         },
         (
             Constructor::CharRange { start: s1, end: e1 },
             Constructor::CharRange { start: s2, end: e2 },
-        ) => s1 <= e2 && s2 <= e1,
+        ) => {
+            let overlap_start = match (s1, e2) {
+                (Some(s), Some(e)) => *s <= *e,
+                _ => true,
+            };
+            let overlap_end = match (s2, e1) {
+                (Some(s), Some(e)) => *s <= *e,
+                _ => true,
+            };
+            overlap_start && overlap_end
+        },
 
         (Constructor::StringLiteral(s1), Constructor::StringLiteral(s2)) => s1 == s2,
 

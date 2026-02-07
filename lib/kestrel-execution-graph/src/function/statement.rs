@@ -182,6 +182,8 @@ pub enum Rvalue {
     StrFromParts { ptr: Value, len: Value },
     /// `int.to_string <value>` - convert integer to string
     IntToString(Value),
+    /// `str.concat [parts...]` - concatenate multiple strings
+    StrConcat { parts: Vec<Value> },
 
     // === Pointer operations ===
     /// `ptr.offset <ptr>, <offset>` - byte offset
@@ -254,6 +256,19 @@ pub enum Rvalue {
         op: FloatMathKind,
         operand: Value,
     },
+    /// Fused multiply-add: a * b + c
+    FloatFma {
+        bits: FloatBits,
+        a: Value,
+        b: Value,
+        c: Value,
+    },
+    /// Copy sign: magnitude with sign from sign_source
+    FloatCopysign {
+        bits: FloatBits,
+        magnitude: Value,
+        sign_source: Value,
+    },
 }
 
 /// What's being called.
@@ -282,6 +297,9 @@ pub enum Callee {
         method: String,
         /// The type parameter we're calling on (e.g., `T`)
         for_type: Id<Ty>,
+        /// Type arguments for the method itself (not the protocol).
+        /// For example, in `Hash.hash[H]`, this would contain the concrete type for `H`.
+        method_type_args: Vec<Id<Ty>>,
     },
 }
 
@@ -348,6 +366,14 @@ pub enum UnOp {
     Not,
     /// Boolean not
     BoolNot,
+    /// Population count (count of 1-bits)
+    Popcount,
+    /// Count leading zeros
+    Clz,
+    /// Count trailing zeros
+    Ctz,
+    /// Byte swap (reverse byte order)
+    Bswap,
 }
 
 /// Type cast kinds.
@@ -357,8 +383,10 @@ pub enum CastKind {
     IntToFloat,
     /// `f64.to.i64`
     FloatToInt,
-    /// `i32.to.i64`
+    /// `i32.to.i64` (sign-extend)
     IntWiden,
+    /// `u32.to.i64` (zero-extend for unsigned source)
+    IntUnsignedWiden,
     /// `i64.to.i32`
     IntTruncate,
     /// `f32.to.f64`
@@ -652,6 +680,39 @@ impl fmt::Display for RvalueDisplay<'_> {
                 };
                 write!(f, "{}.{} {}", bits_str, op_str, operand.display(self.ctx))
             },
+            Rvalue::FloatFma { bits, a, b, c } => {
+                let bits_str = match bits {
+                    FloatBits::F16 => "f16",
+                    FloatBits::F32 => "f32",
+                    FloatBits::F64 => "f64",
+                };
+                write!(
+                    f,
+                    "{}.fma {}, {}, {}",
+                    bits_str,
+                    a.display(self.ctx),
+                    b.display(self.ctx),
+                    c.display(self.ctx)
+                )
+            },
+            Rvalue::FloatCopysign {
+                bits,
+                magnitude,
+                sign_source,
+            } => {
+                let bits_str = match bits {
+                    FloatBits::F16 => "f16",
+                    FloatBits::F32 => "f32",
+                    FloatBits::F64 => "f64",
+                };
+                write!(
+                    f,
+                    "{}.copysign {}, {}",
+                    bits_str,
+                    magnitude.display(self.ctx),
+                    sign_source.display(self.ctx)
+                )
+            },
             // Pointer intrinsic displays
             Rvalue::PtrNull { ty } => {
                 write!(f, "ptr.null {}", self.ctx.ty(*ty).display(self.ctx))
@@ -745,6 +806,16 @@ impl fmt::Display for RvalueDisplay<'_> {
                     delta.display(self.ctx)
                 )
             },
+            Rvalue::StrConcat { parts } => {
+                write!(f, "str.concat [")?;
+                for (i, part) in parts.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", part.display(self.ctx))?;
+                }
+                write!(f, "]")
+            },
         }
     }
 }
@@ -771,11 +842,13 @@ impl Callee {
         protocol: Id<QualifiedName>,
         method: impl Into<String>,
         for_type: Id<Ty>,
+        method_type_args: Vec<Id<Ty>>,
     ) -> Self {
         Callee::Witness {
             protocol,
             method: method.into(),
             for_type,
+            method_type_args,
         }
     }
 
@@ -813,14 +886,20 @@ impl fmt::Display for CalleeDisplay<'_> {
                 protocol,
                 method,
                 for_type,
+                method_type_args,
             } => {
-                write!(
-                    f,
-                    "witness_method {}.{} for {}",
-                    self.ctx.name(*protocol),
-                    method,
-                    self.ctx.ty(*for_type).display(self.ctx)
-                )
+                write!(f, "witness_method {}.{}", self.ctx.name(*protocol), method)?;
+                if !method_type_args.is_empty() {
+                    write!(f, "[")?;
+                    for (i, ty) in method_type_args.iter().enumerate() {
+                        if i > 0 {
+                            write!(f, ", ")?;
+                        }
+                        write!(f, "{}", self.ctx.ty(*ty).display(self.ctx))?;
+                    }
+                    write!(f, "]")?;
+                }
+                write!(f, " for {}", self.ctx.ty(*for_type).display(self.ctx))
             },
         }
     }
@@ -881,6 +960,10 @@ impl UnOp {
             UnOp::FNeg => "f64.neg",
             UnOp::Not => "i64.not",
             UnOp::BoolNot => "bool.not",
+            UnOp::Popcount => "i64.popcount",
+            UnOp::Clz => "i64.clz",
+            UnOp::Ctz => "i64.ctz",
+            UnOp::Bswap => "i64.bswap",
         }
     }
 }
@@ -892,6 +975,7 @@ impl CastKind {
             CastKind::IntToFloat => "i64.to.f64",
             CastKind::FloatToInt => "f64.to.i64",
             CastKind::IntWiden => "int.widen",
+            CastKind::IntUnsignedWiden => "uint.widen",
             CastKind::IntTruncate => "int.truncate",
             CastKind::FloatWiden => "float.widen",
             CastKind::FloatTruncate => "float.truncate",

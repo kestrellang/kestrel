@@ -185,6 +185,7 @@ mod nested_and_complex_types {
             type ArrayPtr = lang.ptr[[lang.i64]];
         "#,
         )
+        .with_stdlib()
         .expect(Compiles);
     }
 
@@ -227,6 +228,7 @@ mod nested_and_complex_types {
             type PtrArray = [lang.ptr[lang.i64]];
         "#,
         )
+        .with_stdlib()
         .expect(Compiles);
     }
 
@@ -412,24 +414,6 @@ mod mir_lowering {
     }
 
     #[test]
-    fn pointer_to_array_type_requires_resolution() {
-        // NOTE: [lang.i64] as a type annotation is not yet resolved to a concrete
-        // struct type like Array[lang.i64, GlobalAllocator]. This test verifies
-        // that MIR lowering correctly fails for unresolved array types.
-        // Once array type resolution is implemented, this test should be
-        // updated to verify the correct MIR structure.
-        Test::new(
-            r#"module Test
-            struct ArrayWrapper {
-                let ptr: lang.ptr[[lang.i64]]
-            }
-        "#,
-        )
-        .expect(Compiles)
-        .expect(Mir::fails());
-    }
-
-    #[test]
     fn generic_pointer_field_lowers_correctly() {
         Test::new(
             r#"module Test
@@ -458,7 +442,7 @@ mod mir_lowering {
         .expect(Mir::compiles())
         // Pointers are passed by reference like other types, so the parameter is &ptr[I64]
         .expect(
-            Mir::mir_function("Test.usePtr").has_param("p", MirTy::ref_(MirTy::ptr(MirTy::I64))),
+            Mir::mir_function("Test.usePtr$p").has_param("p", MirTy::ref_(MirTy::ptr(MirTy::I64))),
         );
     }
 

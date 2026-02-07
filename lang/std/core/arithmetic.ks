@@ -1,51 +1,73 @@
 // Arithmetic operator protocols
+// These protocols define the standard arithmetic operations used by numeric types.
 
 module std.core
 
+/// Protocol for types that support addition (+).
+/// The Output type allows the result to differ from the operand types.
 @builtin(.AddOperatorProtocol)
 public protocol Addable[Rhs = Self] {
     type Output
 
+    /// The additive identity (zero).
+    /// Used as the starting value for sum operations.
+    static var zero: Self { get }
+
+    /// Adds this value to another and returns the result.
     @builtin(.AddOperatorMethod)
     func add(other: Rhs) -> Output
 }
 
+/// Protocol for types that support subtraction (-).
 @builtin(.SubtractOperatorProtocol)
 public protocol Subtractable[Rhs = Self] {
     type Output
 
+    /// Subtracts another value from this one and returns the result.
     @builtin(.SubtractOperatorMethod)
     func subtract(other: Rhs) -> Output
 }
 
+/// Protocol for types that support multiplication (*).
 @builtin(.MultiplyOperatorProtocol)
 public protocol Multipliable[Rhs = Self] {
     type Output
 
+    /// The multiplicative identity (one).
+    /// Used as the starting value for product operations.
+    static var one: Self { get }
+
+    /// Multiplies this value by another and returns the result.
     @builtin(.MultiplyOperatorMethod)
     func multiply(other: Rhs) -> Output
 }
 
+/// Protocol for types that support division (/).
 @builtin(.DivideOperatorProtocol)
 public protocol Divisible[Rhs = Self] {
     type Output
 
+    /// Divides this value by another and returns the result.
     @builtin(.DivideOperatorMethod)
     func divide(other: Rhs) -> Output
 }
 
+/// Protocol for types that support modulo/remainder (%).
 @builtin(.ModuloOperatorProtocol)
 public protocol Modulo[Rhs = Self] {
     type Output
 
+    /// Computes the remainder of dividing this value by another.
     @builtin(.ModuloOperatorMethod)
     func modulo(other: Rhs) -> Output
 }
 
+/// Protocol for types that support unary negation (-x).
 @builtin(.NegateOperatorProtocol)
 public protocol Negatable {
     type Output
 
+    /// Returns the negated value.
     @builtin(.NegateOperatorMethod)
     func negate() -> Output
 }

@@ -80,6 +80,23 @@ impl Substitutions {
             // Type parameter - look up in substitutions
             TyKind::TypeParameter(param_symbol) => {
                 let param_id = Symbol::<KestrelLanguage>::metadata(param_symbol.as_ref()).id();
+                let param_name = Symbol::<KestrelLanguage>::metadata(param_symbol.as_ref())
+                    .name()
+                    .value
+                    .clone();
+
+                // Debug logging for Rhs substitution
+                if param_name == "Rhs" {
+                    debug_trace!(
+                        "  === Substituting type parameter {} (ID: {:?}) ===",
+                        param_name,
+                        param_id
+                    );
+                    debug_trace!("  Available substitutions:");
+                    for (id, ty) in self.iter() {
+                        debug_trace!("    {:?} -> {:?}", id, ty);
+                    }
+                }
 
                 // Check if we're already visiting this type parameter (cycle detected)
                 if visited.contains(&param_id) {
@@ -88,6 +105,9 @@ impl Substitutions {
                 }
 
                 if let Some(substituted) = self.get(param_id) {
+                    if param_name == "Rhs" {
+                        debug_trace!("  Found substitution: {:?}", substituted);
+                    }
                     // Mark this parameter as being visited
                     visited.insert(param_id);
                     // Recursively apply in case the substituted type also has type params
@@ -96,6 +116,13 @@ impl Substitutions {
                     visited.remove(&param_id);
                     result
                 } else {
+                    if param_name == "Rhs" {
+                        debug_trace!(
+                            "  No substitution found for {} (ID: {:?})",
+                            param_name,
+                            param_id
+                        );
+                    }
                     // No substitution found, return as-is
                     ty.clone()
                 }
@@ -110,11 +137,7 @@ impl Substitutions {
                 Ty::tuple(new_elements, ty.span().clone())
             },
 
-            TyKind::Array(element_type) => {
-                let new_element = self.apply_with_visited(element_type, visited);
-                Ty::array(new_element, ty.span().clone())
-            },
-
+            // Note: Array[T] struct types are handled by the Struct case above
             TyKind::Pointer(element_type) => {
                 let new_element = self.apply_with_visited(element_type, visited);
                 Ty::pointer(new_element, ty.span().clone())
@@ -206,7 +229,8 @@ impl Substitutions {
             | TyKind::String
             | TyKind::Error
             | TyKind::SelfType
-            | TyKind::Infer => ty.clone(),
+            | TyKind::Infer
+            | TyKind::UnresolvedPath { .. } => ty.clone(),
         }
     }
 

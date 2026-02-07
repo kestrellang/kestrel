@@ -100,6 +100,10 @@ impl SubscriptBehavior {
     /// This is used for overload resolution. Two subscripts with different
     /// labels are considered different overloads.
     ///
+    /// For parameters with default values, callers may omit trailing arguments.
+    /// The number of labels must be between the number of required parameters
+    /// (those without defaults) and the total number of parameters.
+    ///
     /// # Arguments
     /// * `labels` - The labels from the call site (None for unlabeled arguments)
     ///
@@ -107,10 +111,15 @@ impl SubscriptBehavior {
     /// * `true` if the labels match this subscript's parameter labels
     /// * `false` otherwise
     pub fn matches_labels(&self, labels: &[Option<&str>]) -> bool {
-        if labels.len() != self.parameters.len() {
+        // Count required parameters (those without defaults)
+        let required_count = self.parameters.iter().filter(|p| !p.has_default()).count();
+
+        // Check arity: must be at least required_count and at most total params
+        if labels.len() < required_count || labels.len() > self.parameters.len() {
             return false;
         }
 
+        // Check labels for provided arguments only
         for (arg_label, param) in labels.iter().zip(&self.parameters) {
             let param_label = param.external_label();
             if *arg_label != param_label {

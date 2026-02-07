@@ -4,7 +4,10 @@ use kestrel_span::{Name, Span};
 use semantic_tree::behavior::Behavior;
 use semantic_tree::symbol::Symbol;
 
-use crate::{behavior::KestrelBehaviorKind, language::KestrelLanguage, ty::Ty};
+use crate::{
+    behavior::KestrelBehaviorKind, language::KestrelLanguage, symbol::protocol::ProtocolSymbol,
+    ty::Ty,
+};
 
 /// Describes how a method receives its instance (self).
 ///
@@ -61,6 +64,7 @@ pub enum ParameterAccessMode {
 /// - `with x: Int` -> access_mode=Borrow, label="with", bind_name="x"
 /// - `mutating x: Int` -> access_mode=Mutating, label=None, bind_name="x"
 /// - `consuming point p: Point` -> access_mode=Consuming, label="point", bind_name="p"
+/// - `x: Int = 0` -> has_default=true
 #[derive(Debug, Clone)]
 pub struct CallableParameter {
     /// Access mode for this parameter (borrow/mutating/consuming)
@@ -71,40 +75,45 @@ pub struct CallableParameter {
     pub bind_name: Name,
     /// The parameter's type
     pub ty: Ty,
+    /// Whether this parameter has a default value
+    pub has_default: bool,
 }
 
 impl CallableParameter {
-    /// Create a new parameter without a label (default borrow mode)
+    /// Create a new parameter without a label (default borrow mode, no default value)
     pub fn new(bind_name: Name, ty: Ty) -> Self {
         Self {
             access_mode: ParameterAccessMode::Borrow,
             label: None,
             bind_name,
             ty,
+            has_default: false,
         }
     }
 
-    /// Create a new parameter with a label (default borrow mode)
+    /// Create a new parameter with a label (default borrow mode, no default value)
     pub fn with_label(label: Name, bind_name: Name, ty: Ty) -> Self {
         Self {
             access_mode: ParameterAccessMode::Borrow,
             label: Some(label),
             bind_name,
             ty,
+            has_default: false,
         }
     }
 
-    /// Create a new parameter with access mode and no label
+    /// Create a new parameter with access mode and no label (no default value)
     pub fn with_access_mode(access_mode: ParameterAccessMode, bind_name: Name, ty: Ty) -> Self {
         Self {
             access_mode,
             label: None,
             bind_name,
             ty,
+            has_default: false,
         }
     }
 
-    /// Create a new parameter with access mode and label
+    /// Create a new parameter with access mode and label (no default value)
     pub fn with_access_mode_and_label(
         access_mode: ParameterAccessMode,
         label: Name,
@@ -116,7 +125,14 @@ impl CallableParameter {
             label: Some(label),
             bind_name,
             ty,
+            has_default: false,
         }
+    }
+
+    /// Set whether this parameter has a default value
+    pub fn with_default(mut self, has_default: bool) -> Self {
+        self.has_default = has_default;
+        self
     }
 
     /// Get the access mode for this parameter
@@ -150,6 +166,11 @@ impl CallableParameter {
     /// Check if this parameter is consuming
     pub fn is_consuming(&self) -> bool {
         self.access_mode == ParameterAccessMode::Consuming
+    }
+
+    /// Check if this parameter has a default value
+    pub fn has_default(&self) -> bool {
+        self.has_default
     }
 }
 
@@ -215,6 +236,9 @@ impl SignatureType {
     pub fn from_ty(ty: &Ty) -> Self {
         use crate::ty::TyKind;
 
+        // Expand type aliases (e.g., OptionalTypeOperator[T] -> Optional[T])
+        // so signature comparisons treat aliases as their underlying types.
+        let ty = ty.expand_aliases();
         match ty.kind() {
             TyKind::Unit => SignatureType::Unit,
             TyKind::Never => SignatureType::Never,
@@ -225,9 +249,7 @@ impl SignatureType {
             TyKind::Tuple(elements) => {
                 SignatureType::Tuple(elements.iter().map(SignatureType::from_ty).collect())
             },
-            TyKind::Array(element_type) => {
-                SignatureType::Array(Box::new(SignatureType::from_ty(element_type)))
-            },
+            // Note: Array[T] struct types are handled by the Struct case above
             TyKind::Pointer(_) => {
                 // Pointer types are represented as a named type for signature matching
                 SignatureType::Named(vec!["lang".to_string(), "ptr".to_string()])
@@ -273,9 +295,43 @@ impl SignatureType {
                 // (could also resolve to underlying type)
                 SignatureType::Named(vec![symbol.metadata().name().value.clone()])
             },
-            TyKind::AssociatedType { symbol, .. } => {
-                // For associated types, use the associated type name
-                SignatureType::Named(vec![symbol.metadata().name().value.clone()])
+            TyKind::AssociatedType { symbol, container } => {
+                // For associated types, include the protocol qualification to distinguish
+                // between protocols with the same associated type name (e.g., Addable.Output
+                // vs RangeConstructible.Output)
+                let assoc_name = symbol.metadata().name().value.clone();
+
+                // Try to get the protocol name from the container or the symbol's parent
+                let protocol_name = match container {
+                    Some(container_ty) => match container_ty.kind() {
+                        TyKind::Protocol {
+                            symbol: proto_sym, ..
+                        } => Some(proto_sym.metadata().name().value.clone()),
+                        TyKind::SelfType => {
+                            // For Self type, look up the associated type's defining protocol
+                            symbol
+                                .metadata()
+                                .parent()
+                                .and_then(|p| p.downcast_arc::<ProtocolSymbol>().ok())
+                                .map(|p| p.metadata().name().value.clone())
+                        },
+                        _ => None,
+                    },
+                    None => {
+                        // No container - associated type used within its defining protocol
+                        // Look up the parent protocol
+                        symbol
+                            .metadata()
+                            .parent()
+                            .and_then(|p| p.downcast_arc::<ProtocolSymbol>().ok())
+                            .map(|p| p.metadata().name().value.clone())
+                    },
+                };
+
+                match protocol_name {
+                    Some(proto) => SignatureType::Named(vec![proto, assoc_name]),
+                    None => SignatureType::Named(vec![assoc_name]),
+                }
             },
             TyKind::UnresolvedFunction { return_type, .. } => {
                 // Treat as a function type with unknown params
@@ -283,6 +339,10 @@ impl SignatureType {
                     params: vec![], // Unknown params
                     return_type: Box::new(SignatureType::from_ty(return_type)),
                 }
+            },
+            TyKind::UnresolvedPath { segments } => {
+                // Unresolved path - use the path segments as the name
+                SignatureType::Named(segments.clone())
             },
         }
     }
@@ -464,6 +524,17 @@ impl CallableBehavior {
     /// Get the parameters
     pub fn parameters(&self) -> &[CallableParameter] {
         &self.parameters
+    }
+
+    /// Get the number of required parameters (those without default values).
+    pub fn required_parameter_count(&self) -> usize {
+        self.parameters.iter().filter(|p| !p.has_default()).count()
+    }
+
+    /// Check if the given argument count is compatible with this callable's parameters,
+    /// accounting for default parameter values.
+    pub fn arity_matches(&self, argument_count: usize) -> bool {
+        argument_count >= self.required_parameter_count() && argument_count <= self.parameters.len()
     }
 
     /// Get the return type

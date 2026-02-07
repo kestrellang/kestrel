@@ -130,3 +130,80 @@ impl IntoDiagnostic for ShadowedTypeParameterError {
             ])
     }
 }
+
+/// Error when a required parameter appears after a parameter with a default value.
+pub struct RequiredParameterAfterDefaultError {
+    pub required_name: String,
+    pub required_span: Span,
+    pub default_param_name: String,
+    pub default_param_span: Span,
+}
+
+impl IntoDiagnostic for RequiredParameterAfterDefaultError {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
+        Diagnostic::error()
+            .with_message(format!(
+                "required parameter '{}' cannot follow parameter '{}' which has a default value",
+                self.required_name, self.default_param_name
+            ))
+            .with_labels(vec![
+                Label::secondary(
+                    self.default_param_span.file_id,
+                    self.default_param_span.range(),
+                )
+                .with_message("parameter with default value"),
+                Label::primary(self.required_span.file_id, self.required_span.range())
+                    .with_message("required parameter cannot come after default parameter"),
+            ])
+    }
+}
+
+/// Error when a default value expression has the wrong type.
+pub struct DefaultValueTypeMismatchError {
+    pub param_name: String,
+    pub expected_type: String,
+    pub actual_type: String,
+    pub default_span: Span,
+    pub param_type_span: Span,
+}
+
+impl IntoDiagnostic for DefaultValueTypeMismatchError {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
+        Diagnostic::error()
+            .with_message(format!(
+                "cannot use value of type '{}' as default for parameter '{}' of type '{}'",
+                self.actual_type, self.param_name, self.expected_type
+            ))
+            .with_labels(vec![
+                Label::primary(self.default_span.file_id, self.default_span.range()).with_message(
+                    format!(
+                        "expected '{}', found '{}'",
+                        self.expected_type, self.actual_type
+                    ),
+                ),
+                Label::secondary(self.param_type_span.file_id, self.param_type_span.range())
+                    .with_message("parameter type declared here"),
+            ])
+    }
+}
+
+/// Error when a default value expression references another parameter.
+pub struct DefaultValueReferencesParameterError {
+    pub param_name: String,
+    pub referenced_param: String,
+    pub reference_span: Span,
+}
+
+impl IntoDiagnostic for DefaultValueReferencesParameterError {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
+        Diagnostic::error()
+            .with_message(format!(
+                "default value for '{}' cannot reference parameter '{}'",
+                self.param_name, self.referenced_param
+            ))
+            .with_labels(vec![
+                Label::primary(self.reference_span.file_id, self.reference_span.range())
+                    .with_message("cannot reference other parameters in default values"),
+            ])
+    }
+}

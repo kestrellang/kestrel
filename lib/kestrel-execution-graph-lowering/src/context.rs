@@ -1,6 +1,7 @@
 //! Lowering context - holds all state during the lowering pass.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 use kestrel_execution_graph::{
     BasicBlock, Block, CallArg, Callee, Function, Id, Immediate, Local, MirContext, Place,
@@ -25,6 +26,8 @@ use crate::error::LoweringError;
 pub struct LoopInfo {
     /// The loop identifier from the semantic tree.
     pub loop_id: LoopId,
+    /// Optional label name for named break/continue.
+    pub label: Option<String>,
     /// The header block (where condition is checked, for while loops).
     /// For infinite loops, this is the body entry.
     pub header_block: Id<Block>,
@@ -128,11 +131,20 @@ pub struct LoweringContext<'a> {
     /// Cache of generated thunks for function references.
     /// Maps (function name, type args) to the thunk name.
     thunk_cache: ThunkCache,
+
+    /// Maps file_id to the directory containing that source file.
+    /// Used to resolve relative paths in @fileconstant.
+    file_paths: HashMap<usize, PathBuf>,
 }
 
 impl<'a> LoweringContext<'a> {
     /// Create a new lowering context.
     pub fn new(model: &'a SemanticModel) -> Self {
+        Self::with_file_paths(model, HashMap::new())
+    }
+
+    /// Create a new lowering context with file path information.
+    pub fn with_file_paths(model: &'a SemanticModel, file_paths: HashMap<usize, PathBuf>) -> Self {
         LoweringContext {
             model,
             mir: MirContext::new(),
@@ -148,7 +160,13 @@ impl<'a> LoweringContext<'a> {
             closure_counter: 0,
             deinit_flag_counter: 0,
             thunk_cache: HashMap::new(),
+            file_paths,
         }
+    }
+
+    /// Get the directory for a file by its ID.
+    pub fn file_directory(&self, file_id: usize) -> Option<&PathBuf> {
+        self.file_paths.get(&file_id)
     }
 
     /// Finish lowering and return the result.
@@ -248,9 +266,23 @@ impl<'a> LoweringContext<'a> {
 
     /// Push a loop onto the stack.
     /// The loop's scope_depth is set to the current scope stack depth.
-    pub fn push_loop(&mut self, loop_id: LoopId, header_block: Id<Block>, exit_block: Id<Block>) {
+    pub fn push_loop(
+        &mut self,
+        loop_id: LoopId,
+        header_block: Id<Block>,
+        exit_block: Id<Block>,
+        label: Option<String>,
+    ) {
+        if std::env::var("KESTREL_DEBUG_LOOPS").is_ok() {
+            let func_name = self
+                .current_function
+                .map(|fid| self.mir.name(self.mir.function(fid).name).to_string())
+                .unwrap_or_else(|| "<none>".to_string());
+            eprintln!("push_loop {} {:?}", func_name, loop_id);
+        }
         self.loop_stack.push(LoopInfo {
             loop_id,
+            label,
             header_block,
             exit_block,
             scope_depth: self.scope_stack.len(),
@@ -265,6 +297,19 @@ impl<'a> LoweringContext<'a> {
     /// Find a loop by its ID.
     pub fn find_loop(&self, loop_id: LoopId) -> Option<&LoopInfo> {
         self.loop_stack.iter().rev().find(|l| l.loop_id == loop_id)
+    }
+
+    /// Find the nearest loop by label.
+    pub fn find_loop_by_label(&self, label: &str) -> Option<&LoopInfo> {
+        self.loop_stack
+            .iter()
+            .rev()
+            .find(|l| l.label.as_deref() == Some(label))
+    }
+
+    /// Snapshot loop IDs for debugging.
+    pub fn loop_stack_ids(&self) -> Vec<LoopId> {
+        self.loop_stack.iter().map(|l| l.loop_id).collect()
     }
 
     /// Get the innermost loop.
@@ -326,6 +371,36 @@ impl<'a> LoweringContext<'a> {
         self.local_map = map;
     }
 
+    /// Save the current loop stack (for restoring after lowering a nested closure).
+    pub fn save_loop_stack(&self) -> Vec<LoopInfo> {
+        self.loop_stack.clone()
+    }
+
+    /// Restore a previously saved loop stack.
+    pub fn restore_loop_stack(&mut self, stack: Vec<LoopInfo>) {
+        self.loop_stack = stack;
+    }
+
+    /// Save the current scope stack (for restoring after lowering a nested closure).
+    pub fn save_scope_stack(&self) -> Vec<ScopeInfo> {
+        self.scope_stack.clone()
+    }
+
+    /// Restore a previously saved scope stack.
+    pub fn restore_scope_stack(&mut self, stack: Vec<ScopeInfo>) {
+        self.scope_stack = stack;
+    }
+
+    /// Save statement temporaries (for restoring after lowering a nested closure).
+    pub fn save_statement_temps(&self) -> Vec<Id<Local>> {
+        self.statement_temps.clone()
+    }
+
+    /// Restore statement temporaries.
+    pub fn restore_statement_temps(&mut self, temps: Vec<Id<Local>>) {
+        self.statement_temps = temps;
+    }
+
     /// Set the current function (used when switching to closure context).
     pub fn set_current_function(&mut self, func_id: Option<Id<Function>>) {
         self.current_function = func_id;
@@ -349,6 +424,16 @@ impl<'a> LoweringContext<'a> {
     /// Set the temp counter (for restoring).
     pub fn set_temp_counter(&mut self, counter: u32) {
         self.temp_counter = counter;
+    }
+
+    /// Get the current deinit flag counter value (for saving).
+    pub fn get_deinit_flag_counter(&self) -> u32 {
+        self.deinit_flag_counter
+    }
+
+    /// Set the deinit flag counter (for restoring).
+    pub fn set_deinit_flag_counter(&mut self, counter: u32) {
+        self.deinit_flag_counter = counter;
     }
 
     // === Statement Emission ===

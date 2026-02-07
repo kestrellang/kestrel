@@ -220,7 +220,7 @@ mod field_access {
         .expect(Compiles)
         .expect(Mir::compiles())
         .expect(
-            Mir::mir_function("Main.getX")
+            Mir::mir_function("Main.getX$p")
                 .returns(MirTy::I64)
                 .has_param("p", MirTy::ref_(MirTy::named("Main.Point"))),
         );
@@ -254,7 +254,7 @@ mod field_access {
         .expect(Compiles)
         .expect(Mir::compiles())
         .expect(
-            Mir::mir_function("Main.getValue")
+            Mir::mir_function("Main.getValue$o")
                 .returns(MirTy::I64)
                 .has_param("o", MirTy::ref_(MirTy::named("Main.Outer"))),
         );
@@ -282,7 +282,7 @@ mod field_access {
         .expect(Mir::compiles())
         .expect(Mir::struct_count(6))
         .expect(
-            Mir::mir_function("Main.getValue")
+            Mir::mir_function("Main.getValue$t")
                 .returns(MirTy::I64)
                 .has_param("t", MirTy::ref_(MirTy::named("Main.Top"))),
         );
@@ -343,7 +343,7 @@ mod instance_methods {
         .expect(Compiles)
         .expect(Mir::compiles())
         .expect(
-            Mir::mir_function("Main.Point.add")
+            Mir::mir_function("Main.Point.add$dx$dy")
                 .returns(MirTy::named("Main.Point"))
                 .has_param("self", MirTy::ref_(MirTy::named("Main.Point")))
                 .has_param("dx", MirTy::ref_(MirTy::I64))
@@ -457,7 +457,7 @@ mod mutating_methods {
         .expect(Compiles)
         .expect(Mir::compiles())
         .expect(
-            Mir::mir_function("Main.Counter.add")
+            Mir::mir_function("Main.Counter.add$n")
                 .returns(MirTy::Unit)
                 .has_param("self", MirTy::ref_mut(MirTy::named("Main.Counter")))
                 .has_param("n", MirTy::ref_(MirTy::I64)),
@@ -619,7 +619,7 @@ mod static_methods {
         .expect(Compiles)
         .expect(Mir::compiles())
         .expect(
-            Mir::mir_function("Main.Math.add")
+            Mir::mir_function("Main.Math.add$a$b")
                 .returns(MirTy::I64)
                 .has_param("a", MirTy::ref_(MirTy::I64))
                 .has_param("b", MirTy::ref_(MirTy::I64))
@@ -646,7 +646,7 @@ mod static_methods {
         )
         .expect(Compiles)
         .expect(Mir::compiles())
-        .expect(Mir::mir_function("Main.main").calls("Main.Math.add"));
+        .expect(Mir::mir_function("Main.main").calls("Main.Math.add$a$b"));
     }
 
     #[test]
@@ -720,8 +720,8 @@ mod chained_methods {
         .expect(
             Mir::mir_function("Main.main")
                 .returns(MirTy::I64)
-                .calls("Main.Builder.add")
-                .calls("Main.Builder.multiply")
+                .calls("Main.Builder.add$n")
+                .calls("Main.Builder.multiply$n")
                 .calls("Main.Builder.build"),
         );
     }
@@ -789,7 +789,7 @@ mod struct_with_struct_fields {
         .expect(Compiles)
         .expect(Mir::compiles())
         .expect(
-            Mir::mir_function("Main.getOriginX")
+            Mir::mir_function("Main.getOriginX$r")
                 .returns(MirTy::I64)
                 .has_param("r", MirTy::ref_(MirTy::named("Main.Rectangle"))),
         );

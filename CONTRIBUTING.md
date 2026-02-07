@@ -8,7 +8,6 @@ Thanks for your interest in contributing to Kestrel!
 # Clone and setup
 git clone https://github.com/jkpdino/kestrel.git
 cd kestrel
-./scripts/setup-hooks.sh
 
 # Run tests
 cargo test
@@ -44,5 +43,3 @@ cargo fmt
 cargo clippy
 cargo test
 ```
-
-Or use the pre-commit hooks (installed via `./scripts/setup-hooks.sh`).

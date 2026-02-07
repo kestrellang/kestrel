@@ -52,7 +52,16 @@ pub fn find_witness(
         }
     }
 
-    Err(MonomorphizeError::WitnessNotFound { protocol, for_type })
+    // Get human-readable names for the error message
+    let protocol_name = Some(mir.name(protocol).to_string());
+    let type_name = Some(format!("{}", mir.ty(for_type).display(mir)));
+
+    Err(MonomorphizeError::WitnessNotFound {
+        protocol,
+        for_type,
+        protocol_name,
+        type_name,
+    })
 }
 
 /// Pattern match a witness type against a concrete type to extract type parameter bindings.
@@ -246,8 +255,19 @@ pub fn resolve_witness(
     method: &str,
     for_type: Id<Ty>,
 ) -> Result<(Id<QualifiedName>, Vec<Id<Ty>>), MonomorphizeError> {
+    // Resolve associated type projections before witness lookup.
+    let mut resolved_for_type = for_type;
+    while let MirTy::AssociatedTypeProjection {
+        base,
+        protocol,
+        associated,
+    } = mir.ty(resolved_for_type)
+    {
+        resolved_for_type = resolve_associated_type(mir, *base, *protocol, associated)?;
+    }
+
     // Find the witness
-    let witness_match = find_witness(mir, protocol, for_type)?;
+    let witness_match = find_witness(mir, protocol, resolved_for_type)?;
     let witness_def = &mir.witnesses[witness_match.witness_id];
 
     // Look up the method binding
@@ -256,45 +276,127 @@ pub fn resolve_witness(
             MonomorphizeError::MethodNotFoundInWitness {
                 protocol,
                 method: method.to_string(),
-                for_type,
+                for_type: resolved_for_type,
+                protocol_name: Some(mir.name(protocol).to_string()),
+                type_name: Some(format!("{}", mir.ty(resolved_for_type).display(mir))),
             }
         })?;
 
     // Build the type arguments:
-    // 1. First, the witness's type params (from pattern matching the implementing type)
-    // 2. Then, any method-specific type args (e.g., Self=X for protocol extension methods)
-    let mut type_args: Vec<_> = witness_def
-        .type_params
-        .iter()
-        .map(|tp| {
-            witness_match
-                .type_bindings
-                .get(tp)
-                .copied()
-                // If a type param wasn't bound, it means it wasn't used in the
-                // implementing type pattern (rare but possible). In this case,
-                // we can't determine the type arg - this is an error.
-                .unwrap_or_else(|| {
-                    // This shouldn't happen with well-formed witnesses
-                    panic!(
-                        "witness type param {:?} not bound during matching",
-                        mir.type_param(*tp).name
-                    )
-                })
-        })
-        .collect();
+    //
+    // For direct implementations (e.g., Box[T].clone implementing Cloneable.clone):
+    //   - Include witness type params (e.g., [T] from Box[T])
+    //   - Then append method-specific type args
+    //
+    // For extension methods (e.g., Iterator.map from extend Iterator):
+    //   - Do NOT include witness type params
+    //   - Only use method-specific type args (which handle Self through self_type)
+    //
+    // Detection: Extension methods come from protocol extensions, so their
+    // qualified name includes the protocol name (e.g., std.iter.Iterator.map).
+    // Direct implementations come from the implementing type.
+    let protocol_name_str = mir.name(protocol).to_string();
+    let impl_func_name_str = mir.name(*impl_func_name).to_string();
 
-    // Add method-specific type arguments (e.g., Self binding for protocol extension methods)
-    type_args.extend(method_type_args.iter().cloned());
+    // Check if this is an extension method by seeing if the implementation
+    // is defined within the protocol (protocol extensions)
+    let is_extension_method = impl_func_name_str.contains(&protocol_name_str);
+
+    let type_args = if is_extension_method {
+        // Extension methods: only use method-specific type args
+        // (Self is handled via self_type substitution, not type_args)
+        method_type_args.clone()
+    } else {
+        // Direct implementations: include witness type params + method type args
+        let mut type_args: Vec<_> = witness_def
+            .type_params
+            .iter()
+            .map(|tp| {
+                witness_match
+                    .type_bindings
+                    .get(tp)
+                    .copied()
+                    // If a type param wasn't bound, it means it wasn't used in the
+                    // implementing type pattern (rare but possible). In this case,
+                    // we can't determine the type arg - this is an error.
+                    .unwrap_or_else(|| {
+                        // This shouldn't happen with well-formed witnesses
+                        panic!(
+                            "witness type param {:?} not bound during matching",
+                            mir.type_param(*tp).name
+                        )
+                    })
+            })
+            .collect();
+
+        // Add method-specific type arguments
+        type_args.extend(method_type_args.iter().cloned());
+        type_args
+    };
 
     Ok((*impl_func_name, type_args))
 }
 
-/// Resolve an associated type projection to its concrete type.
+/// Resolve an associated type projection to its concrete type (mutable version).
 ///
 /// Given a projection like `T.Element` where `T: Container` and `T` is substituted
 /// to `MyVec`, this finds the witness `MyVec: Container` and looks up the binding
 /// for `Element`.
+///
+/// This version can intern new types when substituting witness type parameters.
+/// Use this during the collection phase.
+pub fn resolve_associated_type_mut(
+    mir: &mut MirContext,
+    base_type: Id<Ty>,
+    protocol: Id<QualifiedName>,
+    associated: &str,
+) -> Result<Id<Ty>, MonomorphizeError> {
+    // Find the witness
+    let witness_match = find_witness(mir, protocol, base_type)?;
+    let witness_def = &mir.witnesses[witness_match.witness_id];
+
+    // Look up the associated type binding
+    let assoc_ty = *witness_def.type_bindings.get(associated).ok_or_else(|| {
+        MonomorphizeError::MethodNotFoundInWitness {
+            protocol,
+            method: format!("type {}", associated),
+            for_type: base_type,
+            protocol_name: Some(mir.name(protocol).to_string()),
+            type_name: Some(format!("{}", mir.ty(base_type).display(mir))),
+        }
+    })?;
+
+    // Copy the type params we need before releasing the borrow on witness_def
+    let witness_type_params: Vec<_> = witness_def.type_params.clone();
+
+    // If the witness has type parameters, we need to substitute them
+    // in the associated type binding
+    if !witness_type_params.is_empty() {
+        // The associated type might reference the witness's type params
+        // e.g., witness Box[T]: Container { type Element = T }
+        // If we matched Box[Int], we need to substitute T → Int
+        let mut subst = Substitution::new();
+        for tp in &witness_type_params {
+            if let Some(&binding) = witness_match.type_bindings.get(tp) {
+                subst.insert(*tp, binding);
+            }
+        }
+
+        // Use apply_ty which can intern new types
+        Ok(subst.apply_ty(mir, assoc_ty))
+    } else {
+        Ok(assoc_ty)
+    }
+}
+
+/// Resolve an associated type projection to its concrete type (readonly version).
+///
+/// Given a projection like `T.Element` where `T: Container` and `T` is substituted
+/// to `MyVec`, this finds the witness `MyVec: Container` and looks up the binding
+/// for `Element`.
+///
+/// This version cannot intern new types. Use during codegen when all types should
+/// already be interned.
 pub fn resolve_associated_type(
     mir: &MirContext,
     base_type: Id<Ty>,
@@ -311,6 +413,8 @@ pub fn resolve_associated_type(
             protocol,
             method: format!("type {}", associated),
             for_type: base_type,
+            protocol_name: Some(mir.name(protocol).to_string()),
+            type_name: Some(format!("{}", mir.ty(base_type).display(mir))),
         }
     })?;
 
@@ -346,11 +450,8 @@ pub fn resolve_associated_type(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
     fn test_match_pattern_primitives() {
-        let mir = MirContext::new();
 
         // We can't easily test primitives without interning,
         // so this is a placeholder for more comprehensive tests

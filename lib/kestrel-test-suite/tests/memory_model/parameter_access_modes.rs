@@ -810,7 +810,7 @@ mod mir_passing_modes {
         // The call now passes the reference with Copy mode
         .expect(Mir::mir_function("Test.caller").any_block(|b| {
             b.has_statement(StatementPattern::CallWithModes {
-                callee: "Test.process".to_string(),
+                callee: "Test.process$p".to_string(),
                 arg_modes: vec![PassingMode::Copy], // Reference is copied, not Ref
             })
         }))
@@ -871,7 +871,7 @@ mod mir_passing_modes {
         // The call passes the mutable reference with Copy mode
         .expect(Mir::mir_function("Test.caller").any_block(|b| {
             b.has_statement(StatementPattern::CallWithModes {
-                callee: "Test.reset".to_string(),
+                callee: "Test.reset$p".to_string(),
                 arg_modes: vec![PassingMode::Copy], // MutRef is copied
             })
         }))
@@ -901,7 +901,7 @@ mod mir_passing_modes {
         .expect(Mir::compiles())
         .expect(Mir::mir_function("Test.caller").any_block(|b| {
             b.has_statement(StatementPattern::CallWithModes {
-                callee: "Test.consume".to_string(),
+                callee: "Test.consume$p".to_string(),
                 arg_modes: vec![PassingMode::Copy],
             })
         }));
@@ -933,7 +933,7 @@ mod mir_passing_modes {
         // All args are passed with Copy (the first two are references that are copied)
         .expect(Mir::mir_function("Test.caller").any_block(|b| {
             b.has_statement(StatementPattern::CallWithModes {
-                callee: "Test.process".to_string(),
+                callee: "Test.process$a$b$c".to_string(),
                 arg_modes: vec![PassingMode::Copy, PassingMode::Copy, PassingMode::Copy],
             })
         }))
@@ -971,7 +971,7 @@ mod mir_passing_modes {
         .expect(Mir::compiles())
         .expect(Mir::mir_function("Test.caller").any_block(|b| {
             b.has_statement(StatementPattern::CallWithModes {
-                callee: "Test.Point.copyXTo".to_string(),
+                callee: "Test.Point.copyXTo$other".to_string(),
                 // self (Ref, handled specially) + other (RefMut created, passed with Copy)
                 arg_modes: vec![PassingMode::Ref, PassingMode::Copy],
             })

@@ -5,6 +5,27 @@
 use kestrel_reporting::{Diagnostic, IntoDiagnostic, Label};
 use kestrel_span::Span;
 
+/// Error for an integer literal that exceeds the u64 range.
+pub struct IntegerLiteralOverflowError {
+    pub span: Span,
+    pub literal: String,
+}
+
+impl IntoDiagnostic for IntegerLiteralOverflowError {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
+        Diagnostic::error()
+            .with_message("integer literal is out of range")
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message("this value does not fit in `u64`"),
+            ])
+            .with_notes(vec![
+                format!("literal: `{}`", self.literal),
+                "maximum supported integer literal is 18446744073709551615".to_string(),
+            ])
+    }
+}
+
 /// Error for an invalid escape sequence in a string literal
 pub struct InvalidEscapeSequenceError {
     pub span: Span,
@@ -121,6 +142,42 @@ impl IntoDiagnostic for IncompleteEscapeSequenceError {
             .with_labels(vec![
                 Label::primary(self.span.file_id, self.span.range())
                     .with_message("escape sequence is incomplete"),
+            ])
+    }
+}
+
+/// Error for an empty character literal ''
+pub struct EmptyCharacterLiteralError {
+    pub span: Span,
+}
+
+impl IntoDiagnostic for EmptyCharacterLiteralError {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
+        Diagnostic::error()
+            .with_message("empty character literal")
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message("character literal must contain exactly one codepoint"),
+            ])
+    }
+}
+
+/// Error for a character literal containing multiple codepoints
+pub struct MultipleCodepointsInCharLiteralError {
+    pub span: Span,
+    pub count: usize,
+}
+
+impl IntoDiagnostic for MultipleCodepointsInCharLiteralError {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
+        Diagnostic::error()
+            .with_message("character literal may only contain one codepoint")
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message(format!("found {} codepoints", self.count)),
+            ])
+            .with_notes(vec![
+                "use a string literal for multiple characters".to_string(),
             ])
     }
 }

@@ -43,8 +43,8 @@ impl StdLibConfig {
 
 /// Resolved standard library with loaded source files
 pub struct StdLib {
-    /// (file_path, content) pairs for all stdlib files
-    pub sources: Vec<(String, String)>,
+    /// (name, content, full_path) triples for all stdlib files
+    pub sources: Vec<(String, String, PathBuf)>,
 }
 
 impl StdLib {
@@ -98,7 +98,7 @@ impl StdLib {
     }
 
     /// Recursively load all .ks files from a directory
-    fn load_from_path(path: &Path) -> Result<Vec<(String, String)>, StdLibError> {
+    fn load_from_path(path: &Path) -> Result<Vec<(String, String, PathBuf)>, StdLibError> {
         let mut sources = Vec::new();
         Self::collect_sources(path, path, &mut sources)?;
         Ok(sources)
@@ -107,7 +107,7 @@ impl StdLib {
     fn collect_sources(
         root: &Path,
         current: &Path,
-        sources: &mut Vec<(String, String)>,
+        sources: &mut Vec<(String, String, PathBuf)>,
     ) -> Result<(), StdLibError> {
         let entries = fs::read_dir(current)?;
 
@@ -125,7 +125,9 @@ impl StdLib {
                     .unwrap_or(&path)
                     .display()
                     .to_string();
-                sources.push((format!("std/{}", rel_path), content));
+                // Get the absolute path for file constant resolution
+                let full_path = path.canonicalize().unwrap_or_else(|_| path.clone());
+                sources.push((format!("std/{}", rel_path), content, full_path));
             }
         }
         Ok(())

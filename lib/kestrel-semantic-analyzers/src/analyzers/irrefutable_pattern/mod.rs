@@ -194,7 +194,15 @@ fn describe_pattern(pattern: &Pattern) -> String {
                 LiteralValue::Integer(i) => i.to_string(),
                 LiteralValue::Float(f) => f.to_string(),
                 LiteralValue::String(s) => format!("\"{}\"", s),
+                LiteralValue::Char(c) => {
+                    if let Some(ch) = char::from_u32(*c) {
+                        format!("'{}'", ch)
+                    } else {
+                        format!("'\\u{{{:X}}}'", c)
+                    }
+                },
                 LiteralValue::Bool(b) => b.to_string(),
+                LiteralValue::Null => "null".to_string(),
             }
         },
         PatternKind::EnumVariant {
@@ -225,14 +233,22 @@ fn describe_pattern(pattern: &Pattern) -> String {
         } => {
             use kestrel_semantic_tree::pattern::RangeBound;
             let start_str = match start {
-                RangeBound::Integer(i) => i.to_string(),
-                RangeBound::Char(c) => format!("'{}'", c),
+                Some(RangeBound::Integer(i)) => i.to_string(),
+                Some(RangeBound::Char(c)) => format!("'{}'", c),
+                None => String::new(),
             };
             let end_str = match end {
-                RangeBound::Integer(i) => i.to_string(),
-                RangeBound::Char(c) => format!("'{}'", c),
+                Some(RangeBound::Integer(i)) => i.to_string(),
+                Some(RangeBound::Char(c)) => format!("'{}'", c),
+                None => String::new(),
             };
-            let op = if *inclusive { "..=" } else { "..<" };
+            let op = if end.is_none() {
+                ".."
+            } else if *inclusive {
+                "..="
+            } else {
+                "..<"
+            };
             format!("{}{}{}", start_str, op, end_str)
         },
         PatternKind::Struct {

@@ -4,7 +4,7 @@
 //! without depending directly on the semantic model implementation.
 
 use kestrel_semantic_tree::builtins::LanguageFeature;
-use kestrel_semantic_tree::ty::{FloatBits, IntBits, Substitutions, Ty};
+use kestrel_semantic_tree::ty::{FloatBits, IntBits, Substitutions, Ty, WhereClause};
 use kestrel_span::Span;
 use semantic_tree::symbol::SymbolId;
 
@@ -26,6 +26,13 @@ pub struct MemberResolution {
     /// the expected result type can propagate back to constrain the receiver type.
     /// This enables patterns like `-32768` to infer as Int16 when context expects Int16.
     pub returns_self: bool,
+    /// Where clause constraints from the method declaration.
+    /// These are converted into inference constraints to enable type parameter inference
+    /// from where clause equality constraints like `where Item = Optional[T]`.
+    pub where_constraints: WhereClause,
+    /// Number of required parameters (those without default values).
+    /// Used for arity checking that accounts for default parameters.
+    pub required_parameter_count: usize,
 }
 
 /// Error when member resolution fails.
@@ -73,6 +80,29 @@ pub trait TypeOracle {
         member: &str,
         is_static: bool,
     ) -> Result<MemberResolution, MemberError>;
+
+    /// Look up a member on a type with expected argument arity for callable members.
+    ///
+    /// Default implementation delegates to `resolve_member` and then verifies callable arity.
+    fn resolve_member_with_arity(
+        &self,
+        receiver_ty: &Ty,
+        member: &str,
+        is_static: bool,
+        argument_count: usize,
+    ) -> Result<MemberResolution, MemberError> {
+        let resolution = self.resolve_member(receiver_ty, member, is_static)?;
+        if argument_count >= resolution.required_parameter_count
+            && argument_count <= resolution.parameters.len()
+        {
+            Ok(resolution)
+        } else {
+            Err(MemberError::NotFound {
+                receiver_ty: receiver_ty.clone(),
+                member: member.to_string(),
+            })
+        }
+    }
 
     /// Check if a type conforms to a protocol.
     ///
@@ -137,6 +167,18 @@ pub trait TypeOracle {
     /// The protocol's symbol ID, or None if not registered.
     fn builtin_protocol(&self, feature: LanguageFeature) -> Option<SymbolId>;
 
+    /// Get the protocol that a method belongs to, if any.
+    ///
+    /// Used to generate conformance constraints when calling protocol methods.
+    /// Returns None if the method is not a builtin protocol method.
+    fn protocol_for_method(&self, method_id: SymbolId) -> Option<SymbolId> {
+        // Default implementation returns None.
+        // Implementations with access to the builtin registry can check if the method
+        // is a builtin protocol method and return the associated protocol.
+        let _ = method_id;
+        None
+    }
+
     /// Get the default type for integer literals when type is ambiguous.
     ///
     /// Returns Int64 by default.
@@ -169,5 +211,89 @@ pub trait TypeOracle {
         // Default implementation uses primitive bool type.
         // Implementations with access to stdlib can override to return the Bool struct.
         Ty::bool(span)
+    }
+
+    /// Get the default type for character literals when type is ambiguous.
+    ///
+    /// Returns the `CodePoint` struct type if available in the stdlib,
+    /// otherwise falls back to i32.
+    fn default_char_type(&self, span: Span) -> Ty {
+        // Default implementation uses i32.
+        // Implementations with access to stdlib can override to return the CodePoint struct.
+        Ty::int(IntBits::I32, span)
+    }
+
+    /// Get the default type for array literals when type is ambiguous.
+    ///
+    /// Creates `Array[element_ty]` struct type. Returns None if the Array struct
+    /// is not available (e.g., stdlib not loaded).
+    fn default_array_type(&self, element_ty: Ty, span: Span) -> Option<Ty>;
+
+    /// Check if target_ty conforms to FromValue[source_ty].
+    ///
+    /// Used by the Promotable constraint to determine if a value can be
+    /// implicitly wrapped. Returns the from() method symbol and substitutions
+    /// if the conformance exists.
+    ///
+    /// # Arguments
+    ///
+    /// * `target_ty` - The target type (e.g., `Optional[Int]`)
+    /// * `source_ty` - The source type (e.g., `Int`)
+    ///
+    /// # Returns
+    ///
+    /// If target_ty conforms to FromValue[source_ty], returns (method_id, substitutions).
+    /// Otherwise returns None.
+    fn check_from_value_conformance(
+        &self,
+        target_ty: &Ty,
+        source_ty: &Ty,
+    ) -> Option<(SymbolId, Substitutions)> {
+        // Default implementation returns None.
+        // Implementors with access to conformance checking can override.
+        let _ = (target_ty, source_ty);
+        None
+    }
+
+    /// Normalize a type using equality constraints from the current context.
+    ///
+    /// This resolves associated types like `I.Item` to their constrained values
+    /// when there's an equality constraint like `I.Item = (K, V)` in scope.
+    ///
+    /// Used by tuple indexing and other operations that need to know the concrete
+    /// type behind an associated type.
+    ///
+    /// # Arguments
+    ///
+    /// * `ty` - The type to normalize
+    ///
+    /// # Returns
+    ///
+    /// The normalized type, or the original if no normalization applies.
+    fn normalize_with_constraints(&self, ty: &Ty) -> Ty {
+        // Default implementation returns the type unchanged.
+        // Implementors with access to where clause constraints can override.
+        ty.clone()
+    }
+
+    /// Get the where clause for a function symbol.
+    ///
+    /// Used to extract where clause constraints from method calls that were
+    /// resolved during binding. This is critical for methods like
+    /// `compactMap[T]() where Item = Optional[T]` where the where clause
+    /// equality constraint is the only way to infer `T`.
+    ///
+    /// # Arguments
+    ///
+    /// * `function_id` - The symbol ID of the function
+    ///
+    /// # Returns
+    ///
+    /// The function's where clause, or an empty where clause if not found.
+    fn function_where_clause(&self, function_id: SymbolId) -> WhereClause {
+        // Default implementation returns empty where clause.
+        // Implementors with access to the semantic model can override.
+        let _ = function_id;
+        WhereClause::new()
     }
 }

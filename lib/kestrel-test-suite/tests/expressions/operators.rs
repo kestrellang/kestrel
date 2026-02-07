@@ -601,7 +601,11 @@ func bitwiseAndOnBool() -> lang.i1 {
 "#,
         )
         .expect(Fails)
-        .expect(HasErrorCount(3));
+        // 8 errors with MethodRef pattern (double errors for conformance + member):
+        // - "hello" + 5: 3 errors (conformance, member not found, type mismatch)
+        // - 1 and 2: 3 errors (conformance, member not found, closure type mismatch)
+        // - true & false: 2 errors (conformance, member not found)
+        .expect(HasErrorCount(8));
     }
 }
 

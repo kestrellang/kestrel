@@ -11,14 +11,15 @@
 use std::collections::HashSet;
 
 use kestrel_semantic_tree::builtins::LanguageFeature;
-use kestrel_semantic_tree::ty::{ParamInfo, Ty, TyId, TyKind};
+use kestrel_semantic_tree::ty::{ParamInfo, Substitutions, Ty, TyId, TyKind};
 use kestrel_span::Span;
+use semantic_tree::symbol::Symbol;
 
 use crate::constraint::Constraint;
 use crate::context::InferenceContext;
 use crate::error::InferenceError;
 use crate::oracle::MemberError;
-use crate::solution::{Solution, ValueResolution};
+use crate::solution::{PromotionInfo, Solution, ValueResolution};
 
 /// Result of attempting to solve a single constraint.
 enum SolveResult {
@@ -33,6 +34,39 @@ enum SolveResult {
 /// Errors are accumulated in the solution rather than failing fast,
 /// allowing multiple type errors to be reported in a single pass.
 pub fn solve(mut ctx: InferenceContext<'_>) -> Solution {
+    // Pre-scan constraints to identify literal types that have default types
+    // (integer, float, string, bool, char). We need to defer Promotable constraints
+    // for these literals until their defaults are applied.
+    // Note: Null and array literals do NOT have defaults and need type context,
+    // so we don't mark them - they should unify immediately.
+    let literal_ty_ids: Vec<TyId> = ctx
+        .constraints()
+        .iter()
+        .filter_map(|constraint| {
+            let Constraint::Conforms { ty, protocol } = constraint else {
+                return None;
+            };
+            let feature = get_literal_feature_for_protocol(&ctx, protocol.symbol_id)?;
+            // Only mark literals that have defaults
+            match feature {
+                LanguageFeature::ExpressibleByIntLiteral
+                | LanguageFeature::ExpressibleByFloatLiteral
+                | LanguageFeature::ExpressibleByStringLiteral
+                | LanguageFeature::ExpressibleByBoolLiteral
+                | LanguageFeature::ExpressibleByCharLiteral => Some(*ty),
+                // Null, array, and dictionary literals need context, don't defer
+                LanguageFeature::ExpressibleByNullLiteral
+                | LanguageFeature::_ExpressibleByArrayLiteral
+                | LanguageFeature::_ExpressibleByDictionaryLiteral => None,
+                _ => None,
+            }
+        })
+        .collect();
+
+    for ty_id in literal_ty_ids {
+        ctx.mark_literal_ty(ty_id);
+    }
+
     // Iterate until fixpoint (no progress)
     loop {
         let progress = solve_round(&mut ctx);
@@ -41,14 +75,35 @@ pub fn solve(mut ctx: InferenceContext<'_>) -> Solution {
         }
     }
 
-    // Apply default types for unresolved literal types
-    apply_default_literal_types(&mut ctx);
-
-    // Run another round to verify conformances after defaults are applied
+    // Apply default types for unresolved literal types.
+    // Loop until no more defaults can be applied - this handles nested structures
+    // like [[1, 2], [3, 4]] where inner arrays need defaults before outer arrays.
     loop {
-        let progress = solve_round(&mut ctx);
-        if !progress {
+        let defaults_applied = apply_default_literal_types(&mut ctx);
+        if !defaults_applied {
             break;
+        }
+
+        // Run solving rounds after each default application
+        loop {
+            let progress = solve_round(&mut ctx);
+            if !progress {
+                break;
+            }
+        }
+    }
+
+    // Default any remaining unconstrained inference variables to Never.
+    // This handles cases like `tryFold(initial: 0, combine: { .Ok(acc + x) })`
+    // where the error type E in Result[Acc, E] is never constrained because
+    // the closure only produces .Ok values. Never is semantically correct:
+    // it means the error case is impossible.
+    if apply_never_defaults(&mut ctx) {
+        loop {
+            let progress = solve_round(&mut ctx);
+            if !progress {
+                break;
+            }
         }
     }
 
@@ -66,10 +121,17 @@ pub fn solve(mut ctx: InferenceContext<'_>) -> Solution {
 /// - Float literals → Float64 (configurable via DefaultFloatLiteralType)
 /// - String literals → String
 /// - Bool literals → Bool
-fn apply_default_literal_types(ctx: &mut InferenceContext<'_>) {
+/// - Array literals → Array[ElementType] where ElementType is resolved from elements
+///
+/// Returns true if any defaults were applied, false otherwise.
+fn apply_default_literal_types(ctx: &mut InferenceContext<'_>) -> bool {
     // Collect literal constraints where the type is still Infer
     let constraints = ctx.take_constraints();
     let mut literals_to_default: Vec<(TyId, LanguageFeature, Span)> = Vec::new();
+
+    // Also collect Normalizes constraints for array element types
+    let mut array_element_types: std::collections::HashMap<TyId, TyId> =
+        std::collections::HashMap::new();
 
     for constraint in &constraints {
         if let Constraint::Conforms { ty, protocol } = constraint {
@@ -81,36 +143,91 @@ fn apply_default_literal_types(ctx: &mut InferenceContext<'_>) {
                 }
             }
         }
+        // Track array element type associations from Normalizes constraints
+        if let Constraint::Normalizes {
+            base,
+            assoc_name,
+            result,
+            ..
+        } = constraint
+            && assoc_name == "Element"
+        {
+            array_element_types.insert(*base, *result);
+        }
     }
 
-    // Put constraints back (except for literal constraints that we're defaulting)
+    // Apply defaults and track which type IDs were defaulted
+    let mut defaulted_ty_ids: std::collections::HashSet<TyId> = std::collections::HashSet::new();
+    let mut any_applied = false;
+
+    for (ty_id, feature, span) in literals_to_default {
+        let default_ty = match feature {
+            LanguageFeature::ExpressibleByIntLiteral => {
+                ctx.oracle().default_integer_type(span.clone())
+            },
+            LanguageFeature::ExpressibleByFloatLiteral => {
+                ctx.oracle().default_float_type(span.clone())
+            },
+            LanguageFeature::ExpressibleByStringLiteral => {
+                ctx.oracle().default_string_type(span.clone())
+            },
+            LanguageFeature::ExpressibleByBoolLiteral => {
+                ctx.oracle().default_boolean_type(span.clone())
+            },
+            LanguageFeature::ExpressibleByCharLiteral => {
+                ctx.oracle().default_char_type(span.clone())
+            },
+            // Null literal default is generic (NullLiteralType[T] = Optional[T]),
+            // so we can't apply a concrete default - type must be inferred from context
+            LanguageFeature::ExpressibleByNullLiteral => continue,
+            // Array literal default is Array[ElementType]
+            LanguageFeature::_ExpressibleByArrayLiteral => {
+                // Find the element type from the Normalizes constraint
+                if let Some(&elem_ty_id) = array_element_types.get(&ty_id) {
+                    let elem_ty = resolve_type(ctx, elem_ty_id);
+                    // If element type is still Infer, skip for now - inner elements
+                    // need to get defaults first (for nested arrays like [[1,2],[3,4]])
+                    if matches!(elem_ty.kind(), TyKind::Infer) {
+                        continue;
+                    }
+                    if let Some(array_ty) = ctx.oracle().default_array_type(elem_ty, span.clone()) {
+                        array_ty
+                    } else {
+                        continue;
+                    }
+                } else {
+                    continue;
+                }
+            },
+            _ => continue,
+        };
+
+        // Register the default type and add an equality constraint.
+        // Using equate() instead of direct substitution ensures the default
+        // propagates through any existing unification chains (e.g., when an
+        // array literal is inside a tuple, the array's type may be equated
+        // with the tuple's element type slot).
+        ctx.register_type(&default_ty);
+        ctx.equate(ty_id, default_ty.id(), span);
+        defaulted_ty_ids.insert(ty_id);
+        any_applied = true;
+    }
+
+    // Put constraints back (except for literal constraints that we actually defaulted)
     for constraint in constraints {
         if let Constraint::Conforms { ty, protocol } = &constraint {
-            let resolved = resolve_type(ctx, *ty);
-            if matches!(resolved.kind(), TyKind::Infer)
+            // Only skip constraints for types we actually defaulted
+            if defaulted_ty_ids.contains(ty)
                 && get_literal_feature_for_protocol(ctx, protocol.symbol_id).is_some()
             {
-                // Skip this constraint - we're applying a default type
+                // Skip this constraint - we applied a default type
                 continue;
             }
         }
         ctx.push_constraint(constraint);
     }
 
-    // Apply defaults
-    for (ty_id, feature, span) in literals_to_default {
-        let default_ty = match feature {
-            LanguageFeature::ExpressibleByIntLiteral => ctx.oracle().default_integer_type(span),
-            LanguageFeature::ExpressibleByFloatLiteral => ctx.oracle().default_float_type(span),
-            LanguageFeature::ExpressibleByStringLiteral => ctx.oracle().default_string_type(span),
-            LanguageFeature::ExpressibleByBoolLiteral => ctx.oracle().default_boolean_type(span),
-            _ => continue,
-        };
-
-        // Register the default type and substitute
-        ctx.register_type(&default_ty);
-        ctx.substitutions_mut().insert(ty_id, default_ty);
-    }
+    any_applied
 }
 
 /// Check if a protocol symbol ID corresponds to a literal expression protocol.
@@ -124,6 +241,10 @@ fn get_literal_feature_for_protocol(
         LanguageFeature::ExpressibleByFloatLiteral,
         LanguageFeature::ExpressibleByStringLiteral,
         LanguageFeature::ExpressibleByBoolLiteral,
+        LanguageFeature::ExpressibleByCharLiteral,
+        LanguageFeature::ExpressibleByNullLiteral,
+        LanguageFeature::_ExpressibleByArrayLiteral,
+        LanguageFeature::_ExpressibleByDictionaryLiteral,
     ];
 
     for feature in features {
@@ -137,6 +258,101 @@ fn get_literal_feature_for_protocol(
     None
 }
 
+/// Default unconstrained generic type parameters to Never.
+///
+/// After the main solve loop and literal defaults, some inference variables may remain
+/// unresolved. This specifically targets type parameters of generic function calls
+/// that were never constrained — for example, the error type `E` in `Result[Acc, E]`
+/// when a closure only produces `.Ok(...)` values and never `.Err(...)`.
+///
+/// Only Infer types that appear as substitutions of resolved Struct/Enum types are
+/// defaulted. Standalone Infer types (like unconstrained closure parameters) are NOT
+/// defaulted — those remain as genuine type inference errors.
+///
+/// Returns true if any defaults were applied.
+fn apply_never_defaults(ctx: &mut InferenceContext<'_>) -> bool {
+    let mut defaultable = Vec::new();
+    let mut visited = HashSet::new();
+
+    // Walk all types looking for resolved Struct/Enum types with unresolved substitutions.
+    // These represent generic type parameters that were never constrained.
+    for ty in ctx.type_registry().values() {
+        find_defaultable_type_params(ty, ctx, &mut defaultable, &mut visited);
+    }
+    for subst_ty in ctx.substitutions().values() {
+        find_defaultable_type_params(subst_ty, ctx, &mut defaultable, &mut visited);
+    }
+
+    if defaultable.is_empty() {
+        return false;
+    }
+
+    // Default each unconstrained type param to Never
+    for (ty_id, span) in &defaultable {
+        let never_ty = Ty::never(span.clone());
+        ctx.substitutions_mut().insert(*ty_id, never_ty);
+    }
+
+    true
+}
+
+/// Find Infer types that appear as type parameter substitutions of resolved Struct/Enum types.
+/// These are generic type parameters that were never constrained at a call site.
+fn find_defaultable_type_params(
+    ty: &Ty,
+    ctx: &InferenceContext<'_>,
+    defaultable: &mut Vec<(TyId, Span)>,
+    visited: &mut HashSet<TyId>,
+) {
+    if !visited.insert(ty.id()) {
+        return;
+    }
+
+    // First, resolve through substitutions
+    let resolved = if matches!(ty.kind(), TyKind::Infer) {
+        if let Some(subst) = ctx.substitutions().get(&ty.id()) {
+            subst.clone()
+        } else {
+            // Bare unresolved Infer - NOT defaultable (could be a closure param, etc.)
+            return;
+        }
+    } else {
+        ty.clone()
+    };
+
+    match resolved.kind() {
+        TyKind::Struct { substitutions, .. } | TyKind::Enum { substitutions, .. } => {
+            // Check each substitution - if it's an unresolved Infer, it's a defaultable type param
+            for (_, sub_ty) in substitutions.iter() {
+                let resolved_sub = resolve_type(ctx, sub_ty.id());
+                if matches!(resolved_sub.kind(), TyKind::Infer) {
+                    if !defaultable.iter().any(|(id, _)| *id == resolved_sub.id()) {
+                        defaultable.push((resolved_sub.id(), resolved_sub.span().clone()));
+                    }
+                } else {
+                    // Recursively check resolved compound substitutions
+                    find_defaultable_type_params(&resolved_sub, ctx, defaultable, visited);
+                }
+            }
+        },
+        TyKind::Function {
+            params,
+            return_type,
+        } => {
+            for p in params {
+                find_defaultable_type_params(p, ctx, defaultable, visited);
+            }
+            find_defaultable_type_params(return_type, ctx, defaultable, visited);
+        },
+        TyKind::Tuple(elements) => {
+            for e in elements {
+                find_defaultable_type_params(e, ctx, defaultable, visited);
+            }
+        },
+        _ => {},
+    }
+}
+
 /// Run one round of constraint solving.
 ///
 /// Returns true if any progress was made (i.e., at least one constraint was solved
@@ -145,10 +361,14 @@ fn solve_round(ctx: &mut InferenceContext<'_>) -> bool {
     let mut progress = false;
     let constraints = ctx.take_constraints();
 
-    for constraint in constraints {
-        match try_solve(ctx, &constraint) {
-            Ok(SolveResult::Solved) => progress = true,
-            Ok(SolveResult::Deferred) => ctx.push_constraint(constraint),
+    for constraint in constraints.iter() {
+        match try_solve(ctx, constraint) {
+            Ok(SolveResult::Solved) => {
+                progress = true;
+            },
+            Ok(SolveResult::Deferred) => {
+                ctx.push_constraint(constraint.clone());
+            },
             Err(error) => {
                 // Accumulate error and mark as progress (constraint was processed)
                 ctx.add_error(error);
@@ -181,9 +401,18 @@ fn try_solve(
             arguments,
             result,
             expr_id,
+            substitutions,
             span,
         } => resolve_member(
-            ctx, *receiver, member, *is_static, arguments, *result, *expr_id, span,
+            ctx,
+            *receiver,
+            member,
+            *is_static,
+            arguments,
+            *result,
+            *expr_id,
+            substitutions,
+            span,
         ),
         Constraint::ImplicitMember {
             expr_ty,
@@ -212,6 +441,18 @@ fn try_solve(
             *has_rest,
             span,
         ),
+        Constraint::Promotable {
+            from_ty,
+            to_ty,
+            expr_id,
+            span,
+        } => resolve_promotable(ctx, *from_ty, *to_ty, *expr_id, span),
+        Constraint::TupleIndexAccess {
+            tuple,
+            index,
+            result,
+            span,
+        } => resolve_tuple_index(ctx, *tuple, *index, *result, span),
     }
 }
 
@@ -226,6 +467,14 @@ fn unify(
     let ty_a = resolve_type(ctx, a);
     let ty_b = resolve_type(ctx, b);
 
+    // Normalize type parameters/associated types using equality constraints from where clauses.
+    // This helps unify types like `I.Iter.Item` with `T` when constraints equate them.
+    let norm_a = normalize_with_constraints_if_needed(ctx, &ty_a);
+    let norm_b = normalize_with_constraints_if_needed(ctx, &ty_b);
+    if norm_a.to_string() != ty_a.to_string() || norm_b.to_string() != ty_b.to_string() {
+        return unify(ctx, norm_a.id(), norm_b.id(), span);
+    }
+
     // Keep track of original IDs for closure metadata lookup
     let original_a = a;
     let original_b = b;
@@ -235,6 +484,8 @@ fn unify(
         return Ok(SolveResult::Solved);
     }
 
+    // DEBUG: Print when unifying types
+
     // Handle inference placeholders
     match (ty_a.kind(), ty_b.kind()) {
         // Both are inference placeholders - unify them
@@ -243,6 +494,22 @@ fn unify(
             ctx.substitutions_mut().insert(ty_a.id(), ty_b.clone());
             Ok(SolveResult::Solved)
         },
+
+        // Error types unify with anything (suppress cascading errors)
+        (TyKind::Error, _) | (_, TyKind::Error) => Ok(SolveResult::Solved),
+
+        // Never (bottom type) unifies with anything.
+        // IMPORTANT: Never should NOT substitute an Infer type, because Never is the
+        // bottom type that can coerce to any other type. If we have:
+        //   match x { true => 42, false => return }
+        // The match type should be Int (from the first arm), not Never.
+        // When Infer is unified with Never, we succeed without substituting,
+        // allowing another constraint to give Infer a concrete type.
+        (TyKind::Never, TyKind::Infer) | (TyKind::Infer, TyKind::Never) => {
+            // Don't substitute - leave the Infer type open for other constraints
+            Ok(SolveResult::Solved)
+        },
+        (TyKind::Never, _) | (_, TyKind::Never) => Ok(SolveResult::Solved),
 
         // One is an inference placeholder - substitute it
         (TyKind::Infer, _) => {
@@ -267,12 +534,6 @@ fn unify(
             ctx.substitutions_mut().insert(ty_b.id(), ty_a.clone());
             Ok(SolveResult::Solved)
         },
-
-        // Error types unify with anything (suppress cascading errors)
-        (TyKind::Error, _) | (_, TyKind::Error) => Ok(SolveResult::Solved),
-
-        // Never unifies with anything (bottom type)
-        (TyKind::Never, _) | (_, TyKind::Never) => Ok(SolveResult::Solved),
 
         // UnresolvedFunction with Function - check param info compatibility
         (
@@ -439,11 +700,7 @@ fn unify(
             Ok(SolveResult::Solved)
         },
 
-        (TyKind::Array(elem_a), TyKind::Array(elem_b)) => {
-            ctx.equate(elem_a.id(), elem_b.id(), span.clone());
-            Ok(SolveResult::Solved)
-        },
-
+        // Note: Array[T] struct types are unified via the Struct case above
         (TyKind::Pointer(elem_a), TyKind::Pointer(elem_b)) => {
             ctx.equate(elem_a.id(), elem_b.id(), span.clone());
             Ok(SolveResult::Solved)
@@ -862,11 +1119,15 @@ fn unify(
         // Type aliases - expand and retry
         (TyKind::TypeAlias { .. }, _) => {
             let expanded = ctx.oracle().expand_type_alias(&ty_a);
+            // Register the expanded type so resolve_type can find it
+            ctx.register_type(&expanded);
             ctx.equate(expanded.id(), ty_b.id(), span.clone());
             Ok(SolveResult::Solved)
         },
         (_, TyKind::TypeAlias { .. }) => {
             let expanded = ctx.oracle().expand_type_alias(&ty_b);
+            // Register the expanded type so resolve_type can find it
+            ctx.register_type(&expanded);
             ctx.equate(ty_a.id(), expanded.id(), span.clone());
             Ok(SolveResult::Solved)
         },
@@ -880,17 +1141,284 @@ fn unify(
     }
 }
 
+/// Resolve a promotable constraint.
+///
+/// A promotable constraint first tries unification. If that fails, it checks if
+/// the target type conforms to `FromValue[source]` and records a promotion if so.
+/// This enables implicit wrapping of values in Optional or Result types.
+fn resolve_promotable(
+    ctx: &mut InferenceContext<'_>,
+    from_ty: TyId,
+    to_ty: TyId,
+    expr_id: kestrel_semantic_tree::expr::ExprId,
+    span: &Span,
+) -> Result<SolveResult, InferenceError> {
+    let from = resolve_type(ctx, from_ty);
+    let to = resolve_type(ctx, to_ty);
+
+    // Debug only for function type promotions where we expect issues
+    if matches!(to.kind(), TyKind::Function { .. }) {
+        to.to_string().contains("ArrayIterator[Int64].Item");
+    }
+
+    // Expand type aliases for both types to get the underlying types
+    let from = from.expand_aliases();
+    let to = to.expand_aliases();
+
+    // If both types have unresolved variables, unify to link them.
+    if contains_unresolved_infer(&from) && contains_unresolved_infer(&to) {
+        return unify(ctx, from_ty, to_ty, span);
+    }
+
+    // If the source type is a pure Infer placeholder, we need to decide:
+    // - If it's a literal AND target is Infer or a promotion target (Optional/Result),
+    //   defer so the literal type resolves first, then we can try promotion.
+    //   Example: `let x: Int? = 5` - the literal 5 should resolve to Int64 first.
+    //   Example: When target is Infer, it might become Optional later via type annotation.
+    // - Otherwise, unify to propagate type context from the target.
+    //   Example: `return .Ok(value)` needs the Result type from the return type.
+    //   Example: `Int64(intLiteral: 0)` - the literal 0 should take type I64 from context.
+    if matches!(from.kind(), TyKind::Infer) {
+        if ctx.is_literal_ty(from_ty) {
+            // For literals, defer if target is Infer (might become Optional later)
+            // or if target is a known promotion target
+            if matches!(to.kind(), TyKind::Infer) || is_potential_promotion_target(&to) {
+                return Ok(SolveResult::Deferred);
+            }
+            // Target is concrete and not a promotion target - unify to propagate context
+            return unify(ctx, from_ty, to_ty, span);
+        } else {
+            // Not a literal - unify to propagate type context
+            return unify(ctx, from_ty, to_ty, span);
+        }
+    }
+
+    // If the target type has unresolved variables (but source is resolved), unify.
+    if contains_unresolved_infer(&to) {
+        return unify(ctx, from_ty, to_ty, span);
+    }
+
+    // Normalize type parameters/associated types using equality constraints before
+    // deciding whether the types can unify or should be promoted.
+    let from_normalized = normalize_with_constraints_if_needed(ctx, &from);
+    let to_normalized = normalize_with_constraints_if_needed(ctx, &to);
+
+    // Check if types are potentially unifiable (same kind or compatible kinds).
+    // If so, try to unify. If not, check for FromValue promotion.
+    if types_could_unify(&from_normalized, &to_normalized) {
+        // Types could be unifiable - register the expanded types and try unify
+        ctx.register_type(&from_normalized);
+        ctx.register_type(&to_normalized);
+        return unify(ctx, from_normalized.id(), to_normalized.id(), span);
+    }
+
+    // Types can't unify (different kinds). Check if target conforms to FromValue[source] for promotion.
+    if let Some((method_id, subs)) = ctx
+        .oracle()
+        .check_from_value_conformance(&to_normalized, &from_normalized)
+    {
+        // Record promotion for apply_solution
+        ctx.promotions_mut().insert(
+            expr_id,
+            PromotionInfo::new(to_normalized.clone(), method_id, subs),
+        );
+        return Ok(SolveResult::Solved);
+    }
+
+    // Neither direct unification nor promotion worked - report type mismatch
+    Err(InferenceError::type_mismatch(
+        to_normalized,
+        from_normalized,
+        span.clone(),
+    ))
+}
+
+/// Normalize type parameters and associated types using equality constraints from context.
+fn normalize_with_constraints_if_needed(ctx: &mut InferenceContext<'_>, ty: &Ty) -> Ty {
+    if matches!(
+        ty.kind(),
+        TyKind::TypeParameter { .. } | TyKind::AssociatedType { .. }
+    ) {
+        let normalized = ctx.oracle().normalize_with_constraints(ty);
+        if normalized.to_string() != ty.to_string() {
+            ctx.register_type(&normalized);
+            return normalized;
+        }
+    }
+    ty.clone()
+}
+
+/// Check if a type is a potential promotion target (Optional or Result).
+///
+/// These are the types that implement FromValue and thus could accept promoted values.
+/// For literals, we only defer when the target is one of these types.
+fn is_potential_promotion_target(ty: &Ty) -> bool {
+    use kestrel_semantic_tree::language::KestrelLanguage;
+    use semantic_tree::symbol::Symbol;
+
+    let ty = ty.expand_aliases();
+    match ty.kind() {
+        TyKind::Struct { symbol, .. } => {
+            let name = &Symbol::<KestrelLanguage>::metadata(symbol.as_ref())
+                .name()
+                .value;
+            name == "Optional" || name == "Result"
+        },
+        TyKind::Enum { symbol, .. } => {
+            let name = &Symbol::<KestrelLanguage>::metadata(symbol.as_ref())
+                .name()
+                .value;
+            name == "Optional" || name == "Result"
+        },
+        // Handle type aliases that might not be expanded yet
+        TyKind::TypeAlias { symbol, .. } => {
+            let name = &Symbol::<KestrelLanguage>::metadata(symbol.as_ref())
+                .name()
+                .value;
+            name == "OptionalTypeOperator" || name == "ResultTypeOperator"
+        },
+        _ => false,
+    }
+}
+
+/// Check if a type contains any unresolved inference variables.
+fn contains_unresolved_infer(ty: &Ty) -> bool {
+    match ty.kind() {
+        TyKind::Infer => true,
+        TyKind::Tuple(elements) => elements.iter().any(contains_unresolved_infer),
+        TyKind::Pointer(elem) => contains_unresolved_infer(elem),
+        TyKind::Function {
+            params,
+            return_type,
+        } => params.iter().any(contains_unresolved_infer) || contains_unresolved_infer(return_type),
+        TyKind::Struct { substitutions, .. }
+        | TyKind::Enum { substitutions, .. }
+        | TyKind::Protocol { substitutions, .. } => substitutions
+            .iter()
+            .any(|(_, t)| contains_unresolved_infer(t)),
+        TyKind::UnresolvedFunction {
+            param_info,
+            return_type,
+        } => {
+            if contains_unresolved_infer(return_type) {
+                return true;
+            }
+            match param_info {
+                ParamInfo::ImplicitIt { it_type } => contains_unresolved_infer(it_type),
+                ParamInfo::Explicit { param_types } => {
+                    param_types.iter().any(contains_unresolved_infer)
+                },
+                ParamInfo::Unconstrained => false,
+            }
+        },
+        TyKind::AssociatedType { container, .. } => container
+            .as_ref()
+            .is_some_and(|c| contains_unresolved_infer(c)),
+        _ => false,
+    }
+}
+
+/// Check if two types could potentially unify (are of compatible kinds).
+/// This is used by Promotable to decide whether to try unification or promotion.
+fn types_could_unify(a: &Ty, b: &Ty) -> bool {
+    use kestrel_semantic_tree::language::KestrelLanguage;
+    use semantic_tree::symbol::Symbol;
+
+    // Handle special types that unify with anything
+    if matches!(a.kind(), TyKind::Infer | TyKind::Error | TyKind::Never) {
+        return true;
+    }
+    if matches!(b.kind(), TyKind::Infer | TyKind::Error | TyKind::Never) {
+        return true;
+    }
+
+    // Check if types are of compatible kinds
+    match (a.kind(), b.kind()) {
+        // Same kind with same symbol - can unify
+        (TyKind::Struct { symbol: sym_a, .. }, TyKind::Struct { symbol: sym_b, .. }) => {
+            let id_a = Symbol::<KestrelLanguage>::metadata(sym_a.as_ref()).id();
+            let id_b = Symbol::<KestrelLanguage>::metadata(sym_b.as_ref()).id();
+            id_a == id_b
+        },
+        (TyKind::Enum { symbol: sym_a, .. }, TyKind::Enum { symbol: sym_b, .. }) => {
+            let id_a = Symbol::<KestrelLanguage>::metadata(sym_a.as_ref()).id();
+            let id_b = Symbol::<KestrelLanguage>::metadata(sym_b.as_ref()).id();
+            id_a == id_b
+        },
+        (TyKind::Protocol { symbol: sym_a, .. }, TyKind::Protocol { symbol: sym_b, .. }) => {
+            let id_a = Symbol::<KestrelLanguage>::metadata(sym_a.as_ref()).id();
+            let id_b = Symbol::<KestrelLanguage>::metadata(sym_b.as_ref()).id();
+            id_a == id_b
+        },
+        // Struct/Enum to Protocol - might conform
+        (TyKind::Struct { .. }, TyKind::Protocol { .. }) => true,
+        (TyKind::Enum { .. }, TyKind::Protocol { .. }) => true,
+        (TyKind::Protocol { .. }, TyKind::Struct { .. }) => true,
+        (TyKind::Protocol { .. }, TyKind::Enum { .. }) => true,
+        // Primitive types
+        (TyKind::Unit, TyKind::Unit) => true,
+        (TyKind::Bool, TyKind::Bool) => true,
+        (TyKind::String, TyKind::String) => true,
+        (TyKind::Int(bits_a), TyKind::Int(bits_b)) => bits_a == bits_b,
+        (TyKind::Float(bits_a), TyKind::Float(bits_b)) => bits_a == bits_b,
+        // Structural types
+        (TyKind::Tuple(_), TyKind::Tuple(_)) => true,
+        (TyKind::Pointer(_), TyKind::Pointer(_)) => true,
+        (TyKind::Function { .. }, TyKind::Function { .. }) => true,
+        (TyKind::UnresolvedFunction { .. }, TyKind::Function { .. }) => true,
+        (TyKind::Function { .. }, TyKind::UnresolvedFunction { .. }) => true,
+        (TyKind::UnresolvedFunction { .. }, TyKind::UnresolvedFunction { .. }) => true,
+        // Type parameters
+        (TyKind::TypeParameter(param_a), TyKind::TypeParameter(param_b)) => {
+            let id_a = Symbol::<KestrelLanguage>::metadata(param_a.as_ref()).id();
+            let id_b = Symbol::<KestrelLanguage>::metadata(param_b.as_ref()).id();
+            id_a == id_b
+        },
+        // Self type
+        (TyKind::SelfType, TyKind::SelfType) => true,
+        (TyKind::SelfType, TyKind::Struct { .. }) => true,
+        (TyKind::Struct { .. }, TyKind::SelfType) => true,
+        (TyKind::SelfType, TyKind::Protocol { .. }) => true,
+        (TyKind::Protocol { .. }, TyKind::SelfType) => true,
+        // Associated types need deferred resolution
+        (TyKind::AssociatedType { .. }, _) => true,
+        (_, TyKind::AssociatedType { .. }) => true,
+        // Type aliases should have been expanded - if we get here, treat as potentially unifiable
+        (TyKind::TypeAlias { .. }, _) => true,
+        (_, TyKind::TypeAlias { .. }) => true,
+        // Different kinds - can't unify directly
+        _ => false,
+    }
+}
+
 /// Check if a type conforms to a protocol.
 fn check_conforms(
     ctx: &mut InferenceContext<'_>,
     ty: TyId,
     protocol: &crate::constraint::ProtocolRef,
 ) -> Result<SolveResult, InferenceError> {
-    let resolved = resolve_type(ctx, ty);
+    let mut resolved = resolve_type(ctx, ty);
 
     // If the type is still an inference placeholder, defer
     if matches!(resolved.kind(), TyKind::Infer) {
         return Ok(SolveResult::Deferred);
+    }
+
+    // Defer unresolved associated projections like `_.Item` until their container resolves.
+    if let TyKind::AssociatedType { container, .. } = resolved.kind()
+        && container
+            .as_ref()
+            .is_some_and(|c| contains_unresolved_infer(c))
+    {
+        return Ok(SolveResult::Deferred);
+    }
+
+    // Expand type aliases before conformance checking.
+    // Type aliases like DictionaryTypeOperator -> Dictionary need to be expanded
+    // so we can check conformance on the actual underlying type.
+    while matches!(resolved.kind(), TyKind::TypeAlias { .. }) {
+        resolved = ctx.oracle().expand_type_alias(&resolved);
+        ctx.register_type(&resolved);
     }
 
     // Check conformance via the oracle
@@ -909,6 +1437,177 @@ fn check_conforms(
     }
 }
 
+/// Deeply resolve associated types recursively.
+///
+/// This function takes a type that may contain associated types and recursively
+/// resolves them until no more associated types remain. For example:
+/// - `TakeIterator[ArrayIterator[Int64]].Item` ->
+///   `ArrayIterator[Int64].Item` ->
+///   `Int64`
+///
+/// Uses a visited set to detect and handle cycles.
+fn deeply_resolve_associated_types(
+    ctx: &mut InferenceContext<'_>,
+    ty: &Ty,
+    visited: &mut HashSet<TyId>,
+) -> Ty {
+    // Check for cycles
+    if !visited.insert(ty.id()) {
+        return ty.clone();
+    }
+
+    let result = match ty.kind() {
+        // Associated type with container - resolve the container first, then the associated type,
+        // then recurse on the result
+        TyKind::AssociatedType { symbol, container } => {
+            if let Some(container_ty) = container {
+                // First, recursively resolve associated types in the container
+                let resolved_container =
+                    deeply_resolve_associated_types(ctx, container_ty, visited);
+                ctx.register_type(&resolved_container);
+
+                // Also resolve inference variables in the container
+                let resolved_container = resolve_type(ctx, resolved_container.id());
+
+                // Expand type aliases on the resolved container
+                let mut expanded_container = resolved_container;
+                while matches!(expanded_container.kind(), TyKind::TypeAlias { .. }) {
+                    expanded_container = ctx.oracle().expand_type_alias(&expanded_container);
+                    ctx.register_type(&expanded_container);
+                }
+
+                // If the container is still an inference variable, we can't resolve - return as-is
+                if matches!(expanded_container.kind(), TyKind::Infer) {
+                    let result_ty = Ty::qualified_associated_type(
+                        symbol.clone(),
+                        expanded_container,
+                        ty.span().clone(),
+                    );
+                    ctx.register_type(&result_ty);
+                    return result_ty;
+                }
+
+                // Try to resolve the associated type on the expanded container
+                if let Some(resolved_assoc) = ctx
+                    .oracle()
+                    .resolve_associated_type(&expanded_container, &symbol.metadata().name().value)
+                {
+                    ctx.register_type(&resolved_assoc);
+                    // Recursively resolve any nested associated types in the result
+                    deeply_resolve_associated_types(ctx, &resolved_assoc, visited)
+                } else {
+                    // Could not resolve - return the type with the resolved container
+                    let result_ty = Ty::qualified_associated_type(
+                        symbol.clone(),
+                        expanded_container,
+                        ty.span().clone(),
+                    );
+                    ctx.register_type(&result_ty);
+                    result_ty
+                }
+            } else {
+                // No container - return as-is
+                ty.clone()
+            }
+        },
+
+        // Struct/Enum with substitutions - recursively resolve associated types in substitutions
+        TyKind::Struct {
+            symbol,
+            substitutions,
+        } => {
+            let mut new_subs = Substitutions::new();
+            let mut changed = false;
+            for (param_id, sub_ty) in substitutions.iter() {
+                let resolved_sub = deeply_resolve_associated_types(ctx, sub_ty, visited);
+                if resolved_sub.id() != sub_ty.id() {
+                    changed = true;
+                }
+                new_subs.insert(*param_id, resolved_sub);
+            }
+            if changed {
+                let result_ty = Ty::generic_struct(symbol.clone(), new_subs, ty.span().clone());
+                ctx.register_type(&result_ty);
+                result_ty
+            } else {
+                ty.clone()
+            }
+        },
+
+        TyKind::Enum {
+            symbol,
+            substitutions,
+        } => {
+            let mut new_subs = Substitutions::new();
+            let mut changed = false;
+            for (param_id, sub_ty) in substitutions.iter() {
+                let resolved_sub = deeply_resolve_associated_types(ctx, sub_ty, visited);
+                if resolved_sub.id() != sub_ty.id() {
+                    changed = true;
+                }
+                new_subs.insert(*param_id, resolved_sub);
+            }
+            if changed {
+                let result_ty = Ty::generic_enum(symbol.clone(), new_subs, ty.span().clone());
+                ctx.register_type(&result_ty);
+                result_ty
+            } else {
+                ty.clone()
+            }
+        },
+
+        TyKind::Protocol {
+            symbol,
+            substitutions,
+        } => {
+            let mut new_subs = Substitutions::new();
+            let mut changed = false;
+            for (param_id, sub_ty) in substitutions.iter() {
+                let resolved_sub = deeply_resolve_associated_types(ctx, sub_ty, visited);
+                if resolved_sub.id() != sub_ty.id() {
+                    changed = true;
+                }
+                new_subs.insert(*param_id, resolved_sub);
+            }
+            if changed {
+                let result_ty = Ty::generic_protocol(symbol.clone(), new_subs, ty.span().clone());
+                ctx.register_type(&result_ty);
+                result_ty
+            } else {
+                ty.clone()
+            }
+        },
+
+        TyKind::TypeAlias {
+            symbol,
+            substitutions,
+        } => {
+            let mut new_subs = Substitutions::new();
+            let mut changed = false;
+            for (param_id, sub_ty) in substitutions.iter() {
+                let resolved_sub = deeply_resolve_associated_types(ctx, sub_ty, visited);
+                if resolved_sub.id() != sub_ty.id() {
+                    changed = true;
+                }
+                new_subs.insert(*param_id, resolved_sub);
+            }
+            if changed {
+                let result_ty = Ty::generic_type_alias(symbol.clone(), new_subs, ty.span().clone());
+                ctx.register_type(&result_ty);
+                result_ty
+            } else {
+                ty.clone()
+            }
+        },
+
+        // Other types - return as-is
+        _ => ty.clone(),
+    };
+
+    visited.remove(&ty.id());
+    result
+}
+
 /// Resolve an associated type projection.
 fn normalize(
     ctx: &mut InferenceContext<'_>,
@@ -917,7 +1616,15 @@ fn normalize(
     result: TyId,
     span: &Span,
 ) -> Result<SolveResult, InferenceError> {
-    let base_ty = resolve_type(ctx, base);
+    let mut base_ty = resolve_type(ctx, base);
+
+    // Expand type aliases before associated type lookup.
+    // Type aliases (e.g., ArrayTypeOperator -> Array) need to be expanded to their
+    // underlying type so we can look up associated types on the actual struct.
+    while matches!(base_ty.kind(), TyKind::TypeAlias { .. }) {
+        base_ty = ctx.oracle().expand_type_alias(&base_ty);
+        ctx.register_type(&base_ty);
+    }
 
     // If the base type is still an inference placeholder, defer
     if matches!(base_ty.kind(), TyKind::Infer) {
@@ -927,14 +1634,74 @@ fn normalize(
     // Try to resolve the associated type via the oracle
     match ctx.oracle().resolve_associated_type(&base_ty, assoc_name) {
         Some(resolved_assoc) => {
-            // Register and unify with the result
+            // Register the initially resolved type
             ctx.register_type(&resolved_assoc);
-            ctx.equate(resolved_assoc.id(), result, span.clone());
+
+            // Deeply resolve any nested associated types in the result
+            let mut visited = HashSet::new();
+            let fully_resolved =
+                deeply_resolve_associated_types(ctx, &resolved_assoc, &mut visited);
+            ctx.register_type(&fully_resolved);
+
+            // Unify with the result
+            ctx.equate(fully_resolved.id(), result, span.clone());
             Ok(SolveResult::Solved)
         },
         None => Err(InferenceError::associated_type_not_found(
             base_ty.clone(),
             assoc_name.to_string(),
+            span.clone(),
+        )),
+    }
+}
+
+/// Resolve a tuple index access.
+///
+/// This is called when tuple indexing is deferred because the tuple type
+/// wasn't known at constraint generation time (e.g., type parameter with
+/// a tuple constraint like `where Item = (A, B)`).
+fn resolve_tuple_index(
+    ctx: &mut InferenceContext<'_>,
+    tuple: TyId,
+    index: usize,
+    result: TyId,
+    span: &Span,
+) -> Result<SolveResult, InferenceError> {
+    let mut tuple_ty = resolve_type(ctx, tuple);
+
+    // Expand type aliases before tuple access
+    while matches!(tuple_ty.kind(), TyKind::TypeAlias { .. }) {
+        tuple_ty = ctx.oracle().expand_type_alias(&tuple_ty);
+        ctx.register_type(&tuple_ty);
+    }
+
+    // Normalize type parameters and associated types using equality constraints.
+    // This handles cases like `Item = (K, V)` and `I.Item = (K, V)` where tuple
+    // indexing should work on values of the constrained type.
+    tuple_ty = normalize_with_constraints_if_needed(ctx, &tuple_ty);
+
+    // If the tuple type is still an inference placeholder, defer
+    if matches!(tuple_ty.kind(), TyKind::Infer) {
+        return Ok(SolveResult::Deferred);
+    }
+
+    // Check if it's a tuple
+    match tuple_ty.as_tuple() {
+        Some(elements) => {
+            if index >= elements.len() {
+                return Err(InferenceError::tuple_index_out_of_bounds(
+                    index,
+                    elements.len(),
+                    span.clone(),
+                ));
+            }
+            let element_ty = elements[index].clone();
+            ctx.register_type(&element_ty);
+            ctx.equate(element_ty.id(), result, span.clone());
+            Ok(SolveResult::Solved)
+        },
+        None => Err(InferenceError::tuple_index_on_non_tuple(
+            tuple_ty.clone(),
             span.clone(),
         )),
     }
@@ -949,6 +1716,7 @@ fn resolve_member(
     arguments: &[TyId],
     result: TyId,
     expr_id: kestrel_semantic_tree::expr::ExprId,
+    call_site_substitutions: &kestrel_semantic_tree::ty::Substitutions,
     span: &Span,
 ) -> Result<SolveResult, InferenceError> {
     let mut receiver_ty = resolve_type(ctx, receiver);
@@ -961,18 +1729,52 @@ fn resolve_member(
         ctx.register_type(&receiver_ty);
     }
 
+    // Normalize type parameters and associated types using equality constraints from where clauses.
+    // This handles cases like `where V = Array[E]` where methods should be callable on type
+    // parameter V by substituting it with Array[E].
+    if matches!(
+        receiver_ty.kind(),
+        TyKind::TypeParameter { .. } | TyKind::AssociatedType { .. }
+    ) {
+        let normalized = ctx.oracle().normalize_with_constraints(&receiver_ty);
+        if normalized.to_string() != receiver_ty.to_string() {
+            receiver_ty = normalized;
+            ctx.register_type(&receiver_ty);
+        }
+    }
+
     // If the receiver type is still an inference placeholder, defer
     if matches!(receiver_ty.kind(), TyKind::Infer) {
         return Ok(SolveResult::Deferred);
     }
 
+    // Defer unresolved associated projections like `_.Item` until their container resolves.
+    if let TyKind::AssociatedType { container, .. } = receiver_ty.kind()
+        && container
+            .as_ref()
+            .is_some_and(|c| contains_unresolved_infer(c))
+    {
+        return Ok(SolveResult::Deferred);
+    }
+
     // Try to resolve the member via the oracle
-    match ctx.oracle().resolve_member(&receiver_ty, member, is_static) {
+    match ctx
+        .oracle()
+        .resolve_member_with_arity(&receiver_ty, member, is_static, arguments.len())
+    {
         Ok(resolution) => {
-            // Record the value resolution
+            // Merge substitutions: call-site substitutions take precedence for method type params
+            // - resolution.substitutions has protocol-level subs (Self, Item, etc.)
+            // - call_site_substitutions has method type param inference vars (U = _)
+            let mut substitutions = resolution.substitutions.clone();
+            for (param_id, ty) in call_site_substitutions.iter() {
+                substitutions.insert(*param_id, ty.clone());
+            }
+
+            // Record the value resolution with merged substitutions
             ctx.values_mut().insert(
                 expr_id,
-                ValueResolution::new(resolution.symbol_id, resolution.substitutions),
+                ValueResolution::new(resolution.symbol_id, substitutions.clone()),
             );
 
             // Register and unify the member type with the result
@@ -985,6 +1787,27 @@ fn resolve_member(
             for (arg_ty_id, param_ty) in arguments.iter().zip(resolution.parameters.iter()) {
                 ctx.register_type(param_ty);
                 ctx.equate(*arg_ty_id, param_ty.id(), span.clone());
+            }
+
+            // Process where clause equality constraints.
+            // These enable type parameter inference from constraints like `where Item = Optional[T]`.
+            // For example, in `compactMap[T]() where Item = Optional[T]`, this creates a constraint
+            // that equates the receiver's Item associated type with Optional[T], allowing T to be inferred.
+            for (left, right) in resolution.where_constraints.equality_constraints() {
+                // Apply substitutions from the method resolution
+                let left_ty = left.apply_substitutions(&substitutions);
+                let right_ty = right.apply_substitutions(&substitutions);
+
+                // Substitute Self with the receiver type
+                let left_ty = left_ty.substitute_self(&receiver_ty);
+                let right_ty = right_ty.substitute_self(&receiver_ty);
+
+                // Register both types
+                ctx.register_type(&left_ty);
+                ctx.register_type(&right_ty);
+
+                // Create equality constraint
+                ctx.equate(left_ty.id(), right_ty.id(), span.clone());
             }
 
             // For Self-returning methods (like negate()), equate receiver with result.
@@ -1030,8 +1853,18 @@ fn resolve_implicit_member(
 
     let resolved_ty = resolve_type(ctx, expr_ty);
 
+    // Expand type aliases to get underlying type (e.g., OptionalTypeOperator -> Optional)
+    let resolved_ty = resolved_ty.expand_aliases();
+
     // If still Infer, defer until expected type is known
     if matches!(resolved_ty.kind(), TyKind::Infer) {
+        return Ok(SolveResult::Deferred);
+    }
+
+    // If still a TypeAlias after expansion, the alias hasn't been bound yet.
+    // This happens during bootstrap (e.g., result.ks using T throws E before
+    // ResultTypeOperator is fully bound). Defer to allow binding to complete.
+    if matches!(resolved_ty.kind(), TyKind::TypeAlias { .. }) {
         return Ok(SolveResult::Deferred);
     }
 
@@ -1172,6 +2005,9 @@ fn resolve_enum_pattern_binding(
 
     let resolved_ty = resolve_type(ctx, enum_ty);
 
+    // Expand type aliases to get underlying type (e.g., OptionalTypeOperator -> Optional)
+    let resolved_ty = resolved_ty.expand_aliases();
+
     // If still Infer, defer until the enum type is known
     if matches!(resolved_ty.kind(), TyKind::Infer) {
         return Ok(SolveResult::Deferred);
@@ -1232,6 +2068,7 @@ fn resolve_enum_pattern_binding(
             // Apply substitutions to the parameter type and equate
             let param_ty = param.ty.apply_substitutions(substitutions);
             ctx.register_type(&param_ty);
+
             ctx.equate(*binding_ty_id, param_ty.id(), span.clone());
         }
     }
@@ -1343,8 +2180,9 @@ fn resolve_struct_pattern_binding(
 
 /// Follow the substitution chain to get the current resolved type for an ID.
 fn resolve_type(ctx: &InferenceContext<'_>, id: TyId) -> Ty {
-    // Follow substitution chain
+    // Follow substitution chain, tracking the last concrete type found
     let mut current_id = id;
+    let mut last_subst: Option<Ty> = None;
     let mut visited = HashSet::new();
 
     loop {
@@ -1354,21 +2192,77 @@ fn resolve_type(ctx: &InferenceContext<'_>, id: TyId) -> Ty {
         }
 
         if let Some(subst) = ctx.substitutions().get(&current_id) {
+            last_subst = Some(subst.clone());
             current_id = subst.id();
         } else {
             break;
         }
     }
 
-    // Return the substituted type if available, otherwise look in registry
-    ctx.substitutions()
-        .get(&current_id)
-        .cloned()
+    // Return the last substitution found (which is the resolved type),
+    // or look in registry, or create inference placeholder
+    let resolved = last_subst
         .or_else(|| ctx.type_registry().get(&current_id).cloned())
         .unwrap_or_else(|| {
             // If not found anywhere, create an inference placeholder
             Ty::infer(Span::new(0, 0..0))
-        })
+        });
+
+    // If the resolved type is an associated type with a concrete container,
+    // try to resolve it using the oracle. This handles cases like when
+    // U.Item has substitutions applied and U becomes Array[Int64], giving
+    // us Array[Int64].Item which should resolve to Int64.
+    if let TyKind::AssociatedType { symbol, container } = resolved.kind()
+        && let Some(container_ty) = container
+    {
+        // First, recursively resolve the container (it might have substitutions too)
+        let resolved_container = resolve_type(ctx, container_ty.id());
+        let name = symbol.metadata().name().value.clone();
+
+        // Only try to resolve if the container is concrete (not Infer)
+        if !matches!(resolved_container.kind(), TyKind::Infer)
+            && let Some(concrete_ty) = ctx
+                .oracle()
+                .resolve_associated_type(&resolved_container, &name)
+        {
+            return concrete_ty;
+        }
+    }
+
+    // If the resolved type is a struct with type arguments that might contain
+    // associated types, recursively resolve them. This handles cases like
+    // Array[U.Item] where U has been resolved to ArrayIterator[Int64].
+    if let TyKind::Struct {
+        symbol,
+        substitutions,
+    } = resolved.kind()
+    {
+        let mut new_subs = Substitutions::new();
+        let mut changed = false;
+
+        for (param_id, sub_ty) in substitutions.iter() {
+            // Check if this type argument contains an associated type that could be resolved
+            let resolved_arg = if matches!(sub_ty.kind(), TyKind::AssociatedType { .. }) {
+                let r = resolve_type(ctx, sub_ty.id());
+                // If the resolved type is different (by ID), or if it was an AssociatedType but now isn't,
+                // then we made progress
+                if r.id() != sub_ty.id() || !matches!(r.kind(), TyKind::AssociatedType { .. }) {
+                    changed = true;
+                }
+                r
+            } else {
+                sub_ty.clone()
+            };
+            new_subs.insert(*param_id, resolved_arg);
+        }
+
+        if changed {
+            let new_ty = Ty::generic_struct(symbol.clone(), new_subs, resolved.span().clone());
+            return new_ty;
+        }
+    }
+
+    resolved
 }
 
 /// Check if var occurs in ty (prevents infinite types).
@@ -1404,7 +2298,7 @@ fn occurs_check_inner(
         TyKind::Tuple(elements) => elements
             .iter()
             .any(|e| occurs_check_inner(var, e, ctx, visited)),
-        TyKind::Array(elem) => occurs_check_inner(var, elem, ctx, visited),
+        // Note: Array[T] struct types have their substitutions checked via the Struct case
         TyKind::Pointer(elem) => occurs_check_inner(var, elem, ctx, visited),
         TyKind::Function {
             params,
@@ -1485,12 +2379,20 @@ fn check_fully_resolved(ctx: &mut InferenceContext<'_>) {
     }
 
     let mut unresolved = Vec::new();
+    let mut visited = HashSet::new();
 
-    // Check all registered types
-    for (id, ty) in ctx.type_registry() {
-        if matches!(ty.kind(), TyKind::Infer) && !ctx.substitutions().contains_key(id) {
-            unresolved.push((*id, ty.span().clone()));
-        }
+    // Check all registered types for unresolved Infer types.
+    // This includes:
+    // 1. Bare Infer types without substitutions
+    // 2. Infer types with substitutions to compound types containing unresolved Infer
+    // 3. Non-Infer compound types (like UnresolvedFunction) that contain unresolved Infer
+    for ty in ctx.type_registry().values() {
+        find_nested_infer_types(ty, ctx, &mut unresolved, &mut visited);
+    }
+
+    // Also check all substitutions for nested unresolved Infer types
+    for subst_ty in ctx.substitutions().values() {
+        find_nested_infer_types(subst_ty, ctx, &mut unresolved, &mut visited);
     }
 
     // Check for any inference placeholders in remaining constraints
@@ -1543,6 +2445,14 @@ fn check_fully_resolved(ctx: &mut InferenceContext<'_>) {
                     check_resolved_id(*binding_ty, ctx, &mut unresolved);
                 }
             },
+            Constraint::Promotable { from_ty, to_ty, .. } => {
+                check_resolved_id(*from_ty, ctx, &mut unresolved);
+                check_resolved_id(*to_ty, ctx, &mut unresolved);
+            },
+            Constraint::TupleIndexAccess { tuple, result, .. } => {
+                check_resolved_id(*tuple, ctx, &mut unresolved);
+                check_resolved_id(*result, ctx, &mut unresolved);
+            },
         }
     }
 
@@ -1556,8 +2466,86 @@ fn check_fully_resolved(ctx: &mut InferenceContext<'_>) {
 
 fn check_resolved_id(id: TyId, ctx: &InferenceContext<'_>, unresolved: &mut Vec<(TyId, Span)>) {
     let ty = resolve_type(ctx, id);
+    // Check for top-level Infer or UnresolvedFunction
     if matches!(ty.kind(), TyKind::Infer | TyKind::UnresolvedFunction { .. }) {
         unresolved.push((id, ty.span().clone()));
+    }
+    // Also recursively check for nested Infer types inside compound types
+    find_nested_infer_types(&ty, ctx, unresolved, &mut HashSet::new());
+}
+
+/// Recursively find unresolved Infer types nested inside compound types.
+/// This catches cases where an Infer has a substitution to a compound type
+/// (like UnresolvedFunction) that itself contains unresolved Infer types.
+fn find_nested_infer_types(
+    ty: &Ty,
+    ctx: &InferenceContext<'_>,
+    unresolved: &mut Vec<(TyId, Span)>,
+    visited: &mut HashSet<TyId>,
+) {
+    // Prevent infinite recursion
+    if !visited.insert(ty.id()) {
+        return;
+    }
+
+    match ty.kind() {
+        TyKind::Infer => {
+            // Check if this Infer has a substitution
+            if let Some(subst) = ctx.substitutions().get(&ty.id()) {
+                // Recursively check the substitution
+                find_nested_infer_types(subst, ctx, unresolved, visited);
+            } else if !unresolved.iter().any(|(id, _)| *id == ty.id()) {
+                // No substitution - this is unresolved
+                unresolved.push((ty.id(), ty.span().clone()));
+            }
+        },
+        TyKind::UnresolvedFunction {
+            param_info,
+            return_type,
+        } => {
+            // Check return type
+            find_nested_infer_types(return_type, ctx, unresolved, visited);
+            // Check param types based on param_info
+            match param_info {
+                ParamInfo::ImplicitIt { it_type } => {
+                    find_nested_infer_types(it_type, ctx, unresolved, visited);
+                },
+                ParamInfo::Explicit { param_types } => {
+                    for pt in param_types {
+                        find_nested_infer_types(pt, ctx, unresolved, visited);
+                    }
+                },
+                ParamInfo::Unconstrained => {},
+            }
+        },
+        TyKind::Function {
+            params,
+            return_type,
+        } => {
+            for p in params {
+                find_nested_infer_types(p, ctx, unresolved, visited);
+            }
+            find_nested_infer_types(return_type, ctx, unresolved, visited);
+        },
+        TyKind::Tuple(elements) => {
+            for e in elements {
+                find_nested_infer_types(e, ctx, unresolved, visited);
+            }
+        },
+        TyKind::Struct { substitutions, .. } | TyKind::Enum { substitutions, .. } => {
+            for (_, sub_ty) in substitutions.iter() {
+                find_nested_infer_types(sub_ty, ctx, unresolved, visited);
+            }
+        },
+        TyKind::Pointer(pointee) => {
+            find_nested_infer_types(pointee, ctx, unresolved, visited);
+        },
+        TyKind::AssociatedType {
+            container: Some(c), ..
+        } => {
+            find_nested_infer_types(c, ctx, unresolved, visited);
+        },
+        _ => {},
     }
 }
 
@@ -1596,6 +2584,10 @@ mod tests {
         }
 
         fn builtin_protocol(&self, _feature: LanguageFeature) -> Option<SymbolId> {
+            None
+        }
+
+        fn default_array_type(&self, _element_ty: Ty, _span: Span) -> Option<Ty> {
             None
         }
     }

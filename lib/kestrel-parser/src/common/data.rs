@@ -8,6 +8,7 @@ use kestrel_span::Span;
 
 use crate::block::CodeBlockData;
 use crate::expr::ExprVariant;
+use crate::pattern::PatternVariant;
 use crate::ty::TyVariant;
 use crate::type_param::{TypeParameterData, WhereClauseData};
 
@@ -80,31 +81,38 @@ pub enum ParameterAccessMode {
 
 /// Raw parsed data for a single parameter
 ///
-/// Parameter syntax: `(access_mode)? (label)? bind_name: Type`
+/// Parameter syntax: `(access_mode)? (label)? pattern: Type (= default)?`
 /// - `access_mode` is an optional access mode (mutating/consuming)
 /// - `label` is an optional external parameter name (used by callers)
-/// - `bind_name` is the internal parameter name (used in function body)
-/// - If only one name is provided, it's used as both label and bind_name
+/// - `pattern` is the binding pattern (identifier, tuple, struct, or wildcard)
+/// - If only one identifier is provided (no label), it's used as both label and pattern
+/// - `default` is an optional default value expression
 ///
 /// # Examples
-/// - `x: Int` → access_mode=None, label=None, bind_name=x
-/// - `with x: Int` → access_mode=None, label="with", bind_name=x
-/// - `mutating x: Int` → access_mode=Mutating, label=None, bind_name=x
-/// - `consuming point p: Point` → access_mode=Consuming, label="point", bind_name=p
+/// - `x: Int` → access_mode=None, label=None, pattern=Binding(x)
+/// - `with x: Int` → access_mode=None, label="with", pattern=Binding(x)
+/// - `mutating x: Int` → access_mode=Mutating, label=None, pattern=Binding(x)
+/// - `(a, b): (Int, Int)` → access_mode=None, label=None, pattern=Tuple
+/// - `point (x, y): Point` → access_mode=None, label="point", pattern=Tuple
+/// - `Point { x, y }: Point` → access_mode=None, label=None, pattern=Struct
+/// - `_: Int` → access_mode=None, label=None, pattern=Wildcard
+/// - `x: Int = 0` → access_mode=None, label=None, pattern=Binding(x), default=Some(0)
 #[derive(Debug, Clone)]
 pub struct ParameterData {
     /// Optional access mode (mutating/consuming)
     /// If None, the default is borrow (read-only)
     pub access_mode: Option<(ParameterAccessMode, Span)>,
     /// Optional label (external name for callers)
-    /// If None, bind_name is used as the label
+    /// If None, the pattern's primary name is used as the label (for binding patterns)
     pub label: Option<Span>,
-    /// The binding name (internal name used in function body)
-    pub bind_name: Span,
+    /// The binding pattern (identifier, tuple, struct, or wildcard)
+    pub pattern: PatternVariant,
     /// The colon span
     pub colon: Span,
     /// The parameter type
     pub ty: TyVariant,
+    /// Optional default value (equals_span, expression)
+    pub default: Option<(Span, ExprVariant)>,
 }
 
 /// Receiver modifier for instance methods
@@ -114,6 +122,16 @@ pub enum ReceiverModifier {
     Mutating,
     /// `consuming func` - method takes ownership of self
     Consuming,
+}
+
+/// Body data for functions - either a block `{ ... }` or expression `= expr`
+#[derive(Debug, Clone)]
+pub enum FunctionBodyData {
+    /// Block body: `{ statements; expr }`
+    Block(CodeBlockData),
+    /// Expression body: `= expr`
+    /// Contains the equals span and the expression
+    Expression(Span, ExprVariant),
 }
 
 /// Raw parsed data for function declaration internals
@@ -134,7 +152,7 @@ pub struct FunctionDeclarationData {
     pub rparen: Span,
     pub return_type: Option<(Span, TyVariant)>, // (arrow_span, return_ty)
     pub where_clause: Option<WhereClauseData>,
-    pub body: Option<CodeBlockData>, // Optional code block - None for protocol methods
+    pub body: Option<FunctionBodyData>, // Optional body - None for protocol methods
 }
 
 /// Body data for computed properties
@@ -144,8 +162,16 @@ pub enum ComputedBodyData {
     Shorthand(CodeBlockData),
     /// Explicit: `{ get { } set { } }`
     Accessors {
+        /// Span of the opening brace (for property accessors block)
+        lbrace: Span,
+        /// Span of the "get" keyword
+        get_span: Span,
         getter: Option<CodeBlockData>, // None for protocol `{ get }`
+        /// Span of the "set" keyword (if present)
+        set_span: Option<Span>,
         setter: Option<CodeBlockData>, // None for protocol `{ get set }`
+        /// Span of the closing brace (for property accessors block)
+        rbrace: Span,
     },
 }
 
@@ -416,7 +442,15 @@ pub enum SubscriptBodyData {
     Shorthand(CodeBlockData),
     /// Explicit: `{ get { } set { } }` - with explicit getter and optional setter
     Accessors {
+        /// Span of the opening brace (for subscript body block)
+        lbrace: Span,
+        /// Span of the "get" keyword
+        get_span: Span,
         getter: Option<CodeBlockData>, // None for protocol `{ get }`
+        /// Span of the "set" keyword (if present)
+        set_span: Option<Span>,
         setter: Option<CodeBlockData>, // None for protocol `{ get set }` without body
+        /// Span of the closing brace (for subscript body block)
+        rbrace: Span,
     },
 }

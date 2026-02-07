@@ -5,16 +5,26 @@
 module std.ffi
 
 // Memory allocation
+
+/// Allocates size bytes of uninitialized memory.
+/// Returns a pointer to the allocated memory, or null on failure.
 @extern(.C, mangleName: "malloc")
 public func malloc(consuming size: lang.i64) -> lang.ptr[lang.i8]
 
+/// Frees memory previously allocated by malloc, realloc, or calloc.
 @extern(.C, mangleName: "free")
 public func free(consuming ptr: lang.ptr[lang.i8])
 
+/// Changes the size of a memory block.
+/// Returns a pointer to the reallocated memory, or null on failure.
+/// The original pointer becomes invalid after this call.
 @extern(.C, mangleName: "realloc")
 public func realloc(consuming ptr: lang.ptr[lang.i8], consuming size: lang.i64) -> lang.ptr[lang.i8]
 
 // Memory operations
+
+/// Copies n bytes from src to dest. Memory regions must not overlap.
+/// Returns the dest pointer.
 @extern(.C, mangleName: "memcpy")
 public func memcpy(
     consuming dest: lang.ptr[lang.i8],
@@ -22,6 +32,8 @@ public func memcpy(
     consuming n: lang.i64
 ) -> lang.ptr[lang.i8]
 
+/// Copies n bytes from src to dest. Memory regions may overlap.
+/// Returns the dest pointer.
 @extern(.C, mangleName: "memmove")
 public func memmove(
     consuming dest: lang.ptr[lang.i8],
@@ -29,6 +41,8 @@ public func memmove(
     consuming n: lang.i64
 ) -> lang.ptr[lang.i8]
 
+/// Sets n bytes starting at dest to the value c.
+/// Returns the dest pointer.
 @extern(.C, mangleName: "memset")
 public func memset(
     consuming dest: lang.ptr[lang.i8],

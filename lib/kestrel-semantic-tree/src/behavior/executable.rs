@@ -8,6 +8,7 @@ use semantic_tree::behavior::Behavior;
 use crate::behavior::KestrelBehaviorKind;
 use crate::expr::Expression;
 use crate::language::KestrelLanguage;
+use crate::pattern::Pattern;
 use crate::stmt::Statement;
 
 /// A code block containing statements and an optional yield expression.
@@ -58,6 +59,14 @@ impl CodeBlock {
 pub struct ExecutableBehavior {
     /// The resolved code block
     body: CodeBlock,
+    /// Resolved patterns for parameters (for destructuring support).
+    /// One pattern per CallableParameter, in the same order.
+    /// Empty for functions without destructuring patterns.
+    parameter_patterns: Vec<Pattern>,
+    /// Default value expressions for parameters.
+    /// One entry per CallableParameter, in the same order.
+    /// None means no default, Some contains the default expression.
+    default_values: Vec<Option<Expression>>,
 }
 
 impl Behavior<KestrelLanguage> for ExecutableBehavior {
@@ -69,7 +78,33 @@ impl Behavior<KestrelLanguage> for ExecutableBehavior {
 impl ExecutableBehavior {
     /// Create a new ExecutableBehavior with the given body.
     pub fn new(body: CodeBlock) -> Self {
-        ExecutableBehavior { body }
+        ExecutableBehavior {
+            body,
+            parameter_patterns: Vec::new(),
+            default_values: Vec::new(),
+        }
+    }
+
+    /// Create a new ExecutableBehavior with body and parameter patterns.
+    pub fn with_parameter_patterns(body: CodeBlock, parameter_patterns: Vec<Pattern>) -> Self {
+        ExecutableBehavior {
+            body,
+            parameter_patterns,
+            default_values: Vec::new(),
+        }
+    }
+
+    /// Create a new ExecutableBehavior with body, parameter patterns, and default values.
+    pub fn with_defaults(
+        body: CodeBlock,
+        parameter_patterns: Vec<Pattern>,
+        default_values: Vec<Option<Expression>>,
+    ) -> Self {
+        ExecutableBehavior {
+            body,
+            parameter_patterns,
+            default_values,
+        }
     }
 
     /// Get the code block body.
@@ -81,6 +116,19 @@ impl ExecutableBehavior {
     pub fn body_mut(&mut self) -> &mut CodeBlock {
         &mut self.body
     }
+
+    /// Get the parameter patterns for destructuring support.
+    /// Returns one pattern per parameter, in the same order as CallableBehavior::parameters().
+    pub fn parameter_patterns(&self) -> &[Pattern] {
+        &self.parameter_patterns
+    }
+
+    /// Get the default value expressions for parameters.
+    /// Returns one entry per parameter, in the same order as CallableBehavior::parameters().
+    /// None means no default, Some contains the resolved default expression.
+    pub fn default_values(&self) -> &[Option<Expression>] {
+        &self.default_values
+    }
 }
 
 /// Behavior indicating that a symbol has a type-resolved executable body.
@@ -91,6 +139,14 @@ impl ExecutableBehavior {
 pub struct ResolvedExecutableBehavior {
     /// The type-resolved code block
     body: CodeBlock,
+    /// Resolved patterns for parameters (for destructuring support).
+    /// One pattern per CallableParameter, in the same order.
+    /// Empty for functions without destructuring patterns.
+    parameter_patterns: Vec<Pattern>,
+    /// Type-resolved default value expressions for parameters.
+    /// One entry per CallableParameter, in the same order.
+    /// None means no default, Some contains the resolved default expression.
+    default_values: Vec<Option<Expression>>,
 }
 
 impl Behavior<KestrelLanguage> for ResolvedExecutableBehavior {
@@ -102,12 +158,51 @@ impl Behavior<KestrelLanguage> for ResolvedExecutableBehavior {
 impl ResolvedExecutableBehavior {
     /// Create a new ResolvedExecutableBehavior with the given body.
     pub fn new(body: CodeBlock) -> Self {
-        ResolvedExecutableBehavior { body }
+        ResolvedExecutableBehavior {
+            body,
+            parameter_patterns: Vec::new(),
+            default_values: Vec::new(),
+        }
+    }
+
+    /// Create a new ResolvedExecutableBehavior with body and parameter patterns.
+    pub fn with_parameter_patterns(body: CodeBlock, parameter_patterns: Vec<Pattern>) -> Self {
+        ResolvedExecutableBehavior {
+            body,
+            parameter_patterns,
+            default_values: Vec::new(),
+        }
+    }
+
+    /// Create a new ResolvedExecutableBehavior with body, parameter patterns, and default values.
+    pub fn with_defaults(
+        body: CodeBlock,
+        parameter_patterns: Vec<Pattern>,
+        default_values: Vec<Option<Expression>>,
+    ) -> Self {
+        ResolvedExecutableBehavior {
+            body,
+            parameter_patterns,
+            default_values,
+        }
     }
 
     /// Get the code block body.
     pub fn body(&self) -> &CodeBlock {
         &self.body
+    }
+
+    /// Get the parameter patterns for destructuring support.
+    /// Returns one pattern per parameter, in the same order as CallableBehavior::parameters().
+    pub fn parameter_patterns(&self) -> &[Pattern] {
+        &self.parameter_patterns
+    }
+
+    /// Get the default value expressions for parameters.
+    /// Returns one entry per parameter, in the same order as CallableBehavior::parameters().
+    /// None means no default, Some contains the type-resolved default expression.
+    pub fn default_values(&self) -> &[Option<Expression>] {
+        &self.default_values
     }
 }
 

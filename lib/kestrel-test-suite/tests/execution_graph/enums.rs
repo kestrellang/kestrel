@@ -192,7 +192,7 @@ mod enum_construction {
         .expect(Compiles)
         .expect(Mir::compiles())
         .expect(
-            Mir::mir_function("Main.makeSome")
+            Mir::mir_function("Main.makeSome$x")
                 .returns(MirTy::named("Main.Option"))
                 .has_param("x", MirTy::ref_(MirTy::I64)),
         );
@@ -253,7 +253,7 @@ mod match_on_enums {
         .expect(Compiles)
         .expect(Mir::compiles())
         .expect(
-            Mir::mir_function("Main.toInt")
+            Mir::mir_function("Main.toInt$c")
                 .returns(MirTy::I64)
                 .any_block(|b| b.terminates_with(TerminatorPattern::Switch)),
         );
@@ -282,7 +282,7 @@ mod match_on_enums {
         .expect(Compiles)
         .expect(Mir::compiles())
         .expect(
-            Mir::mir_function("Main.unwrapOr")
+            Mir::mir_function("Main.unwrapOr$opt$default")
                 .returns(MirTy::I64)
                 .has_param("opt", MirTy::ref_(MirTy::named("Main.Option")))
                 .has_param("default", MirTy::ref_(MirTy::I64))
@@ -312,7 +312,7 @@ mod match_on_enums {
         .expect(Compiles)
         .expect(Mir::compiles())
         .expect(
-            Mir::mir_function("Main.getX")
+            Mir::mir_function("Main.getX$s")
                 .returns(MirTy::I64)
                 .any_block(|b| b.terminates_with(TerminatorPattern::Switch)),
         );
@@ -372,9 +372,9 @@ mod recursive_enums {
         .expect(Compiles)
         .expect(Mir::compiles())
         .expect(
-            Mir::mir_function("Main.sum")
+            Mir::mir_function("Main.sum$tree")
                 .returns(MirTy::I64)
-                .calls("Main.sum") // Recursive call
+                .calls("Main.sum$tree") // Recursive call
                 .any_block(|b| b.terminates_with(TerminatorPattern::Switch)),
         );
     }
@@ -483,7 +483,7 @@ mod enum_struct_payloads {
         .expect(Compiles)
         .expect(Mir::compiles())
         .expect(
-            Mir::mir_function("Main.getArea")
+            Mir::mir_function("Main.getArea$s")
                 .returns(MirTy::I64)
                 .calls("Main.Circle.area")
                 .calls("Main.Rectangle.area")
@@ -533,7 +533,7 @@ mod nested_match {
         .expect(Compiles)
         .expect(Mir::compiles())
         .expect(
-            Mir::mir_function("Main.getValue")
+            Mir::mir_function("Main.getValue$outer")
                 .returns(MirTy::I64)
                 .has_at_least_blocks(5), // Multiple switch blocks for nested match
         );
@@ -574,7 +574,7 @@ mod wildcard_patterns {
         .expect(Compiles)
         .expect(Mir::compiles())
         .expect(
-            Mir::mir_function("Main.isMonday")
+            Mir::mir_function("Main.isMonday$day")
                 .returns(MirTy::Bool)
                 .any_block(|b| b.terminates_with(TerminatorPattern::Switch)),
         );

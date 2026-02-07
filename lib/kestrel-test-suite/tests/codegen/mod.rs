@@ -28,6 +28,7 @@ mod tuples;
 
 /// Result of running a compiled program.
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct RunResult {
     /// Exit code of the program.
     pub exit_code: i32,

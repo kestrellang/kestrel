@@ -10,7 +10,8 @@ use kestrel_semantic_tree::pattern::{Pattern, PatternKind};
 use kestrel_semantic_tree::stmt::{Statement, StatementKind};
 use kestrel_semantic_tree::symbol::field::FieldSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
-use kestrel_semantic_tree::ty::{Ty, TyKind};
+use kestrel_semantic_tree::ty::{Substitutions, Ty, TyKind};
+use kestrel_span::Span;
 use semantic_tree::symbol::Symbol;
 
 use crate::constraint::ProtocolRef;
@@ -42,12 +43,49 @@ pub fn generate_constraints(
     if let Some(yield_expr) = block.yield_expr() {
         generate_expression_constraints(ctx, yield_expr);
 
-        // Equate yield expression type with return type
-        // ret_ty is expected, yield_expr.ty is found
+        // Constrain yield expression type to be promotable to return type
+        // (allows implicit promotion from T to Optional[T] or Result[T, E])
         if let Some(ret_ty) = return_type {
             ctx.register_type(ret_ty);
             ctx.register_type(&yield_expr.ty);
-            ctx.equate(ret_ty.id(), yield_expr.ty.id(), yield_expr.span.clone());
+            ctx.promotable(
+                yield_expr.ty.id(),
+                ret_ty.id(),
+                yield_expr.id,
+                yield_expr.span.clone(),
+            );
+        }
+    }
+}
+
+/// Generate type inference constraints for default value expressions.
+///
+/// For each default value, generates constraints and ensures the expression
+/// type is promotable to the parameter type.
+///
+/// # Arguments
+/// * `ctx` - The inference context to add constraints to
+/// * `default_values` - The default value expressions (None if parameter has no default)
+/// * `param_types` - The expected parameter types, in the same order
+pub fn generate_default_value_constraints(
+    ctx: &mut InferenceContext<'_>,
+    default_values: &[Option<Expression>],
+    param_types: &[Ty],
+) {
+    for (default_opt, param_ty) in default_values.iter().zip(param_types.iter()) {
+        if let Some(default_expr) = default_opt {
+            // Generate constraints for the default expression
+            generate_expression_constraints(ctx, default_expr);
+
+            // Constrain the default expression type to be promotable to parameter type
+            ctx.register_type(param_ty);
+            ctx.register_type(&default_expr.ty);
+            ctx.promotable(
+                default_expr.ty.id(),
+                param_ty.id(),
+                default_expr.id,
+                default_expr.span.clone(),
+            );
         }
     }
 }
@@ -59,11 +97,12 @@ fn generate_statement_constraints(ctx: &mut InferenceContext<'_>, stmt: &Stateme
             // Generate constraints for the pattern
             generate_pattern_constraints(ctx, pattern);
 
-            // If there's an initializer, equate its type with the pattern type
+            // If there's an initializer, constrain it to be promotable to the pattern type
+            // (allows implicit promotion from T to Optional[T] or Result[T, E])
             if let Some(init) = value {
                 generate_expression_constraints(ctx, init);
                 ctx.register_type(&init.ty);
-                ctx.equate(pattern.ty.id(), init.ty.id(), stmt.span.clone());
+                ctx.promotable(init.ty.id(), pattern.ty.id(), init.id, stmt.span.clone());
             }
         },
         StatementKind::Expr(expr) => {
@@ -169,7 +208,9 @@ pub fn generate_pattern_constraints(ctx: &mut InferenceContext<'_>, pattern: &Pa
                 LiteralValue::Integer(_) => Some(LanguageFeature::ExpressibleByIntLiteral),
                 LiteralValue::Float(_) => Some(LanguageFeature::ExpressibleByFloatLiteral),
                 LiteralValue::String(_) => Some(LanguageFeature::ExpressibleByStringLiteral),
+                LiteralValue::Char(_) => Some(LanguageFeature::ExpressibleByCharLiteral),
                 LiteralValue::Bool(_) => Some(LanguageFeature::ExpressibleByBoolLiteral),
+                LiteralValue::Null => Some(LanguageFeature::ExpressibleByNullLiteral),
                 LiteralValue::Unit => None,
             };
 
@@ -332,9 +373,17 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
                     Some(LanguageFeature::ExpressibleByStringLiteral),
                     Some(Ty::string(expr.span.clone())),
                 ),
+                LiteralValue::Char(_) => (
+                    Some(LanguageFeature::ExpressibleByCharLiteral),
+                    Some(Ty::int(IntBits::I32, expr.span.clone())),
+                ),
                 LiteralValue::Bool(_) => (
                     Some(LanguageFeature::ExpressibleByBoolLiteral),
                     Some(Ty::bool(expr.span.clone())),
+                ),
+                LiteralValue::Null => (
+                    Some(LanguageFeature::ExpressibleByNullLiteral),
+                    None, // Default handled specially in solver (generic NullLiteralType[T])
                 ),
                 LiteralValue::Unit => (None, None), // Unit literal has concrete type
             };
@@ -352,14 +401,106 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
             }
         },
 
-        // Arrays: all elements must have the same type
-        ExprKind::Array(elements) => {
-            if let TyKind::Array(elem_ty) = expr.ty.kind() {
-                ctx.register_type(elem_ty);
-                for elem in elements {
-                    generate_expression_constraints(ctx, elem);
-                    ctx.equate(elem.ty.id(), elem_ty.id(), elem.span.clone());
+        // Interpolated strings: result is String, interpolated expressions must be Formattable
+        ExprKind::InterpolatedString { parts } => {
+            use kestrel_semantic_tree::expr::InterpolationPart;
+
+            // The result type is the default string type (String, not primitive str)
+            // TODO: Support ExpressibleByStringInterpolation for custom types
+            let string_ty = ctx.oracle().default_string_type(expr.span.clone());
+            ctx.register_type(&string_ty);
+            ctx.equate(expr.ty.id(), string_ty.id(), expr.span.clone());
+
+            // Generate constraints for each interpolation expression
+            for part in parts {
+                if let InterpolationPart::Interpolation {
+                    expr: interp_expr, ..
+                } = part
+                {
+                    // Generate constraints for the interpolated expression
+                    generate_expression_constraints(ctx, interp_expr);
+
+                    // TODO: Add conformance constraint for Formattable protocol when it's registered
+                    // For now, the binder will check Formattable conformance
                 }
+            }
+        },
+
+        // Arrays: type conforms to _ExpressibleByArrayLiteral, elements have Element type
+        ExprKind::Array(elements) => {
+            use kestrel_semantic_tree::builtins::LanguageFeature;
+
+            // Add conformance constraint to _ExpressibleByArrayLiteral protocol
+            // This allows array literals to be assigned to custom types like Style
+            if let Some(protocol_id) = ctx
+                .oracle()
+                .builtin_protocol(LanguageFeature::_ExpressibleByArrayLiteral)
+            {
+                let protocol_ref = ProtocolRef::new(protocol_id, expr.span.clone());
+                ctx.conforms(expr.ty.id(), protocol_ref);
+            }
+
+            // Create an infer type for the element type
+            // This will be linked to the array type's Element associated type
+            let elem_ty = Ty::infer(expr.span.clone());
+            ctx.register_type(&elem_ty);
+
+            // Add normalizes constraint: array_type.Element = elem_ty
+            // This resolves the Element associated type from the expected type
+            // (e.g., Style.Element = StyleOption)
+            ctx.normalizes(
+                expr.ty.id(),
+                "Element".to_string(),
+                elem_ty.id(),
+                expr.span.clone(),
+            );
+
+            // All elements must have the same type (the Element type)
+            for elem in elements {
+                generate_expression_constraints(ctx, elem);
+                ctx.equate(elem.ty.id(), elem_ty.id(), elem.span.clone());
+            }
+        },
+
+        // Dictionaries: type conforms to _ExpressibleByDictionaryLiteral, pairs have Key/Value types
+        ExprKind::Dictionary(pairs) => {
+            use kestrel_semantic_tree::builtins::LanguageFeature;
+
+            // Add conformance constraint to _ExpressibleByDictionaryLiteral protocol
+            if let Some(protocol_id) = ctx
+                .oracle()
+                .builtin_protocol(LanguageFeature::_ExpressibleByDictionaryLiteral)
+            {
+                let protocol_ref = ProtocolRef::new(protocol_id, expr.span.clone());
+                ctx.conforms(expr.ty.id(), protocol_ref);
+            }
+
+            // Create infer types for Key and Value
+            let key_ty = Ty::infer(expr.span.clone());
+            let value_ty = Ty::infer(expr.span.clone());
+            ctx.register_type(&key_ty);
+            ctx.register_type(&value_ty);
+
+            // Add normalizes constraints for Key and Value associated types
+            ctx.normalizes(
+                expr.ty.id(),
+                "Key".to_string(),
+                key_ty.id(),
+                expr.span.clone(),
+            );
+            ctx.normalizes(
+                expr.ty.id(),
+                "Value".to_string(),
+                value_ty.id(),
+                expr.span.clone(),
+            );
+
+            // All keys must unify to Key type, all values to Value type
+            for (key, value) in pairs {
+                generate_expression_constraints(ctx, key);
+                generate_expression_constraints(ctx, value);
+                ctx.equate(key.ty.id(), key_ty.id(), key.span.clone());
+                ctx.equate(value.ty.id(), value_ty.id(), value.span.clone());
             }
         },
 
@@ -401,19 +542,43 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
                     vec![], // no arguments for field access
                     expr.ty.id(),
                     expr.id,
+                    Substitutions::new(), // no substitutions for field access
                     expr.span.clone(),
                 );
             }
         },
 
         // Tuple index: type is the element type
-        ExprKind::TupleIndex { tuple, .. } => {
+        ExprKind::TupleIndex { tuple, index } => {
             generate_expression_constraints(ctx, tuple);
+            // If the expression type is Infer, generate a tuple index constraint
+            // so the solver can resolve the element type once the tuple type is known
+            if matches!(expr.ty.kind(), TyKind::Infer) {
+                ctx.register_type(&tuple.ty);
+                ctx.register_type(&expr.ty);
+                ctx.tuple_index_access(tuple.ty.id(), *index, expr.ty.id(), expr.span.clone());
+            }
         },
 
-        // Method reference: process receiver
-        ExprKind::MethodRef { receiver, .. } => {
+        // Method reference: process receiver and check for protocol conformance
+        ExprKind::MethodRef {
+            receiver,
+            candidates,
+            ..
+        } => {
             generate_expression_constraints(ctx, receiver);
+
+            // If any candidate is a protocol method, add a conformance constraint.
+            // Skip for type parameters - their conformance is verified at bind time,
+            // including local where clause constraints that we can't see here.
+            if !matches!(receiver.ty.kind(), TyKind::TypeParameter(_)) {
+                for candidate_id in candidates {
+                    if let Some(protocol_id) = ctx.oracle().protocol_for_method(*candidate_id) {
+                        let protocol_ref = ProtocolRef::new(protocol_id, expr.span.clone());
+                        ctx.conforms(receiver.ty.id(), protocol_ref);
+                    }
+                }
+            }
         },
 
         // Primitive method reference: this should only appear if the primitive method
@@ -430,7 +595,9 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
 
         // Calls
         ExprKind::Call {
-            callee, arguments, ..
+            callee,
+            arguments,
+            substitutions,
         } => {
             generate_expression_constraints(ctx, callee);
             for arg in arguments {
@@ -439,12 +606,28 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
 
             // Generate constraints between argument types and parameter types
             // This enables bidirectional type inference for closures passed as arguments
+            // and allows implicit promotion from T to Optional[T] or Result[T, E]
             match callee.ty.kind() {
-                TyKind::Function { params, .. } => {
+                TyKind::Function {
+                    params,
+                    return_type,
+                } => {
+                    // The call expression type must match the callee's function return type.
+                    // This is critical for propagating contextual type information through
+                    // higher-order calls like map/flatMap/collect.
+                    ctx.register_type(return_type);
+                    ctx.register_type(&expr.ty);
+                    ctx.equate(expr.ty.id(), return_type.id(), expr.span.clone());
+
                     for (arg, param_ty) in arguments.iter().zip(params.iter()) {
                         ctx.register_type(&arg.value.ty);
                         ctx.register_type(param_ty);
-                        ctx.equate(arg.value.ty.id(), param_ty.id(), arg.span.clone());
+                        ctx.promotable(
+                            arg.value.ty.id(),
+                            param_ty.id(),
+                            arg.value.id,
+                            arg.span.clone(),
+                        );
                     }
                 },
                 TyKind::UnresolvedFunction { .. } => {
@@ -461,9 +644,48 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
                     ctx.equate(callee.ty.id(), expected_fn_ty.id(), expr.span.clone());
                 },
                 _ => {
-                    // Callee type is not a function - might be an error or inference needed
+                    // Check if callee is a MethodRef - if so, generate member_access constraint
+                    // for method resolution. This enables the MethodRef pattern for protocol
+                    // method calls (used by desugared for-loops for iter()/next()).
+                    if let ExprKind::MethodRef {
+                        receiver,
+                        method_name,
+                        ..
+                    } = &callee.kind
+                    {
+                        let arg_ty_ids: Vec<_> =
+                            arguments.iter().map(|a| a.value.ty.id()).collect();
+                        ctx.register_type(&receiver.ty);
+                        ctx.register_type(&expr.ty);
+                        ctx.member_access(
+                            receiver.ty.id(),
+                            method_name.clone(),
+                            false,      // instance method call
+                            arg_ty_ids, // argument types for parameter constraint generation
+                            expr.ty.id(),
+                            expr.id,
+                            substitutions.clone(), // pass call-site substitutions with inference vars
+                            expr.span.clone(),
+                        );
+
+                        // For zero-argument methods on literals, speculatively equate receiver with result.
+                        // This enables bidirectional type inference for Self-returning operators like
+                        // negate(), bitwiseNot(), etc. When the expected result type is known (e.g., Int16),
+                        // this constraint propagates that type back to the receiver (the literal),
+                        // preventing default literal inference.
+                        if arguments.is_empty() && matches!(receiver.kind, ExprKind::Literal(_)) {
+                            ctx.equate(receiver.ty.id(), expr.ty.id(), expr.span.clone());
+                        }
+                    }
+                    // Otherwise callee type is not a function - might be an error or inference needed
                 },
             }
+
+            // Extract where clause constraints from method calls resolved during binding
+            // This handles cases like `compactMap[T]() where Item = Optional[T]`
+            // where the method was resolved during binding and its where clause needs to
+            // be converted into inference constraints
+            generate_where_clause_constraints_for_call(ctx, callee, substitutions, &expr.span);
         },
 
         ExprKind::PrimitiveMethodCall {
@@ -500,17 +722,61 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
                 arg_ty_ids, // argument types for parameter constraint generation
                 expr.ty.id(),
                 expr.id,
+                Substitutions::new(), // no call-site substitutions for deferred method call
                 expr.span.clone(),
             );
 
-            // For zero-argument methods on literals (receiver type is Infer), speculatively
-            // equate receiver with result. This enables bidirectional type inference for
-            // Self-returning operators like negate(), bitwiseNot(), etc.
-            // When the expected result type is known (e.g., Int16), this constraint propagates
-            // that type back to the receiver (the literal), preventing default literal inference.
-            if arguments.is_empty() && matches!(receiver.ty.kind(), TyKind::Infer) {
-                ctx.equate(receiver.ty.id(), expr.ty.id(), expr.span.clone());
+            // NOTE: We previously had a speculative equate here for zero-argument methods on
+            // literals that would equate receiver with result. This enabled bidirectional type
+            // inference for Self-returning operators like negate(). However, this caused issues
+            // for methods that return a different type (like String.toCString() -> CString):
+            // the speculative equate would set the result type to String before the method
+            // could be resolved, then conflict with the actual return type CString.
+            //
+            // For now, we disable this optimization. Self-returning operator type inference
+            // may need a different approach (e.g., checking if the resolved method actually
+            // returns Self before applying the equate constraint).
+        },
+
+        ExprKind::DeferredStaticCall {
+            target_ty,
+            method_name,
+            arguments,
+            protocol_candidates,
+        } => {
+            // Generate constraints for arguments
+            for arg in arguments {
+                generate_expression_constraints(ctx, &arg.value);
             }
+
+            // Collect argument type IDs for constraint generation
+            let arg_ty_ids: Vec<_> = arguments.iter().map(|a| a.value.ty.id()).collect();
+
+            // Register target type and result type
+            ctx.register_type(target_ty);
+            ctx.register_type(&expr.ty);
+
+            // If protocol candidates are provided, emit conformance constraints.
+            // This produces better error messages ("does not conform to X" instead of "no member Y").
+            for candidate_id in protocol_candidates {
+                if let Some(protocol_id) = ctx.oracle().protocol_for_method(*candidate_id) {
+                    let protocol_ref = ProtocolRef::new(protocol_id, expr.span.clone());
+                    ctx.conforms(target_ty.id(), protocol_ref);
+                }
+            }
+
+            // Generate a member access constraint for the static method
+            // is_static = true indicates this is a static method lookup
+            ctx.member_access(
+                target_ty.id(),
+                method_name.clone(),
+                true, // is_static = true for static method call
+                arg_ty_ids,
+                expr.ty.id(),
+                expr.id,
+                Substitutions::new(), // no call-site substitutions for deferred static call
+                expr.span.clone(),
+            );
         },
 
         ExprKind::ImplicitStructInit { arguments, .. } => {
@@ -530,7 +796,8 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
                     .filter_map(|c| c.downcast_arc::<FieldSymbol>().ok())
                     .collect();
 
-                // Equate each argument type with its corresponding field type
+                // Constrain each argument type to be promotable to its corresponding field type
+                // (allows implicit promotion from T to Optional[T] or Result[T, E])
                 for (arg, field) in arguments.iter().zip(fields.iter()) {
                     // Get field type from TypedBehavior (resolved type) or fallback to field_type
                     let raw_field_ty = field
@@ -541,7 +808,12 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
                     let field_ty = raw_field_ty.apply_substitutions(substitutions);
                     ctx.register_type(&arg.value.ty);
                     ctx.register_type(&field_ty);
-                    ctx.equate(arg.value.ty.id(), field_ty.id(), arg.span.clone());
+                    ctx.promotable(
+                        arg.value.ty.id(),
+                        field_ty.id(),
+                        arg.value.id,
+                        arg.span.clone(),
+                    );
                 }
             }
         },
@@ -554,10 +826,11 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
         },
 
         // Assignment
+        // (allows implicit promotion from T to Optional[T] or Result[T, E])
         ExprKind::Assignment { target, value } => {
             generate_expression_constraints(ctx, target);
             generate_expression_constraints(ctx, value);
-            ctx.equate(target.ty.id(), value.ty.id(), expr.span.clone());
+            ctx.promotable(value.ty.id(), target.ty.id(), value.id, expr.span.clone());
         },
 
         // Control flow
@@ -578,10 +851,16 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
             }
             if let Some(then_val) = then_value {
                 generate_expression_constraints(ctx, then_val);
-                // Only equate then value type with expression type when there's an else branch.
+                // Only constrain then value type with expression type when there's an else branch.
                 // Without else, the if expression type is () and the then value is discarded.
+                // (allows implicit promotion from T to Optional[T] or Result[T, E])
                 if else_branch.is_some() {
-                    ctx.equate(expr.ty.id(), then_val.ty.id(), then_val.span.clone());
+                    ctx.promotable(
+                        then_val.ty.id(),
+                        expr.ty.id(),
+                        then_val.id,
+                        then_val.span.clone(),
+                    );
                 }
             }
 
@@ -594,14 +873,26 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
                         }
                         if let Some(else_val) = value {
                             generate_expression_constraints(ctx, else_val);
-                            // Else branch value type equals expression type
-                            ctx.equate(expr.ty.id(), else_val.ty.id(), else_val.span.clone());
+                            // Else branch value type must be promotable to expression type
+                            // (allows implicit promotion from T to Optional[T] or Result[T, E])
+                            ctx.promotable(
+                                else_val.ty.id(),
+                                expr.ty.id(),
+                                else_val.id,
+                                else_val.span.clone(),
+                            );
                         }
                     },
                     kestrel_semantic_tree::expr::ElseBranch::ElseIf(else_if) => {
                         generate_expression_constraints(ctx, else_if);
-                        // Else-if expression type equals this expression type
-                        ctx.equate(expr.ty.id(), else_if.ty.id(), else_if.span.clone());
+                        // Else-if expression type must be promotable to expression type
+                        // (allows implicit promotion from T to Optional[T] or Result[T, E])
+                        ctx.promotable(
+                            else_if.ty.id(),
+                            expr.ty.id(),
+                            else_if.id,
+                            else_if.span.clone(),
+                        );
                     },
                 }
             }
@@ -646,11 +937,12 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
             if let Some(val) = value {
                 generate_expression_constraints(ctx, val);
 
-                // Equate return value type with function return type
+                // Constrain return value type to be promotable to function return type
+                // (allows implicit promotion from T to Optional[T] or Result[T, E])
                 if let Some(ret_ty) = ctx.return_type().cloned() {
                     ctx.register_type(&ret_ty);
                     ctx.register_type(&val.ty);
-                    ctx.equate(ret_ty.id(), val.ty.id(), val.span.clone());
+                    ctx.promotable(val.ty.id(), ret_ty.id(), val.id, val.span.clone());
                 }
             } else {
                 // Return with no value - equate Unit with return type
@@ -661,6 +953,13 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
                     ctx.equate(unit_ty.id(), ret_ty.id(), expr.span.clone());
                 }
             }
+        },
+
+        ExprKind::Throw { value } => {
+            // Throw desugars to return R.fromResidual(value)
+            // We just need to generate constraints for the value expression
+            // The type system will validate that the return type implements FromResidual
+            generate_expression_constraints(ctx, value);
         },
 
         ExprKind::Closure {
@@ -881,7 +1180,13 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
 
                 // Body type contributes to match expression type
                 // All arms should have compatible types
-                ctx.equate(expr.ty.id(), arm.body.ty.id(), arm.body.span.clone());
+                // (allows implicit promotion from T to Optional[T] or Result[T, E])
+                ctx.promotable(
+                    arm.body.ty.id(),
+                    expr.ty.id(),
+                    arm.body.id,
+                    arm.body.span.clone(),
+                );
             }
         },
 
@@ -1083,7 +1388,124 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
             }
         },
 
+        ExprKind::ProtocolPropertyAccess { receiver, .. } => {
+            // Constraints already handled during resolution
+            // Just recurse into receiver
+            generate_expression_constraints(ctx, receiver);
+        },
+
         ExprKind::Error => {},
+    }
+}
+
+/// Generate where clause constraints for a method call.
+///
+/// When a method is resolved during binding (not deferred to type inference),
+/// its where clause constraints need to be converted into inference constraints.
+/// This is critical for methods like `compactMap[T]() where Item = Optional[T]`
+/// where the where clause equality constraint is the only way to infer `T`.
+///
+/// # Arguments
+///
+/// * `ctx` - The inference context
+/// * `callee` - The callee expression (should be a SymbolRef to a function)
+/// * `substitutions` - Type argument substitutions from the generic call
+/// * `span` - Span for error reporting
+fn generate_where_clause_constraints_for_call(
+    ctx: &mut InferenceContext<'_>,
+    callee: &Expression,
+    substitutions: &kestrel_semantic_tree::ty::Substitutions,
+    span: &Span,
+) {
+    // Get the function symbol ID and receiver type from the callee expression
+    // Method calls have MethodRef with candidates, regular calls have SymbolRef
+    let (callee_symbol_id, receiver_ty_opt) = match &callee.kind {
+        ExprKind::SymbolRef(id) => (*id, None),
+        ExprKind::MethodRef {
+            candidates,
+            receiver,
+            ..
+        } => {
+            // For MethodRef, use the first candidate (should only be one after resolution)
+            if candidates.len() != 1 {
+                return;
+            }
+            (candidates[0], Some(&receiver.ty))
+        },
+        _ => {
+            return;
+        },
+    };
+
+    // Get the where clause from the function symbol
+    let where_clause = ctx.oracle().function_where_clause(callee_symbol_id);
+
+    if where_clause.is_empty() {
+        return;
+    }
+
+    // Process equality constraints from the where clause
+    // For `where Item = Optional[T]`, we need to:
+    // 1. Qualify the left side (Item -> Self.Item) with the receiver type if it's an associated type
+    // 2. Apply substitutions to both sides (replaces T with fresh inference variables)
+    // 3. Create a Normalizes constraint to resolve the associated type, then equate with the right side
+    for (left_ty, right_ty) in where_clause.equality_constraints() {
+        // Register both types
+        ctx.register_type(left_ty);
+        ctx.register_type(right_ty);
+
+        // Qualify the left side if it's an unqualified associated type and we have a receiver
+        let qualified_left = if let Some(receiver_ty) = receiver_ty_opt {
+            qualify_associated_type(left_ty, receiver_ty)
+        } else {
+            left_ty.clone()
+        };
+
+        // Apply the generic call's substitutions to both sides
+        // This replaces type parameters like T with their instantiated types (inference variables)
+        let left_with_subs = qualified_left.apply_substitutions(substitutions);
+        let right_with_subs = right_ty.apply_substitutions(substitutions);
+
+        // Register the substituted types
+        ctx.register_type(&left_with_subs);
+        ctx.register_type(&right_with_subs);
+
+        // If the left side is a qualified associated type (e.g., ArrayIterator[Optional[Int64]].Item),
+        // create a Normalizes constraint to resolve it, then equate with the right side
+        if let Some((assoc_symbol, Some(container_ty))) =
+            left_with_subs.as_associated_type_with_container()
+        {
+            let assoc_name = assoc_symbol.metadata().name().value.clone();
+            ctx.register_type(container_ty);
+
+            // Create a Normalizes constraint: container.assoc_name => right_side
+            // This tells the solver to resolve ArrayIterator[Optional[Int64]].Item and equate it with Optional[_]
+            ctx.normalizes(
+                container_ty.id(),
+                assoc_name,
+                right_with_subs.id(),
+                span.clone(),
+            );
+        } else {
+            // Not an associated type, just create an equality constraint
+            ctx.equate(left_with_subs.id(), right_with_subs.id(), span.clone());
+        }
+    }
+}
+
+/// Qualify an unqualified associated type with a container type.
+///
+/// For example, if `ty` is `Item` (an unqualified associated type) and `container` is
+/// `ArrayIterator[Optional[Int64]]`, this returns `ArrayIterator[Optional[Int64]].Item`.
+fn qualify_associated_type(ty: &Ty, container: &Ty) -> Ty {
+    match ty.kind() {
+        // If it's an unqualified associated type (no container), qualify it
+        TyKind::AssociatedType {
+            symbol,
+            container: None,
+        } => Ty::qualified_associated_type(symbol.clone(), container.clone(), ty.span().clone()),
+        // Otherwise return as-is
+        _ => ty.clone(),
     }
 }
 
