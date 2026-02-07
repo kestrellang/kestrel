@@ -369,3 +369,52 @@ func first[T](items: T, fallback: T = items) -> T {
         .expect(HasError("cannot reference"));
     }
 }
+
+mod type_inference {
+    use super::*;
+
+    #[test]
+    fn method_with_default_on_expression_result() {
+        // When calling a method with default parameters on an expression result,
+        // the binder defers resolution to type inference. Type inference must
+        // account for default parameters when checking arity.
+        Test::new(
+            r#"module Test
+
+func test(x x: std.num.Int64) -> std.text.String {
+    "value: " + (x + 1).format()
+}
+"#,
+        )
+        .with_stdlib()
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn method_with_default_on_variable() {
+        Test::new(
+            r#"module Test
+
+func test(x x: std.num.Int64) -> std.text.String {
+    x.format()
+}
+"#,
+        )
+        .with_stdlib()
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn method_with_default_provided_on_expression_result() {
+        Test::new(
+            r#"module Test
+
+func test(x x: std.num.Int64) -> std.text.String {
+    (x + 1).format(options: std.text.FormatOptions.default())
+}
+"#,
+        )
+        .with_stdlib()
+        .expect(Compiles);
+    }
+}

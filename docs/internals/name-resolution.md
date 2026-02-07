@@ -4,7 +4,7 @@ Name resolution is the process of finding which declaration a name refers to. Th
 
 ## Overview
 
-When code uses a name like `MyClass` or `process`, the compiler must determine which declaration it refers to. This involves:
+When code uses a name like `MyStruct` or `process`, the compiler must determine which declaration it refers to. This involves:
 
 1. Looking in the current scope
 2. Checking imports
@@ -31,12 +31,11 @@ struct Scope {
 ```
 Root (implicit)
 └── Module scope
-    ├── Class scope
-    │   ├── Nested struct scope
-    │   └── Method scope (future)
     ├── Struct scope
-    │   └── Method scope (future)
-    └── Function scope (future)
+    │   ├── Nested struct scope
+    │   └── Method scope
+    ├── Enum scope
+    └── Function scope
 ```
 
 ### Scope-Creating Symbols
@@ -45,10 +44,11 @@ Root (implicit)
 |-------------|---------------|
 | Module | Yes |
 | Struct | Yes |
-| Struct | Yes |
+| Enum | Yes |
 | Protocol | Yes |
+| Extension | Yes |
+| Function | Yes |
 | SourceFile | Yes (transparent) |
-| Function | Not yet |
 | Field | No |
 | TypeAlias | No |
 | Import | No |
@@ -61,7 +61,7 @@ Root (implicit)
 // file.kes
 module MyApp
 
-struct MyStruct { }    // MyClass is in SourceFile, but visible as MyApp.MyClass
+struct MyStruct { }    // MyStruct is in SourceFile, but visible as MyApp.MyStruct
 ```
 
 ## Resolution Algorithm

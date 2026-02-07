@@ -526,6 +526,18 @@ impl CallableBehavior {
         &self.parameters
     }
 
+    /// Get the number of required parameters (those without default values).
+    pub fn required_parameter_count(&self) -> usize {
+        self.parameters.iter().filter(|p| !p.has_default()).count()
+    }
+
+    /// Check if the given argument count is compatible with this callable's parameters,
+    /// accounting for default parameter values.
+    pub fn arity_matches(&self, argument_count: usize) -> bool {
+        argument_count >= self.required_parameter_count()
+            && argument_count <= self.parameters.len()
+    }
+
     /// Get the return type
     pub fn return_type(&self) -> &Ty {
         &self.return_type

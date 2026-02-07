@@ -2,6 +2,7 @@
 
 - [x] All tests pass
 - [x] All examples build
-- [ ] All docs are up to date
+- [x] All docs are up to date
 - [x] Remove docs/std
-- [ ] Test stdlib more thoroughly
+- [x] Test stdlib more thoroughly
+- [x] Put debugging behind the flags 

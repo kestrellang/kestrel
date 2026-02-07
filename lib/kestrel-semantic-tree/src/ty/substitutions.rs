@@ -84,10 +84,10 @@ impl Substitutions {
 
                 // Debug logging for Rhs substitution
                 if param_name == "Rhs" {
-                    eprintln!("  === Substituting type parameter {} (ID: {:?}) ===", param_name, param_id);
-                    eprintln!("  Available substitutions:");
+                    debug_trace!("  === Substituting type parameter {} (ID: {:?}) ===", param_name, param_id);
+                    debug_trace!("  Available substitutions:");
                     for (id, ty) in self.iter() {
-                        eprintln!("    {:?} -> {:?}", id, ty);
+                        debug_trace!("    {:?} -> {:?}", id, ty);
                     }
                 }
 
@@ -99,7 +99,7 @@ impl Substitutions {
 
                 if let Some(substituted) = self.get(param_id) {
                     if param_name == "Rhs" {
-                        eprintln!("  Found substitution: {:?}", substituted);
+                        debug_trace!("  Found substitution: {:?}", substituted);
                     }
                     // Mark this parameter as being visited
                     visited.insert(param_id);
@@ -110,7 +110,7 @@ impl Substitutions {
                     result
                 } else {
                     if param_name == "Rhs" {
-                        eprintln!("  No substitution found for {} (ID: {:?})", param_name, param_id);
+                        debug_trace!("  No substitution found for {} (ID: {:?})", param_name, param_id);
                     }
                     // No substitution found, return as-is
                     ty.clone()

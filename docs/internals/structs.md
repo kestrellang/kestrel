@@ -1,6 +1,6 @@
 # Structs
 
-Structs are value types that can contain fields, methods, and nested type declarations. Unlike structs are typically copied when assigned or passed.
+Structs are value types that can contain fields, methods, and nested type declarations. Structs are typically copied when assigned or passed.
 
 ## Syntax
 
@@ -9,8 +9,8 @@ StructDeclaration → Visibility? STRUCT Identifier LBRACE StructMember* RBRACE
 
 StructMember → FunctionDeclaration
              | FieldDeclaration
-             | ClassDeclaration
              | StructDeclaration
+             | EnumDeclaration
              | ProtocolDeclaration
 ```
 
@@ -190,16 +190,6 @@ struct Constants {
     static func square(x: Float) -> Float { }
 }
 ```
-
-## Struct vs Class
-
-| Aspect | Struct | Struct |
-|--------|--------|-------|
-| Semantics | Value type | Reference type |
-| Copy behavior | Copied on assignment | Reference shared |
-| Members | Fields, methods, nested types | Fields, methods, nested types |
-| Static members | Allowed | Allowed |
-| Inheritance | Not supported | Not yet implemented |
 
 ## Struct as a Type
 

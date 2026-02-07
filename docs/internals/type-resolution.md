@@ -14,7 +14,7 @@ During parsing, type annotations are stored as unresolved `Path` types:
 During binding, paths are resolved to concrete types:
 
 ```
-// Resolved to: Ty::Class(Arc<ClassSymbol>)  // where ClassSymbol is User
+// Resolved to: Ty::Struct { symbol: Arc<StructSymbol>, substitutions }  // where StructSymbol is User
 ```
 
 ## Type Resolution Algorithm
@@ -29,7 +29,7 @@ resolve_type(ty, context):
             return ty
 
         // Already resolved nominal types
-        Class(_) | Struct(_) | Protocol(_):
+        Struct { .. } | Enum { .. } | Protocol { .. }:
             return ty
 
         // Type alias: currently returned as-is
@@ -360,7 +360,7 @@ struct User { }
 
 func process(u: User) { }
 //              ^^^^ Path(["User"])
-//              Resolves to: Class(UserSymbol)
+//              Resolves to: Struct(UserSymbol)
 ```
 
 ### Qualified Path Resolution
@@ -374,7 +374,7 @@ func process(u: Models.User) { }
 //              ^^^^^^^^^^^ Path(["Models", "User"])
 //              Phase 1: "Models" found via import
 //              Phase 2: "User" found as child of Models
-//              Resolves to: Class(UserSymbol)
+//              Resolves to: Struct(UserSymbol)
 ```
 
 ### Composite Type Resolution
@@ -388,8 +388,8 @@ struct Response { }
 type Handler = (Request) -> Response
 //             ^^^^^^^^^ resolve_type recursively:
 //             - Function type container
-//             - Param: Path(["Request"]) -> Class(RequestSymbol)
-//             - Return: Path(["Response"]) -> Class(ResponseSymbol)
+//             - Param: Path(["Request"]) -> Struct(RequestSymbol)
+//             - Return: Path(["Response"]) -> Struct(ResponseSymbol)
 ```
 
 ### Nested Type Resolution

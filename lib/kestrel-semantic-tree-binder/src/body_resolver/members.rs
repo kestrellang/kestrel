@@ -314,7 +314,7 @@ pub fn resolve_member_access(
     };
 
     // 2. Find child with that name - first in direct children, then in extensions
-    eprintln!("[MEMBER_RESOLUTION] Looking for '{}' on container '{}' (type: {})",
+    debug_trace!("[MEMBER_RESOLUTION] Looking for '{}' on container '{}' (type: {})",
               member_name, container.metadata().name().value, base_ty);
     let member = container
         .metadata()
@@ -337,11 +337,11 @@ pub fn resolve_member_access(
     // If not found in direct children, search type extensions, then protocol extensions
     let member = match member {
         Some(m) => {
-            eprintln!("[MEMBER_RESOLUTION] Found '{}' in direct children", member_name);
+            debug_trace!("[MEMBER_RESOLUTION] Found '{}' in direct children", member_name);
             m
         },
         None => {
-            eprintln!("[MEMBER_RESOLUTION] '{}' not found in direct children, checking extensions", member_name);
+            debug_trace!("[MEMBER_RESOLUTION] '{}' not found in direct children, checking extensions", member_name);
             // Try to find in applicable type extensions
             let extension_member = applicable_extensions
                 .iter()
@@ -350,17 +350,17 @@ pub fn resolve_member_access(
 
             match extension_member {
                 Some(m) => {
-                    eprintln!("[MEMBER_RESOLUTION] Found '{}' in type extensions", member_name);
+                    debug_trace!("[MEMBER_RESOLUTION] Found '{}' in type extensions", member_name);
                     m
                 },
                 None => {
-                    eprintln!("[MEMBER_RESOLUTION] '{}' not found in type extensions, checking protocol extensions", member_name);
+                    debug_trace!("[MEMBER_RESOLUTION] '{}' not found in type extensions, checking protocol extensions", member_name);
                     // Try to find in protocol extensions
                     let protocol_ext_methods =
                         find_methods_in_protocol_extensions(base_ty, member_name, ctx);
 
                     if !protocol_ext_methods.is_empty() {
-                        eprintln!("[MEMBER_RESOLUTION] Found '{}' in protocol extensions: {} candidates",
+                        debug_trace!("[MEMBER_RESOLUTION] Found '{}' in protocol extensions: {} candidates",
                                   member_name, protocol_ext_methods.len());
                         // Found method(s) in protocol extensions - create MethodRef
                         return Expression::method_ref(
@@ -2949,9 +2949,9 @@ fn is_protocol_extension_applicable(
     };
 
     let where_clause = target_behavior.where_clause();
-    eprintln!("[WHERE_CLAUSE_CHECK] Checking protocol extension '{}' applicability for type '{}'",
+    debug_trace!("[WHERE_CLAUSE_CHECK] Checking protocol extension '{}' applicability for type '{}'",
               extension.metadata().name().value, concrete_ty);
-    eprintln!("[WHERE_CLAUSE_CHECK] Extension has {} constraints", where_clause.constraints().len());
+    debug_trace!("[WHERE_CLAUSE_CHECK] Extension has {} constraints", where_clause.constraints().len());
 
     for constraint in where_clause.constraints() {
         if let Constraint::SelfBound {
@@ -2961,15 +2961,15 @@ fn is_protocol_extension_applicable(
         } = constraint
             && associated_type_path.is_empty()
         {
-            eprintln!("[WHERE_CLAUSE_CHECK] Checking SelfBound constraint with {} bounds", bounds.len());
+            debug_trace!("[WHERE_CLAUSE_CHECK] Checking SelfBound constraint with {} bounds", bounds.len());
             // Self: Protocol - check if concrete type conforms to all bounds
             for bound in bounds {
-                eprintln!("[WHERE_CLAUSE_CHECK] Checking if '{}' satisfies bound '{}'", concrete_ty, bound);
+                debug_trace!("[WHERE_CLAUSE_CHECK] Checking if '{}' satisfies bound '{}'", concrete_ty, bound);
                 if !type_satisfies_bound(concrete_ty, bound, ctx.model) {
-                    eprintln!("[WHERE_CLAUSE_CHECK] Type does NOT satisfy bound - extension not applicable");
+                    debug_trace!("[WHERE_CLAUSE_CHECK] Type does NOT satisfy bound - extension not applicable");
                     return false;
                 }
-                eprintln!("[WHERE_CLAUSE_CHECK] Type satisfies bound");
+                debug_trace!("[WHERE_CLAUSE_CHECK] Type satisfies bound");
             }
         }
         // Self.Item: Protocol - resolve associated type and check bounds
@@ -2984,16 +2984,16 @@ fn is_protocol_extension_applicable(
         } = constraint
             && !associated_type_path.is_empty()
         {
-            eprintln!("[WHERE_CLAUSE_CHECK] Found Self.{} constraint with {} bounds (NOT CHECKED YET)",
+            debug_trace!("[WHERE_CLAUSE_CHECK] Found Self.{} constraint with {} bounds (NOT CHECKED YET)",
                       associated_type_path.join("."), bounds.len());
         }
         else if let Constraint::TypeEquality { left, right, .. } = constraint {
-            eprintln!("[WHERE_CLAUSE_CHECK] Found TypeEquality constraint: {} = {} (NOT CHECKED during member resolution - deferred to type inference)",
+            debug_trace!("[WHERE_CLAUSE_CHECK] Found TypeEquality constraint: {} = {} (NOT CHECKED during member resolution - deferred to type inference)",
                       left, right);
         }
     }
 
-    eprintln!("[WHERE_CLAUSE_CHECK] All constraints satisfied - extension is applicable");
+    debug_trace!("[WHERE_CLAUSE_CHECK] All constraints satisfied - extension is applicable");
     true
 }
 
@@ -3009,7 +3009,7 @@ fn find_methods_in_protocol_extensions(
     ctx: &BodyResolutionContext,
 ) -> Vec<SymbolId> {
     if method_name == "cycle" {
-        eprintln!(
+        debug_trace!(
             "[CYCLE_PROTO_EXT] lookup concrete_ty={}",
             concrete_ty
         );
@@ -3017,7 +3017,7 @@ fn find_methods_in_protocol_extensions(
     let applicable_extensions = get_applicable_protocol_extensions(concrete_ty, ctx);
 
     if method_name == "cycle" {
-        eprintln!(
+        debug_trace!(
             "[CYCLE_PROTO_EXT] applicable_extensions={}",
             applicable_extensions.len()
         );

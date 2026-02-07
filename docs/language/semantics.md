@@ -88,7 +88,7 @@ Kestrel functions explicitly declare how they handle parameters using access mod
 
 ### Method Receivers
 
-Methods defined inside `struct`, `enum`, or `extension` blocks have implicit access to `self`. Unlike Rust, **methods do not declare `self` as an explicit parameter**.
+Methods defined inside `struct`, `enum`, or `extend` blocks have implicit access to `self`. Unlike Rust, **methods do not declare `self` as an explicit parameter**.
 
 ```kestrel
 struct Counter {
@@ -123,7 +123,7 @@ Generic types assume `Copyable` by default. To support non-copyable types, use `
 Kestrel uses **Typed Errors** via the `Result[T, E]` enum.
 
 -   **Exceptions are Values**: Errors are regular values, not unchecked exceptions.
--   **Propagation**: The `try` keyword is used to propagate errors up the call stack *(Future)*.
+-   **Propagation**: The `try` keyword is used to propagate errors up the call stack.
 -   **Exhaustive Handling**: You must handle the error case (e.g., via `match`) or propagate it.
 
 ```kestrel
@@ -141,7 +141,7 @@ func read() -> Result[String, FileError] {
 
 Protocols define a set of requirements (methods, properties) that a type must fulfill.
 
--   **Explicit Conformance**: Types must explicitly declare conformance via `extension Type: Protocol`.
+-   **Explicit Conformance**: Types must explicitly declare conformance via `extend Type: Protocol`.
 -   **Static Dispatch**: Calls to protocol methods on concrete types are statically dispatched (resolved at compile time).
 -   **Attributes**: Protocols can use attributes like `@builtin(.Copyable)` to interface with the compiler.
 

@@ -300,7 +300,7 @@ func convert(x: lang.f64) -> lang.str { "float" }
 
 ## Methods
 
-Methods are functions declared inside `struct`, `enum`, or `extension` blocks. Unlike standalone functions, methods have implicit access to `self`.
+Methods are functions declared inside `struct`, `enum`, or `extend` blocks. Unlike standalone functions, methods have implicit access to `self`.
 
 ### Important: `self` is Implicit
 

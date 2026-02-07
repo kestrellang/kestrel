@@ -167,14 +167,16 @@ outer: loop {
     }
 }
 
-// Note: `for` loops are not yet implemented. Use `while` or `loop` instead.
+// For loop
+for item in collection {
+    process(item);
+}
 
 // Match expression (Pattern Matching)
 let desc = match direction {
     .North => "Up",
     .South => "Down",
-    // Or patterns (Future)
-    // .East or .West => "Sideways",
+    .East or .West => "Sideways",
     _ => "Other" // Wildcard
 };
 ```
@@ -211,7 +213,7 @@ protocol Drawable {
 }
 
 // Protocol implementation via Extension
-extension Shape: Drawable {
+extend Shape: Drawable {
     func draw() {
         // Implementation
     }
@@ -233,8 +235,8 @@ protocol Copyable {}
 // Basic syntax
 let add = { (a: Int, b: Int) in a + b };
 
-// Implicit parameters (for single argument) - (Future/Partial)
-// let double = { it * 2 };
+// Implicit parameter (for single argument closures)
+let double = { it * 2 };
 
 // Trailing closure syntax
 numbers.map { it * 2 };
@@ -277,7 +279,7 @@ private struct C { ... }    // Visible in this file/scope
 // let y = x as Float64
 
 // Nil Coalescing
-// let val = optional ?? defaultVal
+let val = optional ?? defaultVal;
 
 // Chaining - (Future)
 // let x = foo?.bar?.baz

@@ -162,7 +162,7 @@ Protocols cannot contain nested type declarations.
 
 ```
 ERROR: Parse error or semantic error
-WHEN: Class, struct, or protocol nested in protocol
+WHEN: Struct, enum, or protocol nested in protocol
 WHY: Protocols define method contracts only
 ```
 
@@ -188,12 +188,9 @@ The protocol type is created during the build phase and attached via `TypedBehav
 
 ## Protocol Conformance
 
-**Note:** Protocol conformance (implementing a protocol in a struct) is not yet implemented. This section describes the intended design.
-
 ### Declaring Conformance
 
 ```kestrel
-// Future syntax
 struct Point: Drawable {
     let x: Int
     let y: Int
@@ -227,10 +224,10 @@ public protocol API {
 }
 ```
 
-## Protocol vs Class/Struct
+## Protocol vs Struct
 
-| Aspect | Protocol | Class/Struct |
-|--------|----------|--------------|
+| Aspect | Protocol | Struct |
+|--------|----------|-------|
 | Methods | Signatures only | Full implementations |
 | Fields | Not allowed | Allowed |
 | Nested types | Not allowed | Allowed |
@@ -266,7 +263,7 @@ let protocol_type = Ty::protocol(protocol_symbol.clone(), span);
 protocol_symbol.add_behavior(TypedBehavior::new(protocol_type, span));
 ```
 
-### Conformance (Future)
+### Conformance
 
 ```
 conforms(Type, Protocol) iff:

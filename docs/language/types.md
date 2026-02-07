@@ -215,16 +215,14 @@ func add(a: lang.i64, b: lang.i64) -> lang.i64 { a + b }
 func multiply(x: lang.i64, y: lang.i64) -> lang.i64 { x * y }
 ```
 
-## Optional Types *(Future)*
+## Optional Types
 
-Optional types represent values that may or may not be present.
+Optional types represent values that may or may not be present. `T?` is syntactic sugar for `Optional[T]`.
 
 ```kestrel
 let maybeNumber: lang.i64? = null;
 let definiteNumber: lang.i64? = 42;
 ```
-
-**Note:** Optional type syntax (`T?`) is planned but not yet implemented. Current null handling is limited.
 
 ## Pointer Types
 
@@ -433,7 +431,7 @@ protocol Cloneable {
     func clone() -> Self;
 }
 
-extension Counter: Cloneable {
+extend Counter: Cloneable {
     func clone() -> Self {
         Self { count: self.count }
     }
@@ -547,7 +545,7 @@ TypeList → (Type (COMMA Type)* COMMA?)?
 - `DOT` - Period `.`
 - `COMMA` - Comma `,`
 - `ARROW` - Arrow `->`
-- `QUESTION` - Question mark `?` *(Future)*
+- `QUESTION` - Question mark `?`
 
 ## Examples
 

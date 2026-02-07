@@ -14,6 +14,9 @@ workflows.md
 - When hitting a roadblock, stop and ask for guidance before reverting changes
 - After 3 failed attempts at the same class of fix, STOP. List what was tried, what was ruled out, and ask for guidance before continuing.
 
+## Debugging
+- Verbose debug tracing is available via `VERBOSE_DEBUG_OUTPUT=1`. This enables `debug_trace!` output in the binder and semantic tree crates (member resolution, method calls, where clause checks, type substitutions).
+
 ## Testing
 - Full suite takes ~5 minutes. Use `--release` for full runs: `cargo test -p kestrel-test-suite --release`
 - During iteration, target specific tests: `cargo test -p kestrel-test-suite --release -- test_name`

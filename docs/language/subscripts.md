@@ -313,7 +313,7 @@ enum JSON {
     }
 }
 
-extension String {
+extend String {
     public subscript(_ index: Int) -> Optional[Char] {
         self.char(at: index)
     }

@@ -30,6 +30,9 @@ pub struct MemberResolution {
     /// These are converted into inference constraints to enable type parameter inference
     /// from where clause equality constraints like `where Item = Optional[T]`.
     pub where_constraints: WhereClause,
+    /// Number of required parameters (those without default values).
+    /// Used for arity checking that accounts for default parameters.
+    pub required_parameter_count: usize,
 }
 
 /// Error when member resolution fails.
@@ -89,7 +92,9 @@ pub trait TypeOracle {
         argument_count: usize,
     ) -> Result<MemberResolution, MemberError> {
         let resolution = self.resolve_member(receiver_ty, member, is_static)?;
-        if resolution.parameters.len() == argument_count {
+        if argument_count >= resolution.required_parameter_count
+            && argument_count <= resolution.parameters.len()
+        {
             Ok(resolution)
         } else {
             Err(MemberError::NotFound {

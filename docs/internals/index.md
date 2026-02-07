@@ -4,7 +4,7 @@ Documentation on the Kestrel compiler architecture and language semantics.
 
 ## Compiler Architecture
 
-- **[Parser Architecture](parser-architecture.md)** - Event-driven parsing with Chumsky
+- **[Parser Architecture](parser-architecture.md)** - Event-driven parsing with Chumsky and Rowan
 - **[Execution Graph](execution-graph.md)** - Dependency-driven compilation
 - **[Validation Passes](validation-passes.md)** - Semantic analysis pipeline
 - **[Type Inference Design](type-inference-design.md)** - Bidirectional type inference

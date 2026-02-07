@@ -119,12 +119,12 @@ let color: Color = .Red
 let shape: Shape = .Circle(radius: 5.0)
 
 // Function arguments
-fn draw(shape: Shape) { ... }
+func draw(shape: Shape) { ... }
 draw(.Rectangle(width: 10.0, height: 20.0))
 
 // Return statements
-fn defaultColor() -> Color {
-    return .Blue
+func defaultColor() -> Color {
+    .Blue
 }
 
 // Assignment to typed variable
@@ -322,12 +322,12 @@ enum Color {
     case Green
     case Blue
 
-    fn isWarm() -> Bool {
+    func isWarm() -> Bool {
         // requires pattern matching
     }
 
-    static fn default() -> Color {
-        return .Red
+    static func default() -> Color {
+        .Red
     }
 }
 ```

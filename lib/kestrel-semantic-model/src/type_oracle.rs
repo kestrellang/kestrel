@@ -106,6 +106,7 @@ impl TypeOracle for SemanticModel {
                                         parameters,
                                         returns_self,
                                         where_constraints,
+                                        required_parameter_count: callable.required_parameter_count(),
                                     });
                                 }
                             }
@@ -147,6 +148,7 @@ impl TypeOracle for SemanticModel {
                                             parameters,
                                             returns_self,
                                             where_constraints,
+                                            required_parameter_count: callable.required_parameter_count(),
                                         });
                                     }
                                 }
@@ -287,6 +289,7 @@ impl TypeOracle for SemanticModel {
                     parameters,
                     returns_self,
                     where_constraints,
+                    required_parameter_count: callable.required_parameter_count(),
                 });
             }
             // Static access on non-static member
@@ -317,6 +320,7 @@ impl TypeOracle for SemanticModel {
                     parameters: vec![],  // field access has no parameters
                     returns_self: false, // field access, not a method call
                     where_constraints: WhereClause::new(), // field access has no where constraints
+                    required_parameter_count: 0,
                 });
             }
             // Check for computed property access via ComputedMemberAccessBehavior
@@ -337,6 +341,7 @@ impl TypeOracle for SemanticModel {
                     parameters: vec![],  // computed property access has no parameters
                     returns_self: false, // computed property access, not a method call
                     where_constraints: WhereClause::new(), // computed property access has no where constraints
+                    required_parameter_count: 0,
                 });
             }
         }
@@ -385,6 +390,7 @@ impl TypeOracle for SemanticModel {
                 parameters,
                 returns_self,
                 where_constraints,
+                required_parameter_count: callable.required_parameter_count(),
             });
         }
 
@@ -403,7 +409,8 @@ impl TypeOracle for SemanticModel {
         argument_count: usize,
     ) -> Result<MemberResolution, MemberError> {
         if let Ok(resolution) = self.resolve_member(receiver_ty, member, is_static)
-            && resolution.parameters.len() == argument_count
+            && argument_count >= resolution.required_parameter_count
+            && argument_count <= resolution.parameters.len()
         {
             return Ok(resolution);
         }
@@ -449,7 +456,7 @@ impl TypeOracle for SemanticModel {
 
         for candidate in candidates {
             if let Some(callable) = candidate.metadata().get_behavior::<CallableBehavior>() {
-                if callable.parameters().len() != argument_count {
+                if !callable.arity_matches(argument_count) {
                     continue;
                 }
                 if callable.is_static() != is_static {
@@ -490,6 +497,7 @@ impl TypeOracle for SemanticModel {
                     parameters,
                     returns_self,
                     where_constraints,
+                    required_parameter_count: callable.required_parameter_count(),
                 });
             }
         }
@@ -1394,7 +1402,7 @@ fn resolve_member_with_context(
                                 child.metadata().get_behavior::<CallableBehavior>()
                             {
                                 if let Some(expected) = expected_arity
-                                    && callable.parameters().len() != expected
+                                    && !callable.arity_matches(expected)
                                 {
                                     continue;
                                 }
@@ -1419,6 +1427,7 @@ fn resolve_member_with_context(
                                     parameters,
                                     returns_self,
                                     where_constraints,
+                                    required_parameter_count: callable.required_parameter_count(),
                                 });
                             }
                         }
@@ -1438,7 +1447,7 @@ fn resolve_member_with_context(
                                     child.metadata().get_behavior::<CallableBehavior>()
                                 {
                                     if let Some(expected) = expected_arity
-                                        && callable.parameters().len() != expected
+                                        && !callable.arity_matches(expected)
                                     {
                                         continue;
                                     }
@@ -1464,6 +1473,7 @@ fn resolve_member_with_context(
                                         parameters,
                                         returns_self,
                                         where_constraints,
+                                        required_parameter_count: callable.required_parameter_count(),
                                     });
                                 }
                             }
@@ -1517,7 +1527,7 @@ fn resolve_member_with_context(
                                 child.metadata().get_behavior::<CallableBehavior>()
                             {
                                 if let Some(expected) = expected_arity
-                                    && callable.parameters().len() != expected
+                                    && !callable.arity_matches(expected)
                                 {
                                     continue;
                                 }
@@ -1542,6 +1552,7 @@ fn resolve_member_with_context(
                                     parameters,
                                     returns_self,
                                     where_constraints,
+                                    required_parameter_count: callable.required_parameter_count(),
                                 });
                             }
                         }
@@ -1561,7 +1572,7 @@ fn resolve_member_with_context(
                                     child.metadata().get_behavior::<CallableBehavior>()
                                 {
                                     if let Some(expected) = expected_arity
-                                        && callable.parameters().len() != expected
+                                        && !callable.arity_matches(expected)
                                     {
                                         continue;
                                     }
@@ -1587,6 +1598,7 @@ fn resolve_member_with_context(
                                         parameters,
                                         returns_self,
                                         where_constraints,
+                                        required_parameter_count: callable.required_parameter_count(),
                                     });
                                 }
                             }
@@ -1633,7 +1645,7 @@ fn resolve_member_with_context(
                                 child.metadata().get_behavior::<CallableBehavior>()
                             {
                                 if let Some(expected) = expected_arity
-                                    && callable.parameters().len() != expected
+                                    && !callable.arity_matches(expected)
                                 {
                                     continue;
                                 }
@@ -1658,6 +1670,7 @@ fn resolve_member_with_context(
                                     parameters,
                                     returns_self,
                                     where_constraints,
+                                    required_parameter_count: callable.required_parameter_count(),
                                 });
                             }
                         }
@@ -1677,7 +1690,7 @@ fn resolve_member_with_context(
                                     child.metadata().get_behavior::<CallableBehavior>()
                                 {
                                     if let Some(expected) = expected_arity
-                                        && callable.parameters().len() != expected
+                                        && !callable.arity_matches(expected)
                                     {
                                         continue;
                                     }
@@ -1703,6 +1716,7 @@ fn resolve_member_with_context(
                                         parameters,
                                         returns_self,
                                         where_constraints,
+                                        required_parameter_count: callable.required_parameter_count(),
                                     });
                                 }
                             }
@@ -2391,7 +2405,7 @@ fn resolve_member_via_protocol_conformance(
                 let member_id = child.metadata().id();
                 if let Some(callable) = child.metadata().get_behavior::<CallableBehavior>() {
                     if let Some(expected) = expected_arity
-                        && callable.parameters().len() != expected
+                        && !callable.arity_matches(expected)
                     {
                         continue;
                     }
@@ -2438,6 +2452,7 @@ fn resolve_member_via_protocol_conformance(
                         parameters,
                         returns_self,
                         where_constraints,
+                        required_parameter_count: callable.required_parameter_count(),
                     });
                 }
             }
@@ -2501,7 +2516,7 @@ fn resolve_member_via_protocol_conformance(
                     let member_id = child.metadata().id();
                     if let Some(callable) = child.metadata().get_behavior::<CallableBehavior>() {
                         if let Some(expected) = expected_arity
-                            && callable.parameters().len() != expected
+                            && !callable.arity_matches(expected)
                         {
                             continue;
                         }
@@ -2584,6 +2599,7 @@ fn resolve_member_via_protocol_conformance(
                             parameters,
                             returns_self,
                             where_constraints,
+                            required_parameter_count: callable.required_parameter_count(),
                         });
                     }
                 }

@@ -14,6 +14,7 @@ MonomorphizationSet { functions, structs, enums }
     │
     ▼ for each instantiation: compile with substitution
 Cranelift IR (monomorphized)
+
 ```
 
 The MIR remains generic. When compiling a function instantiation like `identity[Int]`, we carry a `Substitution` through codegen and apply it as we translate each statement.
