@@ -435,7 +435,7 @@ mod witness_from_struct {
             Mir::mir_witness("Test.Number", "Test.Comparable")
                 .has_method("lessThan")
                 .has_method("equals")
-                .has_method_count(2),
+                .has_method_count(4),
         );
     }
 
@@ -659,7 +659,7 @@ mod witness_method_calls {
         .expect(
             Mir::mir_function("Test.addThem$a$b")
                 .has_type_params(1)
-                .calls_witness("Test.Add", "add"),
+                .calls_witness("Test.Add", "add#1"),
         );
     }
 
@@ -684,7 +684,7 @@ mod witness_method_calls {
         .expect(
             Mir::mir_function("Test.make")
                 .has_type_params(1)
-                .calls_witness("Test.Factory", "create"),
+                .calls_witness("Test.Factory", "create#0"),
         );
     }
 
@@ -709,7 +709,7 @@ mod witness_method_calls {
         .expect(
             Mir::mir_function("Test.make")
                 .has_type_params(1)
-                .calls_witness("Test.Factory", "init"),
+                .calls_witness("Test.Factory", "init#0"),
         );
     }
 
@@ -734,7 +734,7 @@ mod witness_method_calls {
         .expect(
             Mir::mir_function("Test.make$v")
                 .has_type_params(1)
-                .calls_witness("Test.Factory", "init"),
+                .calls_witness("Test.Factory", "init#1"),
         );
     }
 
@@ -759,7 +759,7 @@ mod witness_method_calls {
         .expect(
             Mir::mir_function("Test.run$proc$a$b")
                 .has_type_params(1)
-                .calls_witness("Test.Processor", "process"),
+                .calls_witness("Test.Processor", "process#2"),
         );
     }
 
@@ -789,8 +789,8 @@ mod witness_method_calls {
         .expect(
             Mir::mir_function("Test.compute$a$b")
                 .has_type_params(1)
-                .calls_witness("Test.Add", "add")
-                .calls_witness("Test.Mul", "mul"),
+                .calls_witness("Test.Add", "add#1")
+                .calls_witness("Test.Mul", "mul#1"),
         );
     }
 
@@ -815,7 +815,7 @@ mod witness_method_calls {
         .expect(
             Mir::mir_function("Test.convert$n")
                 .has_type_params(1)
-                .calls_witness("Test.Convertible", "fromInt"),
+                .calls_witness("Test.Convertible", "fromInt#1"),
         );
     }
 
@@ -841,7 +841,7 @@ mod witness_method_calls {
         .expect(
             Mir::mir_function("Test.bump$a")
                 .has_type_params(1)
-                .calls_witness("Test.Counter", "increment"),
+                .calls_witness("Test.Counter", "increment#0"),
         );
     }
 
@@ -870,7 +870,7 @@ mod witness_method_calls {
         .expect(
             Mir::mir_function("Test.makeItem")
                 .has_type_params(1)
-                .calls_witness("Test.Factory", "create"),
+                .calls_witness("Test.Factory", "create#0"),
         );
     }
 }

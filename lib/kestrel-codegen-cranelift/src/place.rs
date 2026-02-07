@@ -577,6 +577,12 @@ fn get_field_by_index(
     }
 
     // Otherwise, it's a regular struct or tuple - look up by index
+    // Resolve AssociatedTypeProjection through substitution before matching
+    let parent_ty = if matches!(ctx.mir.ty(parent_ty), MirTy::AssociatedTypeProjection { .. }) {
+        subst.apply_ty_readonly(ctx.mir, parent_ty).unwrap_or(parent_ty)
+    } else {
+        parent_ty
+    };
     let mir_ty = ctx.mir.ty(parent_ty);
 
     match mir_ty {

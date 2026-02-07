@@ -152,7 +152,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     // Ensure unique storage for mutation (COW)
     private mutating func makeUnique() {
         if self.storage.isUnique() == false {
-            self.storage = self.storage.deepClone()
+            self.storage = RcBox(self.storage.getValue().clone())
         }
     }
 

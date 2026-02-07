@@ -3851,6 +3851,24 @@ fn lower_call(
                 substitutions.clone()
             };
 
+            // For static method calls on generic types (e.g. Pointer[Int64].nullPointer()),
+            // the parent type parameter substitutions live in the receiver type, not in the
+            // Call expression's substitutions. Merge them in.
+            if let Some(recv_ty) = receiver_ty {
+                let recv_subs = match recv_ty.kind() {
+                    TyKind::Struct { substitutions, .. } => Some(substitutions),
+                    TyKind::Enum { substitutions, .. } => Some(substitutions),
+                    _ => None,
+                };
+                if let Some(subs) = recv_subs {
+                    for (id, ty) in subs.iter() {
+                        if !effective_subs.contains(*id) {
+                            effective_subs.insert(*id, ty.clone());
+                        }
+                    }
+                }
+            }
+
             if let Some(ids) = param_ids {
                 // If the extension introduced a synthetic `Self` type parameter,
                 // map it to the receiver type (or SelfType for protocol receivers).
@@ -4027,9 +4045,11 @@ fn lower_call(
                                 if parent.metadata().kind() == KestrelSymbolKind::Protocol {
                                     let protocol_name = qualified_name_for_symbol(ctx, &parent);
                                     let for_type = lower_type(ctx, &expr.ty);
+                                    // Use arity-qualified key to disambiguate init overloads
+                                    let witness_method_name = witness_method_key_from_callable("init", callable_beh.as_deref());
                                     // init() has no method-level type parameters
                                     let mir_callee =
-                                        Callee::witness(protocol_name, "init", for_type, vec![]);
+                                        Callee::witness(protocol_name, witness_method_name, for_type, vec![]);
                                     ctx.emit_call_with_modes(unit_place, mir_callee, call_args);
                                 } else {
                                     ctx.emit_error(LoweringError::internal(

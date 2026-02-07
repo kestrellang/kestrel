@@ -93,6 +93,20 @@ pub fn solve(mut ctx: InferenceContext<'_>) -> Solution {
         }
     }
 
+    // Default any remaining unconstrained inference variables to Never.
+    // This handles cases like `tryFold(initial: 0, combine: { .Ok(acc + x) })`
+    // where the error type E in Result[Acc, E] is never constrained because
+    // the closure only produces .Ok values. Never is semantically correct:
+    // it means the error case is impossible.
+    if apply_never_defaults(&mut ctx) {
+        loop {
+            let progress = solve_round(&mut ctx);
+            if !progress {
+                break;
+            }
+        }
+    }
+
     // Check that everything was resolved, add error if not
     check_fully_resolved(&mut ctx);
 
@@ -242,6 +256,98 @@ fn get_literal_feature_for_protocol(
     }
 
     None
+}
+
+/// Default unconstrained generic type parameters to Never.
+///
+/// After the main solve loop and literal defaults, some inference variables may remain
+/// unresolved. This specifically targets type parameters of generic function calls
+/// that were never constrained — for example, the error type `E` in `Result[Acc, E]`
+/// when a closure only produces `.Ok(...)` values and never `.Err(...)`.
+///
+/// Only Infer types that appear as substitutions of resolved Struct/Enum types are
+/// defaulted. Standalone Infer types (like unconstrained closure parameters) are NOT
+/// defaulted — those remain as genuine type inference errors.
+///
+/// Returns true if any defaults were applied.
+fn apply_never_defaults(ctx: &mut InferenceContext<'_>) -> bool {
+    let mut defaultable = Vec::new();
+    let mut visited = HashSet::new();
+
+    // Walk all types looking for resolved Struct/Enum types with unresolved substitutions.
+    // These represent generic type parameters that were never constrained.
+    for (_id, ty) in ctx.type_registry() {
+        find_defaultable_type_params(ty, ctx, &mut defaultable, &mut visited);
+    }
+    for (_id, subst_ty) in ctx.substitutions() {
+        find_defaultable_type_params(subst_ty, ctx, &mut defaultable, &mut visited);
+    }
+
+    if defaultable.is_empty() {
+        return false;
+    }
+
+    // Default each unconstrained type param to Never
+    for (ty_id, span) in &defaultable {
+        let never_ty = Ty::never(span.clone());
+        ctx.substitutions_mut().insert(*ty_id, never_ty);
+    }
+
+    true
+}
+
+/// Find Infer types that appear as type parameter substitutions of resolved Struct/Enum types.
+/// These are generic type parameters that were never constrained at a call site.
+fn find_defaultable_type_params(
+    ty: &Ty,
+    ctx: &InferenceContext<'_>,
+    defaultable: &mut Vec<(TyId, Span)>,
+    visited: &mut HashSet<TyId>,
+) {
+    if !visited.insert(ty.id()) {
+        return;
+    }
+
+    // First, resolve through substitutions
+    let resolved = if matches!(ty.kind(), TyKind::Infer) {
+        if let Some(subst) = ctx.substitutions().get(&ty.id()) {
+            subst.clone()
+        } else {
+            // Bare unresolved Infer - NOT defaultable (could be a closure param, etc.)
+            return;
+        }
+    } else {
+        ty.clone()
+    };
+
+    match resolved.kind() {
+        TyKind::Struct { substitutions, .. } | TyKind::Enum { substitutions, .. } => {
+            // Check each substitution - if it's an unresolved Infer, it's a defaultable type param
+            for (_, sub_ty) in substitutions.iter() {
+                let resolved_sub = resolve_type(ctx, sub_ty.id());
+                if matches!(resolved_sub.kind(), TyKind::Infer) {
+                    if !defaultable.iter().any(|(id, _)| *id == resolved_sub.id()) {
+                        defaultable.push((resolved_sub.id(), resolved_sub.span().clone()));
+                    }
+                } else {
+                    // Recursively check resolved compound substitutions
+                    find_defaultable_type_params(&resolved_sub, ctx, defaultable, visited);
+                }
+            }
+        }
+        TyKind::Function { params, return_type } => {
+            for p in params {
+                find_defaultable_type_params(p, ctx, defaultable, visited);
+            }
+            find_defaultable_type_params(return_type, ctx, defaultable, visited);
+        }
+        TyKind::Tuple(elements) => {
+            for e in elements {
+                find_defaultable_type_params(e, ctx, defaultable, visited);
+            }
+        }
+        _ => {}
+    }
 }
 
 /// Run one round of constraint solving.

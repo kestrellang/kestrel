@@ -2210,6 +2210,7 @@ pub fn resolve_method_call(
                     })
                     .collect();
                 let ret_ty = substitute_type(&return_ty, &call_substitutions);
+                let ret_ty = resolve_associated_types(&ret_ty, ctx);
                 Ty::function(param_tys, ret_ty, span.clone())
             };
 
@@ -2225,6 +2226,9 @@ pub fn resolve_method_call(
                 span: span.clone(),
                 mutable: false,
             };
+
+            // Resolve associated types in the return type (e.g., Array[Int64].Item -> Int64)
+            return_ty = resolve_associated_types(&return_ty, ctx);
 
             eprintln!("[METHOD_CALL] Successfully resolved '{}' to function (return type: {})",
                       method_name, return_ty);

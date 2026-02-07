@@ -211,7 +211,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     // Ensure unique storage for mutation (COW)
     fileprivate mutating func makeUnique() {
         if self.storage.isUnique() == false {
-            self.storage = self.storage.deepClone()
+            self.storage = RcBox(self.storage.getValue().clone())
         }
     }
 

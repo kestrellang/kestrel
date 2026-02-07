@@ -1954,6 +1954,12 @@ fn get_field_by_index(
     }
 
     // Otherwise, it's a regular struct or tuple - look up by index
+    // Resolve AssociatedTypeProjection through substitution before matching
+    let parent_ty = if matches!(ctx.mir.ty(parent_ty), MirTy::AssociatedTypeProjection { .. }) {
+        subst.apply_ty_readonly(ctx.mir, parent_ty).unwrap_or(parent_ty)
+    } else {
+        parent_ty
+    };
     let mir_ty = ctx.mir.ty(parent_ty);
 
     match mir_ty {
@@ -3072,18 +3078,6 @@ pub fn compile_call(
                 ret_ptr = None;
             }
 
-            // Debug: witness call argument info
-            {
-                eprintln!("=== WITNESS CALL DEBUG: {} ===", method);
-                eprintln!("  mangled: {}", mangled_name);
-                eprintln!("  args.len(): {}", args.len());
-                eprintln!("  expected_param_count: {}", expected_param_count);
-                eprintln!("  needs_sret: {}", needs_sret);
-                for (i, arg) in args.iter().enumerate() {
-                    eprintln!("  arg[{}]: mode={:?}", i, arg.mode);
-                }
-            }
-
             // Compile arguments with proper PassingMode handling
             let mut arg_values = Vec::with_capacity(args.len() + if needs_sret { 1 } else { 0 });
             if let Some(ptr) = ret_ptr {
@@ -3404,7 +3398,7 @@ fn get_place_type_for_call(
 
         PlaceKind::Index { parent, index } => {
             let parent_ty = get_place_type_for_call(ctx, parent, local_map, subst)?;
-            get_field_type_by_index_for_call(ctx, parent_ty, *index)
+            get_field_type_by_index_for_call(ctx, parent_ty, *index, subst)
         },
 
         PlaceKind::Downcast { parent, .. } => get_place_type_for_call(ctx, parent, local_map, subst),
@@ -3486,7 +3480,14 @@ fn get_field_type_by_index_for_call(
     ctx: &CodegenContext<'_>,
     parent_ty: Id<Ty>,
     index: usize,
+    subst: &Substitution,
 ) -> Result<Id<Ty>, CodegenError> {
+    // Resolve AssociatedTypeProjection through substitution before matching
+    let parent_ty = if matches!(ctx.mir.ty(parent_ty), MirTy::AssociatedTypeProjection { .. }) {
+        subst.apply_ty_readonly(ctx.mir, parent_ty).unwrap_or(parent_ty)
+    } else {
+        parent_ty
+    };
     let mir_ty = ctx.mir.ty(parent_ty);
 
     match mir_ty {

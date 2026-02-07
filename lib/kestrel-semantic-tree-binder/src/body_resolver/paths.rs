@@ -1273,57 +1273,94 @@ fn extract_qualified_type_from_path(
 
     let children: Vec<_> = expr_path.children_with_tokens().collect();
 
-    // Find if there's a dot (multi-segment path)
-    let first_dot_pos = children.iter().position(|c| {
-        c.as_token()
-            .map(|t| t.kind() == SyntaxKind::Dot)
+    // Find TypeArgumentList anywhere in the path.
+    // For paths like `std.memory.Pointer[Int64].nullPointer`, the TypeArgumentList
+    // appears after the type name, potentially deep in a multi-segment path.
+    let type_arg_pos = children.iter().position(|c| {
+        c.as_node()
+            .map(|n| n.kind() == SyntaxKind::TypeArgumentList)
             .unwrap_or(false)
     });
 
-    // If no dot, this is a single-segment path - return None
-    let first_dot_pos = first_dot_pos?;
+    // Verify there's a dot AFTER the TypeArgumentList (meaning there's a member access).
+    // If the TypeArgumentList is at the end, this is just a type reference, not qualified member access.
+    let has_trailing_member = if let Some(pos) = type_arg_pos {
+        children[pos + 1..].iter().any(|c| {
+            c.as_token()
+                .map(|t| t.kind() == SyntaxKind::Dot)
+                .unwrap_or(false)
+        })
+    } else {
+        false
+    };
 
-    // Get the first identifier (type name)
-    let first_ident = children
+    // If no TypeArgumentList with trailing member, check for generic type without explicit args
+    if !has_trailing_member {
+        // Find if there's a dot (multi-segment path)
+        let has_dot = children.iter().any(|c| {
+            c.as_token()
+                .map(|t| t.kind() == SyntaxKind::Dot)
+                .unwrap_or(false)
+        });
+        if !has_dot {
+            return None;
+        }
+
+        // Get the first identifier for single-segment type name fallback
+        let first_ident = children
+            .iter()
+            .filter_map(|c| c.as_token())
+            .find(|t| t.kind() == SyntaxKind::Identifier)?;
+        let type_name = first_ident.text().to_string();
+
+        let span = get_node_span(node, ctx.file_id);
+        let base_ty = match ctx.model.query(ResolveTypePath {
+            path: vec![type_name],
+            context: ctx.function_id,
+        }) {
+            TypePathResolution::Resolved(ty) => ty,
+            _ => return None,
+        };
+
+        // Only return Some for generic types that need inference
+        return match base_ty.kind() {
+            TyKind::Struct { symbol, .. } if !symbol.type_parameters().is_empty() => {
+                Some(base_ty)
+            },
+            TyKind::Enum { symbol, .. } if !symbol.type_parameters().is_empty() => Some(base_ty),
+            _ => None,
+        };
+    }
+
+    // We have a TypeArgumentList with trailing member access.
+    // Collect all identifiers BEFORE the TypeArgumentList to form the type path.
+    let type_arg_pos = type_arg_pos.unwrap();
+    let type_path: Vec<String> = children[..type_arg_pos]
         .iter()
         .filter_map(|c| c.as_token())
-        .find(|t| t.kind() == SyntaxKind::Identifier)?;
-    let type_name = first_ident.text().to_string();
+        .filter(|t| t.kind() == SyntaxKind::Identifier)
+        .map(|t| t.text().to_string())
+        .collect();
 
-    // Look for TypeArgumentList before the first dot
-    let type_arg_list = children[..first_dot_pos]
-        .iter()
-        .filter_map(|c| c.as_node())
-        .find(|n| n.kind() == SyntaxKind::TypeArgumentList);
+    if type_path.is_empty() {
+        return None;
+    }
 
-    // Resolve the type name to get the base type
+    // Resolve the type path
     let span = get_node_span(node, ctx.file_id);
     let base_ty = match ctx.model.query(ResolveTypePath {
-        path: vec![type_name.clone()],
+        path: type_path,
         context: ctx.function_id,
     }) {
         TypePathResolution::Resolved(ty) => ty,
-        _ => return None, // Type not found - let normal error handling deal with it
+        _ => return None,
     };
 
-    // Apply type arguments if present
-    if let Some(type_arg_list) = type_arg_list {
-        // Resolve each type in the TypeArgumentList
-        let mut type_args = Vec::new();
-        for child in type_arg_list.children() {
-            if child.kind() == SyntaxKind::Ty {
-                let mut resolver = TypeResolver::new(
-                    ctx.model,
-                    ctx.diagnostics,
-                    ctx.source,
-                    ctx.file_id,
-                    ctx.function_id,
-                );
-                type_args.push(resolver.resolve(&child));
-            }
-        }
-
-        if !type_args.is_empty() {
+    // Extract and apply type arguments from the TypeArgumentList
+    let type_arg_node = children[type_arg_pos].as_node().unwrap();
+    let mut type_args = Vec::new();
+    for child in type_arg_node.children() {
+        if child.kind() == SyntaxKind::Ty {
             let mut resolver = TypeResolver::new(
                 ctx.model,
                 ctx.diagnostics,
@@ -1331,30 +1368,29 @@ fn extract_qualified_type_from_path(
                 ctx.file_id,
                 ctx.function_id,
             );
-            return Some(resolver.apply_type_arguments(&base_ty, type_args, span));
+            type_args.push(resolver.resolve(&child));
         }
     }
 
-    // No explicit type arguments - only return Some for generic types that need inference
-    // For non-generic types like Point, return None to use the original SymbolRef path
-    match base_ty.kind() {
-        TyKind::Struct { symbol, .. } => {
-            if !symbol.type_parameters().is_empty() {
-                // Generic type without explicit args - return base type for inference
-                return Some(base_ty);
-            }
-        },
-        TyKind::Enum { symbol, .. } => {
-            if !symbol.type_parameters().is_empty() {
-                // Generic enum without explicit args - return base type for inference
-                return Some(base_ty);
-            }
-        },
-        _ => {},
+    if !type_args.is_empty() {
+        let mut resolver = TypeResolver::new(
+            ctx.model,
+            ctx.diagnostics,
+            ctx.source,
+            ctx.file_id,
+            ctx.function_id,
+        );
+        Some(resolver.apply_type_arguments(&base_ty, type_args, span))
+    } else {
+        // TypeArgumentList present but empty - return base type for generic inference
+        match base_ty.kind() {
+            TyKind::Struct { symbol, .. } if !symbol.type_parameters().is_empty() => {
+                Some(base_ty)
+            },
+            TyKind::Enum { symbol, .. } if !symbol.type_parameters().is_empty() => Some(base_ty),
+            _ => None,
+        }
     }
-
-    // Non-generic type without type args - return None to use original path
-    None
 }
 
 /// Parse a lang intrinsic name like "i64_add", "i64_signed_div", "f64_mul", etc.
