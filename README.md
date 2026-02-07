@@ -19,9 +19,14 @@ Games built with Kestrel:
 - **Monomorphized generics** - Zero-cost abstractions through compile-time specialization
 - **RAII resource management** - Deterministic cleanup via `deinit` blocks
 - **First-class functions** - Closures with trailing closure syntax and implicit `it` parameter
-- **Pattern matching** - `match`, `if let`, and `while let` expressions with exhaustiveness checking
+- **Pattern matching** - `match`, `if let`, `while let`, range patterns, and array patterns with exhaustiveness checking
 - **Type inference** - Bidirectional type inference within function bodies
-- **Parameter labels** - Named parameters for readable call sites
+- **Parameter labels** - Named parameters with default values for readable call sites
+- **String interpolation** - `"Hello, \(name)"` with format specifiers
+- **Error handling** - `try`/`throw` expressions with `Result` and `Optional` types
+- **Type sugar** - `T?` for Optional, `T!` for Result, `[T]` for Array, `[K: V]` for Dictionary
+- **For-in loops** - `for item in collection { ... }` with iterator protocol
+- **Expression-bodied functions** - `func double(x: Int) -> Int = x * 2`
 
 ## Quick Start
 
@@ -30,7 +35,7 @@ Games built with Kestrel:
 cargo build --release
 
 # Run a program
-kestrel run examples/hello.ks
+kestrel run examples/pong/pong.ks
 
 # Check for errors without running
 kestrel check file.ks
@@ -46,11 +51,10 @@ module Hello
 
 import std.io.stdio.(println)
 import std.io.error.(Error)
-import std.result.(Result)
 
-func main() -> Result[(), Error] {
-    println("Hello, world!");
-    .Ok(())
+func main() -> () throws Error {
+    let name = "World";
+    println("Hello, \(name)!");
 }
 ```
 
@@ -114,6 +118,48 @@ let add = { x, y in x + y }
 
 // Trailing closure syntax
 numbers.map { it * 2 }
+```
+
+### For Loops and Iterators
+
+```kestrel
+for item in items {
+    println("\(item)");
+}
+
+// Iterator adapters
+let evens = numbers.iter()
+    .filter { it % 2 == 0 }
+    .map { it * 10 }
+    .collect();
+```
+
+### Error Handling
+
+```kestrel
+func readConfig(path: String) -> String throws Error {
+    let file = try File.open(path);
+    let contents = try file.readToString();
+    contents
+}
+
+// Null coalescing
+let name = optionalName ?? "default";
+```
+
+### Type Sugar
+
+```kestrel
+var name: String? = nil;      // Optional[String]
+var ids: [Int64] = [];         // Array[Int64]
+var scores: [String: Int64];   // Dictionary[String, Int64]
+```
+
+### Expression-Bodied Functions
+
+```kestrel
+func double(x: Int64) -> Int64 = x * 2
+func isEven(n: Int64) -> Bool = n % 2 == 0
 ```
 
 ### Parameter Access Modes
@@ -192,14 +238,15 @@ docs/                             # Documentation
 
 The standard library (`lang/std/`) includes:
 
-- **core/** - Protocols for operators, comparison, copying
-- **collections/** - Array, Dictionary, Set
-- **result/** - Optional and Result types
-- **text/** - String and Char
-- **io/** - File I/O, stdin/stdout
-- **memory/** - Allocator, Buffer, reference counting
-- **iter/** - Iterator protocol and adapters
-- **num/** - Numeric types (Int8-64, UInt8-64, Float32/64)
+- **core/** - Protocols for operators, comparison, copying, error handling
+- **collections/** - Array, Dictionary (hash map), Set
+- **result/** - Optional and Result types with promotion
+- **text/** - String (UTF-8), Char (grapheme), Unicode tables, string formatting
+- **io/** - File I/O, stdin/stdout, buffered readers/writers
+- **memory/** - Allocator, Buffer, Pointer, reference counting (RcBox)
+- **iter/** - Iterator protocol and adapters (map, filter, flatMap, zip, chain, enumerate, etc.)
+- **num/** - Numeric types (Int8-64, UInt8-64, Float32/64), math functions, random
+- **ffi/** - CString, libc bindings for C interop
 
 ## Building from Source
 
