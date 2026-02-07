@@ -276,10 +276,10 @@ fn apply_never_defaults(ctx: &mut InferenceContext<'_>) -> bool {
 
     // Walk all types looking for resolved Struct/Enum types with unresolved substitutions.
     // These represent generic type parameters that were never constrained.
-    for (_id, ty) in ctx.type_registry() {
+    for ty in ctx.type_registry().values() {
         find_defaultable_type_params(ty, ctx, &mut defaultable, &mut visited);
     }
-    for (_id, subst_ty) in ctx.substitutions() {
+    for subst_ty in ctx.substitutions().values() {
         find_defaultable_type_params(subst_ty, ctx, &mut defaultable, &mut visited);
     }
 
@@ -1157,9 +1157,7 @@ fn resolve_promotable(
     let to = resolve_type(ctx, to_ty);
 
     // Debug only for function type promotions where we expect issues
-    if matches!(to.kind(), TyKind::Function { .. })
-        && to.to_string().contains("ArrayIterator[Int64].Item")
-    {}
+    if matches!(to.kind(), TyKind::Function { .. }) { to.to_string().contains("ArrayIterator[Int64].Item"); }
 
     // Expand type aliases for both types to get the underlying types
     let from = from.expand_aliases();
@@ -2212,23 +2210,21 @@ fn resolve_type(ctx: &InferenceContext<'_>, id: TyId) -> Ty {
     // try to resolve it using the oracle. This handles cases like when
     // U.Item has substitutions applied and U becomes Array[Int64], giving
     // us Array[Int64].Item which should resolve to Int64.
-    if let TyKind::AssociatedType { symbol, container } = resolved.kind() {
-        if let Some(container_ty) = container {
+    if let TyKind::AssociatedType { symbol, container } = resolved.kind()
+        && let Some(container_ty) = container {
             // First, recursively resolve the container (it might have substitutions too)
             let resolved_container = resolve_type(ctx, container_ty.id());
             let name = symbol.metadata().name().value.clone();
 
             // Only try to resolve if the container is concrete (not Infer)
-            if !matches!(resolved_container.kind(), TyKind::Infer) {
-                if let Some(concrete_ty) = ctx
+            if !matches!(resolved_container.kind(), TyKind::Infer)
+                && let Some(concrete_ty) = ctx
                     .oracle()
                     .resolve_associated_type(&resolved_container, &name)
                 {
                     return concrete_ty;
                 }
-            }
         }
-    }
 
     // If the resolved type is a struct with type arguments that might contain
     // associated types, recursively resolve them. This handles cases like
@@ -2387,12 +2383,12 @@ fn check_fully_resolved(ctx: &mut InferenceContext<'_>) {
     // 1. Bare Infer types without substitutions
     // 2. Infer types with substitutions to compound types containing unresolved Infer
     // 3. Non-Infer compound types (like UnresolvedFunction) that contain unresolved Infer
-    for (_id, ty) in ctx.type_registry() {
+    for ty in ctx.type_registry().values() {
         find_nested_infer_types(ty, ctx, &mut unresolved, &mut visited);
     }
 
     // Also check all substitutions for nested unresolved Infer types
-    for (_id, subst_ty) in ctx.substitutions() {
+    for subst_ty in ctx.substitutions().values() {
         find_nested_infer_types(subst_ty, ctx, &mut unresolved, &mut visited);
     }
 
@@ -2541,10 +2537,8 @@ fn find_nested_infer_types(
         TyKind::Pointer(pointee) => {
             find_nested_infer_types(pointee, ctx, unresolved, visited);
         },
-        TyKind::AssociatedType { container, .. } => {
-            if let Some(c) = container {
-                find_nested_infer_types(c, ctx, unresolved, visited);
-            }
+        TyKind::AssociatedType { container: Some(c), .. } => {
+            find_nested_infer_types(c, ctx, unresolved, visited);
         },
         _ => {},
     }

@@ -369,14 +369,13 @@ impl Substitution {
                     MirTy::TypeParam(_) | MirTy::SelfType | MirTy::AssociatedTypeProjection { .. }
                 );
 
-                if base_is_concrete {
-                    if let Ok(resolved) = super::witness::resolve_associated_type(
+                if base_is_concrete
+                    && let Ok(resolved) = super::witness::resolve_associated_type(
                         mir, new_base, *protocol, associated,
                     ) {
                         // Successfully resolved to a concrete type
                         return Ok(resolved);
                     }
-                }
 
                 // Either base is not concrete yet, or resolution failed
                 if new_base == *base {

@@ -1010,31 +1010,27 @@ fn resolve_type(
             Ty::generic_type_alias(symbol.clone(), resolved_subs, ty.span().clone())
         },
         // Associated types - resolve the container if it has one
-        TyKind::AssociatedType { symbol, container } => {
-            match container {
-                Some(container_ty) => {
-                    // First resolve the container type
-                    let resolved_container = resolve_type(container_ty, solution, oracle, visited);
-                    let name = symbol.metadata().name().value.clone();
+        TyKind::AssociatedType { symbol, container: Some(container_ty) } => {
+            // First resolve the container type
+            let resolved_container = resolve_type(container_ty, solution, oracle, visited);
+            let name = symbol.metadata().name().value.clone();
 
-                    // Try to resolve the associated type using the oracle
-                    if let Some(resolved) =
-                        oracle.resolve_associated_type(&resolved_container, &name)
-                    {
-                        // Recursively resolve in case the result also has associated types
-                        resolve_type(&resolved, solution, oracle, visited)
-                    } else {
-                        // Can't resolve - return the type with the resolved container
-                        Ty::qualified_associated_type(
-                            symbol.clone(),
-                            resolved_container,
-                            ty.span().clone(),
-                        )
-                    }
-                },
-                None => ty.clone(),
+            // Try to resolve the associated type using the oracle
+            if let Some(resolved) =
+                oracle.resolve_associated_type(&resolved_container, &name)
+            {
+                // Recursively resolve in case the result also has associated types
+                resolve_type(&resolved, solution, oracle, visited)
+            } else {
+                // Can't resolve - return the type with the resolved container
+                Ty::qualified_associated_type(
+                    symbol.clone(),
+                    resolved_container,
+                    ty.span().clone(),
+                )
             }
         },
+        TyKind::AssociatedType { container: None, .. } => ty.clone(),
         // Other types - no inference placeholders to resolve
         _ => ty.clone(),
     }

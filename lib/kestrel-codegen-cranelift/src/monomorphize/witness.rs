@@ -257,17 +257,13 @@ pub fn resolve_witness(
 ) -> Result<(Id<QualifiedName>, Vec<Id<Ty>>), MonomorphizeError> {
     // Resolve associated type projections before witness lookup.
     let mut resolved_for_type = for_type;
-    loop {
-        match mir.ty(resolved_for_type) {
-            MirTy::AssociatedTypeProjection {
-                base,
-                protocol,
-                associated,
-            } => {
-                resolved_for_type = resolve_associated_type(mir, *base, *protocol, associated)?;
-            },
-            _ => break,
-        }
+    while let MirTy::AssociatedTypeProjection {
+        base,
+        protocol,
+        associated,
+    } = mir.ty(resolved_for_type)
+    {
+        resolved_for_type = resolve_associated_type(mir, *base, *protocol, associated)?;
     }
 
     // Find the witness

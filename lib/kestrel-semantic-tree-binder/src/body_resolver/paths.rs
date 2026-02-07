@@ -783,7 +783,7 @@ fn extract_path_segments_with_spans(
 
                     // Validate span
                     let span =
-                        if range_end <= source.len() && &source[range_start..range_end] == name {
+                        if range_end <= source.len() && source[range_start..range_end] == name {
                             Span::new(file_id, range_start..range_end)
                         } else {
                             // Invalid span - use node range as fallback
@@ -944,7 +944,7 @@ fn extract_trailing_identifiers(
                 let range_end: usize = range.end().into();
 
                 // Validate span
-                let span = if range_end <= source.len() && &source[range_start..range_end] == name {
+                let span = if range_end <= source.len() && source[range_start..range_end] == name {
                     Span::new(file_id, range_start..range_end)
                 } else {
                     // Invalid span - use node range as fallback
@@ -1308,7 +1308,7 @@ fn extract_qualified_type_from_path(
             .find(|t| t.kind() == SyntaxKind::Identifier)?;
         let type_name = first_ident.text().to_string();
 
-        let span = get_node_span(node, ctx.file_id);
+        let _span = get_node_span(node, ctx.file_id);
         let base_ty = match ctx.model.query(ResolveTypePath {
             path: vec![type_name],
             context: ctx.function_id,

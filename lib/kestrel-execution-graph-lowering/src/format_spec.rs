@@ -36,22 +36,6 @@ pub enum SignMode {
     Space,
 }
 
-/// Float display style.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum FloatStyle {
-    /// Default: use shortest representation.
-    #[default]
-    Auto,
-    /// Fixed-point notation (e.g., "3.14").
-    Fixed,
-    /// Scientific notation with lowercase 'e' (e.g., "3.14e0").
-    Scientific,
-    /// Scientific notation with uppercase 'E' (e.g., "3.14E0").
-    ScientificUpper,
-    /// Percentage (multiplies by 100, adds '%').
-    Percent,
-}
-
 /// Format type specifier.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum FormatType {

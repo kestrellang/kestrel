@@ -1199,7 +1199,7 @@ pub fn resolve_member_call(
         {
             let where_clause = ext_behavior.where_clause();
             verify_where_clause_constraints_from_substitutions(
-                &where_clause,
+                where_clause,
                 &call_subs,
                 Some(&resolved_base_ty),
                 &span,
@@ -2540,15 +2540,14 @@ pub(super) fn filter_applicable_extensions(
                             }
                             // If actual_type is a type parameter, check if the bound is
                             // declared in the current context's where clause
-                            if let TyKind::TypeParameter(tp_symbol) = actual_type.kind() {
-                                if type_param_has_bound_in_where_clause(
+                            if let TyKind::TypeParameter(tp_symbol) = actual_type.kind()
+                                && type_param_has_bound_in_where_clause(
                                     tp_symbol.metadata().id(),
                                     bound,
                                     ctx.where_clause(),
                                 ) {
                                     continue;
                                 }
-                            }
                             // Constraint not satisfied
                             return None;
                         }
@@ -2682,23 +2681,21 @@ fn normalize_type_param_with_equality(
         if let kestrel_semantic_tree::ty::Constraint::TypeEquality { left, right, .. } = constraint
         {
             // Check if left side is our type parameter
-            if let TyKind::TypeParameter(tp) = left.kind() {
-                if tp.metadata().id() == param_id {
+            if let TyKind::TypeParameter(tp) = left.kind()
+                && tp.metadata().id() == param_id {
                     // Return the right side if it's concrete enough for member access
                     if is_concrete_for_member_access(right) {
                         return Some(right.clone());
                     }
                 }
-            }
             // Also check if right side is our type parameter (constraints are symmetric)
-            if let TyKind::TypeParameter(tp) = right.kind() {
-                if tp.metadata().id() == param_id {
+            if let TyKind::TypeParameter(tp) = right.kind()
+                && tp.metadata().id() == param_id {
                     // Return the left side if it's concrete enough for member access
                     if is_concrete_for_member_access(left) {
                         return Some(left.clone());
                     }
                 }
-            }
         }
     }
     None
@@ -2724,22 +2721,19 @@ fn type_param_has_bound_in_where_clause(
 
     for constraint in where_clause.constraints() {
         // Check if this constraint is for our type parameter
-        if let Some(constraint_param_id) = constraint.type_parameter_id() {
-            if constraint_param_id == param_id {
+        if let Some(constraint_param_id) = constraint.type_parameter_id()
+            && constraint_param_id == param_id {
                 // Check if any of the bounds match
                 for constraint_bound in constraint.bounds() {
                     if let TyKind::Protocol {
                         symbol: bound_proto,
                         ..
                     } = constraint_bound.kind()
-                    {
-                        if bound_proto.metadata().id() == required_proto.metadata().id() {
+                        && bound_proto.metadata().id() == required_proto.metadata().id() {
                             return true;
                         }
-                    }
                 }
             }
-        }
     }
 
     false

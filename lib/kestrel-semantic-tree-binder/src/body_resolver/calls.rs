@@ -1969,7 +1969,7 @@ pub fn resolve_method_call(
                             let protocol_matches = if proto.metadata().id() == target_protocol_id {
                                 // Direct match
                                 true
-                            } else if let Some(target_proto) = &target_protocol_opt {
+                            } else if let Some(_target_proto) = &target_protocol_opt {
                                 // Check if the conformance protocol inherits from the target
                                 // This handles cases where we have Protocol A: B and the method is from B
                                 get_method_protocol_substitutions(&symbol, proto, proto_subs)
@@ -2141,13 +2141,11 @@ pub fn resolve_method_call(
                             .return_type()
                             .apply_substitutions(&call_substitutions);
                     }
-                } else {
-                    if !method_is_protocol_scoped {
-                        for (param_id, ty) in substitutions.iter() {
-                            call_substitutions.insert(*param_id, ty.clone());
-                        }
-                        return_ty = return_ty.apply_substitutions(substitutions);
+                } else if !method_is_protocol_scoped {
+                    for (param_id, ty) in substitutions.iter() {
+                        call_substitutions.insert(*param_id, ty.clone());
                     }
+                    return_ty = return_ty.apply_substitutions(substitutions);
                 }
             }
 
@@ -2218,7 +2216,7 @@ pub fn resolve_method_call(
             {
                 let where_clause = ext_behavior.where_clause();
                 verify_where_clause_constraints_from_substitutions(
-                    &where_clause,
+                    where_clause,
                     &call_substitutions,
                     Some(&resolved_receiver_ty),
                     &span,
@@ -2236,8 +2234,7 @@ pub fn resolve_method_call(
                 let param_tys: Vec<Ty> = callable
                     .parameters()
                     .iter()
-                    .enumerate()
-                    .map(|(i, p)| {
+                    .map(|p| {
                         let ty = substitute_type(&p.ty, &call_substitutions);
                         let ty = substitute_self(&ty, &resolved_receiver_ty);
                         resolve_associated_types(&ty, ctx)
@@ -2569,12 +2566,12 @@ fn apply_protocol_defaults_with_self(bound: &Ty, self_ty: &Ty) -> Ty {
     // Fill in missing defaults, also substituting Self
     for param in &type_params {
         let param_id = param.metadata().id();
-        if !new_subs.contains(param_id) {
-            if let Some(default_ty) = param.default() {
-                // Substitute Self in the default type with the concrete type
-                let resolved_default = default_ty.substitute_self(self_ty);
-                new_subs.insert(param_id, resolved_default);
-            }
+        if !new_subs.contains(param_id)
+            && let Some(default_ty) = param.default()
+        {
+            // Substitute Self in the default type with the concrete type
+            let resolved_default = default_ty.substitute_self(self_ty);
+            new_subs.insert(param_id, resolved_default);
         }
     }
 

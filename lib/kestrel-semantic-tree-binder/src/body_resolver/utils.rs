@@ -700,8 +700,8 @@ pub fn get_associated_type_bounds_from_context(
     // but we also need to check the parent's where clause for inherited constraints
     if let Some(function) = ctx.model.query(SymbolFor {
         id: ctx.function_id,
-    }) {
-        if let Some(parent) = function.metadata().parent() {
+    })
+        && let Some(parent) = function.metadata().parent() {
             // Get the parent's where clause depending on its kind
             let parent_where_clause = match parent.metadata().kind() {
                 KestrelSymbolKind::Extension => parent
@@ -722,8 +722,7 @@ pub fn get_associated_type_bounds_from_context(
                         bounds: self_bounds,
                         ..
                     } = constraint
-                    {
-                        if path_matches_associated_type(
+                        && path_matches_associated_type(
                             associated_type_path,
                             &assoc_name,
                             container,
@@ -747,7 +746,6 @@ pub fn get_associated_type_bounds_from_context(
                                 }
                             }
                         }
-                    }
                     if let Constraint::InheritedAssociatedTypeBound {
                         path,
                         bounds: assoc_bounds,
@@ -813,7 +811,6 @@ pub fn get_associated_type_bounds_from_context(
                 }
             }
         }
-    }
 
     bounds
 }

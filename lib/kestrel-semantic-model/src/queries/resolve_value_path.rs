@@ -196,15 +196,13 @@ impl Query for ResolveValuePath {
             if matches.is_empty()
                 && (current_symbol.metadata().kind() == KestrelSymbolKind::Field
                     || current_symbol.metadata().kind() == KestrelSymbolKind::Getter)
-            {
-                if let Some(value_beh) = current_symbol.metadata().get_behavior::<ValueBehavior>() {
+                && let Some(value_beh) = current_symbol.metadata().get_behavior::<ValueBehavior>() {
                     return ValuePathResolution::FieldValue {
                         symbol_id: current_symbol.metadata().id(),
                         ty: value_beh.ty().clone(),
                         resolved_index: index - 1,
                     };
                 }
-            }
 
             // Last segment: handle overloads
             if index == self.path.len() - 1 {

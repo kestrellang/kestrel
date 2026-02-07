@@ -554,7 +554,7 @@ fn expression_contains_break(expr: &Expression) -> bool {
                 .any(|s| statement_contains_break(&s.kind))
                 || then_value
                     .as_ref()
-                    .map_or(false, |v| expression_contains_break(v))
+                    .is_some_and(|v| expression_contains_break(v))
                 || else_branch
                     .as_ref()
                     .map(|b| match b {
@@ -562,7 +562,7 @@ fn expression_contains_break(expr: &Expression) -> bool {
                             statements.iter().any(|s| statement_contains_break(&s.kind))
                                 || value
                                     .as_ref()
-                                    .map_or(false, |v| expression_contains_break(v))
+                                    .is_some_and(|v| expression_contains_break(v))
                         },
                         ElseBranch::ElseIf(e) => expression_contains_break(e),
                     })
@@ -612,7 +612,7 @@ fn expression_contains_break(expr: &Expression) -> bool {
             statements.iter().any(|s| statement_contains_break(&s.kind))
                 || value
                     .as_ref()
-                    .map_or(false, |v| expression_contains_break(v))
+                    .is_some_and(|v| expression_contains_break(v))
         },
         _ => false,
     }

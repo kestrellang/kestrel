@@ -218,7 +218,7 @@ impl TypeOracle for SemanticModel {
                             if where_clause.constraints().is_empty() {
                                 return true;
                             }
-                            check_where_clause_satisfied(self, &where_clause, &substitutions)
+                            check_where_clause_satisfied(self, where_clause, &substitutions)
                         } else {
                             true
                         }
@@ -550,11 +550,10 @@ impl TypeOracle for SemanticModel {
                 return self.conforms_to(&resolved, protocol_id);
             }
 
-            if let Some(bounds) = symbol.bounds() {
-                if bound_protocols_include(self, &bounds, protocol_id) {
+            if let Some(bounds) = symbol.bounds()
+                && bound_protocols_include(self, &bounds, protocol_id) {
                     return true;
                 }
-            }
             return false;
         }
 
@@ -2537,14 +2536,12 @@ fn resolve_member_via_protocol_conformance(
                                         symbol: bound_proto,
                                         ..
                                     } = bound.kind()
-                                    {
-                                        if !model
+                                        && !model
                                             .conforms_to(receiver_ty, bound_proto.metadata().id())
                                         {
                                             ext_applicable = false;
                                             break;
                                         }
-                                    }
                                 }
                             }
                             // TODO: Self.Item: Protocol checks
@@ -2561,14 +2558,12 @@ fn resolve_member_via_protocol_conformance(
                                         symbol: bound_proto,
                                         ..
                                     } = bound.kind()
-                                    {
-                                        if !model
+                                        && !model
                                             .conforms_to(actual_ty, bound_proto.metadata().id())
                                         {
                                             ext_applicable = false;
                                             break;
                                         }
-                                    }
                                 }
                             }
                         },
@@ -3022,21 +3017,19 @@ fn collect_protocols_with_inherited_impl(
                 // just `NotEqual` (without explicit type arguments), we still get `{Rhs → Self}`.
                 for type_param in inherited_proto.type_parameters() {
                     let param_id = type_param.metadata().id();
-                    if !combined_subs.contains(param_id) {
-                        if let Some(default_ty) = type_param.default() {
+                    if !combined_subs.contains(param_id)
+                        && let Some(default_ty) = type_param.default() {
                             // Apply parent substitutions to the default type.
                             // This handles cases like `Self` which needs to be resolved in parent context.
-                            let mut substituted_default = subs_with_defaults.apply(&default_ty);
+                            let mut substituted_default = subs_with_defaults.apply(default_ty);
                             // If after applying parent substitutions we still have Self, and we have a receiver type,
                             // substitute Self with the receiver type.
-                            if matches!(substituted_default.kind(), TyKind::SelfType) {
-                                if let Some(recv_ty) = receiver_ty {
+                            if matches!(substituted_default.kind(), TyKind::SelfType)
+                                && let Some(recv_ty) = receiver_ty {
                                     substituted_default = recv_ty.clone();
                                 }
-                            }
                             combined_subs.insert(param_id, substituted_default);
                         }
-                    }
                 }
 
                 // Also copy over any subs from parent that aren't in inherited_subs.
@@ -3087,8 +3080,8 @@ fn apply_protocol_defaults(ty: Ty, self_ty: Option<&Ty>) -> Ty {
 
     for param in &type_params {
         let param_id = param.metadata().id();
-        if !new_subs.contains(param_id) {
-            if let Some(default_ty) = param.default() {
+        if !new_subs.contains(param_id)
+            && let Some(default_ty) = param.default() {
                 // Substitute Self in the default type if we have a concrete type
                 let resolved_default = if let Some(concrete) = self_ty {
                     default_ty.substitute_self(concrete)
@@ -3098,7 +3091,6 @@ fn apply_protocol_defaults(ty: Ty, self_ty: Option<&Ty>) -> Ty {
                 new_subs.insert(param_id, resolved_default);
                 changed = true;
             }
-        }
     }
 
     if changed {
@@ -3190,8 +3182,7 @@ fn get_associated_type_bounds_with_context(
                 bounds: self_bounds,
                 ..
             } = constraint
-            {
-                if !associated_type_path.is_empty()
+                && !associated_type_path.is_empty()
                     && associated_type_path.last() == Some(&assoc_name)
                 {
                     for bound in self_bounds {
@@ -3200,36 +3191,31 @@ fn get_associated_type_bounds_with_context(
                         }
                     }
                 }
-            }
             if let Constraint::InheritedAssociatedTypeBound {
                 path,
                 bounds: assoc_bounds,
                 ..
             } = constraint
-            {
-                if path.split('.').last() == Some(assoc_name.as_str()) {
+                && path.split('.').next_back() == Some(assoc_name.as_str()) {
                     for bound in assoc_bounds {
                         if matches!(bound.kind(), TyKind::Protocol { .. } | TyKind::Error) {
                             bounds.push(bound.clone());
                         }
                     }
                 }
-            }
             if let Constraint::TypeBound {
                 param: None,
                 param_name,
                 bounds: param_bounds,
                 ..
             } = constraint
-            {
-                if param_name == &assoc_name {
+                && param_name == &assoc_name {
                     for bound in param_bounds {
                         if matches!(bound.kind(), TyKind::Protocol { .. } | TyKind::Error) {
                             bounds.push(bound.clone());
                         }
                     }
                 }
-            }
         }
     }
 
@@ -3249,15 +3235,13 @@ fn self_protocol_bounds(model: &SemanticModel, context_id: SymbolId) -> Vec<Symb
                 bounds,
                 ..
             } = constraint
-            {
-                if associated_type_path.is_empty() {
+                && associated_type_path.is_empty() {
                     for bound in bounds {
                         if let TyKind::Protocol { symbol, .. } = bound.kind() {
                             result.push(symbol.metadata().id());
                         }
                     }
                 }
-            }
         }
     }
 
@@ -3306,15 +3290,13 @@ fn get_self_type_bounds_with_context(
                 bounds: self_bounds,
                 ..
             } = constraint
-            {
-                if associated_type_path.is_empty() {
+                && associated_type_path.is_empty() {
                     for bound in self_bounds {
                         if matches!(bound.kind(), TyKind::Protocol { .. } | TyKind::Error) {
                             bounds.push(bound.clone());
                         }
                     }
                 }
-            }
         }
     }
 
@@ -4106,11 +4088,9 @@ fn equality_is_more_concrete(a: &Ty, b: &Ty) -> bool {
         },
         TyKind::TypeParameter(param),
     ) = (a.kind(), b.kind())
-    {
-        if type_contains_param(cont, param.metadata().id()) {
+        && type_contains_param(cont, param.metadata().id()) {
             return false;
         }
-    }
     if let (
         TyKind::TypeParameter(param),
         TyKind::AssociatedType {
@@ -4118,11 +4098,9 @@ fn equality_is_more_concrete(a: &Ty, b: &Ty) -> bool {
             ..
         },
     ) = (a.kind(), b.kind())
-    {
-        if type_contains_param(cont, param.metadata().id()) {
+        && type_contains_param(cont, param.metadata().id()) {
             return true;
         }
-    }
 
     let a_score = equality_type_score(a);
     let b_score = equality_type_score(b);
