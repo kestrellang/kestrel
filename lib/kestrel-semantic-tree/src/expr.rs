@@ -472,10 +472,7 @@ impl LangPrimitive {
     pub fn is_unsigned(&self) -> bool {
         matches!(
             self,
-            LangPrimitive::U8
-                | LangPrimitive::U16
-                | LangPrimitive::U32
-                | LangPrimitive::U64
+            LangPrimitive::U8 | LangPrimitive::U16 | LangPrimitive::U32 | LangPrimitive::U64
         )
     }
 
@@ -3352,9 +3349,12 @@ impl Expression {
                 ExprKind::InterpolatedString { parts: new_parts }
             },
 
-            ExprKind::Array(elements) => {
-                ExprKind::Array(elements.iter().map(|e| e.apply_substitutions(subs)).collect())
-            },
+            ExprKind::Array(elements) => ExprKind::Array(
+                elements
+                    .iter()
+                    .map(|e| e.apply_substitutions(subs))
+                    .collect(),
+            ),
 
             ExprKind::Dictionary(pairs) => ExprKind::Dictionary(
                 pairs
@@ -3363,9 +3363,12 @@ impl Expression {
                     .collect(),
             ),
 
-            ExprKind::Tuple(elements) => {
-                ExprKind::Tuple(elements.iter().map(|e| e.apply_substitutions(subs)).collect())
-            },
+            ExprKind::Tuple(elements) => ExprKind::Tuple(
+                elements
+                    .iter()
+                    .map(|e| e.apply_substitutions(subs))
+                    .collect(),
+            ),
 
             ExprKind::Grouping(inner) => {
                 ExprKind::Grouping(Box::new(inner.apply_substitutions(subs)))
@@ -3747,7 +3750,10 @@ impl Expression {
     }
 
     /// Apply substitutions to an IfCondition.
-    fn apply_substitutions_to_if_condition(cond: &IfCondition, subs: &Substitutions) -> IfCondition {
+    fn apply_substitutions_to_if_condition(
+        cond: &IfCondition,
+        subs: &Substitutions,
+    ) -> IfCondition {
         match cond {
             IfCondition::Expr(expr) => IfCondition::Expr(expr.apply_substitutions(subs)),
             IfCondition::Let {

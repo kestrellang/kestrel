@@ -704,20 +704,22 @@ fn computed_body_parser<'tokens>()
         )
         .then_ignore(skip_trivia())
         .then(just(Token::RBrace).map_with(|_, e| to_kestrel_span(e.span())))
-        .map(|((((lbrace_span, get_span), getter_body), setter_opt), rbrace_span)| {
-            let (set_span, setter_body) = match setter_opt {
-                Some((set_span, setter_body)) => (Some(set_span), Some(setter_body)),
-                None => (None, None),
-            };
-            ComputedBodyData::Accessors {
-                lbrace: lbrace_span,
-                get_span,
-                getter: Some(getter_body),
-                set_span,
-                setter: setter_body,
-                rbrace: rbrace_span,
-            }
-        });
+        .map(
+            |((((lbrace_span, get_span), getter_body), setter_opt), rbrace_span)| {
+                let (set_span, setter_body) = match setter_opt {
+                    Some((set_span, setter_body)) => (Some(set_span), Some(setter_body)),
+                    None => (None, None),
+                };
+                ComputedBodyData::Accessors {
+                    lbrace: lbrace_span,
+                    get_span,
+                    getter: Some(getter_body),
+                    set_span,
+                    setter: setter_body,
+                    rbrace: rbrace_span,
+                }
+            },
+        );
 
     // Shorthand: { expr } - parsed as a code block
     // This is just a regular code block
@@ -932,20 +934,22 @@ fn subscript_body_parser<'tokens>()
         )
         .then_ignore(skip_trivia())
         .then(just(Token::RBrace).map_with(|_, e| to_kestrel_span(e.span())))
-        .map(|((((lbrace_span, get_span), getter_body), setter_opt), rbrace_span)| {
-            let (set_span, setter_body) = match setter_opt {
-                Some((set_span, setter_body)) => (Some(set_span), Some(setter_body)),
-                None => (None, None),
-            };
-            SubscriptBodyData::Accessors {
-                lbrace: lbrace_span,
-                get_span,
-                getter: Some(getter_body),
-                set_span,
-                setter: setter_body,
-                rbrace: rbrace_span,
-            }
-        });
+        .map(
+            |((((lbrace_span, get_span), getter_body), setter_opt), rbrace_span)| {
+                let (set_span, setter_body) = match setter_opt {
+                    Some((set_span, setter_body)) => (Some(set_span), Some(setter_body)),
+                    None => (None, None),
+                };
+                SubscriptBodyData::Accessors {
+                    lbrace: lbrace_span,
+                    get_span,
+                    getter: Some(getter_body),
+                    set_span,
+                    setter: setter_body,
+                    rbrace: rbrace_span,
+                }
+            },
+        );
 
     // Shorthand: { expr } - parsed as a code block
     // This is just a regular code block

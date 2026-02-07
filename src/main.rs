@@ -137,7 +137,7 @@ fn add_source_files(
             Err(e) => {
                 eprintln!("error: failed to read {}: {}", file, e);
                 return Err(ExitCode::from(1));
-            }
+            },
         };
     }
     Ok(builder)

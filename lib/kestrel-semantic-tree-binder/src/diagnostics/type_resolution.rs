@@ -184,17 +184,12 @@ pub struct TypeOperatorNotDefinedError {
 impl IntoDiagnostic for TypeOperatorNotDefinedError {
     fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
-            .with_message(format!(
-                "{} is not defined",
-                self.operator_name
-            ))
+            .with_message(format!("{} is not defined", self.operator_name))
             .with_labels(vec![
                 Label::primary(self.span.file_id, self.span.range())
                     .with_message("type operator cannot be resolved"),
             ])
-            .with_notes(vec![
-                "Is the standard library imported?".to_string(),
-            ])
+            .with_notes(vec!["Is the standard library imported?".to_string()])
     }
 }
 

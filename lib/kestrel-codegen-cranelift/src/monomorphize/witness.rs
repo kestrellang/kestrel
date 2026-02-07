@@ -264,12 +264,7 @@ pub fn resolve_witness(
                 protocol,
                 associated,
             } => {
-                resolved_for_type = resolve_associated_type(
-                    mir,
-                    *base,
-                    *protocol,
-                    associated,
-                )?;
+                resolved_for_type = resolve_associated_type(mir, *base, *protocol, associated)?;
             },
             _ => break,
         }

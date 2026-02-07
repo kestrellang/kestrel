@@ -14,7 +14,7 @@ use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
 
-use crate::binders::utils::attributes::{parse_fileconstant_attribute, FileConstantParseResult};
+use crate::binders::utils::attributes::{FileConstantParseResult, parse_fileconstant_attribute};
 use crate::body_resolver::BodyResolutionContext;
 use crate::body_resolver::context::create_local_scope_for_body;
 use crate::declaration_binder::{BindingContext, DeclarationBinder};

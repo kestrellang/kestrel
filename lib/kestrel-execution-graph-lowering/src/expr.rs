@@ -22,13 +22,13 @@ use kestrel_semantic_tree::symbol::field::FieldSymbol;
 use kestrel_semantic_tree::symbol::getter::GetterSymbol;
 use kestrel_semantic_tree::symbol::initializer::InitializerSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
-use semantic_tree::symbol::Symbol;
 use kestrel_semantic_tree::ty::{Substitutions, Ty, TyKind};
+use semantic_tree::symbol::Symbol;
 use semantic_tree::symbol::SymbolId;
 
 use crate::context::LoweringContext;
 use crate::error::LoweringError;
-use crate::format_spec::{parse_format_spec, Alignment, FormatSpec, FormatType};
+use crate::format_spec::{Alignment, FormatSpec, FormatType, parse_format_spec};
 use crate::lowerer::get_subscript_type_parameters;
 use crate::name::qualified_name_for_symbol;
 use crate::stmt::lower_statement;
@@ -281,12 +281,7 @@ fn infer_type_param_substitutions_from_call(
             param_ty = param_ty.substitute_self(self_ty);
         }
 
-        collect_type_param_substitutions(
-            &param_ty,
-            arg_ty,
-            &method_param_set,
-            &mut subs,
-        );
+        collect_type_param_substitutions(&param_ty, arg_ty, &method_param_set, &mut subs);
     }
 
     subs
@@ -527,7 +522,10 @@ fn build_indirect_call_args(
         .collect()
 }
 
-fn witness_method_key_from_callable(base_name: &str, callable: Option<&CallableBehavior>) -> String {
+fn witness_method_key_from_callable(
+    base_name: &str,
+    callable: Option<&CallableBehavior>,
+) -> String {
     let Some(callable) = callable else {
         return base_name.to_string();
     };
@@ -570,15 +568,18 @@ fn fill_default_arguments(
     // Protocol method declarations may only have ExecutableBehavior, not ResolvedExecutableBehavior
     // Clone the defaults into a Vec so we own them
     use kestrel_semantic_tree::behavior::executable::ExecutableBehavior;
-    let default_values: Vec<Option<Expression>> =
-        if let Some(resolved_exec) = symbol.metadata().get_behavior::<ResolvedExecutableBehavior>() {
-            resolved_exec.default_values().to_vec()
-        } else if let Some(exec_beh) = symbol.metadata().get_behavior::<ExecutableBehavior>() {
-            exec_beh.default_values().to_vec()
-        } else {
-            // No executable behavior - can't fill defaults
-            return None;
-        };
+    let default_values: Vec<Option<Expression>> = if let Some(resolved_exec) =
+        symbol
+            .metadata()
+            .get_behavior::<ResolvedExecutableBehavior>()
+    {
+        resolved_exec.default_values().to_vec()
+    } else if let Some(exec_beh) = symbol.metadata().get_behavior::<ExecutableBehavior>() {
+        exec_beh.default_values().to_vec()
+    } else {
+        // No executable behavior - can't fill defaults
+        return None;
+    };
 
     // Build the extended arguments list
     let mut filled_args: Vec<CallArgument> = arguments.to_vec();
@@ -794,12 +795,12 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
                             let field_ty = &expr.ty;
                             let mir_ty = lower_type(ctx, field_ty);
                             // Check if this is a file constant
-                            if let Some(fc_behavior) =
-                                field_symbol.metadata().get_behavior::<FileConstantBehavior>()
+                            if let Some(fc_behavior) = field_symbol
+                                .metadata()
+                                .get_behavior::<FileConstantBehavior>()
                             {
                                 // Extract element type from LiteralSlice[T]
-                                let element_ty =
-                                    extract_literal_slice_element_type(ctx, field_ty);
+                                let element_ty = extract_literal_slice_element_type(ctx, field_ty);
                                 // Get base path from the symbol's span file_id
                                 let file_id = field_symbol.metadata().span().file_id;
                                 let base_path = ctx.file_directory(file_id).cloned();
@@ -1953,8 +1954,6 @@ fn build_format_options_fields(
     spec: &FormatSpec,
     _span: &kestrel_span::Span,
 ) -> Vec<(String, Value)> {
-
-
     let mut fields: Vec<(String, Value)> = Vec::new();
 
     // Get type IDs needed for construction
@@ -2069,7 +2068,10 @@ fn build_format_options_fields(
 
     // uppercase: Bool
     let uppercase = matches!(spec.format_type, FormatType::HexUpper);
-    fields.push(("uppercase".to_string(), Value::Immediate(Immediate::bool(uppercase))));
+    fields.push((
+        "uppercase".to_string(),
+        Value::Immediate(Immediate::bool(uppercase)),
+    ));
 
     // sign: Sign
     let sign_name = ctx.mir.intern_name(QualifiedNameData::new(vec![
@@ -2096,7 +2098,10 @@ fn build_format_options_fields(
     fields.push(("sign".to_string(), Value::Place(sign_place)));
 
     // alternate: Bool
-    fields.push(("alternate".to_string(), Value::Immediate(Immediate::bool(spec.alternate))));
+    fields.push((
+        "alternate".to_string(),
+        Value::Immediate(Immediate::bool(spec.alternate)),
+    ));
 
     // floatStyle: FloatStyle
     let float_style_name = ctx.mir.intern_name(QualifiedNameData::new(vec![
@@ -2126,7 +2131,10 @@ fn build_format_options_fields(
 
     // debug: Bool
     let debug = matches!(spec.format_type, FormatType::Debug);
-    fields.push(("debug".to_string(), Value::Immediate(Immediate::bool(debug))));
+    fields.push((
+        "debug".to_string(),
+        Value::Immediate(Immediate::bool(debug)),
+    ));
 
     fields
 }
@@ -2363,16 +2371,20 @@ fn lower_interpolated_string(
                         let fields = build_format_options_fields(ctx, &spec, &span);
                         ctx.emit_assign(
                             format_opts_place.clone(),
-                            Rvalue::Construct { ty: format_opts_ty, fields },
+                            Rvalue::Construct {
+                                ty: format_opts_ty,
+                                fields,
+                            },
                         );
                     } else {
                         // Failed to parse format spec, use defaults
-                        let format_opts_default_name = ctx.mir.intern_name(QualifiedNameData::new(vec![
-                            "std".to_string(),
-                            "text".to_string(),
-                            "FormatOptions".to_string(),
-                            "default".to_string(),
-                        ]));
+                        let format_opts_default_name =
+                            ctx.mir.intern_name(QualifiedNameData::new(vec![
+                                "std".to_string(),
+                                "text".to_string(),
+                                "FormatOptions".to_string(),
+                                "default".to_string(),
+                            ]));
                         ctx.emit_call_with_modes(
                             format_opts_place.clone(),
                             Callee::direct(format_opts_default_name),
@@ -2381,12 +2393,13 @@ fn lower_interpolated_string(
                     }
                 } else {
                     // No format spec, use FormatOptions.default()
-                    let format_opts_default_name = ctx.mir.intern_name(QualifiedNameData::new(vec![
-                        "std".to_string(),
-                        "text".to_string(),
-                        "FormatOptions".to_string(),
-                        "default".to_string(),
-                    ]));
+                    let format_opts_default_name =
+                        ctx.mir.intern_name(QualifiedNameData::new(vec![
+                            "std".to_string(),
+                            "text".to_string(),
+                            "FormatOptions".to_string(),
+                            "default".to_string(),
+                        ]));
                     ctx.emit_call_with_modes(
                         format_opts_place.clone(),
                         Callee::direct(format_opts_default_name),
@@ -3730,196 +3743,181 @@ fn lower_call(
     let arg_types: Vec<&Ty> = arguments_to_use.iter().map(|arg| &arg.value.ty).collect();
 
     // Helper to get ordered type args from a symbol's type parameters
-    let get_ordered_type_args =
-        |ctx: &mut LoweringContext,
-         sym: &std::sync::Arc<dyn Symbol<kestrel_semantic_tree::language::KestrelLanguage>>,
-         callable: Option<&CallableBehavior>,
-         call_arg_types: &[&Ty],
-         is_instance_method: bool,
-         receiver_ty: Option<&Ty>|
-         -> Option<Vec<kestrel_execution_graph::Id<kestrel_execution_graph::Ty>>> {
-            use kestrel_semantic_tree::symbol::EnumSymbol;
-            use kestrel_semantic_tree::symbol::extension::ExtensionSymbol;
-            use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
-            use semantic_tree::symbol::SymbolId;
+    let get_ordered_type_args = |ctx: &mut LoweringContext,
+                                 sym: &std::sync::Arc<
+        dyn Symbol<kestrel_semantic_tree::language::KestrelLanguage>,
+    >,
+                                 callable: Option<&CallableBehavior>,
+                                 call_arg_types: &[&Ty],
+                                 is_instance_method: bool,
+                                 receiver_ty: Option<&Ty>|
+     -> Option<
+        Vec<kestrel_execution_graph::Id<kestrel_execution_graph::Ty>>,
+    > {
+        use kestrel_semantic_tree::symbol::EnumSymbol;
+        use kestrel_semantic_tree::symbol::extension::ExtensionSymbol;
+        use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
+        use semantic_tree::symbol::SymbolId;
 
-            // Try to get type parameters from different symbol types
-            let mut method_param_ids: Vec<SymbolId> = Vec::new();
-            let param_ids: Option<Vec<SymbolId>> = if let Some(func_sym) =
-                sym.as_ref().downcast_ref::<FunctionSymbol>()
-            {
-                // For methods on generic structs/enums, we need BOTH parent type params
-                // AND the function's own type params (in that order, matching how MIR
-                // functions are lowered in lowerer/function.rs)
-                let mut all_params: Vec<SymbolId> = Vec::new();
+        // Try to get type parameters from different symbol types
+        let mut method_param_ids: Vec<SymbolId> = Vec::new();
+        let param_ids: Option<Vec<SymbolId>> = if let Some(func_sym) =
+            sym.as_ref().downcast_ref::<FunctionSymbol>()
+        {
+            // For methods on generic structs/enums, we need BOTH parent type params
+            // AND the function's own type params (in that order, matching how MIR
+            // functions are lowered in lowerer/function.rs)
+            let mut all_params: Vec<SymbolId> = Vec::new();
 
-                // First, collect parent type parameters (from struct/enum/extension)
-                if let Some(parent) = func_sym.metadata().parent() {
-                    if let Some(struct_sym) = parent.as_ref().downcast_ref::<StructSymbol>() {
-                        for tp in struct_sym.type_parameters() {
-                            all_params.push(Symbol::metadata(tp.as_ref()).id());
-                        }
-                    } else if let Some(enum_sym) = parent.as_ref().downcast_ref::<EnumSymbol>() {
-                        for tp in enum_sym.type_parameters() {
-                            all_params.push(Symbol::metadata(tp.as_ref()).id());
-                        }
-                    } else if let Some(ext_sym) = parent.as_ref().downcast_ref::<ExtensionSymbol>() {
-                        let is_protocol_extension = ext_sym
-                            .target_type()
-                            .as_ref()
-                            .is_some_and(|ty| is_protocol_type(ty));
-                        for tp in ext_sym.referenced_type_parameters() {
-                            if is_protocol_extension && tp.metadata().name().value == "Self" {
-                                continue;
-                            }
-                            all_params.push(Symbol::metadata(tp.as_ref()).id());
-                        }
+            // First, collect parent type parameters (from struct/enum/extension)
+            if let Some(parent) = func_sym.metadata().parent() {
+                if let Some(struct_sym) = parent.as_ref().downcast_ref::<StructSymbol>() {
+                    for tp in struct_sym.type_parameters() {
+                        all_params.push(Symbol::metadata(tp.as_ref()).id());
                     }
-                }
-
-                // Then, collect function's own type parameters
-                for tp in func_sym.type_parameters() {
-                    let tp_id = Symbol::metadata(tp.as_ref()).id();
-                    all_params.push(tp_id);
-                    method_param_ids.push(tp_id);
-                }
-
-                Some(all_params)
-            } else if let Some(struct_sym) = sym.as_ref().downcast_ref::<StructSymbol>() {
-                let type_params = struct_sym.type_parameters();
-                Some(
-                    type_params
-                        .iter()
-                        .map(|tp| Symbol::metadata(tp.as_ref()).id())
-                        .collect(),
-                )
-            } else if let Some(enum_sym) = sym.as_ref().downcast_ref::<EnumSymbol>() {
-                let type_params = enum_sym.type_parameters();
-                Some(
-                    type_params
-                        .iter()
-                        .map(|tp| Symbol::metadata(tp.as_ref()).id())
-                        .collect(),
-                )
-            } else if let Some(init_sym) = sym.as_ref().downcast_ref::<InitializerSymbol>() {
-                // Initializers inherit type parameters from their parent struct/enum/extension
-                let mut all_params: Vec<SymbolId> = Vec::new();
-                if let Some(parent) = sym.metadata().parent() {
-                    if let Some(struct_sym) = parent.as_ref().downcast_ref::<StructSymbol>() {
-                        for tp in struct_sym.type_parameters() {
-                            all_params.push(Symbol::metadata(tp.as_ref()).id());
-                        }
-                    } else if let Some(enum_sym) = parent.as_ref().downcast_ref::<EnumSymbol>() {
-                        for tp in enum_sym.type_parameters() {
-                            all_params.push(Symbol::metadata(tp.as_ref()).id());
-                        }
-                    } else if let Some(ext_sym) = parent.as_ref().downcast_ref::<ExtensionSymbol>() {
-                        let is_protocol_extension = ext_sym
-                            .target_type()
-                            .as_ref()
-                            .is_some_and(|ty| is_protocol_type(ty));
-                        for tp in ext_sym.referenced_type_parameters() {
-                            if is_protocol_extension && tp.metadata().name().value == "Self" {
-                                continue;
-                            }
-                            all_params.push(Symbol::metadata(tp.as_ref()).id());
-                        }
+                } else if let Some(enum_sym) = parent.as_ref().downcast_ref::<EnumSymbol>() {
+                    for tp in enum_sym.type_parameters() {
+                        all_params.push(Symbol::metadata(tp.as_ref()).id());
                     }
-                }
-                // Then, collect initializer's own type parameters
-                for tp in init_sym.type_parameters() {
-                    let tp_id = Symbol::metadata(tp.as_ref()).id();
-                    all_params.push(tp_id);
-                    method_param_ids.push(tp_id);
-                }
-                Some(all_params)
-            } else {
-                // For other symbols without type_parameters, use the fallback
-                None
-            };
-
-            let mut effective_subs = if !method_param_ids.is_empty() && callable.is_some() {
-                infer_type_param_substitutions_from_call(
-                    substitutions,
-                    callable.unwrap(),
-                    call_arg_types,
-                    is_instance_method,
-                    receiver_ty,
-                    &method_param_ids,
-                )
-            } else {
-                substitutions.clone()
-            };
-
-            // For static method calls on generic types (e.g. Pointer[Int64].nullPointer()),
-            // the parent type parameter substitutions live in the receiver type, not in the
-            // Call expression's substitutions. Merge them in.
-            if let Some(recv_ty) = receiver_ty {
-                let recv_subs = match recv_ty.kind() {
-                    TyKind::Struct { substitutions, .. } => Some(substitutions),
-                    TyKind::Enum { substitutions, .. } => Some(substitutions),
-                    _ => None,
-                };
-                if let Some(subs) = recv_subs {
-                    for (id, ty) in subs.iter() {
-                        if !effective_subs.contains(*id) {
-                            effective_subs.insert(*id, ty.clone());
+                } else if let Some(ext_sym) = parent.as_ref().downcast_ref::<ExtensionSymbol>() {
+                    let is_protocol_extension = ext_sym
+                        .target_type()
+                        .as_ref()
+                        .is_some_and(|ty| is_protocol_type(ty));
+                    for tp in ext_sym.referenced_type_parameters() {
+                        if is_protocol_extension && tp.metadata().name().value == "Self" {
+                            continue;
                         }
+                        all_params.push(Symbol::metadata(tp.as_ref()).id());
                     }
                 }
             }
 
-            if let Some(ids) = param_ids {
-                // If the extension introduced a synthetic `Self` type parameter,
-                // map it to the receiver type (or SelfType for protocol receivers).
-                if let Some(self_ty) = receiver_ty {
-                    let self_sub =
-                        if is_protocol_type(self_ty) || matches!(self_ty.kind(), TyKind::SelfType)
-                        {
+            // Then, collect function's own type parameters
+            for tp in func_sym.type_parameters() {
+                let tp_id = Symbol::metadata(tp.as_ref()).id();
+                all_params.push(tp_id);
+                method_param_ids.push(tp_id);
+            }
+
+            Some(all_params)
+        } else if let Some(struct_sym) = sym.as_ref().downcast_ref::<StructSymbol>() {
+            let type_params = struct_sym.type_parameters();
+            Some(
+                type_params
+                    .iter()
+                    .map(|tp| Symbol::metadata(tp.as_ref()).id())
+                    .collect(),
+            )
+        } else if let Some(enum_sym) = sym.as_ref().downcast_ref::<EnumSymbol>() {
+            let type_params = enum_sym.type_parameters();
+            Some(
+                type_params
+                    .iter()
+                    .map(|tp| Symbol::metadata(tp.as_ref()).id())
+                    .collect(),
+            )
+        } else if let Some(init_sym) = sym.as_ref().downcast_ref::<InitializerSymbol>() {
+            // Initializers inherit type parameters from their parent struct/enum/extension
+            let mut all_params: Vec<SymbolId> = Vec::new();
+            if let Some(parent) = sym.metadata().parent() {
+                if let Some(struct_sym) = parent.as_ref().downcast_ref::<StructSymbol>() {
+                    for tp in struct_sym.type_parameters() {
+                        all_params.push(Symbol::metadata(tp.as_ref()).id());
+                    }
+                } else if let Some(enum_sym) = parent.as_ref().downcast_ref::<EnumSymbol>() {
+                    for tp in enum_sym.type_parameters() {
+                        all_params.push(Symbol::metadata(tp.as_ref()).id());
+                    }
+                } else if let Some(ext_sym) = parent.as_ref().downcast_ref::<ExtensionSymbol>() {
+                    let is_protocol_extension = ext_sym
+                        .target_type()
+                        .as_ref()
+                        .is_some_and(|ty| is_protocol_type(ty));
+                    for tp in ext_sym.referenced_type_parameters() {
+                        if is_protocol_extension && tp.metadata().name().value == "Self" {
+                            continue;
+                        }
+                        all_params.push(Symbol::metadata(tp.as_ref()).id());
+                    }
+                }
+            }
+            // Then, collect initializer's own type parameters
+            for tp in init_sym.type_parameters() {
+                let tp_id = Symbol::metadata(tp.as_ref()).id();
+                all_params.push(tp_id);
+                method_param_ids.push(tp_id);
+            }
+            Some(all_params)
+        } else {
+            // For other symbols without type_parameters, use the fallback
+            None
+        };
+
+        let mut effective_subs = if !method_param_ids.is_empty() && callable.is_some() {
+            infer_type_param_substitutions_from_call(
+                substitutions,
+                callable.unwrap(),
+                call_arg_types,
+                is_instance_method,
+                receiver_ty,
+                &method_param_ids,
+            )
+        } else {
+            substitutions.clone()
+        };
+
+        // For static method calls on generic types (e.g. Pointer[Int64].nullPointer()),
+        // the parent type parameter substitutions live in the receiver type, not in the
+        // Call expression's substitutions. Merge them in.
+        if let Some(recv_ty) = receiver_ty {
+            let recv_subs = match recv_ty.kind() {
+                TyKind::Struct { substitutions, .. } => Some(substitutions),
+                TyKind::Enum { substitutions, .. } => Some(substitutions),
+                _ => None,
+            };
+            if let Some(subs) = recv_subs {
+                for (id, ty) in subs.iter() {
+                    if !effective_subs.contains(*id) {
+                        effective_subs.insert(*id, ty.clone());
+                    }
+                }
+            }
+        }
+
+        if let Some(ids) = param_ids {
+            // If the extension introduced a synthetic `Self` type parameter,
+            // map it to the receiver type (or SelfType for protocol receivers).
+            if let Some(self_ty) = receiver_ty {
+                let self_sub =
+                    if is_protocol_type(self_ty) || matches!(self_ty.kind(), TyKind::SelfType) {
                         Ty::self_type(self_ty.span().clone())
                     } else {
                         self_ty.clone()
                     };
-                    for param_id in &ids {
-                        if effective_subs.contains(*param_id) {
-                            continue;
-                        }
-                        if let Some(sym) = ctx.model.query(SymbolFor { id: *param_id })
-                            && sym.metadata().name().value == "Self"
-                        {
-                            effective_subs.insert(*param_id, self_sub.clone());
-                        }
-                    }
-                }
-
-                let mut filtered_subs = Substitutions::new();
                 for param_id in &ids {
-                    if let Some(sub_ty) = effective_subs.get(*param_id) {
-                        filtered_subs.insert(*param_id, sub_ty.clone());
+                    if effective_subs.contains(*param_id) {
+                        continue;
+                    }
+                    if let Some(sym) = ctx.model.query(SymbolFor { id: *param_id })
+                        && sym.metadata().name().value == "Self"
+                    {
+                        effective_subs.insert(*param_id, self_sub.clone());
                     }
                 }
-                effective_subs = filtered_subs;
+            }
 
-                if ids.is_empty() {
-                    if effective_subs.is_empty() {
-                        return Some(Vec::new());
-                    }
-                    ctx.emit_error(LoweringError::internal(
-                        format!(
-                            "missing type arguments for generic call to {}",
-                            sym.metadata().name().value
-                        ),
-                        Some(expr.span.clone()),
-                    ));
-                    return None;
+            let mut filtered_subs = Substitutions::new();
+            for param_id in &ids {
+                if let Some(sub_ty) = effective_subs.get(*param_id) {
+                    filtered_subs.insert(*param_id, sub_ty.clone());
                 }
-                if let Some(ordered_types) = effective_subs.types_in_order(&ids) {
-                    return Some(
-                        ordered_types
-                            .into_iter()
-                            .map(|ty| lower_type(ctx, ty))
-                            .collect(),
-                    );
+            }
+            effective_subs = filtered_subs;
+
+            if ids.is_empty() {
+                if effective_subs.is_empty() {
+                    return Some(Vec::new());
                 }
                 ctx.emit_error(LoweringError::internal(
                     format!(
@@ -3930,18 +3928,35 @@ fn lower_call(
                 ));
                 return None;
             }
-            if effective_subs.is_empty() {
-                return Some(Vec::new());
+            if let Some(ordered_types) = effective_subs.types_in_order(&ids) {
+                return Some(
+                    ordered_types
+                        .into_iter()
+                        .map(|ty| lower_type(ctx, ty))
+                        .collect(),
+                );
             }
             ctx.emit_error(LoweringError::internal(
                 format!(
-                    "missing type parameter order for generic call to {}",
+                    "missing type arguments for generic call to {}",
                     sym.metadata().name().value
                 ),
                 Some(expr.span.clone()),
             ));
-            None
-        };
+            return None;
+        }
+        if effective_subs.is_empty() {
+            return Some(Vec::new());
+        }
+        ctx.emit_error(LoweringError::internal(
+            format!(
+                "missing type parameter order for generic call to {}",
+                sym.metadata().name().value
+            ),
+            Some(expr.span.clone()),
+        ));
+        None
+    };
 
     // Get the result type and create a temp for the result
     let result_ty = lower_type(ctx, &expr.ty);
@@ -4046,10 +4061,17 @@ fn lower_call(
                                     let protocol_name = qualified_name_for_symbol(ctx, &parent);
                                     let for_type = lower_type(ctx, &expr.ty);
                                     // Use arity-qualified key to disambiguate init overloads
-                                    let witness_method_name = witness_method_key_from_callable("init", callable_beh.as_deref());
+                                    let witness_method_name = witness_method_key_from_callable(
+                                        "init",
+                                        callable_beh.as_deref(),
+                                    );
                                     // init() has no method-level type parameters
-                                    let mir_callee =
-                                        Callee::witness(protocol_name, witness_method_name, for_type, vec![]);
+                                    let mir_callee = Callee::witness(
+                                        protocol_name,
+                                        witness_method_name,
+                                        for_type,
+                                        vec![],
+                                    );
                                     ctx.emit_call_with_modes(unit_place, mir_callee, call_args);
                                 } else {
                                     ctx.emit_error(LoweringError::internal(
@@ -4241,7 +4263,9 @@ fn lower_call(
                             } else if parent.metadata().kind() == KestrelSymbolKind::Extension {
                                 // Check if this is a protocol extension (extend Protocol { ... })
                                 use kestrel_semantic_tree::symbol::extension::ExtensionSymbol;
-                                if let Some(ext_sym) = parent.as_ref().downcast_ref::<ExtensionSymbol>() {
+                                if let Some(ext_sym) =
+                                    parent.as_ref().downcast_ref::<ExtensionSymbol>()
+                                {
                                     if let Some(target_ty) = ext_sym.target_type() {
                                         if is_protocol_type(&target_ty) {
                                             // This is a protocol extension: extend Iterator { ... }
@@ -4249,7 +4273,9 @@ fn lower_call(
                                             // because the method is defined on the protocol extension,
                                             // not on the concrete type itself
                                             is_protocol_extension_method = true;
-                                            if let TyKind::Protocol { symbol, .. } = target_ty.kind() {
+                                            if let TyKind::Protocol { symbol, .. } =
+                                                target_ty.kind()
+                                            {
                                                 Some(symbol.clone() as std::sync::Arc<dyn semantic_tree::symbol::Symbol<kestrel_semantic_tree::language::KestrelLanguage>>)
                                             } else {
                                                 None
@@ -4279,17 +4305,27 @@ fn lower_call(
 
                         // Debug logging for witness dispatch decisions (filtered to common protocol methods)
                         let debug_methods = [
-                            "lessThan", "greaterThan", "equals", "add", "subtract",
-                            "multiply", "divide", "map", "filter", "next"
+                            "lessThan",
+                            "greaterThan",
+                            "equals",
+                            "add",
+                            "subtract",
+                            "multiply",
+                            "divide",
+                            "map",
+                            "filter",
+                            "next",
                         ];
                         if debug_methods.contains(&method_name.as_str()) {
                             eprintln!("\n=== Witness Dispatch Debug: {} ===", method_name);
-                            eprintln!("  protocol_symbol: {}",
+                            eprintln!(
+                                "  protocol_symbol: {}",
                                 if let Some(ref ps) = protocol_symbol {
                                     format!("Some({:?})", qualified_name_for_symbol(ctx, ps))
                                 } else {
                                     "None".to_string()
-                                });
+                                }
+                            );
                             eprintln!("  receiver.ty: {:?}", receiver.ty);
                             eprintln!("  is_type_param_call: {}", is_type_param_call);
                             eprintln!("  is_static_type_param_call: {}", is_static_type_param_call);
@@ -4349,20 +4385,19 @@ fn lower_call(
                                     if method_param_ids.is_empty() {
                                         vec![]
                                     } else {
-                                        let effective_subs = if let Some(callable) =
-                                            callable_beh.as_deref()
-                                        {
-                                            infer_type_param_substitutions_from_call(
-                                                substitutions,
-                                                callable,
-                                                &all_arg_types,
-                                                is_instance,
-                                                Some(&receiver.ty),
-                                                &method_param_ids,
-                                            )
-                                        } else {
-                                            substitutions.clone()
-                                        };
+                                        let effective_subs =
+                                            if let Some(callable) = callable_beh.as_deref() {
+                                                infer_type_param_substitutions_from_call(
+                                                    substitutions,
+                                                    callable,
+                                                    &all_arg_types,
+                                                    is_instance,
+                                                    Some(&receiver.ty),
+                                                    &method_param_ids,
+                                                )
+                                            } else {
+                                                substitutions.clone()
+                                            };
 
                                         if let Some(ordered_types) =
                                             effective_subs.types_in_order(&method_param_ids)
@@ -4379,8 +4414,10 @@ fn lower_call(
                                     vec![]
                                 };
 
-                                let witness_method_name =
-                                    witness_method_key_from_callable(method_name, callable_beh.as_deref());
+                                let witness_method_name = witness_method_key_from_callable(
+                                    method_name,
+                                    callable_beh.as_deref(),
+                                );
                                 let mir_callee = Callee::witness(
                                     protocol_name,
                                     witness_method_name,
@@ -4713,7 +4750,6 @@ fn lower_subscript_call(
             // Add type arguments for subscript's own type parameters (e.g., subscript[F](value: F))
             // We infer these from the argument types by matching parameter types to argument types
             if let Ok(getter_sym) = sym.clone().downcast_arc::<GetterSymbol>() {
-
                 let subscript_type_params = get_subscript_type_parameters(&getter_sym);
                 if !subscript_type_params.is_empty() {
                     // Get the callable behavior to find parameter types
@@ -4774,9 +4810,11 @@ fn get_type_args_for_receiver(
     // Resolve type alias if needed and apply substitutions
     let resolved_ty = if let Some((alias_sym, subs)) = receiver_ty.as_type_alias_with_subs() {
         let alias_id = alias_sym.metadata().id();
-        ctx.model.query(ResolvedAliasedType {
-            type_alias_id: alias_id,
-        }).map(|resolved| resolved.apply_substitutions(subs))
+        ctx.model
+            .query(ResolvedAliasedType {
+                type_alias_id: alias_id,
+            })
+            .map(|resolved| resolved.apply_substitutions(subs))
     } else {
         None
     };
@@ -4996,9 +5034,11 @@ fn find_field_info(ctx: &LoweringContext, ty: &Ty, field_name: &str) -> Option<(
     // Resolve type alias if needed and apply substitutions
     let resolved_ty = if let Some((alias_sym, subs)) = ty.as_type_alias_with_subs() {
         let alias_id = alias_sym.metadata().id();
-        ctx.model.query(ResolvedAliasedType {
-            type_alias_id: alias_id,
-        }).map(|resolved| resolved.apply_substitutions(subs))
+        ctx.model
+            .query(ResolvedAliasedType {
+                type_alias_id: alias_id,
+            })
+            .map(|resolved| resolved.apply_substitutions(subs))
     } else {
         None
     };
@@ -5426,9 +5466,11 @@ fn extract_type_args_from_receiver(
     // Resolve type alias if needed and apply substitutions
     let resolved_ty = if let Some((alias_sym, subs)) = receiver_ty.as_type_alias_with_subs() {
         let alias_id = alias_sym.metadata().id();
-        ctx.model.query(ResolvedAliasedType {
-            type_alias_id: alias_id,
-        }).map(|resolved| resolved.apply_substitutions(subs))
+        ctx.model
+            .query(ResolvedAliasedType {
+                type_alias_id: alias_id,
+            })
+            .map(|resolved| resolved.apply_substitutions(subs))
     } else {
         None
     };

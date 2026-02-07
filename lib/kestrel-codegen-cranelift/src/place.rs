@@ -578,8 +578,13 @@ fn get_field_by_index(
 
     // Otherwise, it's a regular struct or tuple - look up by index
     // Resolve AssociatedTypeProjection through substitution before matching
-    let parent_ty = if matches!(ctx.mir.ty(parent_ty), MirTy::AssociatedTypeProjection { .. }) {
-        subst.apply_ty_readonly(ctx.mir, parent_ty).unwrap_or(parent_ty)
+    let parent_ty = if matches!(
+        ctx.mir.ty(parent_ty),
+        MirTy::AssociatedTypeProjection { .. }
+    ) {
+        subst
+            .apply_ty_readonly(ctx.mir, parent_ty)
+            .unwrap_or(parent_ty)
     } else {
         parent_ty
     };
@@ -670,7 +675,9 @@ fn get_struct_field_by_index(
         .collect();
 
     // Get field offset from layout (pass substituted type_args for generic structs)
-    let struct_layout = ctx.layouts.struct_layout(struct_id, &concrete_type_args, None);
+    let struct_layout = ctx
+        .layouts
+        .struct_layout(struct_id, &concrete_type_args, None);
     let offset = *struct_layout.field_offsets.get(field_name).ok_or_else(|| {
         CodegenError::Unsupported(format!("field offset not found: {}", field_name))
     })?;

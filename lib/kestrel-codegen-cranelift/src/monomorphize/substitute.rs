@@ -371,10 +371,7 @@ impl Substitution {
 
                 if base_is_concrete {
                     if let Ok(resolved) = super::witness::resolve_associated_type(
-                        mir,
-                        new_base,
-                        *protocol,
-                        associated,
+                        mir, new_base, *protocol, associated,
                     ) {
                         // Successfully resolved to a concrete type
                         return Ok(resolved);

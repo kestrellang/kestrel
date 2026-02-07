@@ -556,12 +556,7 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
             if matches!(expr.ty.kind(), TyKind::Infer) {
                 ctx.register_type(&tuple.ty);
                 ctx.register_type(&expr.ty);
-                ctx.tuple_index_access(
-                    tuple.ty.id(),
-                    *index,
-                    expr.ty.id(),
-                    expr.span.clone(),
-                );
+                ctx.tuple_index_access(tuple.ty.id(), *index, expr.ty.id(), expr.span.clone());
             }
         },
 
@@ -1426,16 +1421,20 @@ fn generate_where_clause_constraints_for_call(
     // Method calls have MethodRef with candidates, regular calls have SymbolRef
     let (callee_symbol_id, receiver_ty_opt) = match &callee.kind {
         ExprKind::SymbolRef(id) => (*id, None),
-        ExprKind::MethodRef { candidates, receiver, .. } => {
+        ExprKind::MethodRef {
+            candidates,
+            receiver,
+            ..
+        } => {
             // For MethodRef, use the first candidate (should only be one after resolution)
             if candidates.len() != 1 {
                 return;
             }
             (candidates[0], Some(&receiver.ty))
-        }
+        },
         _ => {
             return;
-        }
+        },
     };
 
     // Get the where clause from the function symbol
@@ -1473,7 +1472,9 @@ fn generate_where_clause_constraints_for_call(
 
         // If the left side is a qualified associated type (e.g., ArrayIterator[Optional[Int64]].Item),
         // create a Normalizes constraint to resolve it, then equate with the right side
-        if let Some((assoc_symbol, Some(container_ty))) = left_with_subs.as_associated_type_with_container() {
+        if let Some((assoc_symbol, Some(container_ty))) =
+            left_with_subs.as_associated_type_with_container()
+        {
             let assoc_name = assoc_symbol.metadata().name().value.clone();
             ctx.register_type(container_ty);
 
@@ -1487,11 +1488,7 @@ fn generate_where_clause_constraints_for_call(
             );
         } else {
             // Not an associated type, just create an equality constraint
-            ctx.equate(
-                left_with_subs.id(),
-                right_with_subs.id(),
-                span.clone(),
-            );
+            ctx.equate(left_with_subs.id(), right_with_subs.id(), span.clone());
         }
     }
 }
@@ -1503,9 +1500,10 @@ fn generate_where_clause_constraints_for_call(
 fn qualify_associated_type(ty: &Ty, container: &Ty) -> Ty {
     match ty.kind() {
         // If it's an unqualified associated type (no container), qualify it
-        TyKind::AssociatedType { symbol, container: None } => {
-            Ty::qualified_associated_type(symbol.clone(), container.clone(), ty.span().clone())
-        }
+        TyKind::AssociatedType {
+            symbol,
+            container: None,
+        } => Ty::qualified_associated_type(symbol.clone(), container.clone(), ty.span().clone()),
         // Otherwise return as-is
         _ => ty.clone(),
     }

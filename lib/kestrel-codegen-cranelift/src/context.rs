@@ -109,14 +109,7 @@ impl<'a> CodegenContext<'a> {
             .mir
             .statics
             .iter()
-            .map(|(id, def)| {
-                (
-                    id,
-                    def.name,
-                    def.ty,
-                    def.file_constant_data.clone(),
-                )
-            })
+            .map(|(id, def)| (id, def.name, def.ty, def.file_constant_data.clone()))
             .collect();
 
         for (_static_id, name_id, ty, file_constant_data) in statics {

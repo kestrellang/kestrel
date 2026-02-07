@@ -267,12 +267,7 @@ fn resolve_associated_type_from_type_param_with_context(
             // Check GenericsBehavior
             if let Some(generics_beh) = symbol.metadata().get_behavior::<GenericsBehavior>() {
                 let where_clause = generics_beh.where_clause();
-                all_bounds.extend(
-                    where_clause
-                        .bounds_for(param_id)
-                        .into_iter()
-                        .cloned(),
-                );
+                all_bounds.extend(where_clause.bounds_for(param_id).into_iter().cloned());
                 for constraint in where_clause.constraints() {
                     if let Constraint::InheritedAssociatedTypeBound { path, bounds, .. } =
                         constraint
@@ -286,12 +281,7 @@ fn resolve_associated_type_from_type_param_with_context(
             // Check ExtensionTargetBehavior
             if let Some(target_beh) = symbol.metadata().get_behavior::<ExtensionTargetBehavior>() {
                 let where_clause = target_beh.where_clause();
-                all_bounds.extend(
-                    where_clause
-                        .bounds_for(param_id)
-                        .into_iter()
-                        .cloned(),
-                );
+                all_bounds.extend(where_clause.bounds_for(param_id).into_iter().cloned());
                 for constraint in where_clause.constraints() {
                     if let Constraint::InheritedAssociatedTypeBound { path, bounds, .. } =
                         constraint

@@ -122,13 +122,14 @@ impl IntoDiagnostic for FileConstantInvalidSizeError {
     fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message("file size is not aligned to element size")
-            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
-                .with_message(format!(
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range()).with_message(format!(
                     "file is {} bytes, but element size is {} bytes (remainder: {})",
                     self.file_size,
                     self.element_size,
                     self.file_size % self.element_size
-                ))])
+                )),
+            ])
     }
 }
 

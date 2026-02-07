@@ -179,10 +179,7 @@ fn extract_integer_value(node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> 
                 Err(_) => {
                     let text_range = t.text_range();
                     let token_start: usize = text_range.start().into();
-                    let token_span = Span::new(
-                        ctx.file_id,
-                        token_start..token_start + text.len(),
-                    );
+                    let token_span = Span::new(ctx.file_id, token_start..token_start + text.len());
                     let error = IntegerLiteralOverflowError {
                         span: token_span,
                         literal: text.to_string(),
@@ -2426,7 +2423,7 @@ fn resolve_closure_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext
                     // Tail has concrete type - create fresh infer type for return
                     // The constraint solver will unify them
                     kestrel_semantic_tree::ty::Ty::infer(span.clone())
-                }
+                },
             }
         } else {
             // No tail - return type is unit
@@ -2444,9 +2441,7 @@ fn resolve_closure_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext
                 kestrel_semantic_tree::ty::TyKind::Infer => {
                     kestrel_semantic_tree::ty::Ty::infer(span.clone())
                 },
-                _ => {
-                    kestrel_semantic_tree::ty::Ty::infer(span.clone())
-                }
+                _ => kestrel_semantic_tree::ty::Ty::infer(span.clone()),
             }
         } else {
             kestrel_semantic_tree::ty::Ty::unit(span.clone())

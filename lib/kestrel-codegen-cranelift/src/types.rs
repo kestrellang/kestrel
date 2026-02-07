@@ -18,7 +18,11 @@ use cranelift_codegen::ir::types as cl_types;
 /// IMPORTANT: If a substitution is provided, it will be applied to the base type
 /// before attempting to resolve the projection. This is critical for resolving
 /// projections like `I.Item` where `I` is a type parameter.
-fn resolve_projection(ctx: &MirContext, ty: Id<Ty>, subst: Option<&Substitution>) -> Result<Id<Ty>, String> {
+fn resolve_projection(
+    ctx: &MirContext,
+    ty: Id<Ty>,
+    subst: Option<&Substitution>,
+) -> Result<Id<Ty>, String> {
     if let MirTy::AssociatedTypeProjection {
         base,
         protocol,
@@ -90,7 +94,12 @@ fn translate_type_ext_with_subst(
         eprintln!("Error: {:?}", e);
 
         // If it's an associated type projection, print more details about the base type
-        if let kestrel_execution_graph::MirTy::AssociatedTypeProjection { base, protocol: _, associated: _ } = ctx.ty(ty) {
+        if let kestrel_execution_graph::MirTy::AssociatedTypeProjection {
+            base,
+            protocol: _,
+            associated: _,
+        } = ctx.ty(ty)
+        {
             eprintln!("\nBase type ID: {:?}", base);
             eprintln!("Base type MirTy: {:?}", ctx.ty(*base));
 
@@ -173,7 +182,8 @@ pub fn is_pass_by_value(ctx: &MirContext, ty: Id<Ty>) -> bool {
 pub fn is_pass_by_value_ext(ctx: &MirContext, ty: Id<Ty>, is_extern: bool) -> bool {
     // Resolve any associated type projections first
     // Note: we don't have substitution context here, so we pass None
-    let ty = resolve_projection(ctx, ty, None).expect("failed to resolve projection in is_pass_by_value");
+    let ty = resolve_projection(ctx, ty, None)
+        .expect("failed to resolve projection in is_pass_by_value");
 
     if is_extern && let Some(inner) = get_wrapper_primitive(ctx, ty) {
         return is_pass_by_value_ext(ctx, inner, is_extern);

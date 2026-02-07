@@ -80,11 +80,18 @@ impl Substitutions {
             // Type parameter - look up in substitutions
             TyKind::TypeParameter(param_symbol) => {
                 let param_id = Symbol::<KestrelLanguage>::metadata(param_symbol.as_ref()).id();
-                let param_name = Symbol::<KestrelLanguage>::metadata(param_symbol.as_ref()).name().value.clone();
+                let param_name = Symbol::<KestrelLanguage>::metadata(param_symbol.as_ref())
+                    .name()
+                    .value
+                    .clone();
 
                 // Debug logging for Rhs substitution
                 if param_name == "Rhs" {
-                    debug_trace!("  === Substituting type parameter {} (ID: {:?}) ===", param_name, param_id);
+                    debug_trace!(
+                        "  === Substituting type parameter {} (ID: {:?}) ===",
+                        param_name,
+                        param_id
+                    );
                     debug_trace!("  Available substitutions:");
                     for (id, ty) in self.iter() {
                         debug_trace!("    {:?} -> {:?}", id, ty);
@@ -110,7 +117,11 @@ impl Substitutions {
                     result
                 } else {
                     if param_name == "Rhs" {
-                        debug_trace!("  No substitution found for {} (ID: {:?})", param_name, param_id);
+                        debug_trace!(
+                            "  No substitution found for {} (ID: {:?})",
+                            param_name,
+                            param_id
+                        );
                     }
                     // No substitution found, return as-is
                     ty.clone()

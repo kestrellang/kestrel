@@ -7,9 +7,9 @@
 use kestrel_execution_graph::{Id, TypeParam};
 use kestrel_semantic_model::SymbolFor;
 use kestrel_semantic_model::queries::ExtensionsFor;
+use kestrel_semantic_tree::behavior::callable::CallableBehavior;
 use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
 use kestrel_semantic_tree::behavior::conforms_to::ConformsToBehavior;
-use kestrel_semantic_tree::behavior::callable::CallableBehavior;
 use kestrel_semantic_tree::behavior::implements::ImplementsBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::enum_symbol::EnumSymbol;
@@ -415,7 +415,13 @@ fn generate_witness_for_protocol(
     bind_methods(ctx, witness_id, implementing_symbol, protocol_symbol);
 
     // Bind extension methods from protocol extensions
-    bind_extension_methods(ctx, witness_id, implementing_type, implementing_symbol, protocol_symbol);
+    bind_extension_methods(
+        ctx,
+        witness_id,
+        implementing_type,
+        implementing_symbol,
+        protocol_symbol,
+    );
 }
 
 /// Bind associated types in the witness from type alias children with ConformsToBehavior.

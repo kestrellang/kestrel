@@ -114,7 +114,9 @@ fn generate_static_init_function(
     ctx: &mut LoweringContext,
     module: &Arc<dyn Symbol<KestrelLanguage>>,
 ) -> Option<kestrel_execution_graph::Id<kestrel_execution_graph::id::QualifiedName>> {
-    use kestrel_semantic_tree::behavior::executable::{ExecutableBehavior, ResolvedExecutableBehavior};
+    use kestrel_semantic_tree::behavior::executable::{
+        ExecutableBehavior, ResolvedExecutableBehavior,
+    };
     use kestrel_semantic_tree::symbol::field::FieldSymbol;
 
     // Collect all static fields with initializers
@@ -142,9 +144,14 @@ fn generate_static_init_function(
         if let Some(field) = field_sym.as_ref().downcast_ref::<FieldSymbol>() {
             // Get the body - prefer ResolvedExecutableBehavior (with inferred types),
             // fall back to ExecutableBehavior if not available
-            let body = if let Some(resolved) = field_sym.metadata().get_behavior::<ResolvedExecutableBehavior>() {
+            let body = if let Some(resolved) = field_sym
+                .metadata()
+                .get_behavior::<ResolvedExecutableBehavior>()
+            {
                 resolved.body().clone()
-            } else if let Some(executable) = field_sym.metadata().get_behavior::<ExecutableBehavior>() {
+            } else if let Some(executable) =
+                field_sym.metadata().get_behavior::<ExecutableBehavior>()
+            {
                 executable.body().clone()
             } else {
                 continue;

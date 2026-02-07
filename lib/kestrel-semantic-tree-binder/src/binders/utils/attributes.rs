@@ -393,10 +393,7 @@ pub fn parse_extern_attribute(
 /// Result of parsing a `@fileconstant("path")` attribute.
 pub enum FileConstantParseResult {
     /// Successfully parsed: contains the relative file path
-    Success {
-        relative_path: String,
-        span: Span,
-    },
+    Success { relative_path: String, span: Span },
     /// Not a fileconstant attribute
     NotFileConstant,
     /// Error occurred during parsing (diagnostic already emitted)

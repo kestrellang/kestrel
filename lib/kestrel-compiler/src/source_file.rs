@@ -61,6 +61,8 @@ impl SourceFile {
 
     /// Get the directory containing this source file, if path is available.
     pub fn directory(&self) -> Option<PathBuf> {
-        self.path.as_ref().and_then(|p| p.parent().map(|d| d.to_path_buf()))
+        self.path
+            .as_ref()
+            .and_then(|p| p.parent().map(|d| d.to_path_buf()))
     }
 }

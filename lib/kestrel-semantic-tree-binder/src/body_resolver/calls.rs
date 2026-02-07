@@ -34,14 +34,13 @@ use crate::resolution::type_resolver::TypeResolver;
 use crate::diagnostics::{
     AmbiguousTypeParameterInitError, CannotMutateThroughImmutableBindingError,
     CannotPassImmutableFieldToMutatingError, CannotPassLetToMutatingError,
-    CannotPassTemporaryToMutatingError, ClosureArityError, FieldNotVisibleForInitError,
-    ImplicitInitArityError, ImplicitInitLabelError, InstanceMethodOnTypeError,
-    MemberNotVisibleError, NoInitInTypeParameterBoundsError, NoMatchingInitializerError,
-    NoMatchingMethodError, NoMatchingOverloadError, NoMatchingTypeParameterInitError,
-    NonCallableError, NotGenericError, OverloadDescription, PrimitiveMethodArityError,
-    TooFewTypeArgumentsError, TooManyTypeArgumentsError, TypeArgsOnNonGenericError,
-    UnconstrainedTypeParameterMemberError,
-    ConstraintNotSatisfiedError,
+    CannotPassTemporaryToMutatingError, ClosureArityError, ConstraintNotSatisfiedError,
+    FieldNotVisibleForInitError, ImplicitInitArityError, ImplicitInitLabelError,
+    InstanceMethodOnTypeError, MemberNotVisibleError, NoInitInTypeParameterBoundsError,
+    NoMatchingInitializerError, NoMatchingMethodError, NoMatchingOverloadError,
+    NoMatchingTypeParameterInitError, NonCallableError, NotGenericError, OverloadDescription,
+    PrimitiveMethodArityError, TooFewTypeArgumentsError, TooManyTypeArgumentsError,
+    TypeArgsOnNonGenericError, UnconstrainedTypeParameterMemberError,
 };
 use kestrel_syntax_tree::utils::get_node_span;
 
@@ -1663,8 +1662,12 @@ pub fn resolve_method_call(
     use super::utils::substitute_self;
     use kestrel_semantic_tree::symbol::function::FunctionSymbol;
 
-    debug_trace!("[METHOD_CALL] Resolving method call '{}' with {} candidates (receiver type: {})",
-              method_name, candidates.len(), receiver.ty);
+    debug_trace!(
+        "[METHOD_CALL] Resolving method call '{}' with {} candidates (receiver type: {})",
+        method_name,
+        candidates.len(),
+        receiver.ty
+    );
 
     // Find matching overload
     let mut invisible_matches = Vec::new();
@@ -1674,8 +1677,11 @@ pub fn resolve_method_call(
             && let Some(orig_callable) = get_callable_behavior(&symbol)
             && matches_signature(&orig_callable, arguments.len(), arg_labels)
         {
-            debug_trace!("[METHOD_CALL] Candidate '{}' matches signature (symbol: {})",
-                      method_name, symbol.metadata().name().value);
+            debug_trace!(
+                "[METHOD_CALL] Candidate '{}' matches signature (symbol: {})",
+                method_name,
+                symbol.metadata().name().value
+            );
             // Check visibility
             if !ctx.model.query(IsVisibleFrom {
                 target: candidate_id,
@@ -1684,14 +1690,19 @@ pub fn resolve_method_call(
                 invisible_matches.push(symbol);
                 continue;
             }
-            debug_trace!("[METHOD_CALL] Candidate '{}' is visible, proceeding with resolution",
-                      method_name);
+            debug_trace!(
+                "[METHOD_CALL] Candidate '{}' is visible, proceeding with resolution",
+                method_name
+            );
 
             // Build substitutions from the receiver type
             // e.g., for Box[Int], we get {T -> Int}
             // For static methods (TypeRef receiver), get the struct type from the symbol
             // For instance methods, resolve Self to concrete type
-            use super::members::{resolve_callable_associated_types, resolve_self_type_to_concrete, substitute_callable_self};
+            use super::members::{
+                resolve_callable_associated_types, resolve_self_type_to_concrete,
+                substitute_callable_self,
+            };
             use kestrel_semantic_tree::behavior::typed::TypedBehavior;
             let resolved_receiver_ty = match &receiver.kind {
                 ExprKind::TypeRef(type_symbol_id) => {
@@ -1856,9 +1867,17 @@ pub fn resolve_method_call(
             // Handle instance method calls where receiver's TYPE is an AssociatedType
             // e.g., item.myEquals(target) where item: Item and Item: MyEqual[Rhs = Self]
             // The default Rhs = Self needs to be substituted with the associated type (Item)
-            else if let TyKind::AssociatedType { symbol: assoc_type, container } = receiver.ty.kind() {
+            else if let TyKind::AssociatedType {
+                symbol: assoc_type,
+                container,
+            } = receiver.ty.kind()
+            {
                 // Get bounds for this associated type from its definition and context
-                let bounds = get_associated_type_bounds_from_context(assoc_type, container.as_ref().map(|v| &**v), ctx);
+                let bounds = get_associated_type_bounds_from_context(
+                    assoc_type,
+                    container.as_ref().map(|v| &**v),
+                    ctx,
+                );
 
                 // Find the protocol that contains this method and get composed substitutions
                 for bound in &bounds {
@@ -1902,18 +1921,26 @@ pub fn resolve_method_call(
                 // The method could come from:
                 // 1. A protocol directly (parent is Protocol)
                 // 2. A protocol extension (parent is Extension that targets a Protocol)
-                let target_protocol_opt = if method_parent.metadata().kind() == KestrelSymbolKind::Protocol {
+                let target_protocol_opt = if method_parent.metadata().kind()
+                    == KestrelSymbolKind::Protocol
+                {
                     // Direct protocol method
                     Some((method_parent.metadata().id(), None))
                 } else if method_parent.metadata().kind() == KestrelSymbolKind::Extension {
                     // Protocol extension method - get the protocol being extended
                     use kestrel_semantic_tree::behavior::extension_target::ExtensionTargetBehavior;
-                    if let Some(ext_behavior) = method_parent.metadata().get_behavior::<ExtensionTargetBehavior>()
+                    if let Some(ext_behavior) = method_parent
+                        .metadata()
+                        .get_behavior::<ExtensionTargetBehavior>()
                         && ext_behavior.is_protocol_extension()
                     {
                         let target_ty = ext_behavior.target_type();
                         // Extract protocol symbol from the target type
-                        if let TyKind::Protocol { symbol: target_proto, .. } = target_ty.kind() {
+                        if let TyKind::Protocol {
+                            symbol: target_proto,
+                            ..
+                        } = target_ty.kind()
+                        {
                             // For protocol extensions, we need to use the target protocol directly
                             Some((target_proto.metadata().id(), Some(target_proto.clone())))
                         } else {
@@ -1928,7 +1955,9 @@ pub fn resolve_method_call(
 
                 if let Some((target_protocol_id, target_protocol_opt)) = target_protocol_opt {
                     // Find the receiver type's conformance to this protocol
-                    let conformances = ctx.model.protocol_conformances_for_type(&resolved_receiver_ty);
+                    let conformances = ctx
+                        .model
+                        .protocol_conformances_for_type(&resolved_receiver_ty);
 
                     for conformance_ty in conformances {
                         if let TyKind::Protocol {
@@ -1943,10 +1972,12 @@ pub fn resolve_method_call(
                             } else if let Some(target_proto) = &target_protocol_opt {
                                 // Check if the conformance protocol inherits from the target
                                 // This handles cases where we have Protocol A: B and the method is from B
-                                get_method_protocol_substitutions(&symbol, proto, proto_subs).is_some()
+                                get_method_protocol_substitutions(&symbol, proto, proto_subs)
+                                    .is_some()
                             } else {
                                 // For direct protocol methods, use get_method_protocol_substitutions
-                                get_method_protocol_substitutions(&symbol, proto, proto_subs).is_some()
+                                get_method_protocol_substitutions(&symbol, proto, proto_subs)
+                                    .is_some()
                             };
 
                             if protocol_matches {
@@ -1957,12 +1988,16 @@ pub fn resolve_method_call(
                                     proto_subs.clone()
                                 } else {
                                     // Direct protocol method: trace through inheritance
-                                    get_method_protocol_substitutions(&symbol, proto, proto_subs).unwrap_or_default()
+                                    get_method_protocol_substitutions(&symbol, proto, proto_subs)
+                                        .unwrap_or_default()
                                 };
 
                                 // Apply protocol substitutions to callable and return type
                                 if !subs_to_apply.is_empty() {
-                                    callable = substitute_callable_with_substitutions(&callable, &subs_to_apply);
+                                    callable = substitute_callable_with_substitutions(
+                                        &callable,
+                                        &subs_to_apply,
+                                    );
                                     return_ty = substitute_type(&return_ty, &subs_to_apply);
 
                                     // Add to call_substitutions for later use
@@ -2178,9 +2213,8 @@ pub fn resolve_method_call(
             // selection with inference placeholders but become invalid once concrete types are known.
             if let Some(parent) = symbol.metadata().parent()
                 && parent.metadata().kind() == KestrelSymbolKind::Extension
-                && let Some(ext_behavior) = parent
-                    .metadata()
-                    .get_behavior::<ExtensionTargetBehavior>()
+                && let Some(ext_behavior) =
+                    parent.metadata().get_behavior::<ExtensionTargetBehavior>()
             {
                 let where_clause = ext_behavior.where_clause();
                 verify_where_clause_constraints_from_substitutions(
@@ -2230,10 +2264,18 @@ pub fn resolve_method_call(
             // Resolve associated types in the return type (e.g., Array[Int64].Item -> Int64)
             return_ty = resolve_associated_types(&return_ty, ctx);
 
-            debug_trace!("[METHOD_CALL] Successfully resolved '{}' to function (return type: {})",
-                      method_name, return_ty);
-            debug_trace!("[METHOD_CALL] Call substitutions: {:?}", call_substitutions.iter()
-                      .map(|(id, ty)| format!("{:?}={}", id, ty)).collect::<Vec<_>>());
+            debug_trace!(
+                "[METHOD_CALL] Successfully resolved '{}' to function (return type: {})",
+                method_name,
+                return_ty
+            );
+            debug_trace!(
+                "[METHOD_CALL] Call substitutions: {:?}",
+                call_substitutions
+                    .iter()
+                    .map(|(id, ty)| format!("{:?}={}", id, ty))
+                    .collect::<Vec<_>>()
+            );
 
             return Expression::generic_call(
                 method_ref,

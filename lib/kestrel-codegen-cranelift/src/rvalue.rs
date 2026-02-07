@@ -1955,8 +1955,13 @@ fn get_field_by_index(
 
     // Otherwise, it's a regular struct or tuple - look up by index
     // Resolve AssociatedTypeProjection through substitution before matching
-    let parent_ty = if matches!(ctx.mir.ty(parent_ty), MirTy::AssociatedTypeProjection { .. }) {
-        subst.apply_ty_readonly(ctx.mir, parent_ty).unwrap_or(parent_ty)
+    let parent_ty = if matches!(
+        ctx.mir.ty(parent_ty),
+        MirTy::AssociatedTypeProjection { .. }
+    ) {
+        subst
+            .apply_ty_readonly(ctx.mir, parent_ty)
+            .unwrap_or(parent_ty)
     } else {
         parent_ty
     };
@@ -2046,7 +2051,9 @@ fn get_struct_field_by_index(
         .collect();
 
     // Get field offset from layout (pass substituted type_args for generic structs)
-    let struct_layout = ctx.layouts.struct_layout(struct_id, &concrete_type_args, None);
+    let struct_layout = ctx
+        .layouts
+        .struct_layout(struct_id, &concrete_type_args, None);
     let offset = *struct_layout.field_offsets.get(field_name).ok_or_else(|| {
         CodegenError::Unsupported(format!("field offset not found: {}", field_name))
     })?;
@@ -2766,11 +2773,8 @@ pub fn compile_call(
                 && let Some(first_arg) = args.first()
                 && let Value::Place(place) = &first_arg.value
                 && let Ok(arg_ty) = get_place_type_for_call(ctx, place, local_map, subst)
-                && let Some(inferred) = extract_named_type_args_for_count(
-                    ctx.mir,
-                    arg_ty,
-                    def.type_params.len(),
-                )
+                && let Some(inferred) =
+                    extract_named_type_args_for_count(ctx.mir, arg_ty, def.type_params.len())
             {
                 concrete_args = inferred;
             }
@@ -3143,9 +3147,7 @@ fn compile_cast(
         stack_locals,
     )?;
     // Apply substitution to target type before translation
-    let substituted_target = subst
-        .apply_ty_readonly(ctx.mir, target)
-        .unwrap_or(target);
+    let substituted_target = subst.apply_ty_readonly(ctx.mir, target).unwrap_or(target);
     let target_ty = translate_type(ctx.mir, substituted_target, ctx.target);
 
     match kind {
@@ -3368,10 +3370,11 @@ fn get_place_type_for_call(
         PlaceKind::Local(local_id) => {
             let local_def = ctx.mir.local(*local_id);
             // Apply substitution to the local's type to resolve type parameters
-            let ty = subst.apply_ty_readonly(ctx.mir, local_def.ty)
-                .map_err(|e| CodegenError::Unsupported(format!(
-                    "failed to substitute local type: {:?}", e
-                )))?;
+            let ty = subst
+                .apply_ty_readonly(ctx.mir, local_def.ty)
+                .map_err(|e| {
+                    CodegenError::Unsupported(format!("failed to substitute local type: {:?}", e))
+                })?;
             Ok(ty)
         },
 
@@ -3401,7 +3404,9 @@ fn get_place_type_for_call(
             get_field_type_by_index_for_call(ctx, parent_ty, *index, subst)
         },
 
-        PlaceKind::Downcast { parent, .. } => get_place_type_for_call(ctx, parent, local_map, subst),
+        PlaceKind::Downcast { parent, .. } => {
+            get_place_type_for_call(ctx, parent, local_map, subst)
+        },
 
         PlaceKind::Deref(inner) => {
             let inner_ty = get_place_type_for_call(ctx, inner, local_map, subst)?;
@@ -3483,8 +3488,13 @@ fn get_field_type_by_index_for_call(
     subst: &Substitution,
 ) -> Result<Id<Ty>, CodegenError> {
     // Resolve AssociatedTypeProjection through substitution before matching
-    let parent_ty = if matches!(ctx.mir.ty(parent_ty), MirTy::AssociatedTypeProjection { .. }) {
-        subst.apply_ty_readonly(ctx.mir, parent_ty).unwrap_or(parent_ty)
+    let parent_ty = if matches!(
+        ctx.mir.ty(parent_ty),
+        MirTy::AssociatedTypeProjection { .. }
+    ) {
+        subst
+            .apply_ty_readonly(ctx.mir, parent_ty)
+            .unwrap_or(parent_ty)
     } else {
         parent_ty
     };
@@ -3671,8 +3681,12 @@ fn compile_apply_partial(
     } else {
         None
     };
-    let mangled_name =
-        ctx.symbol_name_for_function(closure_func_id, closure_def, &closure_type_args, self_type_for_closure);
+    let mangled_name = ctx.symbol_name_for_function(
+        closure_func_id,
+        closure_def,
+        &closure_type_args,
+        self_type_for_closure,
+    );
     let cl_func_id = ctx.func_ids_by_name.get(&mangled_name).ok_or_else(|| {
         CodegenError::Unsupported(format!(
             "closure function not found: {} (mangled: {})",
@@ -3689,7 +3703,9 @@ fn compile_apply_partial(
         // Get the environment struct layout.
         // Env structs inherit type params from their parent closure function,
         // so we pass the same type args used for the closure instantiation.
-        let env_layout = ctx.layouts.struct_layout(env_struct_id, &closure_type_args, self_type_for_closure);
+        let env_layout =
+            ctx.layouts
+                .struct_layout(env_struct_id, &closure_type_args, self_type_for_closure);
         let layout = env_layout.layout;
         let field_offsets = env_layout.field_offsets.clone();
 
@@ -3963,11 +3979,12 @@ fn compile_thin_call(
 
     // Build the signature
     // Apply substitution to the function type to resolve any type parameters or projections
-    let substituted_func_ty = subst
-        .apply_ty_readonly(ctx.mir, func_ty)
-        .map_err(|e| CodegenError::Unsupported(format!(
-            "failed to substitute function type in thin call: {:?}", e
-        )))?;
+    let substituted_func_ty = subst.apply_ty_readonly(ctx.mir, func_ty).map_err(|e| {
+        CodegenError::Unsupported(format!(
+            "failed to substitute function type in thin call: {:?}",
+            e
+        ))
+    })?;
     let sig = build_signature_from_func_type(ctx, substituted_func_ty, builder)?;
     let sig_ref = builder.import_signature(sig);
 
@@ -4043,11 +4060,12 @@ fn compile_thick_call(
     // Get the type of the place to determine how to handle the call
     let func_ty = get_place_type_for_call(ctx, place, local_map, subst)?;
     // Apply substitution to resolve any type parameters or projections
-    let substituted_func_ty = subst
-        .apply_ty_readonly(ctx.mir, func_ty)
-        .map_err(|e| CodegenError::Unsupported(format!(
-            "failed to substitute function type in thick call: {:?}", e
-        )))?;
+    let substituted_func_ty = subst.apply_ty_readonly(ctx.mir, func_ty).map_err(|e| {
+        CodegenError::Unsupported(format!(
+            "failed to substitute function type in thick call: {:?}",
+            e
+        ))
+    })?;
     let resolved_ty = resolve_func_type(ctx, substituted_func_ty);
     let mir_ty = ctx.mir.ty(resolved_ty);
 

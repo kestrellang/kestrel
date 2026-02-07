@@ -72,7 +72,10 @@ pub fn apply_solution_to_defaults(
 ) -> Vec<Option<Expression>> {
     defaults
         .iter()
-        .map(|opt| opt.as_ref().map(|expr| apply_to_expression(expr, solution, oracle)))
+        .map(|opt| {
+            opt.as_ref()
+                .map(|expr| apply_to_expression(expr, solution, oracle))
+        })
         .collect()
 }
 
@@ -81,13 +84,17 @@ fn apply_to_statement(stmt: &Statement, solution: &Solution, oracle: &dyn TypeOr
     let kind = match &stmt.kind {
         StatementKind::Binding { pattern, value } => {
             let resolved_pattern = apply_to_pattern(pattern, solution, oracle);
-            let resolved_value = value.as_ref().map(|v| apply_to_expression(v, solution, oracle));
+            let resolved_value = value
+                .as_ref()
+                .map(|v| apply_to_expression(v, solution, oracle));
             StatementKind::Binding {
                 pattern: resolved_pattern,
                 value: resolved_value,
             }
         },
-        StatementKind::Expr(expr) => StatementKind::Expr(apply_to_expression(expr, solution, oracle)),
+        StatementKind::Expr(expr) => {
+            StatementKind::Expr(apply_to_expression(expr, solution, oracle))
+        },
         StatementKind::GuardLet {
             conditions,
             else_block,
@@ -115,7 +122,11 @@ fn apply_to_statement(stmt: &Statement, solution: &Solution, oracle: &dyn TypeOr
 }
 
 /// Apply solution to an expression.
-fn apply_to_expression(expr: &Expression, solution: &Solution, oracle: &dyn TypeOracle) -> Expression {
+fn apply_to_expression(
+    expr: &Expression,
+    solution: &Solution,
+    oracle: &dyn TypeOracle,
+) -> Expression {
     let resolved_ty = resolve_type(&expr.ty, solution, oracle, &mut HashSet::new());
 
     let kind = match &expr.kind {
@@ -295,7 +306,12 @@ fn apply_to_expression(expr: &Expression, solution: &Solution, oracle: &dyn Type
                     ExprKind::Call {
                         callee: Box::new(resolved_callee),
                         arguments: resolved_arguments,
-                        substitutions: resolve_substitutions(substitutions, solution, oracle, &mut HashSet::new()),
+                        substitutions: resolve_substitutions(
+                            substitutions,
+                            solution,
+                            oracle,
+                            &mut HashSet::new(),
+                        ),
                     }
                 }
             } else {
@@ -303,7 +319,12 @@ fn apply_to_expression(expr: &Expression, solution: &Solution, oracle: &dyn Type
                 ExprKind::Call {
                     callee: Box::new(resolved_callee),
                     arguments: resolved_arguments,
-                    substitutions: resolve_substitutions(substitutions, solution, oracle, &mut HashSet::new()),
+                    substitutions: resolve_substitutions(
+                        substitutions,
+                        solution,
+                        oracle,
+                        &mut HashSet::new(),
+                    ),
                 }
             }
         },
@@ -598,9 +619,13 @@ fn apply_to_expression(expr: &Expression, solution: &Solution, oracle: &dyn Type
                 .collect();
 
             // Apply solution to implicit_param
-            let resolved_implicit_param = implicit_param
-                .as_ref()
-                .map(|(id, ty, span)| (*id, resolve_type(ty, solution, oracle, &mut HashSet::new()), span.clone()));
+            let resolved_implicit_param = implicit_param.as_ref().map(|(id, ty, span)| {
+                (
+                    *id,
+                    resolve_type(ty, solution, oracle, &mut HashSet::new()),
+                    span.clone(),
+                )
+            });
 
             ExprKind::Closure {
                 params: resolved_params,
@@ -694,7 +719,11 @@ fn apply_to_expression(expr: &Expression, solution: &Solution, oracle: &dyn Type
 }
 
 /// Apply solution to a call argument.
-fn apply_to_argument(arg: &CallArgument, solution: &Solution, oracle: &dyn TypeOracle) -> CallArgument {
+fn apply_to_argument(
+    arg: &CallArgument,
+    solution: &Solution,
+    oracle: &dyn TypeOracle,
+) -> CallArgument {
     CallArgument {
         label: arg.label.clone(),
         value: apply_to_expression(&arg.value, solution, oracle),
@@ -703,7 +732,11 @@ fn apply_to_argument(arg: &CallArgument, solution: &Solution, oracle: &dyn TypeO
 }
 
 /// Apply solution to an else branch.
-fn apply_to_else_branch(branch: &ElseBranch, solution: &Solution, oracle: &dyn TypeOracle) -> ElseBranch {
+fn apply_to_else_branch(
+    branch: &ElseBranch,
+    solution: &Solution,
+    oracle: &dyn TypeOracle,
+) -> ElseBranch {
     match branch {
         ElseBranch::Block { statements, value } => ElseBranch::Block {
             statements: statements
@@ -749,7 +782,10 @@ fn apply_to_match_arm(
     oracle: &dyn TypeOracle,
 ) -> kestrel_semantic_tree::expr::MatchArm {
     let resolved_pattern = apply_to_pattern(&arm.pattern, solution, oracle);
-    let resolved_guard = arm.guard.as_ref().map(|g| apply_to_expression(g, solution, oracle));
+    let resolved_guard = arm
+        .guard
+        .as_ref()
+        .map(|g| apply_to_expression(g, solution, oracle));
     let resolved_body = apply_to_expression(&arm.body, solution, oracle);
 
     kestrel_semantic_tree::expr::MatchArm {
@@ -907,8 +943,10 @@ fn resolve_type(
     // For compound types, recursively resolve components
     match ty.kind() {
         TyKind::Tuple(elements) => {
-            let resolved_elements: Vec<_> =
-                elements.iter().map(|e| resolve_type(e, solution, oracle, visited)).collect();
+            let resolved_elements: Vec<_> = elements
+                .iter()
+                .map(|e| resolve_type(e, solution, oracle, visited))
+                .collect();
             Ty::tuple(resolved_elements, ty.span().clone())
         },
         // Note: Array[T] struct types are handled by the Struct case above
@@ -916,8 +954,10 @@ fn resolve_type(
             params,
             return_type,
         } => {
-            let resolved_params: Vec<_> =
-                params.iter().map(|p| resolve_type(p, solution, oracle, visited)).collect();
+            let resolved_params: Vec<_> = params
+                .iter()
+                .map(|p| resolve_type(p, solution, oracle, visited))
+                .collect();
             let resolved_return = resolve_type(return_type, solution, oracle, visited);
             Ty::function(resolved_params, resolved_return, ty.span().clone())
         },
@@ -957,7 +997,10 @@ fn resolve_type(
             Ty::generic_enum(symbol.clone(), resolved_subs, ty.span().clone())
         },
         // Pointer types - resolve pointee
-        TyKind::Pointer(pointee) => Ty::pointer(resolve_type(pointee, solution, oracle, visited), ty.span().clone()),
+        TyKind::Pointer(pointee) => Ty::pointer(
+            resolve_type(pointee, solution, oracle, visited),
+            ty.span().clone(),
+        ),
         // Type aliases with substitutions - resolve any inference placeholders in substitutions
         TyKind::TypeAlias {
             symbol,
@@ -975,12 +1018,18 @@ fn resolve_type(
                     let name = symbol.metadata().name().value.clone();
 
                     // Try to resolve the associated type using the oracle
-                    if let Some(resolved) = oracle.resolve_associated_type(&resolved_container, &name) {
+                    if let Some(resolved) =
+                        oracle.resolve_associated_type(&resolved_container, &name)
+                    {
                         // Recursively resolve in case the result also has associated types
                         resolve_type(&resolved, solution, oracle, visited)
                     } else {
                         // Can't resolve - return the type with the resolved container
-                        Ty::qualified_associated_type(symbol.clone(), resolved_container, ty.span().clone())
+                        Ty::qualified_associated_type(
+                            symbol.clone(),
+                            resolved_container,
+                            ty.span().clone(),
+                        )
                     }
                 },
                 None => ty.clone(),
@@ -1234,10 +1283,8 @@ pub fn apply_solution_to_locals(
 ///
 /// This requires a `resolve_associated_types_fn` closure that takes a type
 /// and returns a type with all associated type projections resolved.
-pub fn resolve_associated_types_in_locals<F>(
-    container: &dyn LocalContainer,
-    resolve_fn: F,
-) where
+pub fn resolve_associated_types_in_locals<F>(container: &dyn LocalContainer, resolve_fn: F)
+where
     F: Fn(&Ty) -> Ty,
 {
     for local in container.locals() {

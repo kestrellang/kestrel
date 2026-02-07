@@ -344,7 +344,10 @@ fn load_stdlib() -> Result<Vec<(String, String, std::path::PathBuf)>, String> {
             .into_iter()
             .map(|(name, content, full_path)| {
                 // Get the parent directory for @fileconstant path resolution
-                let dir = full_path.parent().map(|p| p.to_path_buf()).unwrap_or_default();
+                let dir = full_path
+                    .parent()
+                    .map(|p| p.to_path_buf())
+                    .unwrap_or_default();
                 (name, content, dir)
             })
             .collect()),

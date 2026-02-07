@@ -581,7 +581,7 @@ fn resolve_function_body(
                     .cloned()
                     .collect();
                 Some(WhereClause::with_constraints(combined_constraints))
-            }
+            },
             None if !ext_where.is_empty() => Some(ext_where.clone()),
             None => None,
         }
@@ -664,8 +664,7 @@ fn resolve_function_body(
                     if let Some(token) = child.as_token()
                         && token.kind() == SyntaxKind::Identifier
                     {
-                        let span =
-                            kestrel_syntax_tree::utils::get_node_span(name_node, file_id);
+                        let span = kestrel_syntax_tree::utils::get_node_span(name_node, file_id);
                         let local_id = body_ctx.local_scope.bind(
                             token.text().to_string(),
                             param_ty.clone(),

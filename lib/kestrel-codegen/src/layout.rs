@@ -105,7 +105,8 @@ impl<'a> LayoutCache<'a> {
     ) -> &StructLayout {
         let key = (struct_id, type_args.to_vec(), self_type);
         if !self.struct_layouts.contains_key(&key) {
-            let layout = self.compute_struct_layout(struct_id, type_args, self_type, &HashMap::new());
+            let layout =
+                self.compute_struct_layout(struct_id, type_args, self_type, &HashMap::new());
             self.struct_layouts.insert(key.clone(), layout);
         }
         &self.struct_layouts[&key]
@@ -302,12 +303,18 @@ impl<'a> LayoutCache<'a> {
                 if let Some(concrete_self) = self_type {
                     self.layout_of(concrete_self)
                 } else {
-                    panic!("SelfType reached layout computation without self_type substitution - this is a bug")
+                    panic!(
+                        "SelfType reached layout computation without self_type substitution - this is a bug"
+                    )
                 }
             },
 
             // AssociatedTypeProjection - resolve base through substitution, then project Item.
-            MirTy::AssociatedTypeProjection { base, protocol, associated } => {
+            MirTy::AssociatedTypeProjection {
+                base,
+                protocol,
+                associated,
+            } => {
                 let resolved_base = match self.ctx.ty(*base) {
                     MirTy::SelfType => self_type.unwrap_or(*base),
                     MirTy::TypeParam(tp) => subst.get(tp).copied().unwrap_or(*base),
@@ -463,7 +470,9 @@ impl<'a> LayoutCache<'a> {
                 if new_inner == *inner {
                     ty
                 } else {
-                    self.ctx.lookup_type(&MirTy::Pointer(new_inner)).unwrap_or(ty)
+                    self.ctx
+                        .lookup_type(&MirTy::Pointer(new_inner))
+                        .unwrap_or(ty)
                 }
             },
 
@@ -481,7 +490,9 @@ impl<'a> LayoutCache<'a> {
                 if new_inner == *inner {
                     ty
                 } else {
-                    self.ctx.lookup_type(&MirTy::RefMut(new_inner)).unwrap_or(ty)
+                    self.ctx
+                        .lookup_type(&MirTy::RefMut(new_inner))
+                        .unwrap_or(ty)
                 }
             },
 

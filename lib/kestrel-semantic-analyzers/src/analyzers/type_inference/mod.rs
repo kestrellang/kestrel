@@ -167,7 +167,8 @@ impl Analyzer for TypeInferenceAnalyzer {
             apply_solution_to_patterns(executable.parameter_patterns(), &solution, ctx.model);
 
         // Apply solution to default value expressions
-        let resolved_defaults = apply_solution_to_defaults(executable.default_values(), &solution, ctx.model);
+        let resolved_defaults =
+            apply_solution_to_defaults(executable.default_values(), &solution, ctx.model);
 
         // Update local variables in the container with resolved types, including
         // resolving associated type projections inline during the same pass.
@@ -208,4 +209,3 @@ impl Analyzer for TypeInferenceAnalyzer {
             ));
     }
 }
-

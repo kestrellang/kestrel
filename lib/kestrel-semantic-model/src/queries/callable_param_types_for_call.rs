@@ -63,7 +63,8 @@ impl<'a> Query for CallableParamTypesForCall<'a> {
                             let Some(symbol) = model.query(SymbolFor { id }) else {
                                 continue;
                             };
-                            let Some(callable) = symbol.metadata().get_behavior::<CallableBehavior>()
+                            let Some(callable) =
+                                symbol.metadata().get_behavior::<CallableBehavior>()
                             else {
                                 continue;
                             };

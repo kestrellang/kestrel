@@ -334,19 +334,22 @@ fn find_defaultable_type_params(
                     find_defaultable_type_params(&resolved_sub, ctx, defaultable, visited);
                 }
             }
-        }
-        TyKind::Function { params, return_type } => {
+        },
+        TyKind::Function {
+            params,
+            return_type,
+        } => {
             for p in params {
                 find_defaultable_type_params(p, ctx, defaultable, visited);
             }
             find_defaultable_type_params(return_type, ctx, defaultable, visited);
-        }
+        },
         TyKind::Tuple(elements) => {
             for e in elements {
                 find_defaultable_type_params(e, ctx, defaultable, visited);
             }
-        }
-        _ => {}
+        },
+        _ => {},
     }
 }
 
@@ -357,7 +360,6 @@ fn find_defaultable_type_params(
 fn solve_round(ctx: &mut InferenceContext<'_>) -> bool {
     let mut progress = false;
     let constraints = ctx.take_constraints();
-
 
     for constraint in constraints.iter() {
         match try_solve(ctx, constraint) {
@@ -374,7 +376,6 @@ fn solve_round(ctx: &mut InferenceContext<'_>) -> bool {
             },
         }
     }
-
 
     progress
 }
@@ -403,7 +404,15 @@ fn try_solve(
             substitutions,
             span,
         } => resolve_member(
-            ctx, *receiver, member, *is_static, arguments, *result, *expr_id, substitutions, span,
+            ctx,
+            *receiver,
+            member,
+            *is_static,
+            arguments,
+            *result,
+            *expr_id,
+            substitutions,
+            span,
         ),
         Constraint::ImplicitMember {
             expr_ty,
@@ -476,8 +485,6 @@ fn unify(
     }
 
     // DEBUG: Print when unifying types
-
-
 
     // Handle inference placeholders
     match (ty_a.kind(), ty_b.kind()) {
@@ -1126,13 +1133,11 @@ fn unify(
         },
 
         // No match - type mismatch
-        _ => {
-            Err(InferenceError::type_mismatch(
-                ty_a.clone(),
-                ty_b.clone(),
-                span.clone(),
-            ))
-        },
+        _ => Err(InferenceError::type_mismatch(
+            ty_a.clone(),
+            ty_b.clone(),
+            span.clone(),
+        )),
     }
 }
 
@@ -1152,8 +1157,9 @@ fn resolve_promotable(
     let to = resolve_type(ctx, to_ty);
 
     // Debug only for function type promotions where we expect issues
-    if matches!(to.kind(), TyKind::Function { .. }) && to.to_string().contains("ArrayIterator[Int64].Item") {
-    }
+    if matches!(to.kind(), TyKind::Function { .. })
+        && to.to_string().contains("ArrayIterator[Int64].Item")
+    {}
 
     // Expand type aliases for both types to get the underlying types
     let from = from.expand_aliases();
@@ -1207,13 +1213,15 @@ fn resolve_promotable(
     }
 
     // Types can't unify (different kinds). Check if target conforms to FromValue[source] for promotion.
-    if let Some((method_id, subs)) =
-        ctx.oracle()
-            .check_from_value_conformance(&to_normalized, &from_normalized)
+    if let Some((method_id, subs)) = ctx
+        .oracle()
+        .check_from_value_conformance(&to_normalized, &from_normalized)
     {
         // Record promotion for apply_solution
-        ctx.promotions_mut()
-            .insert(expr_id, PromotionInfo::new(to_normalized.clone(), method_id, subs));
+        ctx.promotions_mut().insert(
+            expr_id,
+            PromotionInfo::new(to_normalized.clone(), method_id, subs),
+        );
         return Ok(SolveResult::Solved);
     }
 
@@ -1454,7 +1462,8 @@ fn deeply_resolve_associated_types(
         TyKind::AssociatedType { symbol, container } => {
             if let Some(container_ty) = container {
                 // First, recursively resolve associated types in the container
-                let resolved_container = deeply_resolve_associated_types(ctx, container_ty, visited);
+                let resolved_container =
+                    deeply_resolve_associated_types(ctx, container_ty, visited);
                 ctx.register_type(&resolved_container);
 
                 // Also resolve inference variables in the container
@@ -1469,19 +1478,30 @@ fn deeply_resolve_associated_types(
 
                 // If the container is still an inference variable, we can't resolve - return as-is
                 if matches!(expanded_container.kind(), TyKind::Infer) {
-                    let result_ty = Ty::qualified_associated_type(symbol.clone(), expanded_container, ty.span().clone());
+                    let result_ty = Ty::qualified_associated_type(
+                        symbol.clone(),
+                        expanded_container,
+                        ty.span().clone(),
+                    );
                     ctx.register_type(&result_ty);
                     return result_ty;
                 }
 
                 // Try to resolve the associated type on the expanded container
-                if let Some(resolved_assoc) = ctx.oracle().resolve_associated_type(&expanded_container, &symbol.metadata().name().value) {
+                if let Some(resolved_assoc) = ctx
+                    .oracle()
+                    .resolve_associated_type(&expanded_container, &symbol.metadata().name().value)
+                {
                     ctx.register_type(&resolved_assoc);
                     // Recursively resolve any nested associated types in the result
                     deeply_resolve_associated_types(ctx, &resolved_assoc, visited)
                 } else {
                     // Could not resolve - return the type with the resolved container
-                    let result_ty = Ty::qualified_associated_type(symbol.clone(), expanded_container, ty.span().clone());
+                    let result_ty = Ty::qualified_associated_type(
+                        symbol.clone(),
+                        expanded_container,
+                        ty.span().clone(),
+                    );
                     ctx.register_type(&result_ty);
                     result_ty
                 }
@@ -1492,7 +1512,10 @@ fn deeply_resolve_associated_types(
         },
 
         // Struct/Enum with substitutions - recursively resolve associated types in substitutions
-        TyKind::Struct { symbol, substitutions } => {
+        TyKind::Struct {
+            symbol,
+            substitutions,
+        } => {
             let mut new_subs = Substitutions::new();
             let mut changed = false;
             for (param_id, sub_ty) in substitutions.iter() {
@@ -1511,7 +1534,10 @@ fn deeply_resolve_associated_types(
             }
         },
 
-        TyKind::Enum { symbol, substitutions } => {
+        TyKind::Enum {
+            symbol,
+            substitutions,
+        } => {
             let mut new_subs = Substitutions::new();
             let mut changed = false;
             for (param_id, sub_ty) in substitutions.iter() {
@@ -1530,7 +1556,10 @@ fn deeply_resolve_associated_types(
             }
         },
 
-        TyKind::Protocol { symbol, substitutions } => {
+        TyKind::Protocol {
+            symbol,
+            substitutions,
+        } => {
             let mut new_subs = Substitutions::new();
             let mut changed = false;
             for (param_id, sub_ty) in substitutions.iter() {
@@ -1549,7 +1578,10 @@ fn deeply_resolve_associated_types(
             }
         },
 
-        TyKind::TypeAlias { symbol, substitutions } => {
+        TyKind::TypeAlias {
+            symbol,
+            substitutions,
+        } => {
             let mut new_subs = Substitutions::new();
             let mut changed = false;
             for (param_id, sub_ty) in substitutions.iter() {
@@ -1607,7 +1639,8 @@ fn normalize(
 
             // Deeply resolve any nested associated types in the result
             let mut visited = HashSet::new();
-            let fully_resolved = deeply_resolve_associated_types(ctx, &resolved_assoc, &mut visited);
+            let fully_resolved =
+                deeply_resolve_associated_types(ctx, &resolved_assoc, &mut visited);
             ctx.register_type(&fully_resolved);
 
             // Unify with the result
@@ -1768,7 +1801,6 @@ fn resolve_member(
                 // Substitute Self with the receiver type
                 let left_ty = left_ty.substitute_self(&receiver_ty);
                 let right_ty = right_ty.substitute_self(&receiver_ty);
-
 
                 // Register both types
                 ctx.register_type(&left_ty);
@@ -2188,7 +2220,10 @@ fn resolve_type(ctx: &InferenceContext<'_>, id: TyId) -> Ty {
 
             // Only try to resolve if the container is concrete (not Infer)
             if !matches!(resolved_container.kind(), TyKind::Infer) {
-                if let Some(concrete_ty) = ctx.oracle().resolve_associated_type(&resolved_container, &name) {
+                if let Some(concrete_ty) = ctx
+                    .oracle()
+                    .resolve_associated_type(&resolved_container, &name)
+                {
                     return concrete_ty;
                 }
             }
@@ -2198,7 +2233,11 @@ fn resolve_type(ctx: &InferenceContext<'_>, id: TyId) -> Ty {
     // If the resolved type is a struct with type arguments that might contain
     // associated types, recursively resolve them. This handles cases like
     // Array[U.Item] where U has been resolved to ArrayIterator[Int64].
-    if let TyKind::Struct { symbol, substitutions } = resolved.kind() {
+    if let TyKind::Struct {
+        symbol,
+        substitutions,
+    } = resolved.kind()
+    {
         let mut new_subs = Substitutions::new();
         let mut changed = false;
 
@@ -2343,7 +2382,6 @@ fn check_fully_resolved(ctx: &mut InferenceContext<'_>) {
     let mut unresolved = Vec::new();
     let mut visited = HashSet::new();
 
-
     // Check all registered types for unresolved Infer types.
     // This includes:
     // 1. Bare Infer types without substitutions
@@ -2461,7 +2499,7 @@ fn find_nested_infer_types(
                 // No substitution - this is unresolved
                 unresolved.push((ty.id(), ty.span().clone()));
             }
-        }
+        },
         TyKind::UnresolvedFunction {
             param_info,
             return_type,
@@ -2472,15 +2510,15 @@ fn find_nested_infer_types(
             match param_info {
                 ParamInfo::ImplicitIt { it_type } => {
                     find_nested_infer_types(it_type, ctx, unresolved, visited);
-                }
+                },
                 ParamInfo::Explicit { param_types } => {
                     for pt in param_types {
                         find_nested_infer_types(pt, ctx, unresolved, visited);
                     }
-                }
-                ParamInfo::Unconstrained => {}
+                },
+                ParamInfo::Unconstrained => {},
             }
-        }
+        },
         TyKind::Function {
             params,
             return_type,
@@ -2489,26 +2527,26 @@ fn find_nested_infer_types(
                 find_nested_infer_types(p, ctx, unresolved, visited);
             }
             find_nested_infer_types(return_type, ctx, unresolved, visited);
-        }
+        },
         TyKind::Tuple(elements) => {
             for e in elements {
                 find_nested_infer_types(e, ctx, unresolved, visited);
             }
-        }
+        },
         TyKind::Struct { substitutions, .. } | TyKind::Enum { substitutions, .. } => {
             for (_, sub_ty) in substitutions.iter() {
                 find_nested_infer_types(sub_ty, ctx, unresolved, visited);
             }
-        }
+        },
         TyKind::Pointer(pointee) => {
             find_nested_infer_types(pointee, ctx, unresolved, visited);
-        }
+        },
         TyKind::AssociatedType { container, .. } => {
             if let Some(c) = container {
                 find_nested_infer_types(c, ctx, unresolved, visited);
             }
-        }
-        _ => {}
+        },
+        _ => {},
     }
 }
 

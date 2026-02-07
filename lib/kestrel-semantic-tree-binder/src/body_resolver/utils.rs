@@ -7,7 +7,6 @@ use std::sync::Arc;
 
 use kestrel_reporting::IntoDiagnostic;
 use kestrel_semantic_model::SymbolFor;
-use kestrel_semantic_type_inference::TypeOracle;
 use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
 use kestrel_semantic_tree::behavior::callable::CallableBehavior;
 use kestrel_semantic_tree::behavior::extension_target::ExtensionTargetBehavior;
@@ -16,14 +15,15 @@ use kestrel_semantic_tree::behavior::implements::ImplementsBehavior;
 use kestrel_semantic_tree::behavior::typed::TypedBehavior;
 use kestrel_semantic_tree::expr::{ExprKind, Expression};
 use kestrel_semantic_tree::language::KestrelLanguage;
+use kestrel_semantic_tree::symbol::associated_type::AssociatedTypeSymbol;
 use kestrel_semantic_tree::symbol::function::FunctionSymbol;
 use kestrel_semantic_tree::symbol::initializer::InitializerSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::symbol::protocol::ProtocolSymbol;
 use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
 use kestrel_semantic_tree::symbol::type_parameter::TypeParameterSymbol;
-use kestrel_semantic_tree::symbol::associated_type::AssociatedTypeSymbol;
 use kestrel_semantic_tree::ty::{Constraint, ParamInfo, Substitutions, Ty, TyKind, WhereClause};
+use kestrel_semantic_type_inference::TypeOracle;
 use kestrel_span::Span;
 use kestrel_syntax_tree::SyntaxKind;
 use semantic_tree::symbol::{Symbol, SymbolId};
@@ -521,11 +521,7 @@ pub fn get_type_parameter_bounds_by_id(
 /// This function verifies that:
 /// 1. The last segment of the path matches the associated type name
 /// 2. The preceding segments match the container type chain
-fn path_matches_associated_type(
-    path: &[String],
-    assoc_name: &str,
-    container: Option<&Ty>,
-) -> bool {
+fn path_matches_associated_type(path: &[String], assoc_name: &str, container: Option<&Ty>) -> bool {
     if path.is_empty() {
         return false;
     }
@@ -551,11 +547,11 @@ fn path_matches_associated_type(
             // No container means this is a top-level associated type in a protocol
             // Only single-segment paths should match (handled above)
             false
-        }
+        },
         Some(container_ty) => {
             // Recursively check the container chain
             container_matches_path(container_ty, prefix)
-        }
+        },
     }
 }
 
@@ -575,8 +571,11 @@ fn container_matches_path(container: &Ty, path: &[String]) -> bool {
         TyKind::TypeParameter(type_param) => {
             // Type parameter matches if it's the only segment and names match
             path.len() == 1 && path[0] == type_param.metadata().name().value
-        }
-        TyKind::AssociatedType { symbol, container: nested_container } => {
+        },
+        TyKind::AssociatedType {
+            symbol,
+            container: nested_container,
+        } => {
             // Associated type matches if:
             // 1. Last segment matches the associated type name
             // 2. Remaining prefix matches the nested container
@@ -592,15 +591,15 @@ fn container_matches_path(container: &Ty, path: &[String]) -> bool {
                 Some(c) => container_matches_path(c, prefix),
                 None => prefix.is_empty(),
             }
-        }
+        },
         TyKind::SelfType => {
             // Self matches if it's the only segment and named "Self"
             path.len() == 1 && path[0] == "Self"
-        }
+        },
         _ => {
             // Other types don't match path prefixes
             false
-        }
+        },
     }
 }
 
@@ -652,8 +651,11 @@ pub fn get_associated_type_bounds_from_context(
                 }
             }
         }
-        if let Constraint::InheritedAssociatedTypeBound { path, bounds: assoc_bounds, .. } =
-            constraint
+        if let Constraint::InheritedAssociatedTypeBound {
+            path,
+            bounds: assoc_bounds,
+            ..
+        } = constraint
         {
             // Convert dot-separated path to vec for matching
             let path_segments: Vec<String> = path.split('.').map(|s| s.to_string()).collect();
@@ -702,18 +704,14 @@ pub fn get_associated_type_bounds_from_context(
         if let Some(parent) = function.metadata().parent() {
             // Get the parent's where clause depending on its kind
             let parent_where_clause = match parent.metadata().kind() {
-                KestrelSymbolKind::Extension => {
-                    parent
-                        .metadata()
-                        .get_behavior::<ExtensionTargetBehavior>()
-                        .map(|t| t.where_clause().clone())
-                }
-                KestrelSymbolKind::Struct | KestrelSymbolKind::Enum => {
-                    parent
-                        .metadata()
-                        .get_behavior::<GenericsBehavior>()
-                        .map(|g| g.where_clause().clone())
-                }
+                KestrelSymbolKind::Extension => parent
+                    .metadata()
+                    .get_behavior::<ExtensionTargetBehavior>()
+                    .map(|t| t.where_clause().clone()),
+                KestrelSymbolKind::Struct | KestrelSymbolKind::Enum => parent
+                    .metadata()
+                    .get_behavior::<GenericsBehavior>()
+                    .map(|g| g.where_clause().clone()),
                 _ => None,
             };
 
@@ -725,7 +723,11 @@ pub fn get_associated_type_bounds_from_context(
                         ..
                     } = constraint
                     {
-                        if path_matches_associated_type(associated_type_path, &assoc_name, container) {
+                        if path_matches_associated_type(
+                            associated_type_path,
+                            &assoc_name,
+                            container,
+                        ) {
                             for bound in self_bounds {
                                 if let TyKind::Protocol { symbol, .. } = bound.kind() {
                                     // Check if this protocol is already in bounds
@@ -752,7 +754,8 @@ pub fn get_associated_type_bounds_from_context(
                         ..
                     } = constraint
                     {
-                        let path_segments: Vec<String> = path.split('.').map(|s| s.to_string()).collect();
+                        let path_segments: Vec<String> =
+                            path.split('.').map(|s| s.to_string()).collect();
                         if path_matches_associated_type(&path_segments, &assoc_name, container) {
                             for bound in assoc_bounds {
                                 if let TyKind::Protocol { symbol, .. } = bound.kind() {
@@ -929,16 +932,27 @@ pub fn resolve_associated_types(ty: &Ty, ctx: &BodyResolutionContext) -> Ty {
                 // Don't try to resolve if the container is an inference variable -
                 // resolution will happen later during type inference when concrete types are known
                 if matches!(resolved_container.kind(), TyKind::Infer) {
-                    return Ty::qualified_associated_type(symbol.clone(), resolved_container, ty.span().clone());
+                    return Ty::qualified_associated_type(
+                        symbol.clone(),
+                        resolved_container,
+                        ty.span().clone(),
+                    );
                 }
 
                 // Try to resolve the associated type using the TypeOracle
-                if let Some(resolved) = ctx.model.resolve_associated_type(&resolved_container, &symbol.metadata().name().value) {
+                if let Some(resolved) = ctx
+                    .model
+                    .resolve_associated_type(&resolved_container, &symbol.metadata().name().value)
+                {
                     // Recursively resolve in case the result also has associated types
                     resolve_associated_types(&resolved, ctx)
                 } else {
                     // Can't resolve - return the type with the resolved container
-                    Ty::qualified_associated_type(symbol.clone(), resolved_container, ty.span().clone())
+                    Ty::qualified_associated_type(
+                        symbol.clone(),
+                        resolved_container,
+                        ty.span().clone(),
+                    )
                 }
             } else {
                 // Unqualified associated type - can't resolve without container

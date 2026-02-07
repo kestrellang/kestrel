@@ -565,7 +565,10 @@ pub fn resolve_path_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContex
                 base
             }
         },
-        ValuePathResolution::AssociatedType { symbol_id, container } => {
+        ValuePathResolution::AssociatedType {
+            symbol_id,
+            container,
+        } => {
             // This is an associated type reference (e.g., Item in `Item.zero`)
             // For multi-segment paths like Item.zero, the db returns AssociatedType
             // for just the first segment, and we need to handle the rest as member accesses
@@ -674,8 +677,7 @@ pub fn resolve_path_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContex
                         Ty::infer(field_span.clone())
                     };
 
-                    let type_ref =
-                        Expression::type_ref(parent_id, parent_ty, field_span.clone());
+                    let type_ref = Expression::type_ref(parent_id, parent_ty, field_span.clone());
 
                     let field_ty = symbol
                         .metadata()
@@ -686,11 +688,7 @@ pub fn resolve_path_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContex
                     let field_name = symbol.metadata().name().value.clone();
 
                     let base = Expression::field_access(
-                        type_ref,
-                        field_name,
-                        is_mutable,
-                        field_ty,
-                        field_span,
+                        type_ref, field_name, is_mutable, field_ty, field_span,
                     );
 
                     // Resolve remaining segments as member accesses
@@ -784,21 +782,20 @@ fn extract_path_segments_with_spans(
                     let range_end: usize = range.end().into();
 
                     // Validate span
-                    let span = if range_end <= source.len()
-                        && &source[range_start..range_end] == name
-                    {
-                        Span::new(file_id, range_start..range_end)
-                    } else {
-                        // Invalid span - use node range as fallback
-                        let node_range = node.text_range();
-                        let node_start: usize = node_range.start().into();
-                        let node_end: usize = node_range.end().into();
-                        if node_end <= source.len() {
-                            Span::new(file_id, node_start..node_end)
+                    let span =
+                        if range_end <= source.len() && &source[range_start..range_end] == name {
+                            Span::new(file_id, range_start..range_end)
                         } else {
-                            Span::new(file_id, 0..0)
-                        }
-                    };
+                            // Invalid span - use node range as fallback
+                            let node_range = node.text_range();
+                            let node_start: usize = node_range.start().into();
+                            let node_end: usize = node_range.end().into();
+                            if node_end <= source.len() {
+                                Span::new(file_id, node_start..node_end)
+                            } else {
+                                Span::new(file_id, 0..0)
+                            }
+                        };
 
                     segments.push((name, span));
                 }
@@ -947,9 +944,7 @@ fn extract_trailing_identifiers(
                 let range_end: usize = range.end().into();
 
                 // Validate span
-                let span = if range_end <= source.len()
-                    && &source[range_start..range_end] == name
-                {
+                let span = if range_end <= source.len() && &source[range_start..range_end] == name {
                     Span::new(file_id, range_start..range_end)
                 } else {
                     // Invalid span - use node range as fallback
@@ -1324,9 +1319,7 @@ fn extract_qualified_type_from_path(
 
         // Only return Some for generic types that need inference
         return match base_ty.kind() {
-            TyKind::Struct { symbol, .. } if !symbol.type_parameters().is_empty() => {
-                Some(base_ty)
-            },
+            TyKind::Struct { symbol, .. } if !symbol.type_parameters().is_empty() => Some(base_ty),
             TyKind::Enum { symbol, .. } if !symbol.type_parameters().is_empty() => Some(base_ty),
             _ => None,
         };
@@ -1384,9 +1377,7 @@ fn extract_qualified_type_from_path(
     } else {
         // TypeArgumentList present but empty - return base type for generic inference
         match base_ty.kind() {
-            TyKind::Struct { symbol, .. } if !symbol.type_parameters().is_empty() => {
-                Some(base_ty)
-            },
+            TyKind::Struct { symbol, .. } if !symbol.type_parameters().is_empty() => Some(base_ty),
             TyKind::Enum { symbol, .. } if !symbol.type_parameters().is_empty() => Some(base_ty),
             _ => None,
         }

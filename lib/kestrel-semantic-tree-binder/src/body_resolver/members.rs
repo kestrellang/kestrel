@@ -32,11 +32,10 @@ use kestrel_span::Span;
 use semantic_tree::symbol::{Symbol, SymbolId};
 
 use crate::diagnostics::{
-    AmbiguousConstrainedMethodError, CannotAccessMemberOnTypeError,
+    AmbiguousConstrainedMethodError, CannotAccessMemberOnTypeError, ConstraintNotSatisfiedError,
     DelegatingInitOutsideInitializerError, MemberNotAccessibleError, MemberNotVisibleError,
     MethodNotInBoundsError, NoMatchingMethodError, NoSuchMemberError, NoSuchMethodError,
     UnconstrainedAssociatedTypeMemberError, UnconstrainedTypeParameterMemberError,
-    ConstraintNotSatisfiedError,
 };
 
 use super::calls::{
@@ -46,8 +45,8 @@ use super::context::BodyResolutionContext;
 use super::utils::{
     find_type_directed_match, format_symbol_kind, get_associated_type_bounds_from_context,
     get_callable_behavior, get_type_container, get_type_parameter_bounds_by_id,
-    get_type_parameter_bounds_from_context, infer_type_arguments,
-    matches_signature, resolve_associated_types, substitute_self, substitute_type, type_satisfies_bound,
+    get_type_parameter_bounds_from_context, infer_type_arguments, matches_signature,
+    resolve_associated_types, substitute_self, substitute_type, type_satisfies_bound,
 };
 
 fn verify_where_clause_constraints_from_substitutions(
@@ -314,8 +313,12 @@ pub fn resolve_member_access(
     };
 
     // 2. Find child with that name - first in direct children, then in extensions
-    debug_trace!("[MEMBER_RESOLUTION] Looking for '{}' on container '{}' (type: {})",
-              member_name, container.metadata().name().value, base_ty);
+    debug_trace!(
+        "[MEMBER_RESOLUTION] Looking for '{}' on container '{}' (type: {})",
+        member_name,
+        container.metadata().name().value,
+        base_ty
+    );
     let member = container
         .metadata()
         .children()
@@ -337,11 +340,17 @@ pub fn resolve_member_access(
     // If not found in direct children, search type extensions, then protocol extensions
     let member = match member {
         Some(m) => {
-            debug_trace!("[MEMBER_RESOLUTION] Found '{}' in direct children", member_name);
+            debug_trace!(
+                "[MEMBER_RESOLUTION] Found '{}' in direct children",
+                member_name
+            );
             m
         },
         None => {
-            debug_trace!("[MEMBER_RESOLUTION] '{}' not found in direct children, checking extensions", member_name);
+            debug_trace!(
+                "[MEMBER_RESOLUTION] '{}' not found in direct children, checking extensions",
+                member_name
+            );
             // Try to find in applicable type extensions
             let extension_member = applicable_extensions
                 .iter()
@@ -350,18 +359,27 @@ pub fn resolve_member_access(
 
             match extension_member {
                 Some(m) => {
-                    debug_trace!("[MEMBER_RESOLUTION] Found '{}' in type extensions", member_name);
+                    debug_trace!(
+                        "[MEMBER_RESOLUTION] Found '{}' in type extensions",
+                        member_name
+                    );
                     m
                 },
                 None => {
-                    debug_trace!("[MEMBER_RESOLUTION] '{}' not found in type extensions, checking protocol extensions", member_name);
+                    debug_trace!(
+                        "[MEMBER_RESOLUTION] '{}' not found in type extensions, checking protocol extensions",
+                        member_name
+                    );
                     // Try to find in protocol extensions
                     let protocol_ext_methods =
                         find_methods_in_protocol_extensions(base_ty, member_name, ctx);
 
                     if !protocol_ext_methods.is_empty() {
-                        debug_trace!("[MEMBER_RESOLUTION] Found '{}' in protocol extensions: {} candidates",
-                                  member_name, protocol_ext_methods.len());
+                        debug_trace!(
+                            "[MEMBER_RESOLUTION] Found '{}' in protocol extensions: {} candidates",
+                            member_name,
+                            protocol_ext_methods.len()
+                        );
                         // Found method(s) in protocol extensions - create MethodRef
                         return Expression::method_ref(
                             base,
@@ -1136,7 +1154,8 @@ pub fn resolve_member_call(
             let method_type_params = generics.type_parameters();
             if !method_type_params.is_empty() {
                 let arg_types: Vec<Ty> = arguments.iter().map(|a| a.value.ty.clone()).collect();
-                let mut method_subs = infer_type_arguments(method_type_params, callable, &arg_types);
+                let mut method_subs =
+                    infer_type_arguments(method_type_params, callable, &arg_types);
 
                 // Ensure all type parameters have substitutions (even if they're inference variables)
                 // This is critical for bidirectional type inference with closures
@@ -1160,8 +1179,8 @@ pub fn resolve_member_call(
         // Validate method where-clause constraints against final substitutions.
         if let Some(func_sym) = method
             .as_any()
-            .downcast_ref::<kestrel_semantic_tree::symbol::function::FunctionSymbol>()
-        {
+            .downcast_ref::<kestrel_semantic_tree::symbol::function::FunctionSymbol>(
+        ) {
             let where_clause = func_sym.where_clause();
             verify_where_clause_constraints_from_substitutions(
                 &where_clause,
@@ -1176,9 +1195,7 @@ pub fn resolve_member_call(
         // If method comes from an extension, validate extension target constraints too.
         if let Some(parent) = method.metadata().parent()
             && parent.metadata().kind() == KestrelSymbolKind::Extension
-            && let Some(ext_behavior) = parent
-                .metadata()
-                .get_behavior::<ExtensionTargetBehavior>()
+            && let Some(ext_behavior) = parent.metadata().get_behavior::<ExtensionTargetBehavior>()
         {
             let where_clause = ext_behavior.where_clause();
             verify_where_clause_constraints_from_substitutions(
@@ -2662,8 +2679,7 @@ fn normalize_type_param_with_equality(
     }
 
     for constraint in where_clause.constraints() {
-        if let kestrel_semantic_tree::ty::Constraint::TypeEquality { left, right, .. } =
-            constraint
+        if let kestrel_semantic_tree::ty::Constraint::TypeEquality { left, right, .. } = constraint
         {
             // Check if left side is our type parameter
             if let TyKind::TypeParameter(tp) = left.kind() {
@@ -2893,7 +2909,10 @@ fn get_applicable_protocol_extensions(
     for protocol_ty in conformances {
         // Extract the protocol symbol and substitutions from the protocol type
         let (protocol_id, _protocol_subs) = match protocol_ty.kind() {
-            TyKind::Protocol { symbol, substitutions } => (symbol.metadata().id(), substitutions),
+            TyKind::Protocol {
+                symbol,
+                substitutions,
+            } => (symbol.metadata().id(), substitutions),
             _ => continue, // Skip non-protocol types
         };
 
@@ -2949,9 +2968,15 @@ fn is_protocol_extension_applicable(
     };
 
     let where_clause = target_behavior.where_clause();
-    debug_trace!("[WHERE_CLAUSE_CHECK] Checking protocol extension '{}' applicability for type '{}'",
-              extension.metadata().name().value, concrete_ty);
-    debug_trace!("[WHERE_CLAUSE_CHECK] Extension has {} constraints", where_clause.constraints().len());
+    debug_trace!(
+        "[WHERE_CLAUSE_CHECK] Checking protocol extension '{}' applicability for type '{}'",
+        extension.metadata().name().value,
+        concrete_ty
+    );
+    debug_trace!(
+        "[WHERE_CLAUSE_CHECK] Extension has {} constraints",
+        where_clause.constraints().len()
+    );
 
     for constraint in where_clause.constraints() {
         if let Constraint::SelfBound {
@@ -2961,12 +2986,21 @@ fn is_protocol_extension_applicable(
         } = constraint
             && associated_type_path.is_empty()
         {
-            debug_trace!("[WHERE_CLAUSE_CHECK] Checking SelfBound constraint with {} bounds", bounds.len());
+            debug_trace!(
+                "[WHERE_CLAUSE_CHECK] Checking SelfBound constraint with {} bounds",
+                bounds.len()
+            );
             // Self: Protocol - check if concrete type conforms to all bounds
             for bound in bounds {
-                debug_trace!("[WHERE_CLAUSE_CHECK] Checking if '{}' satisfies bound '{}'", concrete_ty, bound);
+                debug_trace!(
+                    "[WHERE_CLAUSE_CHECK] Checking if '{}' satisfies bound '{}'",
+                    concrete_ty,
+                    bound
+                );
                 if !type_satisfies_bound(concrete_ty, bound, ctx.model) {
-                    debug_trace!("[WHERE_CLAUSE_CHECK] Type does NOT satisfy bound - extension not applicable");
+                    debug_trace!(
+                        "[WHERE_CLAUSE_CHECK] Type does NOT satisfy bound - extension not applicable"
+                    );
                     return false;
                 }
                 debug_trace!("[WHERE_CLAUSE_CHECK] Type satisfies bound");
@@ -2984,12 +3018,17 @@ fn is_protocol_extension_applicable(
         } = constraint
             && !associated_type_path.is_empty()
         {
-            debug_trace!("[WHERE_CLAUSE_CHECK] Found Self.{} constraint with {} bounds (NOT CHECKED YET)",
-                      associated_type_path.join("."), bounds.len());
-        }
-        else if let Constraint::TypeEquality { left, right, .. } = constraint {
-            debug_trace!("[WHERE_CLAUSE_CHECK] Found TypeEquality constraint: {} = {} (NOT CHECKED during member resolution - deferred to type inference)",
-                      left, right);
+            debug_trace!(
+                "[WHERE_CLAUSE_CHECK] Found Self.{} constraint with {} bounds (NOT CHECKED YET)",
+                associated_type_path.join("."),
+                bounds.len()
+            );
+        } else if let Constraint::TypeEquality { left, right, .. } = constraint {
+            debug_trace!(
+                "[WHERE_CLAUSE_CHECK] Found TypeEquality constraint: {} = {} (NOT CHECKED during member resolution - deferred to type inference)",
+                left,
+                right
+            );
         }
     }
 
@@ -3009,10 +3048,7 @@ fn find_methods_in_protocol_extensions(
     ctx: &BodyResolutionContext,
 ) -> Vec<SymbolId> {
     if method_name == "cycle" {
-        debug_trace!(
-            "[CYCLE_PROTO_EXT] lookup concrete_ty={}",
-            concrete_ty
-        );
+        debug_trace!("[CYCLE_PROTO_EXT] lookup concrete_ty={}", concrete_ty);
     }
     let applicable_extensions = get_applicable_protocol_extensions(concrete_ty, ctx);
 

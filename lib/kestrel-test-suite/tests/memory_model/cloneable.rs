@@ -601,7 +601,9 @@ mod generic_tests {
         .without_prelude()
         .expect(Compiles)
         .expect(Mir::compiles())
-        .expect(Mir::mir_function("Test.makeClone$item").calls_witness("Test.Cloneable", "clone#0"));
+        .expect(
+            Mir::mir_function("Test.makeClone$item").calls_witness("Test.Cloneable", "clone#0"),
+        );
     }
 
     #[test]

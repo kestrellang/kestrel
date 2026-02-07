@@ -534,8 +534,7 @@ impl CallableBehavior {
     /// Check if the given argument count is compatible with this callable's parameters,
     /// accounting for default parameter values.
     pub fn arity_matches(&self, argument_count: usize) -> bool {
-        argument_count >= self.required_parameter_count()
-            && argument_count <= self.parameters.len()
+        argument_count >= self.required_parameter_count() && argument_count <= self.parameters.len()
     }
 
     /// Get the return type

@@ -404,7 +404,9 @@ func main() -> std.num.Int64 {
 "#,
         )
         .with_stdlib()
-        .expect(StdoutEquals("hex:ff HEX:0xFF bin:0b11111111 pad:000000ff\n"));
+        .expect(StdoutEquals(
+            "hex:ff HEX:0xFF bin:0b11111111 pad:000000ff\n",
+        ));
     }
 
     /// Test mixed interpolation with strings, integers, and various format options.
