@@ -84,33 +84,15 @@ impl TypeOracle for SemanticModel {
                                 if let Some(callable) =
                                     child.metadata().get_behavior::<CallableBehavior>()
                                 {
-                                    // Substitute type parameters and Self (Self = the type parameter)
-                                    let raw_return_ty =
-                                        callable.return_type().apply_substitutions(proto_subs);
-                                    let returns_self =
-                                        matches!(raw_return_ty.kind(), TyKind::SelfType);
-                                    let return_ty = raw_return_ty.substitute_self(receiver_ty);
-                                    let parameters: Vec<Ty> = callable
-                                        .parameters()
-                                        .iter()
-                                        .map(|p| {
-                                            p.ty.apply_substitutions(proto_subs)
-                                                .substitute_self(receiver_ty)
-                                        })
-                                        .collect();
-                                    let where_constraints =
-                                        get_where_clause_from_symbol(child.as_ref())
-                                            .unwrap_or_default();
-                                    return Ok(MemberResolution {
-                                        ty: return_ty,
-                                        symbol_id: member_id,
-                                        substitutions: proto_subs.clone(),
-                                        parameters,
-                                        returns_self,
-                                        where_constraints,
-                                        required_parameter_count: callable
-                                            .required_parameter_count(),
-                                    });
+                                    return Ok(resolve_callable_member(
+                                        &callable,
+                                        child.as_ref(),
+                                        member_id,
+                                        proto_subs,
+                                        receiver_ty,
+                                        false,
+                                        AssocTypeResolution::None,
+                                    ));
                                 }
                             }
                         }
@@ -128,33 +110,15 @@ impl TypeOracle for SemanticModel {
                                     if let Some(callable) =
                                         child.metadata().get_behavior::<CallableBehavior>()
                                     {
-                                        // Substitute type parameters and Self (Self = the type parameter)
-                                        let raw_return_ty =
-                                            callable.return_type().apply_substitutions(proto_subs);
-                                        let returns_self =
-                                            matches!(raw_return_ty.kind(), TyKind::SelfType);
-                                        let return_ty = raw_return_ty.substitute_self(receiver_ty);
-                                        let parameters: Vec<Ty> = callable
-                                            .parameters()
-                                            .iter()
-                                            .map(|p| {
-                                                p.ty.apply_substitutions(proto_subs)
-                                                    .substitute_self(receiver_ty)
-                                            })
-                                            .collect();
-                                        let where_constraints =
-                                            get_where_clause_from_symbol(child.as_ref())
-                                                .unwrap_or_default();
-                                        return Ok(MemberResolution {
-                                            ty: return_ty,
-                                            symbol_id: member_id,
-                                            substitutions: proto_subs.clone(),
-                                            parameters,
-                                            returns_self,
-                                            where_constraints,
-                                            required_parameter_count: callable
-                                                .required_parameter_count(),
-                                        });
+                                        return Ok(resolve_callable_member(
+                                            &callable,
+                                            child.as_ref(),
+                                            member_id,
+                                            proto_subs,
+                                            receiver_ty,
+                                            false,
+                                            AssocTypeResolution::None,
+                                        ));
                                     }
                                 }
                             }
@@ -256,40 +220,15 @@ impl TypeOracle for SemanticModel {
                 && let Some(callable) = member_symbol.metadata().get_behavior::<CallableBehavior>()
                 && callable.is_static()
             {
-                // Instantiate method-level type parameters with fresh inference variables
-                let mut combined_subs = substitutions.clone();
-                if let Some(func_sym) = member_symbol.as_any().downcast_ref::<FunctionSymbol>() {
-                    let method_type_params = func_sym.type_parameters();
-                    for type_param in method_type_params {
-                        let param_id = type_param.metadata().id();
-                        let infer_ty = Ty::infer(callable.span().clone());
-                        combined_subs.insert(param_id, infer_ty);
-                    }
-                }
-
-                // Substitute both type parameters and Self with the receiver type
-                let raw_return_ty = callable.return_type().apply_substitutions(&combined_subs);
-                let returns_self = matches!(raw_return_ty.kind(), TyKind::SelfType);
-                let return_ty = raw_return_ty.substitute_self(receiver_ty);
-                let parameters: Vec<Ty> = callable
-                    .parameters()
-                    .iter()
-                    .map(|p| {
-                        p.ty.apply_substitutions(&combined_subs)
-                            .substitute_self(receiver_ty)
-                    })
-                    .collect();
-                let where_constraints =
-                    get_where_clause_from_symbol(member_symbol.as_ref()).unwrap_or_default();
-                return Ok(MemberResolution {
-                    ty: return_ty,
-                    symbol_id: member_id,
-                    substitutions: combined_subs,
-                    parameters,
-                    returns_self,
-                    where_constraints,
-                    required_parameter_count: callable.required_parameter_count(),
-                });
+                return Ok(resolve_callable_member(
+                    &callable,
+                    member_symbol.as_ref(),
+                    member_id,
+                    &substitutions,
+                    receiver_ty,
+                    true,
+                    AssocTypeResolution::None,
+                ));
             }
             // Static access on non-static member
             return Err(MemberError::NotFound {
@@ -305,13 +244,8 @@ impl TypeOracle for SemanticModel {
             if behavior.kind() == KestrelBehaviorKind::MemberAccess
                 && let Some(access) = behavior.as_ref().downcast_ref::<MemberAccessBehavior>()
             {
-                // Substitute type parameters and Self with the receiver type
-                let member_ty = access
-                    .member_type()
-                    .apply_substitutions(&substitutions)
-                    .substitute_self(receiver_ty);
-                // Resolve any qualified associated types (e.g., String.Output → String)
-                let member_ty = resolve_all_associated_types(self, &member_ty);
+                let member_ty =
+                    transform_ty(self, access.member_type(), &substitutions, receiver_ty);
                 return Ok(MemberResolution {
                     ty: member_ty,
                     symbol_id: member_id,
@@ -328,13 +262,8 @@ impl TypeOracle for SemanticModel {
                     .as_ref()
                     .downcast_ref::<ComputedMemberAccessBehavior>()
             {
-                // Substitute type parameters and Self with the receiver type
-                let member_ty = access
-                    .member_type()
-                    .apply_substitutions(&substitutions)
-                    .substitute_self(receiver_ty);
-                // Resolve any qualified associated types (e.g., String.Output → String)
-                let member_ty = resolve_all_associated_types(self, &member_ty);
+                let member_ty =
+                    transform_ty(self, access.member_type(), &substitutions, receiver_ty);
                 return Ok(MemberResolution {
                     ty: member_ty,
                     symbol_id: member_id,
@@ -351,48 +280,15 @@ impl TypeOracle for SemanticModel {
         if member_kind == KestrelSymbolKind::Function
             && let Some(callable) = member_symbol.metadata().get_behavior::<CallableBehavior>()
         {
-            // Create fresh inference variables for method type parameters.
-            // For deferred method calls, the binding phase didn't create these.
-            // For non-deferred calls, the solver will merge with call-site substitutions,
-            // overwriting these with the binding-time inference variables.
-            let mut combined_subs = substitutions.clone();
-            if let Some(func_sym) = member_symbol.as_any().downcast_ref::<FunctionSymbol>() {
-                let method_type_params = func_sym.type_parameters();
-                for type_param in method_type_params {
-                    let param_id = type_param.metadata().id();
-                    let infer_ty = Ty::infer(callable.span().clone());
-                    combined_subs.insert(param_id, infer_ty);
-                }
-            }
-
-            // For methods, return the return type and parameter types
-            // Substitute both type parameters and Self with the receiver type
-            let raw_return_ty = callable.return_type().apply_substitutions(&combined_subs);
-            let returns_self = matches!(raw_return_ty.kind(), TyKind::SelfType);
-            let return_ty = raw_return_ty.substitute_self(receiver_ty);
-            // Resolve any qualified associated types (e.g., String.Output → String)
-            let return_ty = resolve_all_associated_types(self, &return_ty);
-            let parameters: Vec<Ty> = callable
-                .parameters()
-                .iter()
-                .map(|p| {
-                    let param_ty =
-                        p.ty.apply_substitutions(&combined_subs)
-                            .substitute_self(receiver_ty);
-                    resolve_all_associated_types(self, &param_ty)
-                })
-                .collect();
-            let where_constraints =
-                get_where_clause_from_symbol(member_symbol.as_ref()).unwrap_or_default();
-            return Ok(MemberResolution {
-                ty: return_ty,
-                symbol_id: member_id,
-                substitutions: combined_subs,
-                parameters,
-                returns_self,
-                where_constraints,
-                required_parameter_count: callable.required_parameter_count(),
-            });
+            return Ok(resolve_callable_member(
+                &callable,
+                member_symbol.as_ref(),
+                member_id,
+                &substitutions,
+                receiver_ty,
+                true,
+                AssocTypeResolution::Shallow(self),
+            ));
         }
 
         // Member exists but is not accessible (e.g., type alias, nested type)
@@ -464,42 +360,15 @@ impl TypeOracle for SemanticModel {
                     continue;
                 }
 
-                let mut combined_subs = substitutions.clone();
-                if let Some(func_sym) = candidate.as_any().downcast_ref::<FunctionSymbol>() {
-                    for type_param in func_sym.type_parameters() {
-                        let param_id = type_param.metadata().id();
-                        combined_subs.insert(param_id, Ty::infer(callable.span().clone()));
-                    }
-                }
-
-                let raw_return_ty = callable.return_type().apply_substitutions(&combined_subs);
-                let returns_self = matches!(raw_return_ty.kind(), TyKind::SelfType);
-                let return_ty =
-                    resolve_all_associated_types(self, &raw_return_ty.substitute_self(receiver_ty));
-                let parameters: Vec<Ty> = callable
-                    .parameters()
-                    .iter()
-                    .map(|p| {
-                        resolve_all_associated_types(
-                            self,
-                            &p.ty
-                                .apply_substitutions(&combined_subs)
-                                .substitute_self(receiver_ty),
-                        )
-                    })
-                    .collect();
-                let where_constraints =
-                    get_where_clause_from_symbol(candidate.as_ref()).unwrap_or_default();
-
-                return Ok(MemberResolution {
-                    ty: return_ty,
-                    symbol_id: candidate.metadata().id(),
-                    substitutions: combined_subs,
-                    parameters,
-                    returns_self,
-                    where_constraints,
-                    required_parameter_count: callable.required_parameter_count(),
-                });
+                return Ok(resolve_callable_member(
+                    &callable,
+                    candidate.as_ref(),
+                    candidate.metadata().id(),
+                    &substitutions,
+                    receiver_ty,
+                    true,
+                    AssocTypeResolution::Shallow(self),
+                ));
             }
         }
 
@@ -1420,31 +1289,15 @@ fn resolve_member_with_context(
                                 {
                                     continue;
                                 }
-                                // Substitute type parameters and Self (Self = the receiver)
-                                let raw_return_ty =
-                                    callable.return_type().apply_substitutions(proto_subs);
-                                let returns_self = matches!(raw_return_ty.kind(), TyKind::SelfType);
-                                let return_ty = raw_return_ty.substitute_self(receiver_ty);
-                                let parameters: Vec<Ty> = callable
-                                    .parameters()
-                                    .iter()
-                                    .map(|p| {
-                                        p.ty.apply_substitutions(proto_subs)
-                                            .substitute_self(receiver_ty)
-                                    })
-                                    .collect();
-                                let where_constraints =
-                                    get_where_clause_from_symbol(child.as_ref())
-                                        .unwrap_or_default();
-                                return Ok(MemberResolution {
-                                    ty: return_ty,
-                                    symbol_id: member_id,
-                                    substitutions: proto_subs.clone(),
-                                    parameters,
-                                    returns_self,
-                                    where_constraints,
-                                    required_parameter_count: callable.required_parameter_count(),
-                                });
+                                return Ok(resolve_callable_member(
+                                    &callable,
+                                    child.as_ref(),
+                                    member_id,
+                                    proto_subs,
+                                    receiver_ty,
+                                    false,
+                                    AssocTypeResolution::None,
+                                ));
                             }
                         }
                     }
@@ -1467,33 +1320,15 @@ fn resolve_member_with_context(
                                     {
                                         continue;
                                     }
-                                    // Substitute type parameters and Self (Self = the receiver)
-                                    let raw_return_ty =
-                                        callable.return_type().apply_substitutions(proto_subs);
-                                    let returns_self =
-                                        matches!(raw_return_ty.kind(), TyKind::SelfType);
-                                    let return_ty = raw_return_ty.substitute_self(receiver_ty);
-                                    let parameters: Vec<Ty> = callable
-                                        .parameters()
-                                        .iter()
-                                        .map(|p| {
-                                            p.ty.apply_substitutions(proto_subs)
-                                                .substitute_self(receiver_ty)
-                                        })
-                                        .collect();
-                                    let where_constraints =
-                                        get_where_clause_from_symbol(child.as_ref())
-                                            .unwrap_or_default();
-                                    return Ok(MemberResolution {
-                                        ty: return_ty,
-                                        symbol_id: member_id,
-                                        substitutions: proto_subs.clone(),
-                                        parameters,
-                                        returns_self,
-                                        where_constraints,
-                                        required_parameter_count: callable
-                                            .required_parameter_count(),
-                                    });
+                                    return Ok(resolve_callable_member(
+                                        &callable,
+                                        child.as_ref(),
+                                        member_id,
+                                        proto_subs,
+                                        receiver_ty,
+                                        false,
+                                        AssocTypeResolution::None,
+                                    ));
                                 }
                             }
                         }
@@ -1551,31 +1386,15 @@ fn resolve_member_with_context(
                                 {
                                     continue;
                                 }
-                                // Substitute type parameters and Self (Self = the type parameter)
-                                let raw_return_ty =
-                                    callable.return_type().apply_substitutions(proto_subs);
-                                let returns_self = matches!(raw_return_ty.kind(), TyKind::SelfType);
-                                let return_ty = raw_return_ty.substitute_self(receiver_ty);
-                                let parameters: Vec<Ty> = callable
-                                    .parameters()
-                                    .iter()
-                                    .map(|p| {
-                                        p.ty.apply_substitutions(proto_subs)
-                                            .substitute_self(receiver_ty)
-                                    })
-                                    .collect();
-                                let where_constraints =
-                                    get_where_clause_from_symbol(child.as_ref())
-                                        .unwrap_or_default();
-                                return Ok(MemberResolution {
-                                    ty: return_ty,
-                                    symbol_id: member_id,
-                                    substitutions: proto_subs.clone(),
-                                    parameters,
-                                    returns_self,
-                                    where_constraints,
-                                    required_parameter_count: callable.required_parameter_count(),
-                                });
+                                return Ok(resolve_callable_member(
+                                    &callable,
+                                    child.as_ref(),
+                                    member_id,
+                                    proto_subs,
+                                    receiver_ty,
+                                    false,
+                                    AssocTypeResolution::None,
+                                ));
                             }
                         }
                     }
@@ -1598,33 +1417,15 @@ fn resolve_member_with_context(
                                     {
                                         continue;
                                     }
-                                    // Substitute type parameters and Self (Self = the type parameter)
-                                    let raw_return_ty =
-                                        callable.return_type().apply_substitutions(proto_subs);
-                                    let returns_self =
-                                        matches!(raw_return_ty.kind(), TyKind::SelfType);
-                                    let return_ty = raw_return_ty.substitute_self(receiver_ty);
-                                    let parameters: Vec<Ty> = callable
-                                        .parameters()
-                                        .iter()
-                                        .map(|p| {
-                                            p.ty.apply_substitutions(proto_subs)
-                                                .substitute_self(receiver_ty)
-                                        })
-                                        .collect();
-                                    let where_constraints =
-                                        get_where_clause_from_symbol(child.as_ref())
-                                            .unwrap_or_default();
-                                    return Ok(MemberResolution {
-                                        ty: return_ty,
-                                        symbol_id: member_id,
-                                        substitutions: proto_subs.clone(),
-                                        parameters,
-                                        returns_self,
-                                        where_constraints,
-                                        required_parameter_count: callable
-                                            .required_parameter_count(),
-                                    });
+                                    return Ok(resolve_callable_member(
+                                        &callable,
+                                        child.as_ref(),
+                                        member_id,
+                                        proto_subs,
+                                        receiver_ty,
+                                        false,
+                                        AssocTypeResolution::None,
+                                    ));
                                 }
                             }
                         }
@@ -1678,31 +1479,15 @@ fn resolve_member_with_context(
                                 {
                                     continue;
                                 }
-                                // Substitute type parameters and Self (Self = the associated type)
-                                let raw_return_ty =
-                                    callable.return_type().apply_substitutions(proto_subs);
-                                let returns_self = matches!(raw_return_ty.kind(), TyKind::SelfType);
-                                let return_ty = raw_return_ty.substitute_self(receiver_ty);
-                                let parameters: Vec<Ty> = callable
-                                    .parameters()
-                                    .iter()
-                                    .map(|p| {
-                                        p.ty.apply_substitutions(proto_subs)
-                                            .substitute_self(receiver_ty)
-                                    })
-                                    .collect();
-                                let where_constraints =
-                                    get_where_clause_from_symbol(child.as_ref())
-                                        .unwrap_or_default();
-                                return Ok(MemberResolution {
-                                    ty: return_ty,
-                                    symbol_id: member_id,
-                                    substitutions: proto_subs.clone(),
-                                    parameters,
-                                    returns_self,
-                                    where_constraints,
-                                    required_parameter_count: callable.required_parameter_count(),
-                                });
+                                return Ok(resolve_callable_member(
+                                    &callable,
+                                    child.as_ref(),
+                                    member_id,
+                                    proto_subs,
+                                    receiver_ty,
+                                    false,
+                                    AssocTypeResolution::None,
+                                ));
                             }
                         }
                     }
@@ -1725,33 +1510,15 @@ fn resolve_member_with_context(
                                     {
                                         continue;
                                     }
-                                    // Substitute type parameters and Self (Self = the associated type)
-                                    let raw_return_ty =
-                                        callable.return_type().apply_substitutions(proto_subs);
-                                    let returns_self =
-                                        matches!(raw_return_ty.kind(), TyKind::SelfType);
-                                    let return_ty = raw_return_ty.substitute_self(receiver_ty);
-                                    let parameters: Vec<Ty> = callable
-                                        .parameters()
-                                        .iter()
-                                        .map(|p| {
-                                            p.ty.apply_substitutions(proto_subs)
-                                                .substitute_self(receiver_ty)
-                                        })
-                                        .collect();
-                                    let where_constraints =
-                                        get_where_clause_from_symbol(child.as_ref())
-                                            .unwrap_or_default();
-                                    return Ok(MemberResolution {
-                                        ty: return_ty,
-                                        symbol_id: member_id,
-                                        substitutions: proto_subs.clone(),
-                                        parameters,
-                                        returns_self,
-                                        where_constraints,
-                                        required_parameter_count: callable
-                                            .required_parameter_count(),
-                                    });
+                                    return Ok(resolve_callable_member(
+                                        &callable,
+                                        child.as_ref(),
+                                        member_id,
+                                        proto_subs,
+                                        receiver_ty,
+                                        false,
+                                        AssocTypeResolution::None,
+                                    ));
                                 }
                             }
                         }
@@ -2462,50 +2229,15 @@ fn resolve_member_via_protocol_conformance(
                         continue;
                     }
 
-                    // Create fresh inference variables for method type parameters.
-                    // For deferred method calls, the binding phase didn't create these.
-                    // For non-deferred calls, the solver will merge with call-site substitutions.
-                    let mut combined_subs = proto_subs.clone();
-                    if let Some(func_sym) = child.as_any().downcast_ref::<FunctionSymbol>() {
-                        for type_param in func_sym.type_parameters() {
-                            let param_id = type_param.metadata().id();
-                            let infer_ty = Ty::infer(callable.span().clone());
-                            combined_subs.insert(param_id, infer_ty);
-                        }
-                    }
-
-                    let raw_return_ty = callable.return_type().apply_substitutions(&combined_subs);
-                    let returns_self = matches!(raw_return_ty.kind(), TyKind::SelfType);
-                    let return_ty_before_resolve = raw_return_ty.substitute_self(receiver_ty);
-                    let mut visited = std::collections::HashSet::new();
-                    let return_ty = deeply_resolve_associated_types(
-                        model,
-                        &return_ty_before_resolve,
-                        &mut visited,
-                    );
-
-                    let parameters: Vec<Ty> = callable
-                        .parameters()
-                        .iter()
-                        .map(|p| {
-                            let after_subs = p.ty.apply_substitutions(&combined_subs);
-                            let after_self = after_subs.substitute_self(receiver_ty);
-                            let mut visited = std::collections::HashSet::new();
-                            deeply_resolve_associated_types(model, &after_self, &mut visited)
-                        })
-                        .collect();
-
-                    let where_constraints =
-                        get_where_clause_from_symbol(child.as_ref()).unwrap_or_default();
-                    return Some(MemberResolution {
-                        ty: return_ty,
-                        symbol_id: member_id,
-                        substitutions: combined_subs,
-                        parameters,
-                        returns_self,
-                        where_constraints,
-                        required_parameter_count: callable.required_parameter_count(),
-                    });
+                    return Some(resolve_callable_member(
+                        &callable,
+                        child.as_ref(),
+                        member_id,
+                        proto_subs,
+                        receiver_ty,
+                        true,
+                        AssocTypeResolution::Deep(model),
+                    ));
                 }
             }
         }
@@ -2629,51 +2361,15 @@ fn resolve_member_via_protocol_conformance(
                             }
                         }
 
-                        // Create fresh inference variables for method type parameters.
-                        // For deferred method calls, the binding phase didn't create these.
-                        // For non-deferred calls, the solver will merge with call-site substitutions.
-                        let mut combined_subs = effective_subs;
-                        if let Some(func_sym) = child.as_any().downcast_ref::<FunctionSymbol>() {
-                            for type_param in func_sym.type_parameters() {
-                                let param_id = type_param.metadata().id();
-                                let infer_ty = Ty::infer(callable.span().clone());
-                                combined_subs.insert(param_id, infer_ty);
-                            }
-                        }
-
-                        let raw_return_ty =
-                            callable.return_type().apply_substitutions(&combined_subs);
-                        let returns_self = matches!(raw_return_ty.kind(), TyKind::SelfType);
-                        let return_ty_before_resolve = raw_return_ty.substitute_self(receiver_ty);
-                        let mut visited = std::collections::HashSet::new();
-                        let return_ty = deeply_resolve_associated_types(
-                            model,
-                            &return_ty_before_resolve,
-                            &mut visited,
-                        );
-
-                        let parameters: Vec<Ty> = callable
-                            .parameters()
-                            .iter()
-                            .map(|p| {
-                                let after_subs = p.ty.apply_substitutions(&combined_subs);
-                                let after_self = after_subs.substitute_self(receiver_ty);
-                                let mut visited = std::collections::HashSet::new();
-                                deeply_resolve_associated_types(model, &after_self, &mut visited)
-                            })
-                            .collect();
-
-                        let where_constraints =
-                            get_where_clause_from_symbol(child.as_ref()).unwrap_or_default();
-                        return Some(MemberResolution {
-                            ty: return_ty,
-                            symbol_id: member_id,
-                            substitutions: combined_subs,
-                            parameters,
-                            returns_self,
-                            where_constraints,
-                            required_parameter_count: callable.required_parameter_count(),
-                        });
+                        return Some(resolve_callable_member(
+                            &callable,
+                            child.as_ref(),
+                            member_id,
+                            &effective_subs,
+                            receiver_ty,
+                            true,
+                            AssocTypeResolution::Deep(model),
+                        ));
                     }
                 }
             }
@@ -3345,13 +3041,13 @@ fn get_self_type_bounds_with_context(
 ///
 /// This recursively walks the type structure, resolving any `AssociatedType` variants
 /// that have a container (qualified associated types like `T.Item`).
-pub fn resolve_all_associated_types(oracle: &impl TypeOracle, ty: &Ty) -> Ty {
+pub fn resolve_all_associated_types(oracle: &(impl TypeOracle + ?Sized), ty: &Ty) -> Ty {
     resolve_all_associated_types_impl(oracle, ty, &mut std::collections::HashSet::new())
 }
 
 /// Internal helper with cycle detection via visited TyIds.
 fn resolve_all_associated_types_impl(
-    oracle: &impl TypeOracle,
+    oracle: &(impl TypeOracle + ?Sized),
     ty: &Ty,
     visited: &mut std::collections::HashSet<kestrel_semantic_tree::ty::TyId>,
 ) -> Ty {
@@ -3498,6 +3194,96 @@ fn resolve_all_associated_types_impl(
     // from a different path (this is not truly cycle detection, but depth limiting)
     visited.remove(&ty_id);
     result
+}
+
+/// Controls how associated types are resolved after substitution in `resolve_callable_member`.
+enum AssocTypeResolution<'a> {
+    /// No associated type resolution.
+    None,
+    /// Shallow resolution via `resolve_all_associated_types`.
+    Shallow(&'a dyn TypeOracle),
+    /// Deep resolution via `deeply_resolve_associated_types`.
+    Deep(&'a dyn TypeOracle),
+}
+
+/// Build a `MemberResolution` from a callable symbol.
+///
+/// This extracts the common pattern of:
+/// 1. Optionally inserting fresh inference variables for method type parameters
+/// 2. Applying substitutions to return type and parameters
+/// 3. Substituting `Self` with the receiver type
+/// 4. Optionally resolving associated types
+/// 5. Extracting where constraints
+fn resolve_callable_member(
+    callable: &CallableBehavior,
+    member_symbol: &dyn Symbol<KestrelLanguage>,
+    member_id: SymbolId,
+    substitutions: &Substitutions,
+    receiver_ty: &Ty,
+    create_fresh_infer_vars: bool,
+    resolution: AssocTypeResolution<'_>,
+) -> MemberResolution {
+    let mut subs = substitutions.clone();
+    if create_fresh_infer_vars {
+        if let Some(func_sym) = member_symbol.as_any().downcast_ref::<FunctionSymbol>() {
+            for type_param in func_sym.type_parameters() {
+                let param_id = type_param.metadata().id();
+                subs.insert(param_id, Ty::infer(callable.span().clone()));
+            }
+        }
+    }
+
+    let raw_return_ty = callable.return_type().apply_substitutions(&subs);
+    let returns_self = matches!(raw_return_ty.kind(), TyKind::SelfType);
+    let return_ty = raw_return_ty.substitute_self(receiver_ty);
+
+    let resolve_ty = |ty: Ty| -> Ty {
+        match &resolution {
+            AssocTypeResolution::None => ty,
+            AssocTypeResolution::Shallow(oracle) => resolve_all_associated_types(*oracle, &ty),
+            AssocTypeResolution::Deep(oracle) => {
+                let mut visited = HashSet::new();
+                deeply_resolve_associated_types(*oracle, &ty, &mut visited)
+            },
+        }
+    };
+
+    let return_ty = resolve_ty(return_ty);
+    let parameters: Vec<Ty> = callable
+        .parameters()
+        .iter()
+        .map(|p| {
+            let ty = p.ty.apply_substitutions(&subs).substitute_self(receiver_ty);
+            resolve_ty(ty)
+        })
+        .collect();
+    let where_constraints = get_where_clause_from_symbol(member_symbol).unwrap_or_default();
+
+    MemberResolution {
+        ty: return_ty,
+        symbol_id: member_id,
+        substitutions: subs,
+        parameters,
+        returns_self,
+        where_constraints,
+        required_parameter_count: callable.required_parameter_count(),
+    }
+}
+
+/// Apply substitutions and Self-substitution to a type, then resolve associated types.
+///
+/// Used for field/computed-property member resolution and other sites that
+/// need the 3-step transform: apply_substitutions → substitute_self → resolve_all_associated_types.
+fn transform_ty(
+    oracle: &dyn TypeOracle,
+    ty: &Ty,
+    substitutions: &Substitutions,
+    self_ty: &Ty,
+) -> Ty {
+    let ty = ty
+        .apply_substitutions(substitutions)
+        .substitute_self(self_ty);
+    resolve_all_associated_types(oracle, &ty)
 }
 
 /// Get the where clause from a symbol that can have one.
