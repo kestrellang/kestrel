@@ -113,8 +113,7 @@ impl<'a> CodegenContext<'a> {
             .collect();
 
         for (_static_id, name_id, ty, file_constant_data) in statics {
-            let name = self.mir.name(name_id);
-            let mangled_name = format!("{}", name);
+            let mangled_name = mangle_name(self.mir, name_id, &[]);
 
             // Check if this is a file constant
             if let Some(fc_data) = file_constant_data {

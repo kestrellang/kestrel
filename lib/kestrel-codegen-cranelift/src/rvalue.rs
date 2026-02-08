@@ -1659,8 +1659,7 @@ fn compile_ref(
     match &place.kind {
         PlaceKind::Global(name_id) => {
             // Global/static variable - return its address
-            let global_name = ctx.mir.name(*name_id);
-            let mangled_name = format!("{}", global_name);
+            let mangled_name = kestrel_codegen::mangle_name(ctx.mir, *name_id, &[]);
 
             // Look up the global symbol
             let global_ref = ctx

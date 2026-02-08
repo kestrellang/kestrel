@@ -67,8 +67,8 @@ pub use id::{
 };
 pub use item::{
     AssociatedTypeDef, CallingConvention, EnumCaseDef, EnumDef, ExternInfo, FieldDef,
-    FileConstantData, FunctionDef, ParamDef, ProtocolDef, ProtocolMethodDef, StaticDef, StructDef,
-    WhereClause, WhereConstraint, WitnessDef,
+    FileConstantData, FunctionDef, ParamDef, ProtocolDef, ProtocolMethodDef, ReceiverConvention,
+    StaticDef, StructDef, WhereClause, WhereConstraint, WitnessDef,
 };
 pub use metadata::{Metadata, Origin, Prior};
 pub use pass::{FunctionPass, FunctionPassAdapter, MirPass, PassManager, PassResult};

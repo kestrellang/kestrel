@@ -6,6 +6,20 @@ use crate::metadata::{Metadata, Prior};
 use std::collections::HashMap;
 use std::fmt;
 
+/// Receiver convention for methods.
+///
+/// Encodes how `self` is passed to a method, used by the mangler
+/// to emit `r`/`m`/`c` markers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ReceiverConvention {
+    /// `Ref[Self]` — borrowing receiver
+    Ref,
+    /// `RefMut[Self]` — mutating receiver
+    RefMut,
+    /// `Self` by value — consuming receiver
+    Consuming,
+}
+
 /// Calling conventions for extern functions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CallingConvention {
@@ -68,6 +82,8 @@ pub struct FunctionDef {
     /// Extern function info (if this is an @extern function).
     /// When Some, the function has no body and will be linked externally.
     pub extern_info: Option<ExternInfo>,
+    /// Receiver convention for methods (None for free functions, initializers, statics).
+    pub receiver_convention: Option<ReceiverConvention>,
 }
 
 impl FunctionDef {
@@ -86,6 +102,7 @@ impl FunctionDef {
             blocks: Vec::new(),
             entry_block: None,
             extern_info: None,
+            receiver_convention: None,
         }
     }
 

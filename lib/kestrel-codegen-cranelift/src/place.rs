@@ -43,8 +43,7 @@ pub fn compile_place_read(
 
         PlaceKind::Global(name_id) => {
             // Global/static variable access
-            let global_name = ctx.mir.name(*name_id);
-            let mangled_name = format!("{}", global_name);
+            let mangled_name = kestrel_codegen::mangle_name(ctx.mir, *name_id, &[]);
 
             // Look up the global symbol
             let global_ref = ctx
@@ -741,8 +740,7 @@ pub fn compile_place_write(
 
         PlaceKind::Global(name_id) => {
             // Global/static variable write
-            let global_name = ctx.mir.name(*name_id);
-            let mangled_name = format!("{}", global_name);
+            let mangled_name = kestrel_codegen::mangle_name(ctx.mir, *name_id, &[]);
 
             // Look up the global symbol
             let global_ref = ctx
@@ -927,8 +925,7 @@ pub fn compile_place_addr(
 
         PlaceKind::Global(name_id) => {
             // Global/static variable - return the address of the global
-            let global_name = ctx.mir.name(*name_id);
-            let mangled_name = format!("{}", global_name);
+            let mangled_name = kestrel_codegen::mangle_name(ctx.mir, *name_id, &[]);
 
             // Look up the global symbol
             let global_ref = ctx

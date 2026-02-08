@@ -14,6 +14,9 @@ pub struct ParamDef {
     pub local: Id<Local>,
     /// Parameter type.
     pub ty: Id<Ty>,
+    /// External label for this parameter (used in mangling).
+    /// `None` means unlabeled (bare type in signature), `Some(label)` means labeled.
+    pub external_label: Option<String>,
 }
 
 impl ParamDef {
@@ -24,6 +27,23 @@ impl ParamDef {
             name: name.into(),
             local,
             ty,
+            external_label: None,
+        }
+    }
+
+    pub fn with_label(
+        name: impl Into<String>,
+        local: Id<Local>,
+        ty: Id<Ty>,
+        external_label: Option<String>,
+    ) -> Self {
+        Self {
+            meta: Metadata::new(),
+            priors: Vec::new(),
+            name: name.into(),
+            local,
+            ty,
+            external_label,
         }
     }
 }

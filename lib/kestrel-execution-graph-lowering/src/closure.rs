@@ -116,21 +116,17 @@ fn generate_closure_names(
     let func_name = ctx.mir.function(current_func).name;
     let func_name_data = ctx.mir.name(func_name);
 
-    // Build closure name: func_name.closure.idx
+    // Build closure name: func_name + "closure" + idx as separate segments
     let mut closure_segments = func_name_data.segments.clone();
-    // Modify last segment to add .closure.idx
-    if let Some(last) = closure_segments.last_mut() {
-        *last = format!("{}.closure.{}", last, idx);
-    }
+    closure_segments.push("closure".to_string());
+    closure_segments.push(idx.to_string());
     let closure_name = ctx.mir.intern_name(QualifiedNameData {
         segments: closure_segments.clone(),
     });
 
-    // Build env struct name: closure_name.env
+    // Build env struct name: closure_name + "env" as separate segment
     let mut env_segments = closure_segments;
-    if let Some(last) = env_segments.last_mut() {
-        *last = format!("{}.env", last);
-    }
+    env_segments.push("env".to_string());
     let env_name = ctx.mir.intern_name(QualifiedNameData {
         segments: env_segments,
     });

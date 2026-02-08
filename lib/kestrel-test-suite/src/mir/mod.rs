@@ -83,41 +83,19 @@ impl Mir {
     /// Expect a closure function exists in the MIR.
     ///
     /// Auto-expands to the correct closure naming format.
-    /// For `parent = "Module.func"` and `index = 0`, produces `Module."func.closure.0"`.
+    /// Closure names use separate segments: parent + "closure" + index.
+    /// For `parent = "Module.func"` and `index = 0`, produces `Module.func.closure."0"`.
     pub fn mir_closure(parent: &str, index: usize) -> MirFunction {
-        // Split parent into module and function parts
-        // e.g., "Test.test" -> ("Test", "test")
-        // e.g., "Main.Foo.bar" -> ("Main.Foo", "bar")
-        if let Some(dot_pos) = parent.rfind('.') {
-            let module = &parent[..dot_pos];
-            let func = &parent[dot_pos + 1..];
-            MirFunction::new(&format!(
-                "{}.\"{}\"",
-                module,
-                format_args!("{func}.closure.{index}")
-            ))
-        } else {
-            // No dot - just use parent as-is
-            MirFunction::new(&format!("\"{}.closure.{}\"", parent, index))
-        }
+        // The index is a numeric string, which gets quoted in Display format
+        MirFunction::new(&format!("{}.closure.\"{}\"", parent, index))
     }
 
     /// Expect a closure environment struct exists in the MIR.
     ///
     /// Auto-expands to the correct closure env naming format.
-    /// For `parent = "Module.func"` and `index = 0`, produces `Module."func.closure.0.env"`.
+    /// For `parent = "Module.func"` and `index = 0`, produces `Module.func.closure."0".env`.
     pub fn mir_closure_env(parent: &str, index: usize) -> MirStruct {
-        if let Some(dot_pos) = parent.rfind('.') {
-            let module = &parent[..dot_pos];
-            let func = &parent[dot_pos + 1..];
-            MirStruct::new(&format!(
-                "{}.\"{}\"",
-                module,
-                format_args!("{func}.closure.{index}.env")
-            ))
-        } else {
-            MirStruct::new(&format!("\"{}.closure.{}.env\"", parent, index))
-        }
+        MirStruct::new(&format!("{}.closure.\"{}\".env", parent, index))
     }
 
     /// Expect a witness table exists in the MIR.

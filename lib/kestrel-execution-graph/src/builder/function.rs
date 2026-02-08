@@ -39,12 +39,22 @@ impl<'ctx> FunctionBuilder<'ctx> {
 
     /// Add a parameter to this function.
     pub fn param(&mut self, name: impl Into<String>, ty: Id<Ty>) -> Id<Local> {
+        self.param_with_label(name, ty, None)
+    }
+
+    /// Add a parameter with an optional external label to this function.
+    pub fn param_with_label(
+        &mut self,
+        name: impl Into<String>,
+        ty: Id<Ty>,
+        external_label: Option<String>,
+    ) -> Id<Local> {
         let name = name.into();
 
         let local = LocalDef::new(name.clone(), ty);
         let local_id = self.ctx.locals.alloc(local);
 
-        let param = ParamDef::new(name.clone(), local_id, ty);
+        let param = ParamDef::with_label(name.clone(), local_id, ty, external_label);
         let param_id = self.ctx.params.alloc(param);
 
         let def = self.def_mut();

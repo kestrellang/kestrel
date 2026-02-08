@@ -4,6 +4,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use kestrel_execution_graph::CallingConvention as MirCallingConvention;
+use kestrel_execution_graph::ReceiverConvention;
 use kestrel_execution_graph::TypeParamOwner;
 use kestrel_semantic_tree::behavior::callable::{
     CallableBehavior, ParameterAccessMode, ReceiverKind,
@@ -105,6 +106,14 @@ pub fn lower_function(ctx: &mut LoweringContext, func_symbol: &Arc<FunctionSymbo
             compute_self_param_type(ctx, receiver, func_symbol, &parent_type_params)
     {
         ctx.mir.function_builder(func_id).param("self", self_ty);
+
+        // Set receiver convention
+        ctx.mir.function_mut(func_id).receiver_convention = match receiver {
+            ReceiverKind::Borrowing => Some(ReceiverConvention::Ref),
+            ReceiverKind::Mutating => Some(ReceiverConvention::RefMut),
+            ReceiverKind::Consuming => Some(ReceiverConvention::Consuming),
+            ReceiverKind::Initializing => None,
+        };
     }
 
     // Add other parameters
@@ -123,7 +132,10 @@ pub fn lower_function(ctx: &mut LoweringContext, func_symbol: &Arc<FunctionSymbo
                 ParameterAccessMode::Mutating => ctx.mir.ty_ref_mut(base_mir_ty),
                 ParameterAccessMode::Consuming => base_mir_ty,
             };
-            ctx.mir.function_builder(func_id).param(param_name, mir_ty);
+            let external_label = param.external_label().map(|s| s.to_string());
+            ctx.mir
+                .function_builder(func_id)
+                .param_with_label(param_name, mir_ty, external_label);
         }
     }
 
@@ -378,7 +390,10 @@ pub fn lower_initializer(ctx: &mut LoweringContext, init_symbol: &Arc<Initialize
                 ParameterAccessMode::Mutating => ctx.mir.ty_ref_mut(base_mir_ty),
                 ParameterAccessMode::Consuming => base_mir_ty,
             };
-            ctx.mir.function_builder(func_id).param(param_name, mir_ty);
+            let external_label = param.external_label().map(|s| s.to_string());
+            ctx.mir
+                .function_builder(func_id)
+                .param_with_label(param_name, mir_ty, external_label);
         }
     }
 
@@ -499,6 +514,8 @@ pub fn lower_deinit(ctx: &mut LoweringContext, deinit_symbol: &Arc<DeinitSymbol>
     // Add self parameter
     if let Some(self_ty) = self_param_ty {
         ctx.mir.function_builder(func_id).param("self", self_ty);
+        // Deinit consumes self
+        ctx.mir.function_mut(func_id).receiver_convention = Some(ReceiverConvention::Consuming);
     }
 
     // Deinit has no other parameters
@@ -622,6 +639,14 @@ pub fn lower_getter(ctx: &mut LoweringContext, getter_symbol: &Arc<GetterSymbol>
             compute_getter_self_param_type(ctx, receiver, getter_symbol, &parent_type_params)
     {
         ctx.mir.function_builder(func_id).param("self", self_ty);
+
+        // Set receiver convention
+        ctx.mir.function_mut(func_id).receiver_convention = match receiver {
+            ReceiverKind::Borrowing => Some(ReceiverConvention::Ref),
+            ReceiverKind::Mutating => Some(ReceiverConvention::RefMut),
+            ReceiverKind::Consuming => Some(ReceiverConvention::Consuming),
+            ReceiverKind::Initializing => None,
+        };
     }
 
     // Add additional parameters (for subscript getters which have index/key parameters)
@@ -633,7 +658,10 @@ pub fn lower_getter(ctx: &mut LoweringContext, getter_symbol: &Arc<GetterSymbol>
             ParameterAccessMode::Mutating => ctx.mir.ty_ref_mut(base_mir_ty),
             ParameterAccessMode::Consuming => base_mir_ty,
         };
-        ctx.mir.function_builder(func_id).param(param_name, mir_ty);
+        let external_label = param.external_label().map(|s| s.to_string());
+        ctx.mir
+            .function_builder(func_id)
+            .param_with_label(param_name, mir_ty, external_label);
     }
 
     // Enter the function context
@@ -756,6 +784,14 @@ pub fn lower_setter(ctx: &mut LoweringContext, setter_symbol: &Arc<SetterSymbol>
             compute_setter_self_param_type(ctx, receiver, setter_symbol, &parent_type_params)
     {
         ctx.mir.function_builder(func_id).param("self", self_ty);
+
+        // Set receiver convention
+        ctx.mir.function_mut(func_id).receiver_convention = match receiver {
+            ReceiverKind::Borrowing => Some(ReceiverConvention::Ref),
+            ReceiverKind::Mutating => Some(ReceiverConvention::RefMut),
+            ReceiverKind::Consuming => Some(ReceiverConvention::Consuming),
+            ReceiverKind::Initializing => None,
+        };
     }
 
     // Add newValue parameter
@@ -767,7 +803,10 @@ pub fn lower_setter(ctx: &mut LoweringContext, setter_symbol: &Arc<SetterSymbol>
             ParameterAccessMode::Mutating => ctx.mir.ty_ref_mut(base_mir_ty),
             ParameterAccessMode::Consuming => base_mir_ty,
         };
-        ctx.mir.function_builder(func_id).param(param_name, mir_ty);
+        let external_label = param.external_label().map(|s| s.to_string());
+        ctx.mir
+            .function_builder(func_id)
+            .param_with_label(param_name, mir_ty, external_label);
     }
 
     // Enter the function context
