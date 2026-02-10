@@ -399,6 +399,7 @@ fn try_solve(
             member,
             is_static,
             arguments,
+            labels,
             result,
             expr_id,
             substitutions,
@@ -409,6 +410,7 @@ fn try_solve(
             member,
             *is_static,
             arguments,
+            labels,
             *result,
             *expr_id,
             substitutions,
@@ -1714,6 +1716,7 @@ fn resolve_member(
     member: &str,
     is_static: bool,
     arguments: &[TyId],
+    labels: &[Option<String>],
     result: TyId,
     expr_id: kestrel_semantic_tree::expr::ExprId,
     call_site_substitutions: &kestrel_semantic_tree::ty::Substitutions,
@@ -1760,9 +1763,21 @@ fn resolve_member(
     // Try to resolve the member via the oracle
     match ctx
         .oracle()
-        .resolve_member_with_arity(&receiver_ty, member, is_static, arguments.len())
+        .resolve_member_with_labels(&receiver_ty, member, is_static, labels)
     {
         Ok(resolution) => {
+            // Post-resolution visibility check: ensure the resolved member is accessible
+            // from the current function context.
+            if let Some(ctx_id) = ctx.oracle().context_symbol_id()
+                && !ctx.oracle().is_visible(resolution.symbol_id, ctx_id)
+            {
+                return Err(InferenceError::member_not_found(
+                    receiver_ty.clone(),
+                    member.to_string(),
+                    span.clone(),
+                ));
+            }
+
             // Merge substitutions: call-site substitutions take precedence for method type params
             // - resolution.substitutions has protocol-level subs (Self, Item, etc.)
             // - call_site_substitutions has method type param inference vars (U = _)

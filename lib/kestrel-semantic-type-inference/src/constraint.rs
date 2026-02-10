@@ -88,6 +88,10 @@ pub enum Constraint {
         /// Argument type IDs for method calls (empty for field access)
         /// Used to create constraints between argument types and parameter types
         arguments: Vec<TyId>,
+        /// Argument labels for method calls (empty for field access).
+        /// Used for overload resolution when multiple methods share the same name.
+        /// Each entry is None for unlabeled arguments, Some(label) for labeled ones.
+        labels: Vec<Option<String>>,
         /// The result type of the member access
         result: TyId,
         /// The expression ID for tracking the value resolution
@@ -207,6 +211,7 @@ impl Constraint {
         member: String,
         is_static: bool,
         arguments: Vec<TyId>,
+        labels: Vec<Option<String>>,
         result: TyId,
         expr_id: ExprId,
         substitutions: kestrel_semantic_tree::ty::Substitutions,
@@ -217,6 +222,7 @@ impl Constraint {
             member,
             is_static,
             arguments,
+            labels,
             result,
             expr_id,
             substitutions,

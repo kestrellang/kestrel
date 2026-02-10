@@ -540,6 +540,7 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
                     field.clone(),
                     false,  // instance access
                     vec![], // no arguments for field access
+                    vec![], // no labels for field access
                     expr.ty.id(),
                     expr.id,
                     Substitutions::new(), // no substitutions for field access
@@ -655,13 +656,16 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
                     {
                         let arg_ty_ids: Vec<_> =
                             arguments.iter().map(|a| a.value.ty.id()).collect();
+                        let arg_labels: Vec<_> =
+                            arguments.iter().map(|a| a.label.clone()).collect();
                         ctx.register_type(&receiver.ty);
                         ctx.register_type(&expr.ty);
                         ctx.member_access(
                             receiver.ty.id(),
                             method_name.clone(),
-                            false,      // instance method call
-                            arg_ty_ids, // argument types for parameter constraint generation
+                            false,       // instance method call
+                            arg_ty_ids,  // argument types for parameter constraint generation
+                            arg_labels,  // argument labels for overload resolution
                             expr.ty.id(),
                             expr.id,
                             substitutions.clone(), // pass call-site substitutions with inference vars
@@ -708,9 +712,10 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
             for arg in arguments {
                 generate_expression_constraints(ctx, &arg.value);
             }
-            // Collect argument type IDs for constraint generation
+            // Collect argument type IDs and labels for constraint generation
             // When the method is resolved, these will be constrained to match parameter types
             let arg_ty_ids: Vec<_> = arguments.iter().map(|a| a.value.ty.id()).collect();
+            let arg_labels: Vec<_> = arguments.iter().map(|a| a.label.clone()).collect();
 
             // Generate a member access constraint to resolve the method once receiver type is known
             ctx.register_type(&receiver.ty);
@@ -720,6 +725,7 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
                 method_name.clone(),
                 false,      // instance method call
                 arg_ty_ids, // argument types for parameter constraint generation
+                arg_labels, // argument labels for overload resolution
                 expr.ty.id(),
                 expr.id,
                 Substitutions::new(), // no call-site substitutions for deferred method call
@@ -749,8 +755,9 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
                 generate_expression_constraints(ctx, &arg.value);
             }
 
-            // Collect argument type IDs for constraint generation
+            // Collect argument type IDs and labels for constraint generation
             let arg_ty_ids: Vec<_> = arguments.iter().map(|a| a.value.ty.id()).collect();
+            let arg_labels: Vec<_> = arguments.iter().map(|a| a.label.clone()).collect();
 
             // Register target type and result type
             ctx.register_type(target_ty);
@@ -772,6 +779,7 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
                 method_name.clone(),
                 true, // is_static = true for static method call
                 arg_ty_ids,
+                arg_labels, // argument labels for overload resolution
                 expr.ty.id(),
                 expr.id,
                 Substitutions::new(), // no call-site substitutions for deferred static call

@@ -104,6 +104,22 @@ pub trait TypeOracle {
         }
     }
 
+    /// Look up a member on a type with expected argument labels for overload resolution.
+    ///
+    /// Labels include arity information (the length of the labels slice is the argument count).
+    /// Each entry is None for unlabeled arguments, Some(label) for labeled ones.
+    ///
+    /// Default implementation delegates to `resolve_member_with_arity`.
+    fn resolve_member_with_labels(
+        &self,
+        receiver_ty: &Ty,
+        member: &str,
+        is_static: bool,
+        labels: &[Option<String>],
+    ) -> Result<MemberResolution, MemberError> {
+        self.resolve_member_with_arity(receiver_ty, member, is_static, labels.len())
+    }
+
     /// Check if a type conforms to a protocol.
     ///
     /// # Arguments
@@ -274,6 +290,42 @@ pub trait TypeOracle {
         // Default implementation returns the type unchanged.
         // Implementors with access to where clause constraints can override.
         ty.clone()
+    }
+
+    /// Get the context symbol ID (the function being analyzed), if available.
+    ///
+    /// Used for visibility checking and context-aware resolution.
+    /// Returns None when no function context is available.
+    fn context_symbol_id(&self) -> Option<SymbolId> {
+        None
+    }
+
+    /// Look up a member with full type-directed overload resolution.
+    ///
+    /// When multiple overloads match by name, arity, and labels, uses argument types
+    /// to score each candidate and pick the best match.
+    ///
+    /// Default implementation delegates to `resolve_member_with_labels`.
+    fn resolve_member_full(
+        &self,
+        receiver_ty: &Ty,
+        member: &str,
+        is_static: bool,
+        labels: &[Option<String>],
+        argument_types: &[Option<Ty>],
+    ) -> Result<MemberResolution, MemberError> {
+        let _ = argument_types; // default: ignore argument types
+        self.resolve_member_with_labels(receiver_ty, member, is_static, labels)
+    }
+
+    /// Check if a target symbol is visible from the given context.
+    ///
+    /// Used as a post-resolution check to filter out private/internal members
+    /// that were resolved but shouldn't be accessible from the current context.
+    ///
+    /// Returns true by default (no visibility checking without a model).
+    fn is_visible(&self, _target: SymbolId, _from_context: SymbolId) -> bool {
+        true
     }
 
     /// Get the where clause for a function symbol.

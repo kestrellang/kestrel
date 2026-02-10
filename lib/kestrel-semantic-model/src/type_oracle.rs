@@ -171,24 +171,34 @@ impl TypeOracle for SemanticModel {
                 // Extensions with unsatisfied where clauses (e.g., `where T: Cloneable`)
                 // must be excluded so that calls like `iter.cycle()` on non-Cloneable
                 // receivers fail at semantic checking instead of monomorphization.
-                let extension_member = extensions
-                    .iter()
-                    .filter(|ext| {
-                        // Check if extension's where-clause constraints are satisfied
-                        if let Some(target_beh) =
-                            ext.metadata().get_behavior::<ExtensionTargetBehavior>()
+                //
+                // When multiple extensions provide the same member, prefer the most specific
+                // extension (the one with the most concrete type arguments).
+                // E.g., `extend Array[Int]` beats `extend Array[T]`.
+                let mut extension_matches: Vec<(usize, Arc<dyn Symbol<KestrelLanguage>>)> = Vec::new();
+                for ext in extensions.iter() {
+                    // Check if extension's where-clause constraints are satisfied
+                    if let Some(target_beh) =
+                        ext.metadata().get_behavior::<ExtensionTargetBehavior>()
+                    {
+                        let where_clause = target_beh.where_clause();
+                        if !where_clause.constraints().is_empty()
+                            && !check_where_clause_satisfied_with_self(self, where_clause, &substitutions, Some(receiver_ty))
                         {
-                            let where_clause = target_beh.where_clause();
-                            if where_clause.constraints().is_empty() {
-                                return true;
-                            }
-                            check_where_clause_satisfied(self, where_clause, &substitutions)
-                        } else {
-                            true
+                            continue;
                         }
-                    })
-                    .flat_map(|ext| ext.metadata().children())
-                    .find(|child| child.metadata().name().value == member);
+                    }
+
+                    let specificity = extension_specificity(ext);
+                    for child in ext.metadata().children() {
+                        if child.metadata().name().value == member {
+                            extension_matches.push((specificity, child));
+                        }
+                    }
+                }
+                // Sort by specificity descending (most specific first)
+                extension_matches.sort_by(|a, b| b.0.cmp(&a.0));
+                let extension_member = extension_matches.into_iter().next().map(|(_, sym)| sym);
 
                 match extension_member {
                     Some(m) => m,
@@ -334,24 +344,33 @@ impl TypeOracle for SemanticModel {
             },
         };
 
-        let mut candidates: Vec<Arc<dyn Symbol<KestrelLanguage>>> = container
+        // Collect candidates with specificity scores.
+        // Direct members get max specificity (usize::MAX), extension members
+        // get a score based on how many concrete type args the extension has.
+        let mut candidates: Vec<(usize, Arc<dyn Symbol<KestrelLanguage>>)> = container
             .metadata()
             .children()
             .into_iter()
             .filter(|c| c.metadata().name().value == member)
+            .map(|c| (usize::MAX, c))
             .collect();
 
         let extensions = self.query(ExtensionsFor {
             target_id: container.metadata().id(),
         });
-        candidates.extend(
-            extensions
-                .iter()
-                .flat_map(|ext| ext.metadata().children())
-                .filter(|c| c.metadata().name().value == member),
-        );
+        for ext in extensions.iter() {
+            let specificity = extension_specificity(ext);
+            for child in ext.metadata().children() {
+                if child.metadata().name().value == member {
+                    candidates.push((specificity, child));
+                }
+            }
+        }
 
-        for candidate in candidates {
+        // Sort by specificity descending (most specific first)
+        candidates.sort_by(|a, b| b.0.cmp(&a.0));
+
+        for (_, candidate) in candidates {
             if let Some(callable) = candidate.metadata().get_behavior::<CallableBehavior>() {
                 if !callable.arity_matches(argument_count) {
                     continue;
@@ -374,6 +393,104 @@ impl TypeOracle for SemanticModel {
 
         if let Some(resolution) =
             resolve_member_via_protocol_conformance(self, receiver_ty, member, Some(argument_count))
+        {
+            return Ok(resolution);
+        }
+
+        Err(MemberError::NotFound {
+            receiver_ty: receiver_ty.clone(),
+            member: member.to_string(),
+        })
+    }
+
+    fn resolve_member_with_labels(
+        &self,
+        receiver_ty: &Ty,
+        member: &str,
+        is_static: bool,
+        labels: &[Option<String>],
+    ) -> Result<MemberResolution, MemberError> {
+        // If no labels, fall back to arity-based resolution
+        if labels.iter().all(|l| l.is_none()) {
+            return self.resolve_member_with_arity(receiver_ty, member, is_static, labels.len());
+        }
+
+        // Try simple resolution first - if no overloading, this is sufficient
+        if let Ok(resolution) = self.resolve_member(receiver_ty, member, is_static)
+            && resolution.parameters.len() >= labels.len()
+        {
+            return Ok(resolution);
+        }
+
+        if matches!(receiver_ty.kind(), TyKind::Infer) {
+            return Err(MemberError::UnknownType);
+        }
+
+        let (container, substitutions) = match get_type_container_with_subs(self, receiver_ty) {
+            Some((c, s)) => (c, s),
+            None => {
+                if let Some(resolution) = resolve_member_via_protocol_conformance(
+                    self,
+                    receiver_ty,
+                    member,
+                    Some(labels.len()),
+                ) {
+                    return Ok(resolution);
+                }
+                return Err(MemberError::NotFound {
+                    receiver_ty: receiver_ty.clone(),
+                    member: member.to_string(),
+                });
+            },
+        };
+
+        // Collect candidates with specificity scores.
+        let mut candidates: Vec<(usize, Arc<dyn Symbol<KestrelLanguage>>)> = container
+            .metadata()
+            .children()
+            .into_iter()
+            .filter(|c| c.metadata().name().value == member)
+            .map(|c| (usize::MAX, c))
+            .collect();
+
+        let extensions = self.query(ExtensionsFor {
+            target_id: container.metadata().id(),
+        });
+        for ext in extensions.iter() {
+            let specificity = extension_specificity(ext);
+            for child in ext.metadata().children() {
+                if child.metadata().name().value == member {
+                    candidates.push((specificity, child));
+                }
+            }
+        }
+
+        // Sort by specificity descending (most specific first)
+        candidates.sort_by(|a, b| b.0.cmp(&a.0));
+
+        for (_, candidate) in candidates {
+            if let Some(callable) = candidate.metadata().get_behavior::<CallableBehavior>() {
+                if !matches_signature_labels(&callable, labels) {
+                    continue;
+                }
+                if callable.is_static() != is_static {
+                    continue;
+                }
+
+                return Ok(resolve_callable_member(
+                    &callable,
+                    candidate.as_ref(),
+                    candidate.metadata().id(),
+                    &substitutions,
+                    receiver_ty,
+                    true,
+                    AssocTypeResolution::Shallow(self),
+                ));
+            }
+        }
+
+        if let Some(resolution) =
+            resolve_member_via_protocol_conformance(self, receiver_ty, member, Some(labels.len()))
         {
             return Ok(resolution);
         }
@@ -1103,6 +1220,54 @@ impl TypeOracle for ContextualOracle<'_> {
         )
     }
 
+    fn resolve_member_with_labels(
+        &self,
+        receiver_ty: &Ty,
+        member: &str,
+        is_static: bool,
+        labels: &[Option<String>],
+    ) -> Result<MemberResolution, MemberError> {
+        resolve_member_with_context_and_labels(
+            self.model,
+            receiver_ty,
+            member,
+            is_static,
+            Some(self.context_symbol_id),
+            labels,
+        )
+    }
+
+    fn context_symbol_id(&self) -> Option<SymbolId> {
+        Some(self.context_symbol_id)
+    }
+
+    fn is_visible(&self, target: SymbolId, from_context: SymbolId) -> bool {
+        use crate::queries::IsVisibleFrom;
+        self.model.query(IsVisibleFrom {
+            target,
+            context: from_context,
+        })
+    }
+
+    fn resolve_member_full(
+        &self,
+        receiver_ty: &Ty,
+        member: &str,
+        is_static: bool,
+        labels: &[Option<String>],
+        argument_types: &[Option<Ty>],
+    ) -> Result<MemberResolution, MemberError> {
+        resolve_member_full_impl(
+            self.model,
+            receiver_ty,
+            member,
+            is_static,
+            Some(self.context_symbol_id),
+            labels,
+            argument_types,
+        )
+    }
+
     fn conforms_to(&self, ty: &Ty, protocol_id: SymbolId) -> bool {
         // Handle inference placeholders - can't check conformance yet
         if matches!(ty.kind(), TyKind::Infer) {
@@ -1541,6 +1706,177 @@ fn resolve_member_with_context(
     } else {
         model.resolve_member(receiver_ty, member, is_static)
     }
+}
+
+/// Full type-directed member resolution with argument types for disambiguation.
+///
+/// When multiple candidates match by name+labels+arity, scores each by how well
+/// argument types match parameter types:
+/// - Direct type match = 2 points
+/// - Conformance match (argument conforms to protocol parameter) = 1 point
+/// - Unknown (Infer) or no info = 0 points
+fn resolve_member_full_impl(
+    model: &SemanticModel,
+    receiver_ty: &Ty,
+    member: &str,
+    is_static: bool,
+    context: Option<SymbolId>,
+    labels: &[Option<String>],
+    argument_types: &[Option<Ty>],
+) -> Result<MemberResolution, MemberError> {
+    // For SelfType, TypeParameter, and AssociatedType, use arity-based resolution
+    match receiver_ty.kind() {
+        TyKind::SelfType | TyKind::TypeParameter(_) | TyKind::AssociatedType { .. } => {
+            return resolve_member_with_context(
+                model,
+                receiver_ty,
+                member,
+                is_static,
+                context,
+                Some(labels.len()),
+            );
+        },
+        _ => {},
+    }
+
+    // If no argument types are known, fall back to label-based resolution
+    if argument_types.iter().all(|t| t.is_none()) {
+        return model.resolve_member_with_labels(receiver_ty, member, is_static, labels);
+    }
+
+    if matches!(receiver_ty.kind(), TyKind::Infer) {
+        return Err(MemberError::UnknownType);
+    }
+
+    let (container, substitutions) = match get_type_container_with_subs(model, receiver_ty) {
+        Some((c, s)) => (c, s),
+        None => {
+            return model.resolve_member_with_labels(receiver_ty, member, is_static, labels);
+        },
+    };
+
+    // Collect candidates with specificity scores
+    let mut candidates: Vec<(usize, Arc<dyn Symbol<KestrelLanguage>>)> = container
+        .metadata()
+        .children()
+        .into_iter()
+        .filter(|c| c.metadata().name().value == member)
+        .map(|c| (usize::MAX, c))
+        .collect();
+
+    let extensions = model.query(ExtensionsFor {
+        target_id: container.metadata().id(),
+    });
+    for ext in extensions.iter() {
+        let specificity = extension_specificity(ext);
+        for child in ext.metadata().children() {
+            if child.metadata().name().value == member {
+                candidates.push((specificity, child));
+            }
+        }
+    }
+
+    // Sort by specificity descending
+    candidates.sort_by(|a, b| b.0.cmp(&a.0));
+
+    // Filter by labels+arity and static/instance, then score by argument types
+    let mut scored: Vec<(usize, MemberResolution)> = Vec::new();
+
+    for (_, candidate) in &candidates {
+        if let Some(callable) = candidate.metadata().get_behavior::<CallableBehavior>() {
+            if !matches_signature_labels(&callable, labels) {
+                continue;
+            }
+            if callable.is_static() != is_static {
+                continue;
+            }
+
+            let resolution = resolve_callable_member(
+                &callable,
+                candidate.as_ref(),
+                candidate.metadata().id(),
+                &substitutions,
+                receiver_ty,
+                true,
+                AssocTypeResolution::Shallow(model),
+            );
+
+            // Score this candidate by argument type matching
+            let mut score = 0usize;
+            for (i, arg_ty_opt) in argument_types.iter().enumerate() {
+                if let Some(arg_ty) = arg_ty_opt
+                    && let Some(param_ty) = resolution.parameters.get(i)
+                {
+                    if arg_ty.to_string() == param_ty.to_string() {
+                        score += 2; // Direct match
+                    } else if let TyKind::Protocol { symbol, .. } = param_ty.kind()
+                        && model.conforms_to(arg_ty, symbol.metadata().id())
+                    {
+                        score += 1; // Conformance match
+                    }
+                }
+            }
+
+            scored.push((score, resolution));
+        }
+    }
+
+    if scored.is_empty() {
+        // Try protocol conformance fallback
+        if let Some(resolution) = resolve_member_via_protocol_conformance(
+            model,
+            receiver_ty,
+            member,
+            Some(labels.len()),
+        ) {
+            return Ok(resolution);
+        }
+        return Err(MemberError::NotFound {
+            receiver_ty: receiver_ty.clone(),
+            member: member.to_string(),
+        });
+    }
+
+    if scored.len() == 1 {
+        return Ok(scored.into_iter().next().unwrap().1);
+    }
+
+    // Sort by score descending, pick best
+    scored.sort_by(|a, b| b.0.cmp(&a.0));
+    Ok(scored.into_iter().next().unwrap().1)
+}
+
+/// Context-aware member resolution with label-based overload resolution.
+///
+/// For SelfType, TypeParameter, and AssociatedType receivers, delegates to
+/// `resolve_member_with_context` (protocol members are rarely overloaded).
+/// For regular types, delegates to `model.resolve_member_with_labels`.
+fn resolve_member_with_context_and_labels(
+    model: &SemanticModel,
+    receiver_ty: &Ty,
+    member: &str,
+    is_static: bool,
+    context: Option<SymbolId>,
+    labels: &[Option<String>],
+) -> Result<MemberResolution, MemberError> {
+    // For SelfType, TypeParameter, and AssociatedType, use arity-based context resolution
+    // (these types resolve through protocol bounds where overloading is rare)
+    match receiver_ty.kind() {
+        TyKind::SelfType | TyKind::TypeParameter(_) | TyKind::AssociatedType { .. } => {
+            return resolve_member_with_context(
+                model,
+                receiver_ty,
+                member,
+                is_static,
+                context,
+                Some(labels.len()),
+            );
+        },
+        _ => {},
+    }
+
+    // For regular types, use label-based resolution on the model
+    model.resolve_member_with_labels(receiver_ty, member, is_static, labels)
 }
 
 /// Walk up from a function to find if it's inside an extension,
@@ -2470,42 +2806,110 @@ fn filter_applicable_extensions_for_conformance<'a>(
 
 /// Check if a where clause is satisfied given the actual type substitutions.
 ///
-/// For each `TypeBound` constraint like `T: FFISafe`, looks up the actual type
-/// for T and checks if it conforms to FFISafe.
+/// Handles three kinds of constraints:
+/// - `TypeBound { param: Some(id) }` — looks up the actual type for the type parameter
+/// - `TypeBound { param: None, param_name: "Self" }` — uses `self_ty` if provided
+/// - `SelfBound` with empty path — checks that `self_ty` conforms to each bound protocol
 fn check_where_clause_satisfied(
     model: &SemanticModel,
     where_clause: &WhereClause,
     actual_subs: &Substitutions,
 ) -> bool {
+    check_where_clause_satisfied_with_self(model, where_clause, actual_subs, None)
+}
+
+/// Check if a where clause is satisfied, with an optional Self type for Self constraints.
+fn check_where_clause_satisfied_with_self(
+    model: &SemanticModel,
+    where_clause: &WhereClause,
+    actual_subs: &Substitutions,
+    self_ty: Option<&Ty>,
+) -> bool {
     use kestrel_semantic_tree::ty::Constraint;
 
     for constraint in where_clause.constraints() {
-        // Only process TypeBound constraints - other types (NegativeBound,
-        // InheritedAssociatedTypeBound, TypeEquality, SelfBound) are not
-        // relevant for basic conformance filtering
-        let Constraint::TypeBound {
-            param: Some(param_id),
-            bounds,
-            ..
-        } = constraint
-        else {
-            continue;
-        };
+        match constraint {
+            Constraint::TypeBound {
+                param: Some(param_id),
+                param_name,
+                bounds,
+                ..
+            } => {
+                // Try substitutions first; fall back to self_ty if param_name is "Self"
+                let actual_ty = actual_subs
+                    .get(*param_id)
+                    .or_else(|| if param_name == "Self" { self_ty } else { None });
 
-        // Get the actual type for this parameter
-        let Some(actual_ty) = actual_subs.get(*param_id) else {
-            // No substitution for this param - might be a constraint on
-            // a different parameter or inherited constraint. Skip it.
-            continue;
-        };
+                let Some(actual_ty) = actual_ty else {
+                    continue;
+                };
 
-        // Check each bound
-        for bound in bounds {
-            if let TyKind::Protocol { symbol, .. } = bound.kind()
-                && !model.conforms_to(actual_ty, symbol.metadata().id())
-            {
-                return false;
-            }
+                // Skip unresolvable types
+                if matches!(
+                    actual_ty.kind(),
+                    TyKind::Infer | TyKind::TypeParameter(_) | TyKind::SelfType
+                ) {
+                    continue;
+                }
+
+                for bound in bounds {
+                    if let TyKind::Protocol { symbol, .. } = bound.kind()
+                        && !model.conforms_to(actual_ty, symbol.metadata().id())
+                    {
+                        return false;
+                    }
+                }
+            },
+            Constraint::TypeBound {
+                param: None,
+                param_name,
+                bounds,
+                ..
+            } if param_name == "Self" => {
+                let Some(actual_self_ty) = self_ty else {
+                    continue;
+                };
+
+                if matches!(
+                    actual_self_ty.kind(),
+                    TyKind::Infer | TyKind::TypeParameter(_) | TyKind::SelfType
+                ) {
+                    continue;
+                }
+
+                for bound in bounds {
+                    if let TyKind::Protocol { symbol, .. } = bound.kind()
+                        && !model.conforms_to(actual_self_ty, symbol.metadata().id())
+                    {
+                        return false;
+                    }
+                }
+            },
+            Constraint::SelfBound {
+                associated_type_path,
+                bounds,
+                ..
+            } if associated_type_path.is_empty() => {
+                let Some(actual_self_ty) = self_ty else {
+                    continue;
+                };
+
+                if matches!(
+                    actual_self_ty.kind(),
+                    TyKind::Infer | TyKind::TypeParameter(_) | TyKind::SelfType
+                ) {
+                    continue;
+                }
+
+                for bound in bounds {
+                    if let TyKind::Protocol { symbol, .. } = bound.kind()
+                        && !model.conforms_to(actual_self_ty, symbol.metadata().id())
+                    {
+                        return false;
+                    }
+                }
+            },
+            _ => continue,
         }
     }
 
@@ -3958,6 +4362,50 @@ fn type_contains_param(ty: &Ty, param_id: SymbolId) -> bool {
     }
 
     inner(ty, param_id, &mut HashSet::new())
+}
+
+/// Calculate extension specificity: count of concrete (non-type-parameter) type arguments.
+///
+/// More concrete type args = more specific extension.
+/// E.g., `extend Array[Int]` (specificity=1) beats `extend Array[T]` (specificity=0).
+fn extension_specificity(ext: &Arc<ExtensionSymbol>) -> usize {
+    if let Some(target_beh) = ext.metadata().get_behavior::<ExtensionTargetBehavior>() {
+        target_beh.specificity()
+    } else {
+        0
+    }
+}
+
+/// Check if a callable signature matches the given labels (which encode arity).
+///
+/// For parameters with default values, callers may omit trailing arguments.
+/// The arity must be between the number of required parameters and the total.
+/// Labels must match parameter external labels at each position.
+fn matches_signature_labels(callable: &CallableBehavior, labels: &[Option<String>]) -> bool {
+    let params = callable.parameters();
+    let arity = labels.len();
+
+    // Count required parameters (those without defaults)
+    let required_count = params.iter().filter(|p| !p.has_default()).count();
+
+    // Check arity: must be at least required_count and at most total params
+    if arity < required_count || arity > params.len() {
+        return false;
+    }
+
+    // Check labels for provided arguments only (first `arity` parameters)
+    for (i, label) in labels.iter().enumerate() {
+        if i >= params.len() {
+            return false;
+        }
+        let param_label = params[i].external_label();
+        let label_ref = label.as_deref();
+        if param_label != label_ref {
+            return false;
+        }
+    }
+
+    true
 }
 
 #[cfg(test)]
