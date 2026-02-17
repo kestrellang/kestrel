@@ -1760,11 +1760,44 @@ fn resolve_member(
         return Ok(SolveResult::Deferred);
     }
 
-    // Try to resolve the member via the oracle
-    match ctx
-        .oracle()
-        .resolve_member_with_labels(&receiver_ty, member, is_static, labels)
-    {
+    // Try type-directed overload resolution for labeled calls.
+    // This avoids picking the wrong overload when multiple candidates share labels
+    // (e.g. `from:` conversions or predicate-based APIs).
+    let maybe_type_directed = if labels.iter().any(|l| l.is_some()) {
+        let argument_types: Vec<Option<Ty>> = arguments
+            .iter()
+            .map(|arg_id| {
+                let ty = resolve_type(ctx, *arg_id);
+                if matches!(
+                    ty.kind(),
+                    TyKind::Infer
+                        | TyKind::TypeParameter(_)
+                        | TyKind::AssociatedType { .. }
+                        | TyKind::SelfType
+                ) {
+                    None
+                } else {
+                    Some(ty)
+                }
+            })
+            .collect();
+
+        Some(
+            ctx.oracle()
+                .resolve_member_full(&receiver_ty, member, is_static, labels, &argument_types),
+        )
+    } else {
+        None
+    };
+
+    let resolution_result = match maybe_type_directed {
+        Some(Ok(resolution)) => Ok(resolution),
+        _ => ctx
+            .oracle()
+            .resolve_member_with_labels(&receiver_ty, member, is_static, labels),
+    };
+
+    match resolution_result {
         Ok(resolution) => {
             // Post-resolution visibility check: ensure the resolved member is accessible
             // from the current function context.

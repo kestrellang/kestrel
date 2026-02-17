@@ -366,13 +366,50 @@ fn apply_to_expression(
 
             // Check if we have a resolved symbol for this expression
             if let Some(value_resolution) = solution.get_value(expr.id) {
+                let labels: Vec<Option<String>> =
+                    resolved_arguments.iter().map(|a| a.label.clone()).collect();
+                let argument_types: Vec<Option<Ty>> = resolved_arguments
+                    .iter()
+                    .map(|a| {
+                        let ty = a.value.ty.clone();
+                        if matches!(
+                            ty.kind(),
+                            TyKind::Infer
+                                | TyKind::TypeParameter(_)
+                                | TyKind::AssociatedType { .. }
+                                | TyKind::SelfType
+                        ) {
+                            None
+                        } else {
+                            Some(ty)
+                        }
+                    })
+                    .collect();
+
                 let method_fn_ty = oracle
-                    .resolve_member_with_arity(
+                    .resolve_member_full(
                         &resolved_receiver.ty,
                         method_name,
                         false,
-                        resolved_arguments.len(),
+                        &labels,
+                        &argument_types,
                     )
+                    .or_else(|_| {
+                        oracle.resolve_member_with_labels(
+                            &resolved_receiver.ty,
+                            method_name,
+                            false,
+                            &labels,
+                        )
+                    })
+                    .or_else(|_| {
+                        oracle.resolve_member_with_arity(
+                            &resolved_receiver.ty,
+                            method_name,
+                            false,
+                            resolved_arguments.len(),
+                        )
+                    })
                     .map(|resolution| {
                         Ty::function(resolution.parameters, resolution.ty, expr.span.clone())
                     })

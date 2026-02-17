@@ -1,7 +1,7 @@
 //! CallableParamTypesForCall query - compute expected parameter types for a call-like expression
 
 use kestrel_semantic_tree::behavior::callable::CallableBehavior;
-use kestrel_semantic_tree::expr::{ExprKind, Expression};
+use kestrel_semantic_tree::expr::{CallArgument, ExprKind, Expression};
 use kestrel_semantic_tree::ty::{Ty, TyKind};
 use semantic_tree::symbol::Symbol;
 
@@ -27,6 +27,7 @@ impl<'a> Query for CallableParamTypesForCall<'a> {
             ExprKind::Call {
                 callee,
                 substitutions,
+                arguments,
                 ..
             } => {
                 // IMPORTANT: Prefer using the callee's resolved type if it's a function type.
@@ -59,28 +60,13 @@ impl<'a> Query for CallableParamTypesForCall<'a> {
                         receiver,
                         ..
                     } => {
-                        for &id in candidates {
-                            let Some(symbol) = model.query(SymbolFor { id }) else {
-                                continue;
-                            };
-                            let Some(callable) =
-                                symbol.metadata().get_behavior::<CallableBehavior>()
-                            else {
-                                continue;
-                            };
-                            return Some(
-                                callable
-                                    .parameters()
-                                    .iter()
-                                    .map(|p| {
-                                        let ty = p.ty.apply_substitutions(substitutions);
-                                        let ty = ty.substitute_self(&receiver.ty);
-                                        resolve_all_associated_types(model, &ty)
-                                    })
-                                    .collect(),
-                            );
-                        }
-                        None
+                        best_method_param_types_for_call(
+                            model,
+                            candidates,
+                            &receiver.ty,
+                            substitutions,
+                            arguments,
+                        )
                     },
                     _ => None,
                 }
@@ -99,4 +85,63 @@ impl<'a> Query for CallableParamTypesForCall<'a> {
             _ => None,
         }
     }
+}
+
+fn best_method_param_types_for_call(
+    model: &SemanticModel,
+    candidates: &[semantic_tree::symbol::SymbolId],
+    receiver_ty: &Ty,
+    substitutions: &kestrel_semantic_tree::ty::Substitutions,
+    arguments: &[CallArgument],
+) -> Option<Vec<Ty>> {
+    let mut best: Option<(usize, Vec<Ty>)> = None;
+
+    for &id in candidates {
+        let Some(symbol) = model.query(SymbolFor { id }) else {
+            continue;
+        };
+        let Some(callable) = symbol.metadata().get_behavior::<CallableBehavior>() else {
+            continue;
+        };
+
+        let params: Vec<Ty> = callable
+            .parameters()
+            .iter()
+            .map(|p| {
+                let ty = p.ty.apply_substitutions(substitutions);
+                let ty = ty.substitute_self(receiver_ty);
+                resolve_all_associated_types(model, &ty)
+            })
+            .collect();
+
+        if params.len() != arguments.len() {
+            continue;
+        }
+
+        // Prefer candidate with the most argument type matches.
+        let mut score = 0usize;
+        for (arg, param_ty) in arguments.iter().zip(params.iter()) {
+            if arg.value.ty.to_string() == param_ty.to_string() {
+                score += 2;
+            }
+            if arg
+                .label
+                .as_ref()
+                .is_some_and(|label| {
+                    callable
+                        .parameters()
+                        .iter()
+                        .any(|p| p.label.as_ref().is_some_and(|pl| pl.value == *label))
+                })
+            {
+                score += 1;
+            }
+        }
+
+        if best.as_ref().is_none_or(|(best_score, _)| score > *best_score) {
+            best = Some((score, params));
+        }
+    }
+
+    best.map(|(_, params)| params)
 }

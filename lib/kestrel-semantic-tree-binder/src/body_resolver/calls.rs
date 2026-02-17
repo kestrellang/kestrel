@@ -47,8 +47,8 @@ use kestrel_syntax_tree::utils::get_node_span;
 use super::context::BodyResolutionContext;
 use super::expressions::resolve_expression;
 use super::members::{
-    filter_applicable_extensions, resolve_delegating_init, resolve_member_call,
-    substitute_callable_self,
+    filter_applicable_extensions, resolve_callable_associated_types, resolve_delegating_init,
+    resolve_member_call, resolve_self_type_to_concrete, substitute_callable_self,
 };
 use super::utils::{
     create_generic_struct_type, create_struct_type, create_struct_type_with_type_args,
@@ -490,16 +490,55 @@ pub fn resolve_call(
             ref receiver,
             ref candidates,
             ref method_name,
-        } => resolve_method_call(
-            receiver,
-            candidates,
-            method_name,
-            arguments,
-            arg_labels,
-            explicit_type_args,
-            span,
-            ctx,
-        ),
+        } => {
+            // Phase 15 Step 1 (incremental):
+            // - Keep eager resolution for simple single-candidate methods.
+            // - Defer multi-candidate labeled instance overloads to inference.
+            //
+            // This preserves current bind-time mutability/access-mode behavior
+            // for common calls while moving overload selection to TypeOracle.
+            let has_labels = arg_labels.iter().any(|l| l.is_some());
+            let is_static_receiver = matches!(
+                receiver.kind,
+                ExprKind::TypeRef(_) | ExprKind::TypeParameterRef(_) | ExprKind::AssociatedTypeRef
+            );
+            let should_defer =
+                explicit_type_args.is_none()
+                    && candidates.len() > 1
+                    && has_labels
+                    && !is_static_receiver;
+
+            if !should_defer {
+                resolve_method_call(
+                    receiver,
+                    candidates,
+                    method_name,
+                    arguments,
+                    arg_labels,
+                    explicit_type_args,
+                    span,
+                    ctx,
+                )
+            } else {
+                // Preserve a best-effort return type so downstream bind-time checks
+                // (e.g. callable/subscript uses on the bound result) remain stable.
+                let deferred_return_ty = infer_deferred_method_return_type(
+                    receiver,
+                    candidates,
+                    &arguments,
+                    arg_labels,
+                    &span,
+                    ctx,
+                );
+                Expression::deferred_method_call(
+                    (**receiver).clone(),
+                    method_name.to_string(),
+                    arguments,
+                    deferred_return_ty,
+                    span,
+                )
+            }
+        },
 
         // Field access - might be method call on struct
         ExprKind::FieldAccess {
@@ -900,6 +939,54 @@ fn substitute_receiver_type_args(ty: &Ty, receiver_ty: &Ty) -> Ty {
         },
         _ => ty.clone(),
     }
+}
+
+fn infer_deferred_method_return_type(
+    receiver: &Expression,
+    candidates: &[SymbolId],
+    arguments: &[CallArgument],
+    arg_labels: &[Option<String>],
+    span: &Span,
+    ctx: &mut BodyResolutionContext,
+) -> Ty {
+    // Resolve Self before substituting into candidate signatures.
+    let resolved_receiver_ty = resolve_self_type_to_concrete(&receiver.ty, ctx);
+
+    let mut inferred: Option<Ty> = None;
+
+    for &candidate_id in candidates {
+        let Some(symbol) = ctx.model.query(SymbolFor { id: candidate_id }) else {
+            continue;
+        };
+        let Some(orig_callable) = get_callable_behavior(&symbol) else {
+            continue;
+        };
+        if !matches_signature(&orig_callable, arguments.len(), arg_labels) {
+            continue;
+        }
+
+        let mut callable = substitute_callable_self(&orig_callable, &resolved_receiver_ty);
+        callable = resolve_callable_associated_types(&callable, ctx);
+
+        let mut candidate_return_ty = substitute_self(callable.return_type(), &resolved_receiver_ty);
+        candidate_return_ty = resolve_associated_types(&candidate_return_ty, ctx);
+        let expanded_receiver_ty = resolved_receiver_ty.expand_aliases();
+        if let TyKind::Struct { substitutions, .. } | TyKind::Enum { substitutions, .. } =
+            expanded_receiver_ty.kind()
+        {
+            if !substitutions.is_empty() {
+                candidate_return_ty = substitute_type(&candidate_return_ty, substitutions);
+            }
+        }
+
+        match &inferred {
+            None => inferred = Some(candidate_return_ty),
+            Some(existing) if existing.to_string() == candidate_return_ty.to_string() => {},
+            Some(_) => return Ty::infer(span.clone()),
+        }
+    }
+
+    inferred.unwrap_or_else(|| Ty::infer(span.clone()))
 }
 
 /// Resolve a call to a single function (not overloaded)

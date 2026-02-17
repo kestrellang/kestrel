@@ -13,6 +13,7 @@ use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
 use kestrel_semantic_tree::behavior::extension_target::ExtensionTargetBehavior;
 use kestrel_semantic_tree::behavior::generics::GenericsBehavior;
 use kestrel_semantic_tree::behavior::member_access::MemberAccessBehavior;
+use kestrel_semantic_tree::behavior::typed::TypedBehavior;
 use kestrel_semantic_tree::builtins::{BuiltinKind, LanguageFeature};
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::associated_type::AssociatedTypeSymbol;
@@ -90,7 +91,7 @@ impl TypeOracle for SemanticModel {
                                         member_id,
                                         proto_subs,
                                         receiver_ty,
-                                        false,
+                                        true,
                                         AssocTypeResolution::None,
                                     ));
                                 }
@@ -104,6 +105,15 @@ impl TypeOracle for SemanticModel {
                         });
 
                         for ext in &proto_extensions {
+                            // Check extension where clause satisfaction
+                            if let Some(ext_behavior) = ext.metadata().get_behavior::<ExtensionTargetBehavior>() {
+                                let where_clause = ext_behavior.where_clause();
+                                if !where_clause.constraints().is_empty()
+                                    && !check_where_clause_satisfied_with_self(self, where_clause, proto_subs, Some(receiver_ty))
+                                {
+                                    continue;
+                                }
+                            }
                             for child in ext.metadata().children() {
                                 if child.metadata().name().value == member {
                                     let member_id = child.metadata().id();
@@ -116,7 +126,7 @@ impl TypeOracle for SemanticModel {
                                             member_id,
                                             proto_subs,
                                             receiver_ty,
-                                            false,
+                                            true,
                                             AssocTypeResolution::None,
                                         ));
                                     }
@@ -413,13 +423,6 @@ impl TypeOracle for SemanticModel {
         // If no labels, fall back to arity-based resolution
         if labels.iter().all(|l| l.is_none()) {
             return self.resolve_member_with_arity(receiver_ty, member, is_static, labels.len());
-        }
-
-        // Try simple resolution first - if no overloading, this is sufficient
-        if let Ok(resolution) = self.resolve_member(receiver_ty, member, is_static)
-            && resolution.parameters.len() >= labels.len()
-        {
-            return Ok(resolution);
         }
 
         if matches!(receiver_ty.kind(), TyKind::Infer) {
@@ -1200,6 +1203,7 @@ impl TypeOracle for ContextualOracle<'_> {
             is_static,
             Some(self.context_symbol_id),
             None,
+            None,
         )
     }
 
@@ -1217,6 +1221,7 @@ impl TypeOracle for ContextualOracle<'_> {
             is_static,
             Some(self.context_symbol_id),
             Some(argument_count),
+            None,
         )
     }
 
@@ -1227,14 +1232,7 @@ impl TypeOracle for ContextualOracle<'_> {
         is_static: bool,
         labels: &[Option<String>],
     ) -> Result<MemberResolution, MemberError> {
-        resolve_member_with_context_and_labels(
-            self.model,
-            receiver_ty,
-            member,
-            is_static,
-            Some(self.context_symbol_id),
-            labels,
-        )
+        resolve_member_with_context_and_labels(self.model, receiver_ty, member, is_static, Some(self.context_symbol_id), labels)
     }
 
     fn context_symbol_id(&self) -> Option<SymbolId> {
@@ -1404,6 +1402,7 @@ fn resolve_member_with_context(
     is_static: bool,
     context: Option<SymbolId>,
     expected_arity: Option<usize>,
+    expected_labels: Option<&[Option<String>]>,
 ) -> Result<MemberResolution, MemberError> {
     // Handle inference placeholders
     if matches!(receiver_ty.kind(), TyKind::Infer) {
@@ -1424,12 +1423,28 @@ fn resolve_member_with_context(
             return Err(MemberError::UnknownType);
         };
 
+        // If Self refers to a concrete type context (struct/enum/type extension),
+        // resolve using that concrete receiver first.
+        if let Some(concrete_self) = resolve_concrete_self_type_from_context(model, ctx_id)
+            && !matches!(concrete_self.kind(), TyKind::SelfType)
+        {
+            return if let Some(labels) = expected_labels {
+                model.resolve_member_with_labels(&concrete_self, member, is_static, labels)
+            } else if let Some(argument_count) = expected_arity {
+                model.resolve_member_with_arity(&concrete_self, member, is_static, argument_count)
+            } else {
+                model.resolve_member(&concrete_self, member, is_static)
+            };
+        }
+
         let bounds = get_self_type_bounds_with_context(model, ctx_id, receiver_ty.span());
 
         // If any bound is an error type, the type's constraints couldn't be resolved.
         if bounds.iter().any(|b| matches!(b.kind(), TyKind::Error)) {
             return Err(MemberError::UnknownType);
         }
+
+        let mut candidates: Vec<MemberResolution> = Vec::new();
 
         for bound in &bounds {
             if let TyKind::Protocol {
@@ -1442,58 +1457,56 @@ fn resolve_member_with_context(
                     collect_protocols_with_inherited(proto, proto_subs, Some(receiver_ty));
 
                 for (proto, proto_subs) in &all_protocols {
+                    let proto_id = proto.metadata().id();
+
                     // Check protocol's direct members
                     for child in proto.metadata().children() {
                         if child.metadata().name().value == member {
                             let member_id = child.metadata().id();
-                            if let Some(callable) =
-                                child.metadata().get_behavior::<CallableBehavior>()
-                            {
-                                if let Some(expected) = expected_arity
-                                    && !callable.arity_matches(expected)
-                                {
-                                    continue;
-                                }
-                                return Ok(resolve_callable_member(
-                                    &callable,
-                                    child.as_ref(),
-                                    member_id,
-                                    proto_subs,
-                                    receiver_ty,
-                                    false,
-                                    AssocTypeResolution::None,
-                                ));
+                            if let Some(resolution) = resolve_contextual_member_candidate(
+                                model,
+                                child.as_ref(),
+                                member_id,
+                                proto_subs,
+                                receiver_ty,
+                                is_static,
+                                expected_arity,
+                                expected_labels,
+                            ) {
+                                candidates.push(resolution);
                             }
                         }
                     }
 
                     // Check extensions on this protocol
-                    let proto_id = proto.metadata().id();
                     let proto_extensions = model.query(ExtensionsFor {
                         target_id: proto_id,
                     });
 
                     for ext in &proto_extensions {
+                        // Check extension where clause satisfaction
+                        if let Some(ext_behavior) = ext.metadata().get_behavior::<ExtensionTargetBehavior>() {
+                            let where_clause = ext_behavior.where_clause();
+                            if !where_clause.constraints().is_empty()
+                                && !check_where_clause_satisfied_with_self(model, where_clause, proto_subs, Some(receiver_ty))
+                            {
+                                continue;
+                            }
+                        }
                         for child in ext.metadata().children() {
                             if child.metadata().name().value == member {
                                 let member_id = child.metadata().id();
-                                if let Some(callable) =
-                                    child.metadata().get_behavior::<CallableBehavior>()
-                                {
-                                    if let Some(expected) = expected_arity
-                                        && !callable.arity_matches(expected)
-                                    {
-                                        continue;
-                                    }
-                                    return Ok(resolve_callable_member(
-                                        &callable,
-                                        child.as_ref(),
-                                        member_id,
-                                        proto_subs,
-                                        receiver_ty,
-                                        false,
-                                        AssocTypeResolution::None,
-                                    ));
+                                if let Some(resolution) = resolve_contextual_member_candidate(
+                                    model,
+                                    child.as_ref(),
+                                    member_id,
+                                    proto_subs,
+                                    receiver_ty,
+                                    is_static,
+                                    expected_arity,
+                                    expected_labels,
+                                ) {
+                                    candidates.push(resolution);
                                 }
                             }
                         }
@@ -1502,10 +1515,15 @@ fn resolve_member_with_context(
             }
         }
 
-        return Err(MemberError::NotFound {
-            receiver_ty: receiver_ty.clone(),
-            member: member.to_string(),
-        });
+        dedup_candidates_by_symbol_id(&mut candidates);
+        return match candidates.len() {
+            0 => Err(MemberError::NotFound {
+                receiver_ty: receiver_ty.clone(),
+                member: member.to_string(),
+            }),
+            1 => Ok(candidates.remove(0)),
+            n => Err(MemberError::Ambiguous { count: n }),
+        };
     }
 
     // Handle type parameters - look up member in protocol bounds from where clause
@@ -1527,6 +1545,8 @@ fn resolve_member_with_context(
             return Err(MemberError::UnknownType);
         }
 
+        let mut candidates: Vec<MemberResolution> = Vec::new();
+
         for bound in &bounds {
             if let TyKind::Protocol {
                 symbol: proto,
@@ -1539,58 +1559,56 @@ fn resolve_member_with_context(
                     collect_protocols_with_inherited(proto, proto_subs, Some(receiver_ty));
 
                 for (proto, proto_subs) in &all_protocols {
+                    let proto_id = proto.metadata().id();
+
                     // Check protocol's direct members
                     for child in proto.metadata().children() {
                         if child.metadata().name().value == member {
                             let member_id = child.metadata().id();
-                            if let Some(callable) =
-                                child.metadata().get_behavior::<CallableBehavior>()
-                            {
-                                if let Some(expected) = expected_arity
-                                    && !callable.arity_matches(expected)
-                                {
-                                    continue;
-                                }
-                                return Ok(resolve_callable_member(
-                                    &callable,
-                                    child.as_ref(),
-                                    member_id,
-                                    proto_subs,
-                                    receiver_ty,
-                                    false,
-                                    AssocTypeResolution::None,
-                                ));
+                            if let Some(resolution) = resolve_contextual_member_candidate(
+                                model,
+                                child.as_ref(),
+                                member_id,
+                                proto_subs,
+                                receiver_ty,
+                                is_static,
+                                expected_arity,
+                                expected_labels,
+                            ) {
+                                candidates.push(resolution);
                             }
                         }
                     }
 
                     // Check extensions on this protocol
-                    let proto_id = proto.metadata().id();
                     let proto_extensions = model.query(ExtensionsFor {
                         target_id: proto_id,
                     });
 
                     for ext in &proto_extensions {
+                        // Check extension where clause satisfaction
+                        if let Some(ext_behavior) = ext.metadata().get_behavior::<ExtensionTargetBehavior>() {
+                            let where_clause = ext_behavior.where_clause();
+                            if !where_clause.constraints().is_empty()
+                                && !check_where_clause_satisfied_with_self(model, where_clause, proto_subs, Some(receiver_ty))
+                            {
+                                continue;
+                            }
+                        }
                         for child in ext.metadata().children() {
                             if child.metadata().name().value == member {
                                 let member_id = child.metadata().id();
-                                if let Some(callable) =
-                                    child.metadata().get_behavior::<CallableBehavior>()
-                                {
-                                    if let Some(expected) = expected_arity
-                                        && !callable.arity_matches(expected)
-                                    {
-                                        continue;
-                                    }
-                                    return Ok(resolve_callable_member(
-                                        &callable,
-                                        child.as_ref(),
-                                        member_id,
-                                        proto_subs,
-                                        receiver_ty,
-                                        false,
-                                        AssocTypeResolution::None,
-                                    ));
+                                if let Some(resolution) = resolve_contextual_member_candidate(
+                                    model,
+                                    child.as_ref(),
+                                    member_id,
+                                    proto_subs,
+                                    receiver_ty,
+                                    is_static,
+                                    expected_arity,
+                                    expected_labels,
+                                ) {
+                                    candidates.push(resolution);
                                 }
                             }
                         }
@@ -1598,11 +1616,16 @@ fn resolve_member_with_context(
                 }
             }
         }
-        // Member not found in any protocol bound
-        return Err(MemberError::NotFound {
-            receiver_ty: receiver_ty.clone(),
-            member: member.to_string(),
-        });
+
+        dedup_candidates_by_symbol_id(&mut candidates);
+        return match candidates.len() {
+            0 => Err(MemberError::NotFound {
+                receiver_ty: receiver_ty.clone(),
+                member: member.to_string(),
+            }),
+            1 => Ok(candidates.remove(0)),
+            n => Err(MemberError::Ambiguous { count: n }),
+        };
     }
 
     // Handle associated types - look up member in protocol bounds from the associated type definition
@@ -1618,6 +1641,8 @@ fn resolve_member_with_context(
             return Err(MemberError::UnknownType);
         }
 
+        let mut candidates: Vec<MemberResolution> = Vec::new();
+
         for bound in &bounds {
             // Apply protocol defaults with Self = receiver_ty (the associated type)
             // This resolves defaults like `Rhs = Self` in `Equal[Rhs = Self]`
@@ -1632,58 +1657,56 @@ fn resolve_member_with_context(
                     collect_protocols_with_inherited(proto, proto_subs, Some(receiver_ty));
 
                 for (proto, proto_subs) in &all_protocols {
+                    let proto_id = proto.metadata().id();
+
                     // Check protocol's direct members
                     for child in proto.metadata().children() {
                         if child.metadata().name().value == member {
                             let member_id = child.metadata().id();
-                            if let Some(callable) =
-                                child.metadata().get_behavior::<CallableBehavior>()
-                            {
-                                if let Some(expected) = expected_arity
-                                    && !callable.arity_matches(expected)
-                                {
-                                    continue;
-                                }
-                                return Ok(resolve_callable_member(
-                                    &callable,
-                                    child.as_ref(),
-                                    member_id,
-                                    proto_subs,
-                                    receiver_ty,
-                                    false,
-                                    AssocTypeResolution::None,
-                                ));
+                            if let Some(resolution) = resolve_contextual_member_candidate(
+                                model,
+                                child.as_ref(),
+                                member_id,
+                                proto_subs,
+                                receiver_ty,
+                                is_static,
+                                expected_arity,
+                                expected_labels,
+                            ) {
+                                candidates.push(resolution);
                             }
                         }
                     }
 
                     // Check extensions on this protocol
-                    let proto_id = proto.metadata().id();
                     let proto_extensions = model.query(ExtensionsFor {
                         target_id: proto_id,
                     });
 
                     for ext in &proto_extensions {
+                        // Check extension where clause satisfaction
+                        if let Some(ext_behavior) = ext.metadata().get_behavior::<ExtensionTargetBehavior>() {
+                            let where_clause = ext_behavior.where_clause();
+                            if !where_clause.constraints().is_empty()
+                                && !check_where_clause_satisfied_with_self(model, where_clause, proto_subs, Some(receiver_ty))
+                            {
+                                continue;
+                            }
+                        }
                         for child in ext.metadata().children() {
                             if child.metadata().name().value == member {
                                 let member_id = child.metadata().id();
-                                if let Some(callable) =
-                                    child.metadata().get_behavior::<CallableBehavior>()
-                                {
-                                    if let Some(expected) = expected_arity
-                                        && !callable.arity_matches(expected)
-                                    {
-                                        continue;
-                                    }
-                                    return Ok(resolve_callable_member(
-                                        &callable,
-                                        child.as_ref(),
-                                        member_id,
-                                        proto_subs,
-                                        receiver_ty,
-                                        false,
-                                        AssocTypeResolution::None,
-                                    ));
+                                if let Some(resolution) = resolve_contextual_member_candidate(
+                                    model,
+                                    child.as_ref(),
+                                    member_id,
+                                    proto_subs,
+                                    receiver_ty,
+                                    is_static,
+                                    expected_arity,
+                                    expected_labels,
+                                ) {
+                                    candidates.push(resolution);
                                 }
                             }
                         }
@@ -1692,11 +1715,15 @@ fn resolve_member_with_context(
             }
         }
 
-        // Member not found in any protocol bound
-        return Err(MemberError::NotFound {
-            receiver_ty: receiver_ty.clone(),
-            member: member.to_string(),
-        });
+        dedup_candidates_by_symbol_id(&mut candidates);
+        return match candidates.len() {
+            0 => Err(MemberError::NotFound {
+                receiver_ty: receiver_ty.clone(),
+                member: member.to_string(),
+            }),
+            1 => Ok(candidates.remove(0)),
+            n => Err(MemberError::Ambiguous { count: n }),
+        };
     }
 
     // For non-type-parameter types, delegate to the model's resolve_member
@@ -1734,6 +1761,7 @@ fn resolve_member_full_impl(
                 is_static,
                 context,
                 Some(labels.len()),
+                Some(labels),
             );
         },
         _ => {},
@@ -1870,6 +1898,7 @@ fn resolve_member_with_context_and_labels(
                 is_static,
                 context,
                 Some(labels.len()),
+                Some(labels),
             );
         },
         _ => {},
@@ -1877,6 +1906,131 @@ fn resolve_member_with_context_and_labels(
 
     // For regular types, use label-based resolution on the model
     model.resolve_member_with_labels(receiver_ty, member, is_static, labels)
+}
+
+/// Resolve `Self` to a concrete target type from the current context when possible.
+///
+/// Returns `None` when `Self` is abstract (e.g. protocol / protocol extension context).
+fn resolve_concrete_self_type_from_context(model: &SemanticModel, context_id: SymbolId) -> Option<Ty> {
+    let mut current = Some(context_id);
+
+    while let Some(id) = current {
+        let symbol = model.query(SymbolFor { id })?;
+
+        if symbol.metadata().kind() == KestrelSymbolKind::Extension
+            && let Some(target_beh) = symbol.metadata().get_behavior::<ExtensionTargetBehavior>()
+        {
+            let target_ty = target_beh.target_type();
+            if !matches!(target_ty.kind(), TyKind::Protocol { .. } | TyKind::SelfType) {
+                return Some(target_ty.clone());
+            }
+            return None;
+        }
+
+        if matches!(
+            symbol.metadata().kind(),
+            KestrelSymbolKind::Struct | KestrelSymbolKind::Enum
+        ) && let Some(typed) = symbol.metadata().get_behavior::<TypedBehavior>()
+        {
+            let ty = typed.ty();
+            if !matches!(ty.kind(), TyKind::SelfType) {
+                return Some(ty.clone());
+            }
+        }
+
+        if symbol.metadata().kind() == KestrelSymbolKind::Protocol {
+            return None;
+        }
+
+        current = symbol.metadata().parent().map(|p| p.metadata().id());
+    }
+
+    None
+}
+
+fn resolve_contextual_member_candidate(
+    model: &SemanticModel,
+    member_symbol: &dyn Symbol<KestrelLanguage>,
+    member_id: SymbolId,
+    substitutions: &Substitutions,
+    receiver_ty: &Ty,
+    is_static: bool,
+    expected_arity: Option<usize>,
+    expected_labels: Option<&[Option<String>]>,
+) -> Option<MemberResolution> {
+    if let Some(callable) = member_symbol.metadata().get_behavior::<CallableBehavior>() {
+        if callable.is_static() != is_static {
+            return None;
+        }
+
+        if let Some(labels) = expected_labels {
+            if !matches_signature_labels(&callable, labels) {
+                return None;
+            }
+        } else if let Some(expected) = expected_arity
+            && !callable.arity_matches(expected)
+        {
+            return None;
+        }
+
+        return Some(resolve_callable_member(
+            &callable,
+            member_symbol,
+            member_id,
+            substitutions,
+            receiver_ty,
+            true,
+            AssocTypeResolution::None,
+        ));
+    }
+
+    // For zero-argument accesses, allow protocol properties/computed members.
+    let zero_arity = expected_labels.is_some_and(|labels| labels.is_empty())
+        || expected_arity.is_some_and(|a| a == 0)
+        || (expected_labels.is_none() && expected_arity.is_none());
+    if is_static || !zero_arity {
+        return None;
+    }
+
+    for behavior in member_symbol.metadata().behaviors() {
+        if behavior.kind() == KestrelBehaviorKind::MemberAccess
+            && let Some(access) = behavior.as_ref().downcast_ref::<MemberAccessBehavior>()
+        {
+            let member_ty = transform_ty(model, access.member_type(), substitutions, receiver_ty);
+            return Some(MemberResolution {
+                ty: member_ty,
+                symbol_id: member_id,
+                substitutions: substitutions.clone(),
+                parameters: vec![],
+                returns_self: false,
+                where_constraints: WhereClause::new(),
+                required_parameter_count: 0,
+            });
+        }
+        if behavior.kind() == KestrelBehaviorKind::ComputedMemberAccess
+            && let Some(access) = behavior
+                .as_ref()
+                .downcast_ref::<ComputedMemberAccessBehavior>()
+        {
+            let member_ty = transform_ty(model, access.member_type(), substitutions, receiver_ty);
+            return Some(MemberResolution {
+                ty: member_ty,
+                symbol_id: member_id,
+                substitutions: substitutions.clone(),
+                parameters: vec![],
+                returns_self: false,
+                where_constraints: WhereClause::new(),
+                required_parameter_count: 0,
+            });
+        }
+    }
+
+    None
+}
+
+fn dedup_candidates_by_symbol_id(candidates: &mut Vec<MemberResolution>) {
+    let mut seen = HashSet::new();
+    candidates.retain(|c| seen.insert(c.symbol_id));
 }
 
 /// Walk up from a function to find if it's inside an extension,
