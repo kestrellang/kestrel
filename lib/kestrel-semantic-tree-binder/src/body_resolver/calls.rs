@@ -24,7 +24,8 @@ use kestrel_semantic_tree::symbol::protocol::ProtocolSymbol;
 use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
 use kestrel_semantic_tree::symbol::subscript::SubscriptSymbol;
 use kestrel_semantic_tree::symbol::type_parameter::TypeParameterSymbol;
-use kestrel_semantic_tree::ty::{Substitutions, Ty, TyKind};
+use kestrel_semantic_tree::ty::{Constraint, Substitutions, Ty, TyKind};
+use kestrel_semantic_type_inference::TypeOracle;
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::{Symbol, SymbolId};
@@ -491,24 +492,15 @@ pub fn resolve_call(
             ref candidates,
             ref method_name,
         } => {
-            // Phase 15 Step 1 (incremental):
-            // - Keep eager resolution for simple single-candidate methods.
-            // - Defer multi-candidate labeled instance overloads to inference.
-            //
-            // This preserves current bind-time mutability/access-mode behavior
-            // for common calls while moving overload selection to TypeOracle.
-            let has_labels = arg_labels.iter().any(|l| l.is_some());
+            // Phase 15 Step 1: defer all instance method calls to type inference.
+            // Static calls (TypeRef/TypeParameterRef/AssociatedTypeRef receivers) and
+            // calls with explicit type args are still resolved eagerly (Steps 3+).
             let is_static_receiver = matches!(
                 receiver.kind,
                 ExprKind::TypeRef(_) | ExprKind::TypeParameterRef(_) | ExprKind::AssociatedTypeRef
             );
-            let should_defer =
-                explicit_type_args.is_none()
-                    && candidates.len() > 1
-                    && has_labels
-                    && !is_static_receiver;
 
-            if !should_defer {
+            if is_static_receiver || explicit_type_args.is_some() {
                 resolve_method_call(
                     receiver,
                     candidates,
@@ -941,6 +933,185 @@ fn substitute_receiver_type_args(ty: &Ty, receiver_ty: &Ty) -> Ty {
     }
 }
 
+/// Returns true if `ty` references any TypeParameter whose ID is in `method_param_ids`.
+/// Used to detect method-level type parameters (like `Acc` in `fold[Acc]`) that
+/// cannot be resolved at bind time and must remain as `Ty::infer` in best-effort
+/// return type estimates. Struct/enum-level type params (like `T` in `Box[T]`) are
+/// already substituted by the receiver type and do NOT need this guard.
+fn contains_method_type_param(
+    ty: &Ty,
+    method_param_ids: &std::collections::HashSet<semantic_tree::symbol::SymbolId>,
+) -> bool {
+    if method_param_ids.is_empty() {
+        return false;
+    }
+    match ty.kind() {
+        TyKind::TypeParameter(tp) => {
+            method_param_ids.contains(&tp.metadata().id())
+        },
+        TyKind::Function { params, return_type } => {
+            params.iter().any(|p| contains_method_type_param(p, method_param_ids))
+                || contains_method_type_param(return_type, method_param_ids)
+        },
+        TyKind::Tuple(elems) => elems.iter().any(|e| contains_method_type_param(e, method_param_ids)),
+        TyKind::Struct { substitutions, .. }
+        | TyKind::Enum { substitutions, .. }
+        | TyKind::Protocol { substitutions, .. }
+        | TyKind::TypeAlias { substitutions, .. } => {
+            substitutions.iter().any(|(_, t)| contains_method_type_param(t, method_param_ids))
+        },
+        TyKind::Pointer(inner) => contains_method_type_param(inner, method_param_ids),
+        TyKind::AssociatedType { container, .. } => {
+            container.as_ref().is_some_and(|c| contains_method_type_param(c, method_param_ids))
+        },
+        _ => false,
+    }
+}
+
+/// Returns true if `ty` contains any `TypeParameter` NOT listed in `method_param_ids`.
+/// Used when the receiver is itself a TypeParameter (e.g. `T: SomeProtocol`): we can
+/// return concrete types, but must defer to the solver for types that still contain
+/// protocol-level type parameters (e.g. `Target` from `Converter[Target]`).
+fn contains_non_method_type_parameter(
+    ty: &Ty,
+    method_param_ids: &std::collections::HashSet<semantic_tree::symbol::SymbolId>,
+) -> bool {
+    match ty.kind() {
+        TyKind::TypeParameter(tp) => !method_param_ids.contains(&tp.metadata().id()),
+        TyKind::Function { params, return_type } => {
+            params
+                .iter()
+                .any(|p| contains_non_method_type_parameter(p, method_param_ids))
+                || contains_non_method_type_parameter(return_type, method_param_ids)
+        },
+        TyKind::Tuple(elems) => {
+            elems
+                .iter()
+                .any(|e| contains_non_method_type_parameter(e, method_param_ids))
+        },
+        TyKind::Struct { substitutions, .. }
+        | TyKind::Enum { substitutions, .. }
+        | TyKind::Protocol { substitutions, .. }
+        | TyKind::TypeAlias { substitutions, .. } => {
+            substitutions
+                .iter()
+                .any(|(_, t)| contains_non_method_type_parameter(t, method_param_ids))
+        },
+        TyKind::Pointer(inner) => contains_non_method_type_parameter(inner, method_param_ids),
+        TyKind::AssociatedType { container, .. } => {
+            container
+                .as_ref()
+                .is_some_and(|c| contains_non_method_type_parameter(c, method_param_ids))
+        },
+        _ => false,
+    }
+}
+
+/// Returns true if `ty` contains `SelfType` anywhere in its structure.
+/// Used to detect return types that can't be concretized at bind time in protocol extensions.
+fn contains_self_type(ty: &Ty) -> bool {
+    match ty.kind() {
+        TyKind::SelfType => true,
+        TyKind::Tuple(elems) => elems.iter().any(contains_self_type),
+        TyKind::Function { params, return_type } => {
+            params.iter().any(contains_self_type) || contains_self_type(return_type)
+        },
+        TyKind::Struct { substitutions, .. }
+        | TyKind::Enum { substitutions, .. }
+        | TyKind::Protocol { substitutions, .. }
+        | TyKind::TypeAlias { substitutions, .. } => {
+            substitutions.iter().any(|(_, t)| contains_self_type(t))
+        },
+        TyKind::Pointer(inner) => contains_self_type(inner),
+        TyKind::AssociatedType { container, .. } => {
+            container.as_ref().is_some_and(|c| contains_self_type(c))
+        },
+        _ => false,
+    }
+}
+
+/// Try to resolve an unqualified AssociatedType using the given receiver type.
+/// Returns `Some(concrete_type)` if the associated type can be resolved, `None` otherwise.
+/// For example: `Item` → resolves to `Int64` when receiver is `ArrayIterator[Int64]`.
+fn try_resolve_assoc_type_from_receiver(
+    ty: &Ty,
+    receiver_ty: &Ty,
+    ctx: &BodyResolutionContext,
+) -> Option<Ty> {
+    match ty.kind() {
+        TyKind::AssociatedType { symbol, container: None } => {
+            // Unqualified AssociatedType: resolve using receiver as the container.
+            ctx.model.resolve_associated_type(receiver_ty, &symbol.metadata().name().value)
+        },
+        TyKind::AssociatedType { container: Some(_), .. } => {
+            // Qualified AssociatedType: try normal resolution.
+            let resolved = resolve_associated_types(ty, ctx);
+            if matches!(resolved.kind(), TyKind::AssociatedType { .. }) {
+                None // Still unresolved
+            } else {
+                Some(resolved)
+            }
+        },
+        _ => None,
+    }
+}
+
+/// Recursively match `pattern` against `concrete` to infer substitutions for method-level
+/// TypeParameters. Only updates `subs` entries for TypeParameters in `method_type_params`.
+fn infer_method_type_params(
+    pattern: &Ty,
+    concrete: &Ty,
+    method_type_params: &[Arc<TypeParameterSymbol>],
+    subs: &mut Substitutions,
+) {
+    match pattern.kind() {
+        TyKind::TypeParameter(tp) => {
+            let tp_id = tp.metadata().id();
+            if method_type_params.iter().any(|p| p.metadata().id() == tp_id)
+                && !subs.contains(tp_id)
+            {
+                subs.insert(tp_id, concrete.clone());
+            }
+        },
+        TyKind::Tuple(pattern_elems) => {
+            if let TyKind::Tuple(concrete_elems) = concrete.kind() {
+                for (pe, ce) in pattern_elems.iter().zip(concrete_elems.iter()) {
+                    infer_method_type_params(pe, ce, method_type_params, subs);
+                }
+            }
+        },
+        TyKind::Struct { substitutions: pattern_subs, .. } => {
+            if let TyKind::Struct { substitutions: concrete_subs, .. } = concrete.kind() {
+                for (id, pattern_sub_ty) in pattern_subs.iter() {
+                    if let Some(concrete_sub_ty) = concrete_subs.get(*id) {
+                        infer_method_type_params(
+                            pattern_sub_ty,
+                            concrete_sub_ty,
+                            method_type_params,
+                            subs,
+                        );
+                    }
+                }
+            }
+        },
+        TyKind::Enum { substitutions: pattern_subs, .. } => {
+            if let TyKind::Enum { substitutions: concrete_subs, .. } = concrete.kind() {
+                for (id, pattern_sub_ty) in pattern_subs.iter() {
+                    if let Some(concrete_sub_ty) = concrete_subs.get(*id) {
+                        infer_method_type_params(
+                            pattern_sub_ty,
+                            concrete_sub_ty,
+                            method_type_params,
+                            subs,
+                        );
+                    }
+                }
+            }
+        },
+        _ => {},
+    }
+}
+
 fn infer_deferred_method_return_type(
     receiver: &Expression,
     candidates: &[SymbolId],
@@ -951,6 +1122,11 @@ fn infer_deferred_method_return_type(
 ) -> Ty {
     // Resolve Self before substituting into candidate signatures.
     let resolved_receiver_ty = resolve_self_type_to_concrete(&receiver.ty, ctx);
+
+    // For Infer receivers, we have no type information at all — can't do anything useful.
+    if matches!(resolved_receiver_ty.kind(), TyKind::Infer) {
+        return Ty::infer(span.clone());
+    }
 
     let mut inferred: Option<Ty> = None;
 
@@ -976,6 +1152,93 @@ fn infer_deferred_method_return_type(
         {
             if !substitutions.is_empty() {
                 candidate_return_ty = substitute_type(&candidate_return_ty, substitutions);
+            }
+        }
+
+        // If the return type still has SelfType after substitution (e.g. `func clone() -> Self`
+        // in a protocol extension), we can't give a concrete type at bind time.
+        if contains_self_type(&candidate_return_ty) {
+            return Ty::infer(span.clone());
+        }
+
+        // If the receiver is a TypeParameter (e.g. `T: Converter[lang.i64]`), we can only
+        // resolve the return type if it's fully concrete — or contains only method-level
+        // TypeParameters (which the block below will resolve). Protocol-level TypeParameters
+        // (like `Target` from `Converter[Target]`) can't be resolved from the constraint
+        // at bind time; the inference solver must handle them.
+        if matches!(resolved_receiver_ty.kind(), TyKind::TypeParameter(_)) {
+            let method_param_ids_for_tp_check: std::collections::HashSet<_> = symbol
+                .as_any()
+                .downcast_ref::<FunctionSymbol>()
+                .map(|f| f.type_parameters().iter().map(|tp| tp.metadata().id()).collect())
+                .unwrap_or_default();
+            if contains_non_method_type_parameter(
+                &candidate_return_ty,
+                &method_param_ids_for_tp_check,
+            ) {
+                return Ty::infer(span.clone());
+            }
+        }
+
+        // If the return type still has method-level TypeParameters, try to resolve them.
+        let method_type_params = symbol
+            .as_any()
+            .downcast_ref::<FunctionSymbol>()
+            .map(|f| f.type_parameters())
+            .unwrap_or_default();
+
+        if !method_type_params.is_empty() {
+            let method_param_ids: std::collections::HashSet<_> =
+                method_type_params.iter().map(|tp| tp.metadata().id()).collect();
+
+            if contains_method_type_param(&candidate_return_ty, &method_param_ids) {
+                // Step 1: infer TypeParams from argument types (handles `zip[Other]`, `fold[Acc]`).
+                let arg_types: Vec<Ty> =
+                    arguments.iter().map(|a| a.value.ty.clone()).collect();
+                let mut subs =
+                    infer_type_arguments(&method_type_params, &callable, &arg_types);
+
+                // Step 2: infer remaining TypeParams from where clause TypeEquality constraints
+                // (handles `unzip[A, B]() where Item = (A, B)`).
+                if let Some(func_sym) = symbol.as_any().downcast_ref::<FunctionSymbol>() {
+                    let where_clause = func_sym.where_clause();
+                    for constraint in where_clause.constraints() {
+                        if let Constraint::TypeEquality { left, right, .. } = constraint {
+                            if let Some(resolved) = try_resolve_assoc_type_from_receiver(
+                                left,
+                                &resolved_receiver_ty,
+                                ctx,
+                            ) {
+                                infer_method_type_params(
+                                    right,
+                                    &resolved,
+                                    &method_type_params,
+                                    &mut subs,
+                                );
+                            }
+                            if let Some(resolved) = try_resolve_assoc_type_from_receiver(
+                                right,
+                                &resolved_receiver_ty,
+                                ctx,
+                            ) {
+                                infer_method_type_params(
+                                    left,
+                                    &resolved,
+                                    &method_type_params,
+                                    &mut subs,
+                                );
+                            }
+                        }
+                    }
+                }
+                // If all method TypeParams are resolved, substitute them into the return type.
+                // Note: A TypeParam resolved to `Infer` is still "resolved" — the solver will
+                // fill in the concrete type later (e.g. `map[U]` where U comes from a closure).
+                if method_type_params.iter().all(|tp| subs.contains(tp.metadata().id())) {
+                    candidate_return_ty = substitute_type(&candidate_return_ty, &subs);
+                } else {
+                    return Ty::infer(span.clone());
+                }
             }
         }
 
