@@ -1231,14 +1231,17 @@ fn infer_deferred_method_return_type(
                         }
                     }
                 }
-                // If all method TypeParams are resolved, substitute them into the return type.
-                // Note: A TypeParam resolved to `Infer` is still "resolved" — the solver will
-                // fill in the concrete type later (e.g. `map[U]` where U comes from a closure).
-                if method_type_params.iter().all(|tp| subs.contains(tp.metadata().id())) {
-                    candidate_return_ty = substitute_type(&candidate_return_ty, &subs);
-                } else {
-                    return Ty::infer(span.clone());
+                // Substitute all resolved method TypeParams into the return type.
+                // For unresolved params (e.g. `U` from a closure), insert Infer so the
+                // return type is partially concrete (e.g. `Dictionary[K, _, H]` instead of
+                // bare `_`). This gives downstream bind-time checks enough info to find
+                // subscripts, fields, etc. The solver fills in the real type later.
+                for tp in &method_type_params {
+                    if !subs.contains(tp.metadata().id()) {
+                        subs.insert(tp.metadata().id(), Ty::infer(span.clone()));
+                    }
                 }
+                candidate_return_ty = substitute_type(&candidate_return_ty, &subs);
             }
         }
 

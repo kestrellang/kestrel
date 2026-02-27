@@ -325,92 +325,7 @@ impl TypeOracle for SemanticModel {
         is_static: bool,
         argument_count: usize,
     ) -> Result<MemberResolution, MemberError> {
-        if let Ok(resolution) = self.resolve_member(receiver_ty, member, is_static)
-            && argument_count >= resolution.required_parameter_count
-            && argument_count <= resolution.parameters.len()
-        {
-            return Ok(resolution);
-        }
-
-        if matches!(receiver_ty.kind(), TyKind::Infer) {
-            return Err(MemberError::UnknownType);
-        }
-
-        let (container, substitutions) = match get_type_container_with_subs(self, receiver_ty) {
-            Some((c, s)) => (c, s),
-            None => {
-                if let Some(resolution) = resolve_member_via_protocol_conformance(
-                    self,
-                    receiver_ty,
-                    member,
-                    Some(argument_count),
-                ) {
-                    return Ok(resolution);
-                }
-                return Err(MemberError::NotFound {
-                    receiver_ty: receiver_ty.clone(),
-                    member: member.to_string(),
-                });
-            },
-        };
-
-        // Collect candidates with specificity scores.
-        // Direct members get max specificity (usize::MAX), extension members
-        // get a score based on how many concrete type args the extension has.
-        let mut candidates: Vec<(usize, Arc<dyn Symbol<KestrelLanguage>>)> = container
-            .metadata()
-            .children()
-            .into_iter()
-            .filter(|c| c.metadata().name().value == member)
-            .map(|c| (usize::MAX, c))
-            .collect();
-
-        let extensions = self.query(ExtensionsFor {
-            target_id: container.metadata().id(),
-        });
-        for ext in extensions.iter() {
-            let specificity = extension_specificity(ext);
-            for child in ext.metadata().children() {
-                if child.metadata().name().value == member {
-                    candidates.push((specificity, child));
-                }
-            }
-        }
-
-        // Sort by specificity descending (most specific first)
-        candidates.sort_by(|a, b| b.0.cmp(&a.0));
-
-        for (_, candidate) in candidates {
-            if let Some(callable) = candidate.metadata().get_behavior::<CallableBehavior>() {
-                if !callable.arity_matches(argument_count) {
-                    continue;
-                }
-                if callable.is_static() != is_static {
-                    continue;
-                }
-
-                return Ok(resolve_callable_member(
-                    &callable,
-                    candidate.as_ref(),
-                    candidate.metadata().id(),
-                    &substitutions,
-                    receiver_ty,
-                    true,
-                    AssocTypeResolution::Shallow(self),
-                ));
-            }
-        }
-
-        if let Some(resolution) =
-            resolve_member_via_protocol_conformance(self, receiver_ty, member, Some(argument_count))
-        {
-            return Ok(resolution);
-        }
-
-        Err(MemberError::NotFound {
-            receiver_ty: receiver_ty.clone(),
-            member: member.to_string(),
-        })
+        resolve_member_with_arity_and_labels_impl(self, receiver_ty, member, is_static, argument_count, &[])
     }
 
     fn resolve_member_with_labels(
@@ -420,9 +335,18 @@ impl TypeOracle for SemanticModel {
         is_static: bool,
         labels: &[Option<String>],
     ) -> Result<MemberResolution, MemberError> {
-        // If no labels, fall back to arity-based resolution
+        // If no labels, fall back to arity-based resolution with label filtering.
+        // Passing labels (even all-None) enables disambiguation when multiple
+        // overloads share the same arity but differ by external labels.
         if labels.iter().all(|l| l.is_none()) {
-            return self.resolve_member_with_arity(receiver_ty, member, is_static, labels.len());
+            return resolve_member_with_arity_and_labels_impl(
+                self,
+                receiver_ty,
+                member,
+                is_static,
+                labels.len(),
+                labels,
+            );
         }
 
         if matches!(receiver_ty.kind(), TyKind::Infer) {
@@ -2026,6 +1950,140 @@ fn resolve_contextual_member_candidate(
     }
 
     None
+}
+
+/// Arity-based member resolution with optional label filtering.
+///
+/// When `labels` is non-empty, candidates are first filtered by label signature.
+/// If no label-matching candidate is found, falls back to arity-only matching.
+/// When `labels` is empty, behaves identically to the old `resolve_member_with_arity`.
+fn resolve_member_with_arity_and_labels_impl(
+    model: &SemanticModel,
+    receiver_ty: &Ty,
+    member: &str,
+    is_static: bool,
+    argument_count: usize,
+    labels: &[Option<String>],
+) -> Result<MemberResolution, MemberError> {
+    // For single-candidate lookups, try the simple path first.
+    // Only use this fast path when no labels are provided (labels slice is empty),
+    // because labels need multi-candidate filtering to disambiguate overloads.
+    if labels.is_empty() {
+        if let Ok(resolution) = model.resolve_member(receiver_ty, member, is_static)
+            && argument_count >= resolution.required_parameter_count
+            && argument_count <= resolution.parameters.len()
+        {
+            return Ok(resolution);
+        }
+    }
+
+    if matches!(receiver_ty.kind(), TyKind::Infer) {
+        return Err(MemberError::UnknownType);
+    }
+
+    let (container, substitutions) = match get_type_container_with_subs(model, receiver_ty) {
+        Some((c, s)) => (c, s),
+        None => {
+            if let Some(resolution) = resolve_member_via_protocol_conformance(
+                model,
+                receiver_ty,
+                member,
+                Some(argument_count),
+            ) {
+                return Ok(resolution);
+            }
+            return Err(MemberError::NotFound {
+                receiver_ty: receiver_ty.clone(),
+                member: member.to_string(),
+            });
+        },
+    };
+
+    // Collect candidates with specificity scores.
+    // Direct members get max specificity (usize::MAX), extension members
+    // get a score based on how many concrete type args the extension has.
+    let mut candidates: Vec<(usize, Arc<dyn Symbol<KestrelLanguage>>)> = container
+        .metadata()
+        .children()
+        .into_iter()
+        .filter(|c| c.metadata().name().value == member)
+        .map(|c| (usize::MAX, c))
+        .collect();
+
+    let extensions = model.query(ExtensionsFor {
+        target_id: container.metadata().id(),
+    });
+    for ext in extensions.iter() {
+        let specificity = extension_specificity(ext);
+        for child in ext.metadata().children() {
+            if child.metadata().name().value == member {
+                candidates.push((specificity, child));
+            }
+        }
+    }
+
+    // Sort by specificity descending (most specific first)
+    candidates.sort_by(|a, b| b.0.cmp(&a.0));
+
+    // Use label-aware matching when labels are provided
+    let use_labels = !labels.is_empty();
+
+    if use_labels {
+        // First pass: try label-aware matching
+        for (_, candidate) in &candidates {
+            if let Some(callable) = candidate.metadata().get_behavior::<CallableBehavior>() {
+                if !matches_signature_labels(&callable, labels) {
+                    continue;
+                }
+                if callable.is_static() != is_static {
+                    continue;
+                }
+
+                return Ok(resolve_callable_member(
+                    &callable,
+                    candidate.as_ref(),
+                    candidate.metadata().id(),
+                    &substitutions,
+                    receiver_ty,
+                    true,
+                    AssocTypeResolution::Shallow(model),
+                ));
+            }
+        }
+    }
+
+    // Arity-only matching (or fallback from label matching)
+    for (_, candidate) in &candidates {
+        if let Some(callable) = candidate.metadata().get_behavior::<CallableBehavior>() {
+            if !callable.arity_matches(argument_count) {
+                continue;
+            }
+            if callable.is_static() != is_static {
+                continue;
+            }
+
+            return Ok(resolve_callable_member(
+                &callable,
+                candidate.as_ref(),
+                candidate.metadata().id(),
+                &substitutions,
+                receiver_ty,
+                true,
+                AssocTypeResolution::Shallow(model),
+            ));
+        }
+    }
+
+    if let Some(resolution) =
+        resolve_member_via_protocol_conformance(model, receiver_ty, member, Some(argument_count))
+    {
+        return Ok(resolution);
+    }
+
+    Err(MemberError::NotFound {
+        receiver_ty: receiver_ty.clone(),
+        member: member.to_string(),
+    })
 }
 
 fn dedup_candidates_by_symbol_id(candidates: &mut Vec<MemberResolution>) {
