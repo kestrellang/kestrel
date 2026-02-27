@@ -1135,6 +1135,9 @@ pub enum ExprKind {
         receiver: Box<Expression>,
         method_name: String,
         arguments: Vec<CallArgument>,
+        /// Explicit type arguments provided at the call site (e.g., `x.method[Int]()`).
+        /// Converted to substitutions during constraint generation.
+        explicit_type_args: Option<Vec<Ty>>,
     },
 
     /// Deferred static method call on a type that may contain inference variables.
@@ -1152,6 +1155,9 @@ pub enum ExprKind {
         /// Protocol method candidates for conformance checking.
         /// If present, generates "does not conform to X" errors instead of "no member Y".
         protocol_candidates: Vec<SymbolId>,
+        /// Explicit type arguments provided at the call site (e.g., `Type.method[Int]()`).
+        /// Converted to substitutions during constraint generation.
+        explicit_type_args: Option<Vec<Ty>>,
     },
 
     /// Implicit struct initialization: `Point(x: 1, y: 2)` when no explicit init exists.
@@ -1761,6 +1767,7 @@ impl Expression {
                     receiver,
                     method_name,
                     arguments,
+                    ..
                 } => {
                     let args: Vec<String> =
                         arguments.iter().map(|a| format_expr(&a.value)).collect();
@@ -2515,6 +2522,7 @@ impl Expression {
         receiver: Expression,
         method_name: String,
         arguments: Vec<CallArgument>,
+        explicit_type_args: Option<Vec<Ty>>,
         result_ty: Ty,
         span: Span,
     ) -> Self {
@@ -2524,6 +2532,7 @@ impl Expression {
                 receiver: Box::new(receiver),
                 method_name,
                 arguments,
+                explicit_type_args,
             },
             ty: result_ty,
             span,
@@ -2543,6 +2552,7 @@ impl Expression {
         method_name: String,
         arguments: Vec<CallArgument>,
         protocol_candidates: Vec<SymbolId>,
+        explicit_type_args: Option<Vec<Ty>>,
         result_ty: Ty,
         span: Span,
     ) -> Self {
@@ -2553,6 +2563,7 @@ impl Expression {
                 method_name,
                 arguments,
                 protocol_candidates,
+                explicit_type_args,
             },
             ty: result_ty,
             span,
@@ -3478,6 +3489,7 @@ impl Expression {
                 receiver,
                 method_name,
                 arguments,
+                explicit_type_args,
             } => ExprKind::DeferredMethodCall {
                 receiver: Box::new(receiver.apply_substitutions(subs)),
                 method_name: method_name.clone(),
@@ -3489,6 +3501,9 @@ impl Expression {
                         span: arg.span.clone(),
                     })
                     .collect(),
+                explicit_type_args: explicit_type_args.as_ref().map(|args| {
+                    args.iter().map(|ty| ty.apply_substitutions(subs)).collect()
+                }),
             },
 
             ExprKind::DeferredStaticCall {
@@ -3496,6 +3511,7 @@ impl Expression {
                 method_name,
                 arguments,
                 protocol_candidates,
+                explicit_type_args,
             } => ExprKind::DeferredStaticCall {
                 target_ty: target_ty.apply_substitutions(subs),
                 method_name: method_name.clone(),
@@ -3508,6 +3524,9 @@ impl Expression {
                     })
                     .collect(),
                 protocol_candidates: protocol_candidates.clone(),
+                explicit_type_args: explicit_type_args.as_ref().map(|args| {
+                    args.iter().map(|ty| ty.apply_substitutions(subs)).collect()
+                }),
             },
 
             ExprKind::ImplicitStructInit {

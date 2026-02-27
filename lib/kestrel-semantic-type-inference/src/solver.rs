@@ -403,6 +403,7 @@ fn try_solve(
             result,
             expr_id,
             substitutions,
+            explicit_type_args,
             span,
         } => resolve_member(
             ctx,
@@ -414,6 +415,7 @@ fn try_solve(
             *result,
             *expr_id,
             substitutions,
+            explicit_type_args,
             span,
         ),
         Constraint::ImplicitMember {
@@ -1720,6 +1722,7 @@ fn resolve_member(
     result: TyId,
     expr_id: kestrel_semantic_tree::expr::ExprId,
     call_site_substitutions: &kestrel_semantic_tree::ty::Substitutions,
+    explicit_type_args: &Option<Vec<kestrel_semantic_tree::ty::Ty>>,
     span: &Span,
 ) -> Result<SolveResult, InferenceError> {
     let mut receiver_ty = resolve_type(ctx, receiver);
@@ -1817,6 +1820,28 @@ fn resolve_member(
             let mut substitutions = resolution.substitutions.clone();
             for (param_id, ty) in call_site_substitutions.iter() {
                 substitutions.insert(*param_id, ty.clone());
+            }
+
+            // Convert explicit type args to substitutions by zipping with the resolved
+            // method's type parameter IDs. This handles calls like `x.map[Int64](1)`.
+            // We also equate the infer vars (created by resolve_callable_member) with the
+            // explicit type args so that types in resolution.ty and resolution.parameters
+            // that contain these infer vars get properly resolved.
+            if let Some(type_args) = explicit_type_args {
+                for (param_id, type_arg) in resolution
+                    .method_type_param_ids
+                    .iter()
+                    .zip(type_args.iter())
+                {
+                    ctx.register_type(type_arg);
+                    // If the resolution already has an infer var for this param, equate it
+                    // with the explicit type arg so unification resolves the infer var.
+                    if let Some(infer_var) = resolution.substitutions.get(*param_id) {
+                        ctx.register_type(infer_var);
+                        ctx.equate(infer_var.id(), type_arg.id(), span.clone());
+                    }
+                    substitutions.insert(*param_id, type_arg.clone());
+                }
             }
 
             // Record the value resolution with merged substitutions

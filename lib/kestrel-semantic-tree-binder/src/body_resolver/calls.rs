@@ -10,9 +10,8 @@ use kestrel_semantic_model::queries::ExtensionsFor;
 use kestrel_semantic_model::{IsVisibleFrom, SemanticModel, SymbolFor};
 use kestrel_semantic_tree::behavior::callable::{CallableBehavior, ParameterAccessMode};
 use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
-use kestrel_semantic_tree::behavior::extension_target::ExtensionTargetBehavior;
 use kestrel_semantic_tree::behavior::subscript::SubscriptBehavior;
-use kestrel_semantic_tree::expr::{CallArgument, ExprId, ExprKind, Expression};
+use kestrel_semantic_tree::expr::{CallArgument, ExprKind, Expression};
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::enum_case::EnumCaseSymbol;
 use kestrel_semantic_tree::symbol::enum_symbol::EnumSymbol;
@@ -37,8 +36,8 @@ use crate::diagnostics::{
     CannotPassImmutableFieldToMutatingError, CannotPassLetToMutatingError,
     CannotPassTemporaryToMutatingError, ClosureArityError, ConstraintNotSatisfiedError,
     FieldNotVisibleForInitError, ImplicitInitArityError, ImplicitInitLabelError,
-    InstanceMethodOnTypeError, MemberNotVisibleError, NoInitInTypeParameterBoundsError,
-    NoMatchingInitializerError, NoMatchingMethodError, NoMatchingOverloadError,
+    InstanceMethodOnTypeError, NoInitInTypeParameterBoundsError,
+    NoMatchingInitializerError, NoMatchingOverloadError,
     NoMatchingTypeParameterInitError, NonCallableError, NotGenericError, OverloadDescription,
     PrimitiveMethodArityError, TooFewTypeArgumentsError, TooManyTypeArgumentsError,
     TypeArgsOnNonGenericError, UnconstrainedTypeParameterMemberError,
@@ -53,7 +52,7 @@ use super::members::{
 };
 use super::utils::{
     create_generic_struct_type, create_struct_type, create_struct_type_with_type_args,
-    find_type_directed_match, get_associated_type_bounds_from_context, get_callable_behavior,
+    find_type_directed_match, get_callable_behavior,
     get_type_container, get_type_parameter_bounds_by_id, infer_type_arguments, is_expression_kind,
     matches_signature, replace_type_params_except, resolve_associated_types, substitute_self,
     substitute_type, type_satisfies_bound, validate_not_standalone_type_param,
@@ -84,8 +83,6 @@ fn verify_where_clause_constraints_from_substitutions(
                     .get(*param_id)
                     .or_else(|| if param_name == "Self" { self_ty } else { None });
                 if let Some(actual_ty) = actual_ty {
-                    // Defer checks for unresolved placeholders and generic type parameters.
-                    // These must be validated after concrete instantiation.
                     if matches!(
                         actual_ty.kind(),
                         TyKind::Infer | TyKind::TypeParameter(_) | TyKind::SelfType
@@ -492,33 +489,45 @@ pub fn resolve_call(
             ref candidates,
             ref method_name,
         } => {
-            // Phase 15 Step 1: defer all instance method calls to type inference.
-            // Static calls (TypeRef/TypeParameterRef/AssociatedTypeRef receivers) and
-            // calls with explicit type args are still resolved eagerly (Steps 3+).
-            let is_static_receiver = matches!(
+            // Phase 15: defer ALL method calls to type inference.
+            if matches!(
                 receiver.kind,
                 ExprKind::TypeRef(_) | ExprKind::TypeParameterRef(_) | ExprKind::AssociatedTypeRef
-            );
-
-            if is_static_receiver || explicit_type_args.is_some() {
-                resolve_method_call(
-                    receiver,
+            ) {
+                // Static method calls: defer via DeferredStaticCall.
+                // For generic types without explicit type args (e.g., `Box.wrap(42)`),
+                // fill in Infer types so the solver can infer them from arguments.
+                let target_ty = fill_missing_type_params(&receiver.ty, &span);
+                let filled_receiver = Expression {
+                    ty: target_ty.clone(),
+                    ..(**receiver).clone()
+                };
+                let deferred_return_ty = infer_deferred_method_return_type(
+                    &filled_receiver,
                     candidates,
-                    method_name,
-                    arguments,
+                    &arguments,
                     arg_labels,
-                    explicit_type_args,
-                    span,
+                    &explicit_type_args,
+                    &span,
                     ctx,
+                );
+                Expression::deferred_static_call(
+                    target_ty,
+                    method_name.to_string(),
+                    arguments,
+                    vec![],
+                    explicit_type_args,
+                    deferred_return_ty,
+                    span,
                 )
             } else {
-                // Preserve a best-effort return type so downstream bind-time checks
-                // (e.g. callable/subscript uses on the bound result) remain stable.
+                // Instance method calls: defer via DeferredMethodCall.
                 let deferred_return_ty = infer_deferred_method_return_type(
                     receiver,
                     candidates,
                     &arguments,
                     arg_labels,
+                    &explicit_type_args,
                     &span,
                     ctx,
                 );
@@ -526,6 +535,7 @@ pub fn resolve_call(
                     (**receiver).clone(),
                     method_name.to_string(),
                     arguments,
+                    explicit_type_args,
                     deferred_return_ty,
                     span,
                 )
@@ -1112,11 +1122,43 @@ fn infer_method_type_params(
     }
 }
 
+/// For generic struct/enum types without explicit type arguments (e.g., `Box` from `Box.wrap(42)`),
+/// fill in inference variables for each type parameter so the solver can infer them from arguments.
+/// Returns the type unchanged if it already has substitutions or is non-generic.
+fn fill_missing_type_params(ty: &Ty, span: &Span) -> Ty {
+    match ty.kind() {
+        TyKind::Struct { symbol, substitutions } if substitutions.is_empty() => {
+            let type_params = symbol.type_parameters();
+            if type_params.is_empty() {
+                return ty.clone();
+            }
+            let mut subs = Substitutions::new();
+            for param in type_params {
+                subs.insert(param.metadata().id(), Ty::infer(span.clone()));
+            }
+            Ty::generic_struct(symbol.clone(), subs, span.clone())
+        },
+        TyKind::Enum { symbol, substitutions } if substitutions.is_empty() => {
+            let type_params = symbol.type_parameters();
+            if type_params.is_empty() {
+                return ty.clone();
+            }
+            let mut subs = Substitutions::new();
+            for param in type_params {
+                subs.insert(param.metadata().id(), Ty::infer(span.clone()));
+            }
+            Ty::generic_enum(symbol.clone(), subs, span.clone())
+        },
+        _ => ty.clone(),
+    }
+}
+
 fn infer_deferred_method_return_type(
     receiver: &Expression,
     candidates: &[SymbolId],
     arguments: &[CallArgument],
     arg_labels: &[Option<String>],
+    explicit_type_args: &Option<Vec<Ty>>,
     span: &Span,
     ctx: &mut BodyResolutionContext,
 ) -> Ty {
@@ -1192,11 +1234,19 @@ fn infer_deferred_method_return_type(
                 method_type_params.iter().map(|tp| tp.metadata().id()).collect();
 
             if contains_method_type_param(&candidate_return_ty, &method_param_ids) {
-                // Step 1: infer TypeParams from argument types (handles `zip[Other]`, `fold[Acc]`).
-                let arg_types: Vec<Ty> =
-                    arguments.iter().map(|a| a.value.ty.clone()).collect();
-                let mut subs =
-                    infer_type_arguments(&method_type_params, &callable, &arg_types);
+                // Step 0: use explicit type args if provided (handles `cast[Bucket[K, V]]`).
+                let mut subs = if let Some(type_args) = explicit_type_args {
+                    let mut s = Substitutions::new();
+                    for (tp, ty_arg) in method_type_params.iter().zip(type_args.iter()) {
+                        s.insert(tp.metadata().id(), ty_arg.clone());
+                    }
+                    s
+                } else {
+                    // Step 1: infer TypeParams from argument types (handles `zip[Other]`, `fold[Acc]`).
+                    let arg_types: Vec<Ty> =
+                        arguments.iter().map(|a| a.value.ty.clone()).collect();
+                    infer_type_arguments(&method_type_params, &callable, &arg_types)
+                };
 
                 // Step 2: infer remaining TypeParams from where clause TypeEquality constraints
                 // (handles `unzip[A, B]() where Item = (A, B)`).
@@ -2001,679 +2051,6 @@ fn resolve_implicit_init(
     Expression::implicit_struct_init(struct_ty, arguments, span)
 }
 
-/// Resolve a method call from a MethodRef expression
-pub fn resolve_method_call(
-    receiver: &Expression,
-    candidates: &[SymbolId],
-    method_name: &str,
-    arguments: Vec<CallArgument>,
-    arg_labels: &[Option<String>],
-    explicit_type_args: Option<Vec<Ty>>,
-    span: Span,
-    ctx: &mut BodyResolutionContext,
-) -> Expression {
-    use super::utils::substitute_self;
-    use kestrel_semantic_tree::symbol::function::FunctionSymbol;
-
-    debug_trace!(
-        "[METHOD_CALL] Resolving method call '{}' with {} candidates (receiver type: {})",
-        method_name,
-        candidates.len(),
-        receiver.ty
-    );
-
-    // Find matching overload
-    let mut invisible_matches = Vec::new();
-
-    for &candidate_id in candidates {
-        if let Some(symbol) = ctx.model.query(SymbolFor { id: candidate_id })
-            && let Some(orig_callable) = get_callable_behavior(&symbol)
-            && matches_signature(&orig_callable, arguments.len(), arg_labels)
-        {
-            debug_trace!(
-                "[METHOD_CALL] Candidate '{}' matches signature (symbol: {})",
-                method_name,
-                symbol.metadata().name().value
-            );
-            // Check visibility
-            if !ctx.model.query(IsVisibleFrom {
-                target: candidate_id,
-                context: ctx.function_id,
-            }) {
-                invisible_matches.push(symbol);
-                continue;
-            }
-            debug_trace!(
-                "[METHOD_CALL] Candidate '{}' is visible, proceeding with resolution",
-                method_name
-            );
-
-            // Build substitutions from the receiver type
-            // e.g., for Box[Int], we get {T -> Int}
-            // For static methods (TypeRef receiver), get the struct type from the symbol
-            // For instance methods, resolve Self to concrete type
-            use super::members::{
-                resolve_callable_associated_types, resolve_self_type_to_concrete,
-                substitute_callable_self,
-            };
-            use kestrel_semantic_tree::behavior::typed::TypedBehavior;
-            let resolved_receiver_ty = match &receiver.kind {
-                ExprKind::TypeRef(type_symbol_id) => {
-                    // For TypeRef, check if receiver.ty has explicit type arguments
-                    // (from qualified path like Box[lang.i64].wrap or Pointer[T](...))
-                    // ANY non-empty substitutions means type args were explicitly written,
-                    // even if those types are type parameters (like T in a generic context)
-                    let has_explicit_type_args = match receiver.ty.kind() {
-                        TyKind::Struct { substitutions, .. }
-                        | TyKind::Enum { substitutions, .. } => {
-                            // Non-empty substitutions = explicit type args were provided
-                            // This includes both concrete types (lang.i64) and type params (T)
-                            !substitutions.is_empty()
-                        },
-                        _ => false,
-                    };
-
-                    if has_explicit_type_args {
-                        // Use receiver.ty directly - it has the qualified type with explicit type args
-                        receiver.ty.clone()
-                    } else {
-                        // Get the base type from the symbol (for initializers, unspecialized generics, etc.)
-                        if let Some(type_sym) = ctx.model.query(SymbolFor {
-                            id: *type_symbol_id,
-                        }) {
-                            if let Some(typed) = type_sym.metadata().get_behavior::<TypedBehavior>()
-                            {
-                                typed.ty().clone()
-                            } else {
-                                receiver.ty.clone()
-                            }
-                        } else {
-                            receiver.ty.clone()
-                        }
-                    }
-                },
-                _ => resolve_self_type_to_concrete(&receiver.ty, ctx), // Instance method
-            };
-            // Expand type aliases to get the underlying type with substitutions
-            // e.g., OptionalTypeOperator[Int] -> Optional[Int]
-            let resolved_receiver_ty = resolved_receiver_ty.expand_aliases();
-
-            // Substitute Self in the callable and resolve associated types
-            // This ensures parameter types like ArrayIterator[Int64].Item become Int64
-            let mut callable = substitute_callable_self(&orig_callable, &resolved_receiver_ty);
-            callable = resolve_callable_associated_types(&callable, ctx);
-
-            // Get return type, substituting Self with the resolved receiver type
-            let mut return_ty = substitute_self(callable.return_type(), &resolved_receiver_ty);
-            // Resolve associated types in the return type (e.g., ArrayIterator[Int64].Item -> Int64)
-            return_ty = resolve_associated_types(&return_ty, ctx);
-            let mut call_substitutions = Substitutions::new();
-            let mut resolved_receiver_ty = resolved_receiver_ty;
-
-            // Helper: collect type parameters from the callable's parameter types
-            fn collect_callable_type_params(
-                callable: &CallableBehavior,
-            ) -> Vec<Arc<TypeParameterSymbol>> {
-                let mut type_params = Vec::new();
-                for param in callable.parameters() {
-                    collect_type_params_from_ty(&param.ty, &mut type_params);
-                }
-                type_params
-            }
-
-            fn collect_type_params_from_ty(ty: &Ty, params: &mut Vec<Arc<TypeParameterSymbol>>) {
-                match ty.kind() {
-                    TyKind::TypeParameter(tp) => {
-                        if !params
-                            .iter()
-                            .any(|p| p.metadata().id() == tp.metadata().id())
-                        {
-                            params.push(tp.clone());
-                        }
-                    },
-                    TyKind::Struct { substitutions, .. } | TyKind::Enum { substitutions, .. } => {
-                        // Note: Array[T] types are handled here too
-                        for (_, sub_ty) in substitutions.iter() {
-                            collect_type_params_from_ty(sub_ty, params);
-                        }
-                    },
-                    TyKind::Tuple(elems) => {
-                        for elem in elems {
-                            collect_type_params_from_ty(elem, params);
-                        }
-                    },
-                    TyKind::Function {
-                        params: fn_params,
-                        return_type,
-                    } => {
-                        for p in fn_params {
-                            collect_type_params_from_ty(p, params);
-                        }
-                        collect_type_params_from_ty(return_type, params);
-                    },
-                    _ => {},
-                }
-            }
-
-            // Check if this is a static method call (TypeRef receiver)
-            let is_static_method = matches!(&receiver.kind, ExprKind::TypeRef(_));
-
-            // Handle TypeParameterRef receiver (static method on type parameter)
-            // e.g., T.create() where T: Factory[lang.i64]
-            // We need to find the protocol bound that contains this method and apply its substitutions
-            if let ExprKind::TypeParameterRef(type_param_id) = &receiver.kind {
-                // Look up protocol bounds for this type parameter
-                let bounds = get_type_parameter_bounds_by_id(*type_param_id, ctx);
-
-                // Find the protocol that contains this method and get composed substitutions
-                for bound in &bounds {
-                    if let TyKind::Protocol {
-                        symbol: proto,
-                        substitutions: proto_subs,
-                    } = bound.kind()
-                    {
-                        // Get composed substitutions tracing through inheritance
-                        if let Some(composed_subs) =
-                            get_method_protocol_substitutions(&symbol, proto, proto_subs)
-                        {
-                            // Apply composed substitutions to return type and callable
-                            if !composed_subs.is_empty() {
-                                return_ty = substitute_type(&return_ty, &composed_subs);
-                                for (param_id, ty) in composed_subs.iter() {
-                                    call_substitutions.insert(*param_id, ty.clone());
-                                }
-                            }
-                            break;
-                        }
-                    }
-                }
-            }
-            // Also handle instance method calls where receiver's TYPE is a TypeParameter
-            // e.g., val.convert() where val: T and T: Converter[lang.i64]
-            else if let TyKind::TypeParameter(type_param) = receiver.ty.kind() {
-                // Look up protocol bounds for this type parameter
-                let bounds = get_type_parameter_bounds_by_id(type_param.metadata().id(), ctx);
-
-                // Find the protocol that contains this method and get composed substitutions
-                for bound in &bounds {
-                    if let TyKind::Protocol {
-                        symbol: proto,
-                        substitutions: proto_subs,
-                    } = bound.kind()
-                    {
-                        // Get composed substitutions tracing through inheritance
-                        if let Some(composed_subs) =
-                            get_method_protocol_substitutions(&symbol, proto, proto_subs)
-                        {
-                            // Apply composed substitutions to return type and callable
-                            if !composed_subs.is_empty() {
-                                return_ty = substitute_type(&return_ty, &composed_subs);
-                                for (param_id, ty) in composed_subs.iter() {
-                                    call_substitutions.insert(*param_id, ty.clone());
-                                }
-                            }
-                            break;
-                        }
-                    }
-                }
-            }
-            // Handle instance method calls where receiver's TYPE is an AssociatedType
-            // e.g., item.myEquals(target) where item: Item and Item: MyEqual[Rhs = Self]
-            // The default Rhs = Self needs to be substituted with the associated type (Item)
-            else if let TyKind::AssociatedType {
-                symbol: assoc_type,
-                container,
-            } = receiver.ty.kind()
-            {
-                // Get bounds for this associated type from its definition and context
-                let bounds = get_associated_type_bounds_from_context(
-                    assoc_type,
-                    container.as_ref().map(|v| &**v),
-                    ctx,
-                );
-
-                // Find the protocol that contains this method and get composed substitutions
-                for bound in &bounds {
-                    // Apply protocol defaults with Self = the associated type (receiver.ty)
-                    // This substitutes defaults like Rhs = Self with Rhs = Item
-                    let bound = apply_protocol_defaults_with_self(bound, &receiver.ty);
-
-                    if let TyKind::Protocol {
-                        symbol: proto,
-                        substitutions: proto_subs,
-                    } = bound.kind()
-                    {
-                        // Get composed substitutions tracing through inheritance
-                        if let Some(mut composed_subs) =
-                            get_method_protocol_substitutions(&symbol, proto, proto_subs)
-                        {
-                            // Also include the proto_subs which have defaults applied
-                            for (param_id, ty) in proto_subs.iter() {
-                                if !composed_subs.contains(*param_id) {
-                                    composed_subs.insert(*param_id, ty.clone());
-                                }
-                            }
-                            // Apply composed substitutions to return type and callable
-                            if !composed_subs.is_empty() {
-                                return_ty = substitute_type(&return_ty, &composed_subs);
-                                for (param_id, ty) in composed_subs.iter() {
-                                    call_substitutions.insert(*param_id, ty.clone());
-                                }
-                            }
-                            break;
-                        }
-                    }
-                }
-            }
-            // Handle methods from protocol conformances for concrete types
-            // e.g., for Int64 conforming to NotEqual[Int64], when calling notEquals(other: Rhs),
-            // we need to substitute Rhs with Int64
-            //
-            // Check if this method comes from a protocol or protocol extension
-            if let Some(method_parent) = symbol.metadata().parent() {
-                // The method could come from:
-                // 1. A protocol directly (parent is Protocol)
-                // 2. A protocol extension (parent is Extension that targets a Protocol)
-                let target_protocol_opt = if method_parent.metadata().kind()
-                    == KestrelSymbolKind::Protocol
-                {
-                    // Direct protocol method
-                    Some((method_parent.metadata().id(), None))
-                } else if method_parent.metadata().kind() == KestrelSymbolKind::Extension {
-                    // Protocol extension method - get the protocol being extended
-                    use kestrel_semantic_tree::behavior::extension_target::ExtensionTargetBehavior;
-                    if let Some(ext_behavior) = method_parent
-                        .metadata()
-                        .get_behavior::<ExtensionTargetBehavior>()
-                        && ext_behavior.is_protocol_extension()
-                    {
-                        let target_ty = ext_behavior.target_type();
-                        // Extract protocol symbol from the target type
-                        if let TyKind::Protocol {
-                            symbol: target_proto,
-                            ..
-                        } = target_ty.kind()
-                        {
-                            // For protocol extensions, we need to use the target protocol directly
-                            Some((target_proto.metadata().id(), Some(target_proto.clone())))
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                };
-
-                if let Some((target_protocol_id, target_protocol_opt)) = target_protocol_opt {
-                    // Find the receiver type's conformance to this protocol
-                    let conformances = ctx
-                        .model
-                        .protocol_conformances_for_type(&resolved_receiver_ty);
-
-                    for conformance_ty in conformances {
-                        if let TyKind::Protocol {
-                            symbol: proto,
-                            substitutions: proto_subs,
-                        } = conformance_ty.kind()
-                        {
-                            // Check if this conformance is for the target protocol (or an ancestor)
-                            let protocol_matches = if proto.metadata().id() == target_protocol_id {
-                                // Direct match
-                                true
-                            } else if let Some(_target_proto) = &target_protocol_opt {
-                                // Check if the conformance protocol inherits from the target
-                                // This handles cases where we have Protocol A: B and the method is from B
-                                get_method_protocol_substitutions(&symbol, proto, proto_subs)
-                                    .is_some()
-                            } else {
-                                // For direct protocol methods, use get_method_protocol_substitutions
-                                get_method_protocol_substitutions(&symbol, proto, proto_subs)
-                                    .is_some()
-                            };
-
-                            if protocol_matches {
-                                // For protocol extension methods, use the conformance substitutions directly
-                                // For direct protocol methods, compose through inheritance
-                                let subs_to_apply = if target_protocol_opt.is_some() {
-                                    // Protocol extension: use conformance substitutions directly
-                                    proto_subs.clone()
-                                } else {
-                                    // Direct protocol method: trace through inheritance
-                                    get_method_protocol_substitutions(&symbol, proto, proto_subs)
-                                        .unwrap_or_default()
-                                };
-
-                                // Apply protocol substitutions to callable and return type
-                                if !subs_to_apply.is_empty() {
-                                    callable = substitute_callable_with_substitutions(
-                                        &callable,
-                                        &subs_to_apply,
-                                    );
-                                    return_ty = substitute_type(&return_ty, &subs_to_apply);
-
-                                    // Add to call_substitutions for later use
-                                    for (param_id, ty) in subs_to_apply.iter() {
-                                        call_substitutions.insert(*param_id, ty.clone());
-                                    }
-                                }
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Protocol(-extension) methods should use conformance substitutions and Self substitution,
-            // not the receiver nominal type's generic substitutions.
-            let method_is_protocol_scoped = symbol.metadata().parent().is_some_and(|parent| {
-                if parent.metadata().kind() == KestrelSymbolKind::Protocol {
-                    return true;
-                }
-                if parent.metadata().kind() == KestrelSymbolKind::Extension
-                    && let Some(ext_behavior) =
-                        parent.metadata().get_behavior::<ExtensionTargetBehavior>()
-                {
-                    return ext_behavior.is_protocol_extension();
-                }
-                false
-            });
-
-            // Handle struct receiver types (e.g., Box[Int])
-            if let Some((struct_sym, substitutions)) = resolved_receiver_ty.as_struct_with_subs() {
-                // Check if we need type inference (only for static methods):
-                // Only when struct is generic but has EMPTY substitutions (Box.wrap case)
-                // If substitutions are non-empty (even with type params like T), we use them directly
-                let needs_inference = is_static_method
-                    && substitutions.is_empty()
-                    && !struct_sym.type_parameters().is_empty();
-
-                if needs_inference {
-                    // Get type parameters from the callable's parameter types
-                    // These are the extension's type params, not the struct's
-                    let callable_type_params = collect_callable_type_params(&callable);
-
-                    if !callable_type_params.is_empty() {
-                        // Infer type params from method arguments
-                        let arg_types: Vec<Ty> =
-                            arguments.iter().map(|a| a.value.ty.clone()).collect();
-                        let inferred =
-                            infer_type_arguments(&callable_type_params, &callable, &arg_types);
-
-                        // Build new substitutions with inferred types
-                        for (param_id, ty) in inferred.iter() {
-                            call_substitutions.insert(*param_id, ty.clone());
-                        }
-
-                        if !substitutions.is_empty() {
-                            // Map struct type params through the substitution chain
-                            // substitutions maps: struct's T -> extension's T
-                            // inferred maps: extension's T -> concrete type
-                            // We need: struct's T -> concrete type
-                            for (struct_param_id, ext_ty) in substitutions.iter() {
-                                let resolved_ty = ext_ty.apply_substitutions(&call_substitutions);
-                                call_substitutions.insert(*struct_param_id, resolved_ty);
-                            }
-                        } else {
-                            // Empty substitutions (generic struct without explicit type args)
-                            // Map callable type params to struct type params positionally
-                            let struct_type_params = struct_sym.type_parameters();
-                            for (callable_tp, struct_tp) in
-                                callable_type_params.iter().zip(struct_type_params.iter())
-                            {
-                                if let Some(inferred_ty) = inferred.get(callable_tp.metadata().id())
-                                {
-                                    call_substitutions
-                                        .insert(struct_tp.metadata().id(), inferred_ty.clone());
-                                }
-                            }
-                        }
-
-                        // Update resolved_receiver_ty with inferred types
-                        resolved_receiver_ty =
-                            resolved_receiver_ty.apply_substitutions(&call_substitutions);
-                        return_ty = callable
-                            .return_type()
-                            .apply_substitutions(&call_substitutions);
-                    }
-                } else {
-                    // Add receiver's substitutions to call_substitutions
-                    if !method_is_protocol_scoped {
-                        for (param_id, ty) in substitutions.iter() {
-                            call_substitutions.insert(*param_id, ty.clone());
-                        }
-                        return_ty = return_ty.apply_substitutions(substitutions);
-                    }
-                }
-            }
-            // Handle enum receiver types (e.g., Optional[Int])
-            else if let Some((enum_sym, substitutions)) = resolved_receiver_ty.as_enum_with_subs()
-            {
-                // Check if we need type inference (only for static methods):
-                // Only when enum is generic but has EMPTY substitutions
-                let needs_inference = is_static_method
-                    && substitutions.is_empty()
-                    && !enum_sym.type_parameters().is_empty();
-
-                if needs_inference {
-                    let callable_type_params = collect_callable_type_params(&callable);
-
-                    if !callable_type_params.is_empty() {
-                        let arg_types: Vec<Ty> =
-                            arguments.iter().map(|a| a.value.ty.clone()).collect();
-                        let inferred =
-                            infer_type_arguments(&callable_type_params, &callable, &arg_types);
-
-                        for (param_id, ty) in inferred.iter() {
-                            call_substitutions.insert(*param_id, ty.clone());
-                        }
-
-                        if !substitutions.is_empty() {
-                            for (enum_param_id, ext_ty) in substitutions.iter() {
-                                let resolved_ty = ext_ty.apply_substitutions(&call_substitutions);
-                                call_substitutions.insert(*enum_param_id, resolved_ty);
-                            }
-                        } else {
-                            // Empty substitutions - map positionally
-                            let enum_type_params = enum_sym.type_parameters();
-                            for (callable_tp, enum_tp) in
-                                callable_type_params.iter().zip(enum_type_params.iter())
-                            {
-                                if let Some(inferred_ty) = inferred.get(callable_tp.metadata().id())
-                                {
-                                    call_substitutions
-                                        .insert(enum_tp.metadata().id(), inferred_ty.clone());
-                                }
-                            }
-                        }
-
-                        resolved_receiver_ty =
-                            resolved_receiver_ty.apply_substitutions(&call_substitutions);
-                        return_ty = callable
-                            .return_type()
-                            .apply_substitutions(&call_substitutions);
-                    }
-                } else if !method_is_protocol_scoped {
-                    for (param_id, ty) in substitutions.iter() {
-                        call_substitutions.insert(*param_id, ty.clone());
-                    }
-                    return_ty = return_ty.apply_substitutions(substitutions);
-                }
-            }
-
-            // Infer type parameters from argument types if method has its own type parameters
-            // This handles cases like Optional.map[U](transform: (T) -> U) where U needs
-            // to be inferred from the closure's return type
-            if explicit_type_args.is_none() {
-                use kestrel_semantic_tree::behavior::generics::GenericsBehavior;
-                if let Some(func_sym) = symbol.as_any().downcast_ref::<FunctionSymbol>()
-                    && let Some(generics) = func_sym.metadata().get_behavior::<GenericsBehavior>()
-                {
-                    let method_type_params = generics.type_parameters();
-                    if !method_type_params.is_empty() {
-                        let arg_types: Vec<Ty> =
-                            arguments.iter().map(|a| a.value.ty.clone()).collect();
-                        // Use infer_type_arguments which handles nested types like (T) -> U
-                        let method_subs =
-                            infer_type_arguments(method_type_params, &callable, &arg_types);
-                        for (param_id, ty) in method_subs.iter() {
-                            call_substitutions.insert(*param_id, ty.clone());
-                        }
-                        // For any type parameters that couldn't be inferred (not in method_subs),
-                        // add them as inference variables so the type inference solver can solve for them
-                        for param in method_type_params {
-                            let param_id = param.metadata().id();
-                            if !call_substitutions.contains(param_id) {
-                                call_substitutions.insert(param_id, Ty::infer(span.clone()));
-                            }
-                        }
-                        // Reapply substitutions to return type (now including inference variables for uninferred params)
-                        return_ty = callable.return_type().clone();
-                        return_ty = return_ty.apply_substitutions(&call_substitutions);
-                    }
-                }
-            }
-
-            // Add explicit type arguments to substitutions and apply to return type
-            if let Some(ref type_args) = explicit_type_args
-                && let Some(func_sym) = symbol.as_any().downcast_ref::<FunctionSymbol>()
-            {
-                let type_params = func_sym.type_parameters();
-                for (param, arg_ty) in type_params.iter().zip(type_args.iter()) {
-                    call_substitutions.insert(param.metadata().id(), arg_ty.clone());
-                }
-                return_ty = substitute_type(&return_ty, &call_substitutions);
-            }
-
-            // Validate method where-clause constraints against final substitutions.
-            if let Some(func_sym) = symbol.as_any().downcast_ref::<FunctionSymbol>() {
-                let where_clause = func_sym.where_clause();
-                verify_where_clause_constraints_from_substitutions(
-                    &where_clause,
-                    &call_substitutions,
-                    Some(&resolved_receiver_ty),
-                    &span,
-                    ctx.model,
-                    ctx.diagnostics,
-                );
-            }
-
-            // If this method comes from an extension, also validate extension target constraints.
-            // This closes gaps where extension where-clauses were accepted during candidate
-            // selection with inference placeholders but become invalid once concrete types are known.
-            if let Some(parent) = symbol.metadata().parent()
-                && parent.metadata().kind() == KestrelSymbolKind::Extension
-                && let Some(ext_behavior) =
-                    parent.metadata().get_behavior::<ExtensionTargetBehavior>()
-            {
-                let where_clause = ext_behavior.where_clause();
-                verify_where_clause_constraints_from_substitutions(
-                    where_clause,
-                    &call_substitutions,
-                    Some(&resolved_receiver_ty),
-                    &span,
-                    ctx.model,
-                    ctx.diagnostics,
-                );
-            }
-
-            // Validate access modes for arguments
-            validate_argument_access_modes(&callable, &arguments, &span, ctx);
-
-            // Compute the function type with substitutions applied
-            // Must substitute both type parameters AND Self, then resolve associated types
-            let method_fn_ty = {
-                let param_tys: Vec<Ty> = callable
-                    .parameters()
-                    .iter()
-                    .map(|p| {
-                        let ty = substitute_type(&p.ty, &call_substitutions);
-                        let ty = substitute_self(&ty, &resolved_receiver_ty);
-                        resolve_associated_types(&ty, ctx)
-                    })
-                    .collect();
-                let ret_ty = substitute_type(&return_ty, &call_substitutions);
-                let ret_ty = resolve_associated_types(&ret_ty, ctx);
-                Ty::function(param_tys, ret_ty, span.clone())
-            };
-
-            // Create method ref with the correct function type
-            let method_ref = Expression {
-                id: ExprId::new(),
-                kind: ExprKind::MethodRef {
-                    receiver: Box::new(receiver.clone()),
-                    candidates: vec![candidate_id],
-                    method_name: method_name.to_string(),
-                },
-                ty: method_fn_ty.clone(),
-                span: span.clone(),
-                mutable: false,
-            };
-
-            // Resolve associated types in the return type (e.g., Array[Int64].Item -> Int64)
-            return_ty = resolve_associated_types(&return_ty, ctx);
-
-            debug_trace!(
-                "[METHOD_CALL] Successfully resolved '{}' to function (return type: {})",
-                method_name,
-                return_ty
-            );
-            debug_trace!(
-                "[METHOD_CALL] Call substitutions: {:?}",
-                call_substitutions
-                    .iter()
-                    .map(|(id, ty)| format!("{:?}={}", id, ty))
-                    .collect::<Vec<_>>()
-            );
-
-            return Expression::generic_call(
-                method_ref,
-                arguments,
-                call_substitutions,
-                return_ty,
-                span,
-            );
-        }
-    }
-
-    // No matching visible method found
-    if !invisible_matches.is_empty() {
-        let first_invisible = &invisible_matches[0];
-        let visibility = first_invisible
-            .metadata()
-            .get_behavior::<kestrel_semantic_tree::behavior::visibility::VisibilityBehavior>()
-            .and_then(|v| v.visibility().map(|vis| vis.to_string()))
-            .unwrap_or_else(|| "internal".to_string());
-
-        let error = MemberNotVisibleError {
-            member_span: span.clone(), // Could be more precise if we had the member name span
-            member_name: method_name.to_string(),
-            base_span: receiver.span.clone(),
-            base_type: receiver.ty.to_string(),
-            visibility,
-        };
-        ctx.diagnostics.add_diagnostic(error.into_diagnostic());
-        return Expression::error(span);
-    }
-
-    // No matching method found at all - collect overload info for error message
-    let receiver_type = receiver.ty.to_string();
-    let available_overloads = collect_overload_descriptions(candidates, ctx.model);
-
-    let error = NoMatchingMethodError {
-        call_span: span.clone(),
-        method_name: method_name.to_string(),
-        receiver_type,
-        provided_labels: arg_labels.to_vec(),
-        provided_arity: arguments.len(),
-        available_overloads,
-    };
-    ctx.diagnostics.add_diagnostic(error.into_diagnostic());
-
-    Expression::error(span)
-}
-
 /// Get the function name from a list of candidate symbol IDs.
 fn get_function_name_from_candidates(candidates: &[SymbolId], model: &SemanticModel) -> String {
     for &candidate_id in candidates {
@@ -2888,47 +2265,6 @@ fn resolve_type_parameter_init_call(
         return_ty,
         span,
     )
-}
-
-/// Apply protocol default type parameters and substitute Self with the provided type.
-///
-/// For example, `MyEqual` with default `Rhs = Self` becomes `MyEqual[Rhs = Item]`
-/// when `self_ty` is `Item` (an associated type).
-///
-/// This function:
-/// 1. Fills in any missing type parameters with their defaults
-/// 2. Substitutes Self with self_ty in all substitutions (including defaults and existing ones)
-fn apply_protocol_defaults_with_self(bound: &Ty, self_ty: &Ty) -> Ty {
-    let TyKind::Protocol {
-        symbol,
-        substitutions,
-    } = bound.kind()
-    else {
-        return bound.clone();
-    };
-
-    let type_params = symbol.type_parameters();
-
-    // Start with existing substitutions, but substitute Self in each one
-    let mut new_subs = Substitutions::new();
-    for (param_id, ty) in substitutions.iter() {
-        let resolved = ty.substitute_self(self_ty);
-        new_subs.insert(*param_id, resolved);
-    }
-
-    // Fill in missing defaults, also substituting Self
-    for param in &type_params {
-        let param_id = param.metadata().id();
-        if !new_subs.contains(param_id)
-            && let Some(default_ty) = param.default()
-        {
-            // Substitute Self in the default type with the concrete type
-            let resolved_default = default_ty.substitute_self(self_ty);
-            new_subs.insert(param_id, resolved_default);
-        }
-    }
-
-    Ty::generic_protocol(symbol.clone(), new_subs, bound.span().clone())
 }
 
 /// Find the substitutions needed to use a method from a protocol, tracing through inheritance.

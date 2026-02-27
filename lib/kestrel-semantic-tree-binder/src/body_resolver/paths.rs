@@ -327,7 +327,7 @@ pub fn resolve_path_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContex
                         qualified_ty,
                         span.clone(),
                     );
-                    // Return MethodRef for resolve_method_call to handle
+                    // Return MethodRef for call resolution to handle
                     let method_name = symbol.metadata().name().value.clone();
                     return Expression::method_ref(type_ref, vec![symbol_id], method_name, span);
                 }

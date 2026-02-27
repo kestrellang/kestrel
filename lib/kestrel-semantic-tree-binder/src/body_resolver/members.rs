@@ -8,10 +8,10 @@ use std::sync::Arc;
 
 use kestrel_reporting::IntoDiagnostic;
 use kestrel_semantic_model::{ExtensionsFor, IsVisibleFrom, SymbolFor};
+use kestrel_semantic_type_inference::TypeOracle;
 use kestrel_semantic_tree::behavior::ComputedMemberAccessBehavior;
 use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
 use kestrel_semantic_tree::behavior::callable::CallableBehavior;
-use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
 use kestrel_semantic_tree::behavior::extension_target::ExtensionTargetBehavior;
 use kestrel_semantic_tree::behavior::member_access::MemberAccessBehavior;
 use kestrel_semantic_tree::behavior::typed::TypedBehavior;
@@ -19,11 +19,9 @@ use kestrel_semantic_tree::behavior::visibility::VisibilityBehavior;
 use kestrel_semantic_tree::expr::{CallArgument, ExprKind, Expression, PrimitiveMethod};
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::associated_type::AssociatedTypeSymbol;
-use kestrel_semantic_tree::symbol::field::FieldSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::symbol::local::LocalId;
 use kestrel_semantic_tree::symbol::protocol::FlattenedProtocolBehavior;
-use kestrel_semantic_tree::symbol::protocol::ProtocolSymbol;
 use kestrel_semantic_tree::symbol::type_parameter::TypeParameterSymbol;
 use kestrel_semantic_tree::ty::Substitutions;
 use kestrel_semantic_tree::ty::{Ty, TyKind};
@@ -45,7 +43,7 @@ use super::utils::{
     format_symbol_kind, get_associated_type_bounds_from_context,
     get_callable_behavior, get_type_container, get_type_parameter_bounds_by_id,
     get_type_parameter_bounds_from_context, matches_signature,
-    resolve_associated_types, substitute_self, type_satisfies_bound,
+    resolve_associated_types, substitute_self,
 };
 
 /// Resolve a chain of member accesses: obj.field1.field2.field3
@@ -138,32 +136,287 @@ pub fn resolve_member_access(
             base.ty = normalized.clone();
             &base.ty
         } else {
-            // No equality constraint - use protocol bounds
-            let type_param = type_param.clone();
-            return resolve_constrained_member_access(
-                base,
-                &type_param,
-                member_name,
-                member_span,
-                full_span.clone(),
-                ctx,
-            );
+            // No equality constraint - use the oracle for protocol bound resolution.
+            // The oracle handles both callable members (methods) and properties.
+            let type_param_ty = Ty::type_parameter(type_param.clone(), full_span.clone());
+            match ctx.model.resolve_member(&type_param_ty, member_name, false) {
+                Ok(resolution) => {
+                    // Check if it's a protocol property (has protocol_id and has_setter)
+                    if let Some(protocol_id) = resolution.protocol_id
+                        && let Some(has_setter) = resolution.has_setter
+                    {
+                        // Check if it's a callable (method) or property
+                        if let Some(symbol) =
+                            ctx.model.query(SymbolFor { id: resolution.symbol_id })
+                            && symbol.metadata().kind() == KestrelSymbolKind::Function
+                        {
+                            // Method from protocol bound - collect overloads
+                            let bounds =
+                                get_type_parameter_bounds_from_context(&type_param, ctx);
+                            let mut candidates = Vec::new();
+                            for bound in &bounds {
+                                if let TyKind::Protocol { symbol: proto, .. } = bound.kind() {
+                                    if let Some(flattened) = proto
+                                        .metadata()
+                                        .get_behavior::<FlattenedProtocolBehavior>()
+                                    {
+                                        if let Some(methods) = flattened.methods().get(member_name) {
+                                            for method in methods {
+                                                candidates.push(method.symbol.metadata().id());
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            if candidates.is_empty() {
+                                candidates.push(resolution.symbol_id);
+                            }
+                            return Expression::method_ref(
+                                base,
+                                candidates,
+                                member_name.to_string(),
+                                full_span,
+                            );
+                        }
+                        // Protocol property - create ProtocolPropertyAccess
+                        return Expression::protocol_property_access(
+                            base,
+                            resolution.symbol_id,
+                            member_name.to_string(),
+                            protocol_id,
+                            false, // instance access
+                            has_setter,
+                            resolution.ty,
+                            full_span,
+                        );
+                    }
+                    // Non-protocol member (shouldn't happen for type params, but handle gracefully)
+                    if let Some(symbol) =
+                        ctx.model.query(SymbolFor { id: resolution.symbol_id })
+                        && symbol.metadata().kind() == KestrelSymbolKind::Function
+                    {
+                        let bounds =
+                            get_type_parameter_bounds_from_context(&type_param, ctx);
+                        let mut candidates = Vec::new();
+                        for bound in &bounds {
+                            if let TyKind::Protocol { symbol: proto, .. } = bound.kind() {
+                                if let Some(flattened) = proto
+                                    .metadata()
+                                    .get_behavior::<FlattenedProtocolBehavior>()
+                                {
+                                    if let Some(methods) = flattened.methods().get(member_name)
+                                    {
+                                        for method in methods {
+                                            candidates.push(method.symbol.metadata().id());
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        if candidates.is_empty() {
+                            candidates.push(resolution.symbol_id);
+                        }
+                        return Expression::method_ref(
+                            base,
+                            candidates,
+                            member_name.to_string(),
+                            full_span,
+                        );
+                    }
+                    return Expression::field_access(
+                        base,
+                        member_name.to_string(),
+                        false,
+                        Ty::infer(member_span.clone()),
+                        full_span,
+                    );
+                },
+                Err(kestrel_semantic_type_inference::MemberError::UnknownType) => {
+                    // Type bounds not fully resolved - defer
+                    return Expression::field_access(
+                        base,
+                        member_name.to_string(),
+                        false,
+                        Ty::infer(member_span.clone()),
+                        full_span,
+                    );
+                },
+                Err(_) => {
+                    // Member not found in any bound
+                    let type_param_name =
+                        type_param.metadata().name().value.clone();
+                    let bounds =
+                        get_type_parameter_bounds_from_context(&type_param, ctx);
+                    let bound_names: Vec<String> = bounds
+                        .iter()
+                        .filter_map(|b| {
+                            if let TyKind::Protocol { symbol: proto, .. } = b.kind() {
+                                Some(proto.metadata().name().value.clone())
+                            } else {
+                                None
+                            }
+                        })
+                        .collect();
+
+                    if bounds.is_empty() {
+                        let error = UnconstrainedTypeParameterMemberError {
+                            span: full_span.clone(),
+                            member_name: member_name.to_string(),
+                            type_param_name,
+                        };
+                        ctx.diagnostics.add_diagnostic(error.into_diagnostic());
+                    } else {
+                        let error = MethodNotInBoundsError {
+                            call_span: full_span.clone(),
+                            method_name: member_name.to_string(),
+                            type_param_name,
+                            bound_names,
+                        };
+                        ctx.diagnostics.add_diagnostic(error.into_diagnostic());
+                    }
+                    return Expression::error(full_span);
+                },
+            }
         }
     } else {
         base_ty
     };
 
-    // 2.5. Handle associated type specially - similar to type parameters, use bounds
+    // 2.5. Handle associated type specially - use oracle for protocol bound resolution.
+    // We collect bounds from the binder context (which has access to the function's
+    // where clause) and then use the oracle to search within those protocol bounds.
     if let TyKind::AssociatedType { symbol, .. } = base_ty.kind() {
-        let symbol = symbol.clone();
-        return resolve_associated_type_member_access(
-            base,
-            &symbol,
-            member_name,
-            member_span,
-            full_span.clone(),
-            ctx,
-        );
+        let assoc_type_name = symbol.metadata().name().value.clone();
+        let container = if let TyKind::AssociatedType { container, .. } = base_ty.kind() {
+            container.as_ref().map(|c| c.as_ref())
+        } else {
+            None
+        };
+        let bounds = get_associated_type_bounds_from_context(symbol, container, ctx);
+
+        if bounds.is_empty() {
+            let error = UnconstrainedAssociatedTypeMemberError {
+                span: full_span.clone(),
+                member_name: member_name.to_string(),
+                assoc_type_name,
+            };
+            ctx.diagnostics.add_diagnostic(error.into_diagnostic());
+            return Expression::error(full_span);
+        }
+
+        // Try oracle resolution - construct a TypeParameter-like type from the
+        // associated type and use the oracle which now handles properties too.
+        match ctx.model.resolve_member(base_ty, member_name, false) {
+            Ok(resolution) => {
+                if let Some(protocol_id) = resolution.protocol_id
+                    && let Some(has_setter) = resolution.has_setter
+                {
+                    if let Some(sym) =
+                        ctx.model.query(SymbolFor { id: resolution.symbol_id })
+                        && sym.metadata().kind() == KestrelSymbolKind::Function
+                    {
+                        let mut candidates = Vec::new();
+                        for bound in &bounds {
+                            if let TyKind::Protocol { symbol: proto, .. } = bound.kind() {
+                                if let Some(flattened) = proto
+                                    .metadata()
+                                    .get_behavior::<FlattenedProtocolBehavior>()
+                                {
+                                    if let Some(methods) = flattened.methods().get(member_name) {
+                                        for method in methods {
+                                            candidates.push(method.symbol.metadata().id());
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        if candidates.is_empty() {
+                            candidates.push(resolution.symbol_id);
+                        }
+                        return Expression::method_ref(
+                            base,
+                            candidates,
+                            member_name.to_string(),
+                            full_span,
+                        );
+                    }
+                    return Expression::protocol_property_access(
+                        base,
+                        resolution.symbol_id,
+                        member_name.to_string(),
+                        protocol_id,
+                        false,
+                        has_setter,
+                        resolution.ty,
+                        full_span,
+                    );
+                }
+                if let Some(sym) =
+                    ctx.model.query(SymbolFor { id: resolution.symbol_id })
+                    && sym.metadata().kind() == KestrelSymbolKind::Function
+                {
+                    return Expression::method_ref(
+                        base,
+                        vec![resolution.symbol_id],
+                        member_name.to_string(),
+                        full_span,
+                    );
+                }
+                return Expression::field_access(
+                    base,
+                    member_name.to_string(),
+                    false,
+                    Ty::infer(member_span.clone()),
+                    full_span,
+                );
+            },
+            Err(kestrel_semantic_type_inference::MemberError::UnknownType) => {
+                return Expression::field_access(
+                    base,
+                    member_name.to_string(),
+                    false,
+                    Ty::infer(member_span.clone()),
+                    full_span,
+                );
+            },
+            Err(_) => {
+                // Oracle didn't find it (possibly due to missing context) -
+                // fall back to binder-side bound search for methods
+                let mut method_ids: Vec<SymbolId> = Vec::new();
+                let mut bound_names: Vec<String> = Vec::new();
+                for bound in &bounds {
+                    if let TyKind::Protocol { symbol: proto, .. } = bound.kind() {
+                        bound_names.push(proto.metadata().name().value.clone());
+                        if let Some(flattened) = proto
+                            .metadata()
+                            .get_behavior::<FlattenedProtocolBehavior>()
+                        {
+                            if let Some(methods) = flattened.methods().get(member_name) {
+                                for method in methods {
+                                    method_ids.push(method.symbol.metadata().id());
+                                }
+                            }
+                        }
+                    }
+                }
+                if !method_ids.is_empty() {
+                    return Expression::method_ref(
+                        base,
+                        method_ids,
+                        member_name.to_string(),
+                        full_span,
+                    );
+                }
+                let error = MethodNotInBoundsError {
+                    call_span: full_span.clone(),
+                    method_name: member_name.to_string(),
+                    type_param_name: assoc_type_name,
+                    bound_names,
+                };
+                ctx.diagnostics.add_diagnostic(error.into_diagnostic());
+                return Expression::error(full_span);
+            },
+        }
     }
 
     // 3. If base type is Infer, don't emit error yet - type inference will resolve it.
@@ -211,19 +464,8 @@ pub fn resolve_member_access(
         .into_iter()
         .find(|c| c.metadata().name().value == member_name);
 
-    // Get applicable extensions once for reuse
-    let container_id = container.metadata().id();
-    let extensions = ctx.model.query(ExtensionsFor {
-        target_id: container_id,
-    });
-
-    // Resolve Self to concrete type for extension filtering (Self doesn't have substitutions)
-    let resolved_base_ty_for_extensions = resolve_self_type_to_concrete(base_ty, ctx);
-    // Filter to only applicable extensions (now with cycle detection in substitutions)
-    let applicable_extensions =
-        filter_applicable_extensions(extensions, &resolved_base_ty_for_extensions, ctx);
-
-    // If not found in direct children, search type extensions, then protocol extensions
+    // If not found in direct children, defer to type inference (handles extensions,
+    // protocol extensions, Self constraint protocols, etc.)
     let member = match member {
         Some(m) => {
             debug_trace!(
@@ -234,65 +476,74 @@ pub fn resolve_member_access(
         },
         None => {
             debug_trace!(
-                "[MEMBER_RESOLUTION] '{}' not found in direct children, checking extensions",
+                "[MEMBER_RESOLUTION] '{}' not found in direct children, deferring to inference",
                 member_name
             );
-            // Try to find in applicable type extensions
-            let extension_member = applicable_extensions
-                .iter()
-                .flat_map(|ext| ext.metadata().children())
-                .find(|child| child.metadata().name().value == member_name);
+            // Use TypeOracle to check if the member exists in extensions/protocols.
+            // If found as a callable, create a MethodRef so the call resolver
+            // goes through the MethodRef path (which computes better best-effort types).
+            // If found as a non-callable, create a FieldAccess with Ty::infer().
+            // If not found at all, emit an error immediately.
+            let resolved_base_ty = resolve_self_type_to_concrete(base_ty, ctx);
+            match ctx.model.resolve_member(&resolved_base_ty, member_name, false) {
+                Ok(resolution) => {
+                    // Check if the resolved member is callable (method)
+                    if let Some(symbol) = ctx.model.query(SymbolFor { id: resolution.symbol_id })
+                        && symbol.metadata().kind() == KestrelSymbolKind::Function
+                    {
+                        // Collect ALL method overloads with this name from extensions
+                        // (not just the one the oracle resolved) so label-aware
+                        // matching in infer_deferred_method_return_type works correctly.
+                        let container_id = container.metadata().id();
+                        let extensions = ctx.model.query(ExtensionsFor {
+                            target_id: container_id,
+                        });
+                        let resolved_base = resolve_self_type_to_concrete(base_ty, ctx);
+                        let applicable_extensions =
+                            filter_applicable_extensions(extensions, &resolved_base, ctx);
 
-            match extension_member {
-                Some(m) => {
-                    debug_trace!(
-                        "[MEMBER_RESOLUTION] Found '{}' in type extensions",
-                        member_name
-                    );
-                    m
-                },
-                None => {
-                    debug_trace!(
-                        "[MEMBER_RESOLUTION] '{}' not found in type extensions, checking protocol extensions",
-                        member_name
-                    );
-                    // Try to find in protocol extensions
-                    let protocol_ext_methods =
-                        find_methods_in_protocol_extensions(base_ty, member_name, ctx);
+                        let mut candidates = Vec::new();
+                        for ext in &applicable_extensions {
+                            for child in ext.metadata().children() {
+                                if child.metadata().kind() == KestrelSymbolKind::Function
+                                    && child.metadata().name().value == member_name
+                                {
+                                    candidates.push(child.metadata().id());
+                                }
+                            }
+                        }
+                        if candidates.is_empty() {
+                            candidates.push(resolution.symbol_id);
+                        }
 
-                    if !protocol_ext_methods.is_empty() {
-                        debug_trace!(
-                            "[MEMBER_RESOLUTION] Found '{}' in protocol extensions: {} candidates",
-                            member_name,
-                            protocol_ext_methods.len()
-                        );
-                        // Found method(s) in protocol extensions - create MethodRef
                         return Expression::method_ref(
                             base,
-                            protocol_ext_methods,
+                            candidates,
                             member_name.to_string(),
-                            full_span.clone(),
+                            full_span,
                         );
                     }
-
-                    // Try Self constraint protocols (for protocol extensions with where clauses)
-                    if matches!(base_ty.kind(), TyKind::SelfType) {
-                        let constraint_methods =
-                            get_methods_from_self_constraints(member_name, ctx);
-                        if !constraint_methods.is_empty() {
-                            let method_ids: Vec<_> = constraint_methods
-                                .iter()
-                                .map(|m| m.metadata().id())
-                                .collect();
-                            return Expression::method_ref(
-                                base,
-                                method_ids,
-                                member_name.to_string(),
-                                full_span.clone(),
-                            );
-                        }
-                    }
-
+                    // Non-callable member (property/field from extension)
+                    return Expression::field_access(
+                        base,
+                        member_name.to_string(),
+                        false,
+                        Ty::infer(member_span.clone()),
+                        full_span,
+                    );
+                },
+                Err(kestrel_semantic_type_inference::MemberError::UnknownType) => {
+                    // Type is not fully resolved - defer to inference
+                    return Expression::field_access(
+                        base,
+                        member_name.to_string(),
+                        false,
+                        Ty::infer(member_span.clone()),
+                        full_span,
+                    );
+                },
+                Err(_) => {
+                    // Member definitively not found - emit error
                     let error = NoSuchMemberError {
                         member_span,
                         member_name: member_name.to_string(),
@@ -368,7 +619,7 @@ pub fn resolve_member_access(
     // 5. If it's a function, create a MethodRef (for method calls like obj.method())
     if member.metadata().kind() == KestrelSymbolKind::Function {
         // Find all methods with this name (for overloads) from direct children
-        let mut candidates: Vec<SymbolId> = container
+        let candidates: Vec<SymbolId> = container
             .metadata()
             .children()
             .into_iter()
@@ -379,20 +630,8 @@ pub fn resolve_member_access(
             .map(|c| c.metadata().id())
             .collect();
 
-        // Also collect methods from applicable type extensions
-        for extension in &applicable_extensions {
-            for child in extension.metadata().children() {
-                if child.metadata().kind() == KestrelSymbolKind::Function
-                    && child.metadata().name().value == member_name
-                {
-                    candidates.push(child.metadata().id());
-                }
-            }
-        }
-
-        // Also collect methods from protocol extensions (lowest priority)
-        let protocol_ext_methods = find_methods_in_protocol_extensions(base_ty, member_name, ctx);
-        candidates.extend(protocol_ext_methods);
+        // Extension and protocol extension methods are resolved by the solver
+        // via TypeOracle when the DeferredMethodCall is processed.
 
         return Expression::method_ref(
             base,
@@ -504,255 +743,6 @@ fn try_resolve_field_access(
     None
 }
 
-/// Tracks a method found in a protocol bound, with its source protocol.
-struct ProtocolMethodCandidate {
-    method_id: SymbolId,
-    protocol_name: String,
-    definition_span: Span,
-}
-
-/// Resolve a member access on a constrained type parameter: a.member where a: T
-///
-/// Type parameters can only have method members (accessed from protocol bounds).
-/// This creates a MethodRef that will be resolved when the call happens.
-fn resolve_constrained_member_access(
-    base: Expression,
-    type_param: &Arc<kestrel_semantic_tree::symbol::type_parameter::TypeParameterSymbol>,
-    member_name: &str,
-    _member_span: Span,
-    full_span: Span,
-    ctx: &mut BodyResolutionContext,
-) -> Expression {
-    let type_param_name = type_param.metadata().name().value.clone();
-
-    // Get all protocol bounds for this type parameter
-    let bounds = get_type_parameter_bounds_from_context(type_param, ctx);
-
-    // If no bounds, report error
-    if bounds.is_empty() {
-        let error = UnconstrainedTypeParameterMemberError {
-            span: full_span.clone(),
-            member_name: member_name.to_string(),
-            type_param_name,
-        };
-        ctx.diagnostics.add_diagnostic(error.into_diagnostic());
-        return Expression::error(full_span);
-    }
-
-    // First, check if member_name is an instance property in any protocol bound
-    if let Some(property_expr) =
-        find_instance_property_in_bounds(base.clone(), &bounds, member_name, full_span.clone(), ctx)
-    {
-        return property_expr;
-    }
-
-    // Collect all method candidates from protocol bounds, tracking their source
-    let mut candidates: Vec<ProtocolMethodCandidate> = Vec::new();
-    let mut bound_names: Vec<String> = Vec::new();
-
-    for bound in &bounds {
-        if let TyKind::Protocol { symbol: proto, .. } = bound.kind() {
-            let proto_name = proto.metadata().name().value.clone();
-            bound_names.push(proto_name.clone());
-
-            // Collect method IDs from this protocol (including inherited)
-            collect_protocol_method_candidates(proto, member_name, &mut candidates, ctx);
-        }
-    }
-
-    if candidates.is_empty() {
-        let error = MethodNotInBoundsError {
-            call_span: full_span.clone(),
-            method_name: member_name.to_string(),
-            type_param_name,
-            bound_names,
-        };
-        ctx.diagnostics.add_diagnostic(error.into_diagnostic());
-        return Expression::error(full_span);
-    }
-
-    // Check for ambiguity - multiple distinct protocols have a method with this name
-    let mut unique_protocols: std::collections::HashSet<&str> = std::collections::HashSet::new();
-    for c in &candidates {
-        unique_protocols.insert(&c.protocol_name);
-    }
-
-    if unique_protocols.len() > 1 {
-        // Ambiguous - method found in multiple different protocols
-        let protocol_names: Vec<String> =
-            candidates.iter().map(|c| c.protocol_name.clone()).collect();
-        let definition_spans: Vec<(String, Span)> = candidates
-            .iter()
-            .map(|c| (c.protocol_name.clone(), c.definition_span.clone()))
-            .collect();
-
-        let error = AmbiguousConstrainedMethodError {
-            call_span: full_span.clone(),
-            method_name: member_name.to_string(),
-            protocol_names,
-            definition_spans,
-        };
-        ctx.diagnostics.add_diagnostic(error.into_diagnostic());
-        return Expression::error(full_span);
-    }
-
-    // Single protocol source - create MethodRef
-    let method_ids: Vec<SymbolId> = candidates.iter().map(|c| c.method_id).collect();
-    Expression::method_ref(base, method_ids, member_name.to_string(), full_span)
-}
-
-/// Resolve a member access on an associated type: iter.next where iter: I.Iter
-///
-/// Associated types (like `I.Iter` from `where I: Iterable`) can only have members
-/// from their protocol bounds (e.g., `type Iter: Iterator`).
-fn resolve_associated_type_member_access(
-    base: Expression,
-    assoc_type: &Arc<AssociatedTypeSymbol>,
-    member_name: &str,
-    _member_span: Span,
-    full_span: Span,
-    ctx: &mut BodyResolutionContext,
-) -> Expression {
-    let assoc_type_name = assoc_type.metadata().name().value.clone();
-
-    // Extract container from the base type for path matching in where clauses
-    let container = if let TyKind::AssociatedType { container, .. } = base.ty.kind() {
-        container.as_ref().map(|c| c.as_ref())
-    } else {
-        None
-    };
-
-    // Get protocol bounds from the associated type symbol AND context where clause
-    // This handles both:
-    // 1. Direct bounds: `type Item: Protocol` on the associated type definition
-    // 2. Context bounds: `where Item: Protocol` or `where I.Item: Protocol`
-    let bounds = get_associated_type_bounds_from_context(assoc_type, container, ctx);
-
-    // If no bounds, report error
-    if bounds.is_empty() {
-        let error = UnconstrainedAssociatedTypeMemberError {
-            span: full_span.clone(),
-            member_name: member_name.to_string(),
-            assoc_type_name,
-        };
-        ctx.diagnostics.add_diagnostic(error.into_diagnostic());
-        return Expression::error(full_span);
-    }
-
-    // First, check if member_name is an instance property in any protocol bound
-    if let Some(property_expr) =
-        find_instance_property_in_bounds(base.clone(), &bounds, member_name, full_span.clone(), ctx)
-    {
-        return property_expr;
-    }
-
-    // Collect all method candidates from protocol bounds, tracking their source
-    let mut candidates: Vec<ProtocolMethodCandidate> = Vec::new();
-    let mut bound_names: Vec<String> = Vec::new();
-
-    for bound in &bounds {
-        if let TyKind::Protocol { symbol: proto, .. } = bound.kind() {
-            let proto_name = proto.metadata().name().value.clone();
-            bound_names.push(proto_name.clone());
-
-            // Collect method IDs from this protocol (including inherited)
-            collect_protocol_method_candidates(proto, member_name, &mut candidates, ctx);
-        }
-    }
-
-    if candidates.is_empty() {
-        // Reuse MethodNotInBoundsError - the message is generic enough
-        let error = MethodNotInBoundsError {
-            call_span: full_span.clone(),
-            method_name: member_name.to_string(),
-            type_param_name: assoc_type_name,
-            bound_names,
-        };
-        ctx.diagnostics.add_diagnostic(error.into_diagnostic());
-        return Expression::error(full_span);
-    }
-
-    // Check for ambiguity - multiple distinct protocols have a method with this name
-    let mut unique_protocols: std::collections::HashSet<&str> = std::collections::HashSet::new();
-    for c in &candidates {
-        unique_protocols.insert(&c.protocol_name);
-    }
-
-    if unique_protocols.len() > 1 {
-        // Ambiguous - method found in multiple different protocols
-        let protocol_names: Vec<String> =
-            candidates.iter().map(|c| c.protocol_name.clone()).collect();
-        let definition_spans: Vec<(String, Span)> = candidates
-            .iter()
-            .map(|c| (c.protocol_name.clone(), c.definition_span.clone()))
-            .collect();
-
-        let error = AmbiguousConstrainedMethodError {
-            call_span: full_span.clone(),
-            method_name: member_name.to_string(),
-            protocol_names,
-            definition_spans,
-        };
-        ctx.diagnostics.add_diagnostic(error.into_diagnostic());
-        return Expression::error(full_span);
-    }
-
-    // Single protocol source - create MethodRef
-    let method_ids: Vec<SymbolId> = candidates.iter().map(|c| c.method_id).collect();
-    Expression::method_ref(base, method_ids, member_name.to_string(), full_span)
-}
-
-/// Collect method candidates from a protocol, including inherited protocols.
-/// Each candidate tracks which protocol it came from for ambiguity detection.
-fn collect_protocol_method_candidates(
-    protocol: &Arc<ProtocolSymbol>,
-    method_name: &str,
-    candidates: &mut Vec<ProtocolMethodCandidate>,
-    _ctx: &BodyResolutionContext,
-) {
-    // Use flattened behavior if available (normal case after BIND phase)
-    if let Some(flattened) = protocol
-        .metadata()
-        .get_behavior::<FlattenedProtocolBehavior>()
-    {
-        if let Some(methods) = flattened.methods().get(method_name) {
-            for method in methods {
-                candidates.push(ProtocolMethodCandidate {
-                    method_id: method.symbol.metadata().id(),
-                    protocol_name: method.source_protocol_name.clone(),
-                    definition_span: method.definition_span.clone(),
-                });
-            }
-        }
-        return;
-    }
-
-    // FALLBACK: Recursive traversal (for BUILD phase or if flattening failed)
-    let proto_name = protocol.metadata().name().value.clone();
-
-    // Search direct methods
-    for child in protocol.metadata().children() {
-        if child.metadata().kind() == KestrelSymbolKind::Function
-            && child.metadata().name().value == method_name
-        {
-            candidates.push(ProtocolMethodCandidate {
-                method_id: child.metadata().id(),
-                protocol_name: proto_name.clone(),
-                definition_span: child.metadata().name().span.clone(),
-            });
-        }
-    }
-
-    // Search inherited protocols
-    if let Some(conformances) = protocol.metadata().get_behavior::<ConformancesBehavior>() {
-        for parent_proto_ty in conformances.conformances() {
-            if let TyKind::Protocol { symbol: parent, .. } = parent_proto_ty.kind() {
-                collect_protocol_method_candidates(parent, method_name, candidates, _ctx);
-            }
-        }
-    }
-}
-
 /// Resolve a member call from a FieldAccess expression: obj.method(args)
 ///
 /// This handles:
@@ -844,17 +834,38 @@ pub fn resolve_member_call(
     }
 
     // Defer method resolution to type inference.
-    // The TypeOracle (via ContextualOracle) handles:
-    // - Struct/Protocol/Enum methods + extension methods
-    // - SelfType resolution via context
-    // - Overload resolution (labels, arity, argument types)
-    // - Visibility checking
-    // - Where clause constraints
+    // Use the TypeOracle to get a best-effort return type so downstream
+    // bind-time checks (subscript calls, field access) don't cascade errors.
+    let resolved_base_ty = resolve_self_type_to_concrete(base_ty, ctx);
+    let arg_labels: Vec<Option<String>> = arguments.iter().map(|a| a.label.clone()).collect();
+    let deferred_return_ty = if !matches!(resolved_base_ty.kind(), TyKind::Infer | TyKind::Error) {
+        ctx.model
+            .resolve_member_with_labels(&resolved_base_ty, member_name, false, &arg_labels)
+            .map(|resolution| {
+                let mut ty = resolution.ty;
+                // Apply receiver substitutions to the return type
+                ty = substitute_self(&ty, &resolved_base_ty);
+                ty = resolve_associated_types(&ty, ctx);
+                let expanded = resolved_base_ty.expand_aliases();
+                if let TyKind::Struct { substitutions, .. }
+                | TyKind::Enum { substitutions, .. } = expanded.kind()
+                {
+                    if !substitutions.is_empty() {
+                        ty = ty.apply_substitutions(substitutions);
+                    }
+                }
+                ty
+            })
+            .unwrap_or_else(|_| Ty::infer(span.clone()))
+    } else {
+        Ty::infer(span.clone())
+    };
     Expression::deferred_method_call(
         object.clone(),
         member_name.to_string(),
         arguments,
-        Ty::infer(span.clone()),
+        None,
+        deferred_return_ty,
         span,
     )
 }
@@ -933,7 +944,8 @@ pub fn resolve_callable_associated_types(
 
 /// Resolve static member access on a type parameter: `T.staticMethod`.
 ///
-/// This looks up static methods from the type parameter's protocol bounds.
+/// This looks up static methods, static properties, and associated types
+/// from the type parameter's protocol bounds.
 fn resolve_type_parameter_static_member(
     symbol_id: SymbolId,
     member_name: &str,
@@ -958,7 +970,6 @@ fn resolve_type_parameter_static_member(
     let bounds = get_type_parameter_bounds_by_id(symbol_id, ctx);
 
     if bounds.is_empty() {
-        // No bounds - cannot access static methods on unconstrained type parameter
         let error = UnconstrainedTypeParameterMemberError {
             span: full_span.clone(),
             member_name: member_name.to_string(),
@@ -968,98 +979,132 @@ fn resolve_type_parameter_static_member(
         return Expression::error(full_span);
     }
 
-    // For Self substitution - use the type parameter type so T.create() returns T, not _
     let type_param_ty = Ty::type_parameter(type_param_arc.clone(), full_span.clone());
 
-    // First, check if member_name is an associated type in any protocol bound
-    // This enables chained associated type access like T.Next.Next.baseValue()
+    // First, check if member_name is an associated type in any protocol bound.
+    // Associated type access is fundamentally different from member access -
+    // the oracle has resolve_associated_type() for this, not resolve_member().
     if let Some(assoc_type_expr) =
         find_associated_type_in_bounds(&bounds, member_name, &type_param_ty, full_span.clone(), ctx)
     {
         return assoc_type_expr;
     }
 
-    // Second, check if member_name is a static property in any protocol bound
-    if let Some(property_expr) = find_static_property_in_bounds(
-        symbol_id,
-        &bounds,
-        member_name,
-        &type_param_ty,
-        full_span.clone(),
-        ctx,
-    ) {
-        return property_expr;
+    // Use the oracle for static member resolution (properties and methods)
+    match ctx.model.resolve_member(&type_param_ty, member_name, true) {
+        Ok(resolution) => {
+            // Check if it's a callable (method) vs property
+            if let Some(sym) =
+                ctx.model.query(SymbolFor { id: resolution.symbol_id })
+                && sym.metadata().kind() == KestrelSymbolKind::Function
+            {
+                // Static method - collect overloads and check ambiguity
+                let mut method_ids: Vec<SymbolId> = Vec::new();
+                let mut source_protocols: std::collections::HashSet<String> =
+                    std::collections::HashSet::new();
+                for bound in &bounds {
+                    if let TyKind::Protocol { symbol: proto, .. } = bound.kind() {
+                        if let Some(flattened) = proto
+                            .metadata()
+                            .get_behavior::<FlattenedProtocolBehavior>()
+                        {
+                            if let Some(methods) = flattened.methods().get(member_name) {
+                                for method in methods {
+                                    if let Some(callable) = get_callable_behavior(&method.symbol)
+                                        && callable.is_static()
+                                    {
+                                        method_ids.push(method.symbol.metadata().id());
+                                        source_protocols.insert(method.source_protocol_name.clone());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                if method_ids.is_empty() {
+                    method_ids.push(resolution.symbol_id);
+                }
+
+                // Check for ambiguity
+                if source_protocols.len() > 1 {
+                    let protocol_names: Vec<String> = source_protocols.into_iter().collect();
+                    let error = AmbiguousConstrainedMethodError {
+                        call_span: full_span.clone(),
+                        method_name: member_name.to_string(),
+                        protocol_names: protocol_names.clone(),
+                        definition_spans: protocol_names
+                            .iter()
+                            .map(|n| (n.clone(), full_span.clone()))
+                            .collect(),
+                    };
+                    ctx.diagnostics.add_diagnostic(error.into_diagnostic());
+                    return Expression::error(full_span);
+                }
+
+                return Expression::method_ref(
+                    Expression::type_parameter_ref(
+                        symbol_id,
+                        type_param_ty.clone(),
+                        Span::new(full_span.file_id, full_span.start..full_span.start),
+                    ),
+                    method_ids,
+                    member_name.to_string(),
+                    full_span,
+                );
+            }
+            // Static property - requires protocol_id and has_setter
+            if let Some(protocol_id) = resolution.protocol_id
+                && let Some(has_setter) = resolution.has_setter
+            {
+                let receiver = Expression::type_parameter_ref(
+                    symbol_id,
+                    type_param_ty.clone(),
+                    Span::new(full_span.file_id, full_span.start..full_span.start),
+                );
+                return Expression::protocol_property_access(
+                    receiver,
+                    resolution.symbol_id,
+                    member_name.to_string(),
+                    protocol_id,
+                    true,
+                    has_setter,
+                    resolution.ty,
+                    full_span,
+                );
+            }
+            // Fallback for non-protocol resolution
+            return Expression::method_ref(
+                Expression::type_parameter_ref(
+                    symbol_id,
+                    type_param_ty.clone(),
+                    Span::new(full_span.file_id, full_span.start..full_span.start),
+                ),
+                vec![resolution.symbol_id],
+                member_name.to_string(),
+                full_span,
+            );
+        },
+        Err(_) => {
+            let bound_names: Vec<String> = bounds
+                .iter()
+                .filter_map(|b| {
+                    if let TyKind::Protocol { symbol: proto, .. } = b.kind() {
+                        Some(proto.metadata().name().value.clone())
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            let error = MethodNotInBoundsError {
+                call_span: full_span.clone(),
+                method_name: member_name.to_string(),
+                type_param_name,
+                bound_names,
+            };
+            ctx.diagnostics.add_diagnostic(error.into_diagnostic());
+            return Expression::error(full_span);
+        },
     }
-
-    // Collect static methods from all protocol bounds
-    let mut candidates: Vec<StaticMethodCandidate> = Vec::new();
-    let mut bound_names: Vec<String> = Vec::new();
-
-    for bound in &bounds {
-        if let TyKind::Protocol { symbol: proto, .. } = bound.kind() {
-            let proto_name = proto.metadata().name().value.clone();
-            bound_names.push(proto_name.clone());
-
-            // Collect static methods from this protocol
-            collect_protocol_static_methods(proto, member_name, &type_param_ty, &mut candidates);
-        }
-    }
-
-    if candidates.is_empty() {
-        // No static method found with that name in any bound
-        let error = MethodNotInBoundsError {
-            call_span: full_span.clone(),
-            method_name: member_name.to_string(),
-            type_param_name,
-            bound_names,
-        };
-        ctx.diagnostics.add_diagnostic(error.into_diagnostic());
-        return Expression::error(full_span);
-    }
-
-    // Check for ambiguity - same method in multiple protocols
-    let mut seen_protocols: std::collections::HashSet<String> = std::collections::HashSet::new();
-    let unique_candidates: Vec<&StaticMethodCandidate> = candidates
-        .iter()
-        .filter(|c| seen_protocols.insert(c.protocol_name.clone()))
-        .collect();
-
-    if unique_candidates.len() > 1 {
-        // Multiple protocols have the same static method
-        let protocol_names: Vec<String> = unique_candidates
-            .iter()
-            .map(|c| c.protocol_name.clone())
-            .collect();
-        let definition_spans: Vec<(String, Span)> = unique_candidates
-            .iter()
-            .map(|c| (c.protocol_name.clone(), c.definition_span.clone()))
-            .collect();
-
-        let error = AmbiguousConstrainedMethodError {
-            call_span: full_span.clone(),
-            method_name: member_name.to_string(),
-            protocol_names,
-            definition_spans,
-        };
-        ctx.diagnostics.add_diagnostic(error.into_diagnostic());
-        return Expression::error(full_span);
-    }
-
-    // Single method found - create method reference
-    // Note: If there are multiple overloads in the same protocol, we return all of them
-    let method_ids: Vec<SymbolId> = candidates.iter().map(|c| c.method_id).collect();
-
-    // Use the type parameter type for the receiver so Self substitution works correctly
-    Expression::method_ref(
-        Expression::type_parameter_ref(
-            symbol_id,
-            type_param_ty.clone(),
-            Span::new(full_span.file_id, full_span.start..full_span.start),
-        ),
-        method_ids,
-        member_name.to_string(),
-        full_span,
-    )
 }
 
 /// Find an associated type with the given name in the protocol bounds.
@@ -1122,7 +1167,7 @@ fn find_associated_type_in_bounds(
 ///
 /// This handles chained associated type access like `T.Next.Next.baseValue()`.
 /// When the base is an `AssociatedTypeRef`, we look at the associated type's bounds
-/// to find either another associated type or a static method.
+/// to find either another associated type or a static method/property.
 fn resolve_associated_type_static_member(
     base: &Expression,
     member_name: &str,
@@ -1130,24 +1175,18 @@ fn resolve_associated_type_static_member(
     full_span: Span,
     ctx: &mut BodyResolutionContext,
 ) -> Expression {
-    // Extract the associated type symbol and container from base.ty
     let TyKind::AssociatedType {
         symbol: assoc_type,
         container,
     } = base.ty.kind()
     else {
-        // Should not happen - AssociatedTypeRef should always have AssociatedType ty
         return Expression::error(full_span);
     };
 
-    // Get the bounds of the associated type from both:
-    // 1. Direct bounds on the type definition (e.g., `type Item: Protocol`)
-    // 2. Where clause constraints (e.g., `where Item: Addable` or `where I.Item: Protocol`)
     let container_ref = container.as_ref().map(|c| c.as_ref());
     let bounds = get_associated_type_bounds_from_context(assoc_type, container_ref, ctx);
 
     if bounds.is_empty() {
-        // No bounds - cannot access members on unconstrained associated type
         let error = UnconstrainedTypeParameterMemberError {
             span: full_span.clone(),
             member_name: member_name.to_string(),
@@ -1158,7 +1197,6 @@ fn resolve_associated_type_static_member(
     }
 
     // The container type for nested lookups is the qualified associated type itself
-    // e.g., for T.Next.Next, the container for the second Next is T.Next
     let container_ty = match container {
         Some(c) => {
             Ty::qualified_associated_type(assoc_type.clone(), (**c).clone(), full_span.clone())
@@ -1173,367 +1211,159 @@ fn resolve_associated_type_static_member(
         return assoc_type_expr;
     }
 
-    // Second, check if member_name is a static property in any protocol bound
-    // (e.g., Addable.zero, Multipliable.one)
-    if let Some(property_expr) = find_static_property_in_bounds_for_assoc_type(
-        base,
-        &bounds,
-        member_name,
-        &container_ty,
-        full_span.clone(),
-        ctx,
-    ) {
-        return property_expr;
-    }
+    // Use the oracle for static member resolution (properties and methods).
+    // Fall back to binder-side bound search when the oracle fails (it lacks context).
+    match ctx.model.resolve_member(&base.ty, member_name, true) {
+        Ok(resolution) => {
+            if let Some(protocol_id) = resolution.protocol_id
+                && let Some(has_setter) = resolution.has_setter
+            {
+                if let Some(sym) =
+                    ctx.model.query(SymbolFor { id: resolution.symbol_id })
+                    && sym.metadata().kind() == KestrelSymbolKind::Function
+                {
+                    // Static method - collect overloads and check ambiguity
+                    let mut method_ids: Vec<SymbolId> = Vec::new();
+                    let mut source_protocols: std::collections::HashSet<String> =
+                        std::collections::HashSet::new();
+                    for bound in &bounds {
+                        if let TyKind::Protocol { symbol: proto, .. } = bound.kind() {
+                            if let Some(flattened) = proto
+                                .metadata()
+                                .get_behavior::<FlattenedProtocolBehavior>()
+                            {
+                                if let Some(methods) = flattened.methods().get(member_name) {
+                                    for method in methods {
+                                        if let Some(callable) = get_callable_behavior(&method.symbol)
+                                            && callable.is_static()
+                                        {
+                                            method_ids.push(method.symbol.metadata().id());
+                                            source_protocols.insert(method.source_protocol_name.clone());
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if method_ids.is_empty() {
+                        method_ids.push(resolution.symbol_id);
+                    }
 
-    // Collect static methods from all protocol bounds
-    let mut candidates: Vec<StaticMethodCandidate> = Vec::new();
-    let mut bound_names: Vec<String> = Vec::new();
+                    if source_protocols.len() > 1 {
+                        let protocol_names: Vec<String> = source_protocols.into_iter().collect();
+                        let error = AmbiguousConstrainedMethodError {
+                            call_span: full_span.clone(),
+                            method_name: member_name.to_string(),
+                            protocol_names: protocol_names.clone(),
+                            definition_spans: protocol_names
+                                .iter()
+                                .map(|n| (n.clone(), full_span.clone()))
+                                .collect(),
+                        };
+                        ctx.diagnostics.add_diagnostic(error.into_diagnostic());
+                        return Expression::error(full_span);
+                    }
 
-    for bound in &bounds {
-        if let TyKind::Protocol { symbol: proto, .. } = bound.kind() {
-            let proto_name = proto.metadata().name().value.clone();
-            bound_names.push(proto_name.clone());
+                    return Expression::method_ref(base.clone(), method_ids, member_name.to_string(), full_span);
+                }
+                // Static property
+                return Expression::protocol_property_access(
+                    base.clone(),
+                    resolution.symbol_id,
+                    member_name.to_string(),
+                    protocol_id,
+                    true,
+                    has_setter,
+                    resolution.ty,
+                    full_span,
+                );
+            }
+            return Expression::method_ref(
+                base.clone(),
+                vec![resolution.symbol_id],
+                member_name.to_string(),
+                full_span,
+            );
+        },
+        Err(_) => {
+            // Oracle failed (likely missing context for where-clause bounds) -
+            // fall back to binder-side bound search for static methods/properties
+            let mut method_ids: Vec<SymbolId> = Vec::new();
+            let mut source_protocols: std::collections::HashSet<String> =
+                std::collections::HashSet::new();
+            let mut bound_names: Vec<String> = Vec::new();
 
-            // Collect static methods from this protocol
-            collect_protocol_static_methods(proto, member_name, &container_ty, &mut candidates);
-        }
-    }
+            for bound in &bounds {
+                if let TyKind::Protocol { symbol: proto, .. } = bound.kind() {
+                    bound_names.push(proto.metadata().name().value.clone());
+                    if let Some(flattened) = proto
+                        .metadata()
+                        .get_behavior::<FlattenedProtocolBehavior>()
+                    {
+                        if let Some(methods) = flattened.methods().get(member_name) {
+                            for method in methods {
+                                if let Some(callable) = get_callable_behavior(&method.symbol)
+                                    && callable.is_static()
+                                {
+                                    method_ids.push(method.symbol.metadata().id());
+                                    source_protocols.insert(method.source_protocol_name.clone());
+                                }
+                            }
+                        }
+                        // Check for static properties
+                        if let Some(prop) = flattened.properties().get(member_name)
+                            && prop.is_static
+                        {
+                            let prop_ty = prop
+                                .symbol
+                                .metadata()
+                                .get_behavior::<TypedBehavior>()
+                                .map(|tb| substitute_self(tb.ty(), &container_ty))
+                                .unwrap_or_else(|| Ty::error(full_span.clone()));
 
-    if candidates.is_empty() {
-        // No static method found with that name in any bound
-        let error = MethodNotInBoundsError {
-            call_span: full_span.clone(),
-            method_name: member_name.to_string(),
-            type_param_name: assoc_type.metadata().name().value.clone(),
-            bound_names,
-        };
-        ctx.diagnostics.add_diagnostic(error.into_diagnostic());
-        return Expression::error(full_span);
-    }
-
-    // Check for ambiguity - same method in multiple protocols
-    let mut seen_protocols: std::collections::HashSet<String> = std::collections::HashSet::new();
-    let unique_candidates: Vec<&StaticMethodCandidate> = candidates
-        .iter()
-        .filter(|c| seen_protocols.insert(c.protocol_name.clone()))
-        .collect();
-
-    if unique_candidates.len() > 1 {
-        // Multiple protocols have the same static method
-        let protocol_names: Vec<String> = unique_candidates
-            .iter()
-            .map(|c| c.protocol_name.clone())
-            .collect();
-        let definition_spans: Vec<(String, Span)> = unique_candidates
-            .iter()
-            .map(|c| (c.protocol_name.clone(), c.definition_span.clone()))
-            .collect();
-
-        let error = AmbiguousConstrainedMethodError {
-            call_span: full_span.clone(),
-            method_name: member_name.to_string(),
-            protocol_names,
-            definition_spans,
-        };
-        ctx.diagnostics.add_diagnostic(error.into_diagnostic());
-        return Expression::error(full_span);
-    }
-
-    // Single method found - create method reference
-    let method_ids: Vec<SymbolId> = candidates.iter().map(|c| c.method_id).collect();
-
-    // Clone the base expression for the receiver
-    Expression::method_ref(base.clone(), method_ids, member_name.to_string(), full_span)
-}
-
-/// Candidate for static method resolution on type parameter
-struct StaticMethodCandidate {
-    method_id: SymbolId,
-    protocol_name: String,
-    definition_span: Span,
-}
-
-/// Collect static methods from a protocol, including inherited protocols.
-fn collect_protocol_static_methods(
-    protocol: &Arc<ProtocolSymbol>,
-    method_name: &str,
-    _self_replacement: &Ty,
-    candidates: &mut Vec<StaticMethodCandidate>,
-) {
-    // Use flattened behavior if available (normal case after BIND phase)
-    if let Some(flattened) = protocol
-        .metadata()
-        .get_behavior::<FlattenedProtocolBehavior>()
-    {
-        if let Some(methods) = flattened.methods().get(method_name) {
-            for method in methods {
-                if let Some(callable) = get_callable_behavior(&method.symbol) {
-                    // Check if it's a static method (no receiver)
-                    if callable.is_static() {
-                        candidates.push(StaticMethodCandidate {
-                            method_id: method.symbol.metadata().id(),
-                            protocol_name: method.source_protocol_name.clone(),
-                            definition_span: method.definition_span.clone(),
-                        });
+                            return Expression::protocol_property_access(
+                                base.clone(),
+                                prop.symbol.metadata().id(),
+                                member_name.to_string(),
+                                proto.metadata().id(),
+                                true,
+                                prop.has_setter,
+                                prop_ty,
+                                full_span,
+                            );
+                        }
                     }
                 }
             }
-        }
-        return;
-    }
 
-    // FALLBACK: Recursive traversal (for BUILD phase or if flattening failed)
-    let protocol_name = protocol.metadata().name().value.clone();
-
-    // Get all static methods with the given name from this protocol
-    for child in protocol.metadata().children() {
-        if child.metadata().kind() == KestrelSymbolKind::Function
-            && child.metadata().name().value == method_name
-            && let Some(callable) = get_callable_behavior(&child)
-        {
-            // Check if it's a static method (no receiver)
-            if callable.is_static() {
-                candidates.push(StaticMethodCandidate {
-                    method_id: child.metadata().id(),
-                    protocol_name: protocol_name.clone(),
-                    definition_span: child.metadata().span().clone(),
-                });
-            }
-        }
-    }
-
-    // Search inherited protocols
-    if let Some(conformances) = protocol.metadata().get_behavior::<ConformancesBehavior>() {
-        for parent_proto_ty in conformances.conformances() {
-            if let TyKind::Protocol { symbol: parent, .. } = parent_proto_ty.kind() {
-                collect_protocol_static_methods(parent, method_name, _self_replacement, candidates);
-            }
-        }
-    }
-}
-
-/// Find a static property in protocol bounds.
-///
-/// Returns a ProtocolPropertyAccess expression if a matching static property is found.
-fn find_static_property_in_bounds(
-    type_param_id: SymbolId,
-    bounds: &[Ty],
-    property_name: &str,
-    type_param_ty: &Ty,
-    span: Span,
-    _ctx: &BodyResolutionContext,
-) -> Option<Expression> {
-    for bound in bounds {
-        if let TyKind::Protocol { symbol: proto, .. } = bound.kind() {
-            // Use flattened behavior if available
-            if let Some(flattened) = proto.metadata().get_behavior::<FlattenedProtocolBehavior>()
-                && let Some(prop) = flattened.properties().get(property_name)
-                && prop.is_static
-            {
-                // Get the property type from the field's TypedBehavior
-                let prop_ty = prop
-                    .symbol
-                    .metadata()
-                    .get_behavior::<TypedBehavior>()
-                    .map(|tb| substitute_self(tb.ty(), type_param_ty))
-                    .unwrap_or_else(|| Ty::error(span.clone()));
-
-                // Create TypeParameterRef for the receiver
-                let receiver = Expression::type_parameter_ref(
-                    type_param_id,
-                    type_param_ty.clone(),
-                    Span::new(span.file_id, span.start..span.start),
-                );
-
-                return Some(Expression::protocol_property_access(
-                    receiver,
-                    prop.symbol.metadata().id(),
-                    property_name.to_string(),
-                    proto.metadata().id(),
-                    true, // is_static
-                    prop.has_setter,
-                    prop_ty,
-                    span,
-                ));
-            }
-
-            // FALLBACK: Direct search in protocol children
-            for child in proto.metadata().children() {
-                if child.metadata().kind() == KestrelSymbolKind::Field
-                    && child.metadata().name().value == property_name
-                    && let Ok(field) = child.clone().downcast_arc::<FieldSymbol>()
-                    && field.is_computed()
-                    && field.is_static()
-                {
-                    let prop_ty = field
-                        .metadata()
-                        .get_behavior::<TypedBehavior>()
-                        .map(|tb| substitute_self(tb.ty(), type_param_ty))
-                        .unwrap_or_else(|| Ty::error(span.clone()));
-
-                    let receiver = Expression::type_parameter_ref(
-                        type_param_id,
-                        type_param_ty.clone(),
-                        Span::new(span.file_id, span.start..span.start),
-                    );
-
-                    return Some(Expression::protocol_property_access(
-                        receiver,
-                        field.metadata().id(),
-                        property_name.to_string(),
-                        proto.metadata().id(),
-                        true, // is_static
-                        field.setter().is_some(),
-                        prop_ty,
-                        span,
-                    ));
+            if !method_ids.is_empty() {
+                if source_protocols.len() > 1 {
+                    let protocol_names: Vec<String> = source_protocols.into_iter().collect();
+                    let error = AmbiguousConstrainedMethodError {
+                        call_span: full_span.clone(),
+                        method_name: member_name.to_string(),
+                        protocol_names: protocol_names.clone(),
+                        definition_spans: protocol_names
+                            .iter()
+                            .map(|n| (n.clone(), full_span.clone()))
+                            .collect(),
+                    };
+                    ctx.diagnostics.add_diagnostic(error.into_diagnostic());
+                    return Expression::error(full_span);
                 }
+                return Expression::method_ref(base.clone(), method_ids, member_name.to_string(), full_span);
             }
-        }
+
+            let error = MethodNotInBoundsError {
+                call_span: full_span.clone(),
+                method_name: member_name.to_string(),
+                type_param_name: assoc_type.metadata().name().value.clone(),
+                bound_names,
+            };
+            ctx.diagnostics.add_diagnostic(error.into_diagnostic());
+            return Expression::error(full_span);
+        },
     }
-    None
-}
-
-/// Find a static property in protocol bounds for an associated type.
-///
-/// Similar to `find_static_property_in_bounds` but works with associated types
-/// instead of type parameters. Returns a ProtocolPropertyAccess expression if found.
-fn find_static_property_in_bounds_for_assoc_type(
-    base: &Expression,
-    bounds: &[Ty],
-    property_name: &str,
-    assoc_type_ty: &Ty,
-    span: Span,
-    _ctx: &BodyResolutionContext,
-) -> Option<Expression> {
-    for bound in bounds {
-        if let TyKind::Protocol { symbol: proto, .. } = bound.kind() {
-            // Use flattened behavior if available
-            if let Some(flattened) = proto.metadata().get_behavior::<FlattenedProtocolBehavior>()
-                && let Some(prop) = flattened.properties().get(property_name)
-                && prop.is_static
-            {
-                // Get the property type from the field's TypedBehavior
-                let prop_ty = prop
-                    .symbol
-                    .metadata()
-                    .get_behavior::<TypedBehavior>()
-                    .map(|tb| substitute_self(tb.ty(), assoc_type_ty))
-                    .unwrap_or_else(|| Ty::error(span.clone()));
-
-                return Some(Expression::protocol_property_access(
-                    base.clone(),
-                    prop.symbol.metadata().id(),
-                    property_name.to_string(),
-                    proto.metadata().id(),
-                    true, // is_static
-                    prop.has_setter,
-                    prop_ty,
-                    span,
-                ));
-            }
-
-            // FALLBACK: Direct search in protocol children
-            for child in proto.metadata().children() {
-                if child.metadata().kind() == KestrelSymbolKind::Field
-                    && child.metadata().name().value == property_name
-                    && let Ok(field) = child.clone().downcast_arc::<FieldSymbol>()
-                    && field.is_computed()
-                    && field.is_static()
-                {
-                    let prop_ty = field
-                        .metadata()
-                        .get_behavior::<TypedBehavior>()
-                        .map(|tb| substitute_self(tb.ty(), assoc_type_ty))
-                        .unwrap_or_else(|| Ty::error(span.clone()));
-
-                    return Some(Expression::protocol_property_access(
-                        base.clone(),
-                        field.metadata().id(),
-                        property_name.to_string(),
-                        proto.metadata().id(),
-                        true, // is_static
-                        field.setter().is_some(),
-                        prop_ty,
-                        span,
-                    ));
-                }
-            }
-        }
-    }
-    None
-}
-
-/// Find an instance property in protocol bounds.
-///
-/// Returns a ProtocolPropertyAccess expression if a matching instance property is found.
-fn find_instance_property_in_bounds(
-    base: Expression,
-    bounds: &[Ty],
-    property_name: &str,
-    span: Span,
-    _ctx: &BodyResolutionContext,
-) -> Option<Expression> {
-    // Get the type parameter type from the base expression for Self substitution
-    let type_param_ty = &base.ty;
-
-    for bound in bounds {
-        if let TyKind::Protocol { symbol: proto, .. } = bound.kind() {
-            // Use flattened behavior if available
-            if let Some(flattened) = proto.metadata().get_behavior::<FlattenedProtocolBehavior>()
-                && let Some(prop) = flattened.properties().get(property_name)
-                && !prop.is_static
-            {
-                // Get the property type from the field's TypedBehavior
-                let prop_ty = prop
-                    .symbol
-                    .metadata()
-                    .get_behavior::<TypedBehavior>()
-                    .map(|tb| substitute_self(tb.ty(), type_param_ty))
-                    .unwrap_or_else(|| Ty::error(span.clone()));
-
-                return Some(Expression::protocol_property_access(
-                    base,
-                    prop.symbol.metadata().id(),
-                    property_name.to_string(),
-                    proto.metadata().id(),
-                    false, // is_static
-                    prop.has_setter,
-                    prop_ty,
-                    span,
-                ));
-            }
-
-            // FALLBACK: Direct search in protocol children
-            for child in proto.metadata().children() {
-                if child.metadata().kind() == KestrelSymbolKind::Field
-                    && child.metadata().name().value == property_name
-                    && let Ok(field) = child.clone().downcast_arc::<FieldSymbol>()
-                    && field.is_computed()
-                    && !field.is_static()
-                {
-                    let prop_ty = field
-                        .metadata()
-                        .get_behavior::<TypedBehavior>()
-                        .map(|tb| substitute_self(tb.ty(), type_param_ty))
-                        .unwrap_or_else(|| Ty::error(span.clone()));
-
-                    return Some(Expression::protocol_property_access(
-                        base,
-                        field.metadata().id(),
-                        property_name.to_string(),
-                        proto.metadata().id(),
-                        false, // is_static
-                        field.setter().is_some(),
-                        prop_ty,
-                        span,
-                    ));
-                }
-            }
-        }
-    }
-    None
 }
 
 /// Filter extensions to find those applicable to the given type instance.
@@ -1975,270 +1805,6 @@ pub fn resolve_delegating_init(
     Expression::error(span)
 }
 
-/// Get all protocols that a concrete type conforms to (including through extensions).
-///
-/// Returns a list of protocol types with their type parameter substitutions preserved.
-/// For example, for `Int64` conforming to `NotEqual[Int64]`, this returns the full
-/// protocol type `NotEqual[Int64]` rather than just the protocol ID.
-fn get_type_conformances(ty: &Ty, ctx: &BodyResolutionContext) -> Vec<Ty> {
-    ctx.model.protocol_conformances_for_type(ty)
-}
 
-/// Get all applicable protocol extensions for a concrete type.
-///
-/// This finds all protocol extensions where:
-/// 1. The concrete type conforms to the target protocol
-/// 2. All SelfBound constraints are satisfied
-///
-/// Returns tuples of (extension_symbol, specificity, protocol_type) where protocol_type
-/// includes the type parameter substitutions from the conformance.
-fn get_applicable_protocol_extensions(
-    concrete_ty: &Ty,
-    ctx: &BodyResolutionContext,
-) -> Vec<(
-    Arc<kestrel_semantic_tree::symbol::extension::ExtensionSymbol>,
-    usize,
-    Ty,
-)> {
-    let conformances = get_type_conformances(concrete_ty, ctx);
-    let mut applicable = Vec::new();
 
-    for protocol_ty in conformances {
-        // Extract the protocol symbol and substitutions from the protocol type
-        let (protocol_id, _protocol_subs) = match protocol_ty.kind() {
-            TyKind::Protocol {
-                symbol,
-                substitutions,
-            } => (symbol.metadata().id(), substitutions),
-            _ => continue, // Skip non-protocol types
-        };
 
-        // Get all extensions for this protocol
-        let extensions = ctx.model.query(ExtensionsFor {
-            target_id: protocol_id,
-        });
-
-        for extension in extensions {
-            // Check if this is actually a protocol extension
-            let target_behavior = match extension
-                .metadata()
-                .get_behavior::<ExtensionTargetBehavior>()
-            {
-                Some(b) => b,
-                None => continue,
-            };
-
-            if !target_behavior.is_protocol_extension() {
-                continue;
-            }
-
-            // Check SelfBound constraints
-            if is_protocol_extension_applicable(&extension, concrete_ty, ctx) {
-                let specificity = target_behavior.protocol_extension_specificity();
-                applicable.push((extension, specificity, protocol_ty.clone()));
-            }
-        }
-    }
-
-    // Sort by specificity (most specific first)
-    applicable.sort_by_key(|(_, specificity, _)| std::cmp::Reverse(*specificity));
-
-    applicable
-}
-
-/// Check if a protocol extension is applicable to a concrete type.
-///
-/// This checks that all SelfBound constraints in the extension's where clause are satisfied.
-fn is_protocol_extension_applicable(
-    extension: &Arc<kestrel_semantic_tree::symbol::extension::ExtensionSymbol>,
-    concrete_ty: &Ty,
-    ctx: &BodyResolutionContext,
-) -> bool {
-    use kestrel_semantic_tree::ty::Constraint;
-
-    let target_behavior = match extension
-        .metadata()
-        .get_behavior::<ExtensionTargetBehavior>()
-    {
-        Some(b) => b,
-        None => return false,
-    };
-
-    let where_clause = target_behavior.where_clause();
-    debug_trace!(
-        "[WHERE_CLAUSE_CHECK] Checking protocol extension '{}' applicability for type '{}'",
-        extension.metadata().name().value,
-        concrete_ty
-    );
-    debug_trace!(
-        "[WHERE_CLAUSE_CHECK] Extension has {} constraints",
-        where_clause.constraints().len()
-    );
-
-    for constraint in where_clause.constraints() {
-        if let Constraint::SelfBound {
-            associated_type_path,
-            bounds,
-            ..
-        } = constraint
-            && associated_type_path.is_empty()
-        {
-            debug_trace!(
-                "[WHERE_CLAUSE_CHECK] Checking SelfBound constraint with {} bounds",
-                bounds.len()
-            );
-            // Self: Protocol - check if concrete type conforms to all bounds
-            for bound in bounds {
-                debug_trace!(
-                    "[WHERE_CLAUSE_CHECK] Checking if '{}' satisfies bound '{}'",
-                    concrete_ty,
-                    bound
-                );
-                if !type_satisfies_bound(concrete_ty, bound, ctx.model) {
-                    debug_trace!(
-                        "[WHERE_CLAUSE_CHECK] Type does NOT satisfy bound - extension not applicable"
-                    );
-                    return false;
-                }
-                debug_trace!("[WHERE_CLAUSE_CHECK] Type satisfies bound");
-            }
-        }
-        // Self.Item: Protocol - resolve associated type and check bounds
-        // For now, we don't fully support this - requires associated type resolution
-        // TODO: Implement Self.AssociatedType constraint checking
-        // For now, skip these constraints (they'll be checked at call site)
-        // Other constraint types shouldn't appear in protocol extensions
-        else if let Constraint::SelfBound {
-            associated_type_path,
-            bounds,
-            ..
-        } = constraint
-            && !associated_type_path.is_empty()
-        {
-            debug_trace!(
-                "[WHERE_CLAUSE_CHECK] Found Self.{} constraint with {} bounds (NOT CHECKED YET)",
-                associated_type_path.join("."),
-                bounds.len()
-            );
-        } else if let Constraint::TypeEquality { left, right, .. } = constraint {
-            debug_trace!(
-                "[WHERE_CLAUSE_CHECK] Found TypeEquality constraint: {} = {} (NOT CHECKED during member resolution - deferred to type inference)",
-                left,
-                right
-            );
-        }
-    }
-
-    debug_trace!("[WHERE_CLAUSE_CHECK] All constraints satisfied - extension is applicable");
-    true
-}
-
-/// Find a method in protocol extensions for a given concrete type.
-///
-/// Returns a list of method SymbolIds from applicable protocol extensions.
-/// Only methods from the most specific (highest specificity) extensions are returned.
-/// If multiple extensions at the same specificity provide the method, all are returned
-/// (ambiguity is detected at call resolution time based on signature matching).
-fn find_methods_in_protocol_extensions(
-    concrete_ty: &Ty,
-    method_name: &str,
-    ctx: &BodyResolutionContext,
-) -> Vec<SymbolId> {
-    if method_name == "cycle" {
-        debug_trace!("[CYCLE_PROTO_EXT] lookup concrete_ty={}", concrete_ty);
-    }
-    let applicable_extensions = get_applicable_protocol_extensions(concrete_ty, ctx);
-
-    if method_name == "cycle" {
-        debug_trace!(
-            "[CYCLE_PROTO_EXT] applicable_extensions={}",
-            applicable_extensions.len()
-        );
-    }
-
-    if applicable_extensions.is_empty() {
-        return Vec::new();
-    }
-
-    let mut methods = Vec::new();
-
-    // Search ALL applicable extensions (not just highest specificity)
-    // Extensions are sorted by specificity (highest first)
-    for (extension, _specificity, _protocol_ty) in applicable_extensions {
-        for child in extension.metadata().children() {
-            if child.metadata().kind() == KestrelSymbolKind::Function
-                && child.metadata().name().value == method_name
-            {
-                methods.push(child.metadata().id());
-            }
-        }
-    }
-
-    methods
-}
-
-/// Get methods from Self constraint protocols when inside a protocol extension.
-///
-/// When a protocol extension has `where Self: OtherProtocol`, methods from
-/// `OtherProtocol` should be accessible on `self` within the extension body.
-///
-/// Returns a list of method symbols from constraint protocols.
-fn get_methods_from_self_constraints(
-    method_name: &str,
-    ctx: &BodyResolutionContext,
-) -> Vec<Arc<dyn Symbol<KestrelLanguage>>> {
-    use kestrel_semantic_tree::behavior::extension_target::ExtensionTargetBehavior;
-    use kestrel_semantic_tree::ty::Constraint;
-
-    let mut methods = Vec::new();
-
-    // Get the current function
-    let Some(function) = ctx.model.query(SymbolFor {
-        id: ctx.function_id,
-    }) else {
-        return methods;
-    };
-
-    // Get the parent (should be an extension for protocol extensions)
-    let Some(parent) = function.metadata().parent() else {
-        return methods;
-    };
-
-    // Check if we're in a protocol extension
-    if parent.metadata().kind() != KestrelSymbolKind::Extension {
-        return methods;
-    }
-
-    // Get the ExtensionTargetBehavior to check if this is a protocol extension
-    let Some(target_beh) = parent.metadata().get_behavior::<ExtensionTargetBehavior>() else {
-        return methods;
-    };
-
-    if !target_beh.is_protocol_extension() {
-        return methods;
-    }
-
-    // Get the where clause from the extension's target behavior
-    let where_clause = target_beh.where_clause();
-
-    // Look for SelfBound constraints (Self: Protocol)
-    for constraint in where_clause.constraints() {
-        if let Constraint::SelfBound { bounds, .. } = constraint {
-            // Each bound should be a protocol
-            for bound in bounds {
-                if let TyKind::Protocol { symbol, .. } = bound.kind() {
-                    // Search this protocol for the method
-                    for child in symbol.metadata().children() {
-                        if child.metadata().kind() == KestrelSymbolKind::Function
-                            && child.metadata().name().value == method_name
-                        {
-                            methods.push(child);
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    methods
-}

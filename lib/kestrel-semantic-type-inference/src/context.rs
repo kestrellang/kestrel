@@ -230,6 +230,7 @@ impl<'a> InferenceContext<'a> {
         result: TyId,
         expr_id: ExprId,
         substitutions: kestrel_semantic_tree::ty::Substitutions,
+        explicit_type_args: Option<Vec<kestrel_semantic_tree::ty::Ty>>,
         span: Span,
     ) {
         self.constraints.push(Constraint::member_access(
@@ -241,6 +242,7 @@ impl<'a> InferenceContext<'a> {
             result,
             expr_id,
             substitutions,
+            explicit_type_args,
             span,
         ));
     }

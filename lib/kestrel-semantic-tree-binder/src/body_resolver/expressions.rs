@@ -729,7 +729,7 @@ fn resolve_compound_assignment_expression(
     }
 
     // Fallback: use DeferredMethodCall if builtin not registered
-    Expression::deferred_method_call(target, method_name.to_string(), vec![arg], result_ty, span)
+    Expression::deferred_method_call(target, method_name.to_string(), vec![arg], None, result_ty, span)
 }
 
 /// Resolve an if expression: if condition { then } else { else }
@@ -1337,6 +1337,7 @@ fn resolve_for_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) ->
             iterable_expr,
             "iter".to_string(),
             vec![],
+            None,
             iter_ty.clone(),
             span.clone(),
         )
@@ -1382,6 +1383,7 @@ fn resolve_for_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) ->
             iter_ref,
             "next".to_string(),
             vec![],
+            None,
             optional_item_ty.clone(),
             span.clone(),
         )
@@ -1712,6 +1714,7 @@ fn resolve_try_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) ->
             operand,
             "tryExtract".to_string(),
             vec![],
+            None,
             Ty::infer(span.clone()), // ControlFlow[Output, Early]
             span.clone(),
         )
@@ -1811,6 +1814,7 @@ fn resolve_try_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) ->
         "fromResidual".to_string(),
         vec![from_residual_arg],
         protocol_candidates,
+        None,
         return_ty, // Result type is also R (Self)
         span.clone(),
     );

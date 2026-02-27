@@ -55,7 +55,7 @@ impl TypeOracle for SemanticModel {
         // Handle type parameters - look up member in protocol bounds from where clause
         if let TyKind::TypeParameter(type_param) = receiver_ty.kind() {
             // Get bounds by walking up the parent chain to find where clauses
-            let bounds = get_type_parameter_bounds(type_param);
+            let bounds = get_type_parameter_bounds_with_model(type_param, Some(self));
 
             // If any bound is an error type, the type parameter's constraints couldn't be resolved.
             // Return UnknownType to suppress cascading error messages.
@@ -78,28 +78,26 @@ impl TypeOracle for SemanticModel {
                         collect_protocols_with_inherited(proto, proto_subs, Some(receiver_ty));
 
                     for (proto, proto_subs) in &all_protocols {
+                        let proto_id = proto.metadata().id();
+
                         // Check protocol's direct members
                         for child in proto.metadata().children() {
                             if child.metadata().name().value == member {
-                                let member_id = child.metadata().id();
-                                if let Some(callable) =
-                                    child.metadata().get_behavior::<CallableBehavior>()
-                                {
-                                    return Ok(resolve_callable_member(
-                                        &callable,
-                                        child.as_ref(),
-                                        member_id,
-                                        proto_subs,
-                                        receiver_ty,
-                                        true,
-                                        AssocTypeResolution::None,
-                                    ));
+                                if let Some(resolution) = resolve_protocol_bound_member(
+                                    self,
+                                    child.as_ref(),
+                                    child.metadata().id(),
+                                    proto_subs,
+                                    receiver_ty,
+                                    is_static,
+                                    proto_id,
+                                ) {
+                                    return Ok(resolution);
                                 }
                             }
                         }
 
                         // Check extensions on this protocol
-                        let proto_id = proto.metadata().id();
                         let proto_extensions = self.query(ExtensionsFor {
                             target_id: proto_id,
                         });
@@ -116,19 +114,16 @@ impl TypeOracle for SemanticModel {
                             }
                             for child in ext.metadata().children() {
                                 if child.metadata().name().value == member {
-                                    let member_id = child.metadata().id();
-                                    if let Some(callable) =
-                                        child.metadata().get_behavior::<CallableBehavior>()
-                                    {
-                                        return Ok(resolve_callable_member(
-                                            &callable,
-                                            child.as_ref(),
-                                            member_id,
-                                            proto_subs,
-                                            receiver_ty,
-                                            true,
-                                            AssocTypeResolution::None,
-                                        ));
+                                    if let Some(resolution) = resolve_protocol_bound_member(
+                                        self,
+                                        child.as_ref(),
+                                        child.metadata().id(),
+                                        proto_subs,
+                                        receiver_ty,
+                                        is_static,
+                                        proto_id,
+                                    ) {
+                                        return Ok(resolution);
                                     }
                                 }
                             }
@@ -137,6 +132,108 @@ impl TypeOracle for SemanticModel {
                 }
             }
             // Member not found in any protocol bound
+            return Err(MemberError::NotFound {
+                receiver_ty: receiver_ty.clone(),
+                member: member.to_string(),
+            });
+        }
+
+        // Handle associated types - look up member in protocol bounds
+        if let TyKind::AssociatedType { symbol, container } = receiver_ty.kind() {
+            let bounds = get_associated_type_bounds_with_context(
+                self,
+                symbol,
+                self.context_symbol_id(),
+            );
+
+            // If any bound is an error type, suppress cascading errors
+            if bounds.iter().any(|b| matches!(b.kind(), TyKind::Error)) {
+                return Err(MemberError::UnknownType);
+            }
+
+            // If no bounds at all, report not found
+            if bounds.is_empty() {
+                return Err(MemberError::NotFound {
+                    receiver_ty: receiver_ty.clone(),
+                    member: member.to_string(),
+                });
+            }
+
+            for bound in &bounds {
+                let bound = apply_protocol_defaults(bound.clone(), Some(receiver_ty));
+                if let TyKind::Protocol {
+                    symbol: proto,
+                    substitutions: proto_subs,
+                } = bound.kind()
+                {
+                    let all_protocols =
+                        collect_protocols_with_inherited(proto, proto_subs, Some(receiver_ty));
+
+                    for (proto, proto_subs) in &all_protocols {
+                        let proto_id = proto.metadata().id();
+
+                        // Check protocol's direct members
+                        for child in proto.metadata().children() {
+                            if child.metadata().name().value == member {
+                                if let Some(resolution) = resolve_protocol_bound_member(
+                                    self,
+                                    child.as_ref(),
+                                    child.metadata().id(),
+                                    proto_subs,
+                                    receiver_ty,
+                                    is_static,
+                                    proto_id,
+                                ) {
+                                    return Ok(resolution);
+                                }
+                            }
+                        }
+
+                        // Check extensions on this protocol
+                        let proto_extensions = self.query(ExtensionsFor {
+                            target_id: proto_id,
+                        });
+
+                        for ext in &proto_extensions {
+                            if let Some(ext_behavior) = ext.metadata().get_behavior::<ExtensionTargetBehavior>() {
+                                let where_clause = ext_behavior.where_clause();
+                                if !where_clause.constraints().is_empty()
+                                    && !check_where_clause_satisfied_with_self(self, where_clause, proto_subs, Some(receiver_ty))
+                                {
+                                    continue;
+                                }
+                            }
+                            for child in ext.metadata().children() {
+                                if child.metadata().name().value == member {
+                                    if let Some(resolution) = resolve_protocol_bound_member(
+                                        self,
+                                        child.as_ref(),
+                                        child.metadata().id(),
+                                        proto_subs,
+                                        receiver_ty,
+                                        is_static,
+                                        proto_id,
+                                    ) {
+                                        return Ok(resolution);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Also try resolving the associated type to a concrete type and searching there.
+            // This handles cases like `I.Item` where Item = Int through a where clause.
+            let assoc_name = symbol.metadata().name().value.clone();
+            if let Some(container_ty) = container {
+                if let Some(resolved) = self.resolve_associated_type(container_ty, &assoc_name) {
+                    if !matches!(resolved.kind(), TyKind::AssociatedType { .. }) {
+                        return self.resolve_member(&resolved, member, is_static);
+                    }
+                }
+            }
+
             return Err(MemberError::NotFound {
                 receiver_ty: receiver_ty.clone(),
                 member: member.to_string(),
@@ -187,16 +284,8 @@ impl TypeOracle for SemanticModel {
                 // E.g., `extend Array[Int]` beats `extend Array[T]`.
                 let mut extension_matches: Vec<(usize, Arc<dyn Symbol<KestrelLanguage>>)> = Vec::new();
                 for ext in extensions.iter() {
-                    // Check if extension's where-clause constraints are satisfied
-                    if let Some(target_beh) =
-                        ext.metadata().get_behavior::<ExtensionTargetBehavior>()
-                    {
-                        let where_clause = target_beh.where_clause();
-                        if !where_clause.constraints().is_empty()
-                            && !check_where_clause_satisfied_with_self(self, where_clause, &substitutions, Some(receiver_ty))
-                        {
-                            continue;
-                        }
+                    if !is_extension_applicable_to_type(ext, &substitutions, self, Some(receiver_ty)) {
+                        continue;
                     }
 
                     let specificity = extension_specificity(ext);
@@ -270,10 +359,13 @@ impl TypeOracle for SemanticModel {
                     ty: member_ty,
                     symbol_id: member_id,
                     substitutions,
-                    parameters: vec![],  // field access has no parameters
-                    returns_self: false, // field access, not a method call
-                    where_constraints: WhereClause::new(), // field access has no where constraints
+                    parameters: vec![],
+                    returns_self: false,
+                    where_constraints: WhereClause::new(),
                     required_parameter_count: 0,
+                    protocol_id: None,
+                    has_setter: None,
+                    method_type_param_ids: vec![],
                 });
             }
             // Check for computed property access via ComputedMemberAccessBehavior
@@ -288,10 +380,13 @@ impl TypeOracle for SemanticModel {
                     ty: member_ty,
                     symbol_id: member_id,
                     substitutions,
-                    parameters: vec![], // computed property access has no parameters
-                    returns_self: false, // computed property access, not a method call
-                    where_constraints: WhereClause::new(), // computed property access has no where constraints
+                    parameters: vec![],
+                    returns_self: false,
+                    where_constraints: WhereClause::new(),
                     required_parameter_count: 0,
+                    protocol_id: None,
+                    has_setter: None,
+                    method_type_param_ids: vec![],
                 });
             }
         }
@@ -384,6 +479,9 @@ impl TypeOracle for SemanticModel {
             target_id: container.metadata().id(),
         });
         for ext in extensions.iter() {
+            if !is_extension_applicable_to_type(ext, &substitutions, self, Some(receiver_ty)) {
+                continue;
+            }
             let specificity = extension_specificity(ext);
             for child in ext.metadata().children() {
                 if child.metadata().name().value == member {
@@ -446,7 +544,7 @@ impl TypeOracle for SemanticModel {
 
         // Handle type parameters - check if any bound matches the protocol
         if let TyKind::TypeParameter(type_param) = ty.kind() {
-            let bounds = get_type_parameter_bounds(type_param);
+            let bounds = get_type_parameter_bounds_with_model(type_param, Some(self));
             if bound_protocols_include(self, &bounds, protocol_id) {
                 return true;
             }
@@ -871,7 +969,7 @@ impl TypeOracle for SemanticModel {
             // For type parameters, look up in bounds from where clause
             TyKind::TypeParameter(type_param) => {
                 // Get bounds by walking up the parent chain to find where clauses
-                let bounds = get_type_parameter_bounds(type_param);
+                let bounds = get_type_parameter_bounds_with_model(type_param, Some(self));
 
                 for bound in &bounds {
                     if let TyKind::Protocol {
@@ -1222,7 +1320,7 @@ impl TypeOracle for ContextualOracle<'_> {
 
         // Handle type parameters - include extension where-clause bounds from context
         if let TyKind::TypeParameter(type_param) = ty.kind() {
-            let mut bounds = get_type_parameter_bounds(type_param);
+            let mut bounds = get_type_parameter_bounds_with_model(type_param, Some(self.model));
             if let Some(ext_bounds) = get_extension_bounds_for_param(
                 self.model,
                 self.context_symbol_id,
@@ -1453,7 +1551,7 @@ fn resolve_member_with_context(
     // Handle type parameters - look up member in protocol bounds from where clause
     if let TyKind::TypeParameter(type_param) = receiver_ty.kind() {
         // Get bounds by walking up the parent chain to find where clauses
-        let mut bounds = get_type_parameter_bounds(type_param);
+        let mut bounds = get_type_parameter_bounds_with_model(type_param, Some(model));
 
         // If we have context, also check for extension bounds
         if let Some(ctx_id) = context
@@ -1720,6 +1818,9 @@ fn resolve_member_full_impl(
         target_id: container.metadata().id(),
     });
     for ext in extensions.iter() {
+        if !is_extension_applicable_to_type(ext, &substitutions, model, Some(receiver_ty)) {
+            continue;
+        }
         let specificity = extension_specificity(ext);
         for child in ext.metadata().children() {
             if child.metadata().name().value == member {
@@ -1929,6 +2030,9 @@ fn resolve_contextual_member_candidate(
                 returns_self: false,
                 where_constraints: WhereClause::new(),
                 required_parameter_count: 0,
+                protocol_id: None,
+                has_setter: None,
+                method_type_param_ids: vec![],
             });
         }
         if behavior.kind() == KestrelBehaviorKind::ComputedMemberAccess
@@ -1945,6 +2049,9 @@ fn resolve_contextual_member_candidate(
                 returns_self: false,
                 where_constraints: WhereClause::new(),
                 required_parameter_count: 0,
+                protocol_id: None,
+                has_setter: None,
+                method_type_param_ids: vec![],
             });
         }
     }
@@ -2014,6 +2121,9 @@ fn resolve_member_with_arity_and_labels_impl(
         target_id: container.metadata().id(),
     });
     for ext in extensions.iter() {
+        if !is_extension_applicable_to_type(ext, &substitutions, model, Some(receiver_ty)) {
+            continue;
+        }
         let specificity = extension_specificity(ext);
         for child in ext.metadata().children() {
             if child.metadata().name().value == member {
@@ -3421,6 +3531,13 @@ fn apply_protocol_defaults(ty: Ty, self_ty: Option<&Ty>) -> Ty {
 /// This looks at the type parameter's parent symbols (function, struct, protocol)
 /// and extracts bounds from their where clauses.
 fn get_type_parameter_bounds(type_param: &Arc<TypeParameterSymbol>) -> Vec<Ty> {
+    get_type_parameter_bounds_with_model(type_param, None)
+}
+
+fn get_type_parameter_bounds_with_model(
+    type_param: &Arc<TypeParameterSymbol>,
+    model: Option<&SemanticModel>,
+) -> Vec<Ty> {
     let param_id = type_param.metadata().id();
     let mut bounds = Vec::new();
 
@@ -3442,6 +3559,32 @@ fn get_type_parameter_bounds(type_param: &Arc<TypeParameterSymbol>) -> Vec<Ty> {
                 }
             }
         }
+
+        // Also check extensions on this parent for additional bounds.
+        // e.g., `extend Box[T] where T: Formattable` adds T: Formattable
+        // that the parent walk alone wouldn't find.
+        if let Some(model) = model {
+            let parent_id = parent.metadata().id();
+            let extensions = model.query(ExtensionsFor {
+                target_id: parent_id,
+            });
+            for ext in &extensions {
+                if let Some(target_beh) =
+                    ext.metadata().get_behavior::<ExtensionTargetBehavior>()
+                {
+                    let ext_where = target_beh.where_clause();
+                    for bound in ext_where.bounds_for(param_id) {
+                        match bound.kind() {
+                            TyKind::Protocol { .. } | TyKind::Error => {
+                                bounds.push(bound.clone());
+                            },
+                            _ => {},
+                        }
+                    }
+                }
+            }
+        }
+
         current = parent.metadata().parent();
     }
 
@@ -3822,6 +3965,94 @@ enum AssocTypeResolution<'a> {
     Deep(&'a dyn TypeOracle),
 }
 
+/// Resolve a member found in a protocol bound (for TypeParameter/AssociatedType receivers).
+///
+/// Handles callables (methods), MemberAccessBehavior (stored properties),
+/// and ComputedMemberAccessBehavior (computed properties) with is_static filtering.
+/// Sets `protocol_id` and `has_setter` on the returned MemberResolution.
+fn resolve_protocol_bound_member(
+    model: &SemanticModel,
+    member_symbol: &dyn Symbol<KestrelLanguage>,
+    member_id: SymbolId,
+    substitutions: &Substitutions,
+    receiver_ty: &Ty,
+    is_static: bool,
+    proto_id: SymbolId,
+) -> Option<MemberResolution> {
+    // Check for callable (method)
+    if let Some(callable) = member_symbol.metadata().get_behavior::<CallableBehavior>() {
+        if callable.is_static() != is_static {
+            return None;
+        }
+        let mut resolution = resolve_callable_member(
+            &callable,
+            member_symbol,
+            member_id,
+            substitutions,
+            receiver_ty,
+            true,
+            AssocTypeResolution::None,
+        );
+        resolution.protocol_id = Some(proto_id);
+        return Some(resolution);
+    }
+
+    // For properties, check MemberAccessBehavior and ComputedMemberAccessBehavior.
+    // Use FieldSymbol downcast to check is_static for computed properties.
+    let field_is_static = member_symbol
+        .as_any()
+        .downcast_ref::<kestrel_semantic_tree::symbol::field::FieldSymbol>()
+        .map(|f| f.is_static())
+        .unwrap_or(false);
+
+    if field_is_static != is_static {
+        return None;
+    }
+
+    for behavior in member_symbol.metadata().behaviors() {
+        if behavior.kind() == KestrelBehaviorKind::MemberAccess
+            && let Some(access) = behavior.as_ref().downcast_ref::<MemberAccessBehavior>()
+        {
+            let member_ty =
+                transform_ty(model, access.member_type(), substitutions, receiver_ty);
+            return Some(MemberResolution {
+                ty: member_ty,
+                symbol_id: member_id,
+                substitutions: substitutions.clone(),
+                parameters: vec![],
+                returns_self: false,
+                where_constraints: WhereClause::new(),
+                required_parameter_count: 0,
+                protocol_id: Some(proto_id),
+                has_setter: Some(access.is_mutable()),
+                method_type_param_ids: vec![],
+            });
+        }
+        if behavior.kind() == KestrelBehaviorKind::ComputedMemberAccess
+            && let Some(access) = behavior
+                .as_ref()
+                .downcast_ref::<ComputedMemberAccessBehavior>()
+        {
+            let member_ty =
+                transform_ty(model, access.member_type(), substitutions, receiver_ty);
+            return Some(MemberResolution {
+                ty: member_ty,
+                symbol_id: member_id,
+                substitutions: substitutions.clone(),
+                parameters: vec![],
+                returns_self: false,
+                where_constraints: WhereClause::new(),
+                required_parameter_count: 0,
+                protocol_id: Some(proto_id),
+                has_setter: Some(access.has_setter()),
+                method_type_param_ids: vec![],
+            });
+        }
+    }
+
+    None
+}
+
 /// Build a `MemberResolution` from a callable symbol.
 ///
 /// This extracts the common pattern of:
@@ -3875,6 +4106,12 @@ fn resolve_callable_member(
         .collect();
     let where_constraints = get_where_clause_from_symbol(member_symbol).unwrap_or_default();
 
+    let method_type_param_ids = member_symbol
+        .as_any()
+        .downcast_ref::<FunctionSymbol>()
+        .map(|f| f.type_parameters().iter().map(|tp| tp.metadata().id()).collect())
+        .unwrap_or_default();
+
     MemberResolution {
         ty: return_ty,
         symbol_id: member_id,
@@ -3883,6 +4120,9 @@ fn resolve_callable_member(
         returns_self,
         where_constraints,
         required_parameter_count: callable.required_parameter_count(),
+        protocol_id: None,
+        has_setter: None,
+        method_type_param_ids,
     }
 }
 
@@ -4580,6 +4820,71 @@ fn type_contains_param(ty: &Ty, param_id: SymbolId) -> bool {
 ///
 /// More concrete type args = more specific extension.
 /// E.g., `extend Array[Int]` (specificity=1) beats `extend Array[T]` (specificity=0).
+/// Check if an extension is applicable to a type with the given substitutions.
+///
+/// This checks both:
+/// 1. Type argument matching (e.g., `extend Box[Int]` only applies to `Box[Int]`)
+/// 2. Where clause satisfaction (e.g., `extend Box[T] where T: Equatable`)
+fn is_extension_applicable_to_type(
+    ext: &Arc<ExtensionSymbol>,
+    actual_subs: &Substitutions,
+    model: &SemanticModel,
+    receiver_ty: Option<&Ty>,
+) -> bool {
+    let Some(target_beh) = ext.metadata().get_behavior::<ExtensionTargetBehavior>() else {
+        return true;
+    };
+
+    let target_ty = target_beh.target_type();
+
+    // Get substitutions from extension's target type
+    let extension_subs = match target_ty.kind() {
+        TyKind::Struct { substitutions, .. } | TyKind::Enum { substitutions, .. } => substitutions,
+        _ => {
+            // No type arguments - just check where clause
+            let where_clause = target_beh.where_clause();
+            if !where_clause.constraints().is_empty() {
+                return check_where_clause_satisfied_with_self(
+                    model,
+                    where_clause,
+                    actual_subs,
+                    receiver_ty,
+                );
+            }
+            return true;
+        },
+    };
+
+    // Check type argument matching.
+    // When actual_subs is empty (generic type without explicit type args, e.g., `Box.wrap(42)`
+    // where T hasn't been inferred yet), extensions with all-TypeParameter subs are still
+    // potentially applicable — the solver will infer the actual type args later.
+    if !actual_subs.is_empty()
+        && !is_extension_applicable_for_conformance(extension_subs, actual_subs)
+    {
+        return false;
+    }
+
+    // Check where clause constraints
+    let where_clause = target_beh.where_clause();
+    if !where_clause.constraints().is_empty() {
+        // Build substitutions mapping extension type params to actual types
+        let mut resolved_subs = actual_subs.clone();
+        for (param_id, ext_ty) in extension_subs.iter() {
+            if ext_ty.is_type_parameter() {
+                if let Some(actual_ty) = actual_subs.get(*param_id) {
+                    resolved_subs.insert(*param_id, actual_ty.clone());
+                }
+            }
+        }
+        if !check_where_clause_satisfied_with_self(model, where_clause, &resolved_subs, receiver_ty) {
+            return false;
+        }
+    }
+
+    true
+}
+
 fn extension_specificity(ext: &Arc<ExtensionSymbol>) -> usize {
     if let Some(target_beh) = ext.metadata().get_behavior::<ExtensionTargetBehavior>() {
         target_beh.specificity()

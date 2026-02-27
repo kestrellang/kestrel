@@ -7,7 +7,7 @@ use std::collections::HashSet;
 
 use kestrel_semantic_tree::behavior::executable::CodeBlock;
 use kestrel_semantic_tree::expr::{
-    CallArgument, ElseBranch, ExprKind, Expression, InterpolationPart, PrimitiveMethod,
+    CallArgument, ElseBranch, ExprId, ExprKind, Expression, InterpolationPart, PrimitiveMethod,
 };
 use kestrel_semantic_tree::pattern::Pattern;
 use kestrel_semantic_tree::stmt::{Statement, StatementKind};
@@ -357,6 +357,7 @@ fn apply_to_expression(
             receiver,
             method_name,
             arguments,
+            explicit_type_args,
         } => {
             let resolved_receiver = apply_to_expression(receiver, solution, oracle);
             let resolved_arguments: Vec<CallArgument> = arguments
@@ -386,34 +387,16 @@ fn apply_to_expression(
                     })
                     .collect();
 
-                let method_fn_ty = oracle
-                    .resolve_member_full(
-                        &resolved_receiver.ty,
-                        method_name,
-                        false,
-                        &labels,
-                        &argument_types,
-                    )
-                    .or_else(|_| {
-                        oracle.resolve_member_with_labels(
-                            &resolved_receiver.ty,
-                            method_name,
-                            false,
-                            &labels,
-                        )
-                    })
-                    .or_else(|_| {
-                        oracle.resolve_member_with_arity(
-                            &resolved_receiver.ty,
-                            method_name,
-                            false,
-                            resolved_arguments.len(),
-                        )
-                    })
-                    .map(|resolution| {
-                        Ty::function(resolution.parameters, resolution.ty, expr.span.clone())
-                    })
-                    .unwrap_or_else(|_| Ty::infer(expr.span.clone()));
+                // Build the method function type from already-resolved argument and result types.
+                // We can't re-query the oracle because it creates fresh infer vars for method
+                // type params that can't be resolved by SymbolId-based substitutions.
+                let resolved_result_ty =
+                    resolve_type(&expr.ty, solution, oracle, &mut HashSet::new());
+                let param_tys: Vec<Ty> = resolved_arguments
+                    .iter()
+                    .map(|a| a.value.ty.clone())
+                    .collect();
+                let method_fn_ty = Ty::function(param_tys, resolved_result_ty, expr.span.clone());
 
                 // Create a MethodRef with the resolved method symbol
                 let mut method_ref = Expression::method_ref(
@@ -435,6 +418,7 @@ fn apply_to_expression(
                     receiver: Box::new(resolved_receiver),
                     method_name: method_name.clone(),
                     arguments: resolved_arguments,
+                    explicit_type_args: explicit_type_args.clone(),
                 }
             }
         },
@@ -444,6 +428,7 @@ fn apply_to_expression(
             method_name,
             arguments,
             protocol_candidates,
+            explicit_type_args,
         } => {
             let resolved_target_ty = resolve_type(target_ty, solution, oracle, &mut HashSet::new());
             let resolved_arguments: Vec<CallArgument> = arguments
@@ -453,24 +438,37 @@ fn apply_to_expression(
 
             // Check if we have a resolved symbol for this expression
             if let Some(value_resolution) = solution.get_value(expr.id) {
-                // Get the type symbol for creating a TypeRef
-                let type_symbol_id_opt = match resolved_target_ty.kind() {
-                    TyKind::Struct { symbol, .. } => Some(symbol.metadata().id()),
-                    TyKind::Enum { symbol, .. } => Some(symbol.metadata().id()),
+                // Create the appropriate receiver expression based on target type
+                let receiver_opt = match resolved_target_ty.kind() {
+                    TyKind::Struct { symbol, .. } => Some(Expression::type_ref(
+                        symbol.metadata().id(),
+                        resolved_target_ty.clone(),
+                        expr.span.clone(),
+                    )),
+                    TyKind::Enum { symbol, .. } => Some(Expression::type_ref(
+                        symbol.metadata().id(),
+                        resolved_target_ty.clone(),
+                        expr.span.clone(),
+                    )),
+                    TyKind::TypeParameter(tp) => Some(Expression::type_parameter_ref(
+                        tp.metadata().id(),
+                        resolved_target_ty.clone(),
+                        expr.span.clone(),
+                    )),
+                    TyKind::AssociatedType { .. } => Some(Expression {
+                        id: ExprId::new(),
+                        kind: ExprKind::AssociatedTypeRef,
+                        ty: resolved_target_ty.clone(),
+                        span: expr.span.clone(),
+                        mutable: false,
+                    }),
                     _ => None,
                 };
 
-                if let Some(type_symbol_id) = type_symbol_id_opt {
-                    // Create a TypeRef expression for the target type
-                    let type_ref = Expression::type_ref(
-                        type_symbol_id,
-                        resolved_target_ty.clone(),
-                        expr.span.clone(),
-                    );
-
+                if let Some(receiver) = receiver_opt {
                     // Create a MethodRef with the resolved static method symbol
                     let method_ref = Expression::method_ref(
-                        type_ref,
+                        receiver,
                         vec![value_resolution.symbol_id],
                         method_name.clone(),
                         expr.span.clone(),
@@ -483,13 +481,14 @@ fn apply_to_expression(
                         substitutions: value_resolution.substitutions.clone(),
                     }
                 } else {
-                    // Cannot resolve static call on non-struct/enum type
+                    // Cannot resolve static call on unknown type
                     // Keep as deferred (will error during lowering)
                     ExprKind::DeferredStaticCall {
                         target_ty: resolved_target_ty,
                         method_name: method_name.clone(),
                         arguments: resolved_arguments,
                         protocol_candidates: protocol_candidates.clone(),
+                        explicit_type_args: explicit_type_args.clone(),
                     }
                 }
             } else {
@@ -499,6 +498,7 @@ fn apply_to_expression(
                     method_name: method_name.clone(),
                     arguments: resolved_arguments,
                     protocol_candidates: protocol_candidates.clone(),
+                    explicit_type_args: explicit_type_args.clone(),
                 }
             }
         },

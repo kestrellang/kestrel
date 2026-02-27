@@ -98,6 +98,9 @@ pub enum Constraint {
         expr_id: ExprId,
         /// Substitutions from the call site (includes inference variables for method type params)
         substitutions: kestrel_semantic_tree::ty::Substitutions,
+        /// Explicit type arguments from the call site (e.g., `x.map[Int64](1)`).
+        /// Converted to substitutions by the solver after resolving the method.
+        explicit_type_args: Option<Vec<kestrel_semantic_tree::ty::Ty>>,
         /// Span for error reporting
         span: Span,
     },
@@ -215,6 +218,7 @@ impl Constraint {
         result: TyId,
         expr_id: ExprId,
         substitutions: kestrel_semantic_tree::ty::Substitutions,
+        explicit_type_args: Option<Vec<kestrel_semantic_tree::ty::Ty>>,
         span: Span,
     ) -> Self {
         Constraint::MemberAccess {
@@ -226,6 +230,7 @@ impl Constraint {
             result,
             expr_id,
             substitutions,
+            explicit_type_args,
             span,
         }
     }

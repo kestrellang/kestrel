@@ -373,6 +373,7 @@ fn desugar_binary_op(
         lhs,
         method_name.to_string(),
         vec![arg],
+        None,
         result_ty,
         full_span,
     )
@@ -428,6 +429,7 @@ fn desugar_unary_op(
         operand,
         method_name.to_string(),
         vec![],
+        None,
         result_ty,
         full_span,
     )

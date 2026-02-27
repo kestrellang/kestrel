@@ -544,6 +544,7 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
                     expr.ty.id(),
                     expr.id,
                     Substitutions::new(), // no substitutions for field access
+                    None,                 // no explicit type args for field access
                     expr.span.clone(),
                 );
             }
@@ -669,6 +670,7 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
                             expr.ty.id(),
                             expr.id,
                             substitutions.clone(), // pass call-site substitutions with inference vars
+                            None,                  // explicit type args already in substitutions
                             expr.span.clone(),
                         );
 
@@ -707,6 +709,7 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
             receiver,
             method_name,
             arguments,
+            explicit_type_args,
         } => {
             generate_expression_constraints(ctx, receiver);
             for arg in arguments {
@@ -729,6 +732,7 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
                 expr.ty.id(),
                 expr.id,
                 Substitutions::new(), // no call-site substitutions for deferred method call
+                explicit_type_args.clone(), // explicit type args for solver to convert to substitutions
                 expr.span.clone(),
             );
 
@@ -749,6 +753,7 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
             method_name,
             arguments,
             protocol_candidates,
+            explicit_type_args,
         } => {
             // Generate constraints for arguments
             for arg in arguments {
@@ -783,6 +788,7 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
                 expr.ty.id(),
                 expr.id,
                 Substitutions::new(), // no call-site substitutions for deferred static call
+                explicit_type_args.clone(), // explicit type args for solver to convert to substitutions
                 expr.span.clone(),
             );
         },

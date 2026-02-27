@@ -33,6 +33,17 @@ pub struct MemberResolution {
     /// Number of required parameters (those without default values).
     /// Used for arity checking that accounts for default parameters.
     pub required_parameter_count: usize,
+    /// The protocol this member came from, if resolved via protocol bounds.
+    /// Used by the binder to construct `ProtocolPropertyAccess` expressions
+    /// that reference the witness table for protocol dispatch.
+    pub protocol_id: Option<SymbolId>,
+    /// Whether the property has a setter, if this is a protocol property.
+    /// Used by the binder to determine mutability of `ProtocolPropertyAccess`.
+    pub has_setter: Option<bool>,
+    /// Type parameter SymbolIds for method-level generics (e.g., `func map[T](...)`).
+    /// Empty for non-generic methods, fields, and properties.
+    /// Used by the solver to zip with explicit type args from the call site.
+    pub method_type_param_ids: Vec<SymbolId>,
 }
 
 /// Error when member resolution fails.
