@@ -503,6 +503,48 @@ fn apply_to_expression(
             }
         },
 
+        ExprKind::DeferredInitCall {
+            struct_ty,
+            arguments,
+            explicit_type_args,
+        } => {
+            let resolved_ty = resolve_type(struct_ty, solution, oracle, &mut HashSet::new());
+            let resolved_arguments: Vec<CallArgument> = arguments
+                .iter()
+                .map(|arg| apply_to_argument(arg, solution, oracle))
+                .collect();
+
+            if let Some(value_resolution) = solution.get_value(expr.id) {
+                // Build init callee as SymbolRef (NOT MethodRef — MIR lowering expects SymbolRef for init)
+                let resolved_result_ty =
+                    resolve_type(&expr.ty, solution, oracle, &mut HashSet::new());
+                let param_tys: Vec<Ty> = resolved_arguments
+                    .iter()
+                    .map(|a| a.value.ty.clone())
+                    .collect();
+                let fn_ty = Ty::function(param_tys, resolved_result_ty, expr.span.clone());
+                let callee = Expression::symbol_ref(
+                    value_resolution.symbol_id,
+                    fn_ty,
+                    false,
+                    expr.span.clone(),
+                );
+
+                ExprKind::Call {
+                    callee: Box::new(callee),
+                    arguments: resolved_arguments,
+                    substitutions: value_resolution.substitutions.clone(),
+                }
+            } else {
+                // Keep as deferred (will error during lowering)
+                ExprKind::DeferredInitCall {
+                    struct_ty: resolved_ty,
+                    arguments: resolved_arguments,
+                    explicit_type_args: explicit_type_args.clone(),
+                }
+            }
+        },
+
         ExprKind::ImplicitStructInit {
             struct_type,
             arguments,

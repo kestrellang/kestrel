@@ -1160,6 +1160,20 @@ pub enum ExprKind {
         explicit_type_args: Option<Vec<Ty>>,
     },
 
+    /// Deferred explicit init call on a struct type.
+    /// Created when a struct has explicit initializers and resolution should be
+    /// deferred to type inference for overload resolution with full type information.
+    ///
+    /// Type inference will resolve this by calling `oracle.resolve_init()`.
+    DeferredInitCall {
+        /// The struct type being initialized (may have Infer for unknown type args)
+        struct_ty: Ty,
+        /// Arguments to the initializer
+        arguments: Vec<CallArgument>,
+        /// Explicit type arguments provided at the call site (e.g., `Foo[Int](...)`).
+        explicit_type_args: Option<Vec<Ty>>,
+    },
+
     /// Implicit struct initialization: `Point(x: 1, y: 2)` when no explicit init exists.
     /// The compiler generates a memberwise initializer that assigns each argument to
     /// the corresponding field in declaration order.
@@ -1787,6 +1801,23 @@ impl Expression {
                     let args: Vec<String> =
                         arguments.iter().map(|a| format_expr(&a.value)).collect();
                     format!("{}.{}({})", target_ty, method_name, args.join(", "))
+                },
+                ExprKind::DeferredInitCall {
+                    struct_ty,
+                    arguments,
+                    ..
+                } => {
+                    let args: Vec<String> = arguments
+                        .iter()
+                        .map(|a| {
+                            if let Some(ref label) = a.label {
+                                format!("{}: {}", label, format_expr(&a.value))
+                            } else {
+                                format_expr(&a.value)
+                            }
+                        })
+                        .collect();
+                    format!("{}({})", struct_ty, args.join(", "))
                 },
                 ExprKind::ImplicitStructInit {
                     struct_type,
@@ -2563,6 +2594,28 @@ impl Expression {
                 method_name,
                 arguments,
                 protocol_candidates,
+                explicit_type_args,
+            },
+            ty: result_ty,
+            span,
+            mutable: false,
+        }
+    }
+
+    /// Create a deferred init call expression.
+    /// Used when a struct has explicit initializers and resolution is deferred to type inference.
+    pub fn deferred_init_call(
+        struct_ty: Ty,
+        arguments: Vec<CallArgument>,
+        explicit_type_args: Option<Vec<Ty>>,
+        result_ty: Ty,
+        span: Span,
+    ) -> Self {
+        Expression {
+            id: ExprId::new(),
+            kind: ExprKind::DeferredInitCall {
+                struct_ty,
+                arguments,
                 explicit_type_args,
             },
             ty: result_ty,
@@ -3524,6 +3577,25 @@ impl Expression {
                     })
                     .collect(),
                 protocol_candidates: protocol_candidates.clone(),
+                explicit_type_args: explicit_type_args.as_ref().map(|args| {
+                    args.iter().map(|ty| ty.apply_substitutions(subs)).collect()
+                }),
+            },
+
+            ExprKind::DeferredInitCall {
+                struct_ty,
+                arguments,
+                explicit_type_args,
+            } => ExprKind::DeferredInitCall {
+                struct_ty: struct_ty.apply_substitutions(subs),
+                arguments: arguments
+                    .iter()
+                    .map(|arg| CallArgument {
+                        label: arg.label.clone(),
+                        value: arg.value.apply_substitutions(subs),
+                        span: arg.span.clone(),
+                    })
+                    .collect(),
                 explicit_type_args: explicit_type_args.as_ref().map(|args| {
                     args.iter().map(|ty| ty.apply_substitutions(subs)).collect()
                 }),

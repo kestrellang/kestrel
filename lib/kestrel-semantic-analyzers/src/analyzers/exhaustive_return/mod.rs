@@ -360,6 +360,15 @@ fn analyze_expression(expr: &Expression) -> ReturnState {
             }
             ReturnState::MayFallThrough
         },
+        ExprKind::DeferredInitCall { arguments, .. } => {
+            for arg in arguments {
+                let s = analyze_expression(&arg.value);
+                if s.definitely_returns() {
+                    return s;
+                }
+            }
+            ReturnState::MayFallThrough
+        },
         ExprKind::ImplicitStructInit { arguments, .. } => {
             for arg in arguments {
                 let s = analyze_expression(&arg.value);

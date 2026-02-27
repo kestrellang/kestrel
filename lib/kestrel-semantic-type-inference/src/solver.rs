@@ -15,7 +15,7 @@ use kestrel_semantic_tree::ty::{ParamInfo, Substitutions, Ty, TyId, TyKind};
 use kestrel_span::Span;
 use semantic_tree::symbol::Symbol;
 
-use crate::constraint::Constraint;
+use crate::constraint::{Constraint, ProtocolRef};
 use crate::context::InferenceContext;
 use crate::error::InferenceError;
 use crate::oracle::MemberError;
@@ -1761,6 +1761,131 @@ fn resolve_member(
             .is_some_and(|c| contains_unresolved_infer(c))
     {
         return Ok(SolveResult::Deferred);
+    }
+
+    // Special handling for init calls: use oracle.resolve_init() instead of resolve_member()
+    // Init calls come from DeferredInitCall with member="init", is_static=false
+    if member == "init" && !is_static {
+        let argument_types: Vec<Option<Ty>> = arguments
+            .iter()
+            .map(|arg_id| {
+                let ty = resolve_type(ctx, *arg_id);
+                if matches!(
+                    ty.kind(),
+                    TyKind::Infer
+                        | TyKind::TypeParameter(_)
+                        | TyKind::AssociatedType { .. }
+                        | TyKind::SelfType
+                ) {
+                    None
+                } else {
+                    Some(ty)
+                }
+            })
+            .collect();
+
+        let resolution_result = ctx.oracle().resolve_init(&receiver_ty, labels, &argument_types);
+
+        match resolution_result {
+            Ok(resolution) => {
+                // NOTE: No visibility check here. Init visibility is handled at a higher level
+                // (the binder decides whether to emit DeferredInitCall based on available inits).
+                // Private inits should be callable from extensions in the same file.
+
+                let mut substitutions = resolution.substitutions.clone();
+                for (param_id, ty) in call_site_substitutions.iter() {
+                    substitutions.insert(*param_id, ty.clone());
+                }
+
+                // Convert explicit type args to substitutions
+                if let Some(type_args) = explicit_type_args {
+                    for (param_id, type_arg) in resolution
+                        .method_type_param_ids
+                        .iter()
+                        .zip(type_args.iter())
+                    {
+                        ctx.register_type(type_arg);
+                        if let Some(infer_var) = resolution.substitutions.get(*param_id) {
+                            ctx.register_type(infer_var);
+                            ctx.equate(infer_var.id(), type_arg.id(), span.clone());
+                        }
+                        substitutions.insert(*param_id, type_arg.clone());
+                    }
+                }
+
+                // Record the value resolution with merged substitutions
+                ctx.values_mut().insert(
+                    expr_id,
+                    ValueResolution::new(resolution.symbol_id, substitutions.clone()),
+                );
+
+                // Register and unify the return type with the result
+                ctx.register_type(&resolution.ty);
+                ctx.equate(resolution.ty.id(), result, span.clone());
+
+                // Create constraints for argument types vs parameter types
+                for (arg_ty_id, param_ty) in arguments.iter().zip(resolution.parameters.iter()) {
+                    ctx.register_type(param_ty);
+                    ctx.equate(*arg_ty_id, param_ty.id(), span.clone());
+                }
+
+                // Process where clause constraints (both bounds and equalities)
+                {
+                    use kestrel_semantic_tree::ty::Constraint as WhereConstraint;
+                    for constraint in resolution.where_constraints.constraints() {
+                        match constraint {
+                            WhereConstraint::TypeBound { param, bounds, .. } => {
+                                if let Some(param_id) = param {
+                                    // Get the substituted type for this type parameter
+                                    if let Some(param_ty) = substitutions.get(*param_id) {
+                                        let param_ty = param_ty.clone();
+                                        for bound in bounds {
+                                            let bound = bound.apply_substitutions(&substitutions);
+                                            if let TyKind::Protocol { symbol, .. } = bound.kind() {
+                                                ctx.register_type(&param_ty);
+                                                ctx.conforms(
+                                                    param_ty.id(),
+                                                    ProtocolRef {
+                                                        symbol_id: symbol.metadata().id(),
+                                                        span: span.clone(),
+                                                    },
+                                                );
+                                            }
+                                        }
+                                    }
+                                }
+                            },
+                            WhereConstraint::TypeEquality { left, right, .. } => {
+                                let left_ty = left.apply_substitutions(&substitutions);
+                                let right_ty = right.apply_substitutions(&substitutions);
+                                let left_ty = left_ty.substitute_self(&receiver_ty);
+                                let right_ty = right_ty.substitute_self(&receiver_ty);
+                                ctx.register_type(&left_ty);
+                                ctx.register_type(&right_ty);
+                                ctx.equate(left_ty.id(), right_ty.id(), span.clone());
+                            },
+                            _ => {}, // Skip other constraint kinds (NegativeBound, InheritedAssociatedTypeBound, SelfBound)
+                        }
+                    }
+                }
+
+                return Ok(SolveResult::Solved);
+            },
+            Err(MemberError::UnknownType) => return Ok(SolveResult::Deferred),
+            Err(MemberError::NotFound { .. }) => {
+                return Err(InferenceError::member_not_found(
+                    receiver_ty.clone(),
+                    "init".to_string(),
+                    span.clone(),
+                ));
+            },
+            Err(MemberError::Ambiguous { count }) => {
+                return Err(InferenceError::internal(format!(
+                    "ambiguous init: {} candidates",
+                    count
+                )));
+            },
+        }
     }
 
     // Try type-directed overload resolution for labeled calls.

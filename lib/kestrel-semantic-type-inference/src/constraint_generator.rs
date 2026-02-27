@@ -793,6 +793,44 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
             );
         },
 
+        ExprKind::DeferredInitCall {
+            struct_ty,
+            arguments,
+            ..
+        } => {
+            // Generate constraints for arguments
+            for arg in arguments {
+                generate_expression_constraints(ctx, &arg.value);
+            }
+
+            // Collect argument type IDs and labels for constraint generation
+            let arg_ty_ids: Vec<_> = arguments.iter().map(|a| a.value.ty.id()).collect();
+            let arg_labels: Vec<_> = arguments.iter().map(|a| a.label.clone()).collect();
+
+            // Register struct type and result type
+            ctx.register_type(struct_ty);
+            ctx.register_type(&expr.ty);
+
+            // Generate a member access constraint with member="init", is_static=false
+            // The solver will dispatch to oracle.resolve_init() for init members
+            // NOTE: explicit_type_args is None here because the DeferredInitCall's
+            // explicit_type_args are the STRUCT's type args (e.g., [Int64] for Set[Int64]),
+            // not the INIT's method-level type args. The struct type args are already
+            // encoded in struct_ty. Init-level type args (e.g., init[I]) are always inferred.
+            ctx.member_access(
+                struct_ty.id(),
+                "init".to_string(),
+                false, // is_static=false (initializers have a receiver)
+                arg_ty_ids,
+                arg_labels,
+                expr.ty.id(),
+                expr.id,
+                Substitutions::new(),
+                None,
+                expr.span.clone(),
+            );
+        },
+
         ExprKind::ImplicitStructInit { arguments, .. } => {
             for arg in arguments {
                 generate_expression_constraints(ctx, &arg.value);

@@ -1065,6 +1065,18 @@ fn collect_captures_recursive(
             }
         },
 
+        ExprKind::DeferredInitCall { arguments, .. } => {
+            for arg in arguments {
+                collect_captures_recursive(
+                    &arg.value,
+                    closure_entry_depth,
+                    local_scope,
+                    captures,
+                    seen_ids,
+                );
+            }
+        },
+
         ExprKind::DelegatingInit { arguments, .. } => {
             for arg in arguments {
                 collect_captures_recursive(

@@ -413,6 +413,15 @@ impl TypeOracle for SemanticModel {
         })
     }
 
+    fn resolve_all_members(
+        &self,
+        receiver_ty: &Ty,
+        member: &str,
+        is_static: bool,
+    ) -> Result<Vec<MemberResolution>, MemberError> {
+        resolve_all_members_impl(self, receiver_ty, member, is_static)
+    }
+
     fn resolve_member_with_arity(
         &self,
         receiver_ty: &Ty,
@@ -1180,6 +1189,7 @@ impl SemanticModel {
         // Get the where clause from the function
         function_symbol.where_clause()
     }
+
 }
 
 // ============================================================================
@@ -1410,6 +1420,15 @@ impl TypeOracle for ContextualOracle<'_> {
 
     fn function_where_clause(&self, function_id: SymbolId) -> WhereClause {
         self.model.function_where_clause(function_id)
+    }
+
+    fn resolve_init(
+        &self,
+        struct_ty: &Ty,
+        labels: &[Option<String>],
+        argument_types: &[Option<Ty>],
+    ) -> Result<MemberResolution, MemberError> {
+        resolve_init_impl(self.model, struct_ty, Some(self.context_symbol_id), labels, argument_types)
     }
 }
 
@@ -1899,6 +1918,119 @@ fn resolve_member_full_impl(
     Ok(scored.into_iter().next().unwrap().1)
 }
 
+/// Resolve an initializer on a struct type.
+///
+/// Collects InitializerSymbol children from the struct and its extensions,
+/// filters by labels/arity, scores by argument types, and returns the best match.
+fn resolve_init_impl(
+    model: &SemanticModel,
+    struct_ty: &Ty,
+    context: Option<SymbolId>,
+    labels: &[Option<String>],
+    argument_types: &[Option<Ty>],
+) -> Result<MemberResolution, MemberError> {
+    if matches!(struct_ty.kind(), TyKind::Infer) {
+        return Err(MemberError::UnknownType);
+    }
+
+    let (container, substitutions) = match get_type_container_with_subs(model, struct_ty) {
+        Some((c, s)) => (c, s),
+        None => {
+            return Err(MemberError::NotFound {
+                receiver_ty: struct_ty.clone(),
+                member: "init".to_string(),
+            });
+        },
+    };
+
+    // Collect initializer candidates from struct children
+    let mut candidates: Vec<(usize, Arc<dyn Symbol<KestrelLanguage>>)> = container
+        .metadata()
+        .children()
+        .into_iter()
+        .filter(|c| c.metadata().kind() == KestrelSymbolKind::Initializer)
+        .map(|c| (usize::MAX, c))
+        .collect();
+
+    // Also collect from applicable extensions
+    let extensions = model.query(ExtensionsFor {
+        target_id: container.metadata().id(),
+    });
+    for ext in extensions.iter() {
+        if !is_extension_applicable_to_type(ext, &substitutions, model, Some(struct_ty)) {
+            continue;
+        }
+        let specificity = extension_specificity(ext);
+        for child in ext.metadata().children() {
+            if child.metadata().kind() == KestrelSymbolKind::Initializer {
+                candidates.push((specificity, child));
+            }
+        }
+    }
+
+    // Sort by specificity descending
+    candidates.sort_by(|a, b| b.0.cmp(&a.0));
+
+    // Filter by labels+arity, then score by argument types
+    let mut scored: Vec<(usize, MemberResolution)> = Vec::new();
+
+    for (_, candidate) in &candidates {
+        if let Some(callable) = candidate.metadata().get_behavior::<CallableBehavior>() {
+            let label_match = matches_signature_labels(&callable, labels);
+            if !label_match {
+                continue;
+            }
+
+            let resolution = resolve_callable_member(
+                &callable,
+                candidate.as_ref(),
+                candidate.metadata().id(),
+                &substitutions,
+                struct_ty,
+                true,
+                AssocTypeResolution::Shallow(model),
+            );
+
+            // Override the return type to be the struct type (inits return Self)
+            let mut resolution = resolution;
+            resolution.ty = struct_ty.clone();
+
+            // Score this candidate by argument type matching
+            let mut score = 0usize;
+            for (i, arg_ty_opt) in argument_types.iter().enumerate() {
+                if let Some(arg_ty) = arg_ty_opt
+                    && let Some(param_ty) = resolution.parameters.get(i)
+                {
+                    if arg_ty.to_string() == param_ty.to_string() {
+                        score += 2;
+                    } else if let TyKind::Protocol { symbol, .. } = param_ty.kind()
+                        && model.conforms_to(arg_ty, symbol.metadata().id())
+                    {
+                        score += 1;
+                    }
+                }
+            }
+
+            scored.push((score, resolution));
+        }
+    }
+
+    if scored.is_empty() {
+        return Err(MemberError::NotFound {
+            receiver_ty: struct_ty.clone(),
+            member: "init".to_string(),
+        });
+    }
+
+    if scored.len() == 1 {
+        return Ok(scored.into_iter().next().unwrap().1);
+    }
+
+    // Sort by score descending, pick best
+    scored.sort_by(|a, b| b.0.cmp(&a.0));
+    Ok(scored.into_iter().next().unwrap().1)
+}
+
 /// Context-aware member resolution with label-based overload resolution.
 ///
 /// For SelfType, TypeParameter, and AssociatedType receivers, delegates to
@@ -2039,6 +2171,296 @@ fn resolve_contextual_member_candidate(
             && let Some(access) = behavior
                 .as_ref()
                 .downcast_ref::<ComputedMemberAccessBehavior>()
+        {
+            let member_ty = transform_ty(model, access.member_type(), substitutions, receiver_ty);
+            return Some(MemberResolution {
+                ty: member_ty,
+                symbol_id: member_id,
+                substitutions: substitutions.clone(),
+                parameters: vec![],
+                returns_self: false,
+                where_constraints: WhereClause::new(),
+                required_parameter_count: 0,
+                protocol_id: None,
+                has_setter: None,
+                method_type_param_ids: vec![],
+            });
+        }
+    }
+
+    None
+}
+
+/// Resolve ALL matching members on a type (for overload candidate collection).
+///
+/// Unlike `resolve_member` which returns the first/best match, this collects
+/// all members with the given name across protocol bounds and extensions.
+fn resolve_all_members_impl(
+    model: &SemanticModel,
+    receiver_ty: &Ty,
+    member: &str,
+    is_static: bool,
+) -> Result<Vec<MemberResolution>, MemberError> {
+    if matches!(receiver_ty.kind(), TyKind::Infer) {
+        return Err(MemberError::UnknownType);
+    }
+    if matches!(receiver_ty.kind(), TyKind::Error) {
+        return Err(MemberError::NotFound {
+            receiver_ty: receiver_ty.clone(),
+            member: member.to_string(),
+        });
+    }
+
+    // TypeParameter: collect from all protocol bounds
+    if let TyKind::TypeParameter(type_param) = receiver_ty.kind() {
+        let bounds = get_type_parameter_bounds_with_model(type_param, Some(model));
+        if bounds.iter().any(|b| matches!(b.kind(), TyKind::Error)) {
+            return Err(MemberError::UnknownType);
+        }
+        let mut results = Vec::new();
+        for bound in &bounds {
+            let bound = apply_protocol_defaults(bound.clone(), Some(receiver_ty));
+            if let TyKind::Protocol { symbol: proto, substitutions: proto_subs } = bound.kind() {
+                let all_protocols = collect_protocols_with_inherited(proto, proto_subs, Some(receiver_ty));
+                for (proto, proto_subs) in &all_protocols {
+                    let proto_id = proto.metadata().id();
+                    for child in proto.metadata().children() {
+                        if child.metadata().name().value == member {
+                            if let Some(resolution) = resolve_protocol_bound_member(
+                                model, child.as_ref(), child.metadata().id(),
+                                proto_subs, receiver_ty, is_static, proto_id,
+                            ) {
+                                results.push(resolution);
+                            }
+                        }
+                    }
+                    let proto_extensions = model.query(ExtensionsFor { target_id: proto_id });
+                    for ext in &proto_extensions {
+                        if let Some(ext_behavior) = ext.metadata().get_behavior::<ExtensionTargetBehavior>() {
+                            let where_clause = ext_behavior.where_clause();
+                            if !where_clause.constraints().is_empty()
+                                && !check_where_clause_satisfied_with_self(model, where_clause, proto_subs, Some(receiver_ty))
+                            {
+                                continue;
+                            }
+                        }
+                        for child in ext.metadata().children() {
+                            if child.metadata().name().value == member {
+                                if let Some(resolution) = resolve_protocol_bound_member(
+                                    model, child.as_ref(), child.metadata().id(),
+                                    proto_subs, receiver_ty, is_static, proto_id,
+                                ) {
+                                    results.push(resolution);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if results.is_empty() {
+            return Err(MemberError::NotFound {
+                receiver_ty: receiver_ty.clone(),
+                member: member.to_string(),
+            });
+        }
+        return Ok(results);
+    }
+
+    // AssociatedType: collect from all associated type bounds
+    if let TyKind::AssociatedType { symbol, container } = receiver_ty.kind() {
+        let bounds = get_associated_type_bounds_with_context(
+            model, symbol, model.context_symbol_id(),
+        );
+        if bounds.iter().any(|b| matches!(b.kind(), TyKind::Error)) {
+            return Err(MemberError::UnknownType);
+        }
+        if bounds.is_empty() {
+            return Err(MemberError::NotFound {
+                receiver_ty: receiver_ty.clone(),
+                member: member.to_string(),
+            });
+        }
+        let mut results = Vec::new();
+        for bound in &bounds {
+            let bound = apply_protocol_defaults(bound.clone(), Some(receiver_ty));
+            if let TyKind::Protocol { symbol: proto, substitutions: proto_subs } = bound.kind() {
+                let all_protocols = collect_protocols_with_inherited(proto, proto_subs, Some(receiver_ty));
+                for (proto, proto_subs) in &all_protocols {
+                    let proto_id = proto.metadata().id();
+                    for child in proto.metadata().children() {
+                        if child.metadata().name().value == member {
+                            if let Some(resolution) = resolve_protocol_bound_member(
+                                model, child.as_ref(), child.metadata().id(),
+                                proto_subs, receiver_ty, is_static, proto_id,
+                            ) {
+                                results.push(resolution);
+                            }
+                        }
+                    }
+                    let proto_extensions = model.query(ExtensionsFor { target_id: proto_id });
+                    for ext in &proto_extensions {
+                        if let Some(ext_behavior) = ext.metadata().get_behavior::<ExtensionTargetBehavior>() {
+                            let where_clause = ext_behavior.where_clause();
+                            if !where_clause.constraints().is_empty()
+                                && !check_where_clause_satisfied_with_self(model, where_clause, proto_subs, Some(receiver_ty))
+                            {
+                                continue;
+                            }
+                        }
+                        for child in ext.metadata().children() {
+                            if child.metadata().name().value == member {
+                                if let Some(resolution) = resolve_protocol_bound_member(
+                                    model, child.as_ref(), child.metadata().id(),
+                                    proto_subs, receiver_ty, is_static, proto_id,
+                                ) {
+                                    results.push(resolution);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if results.is_empty() {
+            // Try resolving associated type to concrete and searching there
+            let assoc_name = symbol.metadata().name().value.clone();
+            if let Some(container_ty) = container {
+                if let Some(resolved) = model.resolve_associated_type(container_ty, &assoc_name) {
+                    if !matches!(resolved.kind(), TyKind::AssociatedType { .. }) {
+                        return resolve_all_members_impl(model, &resolved, member, is_static);
+                    }
+                }
+            }
+            return Err(MemberError::NotFound {
+                receiver_ty: receiver_ty.clone(),
+                member: member.to_string(),
+            });
+        }
+        return Ok(results);
+    }
+
+    // Concrete types: collect from direct children + all extensions
+    if matches!(receiver_ty.kind(), TyKind::SelfType) {
+        return Err(MemberError::UnknownType);
+    }
+
+    let (container, substitutions) = match get_type_container_with_subs(model, receiver_ty) {
+        Some((c, s)) => (c, s),
+        None => {
+            return Err(MemberError::NotFound {
+                receiver_ty: receiver_ty.clone(),
+                member: member.to_string(),
+            });
+        },
+    };
+
+    let mut results = Vec::new();
+
+    // Direct children
+    for child in container.metadata().children() {
+        if child.metadata().name().value == member {
+            if let Some(resolution) = resolve_direct_member(
+                model, child.as_ref(), child.metadata().id(),
+                &substitutions, receiver_ty, is_static,
+            ) {
+                results.push(resolution);
+            }
+        }
+    }
+
+    // Extensions
+    let container_id = container.metadata().id();
+    let extensions = model.query(ExtensionsFor { target_id: container_id });
+    for ext in extensions.iter() {
+        if !is_extension_applicable_to_type(ext, &substitutions, model, Some(receiver_ty)) {
+            continue;
+        }
+        for child in ext.metadata().children() {
+            if child.metadata().name().value == member {
+                if let Some(resolution) = resolve_direct_member(
+                    model, child.as_ref(), child.metadata().id(),
+                    &substitutions, receiver_ty, is_static,
+                ) {
+                    results.push(resolution);
+                }
+            }
+        }
+    }
+
+    // Protocol conformance methods
+    if results.is_empty() {
+        if let Some(resolution) = resolve_member_via_protocol_conformance(model, receiver_ty, member, None) {
+            results.push(resolution);
+        }
+    }
+
+    if results.is_empty() {
+        return Err(MemberError::NotFound {
+            receiver_ty: receiver_ty.clone(),
+            member: member.to_string(),
+        });
+    }
+    Ok(results)
+}
+
+/// Resolve a direct member (not via protocol bounds) for resolve_all_members.
+fn resolve_direct_member(
+    model: &SemanticModel,
+    member_symbol: &dyn Symbol<KestrelLanguage>,
+    member_id: SymbolId,
+    substitutions: &Substitutions,
+    receiver_ty: &Ty,
+    is_static: bool,
+) -> Option<MemberResolution> {
+    let member_kind = member_symbol.metadata().kind();
+
+    if is_static {
+        if member_kind == KestrelSymbolKind::Function
+            && let Some(callable) = member_symbol.metadata().get_behavior::<CallableBehavior>()
+            && callable.is_static()
+        {
+            return Some(resolve_callable_member(
+                &callable, member_symbol, member_id,
+                substitutions, receiver_ty, true,
+                AssocTypeResolution::None,
+            ));
+        }
+        return None;
+    }
+
+    // Check for callable (method)
+    if member_kind == KestrelSymbolKind::Function
+        && let Some(callable) = member_symbol.metadata().get_behavior::<CallableBehavior>()
+    {
+        return Some(resolve_callable_member(
+            &callable, member_symbol, member_id,
+            substitutions, receiver_ty, true,
+            AssocTypeResolution::Shallow(model),
+        ));
+    }
+
+    // Check for field/property access
+    for behavior in member_symbol.metadata().behaviors() {
+        if behavior.kind() == KestrelBehaviorKind::MemberAccess
+            && let Some(access) = behavior.as_ref().downcast_ref::<MemberAccessBehavior>()
+        {
+            let member_ty = transform_ty(model, access.member_type(), substitutions, receiver_ty);
+            return Some(MemberResolution {
+                ty: member_ty,
+                symbol_id: member_id,
+                substitutions: substitutions.clone(),
+                parameters: vec![],
+                returns_self: false,
+                where_constraints: WhereClause::new(),
+                required_parameter_count: 0,
+                protocol_id: None,
+                has_setter: None,
+                method_type_param_ids: vec![],
+            });
+        }
+        if behavior.kind() == KestrelBehaviorKind::ComputedMemberAccess
+            && let Some(access) = behavior.as_ref().downcast_ref::<ComputedMemberAccessBehavior>()
         {
             let member_ty = transform_ty(model, access.member_type(), substitutions, receiver_ty);
             return Some(MemberResolution {
@@ -3526,14 +3948,6 @@ fn apply_protocol_defaults(ty: Ty, self_ty: Option<&Ty>) -> Ty {
     }
 }
 
-/// Get protocol bounds for a type parameter by walking up the parent chain.
-///
-/// This looks at the type parameter's parent symbols (function, struct, protocol)
-/// and extracts bounds from their where clauses.
-fn get_type_parameter_bounds(type_param: &Arc<TypeParameterSymbol>) -> Vec<Ty> {
-    get_type_parameter_bounds_with_model(type_param, None)
-}
-
 fn get_type_parameter_bounds_with_model(
     type_param: &Arc<TypeParameterSymbol>,
     model: Option<&SemanticModel>,
@@ -4077,6 +4491,11 @@ fn resolve_callable_member(
                 let param_id = type_param.metadata().id();
                 subs.insert(param_id, Ty::infer(callable.span().clone()));
             }
+        } else if let Some(init_sym) = member_symbol.as_any().downcast_ref::<InitializerSymbol>() {
+            for type_param in init_sym.type_parameters() {
+                let param_id = type_param.metadata().id();
+                subs.insert(param_id, Ty::infer(callable.span().clone()));
+            }
         }
     }
 
@@ -4106,11 +4525,13 @@ fn resolve_callable_member(
         .collect();
     let where_constraints = get_where_clause_from_symbol(member_symbol).unwrap_or_default();
 
-    let method_type_param_ids = member_symbol
-        .as_any()
-        .downcast_ref::<FunctionSymbol>()
-        .map(|f| f.type_parameters().iter().map(|tp| tp.metadata().id()).collect())
-        .unwrap_or_default();
+    let method_type_param_ids = if let Some(f) = member_symbol.as_any().downcast_ref::<FunctionSymbol>() {
+        f.type_parameters().iter().map(|tp| tp.metadata().id()).collect()
+    } else if let Some(i) = member_symbol.as_any().downcast_ref::<InitializerSymbol>() {
+        i.type_parameters().iter().map(|tp| tp.metadata().id()).collect()
+    } else {
+        vec![]
+    };
 
     MemberResolution {
         ty: return_ty,

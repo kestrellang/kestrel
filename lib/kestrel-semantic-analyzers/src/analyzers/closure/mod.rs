@@ -397,6 +397,12 @@ fn find_assignments_to_locals(
             }
         },
 
+        ExprKind::DeferredInitCall { arguments, .. } => {
+            for arg in arguments {
+                find_assignments_to_locals(&arg.value, target_locals, container_id, ctx);
+            }
+        },
+
         ExprKind::ImplicitStructInit { arguments, .. } => {
             for arg in arguments {
                 find_assignments_to_locals(&arg.value, target_locals, container_id, ctx);

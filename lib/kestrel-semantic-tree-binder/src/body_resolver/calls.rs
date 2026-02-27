@@ -17,7 +17,6 @@ use kestrel_semantic_tree::symbol::enum_case::EnumCaseSymbol;
 use kestrel_semantic_tree::symbol::enum_symbol::EnumSymbol;
 use kestrel_semantic_tree::symbol::field::FieldSymbol;
 use kestrel_semantic_tree::symbol::function::FunctionSymbol;
-use kestrel_semantic_tree::symbol::initializer::InitializerSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::symbol::protocol::ProtocolSymbol;
 use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
@@ -34,10 +33,10 @@ use crate::resolution::type_resolver::TypeResolver;
 use crate::diagnostics::{
     AmbiguousTypeParameterInitError, CannotMutateThroughImmutableBindingError,
     CannotPassImmutableFieldToMutatingError, CannotPassLetToMutatingError,
-    CannotPassTemporaryToMutatingError, ClosureArityError, ConstraintNotSatisfiedError,
+    CannotPassTemporaryToMutatingError, ClosureArityError,
     FieldNotVisibleForInitError, ImplicitInitArityError, ImplicitInitLabelError,
     InstanceMethodOnTypeError, NoInitInTypeParameterBoundsError,
-    NoMatchingInitializerError, NoMatchingOverloadError,
+    NoMatchingOverloadError,
     NoMatchingTypeParameterInitError, NonCallableError, NotGenericError, OverloadDescription,
     PrimitiveMethodArityError, TooFewTypeArgumentsError, TooManyTypeArgumentsError,
     TypeArgsOnNonGenericError, UnconstrainedTypeParameterMemberError,
@@ -52,125 +51,13 @@ use super::members::{
 };
 use super::utils::{
     create_generic_struct_type, create_struct_type, create_struct_type_with_type_args,
-    find_type_directed_match, get_callable_behavior,
+    get_callable_behavior,
     get_type_container, get_type_parameter_bounds_by_id, infer_type_arguments, is_expression_kind,
-    matches_signature, replace_type_params_except, resolve_associated_types, substitute_self,
-    substitute_type, type_satisfies_bound, validate_not_standalone_type_param,
+    matches_signature, resolve_associated_types, substitute_self,
+    substitute_type, validate_not_standalone_type_param,
     verify_type_argument_constraints,
 };
 
-fn verify_where_clause_constraints_from_substitutions(
-    where_clause: &kestrel_semantic_tree::ty::WhereClause,
-    substitutions: &Substitutions,
-    self_ty: Option<&Ty>,
-    call_span: &Span,
-    model: &kestrel_semantic_model::SemanticModel,
-    diagnostics: &mut kestrel_reporting::DiagnosticContext,
-) -> bool {
-    use kestrel_semantic_tree::ty::Constraint;
-
-    let mut all_satisfied = true;
-
-    for constraint in where_clause.constraints() {
-        match constraint {
-            Constraint::TypeBound {
-                param: Some(param_id),
-                param_name,
-                param_span,
-                bounds,
-            } => {
-                let actual_ty = substitutions
-                    .get(*param_id)
-                    .or_else(|| if param_name == "Self" { self_ty } else { None });
-                if let Some(actual_ty) = actual_ty {
-                    if matches!(
-                        actual_ty.kind(),
-                        TyKind::Infer | TyKind::TypeParameter(_) | TyKind::SelfType
-                    ) {
-                        continue;
-                    }
-                    for bound in bounds {
-                        if !type_satisfies_bound(actual_ty, bound, model) {
-                            diagnostics.add_diagnostic(
-                                ConstraintNotSatisfiedError {
-                                    call_span: call_span.clone(),
-                                    type_name: actual_ty.to_string(),
-                                    constraint_name: bound.to_string(),
-                                    type_param_name: param_name.clone(),
-                                    constraint_span: Some(param_span.clone()),
-                                }
-                                .into_diagnostic(),
-                            );
-                            all_satisfied = false;
-                        }
-                    }
-                }
-            },
-            Constraint::TypeBound {
-                param: None,
-                param_name,
-                param_span,
-                bounds,
-            } if param_name == "Self" => {
-                if let Some(actual_self_ty) = self_ty {
-                    if matches!(
-                        actual_self_ty.kind(),
-                        TyKind::Infer | TyKind::TypeParameter(_) | TyKind::SelfType
-                    ) {
-                        continue;
-                    }
-                    for bound in bounds {
-                        if !type_satisfies_bound(actual_self_ty, bound, model) {
-                            diagnostics.add_diagnostic(
-                                ConstraintNotSatisfiedError {
-                                    call_span: call_span.clone(),
-                                    type_name: actual_self_ty.to_string(),
-                                    constraint_name: bound.to_string(),
-                                    type_param_name: "Self".to_string(),
-                                    constraint_span: Some(param_span.clone()),
-                                }
-                                .into_diagnostic(),
-                            );
-                            all_satisfied = false;
-                        }
-                    }
-                }
-            },
-            Constraint::SelfBound {
-                associated_type_path,
-                path_span,
-                bounds,
-            } if associated_type_path.is_empty() => {
-                if let Some(actual_self_ty) = self_ty {
-                    if matches!(
-                        actual_self_ty.kind(),
-                        TyKind::Infer | TyKind::TypeParameter(_) | TyKind::SelfType
-                    ) {
-                        continue;
-                    }
-                    for bound in bounds {
-                        if !type_satisfies_bound(actual_self_ty, bound, model) {
-                            diagnostics.add_diagnostic(
-                                ConstraintNotSatisfiedError {
-                                    call_span: call_span.clone(),
-                                    type_name: actual_self_ty.to_string(),
-                                    constraint_name: bound.to_string(),
-                                    type_param_name: "Self".to_string(),
-                                    constraint_span: Some(path_span.clone()),
-                                }
-                                .into_diagnostic(),
-                            );
-                            all_satisfied = false;
-                        }
-                    }
-                }
-            },
-            _ => {},
-        }
-    }
-
-    all_satisfied
-}
 
 /// Resolve a call expression: callee(arg1, arg2, ...) or callee[T](arg1, ...)
 pub fn resolve_call_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> Expression {
@@ -450,6 +337,7 @@ pub fn resolve_call(
     // Clone callee.kind to avoid borrow issues
     let callee_kind = callee.kind.clone();
     let callee_ty = callee.ty.clone();
+
 
     match callee_kind {
         // Direct function/field reference
@@ -1735,15 +1623,18 @@ pub fn resolve_struct_instantiation(
     }
 
     if !explicit_inits.is_empty() {
-        // Has explicit initializers - find matching one
-        return resolve_explicit_init_call(
-            &explicit_inits,
+        // Has explicit initializers - defer to type inference for overload resolution
+        let struct_ty = if let Some(ref type_args) = explicit_type_args {
+            create_struct_type_with_type_args(&symbol, type_args, span.clone(), ctx)
+        } else {
+            fill_missing_type_params(&create_struct_type(&symbol, span.clone()), &span)
+        };
+        return Expression::deferred_init_call(
+            struct_ty.clone(),
             arguments,
-            arg_labels,
             explicit_type_args,
+            struct_ty, // return type = struct type (best effort)
             span,
-            symbol.clone(),
-            ctx,
         );
     }
 
@@ -1757,197 +1648,6 @@ pub fn resolve_struct_instantiation(
         symbol.clone(),
         ctx,
     )
-}
-
-/// Resolve a call to an explicit initializer
-fn resolve_explicit_init_call(
-    initializers: &[Arc<dyn Symbol<KestrelLanguage>>],
-    arguments: Vec<CallArgument>,
-    arg_labels: &[Option<String>],
-    explicit_type_args: Option<Vec<Ty>>,
-    span: Span,
-    struct_symbol: Arc<dyn Symbol<KestrelLanguage>>,
-    ctx: &mut BodyResolutionContext,
-) -> Expression {
-    // Collect all matching initializers by arity and labels
-    let mut candidates: Vec<(usize, &Arc<dyn Symbol<KestrelLanguage>>, CallableBehavior)> =
-        Vec::new();
-    for (idx, init_sym) in initializers.iter().enumerate() {
-        if let Some(callable) = get_callable_behavior(init_sym)
-            && matches_signature(&callable, arguments.len(), arg_labels)
-        {
-            candidates.push((idx, init_sym, callable));
-        }
-    }
-
-    // If multiple candidates, try type-directed conformance selection
-    let selected_idx = if candidates.len() > 1 {
-        // Extract argument types for type-directed selection
-        let arg_types: Vec<Ty> = arguments.iter().map(|arg| arg.value.ty.clone()).collect();
-
-        // Try to find a match based on conformance type arguments
-        find_type_directed_match(&candidates, &arg_types, &struct_symbol).unwrap_or(0) // Fall back to first match if no type-directed match
-    } else {
-        0
-    };
-
-    // Select the initializer
-    if let Some((_, init_sym, callable)) = candidates.get(selected_idx) {
-        // Found matching initializer
-        // The return type is the actual struct type
-        // Create a struct type from the struct symbol
-        // If explicit type arguments are provided, use them; otherwise infer
-        let struct_ty = if let Some(ref type_args) = explicit_type_args {
-            create_struct_type_with_type_args(&struct_symbol, type_args, span.clone(), ctx)
-        } else {
-            create_struct_type(&struct_symbol, span.clone())
-        };
-
-        // For explicit init, create a Call expression
-        // Initializers are not mutable lvalues
-        let init_id = init_sym.metadata().id();
-
-        // Get substitutions from the struct type to apply to initializer parameters.
-        // This maps the struct's type parameters (e.g., Slice's T) to the instantiation
-        // type arguments (e.g., inference placeholders or explicit type args).
-        let struct_subs = match struct_ty.kind() {
-            TyKind::Struct { substitutions, .. } => substitutions.clone(),
-            _ => Substitutions::new(),
-        };
-
-        // Check if the initializer has its own type parameters (e.g., init[From](from: From))
-        // If so, we need to infer them from argument types and validate constraints.
-        let init_subs =
-            if let Some(init_symbol) = init_sym.as_any().downcast_ref::<InitializerSymbol>() {
-                let init_type_params = init_symbol.type_parameters();
-
-                if !init_type_params.is_empty() {
-                    // Collect argument types for inference
-                    let arg_types: Vec<Ty> = arguments.iter().map(|a| a.value.ty.clone()).collect();
-
-                    // Infer type arguments from argument types
-                    let mut init_substitutions =
-                        infer_type_arguments(&init_type_params, callable, &arg_types);
-
-                    // Ensure every initializer type parameter has a substitution entry.
-                    for tp in &init_type_params {
-                        let tp_id = tp.metadata().id();
-                        if !init_substitutions.contains(tp_id) {
-                            init_substitutions.insert(tp_id, Ty::infer(span.clone()));
-                        }
-                    }
-
-                    init_substitutions
-                } else {
-                    Substitutions::new()
-                }
-            } else {
-                Substitutions::new()
-            };
-
-        // Combine struct substitutions and initializer substitutions
-        let mut combined_subs = struct_subs.clone();
-        for (key, ty) in init_subs.iter() {
-            combined_subs.insert(*key, ty.clone());
-        }
-
-        // Validate initializer where-clause constraints using the full substitution map.
-        // This covers both initializer-owned generic params and enclosing receiver type params
-        // referenced in constraints (e.g., Array[T].init(... ) where T: Cloneable).
-        if let Some(init_symbol) = init_sym.as_any().downcast_ref::<InitializerSymbol>() {
-            let where_clause = init_symbol.where_clause();
-            verify_where_clause_constraints_from_substitutions(
-                &where_clause,
-                &combined_subs,
-                Some(&struct_ty),
-                &span,
-                ctx.model,
-                ctx.diagnostics,
-            );
-        }
-
-        // Build the function type for the initializer, applying combined substitutions
-        // to parameter types so that:
-        // - Slice.init(pointer: Pointer[T], ...) becomes Slice.init(pointer: Pointer[Infer], ...)
-        // - init[From](from: From) becomes init(from: ConcreteType)
-        //
-        // We also need to replace any type parameters that aren't in the substitution
-        // map with inference placeholders - this handles cases where the callable's
-        // parameter types use different TypeParameter symbols than the struct's.
-        //
-        // However, if the substitution maps to a TypeParameter (e.g., Pointer[T] where T
-        // is from the caller's scope), we should NOT replace that with Infer - it's a
-        // valid type parameter that should be preserved.
-        //
-        // Collect the IDs of type parameters that are substitution values - these should
-        // be preserved (not replaced with Infer) after substitution.
-        let preserved_type_params: std::collections::HashSet<SymbolId> = combined_subs
-            .iter()
-            .filter_map(|(_, ty)| {
-                if let TyKind::TypeParameter(tp) = ty.kind() {
-                    Some(tp.metadata().id())
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        let param_tys: Vec<Ty> = callable
-            .parameters()
-            .iter()
-            .map(|p| {
-                let ty = p.ty.apply_substitutions(&combined_subs);
-                // Replace unsubstituted type params with Infer, but preserve type params
-                // that came from substitution values (they're valid in the caller's scope)
-                replace_type_params_except(&ty, &preserved_type_params, &span)
-            })
-            .collect();
-        let init_fn_ty = Ty::function(param_tys, struct_ty.clone(), span.clone());
-
-        let init_ref = Expression::symbol_ref(init_id, init_fn_ty, false, span.clone());
-        // Use generic_call to store the combined substitutions so that CallableParamTypesForCall
-        // can apply them when type-checking arguments
-        return Expression::generic_call(init_ref, arguments, combined_subs, struct_ty, span);
-    }
-
-    // No matching initializer found - report error
-    let struct_name = struct_symbol.metadata().name().value.clone();
-
-    // Build list of available initializers for the error message
-    let available_initializers: Vec<OverloadDescription> = initializers
-        .iter()
-        .filter_map(|init| {
-            let callable = get_callable_behavior(init)?;
-            let labels: Vec<Option<String>> = callable
-                .parameters()
-                .iter()
-                .map(|p| p.label.as_ref().map(|l| l.value.clone()))
-                .collect();
-            let param_types: Vec<String> = callable
-                .parameters()
-                .iter()
-                .map(|p| p.ty.to_string())
-                .collect();
-            Some(OverloadDescription {
-                name: struct_name.clone(),
-                labels,
-                param_types,
-                definition_span: Some(init.metadata().span().clone()),
-                definition_file_id: Some(init.metadata().span().file_id),
-            })
-        })
-        .collect();
-
-    let error = NoMatchingInitializerError {
-        span: span.clone(),
-        struct_name,
-        provided_labels: arg_labels.to_vec(),
-        provided_arity: arguments.len(),
-        available_initializers,
-    };
-    ctx.diagnostics.add_diagnostic(error.into_diagnostic());
-
-    Expression::error(span)
 }
 
 /// Resolve implicit memberwise initialization

@@ -264,6 +264,14 @@ fn walk_expression(
                     }
                 }
             },
+            ExprKind::DeferredInitCall { arguments, .. } => {
+                for arg in arguments {
+                    walk_expression(&arg.value, analyzers, model, ctx);
+                    if ctx.stopped {
+                        return;
+                    }
+                }
+            },
             ExprKind::ImplicitStructInit { arguments, .. } => {
                 for arg in arguments {
                     walk_expression(&arg.value, analyzers, model, ctx);

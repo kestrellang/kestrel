@@ -329,6 +329,23 @@ pub trait TypeOracle {
         self.resolve_member_with_labels(receiver_ty, member, is_static, labels)
     }
 
+    /// Look up ALL matching members on a type (for overload candidate collection).
+    ///
+    /// Unlike `resolve_member` which returns the single best match, this returns
+    /// all matching members with the given name. Used by the binder to collect
+    /// overload candidates for label-aware disambiguation during type inference.
+    ///
+    /// Default implementation delegates to `resolve_member` and wraps in a vec.
+    fn resolve_all_members(
+        &self,
+        receiver_ty: &Ty,
+        member: &str,
+        is_static: bool,
+    ) -> Result<Vec<MemberResolution>, MemberError> {
+        self.resolve_member(receiver_ty, member, is_static)
+            .map(|r| vec![r])
+    }
+
     /// Check if a target symbol is visible from the given context.
     ///
     /// Used as a post-resolution check to filter out private/internal members
@@ -337,6 +354,35 @@ pub trait TypeOracle {
     /// Returns true by default (no visibility checking without a model).
     fn is_visible(&self, _target: SymbolId, _from_context: SymbolId) -> bool {
         true
+    }
+
+    /// Resolve an initializer on a struct type.
+    ///
+    /// Used for deferred init calls where overload resolution needs full type information.
+    /// Collects initializers from the struct and its extensions, filters by labels/arity,
+    /// and uses argument types for type-directed overload selection.
+    ///
+    /// # Arguments
+    ///
+    /// * `struct_ty` - The struct type being initialized
+    /// * `labels` - Argument labels (None for unlabeled args)
+    /// * `argument_types` - Resolved argument types (None if not yet known)
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(resolution)` - The matching initializer with its type and symbol
+    /// * `Err(MemberError)` - No matching initializer found
+    fn resolve_init(
+        &self,
+        struct_ty: &Ty,
+        labels: &[Option<String>],
+        argument_types: &[Option<Ty>],
+    ) -> Result<MemberResolution, MemberError> {
+        let _ = (struct_ty, labels, argument_types);
+        Err(MemberError::NotFound {
+            receiver_ty: struct_ty.clone(),
+            member: "init".to_string(),
+        })
     }
 
     /// Get the where clause for a function symbol.

@@ -395,6 +395,15 @@ fn analyze_expression(expr: &Expression, errors: &mut Vec<UnreachableCodeWarning
             }
             Divergence::None
         },
+        ExprKind::DeferredInitCall { arguments, .. } => {
+            for arg in arguments {
+                let d = analyze_expression(&arg.value, errors);
+                if d.diverges() {
+                    return d;
+                }
+            }
+            Divergence::None
+        },
         ExprKind::ImplicitStructInit { arguments, .. } => {
             for arg in arguments {
                 let d = analyze_expression(&arg.value, errors);

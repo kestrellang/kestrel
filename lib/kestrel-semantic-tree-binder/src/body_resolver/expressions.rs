@@ -2141,6 +2141,10 @@ fn expression_references_local(
             .iter()
             .any(|arg| expression_references_local(&arg.value, local_id)),
 
+        ExprKind::DeferredInitCall { arguments, .. } => arguments
+            .iter()
+            .any(|arg| expression_references_local(&arg.value, local_id)),
+
         ExprKind::ImplicitStructInit { arguments, .. } => arguments
             .iter()
             .any(|arg| expression_references_local(&arg.value, local_id)),
@@ -2879,6 +2883,11 @@ where
             }
         },
         ExprKind::DeferredStaticCall { arguments, .. } => {
+            for arg in arguments {
+                collect_captures_from_expression(&arg.value, process);
+            }
+        },
+        ExprKind::DeferredInitCall { arguments, .. } => {
             for arg in arguments {
                 collect_captures_from_expression(&arg.value, process);
             }
