@@ -21,3 +21,7 @@ workflows.md
 - Full suite takes ~5 minutes. Use `--release` for full runs: `cargo test -p kestrel-test-suite --release`
 - During iteration, target specific tests: `cargo test -p kestrel-test-suite --release -- test_name`
 - Only run the full suite before commits, not after every edit
+
+### Fluid Memory
+
+Whenever you get stuck, and figure something out, add a memory for it so you won't get stuck in that way again
