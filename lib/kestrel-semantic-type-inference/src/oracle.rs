@@ -8,6 +8,8 @@ use kestrel_semantic_tree::ty::{FloatBits, IntBits, Substitutions, Ty, WhereClau
 use kestrel_span::Span;
 use semantic_tree::symbol::SymbolId;
 
+use crate::solution::MemberKind;
+
 /// Describes a successfully resolved member access.
 #[derive(Debug, Clone)]
 pub struct MemberResolution {
@@ -404,5 +406,32 @@ pub trait TypeOracle {
         // Implementors with access to the semantic model can override.
         let _ = function_id;
         WhereClause::new()
+    }
+
+    /// Classify what kind of member a resolved symbol represents.
+    ///
+    /// Used by the solver to store member kind metadata for the apply phase
+    /// when resolving non-call member access (DeferredMemberAccess).
+    ///
+    /// # Arguments
+    ///
+    /// * `receiver_ty` - The receiver type (used for protocol property detection)
+    /// * `resolution` - The member resolution from resolve_member
+    ///
+    /// # Returns
+    ///
+    /// The kind of member (field, computed property, protocol property, or method).
+    fn classify_member(&self, receiver_ty: &Ty, resolution: &MemberResolution) -> MemberKind {
+        // Default: if protocol_id is set, it's a protocol property; otherwise method.
+        let _ = receiver_ty;
+        if let Some(protocol_id) = resolution.protocol_id {
+            MemberKind::ProtocolProperty {
+                protocol_id,
+                has_setter: resolution.has_setter.unwrap_or(false),
+                is_static: false,
+            }
+        } else {
+            MemberKind::Method
+        }
     }
 }

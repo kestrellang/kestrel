@@ -326,8 +326,12 @@ fn desugar_binary_op(
     full_span: Span,
     ctx: &mut BodyResolutionContext,
 ) -> Expression {
-    // If either operand has a poison type, propagate error without cascading diagnostics.
-    if lhs.ty.is_poison() || rhs.ty.is_poison() {
+    // If either operand has a poison type or Never, propagate error without cascading diagnostics.
+    // Never is the bottom type (unreachable code), so operations on it should not produce errors.
+    if lhs.ty.is_poison() || rhs.ty.is_poison()
+        || matches!(lhs.ty.kind(), TyKind::Never)
+        || matches!(rhs.ty.kind(), TyKind::Never)
+    {
         return Expression::error(full_span);
     }
 
@@ -389,8 +393,8 @@ fn desugar_unary_op(
     full_span: Span,
     ctx: &mut BodyResolutionContext,
 ) -> Expression {
-    // If operand has a poison type, propagate error without cascading diagnostics.
-    if operand.ty.is_poison() {
+    // If operand has a poison or Never type, propagate error without cascading diagnostics.
+    if operand.ty.is_poison() || matches!(operand.ty.kind(), TyKind::Never) {
         return Expression::error(full_span);
     }
 
@@ -1075,6 +1079,16 @@ fn collect_captures_recursive(
                     seen_ids,
                 );
             }
+        },
+
+        ExprKind::DeferredMemberAccess { receiver, .. } => {
+            collect_captures_recursive(
+                receiver,
+                closure_entry_depth,
+                local_scope,
+                captures,
+                seen_ids,
+            );
         },
 
         ExprKind::DelegatingInit { arguments, .. } => {

@@ -600,7 +600,6 @@ impl Test {
         // Parse and add all files
         for (file_name, content, dir) in all_files {
             let file_id = diagnostics.add_file(file_name.to_string(), content.to_string());
-
             // Track file directory for @fileconstant path resolution
             if let Some(directory) = dir {
                 file_paths.insert(file_id, directory.clone());

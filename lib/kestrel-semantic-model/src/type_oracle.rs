@@ -26,6 +26,7 @@ use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
 use kestrel_semantic_tree::symbol::type_alias::TypeAliasSymbol;
 use kestrel_semantic_tree::symbol::type_parameter::TypeParameterSymbol;
 use kestrel_semantic_tree::ty::{Constraint, Substitutions, Ty, TyId, TyKind, WhereClause};
+use kestrel_semantic_type_inference::solution::MemberKind;
 use kestrel_semantic_type_inference::{MemberError, MemberResolution, TypeOracle};
 use semantic_tree::symbol::{Symbol, SymbolId};
 
@@ -1190,6 +1191,54 @@ impl SemanticModel {
         function_symbol.where_clause()
     }
 
+    fn classify_member(&self, _receiver_ty: &Ty, resolution: &MemberResolution) -> MemberKind {
+        // Protocol properties have protocol_id set
+        if let Some(protocol_id) = resolution.protocol_id {
+            return MemberKind::ProtocolProperty {
+                protocol_id,
+                has_setter: resolution.has_setter.unwrap_or(false),
+                is_static: false,
+            };
+        }
+
+        // Look up the symbol to determine its kind
+        if let Some(symbol) = self.query(SymbolFor {
+            id: resolution.symbol_id,
+        }) {
+            // Check for field (MemberAccessBehavior)
+            for behavior in symbol.metadata().behaviors() {
+                if behavior.kind() == KestrelBehaviorKind::MemberAccess {
+                    if let Some(access) =
+                        behavior.as_ref().downcast_ref::<MemberAccessBehavior>()
+                    {
+                        return MemberKind::Field {
+                            mutable: access.is_mutable(),
+                        };
+                    }
+                }
+                if behavior.kind() == KestrelBehaviorKind::ComputedMemberAccess {
+                    let has_setter = behavior
+                        .as_ref()
+                        .downcast_ref::<ComputedMemberAccessBehavior>()
+                        .map(|c| c.has_setter())
+                        .unwrap_or(false);
+                    return MemberKind::ComputedProperty { has_setter };
+                }
+            }
+
+            // Check for callable (method)
+            if symbol
+                .metadata()
+                .get_behavior::<CallableBehavior>()
+                .is_some()
+            {
+                return MemberKind::Method;
+            }
+        }
+
+        // Fallback
+        MemberKind::Method
+    }
 }
 
 // ============================================================================
@@ -1422,6 +1471,10 @@ impl TypeOracle for ContextualOracle<'_> {
         self.model.function_where_clause(function_id)
     }
 
+    fn classify_member(&self, receiver_ty: &Ty, resolution: &MemberResolution) -> MemberKind {
+        self.model.classify_member(receiver_ty, resolution)
+    }
+
     fn resolve_init(
         &self,
         struct_ty: &Ty,
@@ -1513,6 +1566,7 @@ fn resolve_member_with_context(
                                 is_static,
                                 expected_arity,
                                 expected_labels,
+                                Some(proto_id),
                             ) {
                                 candidates.push(resolution);
                             }
@@ -1546,6 +1600,7 @@ fn resolve_member_with_context(
                                     is_static,
                                     expected_arity,
                                     expected_labels,
+                                    Some(proto_id),
                                 ) {
                                     candidates.push(resolution);
                                 }
@@ -1615,6 +1670,7 @@ fn resolve_member_with_context(
                                 is_static,
                                 expected_arity,
                                 expected_labels,
+                                Some(proto_id),
                             ) {
                                 candidates.push(resolution);
                             }
@@ -1648,6 +1704,7 @@ fn resolve_member_with_context(
                                     is_static,
                                     expected_arity,
                                     expected_labels,
+                                    Some(proto_id),
                                 ) {
                                     candidates.push(resolution);
                                 }
@@ -1713,6 +1770,7 @@ fn resolve_member_with_context(
                                 is_static,
                                 expected_arity,
                                 expected_labels,
+                                Some(proto_id),
                             ) {
                                 candidates.push(resolution);
                             }
@@ -1746,6 +1804,7 @@ fn resolve_member_with_context(
                                     is_static,
                                     expected_arity,
                                     expected_labels,
+                                    Some(proto_id),
                                 ) {
                                     candidates.push(resolution);
                                 }
@@ -1925,7 +1984,7 @@ fn resolve_member_full_impl(
 fn resolve_init_impl(
     model: &SemanticModel,
     struct_ty: &Ty,
-    context: Option<SymbolId>,
+    _context: Option<SymbolId>,
     labels: &[Option<String>],
     argument_types: &[Option<Ty>],
 ) -> Result<MemberResolution, MemberError> {
@@ -2114,6 +2173,7 @@ fn resolve_contextual_member_candidate(
     is_static: bool,
     expected_arity: Option<usize>,
     expected_labels: Option<&[Option<String>]>,
+    protocol_id: Option<SymbolId>,
 ) -> Option<MemberResolution> {
     if let Some(callable) = member_symbol.metadata().get_behavior::<CallableBehavior>() {
         if callable.is_static() != is_static {
@@ -2130,7 +2190,7 @@ fn resolve_contextual_member_candidate(
             return None;
         }
 
-        return Some(resolve_callable_member(
+        let mut resolution = resolve_callable_member(
             &callable,
             member_symbol,
             member_id,
@@ -2138,7 +2198,9 @@ fn resolve_contextual_member_candidate(
             receiver_ty,
             true,
             AssocTypeResolution::None,
-        ));
+        );
+        resolution.protocol_id = protocol_id;
+        return Some(resolution);
     }
 
     // For zero-argument accesses, allow protocol properties/computed members.
@@ -2162,8 +2224,8 @@ fn resolve_contextual_member_candidate(
                 returns_self: false,
                 where_constraints: WhereClause::new(),
                 required_parameter_count: 0,
-                protocol_id: None,
-                has_setter: None,
+                protocol_id,
+                has_setter: Some(access.is_mutable()),
                 method_type_param_ids: vec![],
             });
         }
@@ -2181,8 +2243,8 @@ fn resolve_contextual_member_candidate(
                 returns_self: false,
                 where_constraints: WhereClause::new(),
                 required_parameter_count: 0,
-                protocol_id: None,
-                has_setter: None,
+                protocol_id,
+                has_setter: Some(access.has_setter()),
                 method_type_param_ids: vec![],
             });
         }

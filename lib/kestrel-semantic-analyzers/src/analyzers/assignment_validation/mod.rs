@@ -30,7 +30,6 @@ impl Analyzer for AssignmentValidationAnalyzer {
         let ExprKind::Assignment { target, .. } = &expr.kind else {
             return;
         };
-
         let container_id = ctx.current_symbol().map(|s| s.metadata().id());
         let is_initializer = ctx
             .current_symbol()
@@ -77,6 +76,20 @@ fn validate_assignment_target(
                 ));
             }
         },
+        // Deferred member access — validate mutability using best-effort info from the binder.
+        // The mutable flag was computed from field mutability && receiver mutability.
+        ExprKind::DeferredMemberAccess { receiver, member } => {
+            let is_self_in_init = is_initializer && is_self_expr(receiver);
+            if !is_self_in_init && !target.is_mutable() {
+                out.push(AssignmentError::ImmutableField(
+                    CannotAssignToImmutableFieldError {
+                        span: target.span.clone(),
+                        field_name: member.clone(),
+                    },
+                ));
+            }
+        },
+
         ExprKind::FieldAccess { object, field } => {
             let is_self_in_init = is_initializer && is_self_expr(object);
             if !is_self_in_init && !target.is_mutable() {

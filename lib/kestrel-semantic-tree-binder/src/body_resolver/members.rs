@@ -30,7 +30,7 @@ use semantic_tree::symbol::{Symbol, SymbolId};
 
 use crate::diagnostics::{
     AmbiguousConstrainedMethodError, CannotAccessMemberOnTypeError,
-    DelegatingInitOutsideInitializerError, MemberNotAccessibleError, MemberNotVisibleError,
+    DelegatingInitOutsideInitializerError, MemberNotVisibleError,
     MethodNotInBoundsError, NoSuchMemberError, NoSuchMethodError,
     UnconstrainedAssociatedTypeMemberError, UnconstrainedTypeParameterMemberError,
 };
@@ -40,7 +40,7 @@ use super::calls::{
 };
 use super::context::BodyResolutionContext;
 use super::utils::{
-    format_symbol_kind, get_associated_type_bounds_from_context,
+    get_associated_type_bounds_from_context,
     get_callable_behavior, get_type_container, get_type_parameter_bounds_by_id,
     get_type_parameter_bounds_from_context, matches_signature,
     resolve_associated_types, substitute_self,
@@ -105,7 +105,6 @@ pub fn resolve_member_access(
     }
 
     // 0.5. Check if base is an AssociatedTypeRef (for chained access like T.Next.Next.method())
-    // This is for STATIC member access on associated types
     if let ExprKind::AssociatedTypeRef = &base.kind {
         return resolve_associated_type_static_member(
             &base,
@@ -117,85 +116,67 @@ pub fn resolve_member_access(
     }
 
     // 1. Check for primitive method (e.g., 5.toString, "hello".length)
-    // Primitive methods can only be called, not used as first-class values.
-    // Return a PrimitiveMethodRef that call resolution can convert to a call.
-    // If this expression is NOT called, call resolution will emit an error.
     if let Some(primitive_method) = PrimitiveMethod::lookup(base_ty, member_name) {
         return Expression::primitive_method_ref(base, primitive_method, full_span);
     }
 
-    // 2. Handle type parameter specially - we can't access fields, only methods
-    // First, check if the type parameter has an equality constraint (e.g., V = Array[E])
-    // If so, normalize it to the concrete type and continue with that type.
-    let base_ty = if let TyKind::TypeParameter(type_param) = base_ty.kind() {
+    // 2. Propagate error types and Never without cascading diagnostics.
+    if matches!(base_ty.kind(), TyKind::Error | TyKind::Never) {
+        return Expression::error(full_span);
+    }
+
+    // 3. If base type is Infer, defer to type inference.
+    if matches!(base_ty.kind(), TyKind::Infer) {
+        return Expression::deferred_member_access(
+            base,
+            member_name.to_string(),
+            true, // optimistic: validated post-inference
+            Ty::infer(member_span),
+            full_span,
+        );
+    }
+
+    // 4. Handle type parameter instance access — defer to inference.
+    // The oracle handles protocol bound resolution during solving.
+    if matches!(base_ty.kind(), TyKind::TypeParameter(_)) {
+        // Clone the type to break the borrow on `base`
+        let mut effective_ty = base_ty.clone();
         // Try to normalize using equality constraints from the where clause
-        if let Some(normalized) =
-            normalize_type_param_with_equality(type_param.metadata().id(), ctx.where_clause())
-        {
-            // Update base expression type with normalized type
-            base.ty = normalized.clone();
-            &base.ty
-        } else {
-            // No equality constraint - use the oracle for protocol bound resolution.
-            // The oracle handles both callable members (methods) and properties.
-            let type_param_ty = Ty::type_parameter(type_param.clone(), full_span.clone());
-            match ctx.model.resolve_member(&type_param_ty, member_name, false) {
-                Ok(resolution) => {
-                    // Check if it's a method — collect all overloads from bounds
-                    if ctx.model.query(SymbolFor { id: resolution.symbol_id })
-                        .map(|s| s.metadata().kind() == KestrelSymbolKind::Function)
-                        .unwrap_or(false)
-                    {
-                        let bounds = get_type_parameter_bounds_from_context(&type_param, ctx);
-                        let candidates = collect_method_candidates_from_bounds(&bounds, member_name, resolution.symbol_id);
-                        return Expression::method_ref(
-                            base,
-                            candidates,
-                            member_name.to_string(),
-                            full_span,
-                        );
-                    }
-
-                    // Protocol property
-                    if let Some(protocol_id) = resolution.protocol_id
-                        && let Some(has_setter) = resolution.has_setter
-                    {
-                        return Expression::protocol_property_access(
-                            base,
-                            resolution.symbol_id,
-                            member_name.to_string(),
-                            protocol_id,
-                            false, // instance access
-                            has_setter,
-                            resolution.ty,
-                            full_span,
-                        );
-                    }
-
-                    return Expression::field_access(
-                        base,
-                        member_name.to_string(),
-                        false,
-                        Ty::infer(member_span.clone()),
-                        full_span,
-                    );
-                },
-                Err(kestrel_semantic_type_inference::MemberError::UnknownType) => {
-                    // Type bounds not fully resolved - defer
-                    return Expression::field_access(
-                        base,
-                        member_name.to_string(),
-                        false,
-                        Ty::infer(member_span.clone()),
-                        full_span,
-                    );
-                },
-                Err(_) => {
-                    // Member not found in any bound
-                    let type_param_name =
-                        type_param.metadata().name().value.clone();
-                    let bounds =
-                        get_type_parameter_bounds_from_context(&type_param, ctx);
+        if let TyKind::TypeParameter(type_param) = effective_ty.kind() {
+            if let Some(normalized) =
+                normalize_type_param_with_equality(type_param.metadata().id(), ctx.where_clause())
+            {
+                effective_ty = normalized.clone();
+                base.ty = normalized.clone();
+            }
+        }
+        // Check if the member exists in protocol bounds — emit error if definitely not found
+        let resolved_base_ty = resolve_self_type_to_concrete(&effective_ty, ctx);
+        match ctx.model.resolve_member(&resolved_base_ty, member_name, false) {
+            Ok(resolution) => {
+                let field_mutable = member_field_mutable(&resolution, ctx);
+                return Expression::deferred_member_access(
+                    base,
+                    member_name.to_string(),
+                    field_mutable,
+                    resolution.ty,
+                    full_span,
+                );
+            },
+            Err(kestrel_semantic_type_inference::MemberError::UnknownType) => {
+                return Expression::deferred_member_access(
+                    base,
+                    member_name.to_string(),
+                    true,
+                    Ty::infer(member_span),
+                    full_span,
+                );
+            },
+            Err(_) => {
+                // Member not found in any bound - emit error
+                if let TyKind::TypeParameter(type_param) = effective_ty.kind() {
+                    let type_param_name = type_param.metadata().name().value.clone();
+                    let bounds = get_type_parameter_bounds_from_context(type_param, ctx);
                     let bound_names: Vec<String> = bounds
                         .iter()
                         .filter_map(|b| {
@@ -223,17 +204,13 @@ pub fn resolve_member_access(
                         };
                         ctx.diagnostics.add_diagnostic(error.into_diagnostic());
                     }
-                    return Expression::error(full_span);
-                },
-            }
+                }
+                return Expression::error(full_span);
+            },
         }
-    } else {
-        base_ty
-    };
+    }
 
-    // 2.5. Handle associated type specially - use oracle for protocol bound resolution.
-    // We collect bounds from the binder context (which has access to the function's
-    // where clause) and then use the oracle to search within those protocol bounds.
+    // 4.5. Handle associated type access — defer to inference with error checking.
     if let TyKind::AssociatedType { symbol, .. } = base_ty.kind() {
         let assoc_type_name = symbol.metadata().name().value.clone();
         let container = if let TyKind::AssociatedType { container, .. } = base_ty.kind() {
@@ -253,79 +230,50 @@ pub fn resolve_member_access(
             return Expression::error(full_span);
         }
 
-        // Use oracle to check if member exists, then collect all overloads from bounds.
         match ctx.model.resolve_member(base_ty, member_name, false) {
             Ok(resolution) => {
-                // Check if it's a method — collect all overloads from bounds
-                if ctx.model.query(SymbolFor { id: resolution.symbol_id })
-                    .map(|s| s.metadata().kind() == KestrelSymbolKind::Function)
-                    .unwrap_or(false)
-                {
-                    let candidates = collect_method_candidates_from_bounds(&bounds, member_name, resolution.symbol_id);
-                    return Expression::method_ref(
-                        base,
-                        candidates,
-                        member_name.to_string(),
-                        full_span,
-                    );
-                }
-
-                // Protocol property
-                if let Some(protocol_id) = resolution.protocol_id
-                    && let Some(has_setter) = resolution.has_setter
-                {
-                    return Expression::protocol_property_access(
-                        base,
-                        resolution.symbol_id,
-                        member_name.to_string(),
-                        protocol_id,
-                        false,
-                        has_setter,
-                        resolution.ty,
-                        full_span,
-                    );
-                }
-
-                return Expression::field_access(
+                let field_mutable = member_field_mutable(&resolution, ctx);
+                return Expression::deferred_member_access(
                     base,
                     member_name.to_string(),
-                    false,
-                    Ty::infer(member_span.clone()),
+                    field_mutable,
+                    resolution.ty,
                     full_span,
                 );
             },
             Err(kestrel_semantic_type_inference::MemberError::UnknownType) => {
-                return Expression::field_access(
+                return Expression::deferred_member_access(
                     base,
                     member_name.to_string(),
-                    false,
-                    Ty::infer(member_span.clone()),
+                    true,
+                    Ty::infer(member_span),
                     full_span,
                 );
             },
             Err(_) => {
-                // Oracle didn't find it (possibly lacking binder context) —
-                // try collecting methods directly from bounds as fallback.
-                let mut method_ids = Vec::new();
+                // Try collecting methods directly from bounds as fallback
+                let mut found = false;
                 for bound in &bounds {
                     if let TyKind::Protocol { symbol: proto, .. } = bound.kind() {
                         if let Some(flattened) = proto
                             .metadata()
                             .get_behavior::<FlattenedProtocolBehavior>()
                         {
-                            if let Some(methods) = flattened.methods().get(member_name) {
-                                for method in methods {
-                                    method_ids.push(method.symbol.metadata().id());
-                                }
+                            if flattened.methods().get(member_name).is_some()
+                                || flattened.properties().get(member_name).is_some()
+                            {
+                                found = true;
+                                break;
                             }
                         }
                     }
                 }
-                if !method_ids.is_empty() {
-                    return Expression::method_ref(
+                if found {
+                    return Expression::deferred_member_access(
                         base,
-                        method_ids,
                         member_name.to_string(),
+                        true,
+                        Ty::infer(member_span),
                         full_span,
                     );
                 }
@@ -351,214 +299,188 @@ pub fn resolve_member_access(
         }
     }
 
-    // 3. If base type is Infer, don't emit error yet - type inference will resolve it.
-    // Create a field access with inferred type and let type inference resolve the actual field type.
-    if matches!(base_ty.kind(), TyKind::Infer) {
-        return Expression::field_access(
+    // 4.7. Handle SelfType (protocol extensions) — defer to inference.
+    // SelfType in protocol extensions is not resolved to a concrete type,
+    // so the oracle can't handle it. Try to get a best-effort type from the
+    // protocol container to avoid cascading errors.
+    if matches!(base_ty.kind(), TyKind::SelfType) {
+        let best_effort_ty = get_type_container(base_ty, ctx)
+            .and_then(|container| {
+                let member = container
+                    .metadata()
+                    .children()
+                    .into_iter()
+                    .find(|c| c.metadata().name().value == member_name)?;
+                // Try to get the return type from behaviors
+                for behavior in member.metadata().behaviors() {
+                    if behavior.kind() == KestrelBehaviorKind::MemberAccess {
+                        if let Some(access) =
+                            behavior.as_ref().downcast_ref::<MemberAccessBehavior>()
+                        {
+                            return Some(access.member_type().clone());
+                        }
+                    }
+                    if behavior.kind() == KestrelBehaviorKind::ComputedMemberAccess {
+                        if let Some(access) = behavior
+                            .as_ref()
+                            .downcast_ref::<ComputedMemberAccessBehavior>()
+                        {
+                            return Some(access.member_type().clone());
+                        }
+                    }
+                    if behavior.kind() == KestrelBehaviorKind::Callable {
+                        if let Some(callable) =
+                            behavior.as_ref().downcast_ref::<CallableBehavior>()
+                        {
+                            return Some(callable.return_type().clone());
+                        }
+                    }
+                }
+                None
+            })
+            .unwrap_or_else(|| Ty::infer(member_span.clone()));
+        return Expression::deferred_member_access(
             base,
             member_name.to_string(),
-            false, // field_mutable - conservative default, type inference may correct this
-            Ty::infer(member_span.clone()),
+            true, // optimistic: validated post-inference
+            best_effort_ty,
             full_span,
         );
     }
 
-    // 3.5. If base type is Error, propagate error without cascading diagnostics.
-    // The original error has already been reported where the error type was created.
-    if matches!(base_ty.kind(), TyKind::Error) {
-        return Expression::error(full_span);
-    }
+    // 5. For concrete types, try the oracle. If the member exists, defer.
+    // If not found, emit a binder-level error for better diagnostics.
+    let resolved_base_ty = resolve_self_type_to_concrete(base_ty, ctx);
+    let oracle_result = ctx.model.resolve_member(&resolved_base_ty, member_name, false);
+    match oracle_result {
+        Ok(resolution) => {
+            // Check visibility before deferring — the oracle doesn't filter by visibility
+            if !ctx.model.query(IsVisibleFrom {
+                target: resolution.symbol_id,
+                context: ctx.function_id,
+            }) {
+                use kestrel_semantic_tree::behavior::visibility::Visibility;
 
-    // 4. Get container from base type
-    let container = match get_type_container(base_ty, ctx) {
-        Some(c) => c,
-        None => {
-            // Type doesn't support member access (e.g., Int, Bool, etc.)
-            let error = CannotAccessMemberOnTypeError {
-                span: full_span.clone(),
-                base_type: base_ty.to_string(),
-            };
-            ctx.diagnostics.add_diagnostic(error.into_diagnostic());
-            return Expression::error(full_span.clone());
+                let member_sym = ctx.model.query(SymbolFor {
+                    id: resolution.symbol_id,
+                });
+                let visibility = member_sym
+                    .as_ref()
+                    .and_then(|s| s.metadata().get_behavior::<VisibilityBehavior>())
+                    .and_then(|v| v.visibility().cloned())
+                    .unwrap_or(Visibility::Internal);
+
+                let error = MemberNotVisibleError {
+                    member_span,
+                    member_name: member_name.to_string(),
+                    base_span,
+                    base_type: base_ty.to_string(),
+                    visibility: visibility.to_string(),
+                };
+                ctx.diagnostics.add_diagnostic(error.into_diagnostic());
+                return Expression::error(full_span);
+            }
+
+            let field_mutable = member_field_mutable(&resolution, ctx);
+            Expression::deferred_member_access(
+                base,
+                member_name.to_string(),
+                field_mutable,
+                resolution.ty,
+                full_span,
+            )
         },
-    };
-
-    // 2. Find child with that name - first in direct children, then in extensions
-    debug_trace!(
-        "[MEMBER_RESOLUTION] Looking for '{}' on container '{}' (type: {})",
-        member_name,
-        container.metadata().name().value,
-        base_ty
-    );
-    let member = container
-        .metadata()
-        .children()
-        .into_iter()
-        .find(|c| c.metadata().name().value == member_name);
-
-    // If not found in direct children, defer to type inference (handles extensions,
-    // protocol extensions, Self constraint protocols, etc.)
-    let member = match member {
-        Some(m) => {
-            debug_trace!(
-                "[MEMBER_RESOLUTION] Found '{}' in direct children",
-                member_name
-            );
-            m
+        Err(kestrel_semantic_type_inference::MemberError::UnknownType) => {
+            Expression::deferred_member_access(
+                base,
+                member_name.to_string(),
+                true,
+                Ty::infer(member_span),
+                full_span,
+            )
         },
-        None => {
-            debug_trace!(
-                "[MEMBER_RESOLUTION] '{}' not found in direct children, deferring to inference",
-                member_name
-            );
-            // Use TypeOracle to find all matching members in extensions/protocols.
-            let resolved_base_ty = resolve_self_type_to_concrete(base_ty, ctx);
-            match ctx.model.resolve_all_members(&resolved_base_ty, member_name, false) {
-                Ok(resolutions) => {
-                    // Collect all method candidates
-                    let method_ids: Vec<SymbolId> = resolutions.iter()
-                        .filter(|r| ctx.model.query(SymbolFor { id: r.symbol_id })
-                            .map(|s| s.metadata().kind() == KestrelSymbolKind::Function)
-                            .unwrap_or(false))
-                        .map(|r| r.symbol_id)
-                        .collect();
+        Err(_) => {
+            // Check if the type supports member access at all
+            if get_type_container(base_ty, ctx).is_none() {
+                let error = CannotAccessMemberOnTypeError {
+                    span: full_span.clone(),
+                    base_type: base_ty.to_string(),
+                };
+                ctx.diagnostics.add_diagnostic(error.into_diagnostic());
+                return Expression::error(full_span);
+            }
 
-                    if !method_ids.is_empty() {
-                        return Expression::method_ref(
-                            base,
-                            method_ids,
-                            member_name.to_string(),
-                            full_span,
-                        );
-                    }
-                    // Non-callable member (property/field from extension)
-                    return Expression::field_access(
-                        base,
-                        member_name.to_string(),
-                        false,
-                        Ty::infer(member_span.clone()),
-                        full_span,
-                    );
-                },
-                Err(kestrel_semantic_type_inference::MemberError::UnknownType) => {
-                    // Type is not fully resolved - defer to inference
-                    return Expression::field_access(
-                        base,
-                        member_name.to_string(),
-                        false,
-                        Ty::infer(member_span.clone()),
-                        full_span,
-                    );
-                },
-                Err(_) => {
-                    // Member definitively not found - emit error
-                    let error = NoSuchMemberError {
+            // Check visibility: member might exist but be private
+            let container = get_type_container(base_ty, ctx).unwrap();
+            let member = container
+                .metadata()
+                .children()
+                .into_iter()
+                .find(|c| c.metadata().name().value == member_name);
+
+            if let Some(member) = member {
+                let member_id = member.metadata().id();
+                if !ctx.model.query(IsVisibleFrom {
+                    target: member_id,
+                    context: ctx.function_id,
+                }) {
+                    use kestrel_semantic_tree::behavior::visibility::Visibility;
+
+                    let visibility = member
+                        .metadata()
+                        .get_behavior::<VisibilityBehavior>()
+                        .and_then(|v| v.visibility().cloned())
+                        .unwrap_or(Visibility::Internal);
+
+                    let error = MemberNotVisibleError {
                         member_span,
                         member_name: member_name.to_string(),
                         base_span,
                         base_type: base_ty.to_string(),
+                        visibility: visibility.to_string(),
                     };
                     ctx.diagnostics.add_diagnostic(error.into_diagnostic());
-                    return Expression::error(full_span.clone());
-                },
+                    return Expression::error(full_span);
+                }
+
+                // Member exists and is visible — the oracle didn't find it
+                // (possibly due to visibility context differences). Defer to inference.
+                return Expression::deferred_member_access(
+                    base,
+                    member_name.to_string(),
+                    true,
+                    Ty::infer(member_span),
+                    full_span,
+                );
             }
+
+            // Member definitively not found
+            let error = NoSuchMemberError {
+                member_span,
+                member_name: member_name.to_string(),
+                base_span,
+                base_type: base_ty.to_string(),
+            };
+            ctx.diagnostics.add_diagnostic(error.into_diagnostic());
+            Expression::error(full_span)
         },
-    };
-
-    // 3. Check visibility
-    let member_id = member.metadata().id();
-    if !ctx.model.query(IsVisibleFrom {
-        target: member_id,
-        context: ctx.function_id,
-    }) {
-        use kestrel_semantic_tree::behavior::visibility::Visibility;
-
-        let visibility = member
-            .metadata()
-            .get_behavior::<VisibilityBehavior>()
-            .and_then(|v| v.visibility().cloned())
-            .unwrap_or(Visibility::Internal);
-
-        let error = MemberNotVisibleError {
-            member_span,
-            member_name: member_name.to_string(),
-            base_span,
-            base_type: base_ty.to_string(),
-            visibility: visibility.to_string(),
-        };
-        ctx.diagnostics.add_diagnostic(error.into_diagnostic());
-        return Expression::error(full_span.clone());
     }
+}
 
-    // 4. Get MemberAccessBehavior or ComputedMemberAccessBehavior and produce expression
-    for behavior in member.metadata().behaviors() {
-        if behavior.kind() == KestrelBehaviorKind::MemberAccess
-            && let Some(access) = behavior.as_ref().downcast_ref::<MemberAccessBehavior>()
-        {
-            let mut result = access.access(base.clone(), full_span.clone());
-            // Apply substitutions from the parent's type to the member type
-            // e.g., for Box[T].value, substitute Box's T with the instantiated type arg
-
-            // First, resolve SelfType to the actual type if needed
-            let resolved_base_ty = resolve_self_type_to_concrete(base_ty, ctx);
-
-            if let Some((_, substitutions)) = resolved_base_ty.as_struct_with_subs() {
-                result.ty = result.ty.apply_substitutions(substitutions);
-            }
-            return result;
-        }
-        // Handle computed properties (getter-only access for now)
-        if behavior.kind() == KestrelBehaviorKind::ComputedMemberAccess
-            && let Some(access) = behavior
-                .as_ref()
-                .downcast_ref::<ComputedMemberAccessBehavior>()
-        {
-            let mut result = access.access(base.clone(), full_span.clone());
-            // Apply substitutions from the parent's type to the member type
-            let resolved_base_ty = resolve_self_type_to_concrete(base_ty, ctx);
-
-            if let Some((_, substitutions)) = resolved_base_ty.as_struct_with_subs() {
-                result.ty = result.ty.apply_substitutions(substitutions);
-            }
-            return result;
-        }
-    }
-
-    // 5. If it's a function, create a MethodRef (for method calls like obj.method())
-    if member.metadata().kind() == KestrelSymbolKind::Function {
-        // Find all methods with this name (for overloads) from direct children
-        let candidates: Vec<SymbolId> = container
-            .metadata()
-            .children()
-            .into_iter()
-            .filter(|c| {
-                c.metadata().kind() == KestrelSymbolKind::Function
-                    && c.metadata().name().value == member_name
-            })
-            .map(|c| c.metadata().id())
-            .collect();
-
-        // Extension and protocol extension methods are resolved by the solver
-        // via TypeOracle when the DeferredMethodCall is processed.
-
-        return Expression::method_ref(
-            base,
-            candidates,
-            member_name.to_string(),
-            full_span.clone(),
-        );
-    }
-
-    // Member exists but doesn't have MemberAccessBehavior (e.g., type alias, nested type)
-    let error = MemberNotAccessibleError {
-        member_span,
-        member_name: member_name.to_string(),
-        base_span,
-        base_type: base_ty.to_string(),
-        member_kind: format_symbol_kind(member.metadata().kind()),
-    };
-    ctx.diagnostics.add_diagnostic(error.into_diagnostic());
-    Expression::error(full_span.clone())
+/// Check if a resolved member is a mutable field.
+/// Returns true for non-field members (methods, computed props) since they don't
+/// participate in assignment mutability the same way.
+fn member_field_mutable(
+    resolution: &kestrel_semantic_type_inference::MemberResolution,
+    ctx: &BodyResolutionContext,
+) -> bool {
+    ctx.model
+        .query(SymbolFor {
+            id: resolution.symbol_id,
+        })
+        .and_then(|s| s.metadata().get_behavior::<MemberAccessBehavior>())
+        .map(|b| b.is_mutable())
+        .unwrap_or(true) // non-field members default to true
 }
 
 /// Try to resolve a field access without emitting errors.
@@ -662,6 +584,7 @@ pub fn resolve_member_call(
     member_name: &str,
     arguments: Vec<CallArgument>,
     arg_labels: &[Option<String>],
+    explicit_type_args: Option<Vec<kestrel_semantic_tree::ty::Ty>>,
     span: Span,
     ctx: &mut BodyResolutionContext,
 ) -> Expression {
@@ -699,8 +622,8 @@ pub fn resolve_member_call(
         );
     }
 
-    // If base type is Error, propagate error without cascading diagnostics.
-    if matches!(base_ty.kind(), TyKind::Error) {
+    // If base type is Error or Never, propagate without cascading diagnostics.
+    if matches!(base_ty.kind(), TyKind::Error | TyKind::Never) {
         return Expression::error(span);
     }
 
@@ -764,7 +687,12 @@ pub fn resolve_member_call(
                 }
                 ty
             })
-            .unwrap_or_else(|_| Ty::infer(span.clone()))
+            .unwrap_or_else(|_| {
+                // Fallback for SelfType in protocol extensions: look up the method
+                // directly from the protocol container to get a best-effort return type.
+                best_effort_return_type_from_container(base_ty, member_name, ctx)
+                    .unwrap_or_else(|| Ty::infer(span.clone()))
+            })
     } else {
         Ty::infer(span.clone())
     };
@@ -772,10 +700,33 @@ pub fn resolve_member_call(
         object.clone(),
         member_name.to_string(),
         arguments,
-        None,
+        explicit_type_args,
         deferred_return_ty,
         span,
     )
+}
+
+/// Look up a method in the type container to get a best-effort return type.
+/// Used when the oracle can't resolve the member (e.g., SelfType in protocol extensions).
+fn best_effort_return_type_from_container(
+    base_ty: &Ty,
+    member_name: &str,
+    ctx: &BodyResolutionContext,
+) -> Option<Ty> {
+    let container = get_type_container(base_ty, ctx)?;
+    let member = container
+        .metadata()
+        .children()
+        .into_iter()
+        .find(|c| c.metadata().name().value == member_name)?;
+    for behavior in member.metadata().behaviors() {
+        if behavior.kind() == KestrelBehaviorKind::Callable {
+            if let Some(callable) = behavior.as_ref().downcast_ref::<CallableBehavior>() {
+                return Some(callable.return_type().clone());
+            }
+        }
+    }
+    None
 }
 
 /// Substitute Self with the receiver type in a CallableBehavior.
@@ -1243,36 +1194,6 @@ fn resolve_associated_type_static_member(
 /// 1. Its type arguments can be unified with the actual type's arguments
 /// 2. Any where clause constraints are satisfied
 ///
-/// Collect all method candidate SymbolIds with the given name from protocol bounds.
-///
-/// Iterates through protocol bounds using FlattenedProtocolBehavior to collect
-/// all overloads. If no methods found in bounds, returns a vec with the fallback_id.
-fn collect_method_candidates_from_bounds(
-    bounds: &[Ty],
-    method_name: &str,
-    fallback_id: SymbolId,
-) -> Vec<SymbolId> {
-    let mut candidates = Vec::new();
-    for bound in bounds {
-        if let TyKind::Protocol { symbol: proto, .. } = bound.kind() {
-            if let Some(flattened) = proto
-                .metadata()
-                .get_behavior::<FlattenedProtocolBehavior>()
-            {
-                if let Some(methods) = flattened.methods().get(method_name) {
-                    for method in methods {
-                        candidates.push(method.symbol.metadata().id());
-                    }
-                }
-            }
-        }
-    }
-    if candidates.is_empty() {
-        candidates.push(fallback_id);
-    }
-    candidates
-}
-
 /// Collect all static method candidate SymbolIds with the given name from protocol bounds.
 ///
 /// Also tracks which protocols each method comes from for ambiguity detection.

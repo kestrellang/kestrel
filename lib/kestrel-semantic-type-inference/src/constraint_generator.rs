@@ -831,6 +831,21 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
             );
         },
 
+        ExprKind::DeferredMemberAccess { receiver, member } => {
+            generate_expression_constraints(ctx, receiver);
+            ctx.register_type(&receiver.ty);
+            ctx.register_type(&expr.ty);
+            // Non-call property access (distinct from zero-arg method calls)
+            ctx.property_access(
+                receiver.ty.id(),
+                member.clone(),
+                false,
+                expr.ty.id(),
+                expr.id,
+                expr.span.clone(),
+            );
+        },
+
         ExprKind::ImplicitStructInit { arguments, .. } => {
             for arg in arguments {
                 generate_expression_constraints(ctx, &arg.value);

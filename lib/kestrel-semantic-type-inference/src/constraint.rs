@@ -92,6 +92,9 @@ pub enum Constraint {
         /// Used for overload resolution when multiple methods share the same name.
         /// Each entry is None for unlabeled arguments, Some(label) for labeled ones.
         labels: Vec<Option<String>>,
+        /// Whether this is a non-call property access (DeferredMemberAccess),
+        /// as opposed to a method call with zero arguments.
+        is_property_access: bool,
         /// The result type of the member access
         result: TyId,
         /// The expression ID for tracking the value resolution
@@ -227,10 +230,34 @@ impl Constraint {
             is_static,
             arguments,
             labels,
+            is_property_access: false,
             result,
             expr_id,
             substitutions,
             explicit_type_args,
+            span,
+        }
+    }
+
+    pub fn property_access(
+        receiver: TyId,
+        member: String,
+        is_static: bool,
+        result: TyId,
+        expr_id: ExprId,
+        span: Span,
+    ) -> Self {
+        Constraint::MemberAccess {
+            receiver,
+            member,
+            is_static,
+            arguments: vec![],
+            labels: vec![],
+            is_property_access: true,
+            result,
+            expr_id,
+            substitutions: kestrel_semantic_tree::ty::Substitutions::new(),
+            explicit_type_args: None,
             span,
         }
     }

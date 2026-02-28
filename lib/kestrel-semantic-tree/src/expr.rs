@@ -1174,6 +1174,18 @@ pub enum ExprKind {
         explicit_type_args: Option<Vec<Ty>>,
     },
 
+    /// Deferred non-call member access (field, computed property, protocol property, method ref).
+    /// Created when the binder defers member resolution to type inference.
+    ///
+    /// Type inference will resolve this via `oracle.resolve_member()` and classify
+    /// the member kind to produce the correct concrete expression in the apply phase.
+    DeferredMemberAccess {
+        /// The receiver expression being accessed
+        receiver: Box<Expression>,
+        /// The member name being accessed
+        member: String,
+    },
+
     /// Implicit struct initialization: `Point(x: 1, y: 2)` when no explicit init exists.
     /// The compiler generates a memberwise initializer that assigns each argument to
     /// the corresponding field in declaration order.
@@ -1818,6 +1830,9 @@ impl Expression {
                         })
                         .collect();
                     format!("{}({})", struct_ty, args.join(", "))
+                },
+                ExprKind::DeferredMemberAccess { receiver, member } => {
+                    format!("{}.{}", format_expr(receiver), member)
                 },
                 ExprKind::ImplicitStructInit {
                     struct_type,
@@ -2621,6 +2636,32 @@ impl Expression {
             ty: result_ty,
             span,
             mutable: false,
+        }
+    }
+
+    /// Create a deferred member access expression.
+    /// Used when member resolution is deferred to type inference.
+    pub fn deferred_member_access(
+        receiver: Expression,
+        member: String,
+        field_mutable: bool,
+        result_ty: Ty,
+        span: Span,
+    ) -> Self {
+        let mutable = if matches!(receiver.kind, ExprKind::TypeRef(_)) {
+            field_mutable
+        } else {
+            field_mutable && receiver.mutable
+        };
+        Expression {
+            id: ExprId::new(),
+            kind: ExprKind::DeferredMemberAccess {
+                receiver: Box::new(receiver),
+                member,
+            },
+            ty: result_ty,
+            span,
+            mutable,
         }
     }
 
@@ -3599,6 +3640,13 @@ impl Expression {
                 explicit_type_args: explicit_type_args.as_ref().map(|args| {
                     args.iter().map(|ty| ty.apply_substitutions(subs)).collect()
                 }),
+            },
+
+            ExprKind::DeferredMemberAccess { receiver, member } => {
+                ExprKind::DeferredMemberAccess {
+                    receiver: Box::new(receiver.apply_substitutions(subs)),
+                    member: member.clone(),
+                }
             },
 
             ExprKind::ImplicitStructInit {

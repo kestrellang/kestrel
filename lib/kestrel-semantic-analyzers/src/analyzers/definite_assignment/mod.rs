@@ -476,6 +476,9 @@ fn analyze_expression(
                 state = analyze_expression(&arg.value, state, false, ctx);
             }
         },
+        ExprKind::DeferredMemberAccess { receiver, .. } => {
+            state = analyze_expression(receiver, state, false, ctx);
+        },
         ExprKind::ImplicitStructInit { arguments, .. } => {
             for arg in arguments {
                 state = analyze_expression(&arg.value, state, false, ctx);

@@ -119,7 +119,8 @@ pub fn resolve_path_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContex
         if path_with_spans.len() == 1 {
             return base_expr;
         } else {
-            return resolve_member_chain(base_expr, &path_with_spans[1..], ctx);
+            let result = resolve_member_chain(base_expr, &path_with_spans[1..], ctx);
+            return result;
         }
     }
 

@@ -354,6 +354,18 @@ fn analyze_expression(
                 state = analyze_expression(&arg.value, state, false, ctx);
             }
         },
+        ExprKind::DeferredMemberAccess { receiver, member } => {
+            if is_self_expr(receiver) {
+                if !is_assignment_target && !state.assigned.contains(member) {
+                    ctx.errors.push(InitializerError::FieldReadBeforeAssigned {
+                        span: expr.span.clone(),
+                        field_name: member.clone(),
+                    });
+                }
+            } else {
+                state = analyze_expression(receiver, state, false, ctx);
+            }
+        },
         ExprKind::ImplicitStructInit { arguments, .. } => {
             for arg in arguments {
                 state = analyze_expression(&arg.value, state, false, ctx);
@@ -375,18 +387,27 @@ fn analyze_expression(
         },
         ExprKind::Assignment { target, value } => {
             state = analyze_expression(value, state, false, ctx);
-            if let ExprKind::FieldAccess { object, field } = &target.kind
-                && is_self_expr(object)
-            {
-                if ctx.let_fields.contains(field) && state.let_assigned.contains(field) {
+            // Check both FieldAccess and DeferredMemberAccess (which resolves to FieldAccess after inference)
+            let self_field = match &target.kind {
+                ExprKind::FieldAccess { object, field } if is_self_expr(object) => {
+                    Some(field.as_str())
+                },
+                ExprKind::DeferredMemberAccess { receiver, member } if is_self_expr(receiver) => {
+                    Some(member.as_str())
+                },
+                _ => None,
+            };
+            if let Some(field) = self_field {
+                let field_str = field.to_string();
+                if ctx.let_fields.contains(&field_str) && state.let_assigned.contains(&field_str) {
                     ctx.errors.push(InitializerError::LetFieldAssignedTwice {
                         span: target.span.clone(),
-                        field_name: field.clone(),
+                        field_name: field_str.clone(),
                     });
                 }
-                state.assigned.insert(field.clone());
-                if ctx.let_fields.contains(field) {
-                    state.let_assigned.insert(field.clone());
+                state.assigned.insert(field_str.clone());
+                if ctx.let_fields.contains(&field_str) {
+                    state.let_assigned.insert(field_str);
                 }
             }
             state = analyze_expression(target, state, true, ctx);

@@ -400,6 +400,7 @@ fn try_solve(
             is_static,
             arguments,
             labels,
+            is_property_access,
             result,
             expr_id,
             substitutions,
@@ -410,6 +411,7 @@ fn try_solve(
             *receiver,
             member,
             *is_static,
+            *is_property_access,
             arguments,
             labels,
             *result,
@@ -488,7 +490,12 @@ fn unify(
         return Ok(SolveResult::Solved);
     }
 
-    // DEBUG: Print when unifying types
+    // Register resolved types so their inner TyIds are available in the type registry.
+    // This is critical when resolve_type resolves an AssociatedType via the oracle,
+    // producing a fresh type with new TyIds. Without registration, inner TyIds used
+    // in equate constraints would be unknown to the solver in subsequent rounds.
+    ctx.register_type(&ty_a);
+    ctx.register_type(&ty_b);
 
     // Handle inference placeholders
     match (ty_a.kind(), ty_b.kind()) {
@@ -1717,6 +1724,7 @@ fn resolve_member(
     receiver: TyId,
     member: &str,
     is_static: bool,
+    is_property_access: bool,
     arguments: &[TyId],
     labels: &[Option<String>],
     result: TyId,
@@ -1752,6 +1760,15 @@ fn resolve_member(
     // If the receiver type is still an inference placeholder, defer
     if matches!(receiver_ty.kind(), TyKind::Infer) {
         return Ok(SolveResult::Deferred);
+    }
+
+    // Never is the bottom type (unreachable code). Any member access on it
+    // produces Never. Equate the result with Never to propagate.
+    if matches!(receiver_ty.kind(), TyKind::Never) {
+        let never_ty = Ty::never(span.clone());
+        ctx.register_type(&never_ty);
+        ctx.equate(never_ty.id(), result, span.clone());
+        return Ok(SolveResult::Solved);
     }
 
     // Defer unresolved associated projections like `_.Item` until their container resolves.
@@ -1883,6 +1900,59 @@ fn resolve_member(
                 return Err(InferenceError::internal(format!(
                     "ambiguous init: {} candidates",
                     count
+                )));
+            },
+        }
+    }
+
+    // Non-call member access: field, computed property, protocol property, or method-as-value.
+    // When arguments and labels are empty, this is a property access / method reference,
+    // not a method call. Use resolve_member directly (without arity check).
+    if is_property_access {
+        let resolution_result = ctx.oracle().resolve_member(&receiver_ty, member, is_static);
+        match resolution_result {
+            Ok(resolution) => {
+                // Post-resolution visibility check
+                if let Some(ctx_id) = ctx.oracle().context_symbol_id()
+                    && !ctx.oracle().is_visible(resolution.symbol_id, ctx_id)
+                {
+                    return Err(InferenceError::member_not_found(
+                        receiver_ty.clone(),
+                        member.to_string(),
+                        span.clone(),
+                    ));
+                }
+
+                // Classify the member kind and store for apply phase
+                let member_kind = ctx.oracle().classify_member(&receiver_ty, &resolution);
+                ctx.member_kinds_mut().insert(expr_id, member_kind);
+
+                // Record value resolution
+                let mut subs = resolution.substitutions.clone();
+                for (param_id, ty) in call_site_substitutions.iter() {
+                    subs.insert(*param_id, ty.clone());
+                }
+                ctx.values_mut()
+                    .insert(expr_id, ValueResolution::new(resolution.symbol_id, subs));
+
+                // Equate member type with result
+                ctx.register_type(&resolution.ty);
+                ctx.equate(resolution.ty.id(), result, span.clone());
+
+                return Ok(SolveResult::Solved);
+            },
+            Err(MemberError::UnknownType) => return Ok(SolveResult::Deferred),
+            Err(MemberError::NotFound { .. }) => {
+                return Err(InferenceError::member_not_found(
+                    receiver_ty.clone(),
+                    member.to_string(),
+                    span.clone(),
+                ));
+            },
+            Err(MemberError::Ambiguous { count }) => {
+                return Err(InferenceError::internal(format!(
+                    "ambiguous member '{}': {} candidates",
+                    member, count
                 )));
             },
         }

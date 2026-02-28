@@ -16,7 +16,7 @@ use kestrel_semantic_tree::ty::{ParamInfo, Substitutions, Ty, TyId, TyKind};
 use semantic_tree::symbol::Symbol;
 
 use crate::oracle::TypeOracle;
-use crate::solution::{PromotionInfo, Solution};
+use crate::solution::{MemberKind, PromotionInfo, Solution};
 
 /// Apply a solution to a code block, resolving all inference placeholders
 /// and associated type projections.
@@ -367,26 +367,6 @@ fn apply_to_expression(
 
             // Check if we have a resolved symbol for this expression
             if let Some(value_resolution) = solution.get_value(expr.id) {
-                let labels: Vec<Option<String>> =
-                    resolved_arguments.iter().map(|a| a.label.clone()).collect();
-                let argument_types: Vec<Option<Ty>> = resolved_arguments
-                    .iter()
-                    .map(|a| {
-                        let ty = a.value.ty.clone();
-                        if matches!(
-                            ty.kind(),
-                            TyKind::Infer
-                                | TyKind::TypeParameter(_)
-                                | TyKind::AssociatedType { .. }
-                                | TyKind::SelfType
-                        ) {
-                            None
-                        } else {
-                            Some(ty)
-                        }
-                    })
-                    .collect();
-
                 // Build the method function type from already-resolved argument and result types.
                 // We can't re-query the oracle because it creates fresh infer vars for method
                 // type params that can't be resolved by SymbolId-based substitutions.
@@ -541,6 +521,106 @@ fn apply_to_expression(
                     struct_ty: resolved_ty,
                     arguments: resolved_arguments,
                     explicit_type_args: explicit_type_args.clone(),
+                }
+            }
+        },
+
+        ExprKind::DeferredMemberAccess { receiver, member } => {
+            let resolved_receiver = apply_to_expression(receiver, solution, oracle);
+
+            if let Some(value_res) = solution.get_value(expr.id) {
+                let member_kind = solution.get_member_kind(expr.id);
+                match member_kind {
+                    Some(MemberKind::Field { mutable }) => {
+                        let resolved_ty =
+                            resolve_type(&expr.ty, solution, oracle, &mut HashSet::new());
+                        let field_mutable = *mutable;
+                        let is_mutable = if matches!(
+                            resolved_receiver.kind,
+                            ExprKind::TypeRef(_)
+                        ) {
+                            field_mutable
+                        } else {
+                            field_mutable && resolved_receiver.mutable
+                        };
+                        let result = Expression {
+                            id: expr.id,
+                            kind: ExprKind::FieldAccess {
+                                object: Box::new(resolved_receiver),
+                                field: member.clone(),
+                            },
+                            ty: resolved_ty,
+                            span: expr.span.clone(),
+                            mutable: is_mutable,
+                        };
+                        // Handle promotion if needed
+                        if let Some(promo) = solution.get_promotion(expr.id) {
+                            return wrap_with_promotion(result, promo);
+                        }
+                        return result;
+                    },
+                    Some(MemberKind::ComputedProperty { has_setter }) => {
+                        // Computed properties use FieldAccess - lowering handles the getter call
+                        let resolved_ty =
+                            resolve_type(&expr.ty, solution, oracle, &mut HashSet::new());
+                        let is_mutable = *has_setter && resolved_receiver.mutable;
+                        let result = Expression {
+                            id: expr.id,
+                            kind: ExprKind::FieldAccess {
+                                object: Box::new(resolved_receiver),
+                                field: member.clone(),
+                            },
+                            ty: resolved_ty,
+                            span: expr.span.clone(),
+                            mutable: is_mutable,
+                        };
+                        if let Some(promo) = solution.get_promotion(expr.id) {
+                            return wrap_with_promotion(result, promo);
+                        }
+                        return result;
+                    },
+                    Some(MemberKind::ProtocolProperty {
+                        protocol_id,
+                        has_setter,
+                        is_static,
+                    }) => {
+                        let resolved_ty =
+                            resolve_type(&expr.ty, solution, oracle, &mut HashSet::new());
+                        let is_mutable =
+                            *has_setter && (*is_static || resolved_receiver.mutable);
+                        let result = Expression {
+                            id: expr.id,
+                            kind: ExprKind::ProtocolPropertyAccess {
+                                receiver: Box::new(resolved_receiver),
+                                field_id: value_res.symbol_id,
+                                property_name: member.clone(),
+                                protocol_id: *protocol_id,
+                                is_static: *is_static,
+                                has_setter: *has_setter,
+                            },
+                            ty: resolved_ty,
+                            span: expr.span.clone(),
+                            mutable: is_mutable,
+                        };
+                        if let Some(promo) = solution.get_promotion(expr.id) {
+                            return wrap_with_promotion(result, promo);
+                        }
+                        return result;
+                    },
+                    Some(MemberKind::Method) | None => {
+                        // Method reference (not called)
+                        ExprKind::MethodRef {
+                            receiver: Box::new(resolved_receiver),
+                            candidates: vec![value_res.symbol_id],
+                            method_name: member.clone(),
+                        }
+                    },
+                }
+            } else {
+                // Unresolved — keep deferred (will error at lowering)
+                ExprKind::DeferredMemberAccess {
+                    receiver: Box::new(resolved_receiver),
+                    member: member.clone(),
                 }
             }
         },

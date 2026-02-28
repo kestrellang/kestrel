@@ -14,7 +14,7 @@ use semantic_tree::symbol::Symbol;
 use crate::constraint::{Constraint, ProtocolRef};
 use crate::error::InferenceError;
 use crate::oracle::TypeOracle;
-use crate::solution::{PromotionInfo, Solution, ValueResolution};
+use crate::solution::{MemberKind, PromotionInfo, Solution, ValueResolution};
 
 /// Metadata about a closure expression for error reporting.
 #[derive(Debug, Clone)]
@@ -75,6 +75,8 @@ pub struct InferenceContext<'a> {
     /// TyIds that have ExpressibleBy* constraints (i.e., literals)
     /// Used by Promotable solver to decide whether to defer
     literal_ty_ids: HashSet<TyId>,
+    /// Member kind classifications for deferred member access
+    member_kinds: HashMap<ExprId, MemberKind>,
 }
 
 impl<'a> InferenceContext<'a> {
@@ -91,6 +93,7 @@ impl<'a> InferenceContext<'a> {
             closure_metadata: HashMap::new(),
             return_type: None,
             literal_ty_ids: HashSet::new(),
+            member_kinds: HashMap::new(),
         }
     }
 
@@ -247,6 +250,26 @@ impl<'a> InferenceContext<'a> {
         ));
     }
 
+    /// Add a property access constraint (non-call member access).
+    pub fn property_access(
+        &mut self,
+        receiver: TyId,
+        member: String,
+        is_static: bool,
+        result: TyId,
+        expr_id: ExprId,
+        span: Span,
+    ) {
+        self.constraints.push(Constraint::property_access(
+            receiver,
+            member,
+            is_static,
+            result,
+            expr_id,
+            span,
+        ));
+    }
+
     /// Add an implicit member constraint: resolve `.Member` or `.Member(args)` based on expected type.
     ///
     /// This is used for enum shorthand syntax where the enum type is inferred from context.
@@ -394,6 +417,10 @@ impl<'a> InferenceContext<'a> {
         &mut self.promotions
     }
 
+    pub(crate) fn member_kinds_mut(&mut self) -> &mut HashMap<ExprId, MemberKind> {
+        &mut self.member_kinds
+    }
+
     pub(crate) fn into_solution(self) -> Solution {
         // Resolve inference variables in ValueResolution substitutions
         // Clone substitutions first since we need it for both resolution and the final solution
@@ -416,7 +443,10 @@ impl<'a> InferenceContext<'a> {
             })
             .collect();
 
-        Solution::with_promotions(substitutions, resolved_values, self.promotions, self.errors)
+        let mut solution =
+            Solution::with_promotions(substitutions, resolved_values, self.promotions, self.errors);
+        solution.member_kinds = self.member_kinds;
+        solution
     }
 }
 

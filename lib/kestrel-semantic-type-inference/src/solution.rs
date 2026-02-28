@@ -11,6 +11,25 @@ use semantic_tree::symbol::SymbolId;
 
 use crate::error::InferenceError;
 
+/// Describes what kind of member was resolved for a deferred member access.
+///
+/// Used by the apply phase to produce the correct concrete ExprKind.
+#[derive(Debug, Clone)]
+pub enum MemberKind {
+    /// Struct field — produce FieldAccess
+    Field { mutable: bool },
+    /// Computed property — produce a getter call (SymbolRef + Call)
+    ComputedProperty { has_setter: bool },
+    /// Protocol property — produce ProtocolPropertyAccess
+    ProtocolProperty {
+        protocol_id: SymbolId,
+        has_setter: bool,
+        is_static: bool,
+    },
+    /// Method reference (not called) — produce MethodRef
+    Method,
+}
+
 /// A resolved value from type-directed member access.
 ///
 /// When a member access depends on type inference (e.g., `x.method()` where
@@ -94,6 +113,12 @@ pub struct Solution {
     /// here with information about the target type and method to call.
     pub promotions: HashMap<ExprId, PromotionInfo>,
 
+    /// Member kinds for deferred member access expressions.
+    ///
+    /// Records what kind of member was resolved (field, computed property,
+    /// protocol property, method) so the apply phase can produce the correct ExprKind.
+    pub member_kinds: HashMap<ExprId, MemberKind>,
+
     /// Errors encountered during type inference.
     ///
     /// The solver accumulates errors rather than failing fast, allowing
@@ -108,6 +133,7 @@ impl Solution {
             types: HashMap::new(),
             values: HashMap::new(),
             promotions: HashMap::new(),
+            member_kinds: HashMap::new(),
             errors: Vec::new(),
         }
     }
@@ -121,6 +147,7 @@ impl Solution {
             types,
             values,
             promotions: HashMap::new(),
+            member_kinds: HashMap::new(),
             errors: Vec::new(),
         }
     }
@@ -135,6 +162,7 @@ impl Solution {
             types,
             values,
             promotions: HashMap::new(),
+            member_kinds: HashMap::new(),
             errors,
         }
     }
@@ -150,6 +178,7 @@ impl Solution {
             types,
             values,
             promotions,
+            member_kinds: HashMap::new(),
             errors,
         }
     }
@@ -167,6 +196,16 @@ impl Solution {
     /// Get the promotion info for an ExprId.
     pub fn get_promotion(&self, id: ExprId) -> Option<&PromotionInfo> {
         self.promotions.get(&id)
+    }
+
+    /// Get the member kind for a deferred member access expression.
+    pub fn get_member_kind(&self, id: ExprId) -> Option<&MemberKind> {
+        self.member_kinds.get(&id)
+    }
+
+    /// Set the member kind for a deferred member access expression.
+    pub fn set_member_kind(&mut self, id: ExprId, kind: MemberKind) {
+        self.member_kinds.insert(id, kind);
     }
 
     /// Check if a type has been resolved.

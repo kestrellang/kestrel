@@ -430,6 +430,39 @@ pub fn resolve_call(
             }
         },
 
+        // Deferred member access used as callee — the member access was deferred,
+        // but now we know it's being called. Route through resolve_member_call which
+        // handles field+subscript, callable fields, and method deferral.
+        ExprKind::DeferredMemberAccess {
+            ref receiver,
+            ref member,
+        } => {
+            if matches!(
+                receiver.kind,
+                ExprKind::TypeRef(_) | ExprKind::TypeParameterRef(_) | ExprKind::AssociatedTypeRef
+            ) {
+                let target_ty = fill_missing_type_params(&receiver.ty, &span);
+                let deferred_return_ty =
+                    match ctx.model.resolve_member(&receiver.ty, member, true) {
+                        Ok(resolution) => resolution.ty,
+                        _ => Ty::infer(span.clone()),
+                    };
+                Expression::deferred_static_call(
+                    target_ty,
+                    member.to_string(),
+                    arguments,
+                    vec![],
+                    explicit_type_args,
+                    deferred_return_ty,
+                    span,
+                )
+            } else {
+                // Use resolve_member_call which tries field+subscript, callable fields,
+                // and defers method calls — exactly what we need.
+                resolve_member_call(receiver, member, arguments, arg_labels, explicit_type_args, span, ctx)
+            }
+        },
+
         // Field access - might be method call on struct
         ExprKind::FieldAccess {
             ref object,
@@ -453,7 +486,7 @@ pub fn resolve_call(
             // This could be:
             // 1. A field with callable type (first-class function)
             // 2. A method call
-            resolve_member_call(object, field, arguments, arg_labels, span, ctx)
+            resolve_member_call(object, field, arguments, arg_labels, explicit_type_args, span, ctx)
         },
 
         // Primitive method reference - convert to a primitive method call
@@ -2253,6 +2286,15 @@ pub(crate) fn classify_mutability(
                     field_name: property_name.clone(),
                     field_span: None,
                 }
+            }
+        },
+
+        // Deferred member access — check the mutable flag computed at bind time.
+        ExprKind::DeferredMemberAccess { receiver, member } => {
+            if expr.mutable {
+                MutabilityClassification::Mutable
+            } else {
+                classify_field_chain_mutability(receiver, member, ctx)
             }
         },
 

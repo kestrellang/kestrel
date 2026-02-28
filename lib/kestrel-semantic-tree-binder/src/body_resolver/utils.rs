@@ -1020,30 +1020,6 @@ pub fn resolve_associated_types(ty: &Ty, ctx: &BodyResolutionContext) -> Ty {
     }
 }
 
-/// Format a symbol kind for error messages
-pub fn format_symbol_kind(kind: KestrelSymbolKind) -> String {
-    match kind {
-        KestrelSymbolKind::AssociatedType => "associated type".to_string(),
-        KestrelSymbolKind::Deinit => "deinit".to_string(),
-        KestrelSymbolKind::Enum => "enum".to_string(),
-        KestrelSymbolKind::EnumCase => "enum case".to_string(),
-        KestrelSymbolKind::Extension => "extension".to_string(),
-        KestrelSymbolKind::Field => "field".to_string(),
-        KestrelSymbolKind::Function => "function".to_string(),
-        KestrelSymbolKind::Import => "import".to_string(),
-        KestrelSymbolKind::Initializer => "initializer".to_string(),
-        KestrelSymbolKind::Module => "module".to_string(),
-        KestrelSymbolKind::Protocol => "protocol".to_string(),
-        KestrelSymbolKind::SourceFile => "source file".to_string(),
-        KestrelSymbolKind::Struct => "struct".to_string(),
-        KestrelSymbolKind::TypeAlias => "type alias".to_string(),
-        KestrelSymbolKind::TypeParameter => "type parameter".to_string(),
-        KestrelSymbolKind::Getter => "getter".to_string(),
-        KestrelSymbolKind::Setter => "setter".to_string(),
-        KestrelSymbolKind::Subscript => "subscript".to_string(),
-    }
-}
-
 // =============================================================================
 // Type Argument Inference
 // =============================================================================

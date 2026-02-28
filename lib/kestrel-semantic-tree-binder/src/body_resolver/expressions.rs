@@ -2145,6 +2145,10 @@ fn expression_references_local(
             .iter()
             .any(|arg| expression_references_local(&arg.value, local_id)),
 
+        ExprKind::DeferredMemberAccess { receiver, .. } => {
+            expression_references_local(receiver, local_id)
+        },
+
         ExprKind::ImplicitStructInit { arguments, .. } => arguments
             .iter()
             .any(|arg| expression_references_local(&arg.value, local_id)),
@@ -2892,6 +2896,9 @@ where
                 collect_captures_from_expression(&arg.value, process);
             }
         },
+        ExprKind::DeferredMemberAccess { receiver, .. } => {
+            collect_captures_from_expression(receiver, process);
+        },
         ExprKind::MethodRef { receiver, .. } => {
             collect_captures_from_expression(receiver, process);
         },
@@ -3287,7 +3294,8 @@ fn is_field_access_on_self(target: &Expression, ctx: &BodyResolutionContext) -> 
     use kestrel_semantic_tree::expr::ExprKind;
 
     match &target.kind {
-        ExprKind::FieldAccess { object, .. } => {
+        ExprKind::FieldAccess { object, .. }
+        | ExprKind::DeferredMemberAccess { receiver: object, .. } => {
             // Check if the object is `self`
             if let ExprKind::LocalRef(local_id) = &object.kind
                 && let Some(local) = ctx.local_scope.get_local(*local_id)

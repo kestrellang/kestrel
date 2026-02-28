@@ -404,6 +404,9 @@ fn analyze_expression(expr: &Expression, errors: &mut Vec<UnreachableCodeWarning
             }
             Divergence::None
         },
+        ExprKind::DeferredMemberAccess { receiver, .. } => {
+            analyze_expression(receiver, errors)
+        },
         ExprKind::ImplicitStructInit { arguments, .. } => {
             for arg in arguments {
                 let d = analyze_expression(&arg.value, errors);

@@ -272,6 +272,9 @@ fn walk_expression(
                     }
                 }
             },
+            ExprKind::DeferredMemberAccess { receiver, .. } => {
+                walk_expression(receiver, analyzers, model, ctx);
+            },
             ExprKind::ImplicitStructInit { arguments, .. } => {
                 for arg in arguments {
                     walk_expression(&arg.value, analyzers, model, ctx);
@@ -541,8 +544,11 @@ fn get_executable_body(
         return Some(resolved.body().clone());
     }
     // Fall back to unresolved ExecutableBehavior.
-    symbol
+    if let Some(exec) = symbol
         .metadata()
         .get_behavior::<ExecutableBehavior>()
-        .map(|exec| exec.body().clone())
+    {
+        return Some(exec.body().clone());
+    }
+    None
 }

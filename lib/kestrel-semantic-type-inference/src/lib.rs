@@ -37,7 +37,7 @@ mod constraint_generator;
 mod context;
 mod error;
 mod oracle;
-mod solution;
+pub mod solution;
 mod solver;
 
 pub use apply::{
