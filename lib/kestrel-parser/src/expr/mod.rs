@@ -2609,11 +2609,7 @@ fn emit_expr_variant_inner(sink: &mut EventSink, variant: &ExprVariant) {
                 emit_type_args(sink, type_args);
             }
         },
-        ExprVariant::TupleIndex { base, dot, index } => {
-            emit_expr_variant_inner(sink, base);
-            sink.add_token(SyntaxKind::Dot, dot.clone());
-            sink.add_token(SyntaxKind::Integer, index.clone());
-        },
+        ExprVariant::TupleIndex { .. } => emit_expr_variant(sink, variant),
         _ => emit_expr_variant(sink, variant),
     }
 }

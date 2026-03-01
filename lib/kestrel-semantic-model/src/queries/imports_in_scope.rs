@@ -15,6 +15,7 @@ use crate::scope::{Import, ImportItem};
 ///
 /// Returns a list of Import metadata extracted from ImportDataBehavior
 /// on the symbol's children.
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct ImportsInScope {
     pub symbol_id: SymbolId,
 }

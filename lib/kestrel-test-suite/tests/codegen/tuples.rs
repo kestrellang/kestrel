@@ -91,6 +91,137 @@ func main() -> lang.i64 {
 }
 
 #[test]
+fn test_tuple_field_member_access() {
+    Test::new(
+        r#"module Test
+
+func main() -> lang.i64 {
+    let pair = ("hello", "world");
+    if pair.0.byteCount != 5 { return 1 }
+    if pair.1.byteCount != 5 { return 2 }
+    0
+}
+"#,
+    )
+    .with_stdlib()
+    .expect(Compiles)
+    .expect(Runs);
+}
+
+#[test]
+fn test_tuple_field_method_call() {
+    Test::new(
+        r#"module Test
+
+func main() -> lang.i64 {
+    let pair = ("hello", "world");
+    if pair.0.equals("hello") != true { return 1 }
+    if pair.1.equals("hello") != false { return 2 }
+    0
+}
+"#,
+    )
+    .with_stdlib()
+    .expect(Compiles)
+    .expect(Runs);
+}
+
+#[test]
+fn test_tuple_field_chained_operations() {
+    Test::new(
+        r#"module Test
+
+func main() -> lang.i64 {
+    let pair = ("hello world", 42);
+    let len = pair.0.byteCount;
+    if len != 11 { return 1 }
+    if pair.1 != 42 { return 2 }
+    0
+}
+"#,
+    )
+    .with_stdlib()
+    .expect(Compiles)
+    .expect(Runs);
+}
+
+#[test]
+fn test_tuple_field_method_in_loop() {
+    // Exercises the pattern used in HTTP header lookup:
+    // iterating an array of tuples, calling a method on a tuple field
+    Test::new(
+        r#"module Test
+
+func findValue(pairs: Array[(String, String)], name: String) -> String? {
+    var i: Int64 = 0;
+    while i < pairs.count {
+        let pair = pairs(unchecked: i);
+        if pair.0.equals(name) {
+            return .Some(pair.1)
+        }
+        i = i + 1
+    }
+    .None
+}
+
+func main() -> lang.i64 {
+    var headers = Array[(String, String)]();
+    headers.append(("Content-Type", "text/html"));
+    headers.append(("Host", "example.com"));
+    headers.append(("Accept", "application/json"));
+
+    let ct = findValue(headers, "Content-Type");
+    match ct {
+        .Some(v) => if v.equals("text/html") == false { return 1 },
+        .None => return 2
+    }
+
+    let host = findValue(headers, "Host");
+    match host {
+        .Some(v) => if v.equals("example.com") == false { return 3 },
+        .None => return 4
+    }
+
+    let missing = findValue(headers, "X-Missing");
+    match missing {
+        .Some(_) => return 5,
+        .None => 0
+    }
+
+    0
+}
+"#,
+    )
+    .with_stdlib()
+    .expect(Compiles)
+    .expect(Runs);
+}
+
+#[test]
+fn test_tuple_field_as_function_arg() {
+    // Exercises the pattern used in file seek:
+    // passing tuple fields directly as function arguments
+    Test::new(
+        r#"module Test
+
+func add(a: Int64, b: Int64) -> Int64 {
+    a + b
+}
+
+func main() -> lang.i64 {
+    let pair = (20, 22);
+    let result = add(pair.0, pair.1);
+    if result != 42 { return 1 }
+    0
+}
+"#,
+    )
+    .with_stdlib()
+    .expect(Compiles)
+    .expect(Runs);
+}
+
+#[test]
 fn test_tuple_from_function() {
     Test::new(
         r#"module Test

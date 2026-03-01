@@ -19,6 +19,7 @@ use crate::type_oracle::ContextualOracle;
 /// 2. Creates an InferenceContext with a ContextualOracle that knows the current function
 /// 3. Generates constraints from the code block
 /// 4. Solves the constraints and returns the Solution (with any errors)
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct InferenceResultFor {
     pub symbol_id: SymbolId,
 }

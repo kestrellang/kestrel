@@ -12,6 +12,7 @@ use crate::query::Query;
 /// Find children of parent that are visible from context and match name.
 ///
 /// Combines symbol lookup with visibility checking and name filtering.
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct VisibleChildrenByName {
     pub parent: SymbolId,
     pub name: String,

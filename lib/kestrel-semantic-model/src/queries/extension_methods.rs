@@ -10,6 +10,7 @@ use crate::queries::SymbolFor;
 use crate::query::Query;
 
 /// Get all function children (method declarations) of an extension.
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct ExtensionMethods {
     pub extension_id: SymbolId,
 }

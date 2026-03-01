@@ -8,9 +8,8 @@
 
 use std::sync::Arc;
 
-use kestrel_semantic_model::ResolvedAliasedType;
+use kestrel_semantic_model::{ResolvedAliasedType, VisibilityLevel};
 use kestrel_semantic_tree::behavior::typed::TypedBehavior;
-use kestrel_semantic_tree::behavior::visibility::Visibility;
 use kestrel_semantic_tree::behavior::visibility::VisibilityBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::function::FunctionSymbol;
@@ -37,35 +36,6 @@ impl VisibilityConsistencyAnalyzer {
 impl Default for VisibilityConsistencyAnalyzer {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-/// Visibility level for comparison (higher = more visible)
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-enum VisibilityLevel {
-    Private = 1,
-    Fileprivate = 2,
-    Internal = 3,
-    Public = 4,
-}
-
-impl VisibilityLevel {
-    fn from_visibility(vis: Option<&Visibility>) -> Self {
-        match vis {
-            Some(Visibility::Public) => VisibilityLevel::Public,
-            Some(Visibility::Internal) => VisibilityLevel::Internal,
-            Some(Visibility::Fileprivate) => VisibilityLevel::Fileprivate,
-            Some(Visibility::Private) => VisibilityLevel::Private,
-            None => VisibilityLevel::Internal, // Default is internal
-        }
-    }
-    fn name(&self) -> &'static str {
-        match self {
-            VisibilityLevel::Public => "public",
-            VisibilityLevel::Internal => "internal",
-            VisibilityLevel::Fileprivate => "fileprivate",
-            VisibilityLevel::Private => "private",
-        }
     }
 }
 

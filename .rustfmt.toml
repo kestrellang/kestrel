@@ -3,7 +3,7 @@
 # Only stable options are used to avoid nightly dependency
 
 # Use the 2021 edition style (compatible with 2024)
-edition = "2021"
+edition = "2024"
 
 # Maximum line width
 max_width = 100

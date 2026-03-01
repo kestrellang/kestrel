@@ -18,6 +18,7 @@ use crate::query::Query;
 ///
 /// This includes inherited protocol initializers. The returned list may contain multiple entries with
 /// the same initializer signature from different definers; callers can decide how to handle ambiguity.
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct ProtocolInitializersWithDefiner {
     pub protocol_id: SymbolId,
 }

@@ -13,6 +13,7 @@ use crate::query::Query;
 
 /// Collect all initializers for a type, including initializers
 /// declared in extensions.
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct AllInitializersFor {
     pub symbol_id: SymbolId,
 }

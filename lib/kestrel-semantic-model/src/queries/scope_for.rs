@@ -19,6 +19,7 @@ use crate::scope::Scope;
 /// - `imports`: Resolved imports from Import children
 /// - `declarations`: Non-import children mapped by name
 /// - `parent`: Parent symbol's ID for scope chain lookup
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct ScopeFor {
     pub symbol_id: SymbolId,
 }

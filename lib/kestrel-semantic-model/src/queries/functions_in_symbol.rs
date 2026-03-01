@@ -12,6 +12,7 @@ use crate::queries::SymbolFor;
 use crate::query::Query;
 
 /// Get function children (direct members) of a symbol.
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct FunctionsInSymbol {
     pub parent_id: SymbolId,
 }

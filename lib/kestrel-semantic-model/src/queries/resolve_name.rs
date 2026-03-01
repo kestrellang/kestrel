@@ -18,6 +18,7 @@ use crate::resolution::SymbolResolution;
 /// Walks up the scope chain checking imports, then declarations,
 /// then special cases like extension type parameters and inherited
 /// protocol members.
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct ResolveName {
     pub name: String,
     pub context: SymbolId,

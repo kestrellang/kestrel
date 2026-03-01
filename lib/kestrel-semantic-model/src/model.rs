@@ -4,6 +4,8 @@
 //! about a compiled Kestrel program. It owns the symbol tree, syntax mappings,
 //! source code, and registries.
 
+use std::any::{Any, TypeId};
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -20,6 +22,23 @@ use semantic_tree::symbol::{Symbol, SymbolId};
 use crate::extension_registry::ExtensionRegistry;
 use crate::query::Query;
 use crate::registry::SymbolRegistry;
+
+/// Type-erased per-query-type cache.
+///
+/// Each query type `Q` gets a `HashMap<Q, Q::Output>` behind the type erasure.
+/// Uses `RefCell` for interior mutability since queries may recurse (a query's
+/// `execute` may call `model.query()` for other queries).
+struct QueryCache {
+    stores: RefCell<HashMap<TypeId, Box<dyn Any>>>,
+}
+
+impl QueryCache {
+    fn new() -> Self {
+        Self {
+            stores: RefCell::new(HashMap::new()),
+        }
+    }
+}
 
 /// The semantic model for a Kestrel program.
 ///
@@ -39,6 +58,8 @@ pub struct SemanticModel {
     extension_registry: ExtensionRegistry,
     /// Builtin registry for language feature lookups
     builtin_registry: Arc<BuiltinRegistry>,
+    /// Memoization cache for query results
+    cache: QueryCache,
 }
 
 impl SemanticModel {
@@ -60,6 +81,7 @@ impl SemanticModel {
             registry,
             extension_registry: ExtensionRegistry::new(),
             builtin_registry: Arc::new(BuiltinRegistry::new()),
+            cache: QueryCache::new(),
         }
     }
 
@@ -82,6 +104,7 @@ impl SemanticModel {
             registry,
             extension_registry,
             builtin_registry,
+            cache: QueryCache::new(),
         }
     }
 
@@ -107,8 +130,40 @@ impl SemanticModel {
     }
 
     /// Execute a query against this model.
+    ///
+    /// Results are memoized: repeated calls with the same query return cached results.
+    /// Uses a three-phase borrow pattern for re-entrancy safety (queries may call
+    /// other queries during execution).
     pub fn query<Q: Query>(&self, query: Q) -> Q::Output {
-        query.execute(self)
+        // Phase 1: check cache (borrow, then release)
+        {
+            let stores = self.cache.stores.borrow();
+            if let Some(store) = stores.get(&TypeId::of::<Q>()) {
+                if let Some(result) = store
+                    .downcast_ref::<HashMap<Q, Q::Output>>()
+                    .and_then(|map| map.get(&query))
+                {
+                    return result.clone();
+                }
+            }
+        }
+
+        // Phase 2: execute (may recurse into query() — no borrow held)
+        let key = query.clone();
+        let result = query.execute(self);
+
+        // Phase 3: store result (borrow, then release)
+        {
+            let mut stores = self.cache.stores.borrow_mut();
+            stores
+                .entry(TypeId::of::<Q>())
+                .or_insert_with(|| Box::new(HashMap::<Q, Q::Output>::new()))
+                .downcast_mut::<HashMap<Q, Q::Output>>()
+                .unwrap()
+                .insert(key, result.clone());
+        }
+
+        result
     }
 
     /// Get the root symbol.
@@ -141,8 +196,21 @@ impl SemanticModel {
     }
 
     /// Register an extension (called during binding).
+    ///
+    /// Invalidates the query cache since extension registration changes
+    /// the results of queries that depend on extensions (e.g. ExtensionsFor,
+    /// AllConformancesFor, AllMethodsFor).
     pub fn register_extension(&self, target_id: SymbolId, extension: Arc<ExtensionSymbol>) {
         self.extension_registry.register(target_id, extension);
+        self.cache.stores.borrow_mut().clear();
+    }
+
+    /// Invalidate the query cache.
+    ///
+    /// Call this after mutating any model state (e.g. registering symbols)
+    /// that queries may depend on.
+    pub fn invalidate_cache(&self) {
+        self.cache.stores.borrow_mut().clear();
     }
 
     /// Get the builtin registry.

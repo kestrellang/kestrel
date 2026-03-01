@@ -13,6 +13,7 @@ use crate::query::Query;
 ///
 /// Gathers where clauses from both `GenericsBehavior` (on generic declarations)
 /// and `ExtensionTargetBehavior` (on extensions).
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct WhereClausesInScope {
     pub context_id: SymbolId,
 }

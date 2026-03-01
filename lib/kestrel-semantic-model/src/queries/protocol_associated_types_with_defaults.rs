@@ -13,6 +13,7 @@ use crate::queries::SymbolFor;
 use crate::query::Query;
 
 /// Collect associated types declared by a protocol, along with their default types (if any).
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct ProtocolAssociatedTypesWithDefaults {
     pub protocol_id: SymbolId,
 }

@@ -1,5 +1,6 @@
 //! ResolveValuePath query - resolve a value path to a value
 
+use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use kestrel_semantic_tree::behavior::callable::CallableBehavior;
@@ -24,9 +25,17 @@ use crate::resolution::{SymbolResolution, ValuePathResolution};
 /// - Functions (including overloads)
 /// - Static methods on types (including extensions)
 /// - Type parameters (for static method calls like T.create())
+#[derive(Clone, PartialEq, Eq)]
 pub struct ResolveValuePath {
     pub path: Vec<String>,
     pub context: SymbolId,
+}
+
+impl Hash for ResolveValuePath {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.path.as_slice().hash(state);
+        self.context.hash(state);
+    }
 }
 
 impl Query for ResolveValuePath {

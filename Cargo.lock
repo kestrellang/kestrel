@@ -825,6 +825,7 @@ dependencies = [
  "dashmap 6.1.0",
  "kestrel-compiler",
  "kestrel-reporting",
+ "kestrel-semantic-model",
  "kestrel-semantic-tree",
  "kestrel-span",
  "semantic-tree",

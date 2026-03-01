@@ -9,6 +9,7 @@ use crate::SemanticModel;
 use crate::query::Query;
 
 /// Get all extensions registered for a target type.
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct ExtensionsFor {
     pub target_id: SymbolId,
 }

@@ -246,6 +246,7 @@ fn resolve_extension_target(
         ));
         // Register the synthetic Self with the symbol registry so SymbolFor can find it
         ctx.model.registry().register(self_param.clone());
+        ctx.model.invalidate_cache();
 
         referenced_params.push(self_param);
     }

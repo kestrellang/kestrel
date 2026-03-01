@@ -2113,6 +2113,16 @@ fn resolve_init_impl(
 
     // Sort by score descending, pick best
     scored.sort_by(|a, b| b.0.cmp(&a.0));
+
+    // If multiple candidates are tied and any argument type is unknown,
+    // defer — don't guess which overload to pick
+    if argument_types.iter().any(|t| t.is_none())
+        && scored.len() >= 2
+        && scored[0].0 == scored[1].0
+    {
+        return Err(MemberError::UnknownType);
+    }
+
     Ok(scored.into_iter().next().unwrap().1)
 }
 

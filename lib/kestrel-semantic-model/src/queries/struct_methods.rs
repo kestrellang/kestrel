@@ -10,6 +10,7 @@ use crate::queries::SymbolFor;
 use crate::query::Query;
 
 /// Get all function children (method declarations) of a struct.
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct StructMethods {
     pub struct_id: SymbolId,
 }

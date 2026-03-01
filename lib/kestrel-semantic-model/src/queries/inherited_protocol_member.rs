@@ -13,6 +13,7 @@ use crate::query::Query;
 ///
 /// Given a protocol and a name, searches the protocol's parent protocols
 /// (via conformances) for a child with the given name.
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct InheritedProtocolMember {
     pub protocol_id: SymbolId,
     pub name: String,

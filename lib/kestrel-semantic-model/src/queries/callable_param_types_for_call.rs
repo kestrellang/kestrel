@@ -1,4 +1,4 @@
-//! CallableParamTypesForCall query - compute expected parameter types for a call-like expression
+//! callable_param_types_for_call - compute expected parameter types for a call-like expression
 
 use kestrel_semantic_tree::behavior::callable::CallableBehavior;
 use kestrel_semantic_tree::expr::{CallArgument, ExprKind, Expression};
@@ -7,7 +7,6 @@ use semantic_tree::symbol::Symbol;
 
 use crate::SemanticModel;
 use crate::queries::{StructFields, SymbolFor};
-use crate::query::Query;
 use crate::resolve_all_associated_types;
 
 /// Get the expected parameter types for a call-like expression.
@@ -15,75 +14,70 @@ use crate::resolve_all_associated_types;
 /// Supports:
 /// - `ExprKind::Call` with `SymbolRef` or `MethodRef` callee
 /// - `ExprKind::ImplicitStructInit` (memberwise initializer)
-pub struct CallableParamTypesForCall<'a> {
-    pub expr: &'a Expression,
-}
+///
+/// This is a plain function (not a query) because it borrows `&Expression`
+/// and cannot satisfy the `Hash + Eq + Clone + 'static` bounds required for memoization.
+pub fn callable_param_types_for_call(expr: &Expression, model: &SemanticModel) -> Option<Vec<Ty>> {
+    match &expr.kind {
+        ExprKind::Call {
+            callee,
+            substitutions,
+            arguments,
+            ..
+        } => {
+            // IMPORTANT: Prefer using the callee's resolved type if it's a function type.
+            // The body resolver already computed fully resolved parameter types (including
+            // associated type resolution) and stored them in callee.ty. Re-querying the
+            // symbol would give us unresolved types with associated types like
+            // ArrayIterator[T].Item instead of the resolved type T.
+            if let TyKind::Function { params, .. } = callee.ty.kind() {
+                return Some(params.clone());
+            }
 
-impl<'a> Query for CallableParamTypesForCall<'a> {
-    type Output = Option<Vec<Ty>>;
-
-    fn execute(self, model: &SemanticModel) -> Self::Output {
-        match &self.expr.kind {
-            ExprKind::Call {
-                callee,
-                substitutions,
-                arguments,
-                ..
-            } => {
-                // IMPORTANT: Prefer using the callee's resolved type if it's a function type.
-                // The body resolver already computed fully resolved parameter types (including
-                // associated type resolution) and stored them in callee.ty. Re-querying the
-                // symbol would give us unresolved types with associated types like
-                // ArrayIterator[T].Item instead of the resolved type T.
-                if let TyKind::Function { params, .. } = callee.ty.kind() {
-                    return Some(params.clone());
-                }
-
-                // Fallback: re-query the symbol if callee type is not a resolved function
-                match &callee.kind {
-                    ExprKind::SymbolRef(symbol_id) => {
-                        let symbol = model.query(SymbolFor { id: *symbol_id })?;
-                        let callable = symbol.metadata().get_behavior::<CallableBehavior>()?;
-                        Some(
-                            callable
-                                .parameters()
-                                .iter()
-                                .map(|p| {
-                                    let ty = p.ty.apply_substitutions(substitutions);
-                                    resolve_all_associated_types(model, &ty)
-                                })
-                                .collect(),
-                        )
-                    },
-                    ExprKind::MethodRef {
+            // Fallback: re-query the symbol if callee type is not a resolved function
+            match &callee.kind {
+                ExprKind::SymbolRef(symbol_id) => {
+                    let symbol = model.query(SymbolFor { id: *symbol_id })?;
+                    let callable = symbol.metadata().get_behavior::<CallableBehavior>()?;
+                    Some(
+                        callable
+                            .parameters()
+                            .iter()
+                            .map(|p| {
+                                let ty = p.ty.apply_substitutions(substitutions);
+                                resolve_all_associated_types(model, &ty)
+                            })
+                            .collect(),
+                    )
+                },
+                ExprKind::MethodRef {
+                    candidates,
+                    receiver,
+                    ..
+                } => {
+                    best_method_param_types_for_call(
+                        model,
                         candidates,
-                        receiver,
-                        ..
-                    } => {
-                        best_method_param_types_for_call(
-                            model,
-                            candidates,
-                            &receiver.ty,
-                            substitutions,
-                            arguments,
-                        )
-                    },
-                    _ => None,
-                }
-            },
-            ExprKind::ImplicitStructInit { .. } => {
-                let (struct_sym, substitutions) = self.expr.ty.as_struct_with_subs()?;
-                let struct_id = struct_sym.metadata().id();
-                let fields = model.query(StructFields { struct_id });
-                Some(
-                    fields
-                        .into_iter()
-                        .map(|field| field.ty.apply_substitutions(substitutions))
-                        .collect(),
-                )
-            },
-            _ => None,
-        }
+                        &receiver.ty,
+                        substitutions,
+                        arguments,
+                    )
+                },
+                _ => None,
+            }
+        },
+        ExprKind::ImplicitStructInit { .. } => {
+            let (struct_sym, substitutions) = expr.ty.as_struct_with_subs()?;
+            let struct_id = struct_sym.metadata().id();
+            let fields = model.query(StructFields { struct_id });
+            Some(
+                fields
+                    .into_iter()
+                    .map(|field| field.ty.apply_substitutions(substitutions))
+                    .collect(),
+            )
+        },
+        _ => None,
     }
 }
 

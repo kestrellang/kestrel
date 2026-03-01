@@ -38,6 +38,7 @@ pub struct PropertyRequirement {
 ///
 /// If a protocol defines a property with the same name as an inherited property,
 /// the protocol's property overrides the inherited property.
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct ProtocolRequiredProperties {
     pub protocol_id: SymbolId,
 }

@@ -9,6 +9,7 @@ use crate::queries::SymbolFor;
 use crate::query::Query;
 
 /// Get the executable body (function/initializer) for a symbol.
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct ExecutableBodyFor {
     pub symbol_id: SymbolId,
 }

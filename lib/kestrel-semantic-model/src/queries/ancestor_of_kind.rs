@@ -11,6 +11,7 @@ use crate::query::Query;
 ///
 /// Walks up the symbol tree from the given symbol, looking for an
 /// ancestor that matches the specified kind.
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct AncestorOfKind {
     pub symbol_id: SymbolId,
     pub kind: KestrelSymbolKind,

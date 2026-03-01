@@ -13,6 +13,7 @@ use crate::query::Query;
 ///
 /// Searches the visible children of the parent symbol for one
 /// matching the given name. Does not perform visibility checking.
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct ChildByName {
     pub parent: SymbolId,
     pub name: String,

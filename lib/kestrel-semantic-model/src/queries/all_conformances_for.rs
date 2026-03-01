@@ -9,6 +9,7 @@ use crate::query::Query;
 
 /// Collect all protocol conformances for a type, including conformances
 /// declared in extensions.
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct AllConformancesFor {
     pub symbol_id: SymbolId,
 }

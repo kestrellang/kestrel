@@ -18,6 +18,7 @@ use crate::query::Query;
 ///
 /// This includes inherited protocol methods. The returned list may contain multiple entries with
 /// the same method signature from different definers; callers can decide how to handle ambiguity.
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct ProtocolMethodsWithDefiner {
     pub protocol_id: SymbolId,
 }

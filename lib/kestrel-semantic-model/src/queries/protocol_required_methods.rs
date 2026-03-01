@@ -20,6 +20,7 @@ use crate::query::Query;
 ///
 /// If a protocol defines a method with the same signature as an inherited method,
 /// the protocol's method overrides the inherited method.
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct ProtocolRequiredMethods {
     pub protocol_id: SymbolId,
 }

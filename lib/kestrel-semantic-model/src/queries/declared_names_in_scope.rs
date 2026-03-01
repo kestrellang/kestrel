@@ -16,6 +16,7 @@ pub struct DeclaredName {
 }
 
 /// Collect declared child names (direct children only) for a scope symbol.
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct DeclaredNamesInScope {
     pub scope_id: SymbolId,
 }

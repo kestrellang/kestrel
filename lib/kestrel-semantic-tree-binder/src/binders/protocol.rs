@@ -118,7 +118,9 @@ impl ProtocolBinder {
         // Validate: if must_be_marker, check that protocol has no required members
         if let BuiltinKind::Protocol { must_be_marker, .. } = &definition.kind
             && *must_be_marker
-            && !self.is_marker_protocol(symbol)
+            && !context.model.query(kestrel_semantic_model::IsMarkerProtocol {
+                protocol_id: symbol.metadata().id(),
+            })
         {
             context.diagnostics.throw(BuiltinMustBeMarkerError {
                 span: attr_span,
@@ -127,29 +129,24 @@ impl ProtocolBinder {
             return;
         }
 
-        // Register the builtin
+        // Register the builtin (may already be registered by the pre-pass)
         let symbol_id = symbol.metadata().id();
         if !context
             .model
             .builtin_registry()
             .register_protocol(feature, symbol_id)
         {
-            context.diagnostics.throw(DuplicateBuiltinError {
-                span: attr_span,
-                feature_name: feature.name().to_string(),
-            });
+            // The pre-pass registers all @builtin protocols before bind_signatures.
+            // If the same symbol tries to register again, that's expected — skip it.
+            // Only report an error if a *different* symbol claims the same feature.
+            let existing = context.model.builtin_registry().protocol(feature);
+            if existing != Some(symbol_id) {
+                context.diagnostics.throw(DuplicateBuiltinError {
+                    span: attr_span,
+                    feature_name: feature.name().to_string(),
+                });
+            }
         }
     }
 
-    /// Check if a protocol is a marker protocol (no required methods or associated types).
-    fn is_marker_protocol(&self, symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> bool {
-        for child in symbol.metadata().children() {
-            let kind = child.metadata().kind();
-            // If protocol has functions or associated types, it's not a marker
-            if kind == KestrelSymbolKind::Function || kind == KestrelSymbolKind::AssociatedType {
-                return false;
-            }
-        }
-        true
-    }
 }

@@ -23,6 +23,7 @@ pub struct GenericsData {
 }
 
 /// Get generic type parameters and where clause for a symbol that supports generics.
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct GenericsDataFor {
     pub symbol_id: SymbolId,
 }

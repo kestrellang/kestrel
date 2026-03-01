@@ -321,9 +321,7 @@ public struct File: Read, Write, not Copyable {
             .Current(o) => (o, libc.SEEK_CUR()),
             .End(o) => (o, libc.SEEK_END())
         };
-        let offset = pair.0;
-        let whence = pair.1;
-        let result = libc.lseek(self.fd, offset, whence);
+        let result = libc.lseek(self.fd, pair.0, pair.1);
         if result < 0 {
             return .Err(Error.last())
         }

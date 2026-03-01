@@ -16,6 +16,7 @@ use crate::query::Query;
 ///
 /// Applies visibility rules (public, private, internal, fileprivate)
 /// to determine if `target` can be accessed from `context`.
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct IsVisibleFrom {
     pub target: SymbolId,
     pub context: SymbolId,

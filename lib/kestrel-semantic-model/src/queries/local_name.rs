@@ -10,6 +10,7 @@ use crate::queries::SymbolFor;
 use crate::query::Query;
 
 /// Look up a local's name within a specific container (function or initializer).
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct LocalName {
     pub container_id: SymbolId,
     pub local_id: LocalId,

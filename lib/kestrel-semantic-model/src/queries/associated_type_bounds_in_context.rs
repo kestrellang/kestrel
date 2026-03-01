@@ -11,6 +11,7 @@ use crate::query::Query;
 /// Collect all protocol bounds on an associated type from:
 /// 1. Direct bounds on the associated type declaration
 /// 2. Where clause constraints in scope (SelfBound, InheritedAssociatedTypeBound, TypeBound)
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct AssociatedTypeBoundsInContext {
     pub assoc_type_id: SymbolId,
     pub context_id: Option<SymbolId>,

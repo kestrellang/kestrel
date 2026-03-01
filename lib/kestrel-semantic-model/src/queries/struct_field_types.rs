@@ -17,6 +17,7 @@ pub struct StructFieldTypeInfo {
 }
 
 /// Get all field types (direct children) for a struct symbol.
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct StructFieldTypes {
     pub struct_id: SymbolId,
 }

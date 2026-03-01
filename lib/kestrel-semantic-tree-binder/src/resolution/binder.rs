@@ -91,6 +91,11 @@ impl SemanticBinder {
     /// This ensures that when resolving a function body, all functions in the file
     /// (including those declared later) have their CallableBehavior attached.
     fn run_binding(&mut self, diagnostics: &mut DiagnosticContext) -> SemanticModel {
+        // Pre-pass: Register all @builtin protocol IDs before binding.
+        // This ensures builtin protocol lookups (e.g., Copyable for `not Copyable`)
+        // work regardless of module traversal order during bind_signatures.
+        self.register_builtin_protocols(&self.root.clone());
+
         // Pass 1: Bind all signatures (behaviors only, no bodies)
         self.bind_signatures(&self.root.clone(), diagnostics);
 
@@ -176,6 +181,66 @@ impl SemanticBinder {
         for child in symbol.metadata().children() {
             self.bind_bodies(&child, diagnostics);
         }
+    }
+
+    /// Pre-pass: Register all `@builtin` protocol IDs in the BuiltinRegistry.
+    ///
+    /// This walks the symbol tree looking for protocols with `@builtin` attributes
+    /// and registers them before `bind_signatures` runs. This eliminates ordering
+    /// dependencies — e.g., `not Copyable` works in any module regardless of whether
+    /// `std.core.copy.Copyable` has been bound yet.
+    ///
+    /// Only registration happens here; validation (wrong kind, must-be-marker,
+    /// duplicate detection) is handled by `process_builtin_attribute` during
+    /// `bind_signatures`.
+    fn register_builtin_protocols(&self, symbol: &Arc<dyn Symbol<KestrelLanguage>>) {
+        if symbol.metadata().kind() == KestrelSymbolKind::Protocol {
+            if let Some(syntax_node) = self.syntax_map.get(&symbol.metadata().id()) {
+                let source = Self::source_for_symbol(symbol, &self.sources);
+                // Use a scratch diagnostic context to avoid duplicate warnings
+                let mut scratch_diagnostics = DiagnosticContext::new();
+                let attributes =
+                    crate::binders::utils::attributes::resolve_attributes(
+                        syntax_node,
+                        &source,
+                        0, // file_id doesn't matter for attribute parsing
+                        &mut scratch_diagnostics,
+                    );
+                if let crate::binders::utils::attributes::BuiltinParseResult::Success(feature) =
+                    crate::binders::utils::attributes::parse_builtin_attribute(
+                        &attributes,
+                        &source,
+                        &mut scratch_diagnostics,
+                    )
+                {
+                    if feature.definition().kind.is_protocol() {
+                        let _ = self
+                            .builtin_registry
+                            .register_protocol(feature, symbol.metadata().id());
+                    }
+                }
+            }
+        }
+
+        for child in symbol.metadata().children() {
+            self.register_builtin_protocols(&child);
+        }
+    }
+
+    /// Get source text for a symbol by walking up to its SourceFile ancestor.
+    fn source_for_symbol(
+        symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+        sources: &SourceMap,
+    ) -> String {
+        let mut current = Some(symbol.clone());
+        while let Some(sym) = current {
+            if sym.metadata().kind() == KestrelSymbolKind::SourceFile {
+                let file_name = sym.metadata().name().value.clone();
+                return sources.get(&file_name).cloned().unwrap_or_default();
+            }
+            current = sym.metadata().parent();
+        }
+        String::new()
     }
 
     /// Map symbol kind to syntax kind for resolver lookup

@@ -16,6 +16,7 @@ use crate::query::Query;
 ///
 /// Returns `None` if the symbol is not a type alias, or if the type alias
 /// has not been bound (i.e., missing `TypeAliasTypedBehavior`).
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct ResolvedAliasedType {
     pub type_alias_id: SymbolId,
 }

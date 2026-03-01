@@ -15,7 +15,7 @@ mod r#struct;
 mod subscript;
 mod terminal;
 mod type_alias;
-mod utils;
+pub(crate) mod utils;
 
 pub use deinit::DeinitBinder;
 pub use enum_binder::EnumBinder;

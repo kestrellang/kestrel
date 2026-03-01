@@ -13,6 +13,7 @@ use crate::query::Query;
 ///
 /// Walks the parent chain from context looking for an Extension declaration,
 /// then extracts where clause bounds for the given type parameter.
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct ExtensionBoundsForParam {
     pub context_id: SymbolId,
     pub param_id: SymbolId,

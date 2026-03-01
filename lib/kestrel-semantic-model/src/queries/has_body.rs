@@ -10,6 +10,7 @@ use crate::query::Query;
 /// Check whether a function has a body.
 ///
 /// Returns `None` if the symbol is missing `FunctionDataBehavior` (not a function).
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct HasBody {
     pub function_id: SymbolId,
 }

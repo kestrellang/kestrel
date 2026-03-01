@@ -141,7 +141,7 @@ VALIDATE (check errors)         "diagnostics(entity)" query
 
 ## Existing Queries
 
-46 queries in `kestrel-semantic-model/src/queries/`:
+48 queries in `kestrel-semantic-model/src/queries/`:
 
 | Query | Input | Output | Call Sites |
 |-------|-------|--------|------------|
@@ -321,17 +321,17 @@ Extra protocol bounds on a type parameter from extension where clauses in contex
 
 Files: `type_oracle.rs`: `get_extension_bounds_for_param` (deleted)
 
-#### `IsMarkerProtocol(protocol_id) → bool`
+#### `IsMarkerProtocol(protocol_id) → bool` ✅ DONE
 
-Whether a protocol has no required methods or associated types. Simple children scan.
+Whether a protocol has no required methods or associated types. Simple children scan. 1 call site in binder replaced.
 
-Files: `binders/protocol.rs`: `is_marker_protocol`
+Files: `binders/protocol.rs`: `is_marker_protocol` (deleted)
 
-#### `VisibilityLevelOf(symbol_id) → VisibilityLevel`
+#### `VisibilityLevelOf(symbol_id) → VisibilityLevel` ✅ DONE
 
-Visibility level of a symbol. Currently two near-identical functions in the visibility analyzer (`get_symbol_visibility_level` and `get_visibility_level_from_symbol`).
+Visibility level of a symbol. `VisibilityLevel` enum moved to query module, eliminating duplication from the visibility analyzer.
 
-Files: `analyzers/visibility_consistency/mod.rs`
+Files: `analyzers/visibility_consistency/mod.rs`: local `VisibilityLevel` enum + `get_symbol_visibility_level` + `get_visibility_level_from_symbol` (deleted, now imports from kestrel-semantic-model)
 
 #### `ProtocolCycleCheck(protocol_id) → Option<CyclePath>`
 

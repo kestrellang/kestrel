@@ -431,10 +431,8 @@ fn capacity_management() {
     .expect(Runs);
 }
 
-// TODO: init(count:generator:) signature Array(Int64, (Int64) -> T) collides with the internal
-// array literal init Array(lang.ptr[T], lang.i64) during overload resolution. The compiler
-// matches the wrong init. This test should use .expect(Compiles).expect(Runs) once the
-// overload resolution is fixed.
+// Fixed: init(count:generator:) overload resolution now correctly defers when argument
+// types are unknown, instead of matching the wrong init.
 #[test]
 fn init_count_generator() {
     Test::new(
@@ -448,7 +446,8 @@ fn init_count_generator() {
     "#,
     )
     .with_stdlib()
-    .expect(HasError("does not conform to protocol"));
+    .expect(Compiles)
+    .expect(Runs);
 }
 
 // TODO: subscript assignment syntax arr(index) = value is not yet supported.

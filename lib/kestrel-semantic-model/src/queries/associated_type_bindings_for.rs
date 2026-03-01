@@ -21,6 +21,7 @@ use crate::query::Query;
 ///
 /// Unifies `AssociatedTypeBindingsForStruct` and `AssociatedTypeBindingsForEnum`.
 /// Dispatches based on symbol kind internally.
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct AssociatedTypeBindingsFor {
     pub symbol_id: SymbolId,
 }

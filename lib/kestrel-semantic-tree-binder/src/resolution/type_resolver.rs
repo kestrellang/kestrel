@@ -285,11 +285,13 @@ impl<'a> TypeResolver<'a> {
             TyKind::Struct { symbol, .. } => {
                 let type_params = symbol.type_parameters();
                 let type_name = symbol.metadata().name().value.clone();
+                let defining_context = symbol.metadata().id();
                 self.apply_type_args_to_generic(
                     &type_params,
                     &type_name,
                     type_args,
                     span.clone(),
+                    defining_context,
                     |subs| Ty::generic_struct(symbol.clone(), subs, span),
                 )
             },
@@ -297,11 +299,13 @@ impl<'a> TypeResolver<'a> {
             TyKind::Protocol { symbol, .. } => {
                 let type_params = symbol.type_parameters();
                 let type_name = symbol.metadata().name().value.clone();
+                let defining_context = symbol.metadata().id();
                 self.apply_type_args_to_generic(
                     &type_params,
                     &type_name,
                     type_args,
                     span.clone(),
+                    defining_context,
                     |subs| Ty::generic_protocol(symbol.clone(), subs, span),
                 )
             },
@@ -309,11 +313,13 @@ impl<'a> TypeResolver<'a> {
             TyKind::TypeAlias { symbol, .. } => {
                 let type_params = symbol.type_parameters();
                 let type_name = symbol.metadata().name().value.clone();
+                let defining_context = symbol.metadata().id();
                 self.apply_type_args_to_generic(
                     &type_params,
                     &type_name,
                     type_args,
                     span.clone(),
+                    defining_context,
                     |subs| Ty::generic_type_alias(symbol.clone(), subs, span),
                 )
             },
@@ -321,11 +327,13 @@ impl<'a> TypeResolver<'a> {
             TyKind::Enum { symbol, .. } => {
                 let type_params = symbol.type_parameters();
                 let type_name = symbol.metadata().name().value.clone();
+                let defining_context = symbol.metadata().id();
                 self.apply_type_args_to_generic(
                     &type_params,
                     &type_name,
                     type_args,
                     span.clone(),
+                    defining_context,
                     |subs| Ty::generic_enum(symbol.clone(), subs, span),
                 )
             },
@@ -617,6 +625,7 @@ impl<'a> TypeResolver<'a> {
         type_name: &str,
         type_args: Vec<Ty>,
         span: Span,
+        defining_context: SymbolId,
         make_ty: F,
     ) -> Ty
     where
@@ -672,9 +681,17 @@ impl<'a> TypeResolver<'a> {
             } else {
                 // Use the default - we've already verified this exists via min_args check
                 let default_ty = param.default().expect("missing default for type parameter");
-                // Resolve UnresolvedPath types that couldn't be resolved at build time
+                // Resolve UnresolvedPath types that couldn't be resolved at build time.
+                // Use the defining type's scope so defaults like `DefaultHasher` resolve
+                // in the module where the type is defined, not the caller's scope.
                 if let TyKind::UnresolvedPath { segments } = default_ty.kind() {
-                    self.resolve_path(segments, default_ty.span().clone())
+                    match self.model.query(ResolveTypePath {
+                        path: segments.to_vec(),
+                        context: defining_context,
+                    }) {
+                        TypePathResolution::Resolved(resolved_ty) => resolved_ty,
+                        _ => self.resolve_path(segments, default_ty.span().clone()),
+                    }
                 } else {
                     default_ty.clone()
                 }

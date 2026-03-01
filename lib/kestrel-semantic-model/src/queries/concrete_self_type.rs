@@ -14,6 +14,7 @@ use crate::query::Query;
 ///
 /// Walks the parent chain looking for Struct/Enum/Extension declarations.
 /// Returns `None` for Protocol contexts (where Self is symbolic).
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct ConcreteSelfType {
     pub context_id: SymbolId,
 }

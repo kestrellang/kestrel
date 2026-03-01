@@ -13,6 +13,7 @@ use crate::query::Query;
 ///
 /// Returns all children of `parent` that are visible when accessed
 /// from `context`, applying visibility rules.
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct VisibleChildren {
     pub parent: SymbolId,
     pub context: SymbolId,

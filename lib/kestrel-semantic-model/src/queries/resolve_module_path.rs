@@ -1,5 +1,7 @@
 //! ResolveModulePath query - resolve a module path from a context
 
+use std::hash::{Hash, Hasher};
+
 use kestrel_semantic_tree::error::ModuleNotFoundError;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_span::Span;
@@ -13,9 +15,17 @@ use crate::query::Query;
 /// Takes a path like `["A", "B", "C"]` and resolves it to a module symbol.
 /// The first segment is looked up by kind+name index, subsequent segments
 /// are looked up as visible children.
+#[derive(Clone, PartialEq, Eq)]
 pub struct ResolveModulePath {
     pub path: Vec<String>,
     pub context: SymbolId,
+}
+
+impl Hash for ResolveModulePath {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.path.as_slice().hash(state);
+        self.context.hash(state);
+    }
 }
 
 impl Query for ResolveModulePath {

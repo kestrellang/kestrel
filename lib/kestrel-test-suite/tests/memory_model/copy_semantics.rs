@@ -960,3 +960,57 @@ mod loop_move_tests {
         .expect(HasError("use of moved value"));
     }
 }
+
+// =============================================================================
+// NOT COPYABLE WITH STDLIB (binding order independence)
+// =============================================================================
+
+mod not_copyable_with_stdlib {
+    use super::*;
+
+    #[test]
+    fn not_copyable_compiles_with_stdlib() {
+        // Regression: `not Copyable` failed in user code when stdlib was loaded
+        // if the module binding order caused std.core to be bound after the user module.
+        Test::new(
+            r#"module Test
+
+struct Handle: not Copyable {
+    var fd: Int64
+}
+
+func main() -> lang.i64 {
+    0
+}
+"#,
+        )
+        .with_stdlib()
+        .expect(Compiles)
+        .expect(Runs);
+    }
+
+    #[test]
+    fn not_copyable_move_semantics_with_stdlib() {
+        // Verify that `not Copyable` structs have move semantics when stdlib is loaded.
+        // Using a value after it has been moved should produce a "use of moved value" error.
+        Test::new(
+            r#"module Test
+
+struct Handle: not Copyable {
+    var fd: Int64
+}
+
+func consume(consuming h: Handle) {}
+
+func test() {
+    var h = Handle(fd: 42);
+    consume(h);
+    consume(h)
+}
+"#,
+        )
+        .with_stdlib()
+        .expect(HasError("use of moved value"));
+    }
+}
+

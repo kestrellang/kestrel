@@ -20,6 +20,7 @@ use crate::query::Query;
 ///
 /// If a protocol defines an initializer with the same signature as an inherited initializer,
 /// the protocol's initializer overrides the inherited initializer.
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct ProtocolRequiredInitializers {
     pub protocol_id: SymbolId,
 }

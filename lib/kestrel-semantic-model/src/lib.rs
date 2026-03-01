@@ -20,18 +20,20 @@ pub use model::SemanticModel;
 pub use queries::{
     AllConformancesFor, AllInitializersFor, AllMethodsFor, AncestorOfKind,
     AssociatedTypeBindingsFor, AssociatedTypeBoundsInContext,
-    CallableParamTypesForCall, ChildByName, ConcreteSelfType, ConformancesForSymbol, DeclaredName,
+    ChildByName, ConcreteSelfType, ConformancesForSymbol, DeclaredName,
     DeclaredNamesInScope, ExecutableBodyFor, ExtensionBoundsForParam, ExtensionMethods,
     ExtensionsFor, FunctionsInSymbol,
     GenericsData, GenericsDataFor, HasBody, ImportsInScope, InferenceResultFor,
-    InheritedProtocolMember, IsInsideAny, IsVisibleFrom, LocalName, PropertyRequirement,
+    InheritedProtocolMember, IsInsideAny, IsMarkerProtocol, IsVisibleFrom, LocalName,
+    PropertyRequirement,
     ProtocolAssociatedTypesWithDefaults, ProtocolInitializersWithDefiner,
     ProtocolMethodsWithDefiner, ProtocolRequiredInitializers, ProtocolRequiredMethods,
     ProtocolRequiredProperties, ResolveModulePath, ResolveName, ResolveTypePath, ResolveValuePath,
     ResolvedAliasedType, ScopeFor, SelfProtocolBounds, StructFieldInfo, StructFieldTypeInfo,
     StructFieldTypes,
     StructFields, StructMethods, SymbolFor, TypeParameterBounds, VisibleChildren,
-    VisibleChildrenByName, WhereClausesInScope,
+    VisibilityLevel, VisibilityLevelOf, VisibleChildrenByName, WhereClausesInScope,
+    callable_param_types_for_call,
 };
 pub use query::Query;
 pub use registry::SymbolRegistry;

@@ -1,5 +1,6 @@
 //! ResolveTypePath query - resolve a type path to a Type
 
+use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use kestrel_prelude::lang;
@@ -27,9 +28,17 @@ use crate::resolution::{SymbolResolution, TypePathResolution};
 /// - User-defined types via scope resolution
 /// - Type parameters
 /// - Associated types (including T.Item style)
+#[derive(Clone, PartialEq, Eq)]
 pub struct ResolveTypePath {
     pub path: Vec<String>,
     pub context: SymbolId,
+}
+
+impl Hash for ResolveTypePath {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.path.as_slice().hash(state);
+        self.context.hash(state);
+    }
 }
 
 impl Query for ResolveTypePath {

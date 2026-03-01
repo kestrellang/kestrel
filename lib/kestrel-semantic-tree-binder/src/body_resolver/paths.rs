@@ -896,6 +896,7 @@ fn find_nested_expression(node: &SyntaxNode) -> Option<SyntaxNode> {
                 | SyntaxKind::ExprArray
                 | SyntaxKind::ExprDictionary
                 | SyntaxKind::ExprTuple
+                | SyntaxKind::ExprTupleIndex
         )
     }
 

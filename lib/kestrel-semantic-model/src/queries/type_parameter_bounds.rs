@@ -13,6 +13,7 @@ use crate::query::Query;
 ///
 /// Gathers bounds from where clauses at each enclosing scope, plus from
 /// extensions on each enclosing type. Returns only `Protocol` and `Error` bounds.
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct TypeParameterBounds {
     pub param_id: SymbolId,
 }

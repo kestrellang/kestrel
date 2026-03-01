@@ -15,6 +15,7 @@ use crate::query::Query;
 /// 1. Where clauses with `Self: Protocol` constraints
 /// 2. The enclosing protocol (if inside a protocol)
 /// 3. The extension target protocol (if inside a protocol extension)
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct SelfProtocolBounds {
     pub context_id: SymbolId,
 }

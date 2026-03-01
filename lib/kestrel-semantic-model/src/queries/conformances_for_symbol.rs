@@ -9,6 +9,7 @@ use crate::queries::SymbolFor;
 use crate::query::Query;
 
 /// Get conformances for a symbol (struct/protocol/extension/etc.) if present.
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct ConformancesForSymbol {
     pub symbol_id: SymbolId,
 }

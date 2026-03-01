@@ -26,6 +26,7 @@ pub struct StructFieldInfo {
 }
 
 /// Get all fields (direct children) of a struct symbol.
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct StructFields {
     pub struct_id: SymbolId,
 }

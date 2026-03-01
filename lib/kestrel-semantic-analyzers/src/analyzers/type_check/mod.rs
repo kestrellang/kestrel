@@ -3,7 +3,7 @@ use std::sync::Arc;
 use crate::analyzer::Analyzer;
 use crate::context::AnalysisContext;
 
-use kestrel_semantic_model::CallableParamTypesForCall;
+use kestrel_semantic_model::callable_param_types_for_call;
 use kestrel_semantic_tree::behavior::callable::CallableBehavior;
 use kestrel_semantic_tree::behavior::executable::ExecutableBehavior;
 use kestrel_semantic_tree::builtins::LanguageFeature;
@@ -350,7 +350,7 @@ impl TypeCheckAnalyzer {
         arguments: &[CallArgument],
         ctx: &mut AnalysisContext,
     ) {
-        let Some(param_types) = ctx.model.query(CallableParamTypesForCall { expr }) else {
+        let Some(param_types) = callable_param_types_for_call(expr, ctx.model) else {
             return;
         };
         for (i, (arg, param_ty)) in arguments.iter().zip(param_types.iter()).enumerate() {

@@ -9,6 +9,7 @@ use crate::SemanticModel;
 use crate::query::Query;
 
 /// Get a symbol by its ID.
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct SymbolFor {
     pub id: SymbolId,
 }

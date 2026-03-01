@@ -11,6 +11,7 @@ use crate::query::Query;
 
 /// Collect all function methods for a type, including methods
 /// declared in extensions.
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct AllMethodsFor {
     pub symbol_id: SymbolId,
 }
