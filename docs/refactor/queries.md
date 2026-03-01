@@ -141,7 +141,7 @@ VALIDATE (check errors)         "diagnostics(entity)" query
 
 ## Existing Queries
 
-43 queries in `kestrel-semantic-model/src/queries/`:
+46 queries in `kestrel-semantic-model/src/queries/`:
 
 | Query | Input | Output | Call Sites |
 |-------|-------|--------|------------|
@@ -303,23 +303,23 @@ Files: `binders/protocol_flattener.rs`
 
 Complexity: Hard — interleaves error emission (cycle detection) with computation. Needs separation of "compute flat structure" from "emit cycle error."
 
-#### `SelfProtocolBounds(context_id) → Vec<SymbolId>`
+#### `SelfProtocolBounds(context_id) → Vec<SymbolId>` ✅ DONE
 
-Protocol IDs that `Self` is bounded by in a given context. 2 call sites in `ContextualOracle::conforms_to`.
+Protocol IDs that `Self` is bounded by in a given context. 2 call sites replaced.
 
-Files: `type_oracle.rs`: `self_protocol_bounds`
+Files: `type_oracle.rs`: `self_protocol_bounds` (deleted)
 
-#### `ConcreteSelfType(context_id) → Option<Ty>`
+#### `ConcreteSelfType(context_id) → Option<Ty>` ✅ DONE
 
-The concrete type that `Self` resolves to inside a struct/enum/extension method.
+The concrete type that `Self` resolves to inside a struct/enum/extension method. 1 call site replaced.
 
-Files: `type_oracle.rs`: `resolve_concrete_self_type_from_context`
+Files: `type_oracle.rs`: `resolve_concrete_self_type_from_context` (deleted)
 
-#### `ExtensionBoundsForParam(context_id, param_id) → Option<Vec<Ty>>`
+#### `ExtensionBoundsForParam(context_id, param_id) → Option<Vec<Ty>>` ✅ DONE
 
-Extra protocol bounds on a type parameter from extension where clauses in context.
+Extra protocol bounds on a type parameter from extension where clauses in context. 2 call sites replaced.
 
-Files: `type_oracle.rs`: `get_extension_bounds_for_param`
+Files: `type_oracle.rs`: `get_extension_bounds_for_param` (deleted)
 
 #### `IsMarkerProtocol(protocol_id) → bool`
 

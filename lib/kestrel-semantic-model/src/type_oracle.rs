@@ -32,8 +32,9 @@ use semantic_tree::symbol::{Symbol, SymbolId};
 
 use crate::SemanticModel;
 use crate::queries::{
-    AssociatedTypeBoundsInContext, ConformancesForSymbol, ExtensionsFor, ResolvedAliasedType,
-    SymbolFor, TypeParameterBounds, WhereClausesInScope,
+    AssociatedTypeBoundsInContext, ConcreteSelfType, ConformancesForSymbol,
+    ExtensionBoundsForParam, ExtensionsFor, ResolvedAliasedType, SelfProtocolBounds, SymbolFor,
+    TypeParameterBounds, WhereClausesInScope,
 };
 
 impl TypeOracle for SemanticModel {
@@ -1368,7 +1369,9 @@ impl TypeOracle for ContextualOracle<'_> {
         // Handle SelfType using context (protocol or protocol extension)
         if matches!(ty.kind(), TyKind::SelfType) {
             let mut seed_protocols = Vec::new();
-            seed_protocols.extend(self_protocol_bounds(self.model, self.context_symbol_id));
+            seed_protocols.extend(self.model.query(SelfProtocolBounds {
+                context_id: self.context_symbol_id,
+            }));
             if !seed_protocols.is_empty() {
                 if seed_protocols.contains(&protocol_id) {
                     return true;
@@ -1382,11 +1385,10 @@ impl TypeOracle for ContextualOracle<'_> {
         // Handle type parameters - include extension where-clause bounds from context
         if let TyKind::TypeParameter(type_param) = ty.kind() {
             let mut bounds = self.model.query(TypeParameterBounds { param_id: type_param.metadata().id() });
-            if let Some(ext_bounds) = get_extension_bounds_for_param(
-                self.model,
-                self.context_symbol_id,
-                type_param.metadata().id(),
-            ) {
+            if let Some(ext_bounds) = self.model.query(ExtensionBoundsForParam {
+                context_id: self.context_symbol_id,
+                param_id: type_param.metadata().id(),
+            }) {
                 bounds.extend(ext_bounds);
             }
             return bound_protocols_include(self.model, &bounds, protocol_id);
@@ -1538,7 +1540,7 @@ fn resolve_member_with_context(
 
         // If Self refers to a concrete type context (struct/enum/type extension),
         // resolve using that concrete receiver first.
-        if let Some(concrete_self) = resolve_concrete_self_type_from_context(model, ctx_id)
+        if let Some(concrete_self) = model.query(ConcreteSelfType { context_id: ctx_id })
             && !matches!(concrete_self.kind(), TyKind::SelfType)
         {
             return if let Some(labels) = expected_labels {
@@ -1648,8 +1650,10 @@ fn resolve_member_with_context(
 
         // If we have context, also check for extension bounds
         if let Some(ctx_id) = context
-            && let Some(ext_bounds) =
-                get_extension_bounds_for_param(model, ctx_id, type_param.metadata().id())
+            && let Some(ext_bounds) = model.query(ExtensionBoundsForParam {
+                context_id: ctx_id,
+                param_id: type_param.metadata().id(),
+            })
         {
             bounds.extend(ext_bounds);
         }
@@ -2474,46 +2478,6 @@ fn resolve_member_with_context_and_labels(
     model.resolve_member_with_labels(receiver_ty, member, is_static, labels)
 }
 
-/// Resolve `Self` to a concrete target type from the current context when possible.
-///
-/// Returns `None` when `Self` is abstract (e.g. protocol / protocol extension context).
-fn resolve_concrete_self_type_from_context(model: &SemanticModel, context_id: SymbolId) -> Option<Ty> {
-    let mut current = Some(context_id);
-
-    while let Some(id) = current {
-        let symbol = model.query(SymbolFor { id })?;
-
-        if symbol.metadata().kind() == KestrelSymbolKind::Extension
-            && let Some(target_beh) = symbol.metadata().get_behavior::<ExtensionTargetBehavior>()
-        {
-            let target_ty = target_beh.target_type();
-            if !matches!(target_ty.kind(), TyKind::Protocol { .. } | TyKind::SelfType) {
-                return Some(target_ty.clone());
-            }
-            return None;
-        }
-
-        if matches!(
-            symbol.metadata().kind(),
-            KestrelSymbolKind::Struct | KestrelSymbolKind::Enum
-        ) && let Some(typed) = symbol.metadata().get_behavior::<TypedBehavior>()
-        {
-            let ty = typed.ty();
-            if !matches!(ty.kind(), TyKind::SelfType) {
-                return Some(ty.clone());
-            }
-        }
-
-        if symbol.metadata().kind() == KestrelSymbolKind::Protocol {
-            return None;
-        }
-
-        current = symbol.metadata().parent().map(|p| p.metadata().id());
-    }
-
-    None
-}
-
 fn resolve_contextual_member_candidate(
     model: &SemanticModel,
     member_symbol: &dyn Symbol<KestrelLanguage>,
@@ -3034,37 +2998,6 @@ fn resolve_member_with_arity_and_labels_impl(
 fn dedup_candidates_by_symbol_id(candidates: &mut Vec<MemberResolution>) {
     let mut seen = HashSet::new();
     candidates.retain(|c| seen.insert(c.symbol_id));
-}
-
-/// Walk up from a function to find if it's inside an extension,
-/// and if so, return any additional bounds from the extension's where clause.
-fn get_extension_bounds_for_param(
-    model: &SemanticModel,
-    context_id: SymbolId,
-    param_id: SymbolId,
-) -> Option<Vec<Ty>> {
-    let context = model.query(SymbolFor { id: context_id })?;
-    let mut current: Option<Arc<dyn Symbol<KestrelLanguage>>> = Some(context);
-
-    while let Some(sym) = current {
-        if sym.metadata().kind() == KestrelSymbolKind::Extension {
-            // Found extension - check its where clause for bounds on param_id
-            if let Some(ext_target) = sym.metadata().get_behavior::<ExtensionTargetBehavior>() {
-                let where_clause = ext_target.where_clause();
-                let bounds: Vec<Ty> = where_clause
-                    .bounds_for(param_id)
-                    .into_iter()
-                    .filter(|b| matches!(b.kind(), TyKind::Protocol { .. } | TyKind::Error))
-                    .cloned()
-                    .collect();
-                if !bounds.is_empty() {
-                    return Some(bounds);
-                }
-            }
-        }
-        current = sym.metadata().parent();
-    }
-    None
 }
 
 /// Get the container symbol and substitutions from a type.
@@ -4383,58 +4316,6 @@ fn bound_protocols_include(model: &SemanticModel, bounds: &[Ty], protocol_id: Sy
     reachable.contains(&protocol_id)
 }
 
-/// Collect protocol bounds that apply to `Self` in the current context.
-fn self_protocol_bounds(model: &SemanticModel, context_id: SymbolId) -> Vec<SymbolId> {
-    let mut result = Vec::new();
-
-    // Self bounds from where clauses (Self: Protocol)
-    let where_clauses = model.query(WhereClausesInScope { context_id });
-    for wc in where_clauses {
-        for constraint in wc.constraints() {
-            if let Constraint::SelfBound {
-                associated_type_path,
-                bounds,
-                ..
-            } = constraint
-                && associated_type_path.is_empty()
-            {
-                for bound in bounds {
-                    if let TyKind::Protocol { symbol, .. } = bound.kind() {
-                        result.push(symbol.metadata().id());
-                    }
-                }
-            }
-        }
-    }
-
-    // Also add the enclosing protocol or protocol extension target, if any
-    let mut current = Some(context_id);
-    while let Some(id) = current {
-        let Some(symbol) = model.query(SymbolFor { id }) else {
-            break;
-        };
-
-        if symbol.metadata().kind() == KestrelSymbolKind::Protocol {
-            result.push(symbol.metadata().id());
-            break;
-        }
-
-        if symbol.metadata().kind() == KestrelSymbolKind::Extension
-            && let Some(target_beh) = symbol.metadata().get_behavior::<ExtensionTargetBehavior>()
-        {
-            let target_ty = target_beh.target_type();
-            if let TyKind::Protocol { symbol, .. } = target_ty.kind() {
-                result.push(symbol.metadata().id());
-                break;
-            }
-        }
-
-        current = symbol.metadata().parent().map(|p| p.metadata().id());
-    }
-
-    result
-}
-
 /// Get protocol bounds for `Self` in the current context, as concrete protocol types.
 fn get_self_type_bounds_with_context(
     model: &SemanticModel,
@@ -4921,7 +4802,9 @@ fn normalize_type_with_context(model: &SemanticModel, ty: &Ty, context_id: Symbo
     // In protocol/protocol-extension contexts, implicitly qualify unqualified associated
     // types with `Self` so constraints like `Item = (A, B)` apply to `Self.Item`.
     let qualified_ty =
-        if !owned_equalities.is_empty() && !self_protocol_bounds(model, context_id).is_empty() {
+        if !owned_equalities.is_empty()
+            && !model.query(SelfProtocolBounds { context_id }).is_empty()
+        {
             let mut qualified = Vec::with_capacity(owned_equalities.len());
             let self_ty = Ty::self_type(ty.span().clone());
             for (left, right) in owned_equalities.into_iter() {
