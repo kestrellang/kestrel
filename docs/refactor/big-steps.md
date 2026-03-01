@@ -119,7 +119,10 @@ Each step lands independently with tests passing:
 **Step 4: Delete dead binder code (~1 day)** — BLOCKED
 - Remove `members.rs`, most of `calls.rs`, `get_type_container()` and related functions
 - The body_resolver shrinks from ~17,500 lines to ~5,000
-- Blocked on 5 remaining eager resolution categories in the binder
+- Blocked on 2 remaining eager resolution categories:
+  1. Callable field detection (~35 lines, niche feature)
+  2. TypeParam/AssociatedType static member resolution (~300 lines, error quality concern)
+- Operator and iterator/try protocol calls intentionally kept eager (known protocol shapes)
 
 #### Files affected
 
@@ -191,15 +194,11 @@ let return_ty = transformer.transform(callable.return_type());
 
 This also builds on the `TypeTransformer` trait proposed in `refactor.md` — the `map_children` method on `Ty` eliminates the duplicated structural recursion across `substitute_self`, `apply_substitutions`, `expand_aliases`, etc.
 
-### Migration
+### Status: DONE ✓
 
-This refactoring is independent and can happen before, during, or after the inference migration:
+Implemented via `Ty::map_children()` to factor out structural recursion, plus `Substitutions::map_values()` and `CallableBehavior::map_types()`. Simplified all 5 recursive walkers to use `map_children`. Deleted binder's buggy `substitute_type` duplicate and 6 other redundant helper functions. Net: ~520 lines removed, ~70 added.
 
-1. Add `Ty::map_children()` method for structural recursion
-2. Implement `TypeTransformer` struct in `kestrel-semantic-tree`
-3. Replace inline substitution chains in `type_oracle.rs` with `TypeTransformer` calls
-4. Replace inline chains in `body_resolver/` (these disappear anyway if inference migration happens first)
-5. Verify MIR-level `Substitution::apply_ty()` can use the same pattern (different type representation, but same structure)
+The full `TypeTransformer` struct was not needed — the existing `transform_ty` helper in type_oracle.rs already consolidates the 3-step dance for its 8 call sites, and `map_children` + `map_types` handle the rest.
 
 ---
 
@@ -390,10 +389,10 @@ The parser rewrite is independent of the inference migration and can happen in p
 ```
 ┌─────────────────────┐  ┌─────────────┐  ┌──────────────────┐  ┌──────────────────┐
 │ 0. Clean up Oracle  │  │ TypeTransfmr│  │ Parser rewrite   │  │ Mangling rewrite │
-│    DONE ✓           │  │ (can happen │  │ (independent,    │  │ DONE ✓           │
-├─────────────────────┤  │  anytime)   │  │  can run in      │  └──────────────────┘
-│ 1. Migrate method   │  │  ~2 days    │  │  parallel)       │
-│    calls  DONE ✓    │  └─────────────┘  │  ~1-2 weeks      │
+│    DONE ✓           │  │ DONE ✓      │  │ (independent,    │  │ DONE ✓           │
+├─────────────────────┤  └─────────────┘  │  can run in      │  └──────────────────┘
+│ 1. Migrate method   │                   │  parallel)       │
+│    calls  DONE ✓    │                   │  ~1-2 weeks      │
 ├─────────────────────┤                   └──────────────────┘
 │ 2. Migrate member   │
 │    access DONE ✓    │
@@ -407,7 +406,7 @@ The parser rewrite is independent of the inference migration and can happen in p
 └─────────────────────┘
 ```
 
-Steps 0–3 of the inference migration and the mangling rewrite are complete. Step 4 (deleting dead binder code) is blocked on 5 remaining eager resolution categories. The TypeTransformer and parser rewrite are not yet started.
+Steps 0–3 of the inference migration, the mangling rewrite, and the TypeTransformer are complete. Step 4 (deleting dead binder code) is blocked on 2 remaining eager resolution categories. The parser rewrite is not yet started.
 
 ### Estimated total impact
 

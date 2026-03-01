@@ -491,6 +491,82 @@ impl Ty {
         Self::new(TyKind::UnresolvedPath { segments }, span)
     }
 
+    // === Structural recursion ===
+
+    /// Apply a function to each direct child type, returning a new Ty with
+    /// transformed children. Leaf types (Unit, Never, Int, Float, Bool, String,
+    /// Error, SelfType, Infer, TypeParameter, UnresolvedPath) are returned as-is.
+    pub fn map_children(&self, f: &mut impl FnMut(&Ty) -> Ty) -> Ty {
+        match self.kind() {
+            TyKind::Tuple(elements) => {
+                let new_elements: Vec<Ty> = elements.iter().map(|e| f(e)).collect();
+                Ty::tuple(new_elements, self.span.clone())
+            },
+            TyKind::Pointer(inner) => {
+                Ty::pointer(f(inner), self.span.clone())
+            },
+            TyKind::Function {
+                params,
+                return_type,
+            } => {
+                let new_params: Vec<Ty> = params.iter().map(|p| f(p)).collect();
+                Ty::function(new_params, f(return_type), self.span.clone())
+            },
+            TyKind::Struct {
+                symbol,
+                substitutions,
+            } => {
+                let new_subs = substitutions.map_values(&mut |ty| f(ty));
+                Ty::generic_struct(symbol.clone(), new_subs, self.span.clone())
+            },
+            TyKind::Enum {
+                symbol,
+                substitutions,
+            } => {
+                let new_subs = substitutions.map_values(&mut |ty| f(ty));
+                Ty::generic_enum(symbol.clone(), new_subs, self.span.clone())
+            },
+            TyKind::Protocol {
+                symbol,
+                substitutions,
+            } => {
+                let new_subs = substitutions.map_values(&mut |ty| f(ty));
+                Ty::generic_protocol(symbol.clone(), new_subs, self.span.clone())
+            },
+            TyKind::TypeAlias {
+                symbol,
+                substitutions,
+            } => {
+                let new_subs = substitutions.map_values(&mut |ty| f(ty));
+                Ty::generic_type_alias(symbol.clone(), new_subs, self.span.clone())
+            },
+            TyKind::AssociatedType { symbol, container } => match container {
+                Some(container_ty) => {
+                    Ty::qualified_associated_type(symbol.clone(), f(container_ty), self.span.clone())
+                },
+                None => self.clone(),
+            },
+            TyKind::UnresolvedFunction {
+                param_info,
+                return_type,
+            } => {
+                let new_return = f(return_type);
+                let new_param_info = match param_info {
+                    ParamInfo::Unconstrained => ParamInfo::Unconstrained,
+                    ParamInfo::ImplicitIt { it_type } => ParamInfo::ImplicitIt {
+                        it_type: Box::new(f(it_type)),
+                    },
+                    ParamInfo::Explicit { param_types } => ParamInfo::Explicit {
+                        param_types: param_types.iter().map(|p| f(p)).collect(),
+                    },
+                };
+                Ty::unresolved_function(new_param_info, new_return, self.span.clone())
+            },
+            // Leaf types: no children to map
+            _ => self.clone(),
+        }
+    }
+
     // === Type joining (for Never propagation) ===
 
     /// Join two types, handling Never type propagation.
@@ -585,112 +661,18 @@ impl Ty {
     pub fn substitute_self(&self, replacement: &Ty) -> Ty {
         match self.kind() {
             TyKind::SelfType => replacement.clone(),
-
-            TyKind::Tuple(elements) => {
-                let new_elements: Vec<Ty> = elements
-                    .iter()
-                    .map(|e| e.substitute_self(replacement))
-                    .collect();
-                Ty::tuple(new_elements, self.span.clone())
-            },
-
-            TyKind::Pointer(element_type) => {
-                let new_element = element_type.substitute_self(replacement);
-                Ty::pointer(new_element, self.span.clone())
-            },
-
-            TyKind::Function {
-                params,
-                return_type,
-            } => {
-                let new_params: Vec<Ty> = params
-                    .iter()
-                    .map(|p| p.substitute_self(replacement))
-                    .collect();
-                let new_return = return_type.substitute_self(replacement);
-                Ty::function(new_params, new_return, self.span.clone())
-            },
-
-            TyKind::AssociatedType { symbol, container } => match container {
-                Some(container_ty) => {
-                    let new_container = container_ty.substitute_self(replacement);
-                    Ty::qualified_associated_type(symbol.clone(), new_container, self.span.clone())
-                },
-                None => {
-                    // Implicitly Self.Symbol, replace with replacement.Symbol
-                    Ty::qualified_associated_type(
-                        symbol.clone(),
-                        replacement.clone(),
-                        self.span.clone(),
-                    )
-                },
-            },
-
-            TyKind::Struct {
+            TyKind::AssociatedType {
                 symbol,
-                substitutions,
+                container: None,
             } => {
-                let mut new_subs = Substitutions::new();
-                for (id, ty) in substitutions.iter() {
-                    new_subs.insert(*id, ty.substitute_self(replacement));
-                }
-                Ty::generic_struct(symbol.clone(), new_subs, self.span.clone())
+                // Implicitly Self.Symbol, qualify with replacement
+                Ty::qualified_associated_type(
+                    symbol.clone(),
+                    replacement.clone(),
+                    self.span.clone(),
+                )
             },
-
-            TyKind::Enum {
-                symbol,
-                substitutions,
-            } => {
-                let mut new_subs = Substitutions::new();
-                for (id, ty) in substitutions.iter() {
-                    new_subs.insert(*id, ty.substitute_self(replacement));
-                }
-                Ty::generic_enum(symbol.clone(), new_subs, self.span.clone())
-            },
-
-            TyKind::Protocol {
-                symbol,
-                substitutions,
-            } => {
-                let mut new_subs = Substitutions::new();
-                for (id, ty) in substitutions.iter() {
-                    new_subs.insert(*id, ty.substitute_self(replacement));
-                }
-                Ty::generic_protocol(symbol.clone(), new_subs, self.span.clone())
-            },
-
-            TyKind::TypeAlias {
-                symbol,
-                substitutions,
-            } => {
-                let mut new_subs = Substitutions::new();
-                for (id, ty) in substitutions.iter() {
-                    new_subs.insert(*id, ty.substitute_self(replacement));
-                }
-                Ty::generic_type_alias(symbol.clone(), new_subs, self.span.clone())
-            },
-
-            TyKind::UnresolvedFunction {
-                param_info,
-                return_type,
-            } => {
-                let new_return = return_type.substitute_self(replacement);
-                let new_param_info = match param_info {
-                    ParamInfo::Unconstrained => ParamInfo::Unconstrained,
-                    ParamInfo::ImplicitIt { it_type } => ParamInfo::ImplicitIt {
-                        it_type: Box::new(it_type.substitute_self(replacement)),
-                    },
-                    ParamInfo::Explicit { param_types } => ParamInfo::Explicit {
-                        param_types: param_types
-                            .iter()
-                            .map(|p| p.substitute_self(replacement))
-                            .collect(),
-                    },
-                };
-                Ty::unresolved_function(new_param_info, new_return, self.span.clone())
-            },
-
-            _ => self.clone(),
+            _ => self.map_children(&mut |child| child.substitute_self(replacement)),
         }
     }
 

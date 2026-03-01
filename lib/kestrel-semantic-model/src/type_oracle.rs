@@ -4632,8 +4632,6 @@ fn resolve_all_associated_types_impl(
     ty: &Ty,
     visited: &mut std::collections::HashSet<kestrel_semantic_tree::ty::TyId>,
 ) -> Ty {
-    use kestrel_semantic_tree::ty::ParamInfo;
-
     // Cycle detection: if we've already visited this type, return it as-is
     let ty_id = ty.id();
     if !visited.insert(ty_id) {
@@ -4661,114 +4659,16 @@ fn resolve_all_associated_types_impl(
         },
 
         // Unqualified associated type (container: None) - leave as-is
-        // This shouldn't appear after substitute_self, but handle it gracefully
         TyKind::AssociatedType { .. } => ty.clone(),
-
-        // Compound types - recurse into nested types
-        TyKind::Tuple(elements) => {
-            let new_elements: Vec<Ty> = elements
-                .iter()
-                .map(|e| resolve_all_associated_types_impl(oracle, e, visited))
-                .collect();
-            Ty::tuple(new_elements, ty.span().clone())
-        },
-
-        // Note: Array[T] struct types are handled by the Struct case below
-        TyKind::Pointer(element) => {
-            let new_element = resolve_all_associated_types_impl(oracle, element, visited);
-            Ty::pointer(new_element, ty.span().clone())
-        },
-
-        TyKind::Function {
-            params,
-            return_type,
-        } => {
-            let new_params: Vec<Ty> = params
-                .iter()
-                .map(|p| resolve_all_associated_types_impl(oracle, p, visited))
-                .collect();
-            let new_return = resolve_all_associated_types_impl(oracle, return_type, visited);
-            Ty::function(new_params, new_return, ty.span().clone())
-        },
-
-        TyKind::Struct {
-            symbol,
-            substitutions,
-        } => {
-            let mut new_subs = Substitutions::new();
-            for (id, sub_ty) in substitutions.iter() {
-                new_subs.insert(
-                    *id,
-                    resolve_all_associated_types_impl(oracle, sub_ty, visited),
-                );
-            }
-            Ty::generic_struct(symbol.clone(), new_subs, ty.span().clone())
-        },
-
-        TyKind::Enum {
-            symbol,
-            substitutions,
-        } => {
-            let mut new_subs = Substitutions::new();
-            for (id, sub_ty) in substitutions.iter() {
-                new_subs.insert(
-                    *id,
-                    resolve_all_associated_types_impl(oracle, sub_ty, visited),
-                );
-            }
-            Ty::generic_enum(symbol.clone(), new_subs, ty.span().clone())
-        },
 
         // Don't recurse into protocol substitutions - protocols may have cyclic inheritance
         // and their substitutions shouldn't contain associated types that need resolution
         TyKind::Protocol { .. } => ty.clone(),
 
-        TyKind::TypeAlias {
-            symbol,
-            substitutions,
-        } => {
-            let mut new_subs = Substitutions::new();
-            for (id, sub_ty) in substitutions.iter() {
-                new_subs.insert(
-                    *id,
-                    resolve_all_associated_types_impl(oracle, sub_ty, visited),
-                );
-            }
-            Ty::generic_type_alias(symbol.clone(), new_subs, ty.span().clone())
-        },
-
-        TyKind::UnresolvedFunction {
-            param_info,
-            return_type,
-        } => {
-            let new_return = resolve_all_associated_types_impl(oracle, return_type, visited);
-            let new_param_info = match param_info {
-                ParamInfo::Unconstrained => ParamInfo::Unconstrained,
-                ParamInfo::ImplicitIt { it_type } => ParamInfo::ImplicitIt {
-                    it_type: Box::new(resolve_all_associated_types_impl(oracle, it_type, visited)),
-                },
-                ParamInfo::Explicit { param_types } => ParamInfo::Explicit {
-                    param_types: param_types
-                        .iter()
-                        .map(|p| resolve_all_associated_types_impl(oracle, p, visited))
-                        .collect(),
-                },
-            };
-            Ty::unresolved_function(new_param_info, new_return, ty.span().clone())
-        },
-
-        // Primitive types and special types - no nested types to resolve
-        TyKind::Unit
-        | TyKind::Never
-        | TyKind::Int(_)
-        | TyKind::Float(_)
-        | TyKind::Bool
-        | TyKind::String
-        | TyKind::Error
-        | TyKind::SelfType
-        | TyKind::Infer
-        | TyKind::TypeParameter(_)
-        | TyKind::UnresolvedPath { .. } => ty.clone(),
+        // All other types: recurse into children
+        _ => ty.map_children(&mut |child| {
+            resolve_all_associated_types_impl(oracle, child, visited)
+        }),
     };
 
     // Remove from visited after processing so we can visit the same type again

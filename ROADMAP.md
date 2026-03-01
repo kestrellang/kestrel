@@ -644,8 +644,8 @@ See [docs/memory-model/implementation-plan.md](docs/memory-model/implementation-
 
 - [ ] Refactor parser
 - [x] Refactor symbol mangling
-- [ ] Switch lookup from binding phase to type inference
-- [ ] Consolidate type transformations
+- [x] Switch lookup from binding phase to type inference
+- [x] Consolidate type transformations
 - [ ] Refactor semantic model and passes
 - [ ] Incremental compilation
 

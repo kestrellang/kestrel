@@ -43,7 +43,7 @@ use super::utils::{
     get_associated_type_bounds_from_context,
     get_callable_behavior, get_type_container, get_type_parameter_bounds_by_id,
     get_type_parameter_bounds_from_context, matches_signature,
-    resolve_associated_types, substitute_self,
+    resolve_associated_types,
 };
 
 /// Resolve a chain of member accesses: obj.field1.field2.field3
@@ -675,7 +675,7 @@ pub fn resolve_member_call(
             .map(|resolution| {
                 let mut ty = resolution.ty;
                 // Apply receiver substitutions to the return type
-                ty = substitute_self(&ty, &resolved_base_ty);
+                ty = ty.substitute_self(&resolved_base_ty);
                 ty = resolve_associated_types(&ty, ctx);
                 let expanded = resolved_base_ty.expand_aliases();
                 if let TyKind::Struct { substitutions, .. }
@@ -727,78 +727,6 @@ fn best_effort_return_type_from_container(
         }
     }
     None
-}
-
-/// Substitute Self with the receiver type in a CallableBehavior.
-pub fn substitute_callable_self(callable: &CallableBehavior, receiver_ty: &Ty) -> CallableBehavior {
-    use kestrel_semantic_tree::behavior::callable::CallableParameter;
-
-    let new_params: Vec<CallableParameter> = callable
-        .parameters()
-        .iter()
-        .map(|p| {
-            let new_ty = substitute_self(&p.ty, receiver_ty);
-            CallableParameter {
-                access_mode: p.access_mode,
-                ty: new_ty,
-                label: p.label.clone(),
-                bind_name: p.bind_name.clone(),
-                has_default: p.has_default,
-            }
-        })
-        .collect();
-
-    let new_return = substitute_self(callable.return_type(), receiver_ty);
-
-    // Preserve receiver kind if present
-    match callable.receiver() {
-        Some(receiver_kind) => CallableBehavior::with_receiver(
-            new_params,
-            new_return,
-            receiver_kind,
-            callable.span().clone(),
-        ),
-        None => CallableBehavior::new(new_params, new_return, callable.span().clone()),
-    }
-}
-
-/// Resolve associated types in a CallableBehavior.
-///
-/// This recursively resolves any AssociatedType projections in parameter types
-/// and return type to their concrete types using the TypeOracle.
-pub fn resolve_callable_associated_types(
-    callable: &CallableBehavior,
-    ctx: &BodyResolutionContext,
-) -> CallableBehavior {
-    use kestrel_semantic_tree::behavior::callable::CallableParameter;
-
-    let new_params: Vec<CallableParameter> = callable
-        .parameters()
-        .iter()
-        .map(|p| {
-            let new_ty = resolve_associated_types(&p.ty, ctx);
-            CallableParameter {
-                access_mode: p.access_mode,
-                ty: new_ty,
-                label: p.label.clone(),
-                bind_name: p.bind_name.clone(),
-                has_default: p.has_default,
-            }
-        })
-        .collect();
-
-    let new_return = resolve_associated_types(callable.return_type(), ctx);
-
-    // Preserve receiver kind if present
-    match callable.receiver() {
-        Some(receiver_kind) => CallableBehavior::with_receiver(
-            new_params,
-            new_return,
-            receiver_kind,
-            callable.span().clone(),
-        ),
-        None => CallableBehavior::new(new_params, new_return, callable.span().clone()),
-    }
 }
 
 /// Resolve static member access on a type parameter: `T.staticMethod`.
@@ -1139,7 +1067,7 @@ fn resolve_associated_type_static_member(
                                 .symbol
                                 .metadata()
                                 .get_behavior::<TypedBehavior>()
-                                .map(|tb| substitute_self(tb.ty(), &container_ty))
+                                .map(|tb| tb.ty().substitute_self(&container_ty))
                                 .unwrap_or_else(|| Ty::error(full_span.clone()));
 
                             return Expression::protocol_property_access(

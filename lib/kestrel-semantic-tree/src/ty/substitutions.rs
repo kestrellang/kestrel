@@ -65,6 +65,15 @@ impl Substitutions {
         param_ids.iter().map(|id| self.get(*id)).collect()
     }
 
+    /// Apply a function to each substitution value, returning a new map.
+    pub fn map_values(&self, f: &mut impl FnMut(&Ty) -> Ty) -> Substitutions {
+        let mut result = Substitutions::new();
+        for (id, ty) in self.iter() {
+            result.insert(*id, f(ty));
+        }
+        result
+    }
+
     /// Apply substitutions to a type, replacing any type parameters with their
     /// substituted types. Returns a new type with substitutions applied.
     pub fn apply(&self, ty: &Ty) -> Ty {
@@ -128,109 +137,8 @@ impl Substitutions {
                 }
             },
 
-            // Composite types - recursively apply to components
-            TyKind::Tuple(elements) => {
-                let new_elements: Vec<Ty> = elements
-                    .iter()
-                    .map(|e| self.apply_with_visited(e, visited))
-                    .collect();
-                Ty::tuple(new_elements, ty.span().clone())
-            },
-
-            // Note: Array[T] struct types are handled by the Struct case above
-            TyKind::Pointer(element_type) => {
-                let new_element = self.apply_with_visited(element_type, visited);
-                Ty::pointer(new_element, ty.span().clone())
-            },
-
-            TyKind::Function {
-                params,
-                return_type,
-            } => {
-                let new_params: Vec<Ty> = params
-                    .iter()
-                    .map(|p| self.apply_with_visited(p, visited))
-                    .collect();
-                let new_return = self.apply_with_visited(return_type, visited);
-                Ty::function(new_params, new_return, ty.span().clone())
-            },
-
-            // Instantiated types - recursively apply to their substitutions
-            TyKind::Struct {
-                symbol,
-                substitutions,
-            } => {
-                let new_subs = self.apply_to_substitutions_with_visited(substitutions, visited);
-                Ty::generic_struct(symbol.clone(), new_subs, ty.span().clone())
-            },
-
-            TyKind::Enum {
-                symbol,
-                substitutions,
-            } => {
-                let new_subs = self.apply_to_substitutions_with_visited(substitutions, visited);
-                Ty::generic_enum(symbol.clone(), new_subs, ty.span().clone())
-            },
-
-            TyKind::Protocol {
-                symbol,
-                substitutions,
-            } => {
-                let new_subs = self.apply_to_substitutions_with_visited(substitutions, visited);
-                Ty::generic_protocol(symbol.clone(), new_subs, ty.span().clone())
-            },
-
-            TyKind::TypeAlias {
-                symbol,
-                substitutions,
-            } => {
-                let new_subs = self.apply_to_substitutions_with_visited(substitutions, visited);
-                Ty::generic_type_alias(symbol.clone(), new_subs, ty.span().clone())
-            },
-
-            // Associated type - apply substitutions to container if present
-            TyKind::AssociatedType { symbol, container } => match container {
-                Some(container_ty) => {
-                    let new_container = self.apply_with_visited(container_ty, visited);
-                    Ty::qualified_associated_type(symbol.clone(), new_container, ty.span().clone())
-                },
-                None => ty.clone(),
-            },
-
-            // Unresolved function - apply substitutions to param info and return type
-            TyKind::UnresolvedFunction {
-                param_info,
-                return_type,
-            } => {
-                use super::ParamInfo;
-
-                let new_return = self.apply_with_visited(return_type, visited);
-                let new_param_info = match param_info {
-                    ParamInfo::Unconstrained => ParamInfo::Unconstrained,
-                    ParamInfo::ImplicitIt { it_type } => ParamInfo::ImplicitIt {
-                        it_type: Box::new(self.apply_with_visited(it_type, visited)),
-                    },
-                    ParamInfo::Explicit { param_types } => ParamInfo::Explicit {
-                        param_types: param_types
-                            .iter()
-                            .map(|p| self.apply_with_visited(p, visited))
-                            .collect(),
-                    },
-                };
-                Ty::unresolved_function(new_param_info, new_return, ty.span().clone())
-            },
-
-            // Base types and special types - return as-is
-            TyKind::Unit
-            | TyKind::Never
-            | TyKind::Int(_)
-            | TyKind::Float(_)
-            | TyKind::Bool
-            | TyKind::String
-            | TyKind::Error
-            | TyKind::SelfType
-            | TyKind::Infer
-            | TyKind::UnresolvedPath { .. } => ty.clone(),
+            // All other types: recurse into children
+            _ => ty.map_children(&mut |child| self.apply_with_visited(child, visited)),
         }
     }
 
@@ -281,18 +189,6 @@ impl Substitutions {
         true
     }
 
-    /// Internal helper for apply_to_substitutions that tracks visited type parameters
-    fn apply_to_substitutions_with_visited(
-        &self,
-        other: &Substitutions,
-        visited: &mut std::collections::HashSet<SymbolId>,
-    ) -> Substitutions {
-        let mut result = Substitutions::new();
-        for (id, ty) in other.iter() {
-            result.insert(*id, self.apply_with_visited(ty, visited));
-        }
-        result
-    }
 }
 
 #[cfg(test)]

@@ -29,7 +29,7 @@ use kestrel_syntax_tree::utils::get_node_span;
 use super::context::BodyResolutionContext;
 use super::expressions::resolve_expression;
 use super::members::resolve_member_chain;
-use super::utils::{get_callable_behavior, is_expression_kind, substitute_type};
+use super::utils::{get_callable_behavior, is_expression_kind};
 
 /// Resolve a path expression (variable reference, function reference, or member access)
 pub fn resolve_path_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> Expression {
@@ -1240,9 +1240,9 @@ fn apply_type_args_to_function(
     let params: Vec<Ty> = callable
         .parameters()
         .iter()
-        .map(|p| substitute_type(&p.ty, &substitutions))
+        .map(|p| p.ty.apply_substitutions(&substitutions))
         .collect();
-    let return_type = substitute_type(callable.return_type(), &substitutions);
+    let return_type = callable.return_type().apply_substitutions(&substitutions);
 
     Some(Ty::function(params, return_type, span.clone()))
 }

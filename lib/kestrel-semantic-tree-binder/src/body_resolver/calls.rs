@@ -8,7 +8,7 @@ use std::sync::Arc;
 use kestrel_reporting::IntoDiagnostic;
 use kestrel_semantic_model::queries::ExtensionsFor;
 use kestrel_semantic_model::{IsVisibleFrom, SymbolFor};
-use kestrel_semantic_tree::behavior::callable::{CallableBehavior, ParameterAccessMode};
+use kestrel_semantic_tree::behavior::callable::ParameterAccessMode;
 use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
 use kestrel_semantic_tree::behavior::subscript::SubscriptBehavior;
 use kestrel_semantic_tree::expr::{CallArgument, ExprKind, Expression};
@@ -43,15 +43,15 @@ use kestrel_syntax_tree::utils::get_node_span;
 use super::context::BodyResolutionContext;
 use super::expressions::resolve_expression;
 use super::members::{
-    filter_applicable_extensions, resolve_callable_associated_types, resolve_delegating_init,
-    resolve_member_call, resolve_self_type_to_concrete, substitute_callable_self,
+    filter_applicable_extensions, resolve_delegating_init,
+    resolve_member_call, resolve_self_type_to_concrete,
 };
 use super::utils::{
     create_generic_struct_type, create_struct_type, create_struct_type_with_type_args,
     get_callable_behavior,
     get_type_container, get_type_parameter_bounds_by_id, infer_type_arguments, is_expression_kind,
-    matches_signature, resolve_associated_types, substitute_self,
-    substitute_type, validate_not_standalone_type_param,
+    matches_signature, resolve_associated_types,
+    validate_not_standalone_type_param,
     verify_type_argument_constraints,
 };
 
@@ -826,8 +826,17 @@ pub fn try_resolve_subscript_call(
         .and_then(|matching| {
             let behavior = matching.metadata().get_behavior::<SubscriptBehavior>()?;
             let return_type = behavior.return_type().clone();
-            let return_type = substitute_self(&return_type, receiver_ty);
-            Some(substitute_receiver_type_args(&return_type, receiver_ty))
+            let return_type = return_type.substitute_self(receiver_ty);
+            let return_type = match receiver_ty.expand_aliases().kind() {
+                TyKind::Struct { substitutions, .. }
+                | TyKind::Enum { substitutions, .. }
+                    if !substitutions.is_empty() =>
+                {
+                    return_type.apply_substitutions(substitutions)
+                },
+                _ => return_type,
+            };
+            Some(return_type)
         })
         .unwrap_or_else(|| Ty::infer(span.clone()));
 
@@ -918,31 +927,6 @@ fn matches_subscript_signature(
         .map(|l| l.as_ref().map(|s| s.as_str()))
         .collect();
     behavior.matches_labels(&labels_as_str)
-}
-
-/// Substitute type arguments from the receiver type into a type.
-fn substitute_receiver_type_args(ty: &Ty, receiver_ty: &Ty) -> Ty {
-    match receiver_ty.kind() {
-        TyKind::Struct { substitutions, .. } | TyKind::Enum { substitutions, .. } => {
-            if substitutions.is_empty() {
-                ty.clone()
-            } else {
-                // Substitute the type arguments
-                substitute_type(ty, substitutions)
-            }
-        },
-        TyKind::TypeAlias { .. } => {
-            // Expand the type alias and recurse to substitute on the underlying type
-            let expanded = receiver_ty.expand_aliases();
-            // Avoid infinite recursion if expand_aliases returns the same type
-            if !matches!(expanded.kind(), TyKind::TypeAlias { .. }) {
-                substitute_receiver_type_args(ty, &expanded)
-            } else {
-                ty.clone()
-            }
-        },
-        _ => ty.clone(),
-    }
 }
 
 /// Returns true if `ty` references any TypeParameter whose ID is in `method_param_ids`.
@@ -1185,17 +1169,17 @@ fn infer_deferred_method_return_type(
             continue;
         }
 
-        let mut callable = substitute_callable_self(&orig_callable, &resolved_receiver_ty);
-        callable = resolve_callable_associated_types(&callable, ctx);
+        let mut callable = orig_callable.map_types(&mut |t| t.substitute_self(&resolved_receiver_ty));
+        callable = callable.map_types(&mut |t| resolve_associated_types(t, ctx));
 
-        let mut candidate_return_ty = substitute_self(callable.return_type(), &resolved_receiver_ty);
+        let mut candidate_return_ty = callable.return_type().substitute_self(&resolved_receiver_ty);
         candidate_return_ty = resolve_associated_types(&candidate_return_ty, ctx);
         let expanded_receiver_ty = resolved_receiver_ty.expand_aliases();
         if let TyKind::Struct { substitutions, .. } | TyKind::Enum { substitutions, .. } =
             expanded_receiver_ty.kind()
         {
             if !substitutions.is_empty() {
-                candidate_return_ty = substitute_type(&candidate_return_ty, substitutions);
+                candidate_return_ty = candidate_return_ty.apply_substitutions(substitutions);
             }
         }
 
@@ -1293,7 +1277,7 @@ fn infer_deferred_method_return_type(
                         subs.insert(tp.metadata().id(), Ty::infer(span.clone()));
                     }
                 }
-                candidate_return_ty = substitute_type(&candidate_return_ty, &subs);
+                candidate_return_ty = candidate_return_ty.apply_substitutions(&subs);
             }
         }
 
@@ -1338,7 +1322,7 @@ fn compute_function_best_effort_return_type(
                 for (param, arg_ty) in type_params.iter().zip(type_args.iter()) {
                     subs.insert(param.metadata().id(), arg_ty.clone());
                 }
-                return substitute_type(&return_ty, &subs);
+                return return_ty.apply_substitutions(&subs);
             }
         }
     }
@@ -1356,7 +1340,7 @@ fn compute_function_best_effort_return_type(
                     subs.insert(tp_id, Ty::infer(span.clone()));
                 }
             }
-            return substitute_type(&return_ty, &subs);
+            return return_ty.apply_substitutions(&subs);
         }
     }
 
@@ -1819,10 +1803,10 @@ fn collect_protocol_initializers(
             && let Some(callable) = get_callable_behavior(&child)
         {
             // Substitute Self with the type parameter in the callable
-            let substituted = substitute_callable_self(&callable, self_replacement);
+            let substituted = callable.map_types(&mut |t| t.substitute_self(self_replacement));
             // Apply protocol type parameter substitutions
             let substituted =
-                substitute_callable_with_substitutions(&substituted, protocol_substitutions);
+                substituted.map_types(&mut |t| t.apply_substitutions(protocol_substitutions));
 
             candidates.push(InitCandidate {
                 init: child.clone(),
@@ -1842,58 +1826,12 @@ fn collect_protocol_initializers(
             } = parent_proto_ty.kind()
             {
                 // Compose substitutions: apply our substitutions to the parent's type arguments
-                let composed_subs = compose_substitutions(protocol_substitutions, parent_subs);
+                let composed_subs =
+                    parent_subs.map_values(&mut |ty| ty.apply_substitutions(protocol_substitutions));
                 collect_protocol_initializers(parent, self_replacement, &composed_subs, candidates);
             }
         }
     }
-}
-
-/// Substitute type parameters in a CallableBehavior using protocol substitutions.
-fn substitute_callable_with_substitutions(
-    callable: &CallableBehavior,
-    substitutions: &Substitutions,
-) -> CallableBehavior {
-    use kestrel_semantic_tree::behavior::callable::CallableParameter;
-
-    // Skip if no substitutions to apply
-    if substitutions.is_empty() {
-        return callable.clone();
-    }
-
-    let new_params: Vec<CallableParameter> = callable
-        .parameters()
-        .iter()
-        .map(|p| CallableParameter {
-            access_mode: p.access_mode,
-            ty: substitute_type(&p.ty, substitutions),
-            label: p.label.clone(),
-            bind_name: p.bind_name.clone(),
-            has_default: p.has_default,
-        })
-        .collect();
-
-    let new_return = substitute_type(callable.return_type(), substitutions);
-
-    // Preserve receiver kind if present
-    match callable.receiver() {
-        Some(receiver_kind) => CallableBehavior::with_receiver(
-            new_params,
-            new_return,
-            receiver_kind,
-            callable.span().clone(),
-        ),
-        None => CallableBehavior::new(new_params, new_return, callable.span().clone()),
-    }
-}
-
-/// Compose substitutions: apply outer substitutions to inner substitution values.
-fn compose_substitutions(outer: &Substitutions, inner: &Substitutions) -> Substitutions {
-    let mut result = Substitutions::new();
-    for (id, ty) in inner.iter() {
-        result.insert(*id, substitute_type(ty, outer));
-    }
-    result
 }
 
 // =============================================================================

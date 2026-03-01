@@ -552,6 +552,29 @@ impl CallableBehavior {
         self.receiver
     }
 
+    /// Apply a function to all types in this callable (parameter types and return type),
+    /// returning a new CallableBehavior with the transformed types.
+    pub fn map_types(&self, f: &mut impl FnMut(&Ty) -> Ty) -> CallableBehavior {
+        let new_params: Vec<CallableParameter> = self
+            .parameters
+            .iter()
+            .map(|p| CallableParameter {
+                access_mode: p.access_mode,
+                ty: f(&p.ty),
+                label: p.label.clone(),
+                bind_name: p.bind_name.clone(),
+                has_default: p.has_default,
+            })
+            .collect();
+        let new_return = f(&self.return_type);
+        match self.receiver {
+            Some(receiver) => {
+                CallableBehavior::with_receiver(new_params, new_return, receiver, self.span.clone())
+            },
+            None => CallableBehavior::new(new_params, new_return, self.span.clone()),
+        }
+    }
+
     /// Check if this is an instance method (has a receiver)
     pub fn is_instance_method(&self) -> bool {
         self.receiver.is_some()
