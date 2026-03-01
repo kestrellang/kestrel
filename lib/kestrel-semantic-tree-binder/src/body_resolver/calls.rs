@@ -1789,65 +1789,6 @@ fn resolve_type_parameter_init_call(
     )
 }
 
-/// Find the substitutions needed to use a method from a protocol, tracing through inheritance.
-///
-/// Returns Some(substitutions) if the method is from the protocol or its ancestors,
-/// None if the method is not found in this protocol's hierarchy.
-fn get_method_protocol_substitutions(
-    method: &Arc<dyn Symbol<KestrelLanguage>>,
-    protocol: &Arc<ProtocolSymbol>,
-    base_substitutions: &Substitutions,
-) -> Option<Substitutions> {
-    // Get the method's parent protocol
-    let method_parent = method.metadata().parent()?;
-    if method_parent.metadata().kind() != KestrelSymbolKind::Protocol {
-        return None;
-    }
-    let method_parent_id = method_parent.metadata().id();
-    let protocol_id = protocol.metadata().id();
-
-    // Direct parent check - method is directly from this protocol
-    if method_parent_id == protocol_id {
-        return Some(base_substitutions.clone());
-    }
-
-    // Check if method comes from an inherited protocol
-    // Trace through the inheritance to find the path and compose substitutions
-    if let Some(conformances) = protocol.metadata().get_behavior::<ConformancesBehavior>() {
-        for parent_ty in conformances.conformances() {
-            if let TyKind::Protocol {
-                symbol: parent,
-                substitutions: parent_subs,
-            } = parent_ty.kind()
-            {
-                // Compose substitutions: apply our base_substitutions to the parent's type args
-                let composed = compose_substitutions(base_substitutions, parent_subs);
-
-                if parent.metadata().id() == method_parent_id {
-                    // Found the method's protocol directly
-                    return Some(composed);
-                }
-
-                // Recursively check
-                if let Some(result) = get_method_protocol_substitutions(method, parent, &composed) {
-                    return Some(result);
-                }
-            }
-        }
-    }
-
-    None
-}
-
-/// Check if a method symbol belongs to a protocol (directly or through inheritance).
-#[allow(dead_code)]
-fn method_is_from_protocol(
-    method: &Arc<dyn Symbol<KestrelLanguage>>,
-    protocol: &Arc<ProtocolSymbol>,
-) -> bool {
-    get_method_protocol_substitutions(method, protocol, &Substitutions::new()).is_some()
-}
-
 /// Candidate for init resolution on type parameter
 struct InitCandidate {
     /// The init symbol

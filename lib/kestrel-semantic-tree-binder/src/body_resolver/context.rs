@@ -394,15 +394,6 @@ fn try_extract_yield_expression(
     None
 }
 
-/// Check if a syntax kind could potentially be a yield expression.
-#[allow(dead_code)]
-fn can_syntax_kind_be_yield(kind: SyntaxKind) -> bool {
-    matches!(kind, SyntaxKind::ExprIf | SyntaxKind::ExprMatch)
-    // Note: ExprLoop and ExprWhile are NOT included because:
-    // - loop without break-with-value returns Never
-    // - while always returns () (no else branch concept)
-}
-
 /// Check if an expression node can be used as a yield expression.
 ///
 /// This checks structural properties to determine if the expression can produce a value:
@@ -685,8 +676,3 @@ pub(crate) fn create_local_scope_for_body(
     LocalScope::new(dummy_func)
 }
 
-/// Backwards-compatible wrapper for older call sites.
-#[allow(dead_code)]
-fn create_local_scope_from_dyn(symbol: Arc<dyn Symbol<KestrelLanguage>>) -> LocalScope {
-    create_local_scope_for_body(symbol, "__body_resolver_temp")
-}

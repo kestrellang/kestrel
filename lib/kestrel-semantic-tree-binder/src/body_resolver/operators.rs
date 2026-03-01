@@ -6,9 +6,7 @@
 
 use std::sync::LazyLock;
 
-use kestrel_semantic_tree::expr::{
-    CallArgument, Capture, CaptureKind, Expression, PrimitiveMethod,
-};
+use kestrel_semantic_tree::expr::{CallArgument, Capture, CaptureKind, Expression};
 use kestrel_semantic_tree::operators::{BinaryOp, InfixAction, OperatorRegistry, UnaryOp};
 use kestrel_semantic_tree::symbol::local::LocalId;
 use kestrel_semantic_tree::ty::{FloatBits, IntBits, Ty, TyKind};
@@ -500,25 +498,6 @@ fn suggested_unary_intrinsic(ty: &Ty, op: UnaryOp) -> String {
     };
 
     format!("{}{}(a)", prefix, op_name)
-}
-
-/// Look up a primitive method on a type for binary operators.
-/// Uses the centralized PrimitiveMethod::lookup.
-#[allow(dead_code)]
-fn lookup_primitive_binary_method(ty: &Ty, method_name: &str) -> Option<PrimitiveMethod> {
-    PrimitiveMethod::lookup(ty, method_name)
-}
-
-/// Look up a primitive method on a type for unary operators.
-/// Uses the centralized PrimitiveMethod::lookup, with special handling
-/// for `!` (bitwiseNot) on Bool which maps to logicalNot.
-#[allow(dead_code)]
-fn lookup_primitive_unary_method(ty: &Ty, method_name: &str) -> Option<PrimitiveMethod> {
-    // Special case: `!` (bitwiseNot) on Bool maps to logicalNot for compatibility
-    if matches!(ty.kind(), TyKind::Bool) && method_name == "bitwiseNot" {
-        return Some(PrimitiveMethod::BoolNot);
-    }
-    PrimitiveMethod::lookup(ty, method_name)
 }
 
 /// Wrap an expression in a zero-argument closure for short-circuit evaluation.
