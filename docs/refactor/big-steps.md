@@ -98,27 +98,28 @@ The inference phase resolves each of these, producing the final `Call`, `FieldAc
 
 Each step lands independently with tests passing:
 
-**Step 0: Clean up TypeOracle internals (~1 day)**
+**Step 0: Clean up TypeOracle internals (~1 day)** — DONE
 - Extract the repeated `apply_substitutions` → `substitute_self` → `resolve_associated_types` pattern into a helper
 - Consolidate `get_type_parameter_bounds()` (type_oracle.rs), `get_type_parameter_bounds_by_id()` (calls.rs), and `get_associated_type_bounds_from_context()` (calls.rs) into queries on SemanticModel
 - This directly improves the code path that's about to become the only path
 
-**Step 1: Migrate method calls to inference (~2-3 days)**
-- Change the binder to emit `UnresolvedCall` for method calls instead of resolving
-- Update the solver to handle `UnresolvedCall` (it already handles `DeferredMethodCall`, this generalizes it)
-- Delete the method resolution code from `calls.rs` and `members.rs`
+**Step 1: Migrate method calls to inference (~2-3 days)** — DONE
+- Change the binder to emit `DeferredMethodCall` for method calls instead of resolving
+- Update the solver to handle `DeferredMethodCall` via TypeOracle
+- Extracted `builtin_method_call` helper on `BodyResolutionContext` to consolidate 6 builtin protocol call sites
 
-**Step 2: Migrate member access to inference (~2 days)**
-- `x.field` and `x.method` become `UnresolvedMemberAccess` until inference
-- The solver resolves these via `TypeOracle::resolve_member()`
+**Step 2: Migrate member access to inference (~2 days)** — DONE
+- `x.field` and `x.method` become `DeferredMemberAccess` until inference
+- The solver resolves these via `TypeOracle::resolve_member()` + `classify_member()`
 
-**Step 3: Migrate static calls and initializers (~2 days)**
-- `Type.staticMethod()` and `Type()` initializer calls become unresolved
-- The solver handles these the same way as instance methods
+**Step 3: Migrate static calls and initializers (~2 days)** — DONE
+- `Type.staticMethod()` and `Type()` initializer calls become `DeferredStaticCall`/`DeferredInitCall`
+- The solver handles these via TypeOracle
 
-**Step 4: Delete dead binder code (~1 day)**
+**Step 4: Delete dead binder code (~1 day)** — BLOCKED
 - Remove `members.rs`, most of `calls.rs`, `get_type_container()` and related functions
 - The body_resolver shrinks from ~17,500 lines to ~5,000
+- Blocked on 5 remaining eager resolution categories in the binder
 
 #### Files affected
 
@@ -387,35 +388,26 @@ The parser rewrite is independent of the inference migration and can happen in p
 ## Implementation Order
 
 ```
-                    ┌─────────────────────────┐
-                    │ 0. Clean up TypeOracle   │ ~1 day
-                    │    (extract helpers,     │
-                    │     consolidate queries) │
-                    └────────────┬────────────┘
-                                 │
-              ┌──────────────────┼──────────────────┐
-              │                  │                   │
-              ▼                  ▼                   ▼
 ┌─────────────────────┐  ┌─────────────┐  ┌──────────────────┐  ┌──────────────────┐
-│ 1. Migrate method   │  │ TypeTransfmr│  │ Parser rewrite   │  │ Mangling rewrite │
-│    calls to infer.  │  │ (can happen │  │ (independent,    │  │ (independent,    │
-│    ~2-3 days        │  │  anytime)   │  │  can run in      │  │  can run in      │
-├─────────────────────┤  │  ~2 days    │  │  parallel)       │  │  parallel)       │
-│ 2. Migrate member   │  └─────────────┘  │  ~1-2 weeks      │  │  ~4 days         │
-│    access to infer. │                   └──────────────────┘  └──────────────────┘
-│    ~2 days          │
+│ 0. Clean up Oracle  │  │ TypeTransfmr│  │ Parser rewrite   │  │ Mangling rewrite │
+│    DONE ✓           │  │ (can happen │  │ (independent,    │  │ DONE ✓           │
+├─────────────────────┤  │  anytime)   │  │  can run in      │  └──────────────────┘
+│ 1. Migrate method   │  │  ~2 days    │  │  parallel)       │
+│    calls  DONE ✓    │  └─────────────┘  │  ~1-2 weeks      │
+├─────────────────────┤                   └──────────────────┘
+│ 2. Migrate member   │
+│    access DONE ✓    │
 ├─────────────────────┤
 │ 3. Migrate static   │
-│    calls / inits    │
-│    ~2 days          │
+│    calls  DONE ✓    │
 ├─────────────────────┤
 │ 4. Delete dead      │
 │    binder code      │
-│    ~1 day           │
+│    BLOCKED          │
 └─────────────────────┘
 ```
 
-The inference migration (steps 0–4), parser rewrite, and mangling rewrite are all independent work streams. The TypeTransformer can be done at any point — it's most impactful if done during step 0 (cleaning up TypeOracle) since it directly simplifies the code that becomes the single resolution path.
+Steps 0–3 of the inference migration and the mangling rewrite are complete. Step 4 (deleting dead binder code) is blocked on 5 remaining eager resolution categories. The TypeTransformer and parser rewrite are not yet started.
 
 ### Estimated total impact
 
@@ -432,7 +424,7 @@ The solver grows by ~1000 lines to handle all resolution, mangling grows slightl
 
 ---
 
-## 4. Symbol Mangling Rewrite
+## 4. Symbol Mangling Rewrite — DONE
 
 ### Problem
 
