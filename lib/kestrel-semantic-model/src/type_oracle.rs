@@ -1483,6 +1483,24 @@ impl TypeOracle for ContextualOracle<'_> {
     ) -> Result<MemberResolution, MemberError> {
         resolve_init_impl(self.model, struct_ty, Some(self.context_symbol_id), labels, argument_types)
     }
+
+    fn resolve_subscript(
+        &self,
+        receiver_ty: &Ty,
+        labels: &[Option<String>],
+        argument_types: &[Option<Ty>],
+    ) -> Result<MemberResolution, MemberError> {
+        resolve_subscript_impl(self.model, receiver_ty, labels, argument_types)
+    }
+
+    fn resolve_function(
+        &self,
+        candidates: &[SymbolId],
+        labels: &[Option<String>],
+        argument_types: &[Option<Ty>],
+    ) -> Result<MemberResolution, MemberError> {
+        resolve_function_impl(self.model, candidates, labels, argument_types)
+    }
 }
 
 /// Resolve a member with optional context for extension bound lookup.
@@ -2086,6 +2104,334 @@ fn resolve_init_impl(
     }
 
     // Sort by score descending, pick best
+    scored.sort_by(|a, b| b.0.cmp(&a.0));
+    Ok(scored.into_iter().next().unwrap().1)
+}
+
+/// Resolve a subscript call on a type.
+///
+/// Finds subscript declarations on the receiver type (and its protocol conformances),
+/// matches by labels/arity, scores by argument types, and returns the best match.
+fn resolve_subscript_impl(
+    model: &SemanticModel,
+    receiver_ty: &Ty,
+    labels: &[Option<String>],
+    argument_types: &[Option<Ty>],
+) -> Result<MemberResolution, MemberError> {
+    use kestrel_semantic_tree::behavior::subscript::SubscriptBehavior;
+    use kestrel_semantic_tree::symbol::subscript::SubscriptSymbol;
+
+    if matches!(receiver_ty.kind(), TyKind::Infer) {
+        return Err(MemberError::UnknownType);
+    }
+
+    let (container, substitutions) = match get_type_container_with_subs(model, receiver_ty) {
+        Some((c, s)) => (c, s),
+        None => {
+            return Err(MemberError::NotFound {
+                receiver_ty: receiver_ty.clone(),
+                member: "subscript".to_string(),
+            });
+        },
+    };
+
+    // Collect subscript candidates from direct children and protocol conformances
+    let mut subscript_symbols: Vec<Arc<SubscriptSymbol>> = Vec::new();
+
+    for child in container.metadata().children() {
+        if child.metadata().kind() == KestrelSymbolKind::Subscript
+            && let Ok(subscript) = child.downcast_arc::<SubscriptSymbol>()
+        {
+            subscript_symbols.push(subscript);
+        }
+    }
+
+    // Check protocol conformances
+    if let Some(conformances) = container.metadata().get_behavior::<ConformancesBehavior>() {
+        for conformance_ty in conformances.conformances() {
+            if let TyKind::Protocol { symbol, .. } = conformance_ty.kind() {
+                for child in symbol.metadata().children() {
+                    if child.metadata().kind() == KestrelSymbolKind::Subscript
+                        && let Ok(subscript) = child.downcast_arc::<SubscriptSymbol>()
+                    {
+                        subscript_symbols.push(subscript);
+                    }
+                }
+            }
+        }
+    }
+
+    // Also check extensions
+    let extensions = model.query(ExtensionsFor {
+        target_id: container.metadata().id(),
+    });
+    for ext in extensions.iter() {
+        if !is_extension_applicable_to_type(ext, &substitutions, model, Some(receiver_ty)) {
+            continue;
+        }
+        for child in ext.metadata().children() {
+            if child.metadata().kind() == KestrelSymbolKind::Subscript
+                && let Ok(subscript) = child.downcast_arc::<SubscriptSymbol>()
+            {
+                subscript_symbols.push(subscript);
+            }
+        }
+    }
+
+    if subscript_symbols.is_empty() {
+        return Err(MemberError::NotFound {
+            receiver_ty: receiver_ty.clone(),
+            member: "subscript".to_string(),
+        });
+    }
+
+    // Convert labels to &str for matching
+    let labels_as_str: Vec<Option<&str>> = labels
+        .iter()
+        .map(|l| l.as_ref().map(|s| s.as_str()))
+        .collect();
+
+    // Find matching subscript by labels/arity and score by argument types
+    let mut scored: Vec<(usize, MemberResolution)> = Vec::new();
+
+    for subscript in &subscript_symbols {
+        let Some(behavior) = subscript.metadata().get_behavior::<SubscriptBehavior>() else {
+            continue;
+        };
+
+        if !behavior.matches_labels(&labels_as_str) {
+            continue;
+        }
+
+        let Some(getter_id) = subscript.getter_id() else {
+            continue;
+        };
+
+        // Handle subscript-level type parameters (e.g., subscript[F](value: F))
+        let mut subs = substitutions.clone();
+        let mut method_type_param_ids = Vec::new();
+        for child in subscript.metadata().children() {
+            if child.metadata().kind() == KestrelSymbolKind::TypeParameter {
+                let param_id = child.metadata().id();
+                subs.insert(param_id, Ty::infer(behavior.return_type().span().clone()));
+                method_type_param_ids.push(param_id);
+            }
+        }
+
+        // Build return type with receiver + subscript type param substitutions
+        let return_type = behavior.return_type().clone();
+        let return_type = return_type.substitute_self(receiver_ty);
+        let return_type = return_type.apply_substitutions(&subs);
+
+        // Build parameter types with substitutions
+        let param_tys: Vec<Ty> = behavior
+            .parameters()
+            .iter()
+            .map(|p| {
+                let ty = p.ty.substitute_self(receiver_ty);
+                ty.apply_substitutions(&subs)
+            })
+            .collect();
+
+        let required_count = behavior
+            .parameters()
+            .iter()
+            .filter(|p| !p.has_default())
+            .count();
+
+        // Get where clause from subscript symbol
+        let where_constraints = get_where_clause_from_symbol(subscript.as_ref())
+            .unwrap_or_default();
+
+        // Score by argument types
+        let mut score = 0usize;
+        for (i, arg_ty_opt) in argument_types.iter().enumerate() {
+            if let Some(arg_ty) = arg_ty_opt
+                && let Some(param_ty) = param_tys.get(i)
+            {
+                if arg_ty.to_string() == param_ty.to_string() {
+                    score += 2;
+                }
+            }
+        }
+
+        scored.push((
+            score,
+            MemberResolution {
+                ty: return_type,
+                symbol_id: getter_id,
+                substitutions: subs,
+                parameters: param_tys,
+                returns_self: false,
+                where_constraints,
+                required_parameter_count: required_count,
+                protocol_id: None,
+                has_setter: None,
+                method_type_param_ids,
+            },
+        ));
+    }
+
+    if scored.is_empty() {
+        return Err(MemberError::NotFound {
+            receiver_ty: receiver_ty.clone(),
+            member: "subscript".to_string(),
+        });
+    }
+
+    if scored.len() == 1 {
+        return Ok(scored.into_iter().next().unwrap().1);
+    }
+
+    scored.sort_by(|a, b| b.0.cmp(&a.0));
+    Ok(scored.into_iter().next().unwrap().1)
+}
+
+/// Resolve a direct function call from candidate symbol IDs.
+///
+/// Matches candidates by labels/arity, creates fresh inference variables for
+/// type parameters, and returns the best match with substitutions and parameter types.
+fn resolve_function_impl(
+    model: &SemanticModel,
+    candidates: &[SymbolId],
+    labels: &[Option<String>],
+    argument_types: &[Option<Ty>],
+) -> Result<MemberResolution, MemberError> {
+    use kestrel_semantic_tree::symbol::enum_symbol::EnumSymbol;
+
+    let mut scored: Vec<(usize, MemberResolution)> = Vec::new();
+
+    for &candidate_id in candidates {
+        let Some(symbol) = model.query(SymbolFor { id: candidate_id }) else {
+            continue;
+        };
+
+        let is_enum_case = symbol.metadata().kind() == KestrelSymbolKind::EnumCase;
+
+        let Some(callable) = symbol.metadata().get_behavior::<CallableBehavior>() else {
+            continue;
+        };
+
+        let label_match = matches_signature_labels(&callable, labels);
+        if !label_match {
+            continue;
+        }
+
+        // Check for instance method being called without an instance (but not enum cases)
+        if !is_enum_case && callable.is_instance_method() {
+            continue;
+        }
+
+        // Get the parent type for Self substitution (if applicable)
+        // For enum cases, we need to create fresh infer vars for the parent enum's type params
+        let (self_ty, parent_subs, parent_type_param_ids) = if is_enum_case {
+            if let Some(parent) = symbol.metadata().parent() {
+                if let Some(enum_sym_arc) = parent.clone().downcast_arc::<EnumSymbol>().ok() {
+                    let type_params = enum_sym_arc.type_parameters();
+                    let mut subs = Substitutions::new();
+                    let mut type_param_ids = Vec::new();
+                    for tp in &type_params {
+                        let param_id = tp.metadata().id();
+                        subs.insert(param_id, Ty::infer(callable.span().clone()));
+                        type_param_ids.push(param_id);
+                    }
+                    // Build self_ty as Enum[_infer_, _infer_, ...] using generic_enum constructor
+                    let self_ty = if type_params.is_empty() {
+                        Ty::r#enum(enum_sym_arc, callable.span().clone())
+                    } else {
+                        Ty::generic_enum(enum_sym_arc, subs.clone(), callable.span().clone())
+                    };
+                    (self_ty, subs, type_param_ids)
+                } else {
+                    let ty = parent
+                        .metadata()
+                        .get_behavior::<TypedBehavior>()
+                        .map(|typed| typed.ty().clone())
+                        .unwrap_or_else(|| Ty::unit(kestrel_span::Span::synthetic(0)));
+                    (ty, Substitutions::new(), vec![])
+                }
+            } else {
+                (Ty::unit(kestrel_span::Span::synthetic(0)), Substitutions::new(), vec![])
+            }
+        } else {
+            let ty = symbol
+                .metadata()
+                .parent()
+                .and_then(|p| p.metadata().get_behavior::<TypedBehavior>())
+                .map(|typed| typed.ty().clone())
+                .unwrap_or_else(|| Ty::unit(kestrel_span::Span::synthetic(0)));
+            (ty, Substitutions::new(), vec![])
+        };
+
+        let mut resolution = resolve_callable_member(
+            &callable,
+            symbol.as_ref(),
+            candidate_id,
+            &parent_subs,
+            &self_ty,
+            true,
+            AssocTypeResolution::Shallow(model),
+        );
+
+        // For enum cases, the return type should be the enum type (self_ty), not the raw return type
+        if is_enum_case {
+            resolution.ty = self_ty.clone();
+            // Include parent type param IDs so the solver can resolve them
+            resolution.method_type_param_ids = parent_type_param_ids;
+        }
+
+        // Score by argument types
+        let mut score = 0usize;
+        for (i, arg_ty_opt) in argument_types.iter().enumerate() {
+            if let Some(arg_ty) = arg_ty_opt
+                && let Some(param_ty) = resolution.parameters.get(i)
+            {
+                if arg_ty.to_string() == param_ty.to_string() {
+                    score += 2;
+                } else if let TyKind::Protocol { symbol, .. } = param_ty.kind()
+                    && model.conforms_to(arg_ty, symbol.metadata().id())
+                {
+                    score += 1;
+                }
+            }
+        }
+
+        scored.push((score, resolution));
+    }
+
+    if scored.is_empty() {
+        let name = candidates
+            .first()
+            .and_then(|id| model.query(SymbolFor { id: *id }))
+            .map(|s| s.metadata().name().value.clone())
+            .unwrap_or_else(|| "function".to_string());
+
+        // Collect expected labels from the first candidate that has callable behavior
+        let expected_labels: Vec<Option<String>> = candidates
+            .iter()
+            .filter_map(|id| model.query(SymbolFor { id: *id }))
+            .filter_map(|s| s.metadata().get_behavior::<CallableBehavior>())
+            .next()
+            .map(|callable| {
+                callable
+                    .parameters()
+                    .iter()
+                    .map(|p| p.label.as_ref().map(|l| l.value.clone()))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        return Err(MemberError::NoMatchingOverload {
+            name,
+            provided_labels: labels.to_vec(),
+            expected_labels,
+        });
+    }
+
+    if scored.len() == 1 {
+        return Ok(scored.into_iter().next().unwrap().1);
+    }
+
     scored.sort_by(|a, b| b.0.cmp(&a.0));
     Ok(scored.into_iter().next().unwrap().1)
 }

@@ -459,6 +459,26 @@ fn try_solve(
             result,
             span,
         } => resolve_tuple_index(ctx, *tuple, *index, *result, span),
+        Constraint::FunctionCall {
+            candidates,
+            arguments,
+            argument_expr_ids,
+            labels,
+            explicit_type_args,
+            result,
+            expr_id,
+            span,
+        } => resolve_function_call(
+            ctx,
+            candidates,
+            arguments,
+            argument_expr_ids,
+            labels,
+            explicit_type_args,
+            *result,
+            *expr_id,
+            span,
+        ),
     }
 }
 
@@ -1671,6 +1691,142 @@ fn normalize(
 /// This is called when tuple indexing is deferred because the tuple type
 /// wasn't known at constraint generation time (e.g., type parameter with
 /// a tuple constraint like `where Item = (A, B)`).
+/// Resolve a direct function call or overloaded call.
+fn resolve_function_call(
+    ctx: &mut InferenceContext<'_>,
+    candidates: &[semantic_tree::symbol::SymbolId],
+    arguments: &[TyId],
+    argument_expr_ids: &[kestrel_semantic_tree::expr::ExprId],
+    labels: &[Option<String>],
+    explicit_type_args: &Option<Vec<kestrel_semantic_tree::ty::Ty>>,
+    result: TyId,
+    expr_id: kestrel_semantic_tree::expr::ExprId,
+    span: &Span,
+) -> Result<SolveResult, InferenceError> {
+    let argument_types: Vec<Option<Ty>> = arguments
+        .iter()
+        .map(|arg_id| {
+            let ty = resolve_type(ctx, *arg_id);
+            if matches!(
+                ty.kind(),
+                TyKind::Infer
+                    | TyKind::TypeParameter(_)
+                    | TyKind::AssociatedType { .. }
+                    | TyKind::SelfType
+            ) {
+                None
+            } else {
+                Some(ty)
+            }
+        })
+        .collect();
+
+    let resolution_result = ctx.oracle().resolve_function(candidates, labels, &argument_types);
+
+    match resolution_result {
+        Ok(resolution) => {
+            let mut substitutions = resolution.substitutions.clone();
+
+            // Convert explicit type args to substitutions
+            if let Some(type_args) = explicit_type_args {
+                for (param_id, type_arg) in resolution
+                    .method_type_param_ids
+                    .iter()
+                    .zip(type_args.iter())
+                {
+                    ctx.register_type(type_arg);
+                    if let Some(infer_var) = resolution.substitutions.get(*param_id) {
+                        ctx.register_type(infer_var);
+                        ctx.equate(infer_var.id(), type_arg.id(), span.clone());
+                    }
+                    substitutions.insert(*param_id, type_arg.clone());
+                }
+            }
+
+            // Record the value resolution
+            ctx.values_mut().insert(
+                expr_id,
+                ValueResolution::new(resolution.symbol_id, substitutions.clone()),
+            );
+
+            // Register and unify the return type with the result
+            ctx.register_type(&resolution.ty);
+            ctx.equate(resolution.ty.id(), result, span.clone());
+
+            // Create promotable constraints for argument types vs parameter types
+            // This enables implicit Optional/Result wrapping (value promotion)
+            for (i, (arg_ty_id, param_ty)) in arguments.iter().zip(resolution.parameters.iter()).enumerate() {
+                ctx.register_type(param_ty);
+                if let Some(&arg_expr_id) = argument_expr_ids.get(i) {
+                    ctx.promotable(*arg_ty_id, param_ty.id(), arg_expr_id, span.clone());
+                } else {
+                    ctx.equate(*arg_ty_id, param_ty.id(), span.clone());
+                }
+            }
+
+            // Process where clause constraints
+            {
+                use kestrel_semantic_tree::ty::Constraint as WhereConstraint;
+                for constraint in resolution.where_constraints.constraints() {
+                    match constraint {
+                        WhereConstraint::TypeBound { param, bounds, .. } => {
+                            if let Some(param_id) = param {
+                                if let Some(param_ty) = substitutions.get(*param_id) {
+                                    let param_ty = param_ty.clone();
+                                    for bound in bounds {
+                                        let bound = bound.apply_substitutions(&substitutions);
+                                        if let TyKind::Protocol { symbol, .. } = bound.kind() {
+                                            ctx.register_type(&param_ty);
+                                            ctx.conforms(
+                                                param_ty.id(),
+                                                ProtocolRef {
+                                                    symbol_id: symbol.metadata().id(),
+                                                    span: span.clone(),
+                                                },
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        WhereConstraint::TypeEquality { left, right, .. } => {
+                            let left_ty = left.apply_substitutions(&substitutions);
+                            let right_ty = right.apply_substitutions(&substitutions);
+                            ctx.register_type(&left_ty);
+                            ctx.register_type(&right_ty);
+                            ctx.equate(left_ty.id(), right_ty.id(), span.clone());
+                        },
+                        _ => {},
+                    }
+                }
+            }
+
+            Ok(SolveResult::Solved)
+        },
+        Err(MemberError::UnknownType) => Ok(SolveResult::Deferred),
+        Err(MemberError::NotFound { member, .. }) => Err(InferenceError::member_not_found(
+            Ty::unit(span.clone()),
+            member,
+            span.clone(),
+        )),
+        Err(MemberError::NoMatchingOverload {
+            name,
+            provided_labels,
+            expected_labels,
+        }) => Err(InferenceError::no_matching_overload(
+            name,
+            Ty::unit(span.clone()),
+            provided_labels,
+            expected_labels,
+            span.clone(),
+        )),
+        Err(MemberError::Ambiguous { count }) => Err(InferenceError::internal(format!(
+            "ambiguous function call: {} candidates",
+            count
+        ))),
+    }
+}
+
 fn resolve_tuple_index(
     ctx: &mut InferenceContext<'_>,
     tuple: TyId,
@@ -1902,6 +2058,121 @@ fn resolve_member(
                     count
                 )));
             },
+            Err(MemberError::NoMatchingOverload {
+                name,
+                provided_labels,
+                expected_labels,
+            }) => {
+                return Err(InferenceError::no_matching_overload(
+                    name,
+                    receiver_ty.clone(),
+                    provided_labels,
+                    expected_labels,
+                    span.clone(),
+                ));
+            },
+        }
+    }
+
+    // Special handling for subscript calls: use oracle.resolve_subscript()
+    // Subscript calls come from DeferredSubscriptCall with member="subscript"
+    if member == "subscript" && !is_static {
+        let argument_types: Vec<Option<Ty>> = arguments
+            .iter()
+            .map(|arg_id| {
+                let ty = resolve_type(ctx, *arg_id);
+                if matches!(
+                    ty.kind(),
+                    TyKind::Infer
+                        | TyKind::TypeParameter(_)
+                        | TyKind::AssociatedType { .. }
+                        | TyKind::SelfType
+                ) {
+                    None
+                } else {
+                    Some(ty)
+                }
+            })
+            .collect();
+
+        let resolution_result =
+            ctx.oracle()
+                .resolve_subscript(&receiver_ty, labels, &argument_types);
+
+        match resolution_result {
+            Ok(resolution) => {
+                let mut substitutions = resolution.substitutions.clone();
+                for (param_id, ty) in call_site_substitutions.iter() {
+                    substitutions.insert(*param_id, ty.clone());
+                }
+
+                // Record the value resolution
+                ctx.values_mut().insert(
+                    expr_id,
+                    ValueResolution::new(resolution.symbol_id, substitutions.clone()),
+                );
+
+                // Register and unify the return type with the result
+                ctx.register_type(&resolution.ty);
+                ctx.equate(resolution.ty.id(), result, span.clone());
+
+                // Create constraints for argument types vs parameter types
+                for (arg_ty_id, param_ty) in arguments.iter().zip(resolution.parameters.iter()) {
+                    ctx.register_type(param_ty);
+                    ctx.equate(*arg_ty_id, param_ty.id(), span.clone());
+                }
+
+                // Process where clause constraints from the subscript
+                {
+                    use kestrel_semantic_tree::ty::Constraint as WhereConstraint;
+                    for constraint in resolution.where_constraints.constraints() {
+                        match constraint {
+                            WhereConstraint::TypeBound { param, bounds, .. } => {
+                                if let Some(param_id) = param {
+                                    if let Some(param_ty) = substitutions.get(*param_id) {
+                                        let param_ty = param_ty.clone();
+                                        for bound in bounds {
+                                            let bound = bound.apply_substitutions(&substitutions);
+                                            if let TyKind::Protocol { symbol, .. } = bound.kind() {
+                                                ctx.register_type(&param_ty);
+                                                ctx.conforms(
+                                                    param_ty.id(),
+                                                    ProtocolRef {
+                                                        symbol_id: symbol.metadata().id(),
+                                                        span: span.clone(),
+                                                    },
+                                                );
+                                            }
+                                        }
+                                    }
+                                }
+                            },
+                            _ => {},
+                        }
+                    }
+                }
+
+                return Ok(SolveResult::Solved);
+            },
+            Err(MemberError::UnknownType) => return Ok(SolveResult::Deferred),
+            Err(MemberError::NotFound { .. }) => {
+                return Err(InferenceError::member_not_found(
+                    receiver_ty.clone(),
+                    "subscript".to_string(),
+                    span.clone(),
+                ));
+            },
+            Err(MemberError::Ambiguous { count }) => {
+                return Err(InferenceError::internal(format!(
+                    "ambiguous subscript: {} candidates",
+                    count
+                )));
+            },
+            Err(MemberError::NoMatchingOverload { name, provided_labels, expected_labels }) => {
+                return Err(InferenceError::no_matching_overload(
+                    name, receiver_ty.clone(), provided_labels, expected_labels, span.clone(),
+                ));
+            },
         }
     }
 
@@ -1954,6 +2225,11 @@ fn resolve_member(
                     "ambiguous member '{}': {} candidates",
                     member, count
                 )));
+            },
+            Err(MemberError::NoMatchingOverload { name, provided_labels, expected_labels }) => {
+                return Err(InferenceError::no_matching_overload(
+                    name, receiver_ty.clone(), provided_labels, expected_labels, span.clone(),
+                ));
             },
         }
     }
@@ -2101,6 +2377,11 @@ fn resolve_member(
             "ambiguous member '{}': {} candidates",
             member, count
         ))),
+        Err(MemberError::NoMatchingOverload { name, provided_labels, expected_labels }) => {
+            Err(InferenceError::no_matching_overload(
+                name, receiver_ty.clone(), provided_labels, expected_labels, span.clone(),
+            ))
+        },
     }
 }
 
@@ -2719,6 +3000,14 @@ fn check_fully_resolved(ctx: &mut InferenceContext<'_>) {
             },
             Constraint::TupleIndexAccess { tuple, result, .. } => {
                 check_resolved_id(*tuple, ctx, &mut unresolved);
+                check_resolved_id(*result, ctx, &mut unresolved);
+            },
+            Constraint::FunctionCall {
+                arguments, result, ..
+            } => {
+                for arg in arguments {
+                    check_resolved_id(*arg, ctx, &mut unresolved);
+                }
                 check_resolved_id(*result, ctx, &mut unresolved);
             },
         }

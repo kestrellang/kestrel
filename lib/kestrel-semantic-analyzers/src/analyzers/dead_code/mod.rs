@@ -407,6 +407,29 @@ fn analyze_expression(expr: &Expression, errors: &mut Vec<UnreachableCodeWarning
         ExprKind::DeferredMemberAccess { receiver, .. } => {
             analyze_expression(receiver, errors)
         },
+        ExprKind::DeferredSubscriptCall {
+            receiver,
+            arguments,
+            ..
+        } => {
+            let _ = analyze_expression(receiver, errors);
+            for arg in arguments {
+                let d = analyze_expression(&arg.value, errors);
+                if d.diverges() {
+                    return d;
+                }
+            }
+            Divergence::None
+        },
+        ExprKind::DeferredFunctionCall { arguments, .. } => {
+            for arg in arguments {
+                let d = analyze_expression(&arg.value, errors);
+                if d.diverges() {
+                    return d;
+                }
+            }
+            Divergence::None
+        },
         ExprKind::ImplicitStructInit { arguments, .. } => {
             for arg in arguments {
                 let d = analyze_expression(&arg.value, errors);

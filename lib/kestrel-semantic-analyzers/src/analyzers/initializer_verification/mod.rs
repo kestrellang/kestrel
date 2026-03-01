@@ -354,6 +354,21 @@ fn analyze_expression(
                 state = analyze_expression(&arg.value, state, false, ctx);
             }
         },
+        ExprKind::DeferredSubscriptCall {
+            receiver,
+            arguments,
+            ..
+        } => {
+            state = analyze_expression(receiver, state, false, ctx);
+            for arg in arguments {
+                state = analyze_expression(&arg.value, state, false, ctx);
+            }
+        },
+        ExprKind::DeferredFunctionCall { arguments, .. } => {
+            for arg in arguments {
+                state = analyze_expression(&arg.value, state, false, ctx);
+            }
+        },
         ExprKind::DeferredMemberAccess { receiver, member } => {
             if is_self_expr(receiver) {
                 if !is_assignment_target && !state.assigned.contains(member) {

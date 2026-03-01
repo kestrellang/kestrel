@@ -65,6 +65,15 @@ pub enum MemberError {
         /// Number of candidates
         count: usize,
     },
+    /// Candidates exist but none match the provided labels/arity
+    NoMatchingOverload {
+        /// The function/method name
+        name: String,
+        /// The provided argument labels
+        provided_labels: Vec<Option<String>>,
+        /// The expected labels from the best candidate
+        expected_labels: Vec<Option<String>>,
+    },
 }
 
 /// Trait for querying type information during inference.
@@ -346,6 +355,62 @@ pub trait TypeOracle {
     ) -> Result<Vec<MemberResolution>, MemberError> {
         self.resolve_member(receiver_ty, member, is_static)
             .map(|r| vec![r])
+    }
+
+    /// Resolve a subscript call on a type.
+    ///
+    /// Used for deferred subscript calls where resolution needs full type information.
+    /// Finds matching subscript declarations on the receiver type and its protocol conformances.
+    ///
+    /// # Arguments
+    ///
+    /// * `receiver_ty` - The type being subscripted
+    /// * `labels` - Argument labels (None for unlabeled args)
+    /// * `argument_types` - Resolved argument types (None if not yet known)
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(resolution)` - The matching subscript with its getter symbol, return type, etc.
+    /// * `Err(MemberError)` - No matching subscript found
+    fn resolve_subscript(
+        &self,
+        receiver_ty: &Ty,
+        labels: &[Option<String>],
+        argument_types: &[Option<Ty>],
+    ) -> Result<MemberResolution, MemberError> {
+        let _ = (receiver_ty, labels, argument_types);
+        Err(MemberError::NotFound {
+            receiver_ty: receiver_ty.clone(),
+            member: "subscript".to_string(),
+        })
+    }
+
+    /// Resolve a direct function call.
+    ///
+    /// Used for deferred function calls where overload resolution needs full type information.
+    /// Checks candidates against labels and argument types.
+    ///
+    /// # Arguments
+    ///
+    /// * `candidates` - Candidate function symbol IDs
+    /// * `labels` - Argument labels (None for unlabeled args)
+    /// * `argument_types` - Resolved argument types (None if not yet known)
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(resolution)` - The matching function with its symbol, return type, parameters, etc.
+    /// * `Err(MemberError)` - No matching function found
+    fn resolve_function(
+        &self,
+        candidates: &[SymbolId],
+        labels: &[Option<String>],
+        argument_types: &[Option<Ty>],
+    ) -> Result<MemberResolution, MemberError> {
+        let _ = (candidates, labels, argument_types);
+        Err(MemberError::NotFound {
+            receiver_ty: Ty::unit(Span::synthetic(0)),
+            member: "function".to_string(),
+        })
     }
 
     /// Check if a target symbol is visible from the given context.

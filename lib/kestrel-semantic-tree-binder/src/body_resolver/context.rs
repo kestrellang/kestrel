@@ -9,7 +9,8 @@ use kestrel_reporting::{DiagnosticContext, IntoDiagnostic};
 use kestrel_semantic_model::{SemanticModel, SymbolFor};
 use kestrel_semantic_tree::behavior::executable::{CodeBlock, ExecutableBehavior};
 use kestrel_semantic_tree::behavior::generics::GenericsBehavior;
-use kestrel_semantic_tree::expr::LoopId;
+use kestrel_semantic_tree::builtins::LanguageFeature;
+use kestrel_semantic_tree::expr::{CallArgument, Expression, LoopId};
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::stmt::Statement;
 use kestrel_semantic_tree::symbol::function::FunctionSymbol;
@@ -192,6 +193,39 @@ impl<'a> BodyResolutionContext<'a> {
         })?;
         let callable = get_callable_behavior(&symbol)?;
         Some(callable.return_type().clone())
+    }
+
+    /// Create a protocol method call: receiver.method(args)
+    ///
+    /// Looks up the method from the builtin registry and creates MethodRef + Call.
+    /// Falls back to DeferredMethodCall if the builtin is not registered (no stdlib).
+    pub fn builtin_method_call(
+        &self,
+        receiver: Expression,
+        feature: LanguageFeature,
+        method_name: &str,
+        arguments: Vec<CallArgument>,
+        result_ty: Ty,
+        span: Span,
+    ) -> Expression {
+        if let Some(method_id) = self.model.builtin_registry().method(feature) {
+            let method_ref = Expression::method_ref(
+                receiver,
+                vec![method_id],
+                method_name.to_string(),
+                span.clone(),
+            );
+            Expression::call(method_ref, arguments, result_ty, span)
+        } else {
+            Expression::deferred_method_call(
+                receiver,
+                method_name.to_string(),
+                arguments,
+                None,
+                result_ty,
+                span,
+            )
+        }
     }
 
     /// Check if we're currently in an initializer context.

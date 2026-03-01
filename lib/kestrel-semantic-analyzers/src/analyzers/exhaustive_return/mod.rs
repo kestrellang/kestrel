@@ -372,6 +372,29 @@ fn analyze_expression(expr: &Expression) -> ReturnState {
         ExprKind::DeferredMemberAccess { receiver, .. } => {
             analyze_expression(receiver)
         },
+        ExprKind::DeferredSubscriptCall {
+            receiver,
+            arguments,
+            ..
+        } => {
+            let _ = analyze_expression(receiver);
+            for arg in arguments {
+                let s = analyze_expression(&arg.value);
+                if s.definitely_returns() {
+                    return s;
+                }
+            }
+            ReturnState::MayFallThrough
+        },
+        ExprKind::DeferredFunctionCall { arguments, .. } => {
+            for arg in arguments {
+                let s = analyze_expression(&arg.value);
+                if s.definitely_returns() {
+                    return s;
+                }
+            }
+            ReturnState::MayFallThrough
+        },
         ExprKind::ImplicitStructInit { arguments, .. } => {
             for arg in arguments {
                 let s = analyze_expression(&arg.value);

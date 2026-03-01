@@ -275,6 +275,27 @@ fn walk_expression(
             ExprKind::DeferredMemberAccess { receiver, .. } => {
                 walk_expression(receiver, analyzers, model, ctx);
             },
+            ExprKind::DeferredSubscriptCall {
+                receiver,
+                arguments,
+                ..
+            } => {
+                walk_expression(receiver, analyzers, model, ctx);
+                for arg in arguments {
+                    walk_expression(&arg.value, analyzers, model, ctx);
+                    if ctx.stopped {
+                        return;
+                    }
+                }
+            },
+            ExprKind::DeferredFunctionCall { arguments, .. } => {
+                for arg in arguments {
+                    walk_expression(&arg.value, analyzers, model, ctx);
+                    if ctx.stopped {
+                        return;
+                    }
+                }
+            },
             ExprKind::ImplicitStructInit { arguments, .. } => {
                 for arg in arguments {
                     walk_expression(&arg.value, analyzers, model, ctx);

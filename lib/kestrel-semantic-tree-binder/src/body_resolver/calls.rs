@@ -7,14 +7,12 @@ use std::sync::Arc;
 
 use kestrel_reporting::IntoDiagnostic;
 use kestrel_semantic_model::queries::ExtensionsFor;
-use kestrel_semantic_model::{IsVisibleFrom, SemanticModel, SymbolFor};
+use kestrel_semantic_model::{IsVisibleFrom, SymbolFor};
 use kestrel_semantic_tree::behavior::callable::{CallableBehavior, ParameterAccessMode};
 use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
 use kestrel_semantic_tree::behavior::subscript::SubscriptBehavior;
 use kestrel_semantic_tree::expr::{CallArgument, ExprKind, Expression};
 use kestrel_semantic_tree::language::KestrelLanguage;
-use kestrel_semantic_tree::symbol::enum_case::EnumCaseSymbol;
-use kestrel_semantic_tree::symbol::enum_symbol::EnumSymbol;
 use kestrel_semantic_tree::symbol::field::FieldSymbol;
 use kestrel_semantic_tree::symbol::function::FunctionSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
@@ -35,10 +33,9 @@ use crate::diagnostics::{
     CannotPassImmutableFieldToMutatingError, CannotPassLetToMutatingError,
     CannotPassTemporaryToMutatingError, ClosureArityError,
     FieldNotVisibleForInitError, ImplicitInitArityError, ImplicitInitLabelError,
-    InstanceMethodOnTypeError, NoInitInTypeParameterBoundsError,
-    NoMatchingOverloadError,
+    NoInitInTypeParameterBoundsError,
     NoMatchingTypeParameterInitError, NonCallableError, NotGenericError, OverloadDescription,
-    PrimitiveMethodArityError, TooFewTypeArgumentsError, TooManyTypeArgumentsError,
+    PrimitiveMethodArityError, TooFewTypeArgumentsError,
     TypeArgsOnNonGenericError, UnconstrainedTypeParameterMemberError,
 };
 use kestrel_syntax_tree::utils::get_node_span;
@@ -355,20 +352,106 @@ pub fn resolve_call(
                     return subscript_expr;
                 }
             }
-            // Not a field, or field type has no subscripts - try function call
-            resolve_single_function_call(
+            // Not a field, or field type has no subscripts - defer function call to type inference
+            // Validate access modes and where clause constraints eagerly
+            if let Some(symbol) = ctx.model.query(SymbolFor { id: symbol_id })
+                && let Some(callable) = get_callable_behavior(&symbol)
+            {
+                validate_argument_access_modes(&callable, &arguments, &span, ctx);
+
+                // Eagerly validate explicit type args count and where clause constraints
+                if let Some(func_sym) = symbol.as_any().downcast_ref::<FunctionSymbol>() {
+                    let type_params = func_sym.type_parameters();
+
+                    // Validate explicit type arg count
+                    if let Some(ref type_args) = explicit_type_args {
+                        if type_params.is_empty() {
+                            let function_name = symbol.metadata().name().value.clone();
+                            ctx.diagnostics.add_diagnostic(
+                                NotGenericError {
+                                    span: span.clone(),
+                                    type_name: function_name,
+                                }
+                                .into_diagnostic(),
+                            );
+                        } else if type_args.len() < type_params.len() {
+                            let function_name = symbol.metadata().name().value.clone();
+                            ctx.diagnostics.add_diagnostic(
+                                TooFewTypeArgumentsError {
+                                    span: span.clone(),
+                                    type_name: function_name,
+                                    min_expected: type_params.len(),
+                                    got: type_args.len(),
+                                }
+                                .into_diagnostic(),
+                            );
+                        }
+                    }
+
+                    if !type_params.is_empty() {
+                        let arg_types: Vec<Ty> = arguments.iter().map(|a| a.value.ty.clone()).collect();
+                        let subs = infer_type_arguments(&type_params, &callable, &arg_types);
+                        let inferred_args: Vec<Ty> = type_params
+                            .iter()
+                            .map(|tp| {
+                                let tp_id = tp.metadata().id();
+                                subs.get(tp_id).cloned().unwrap_or_else(|| Ty::infer(span.clone()))
+                            })
+                            .collect();
+                        let where_clause = func_sym.where_clause();
+                        verify_type_argument_constraints(
+                            &type_params,
+                            &inferred_args,
+                            &where_clause,
+                            span.clone(),
+                            ctx.model,
+                            ctx.diagnostics,
+                        );
+                    }
+                }
+            }
+            let best_effort_ty = compute_function_best_effort_return_type(
                 symbol_id,
-                callee,
+                &arguments,
+                &explicit_type_args,
+                &span,
+                ctx,
+            );
+            Expression::deferred_function_call(
+                vec![symbol_id],
                 arguments,
                 explicit_type_args,
+                best_effort_ty,
                 span,
-                ctx,
             )
         },
 
         // Overloaded function reference - need to pick one
         ExprKind::OverloadedRef(ref candidates) => {
-            resolve_overloaded_call(candidates, callee, arguments, arg_labels, span, ctx)
+            // Validate access modes eagerly on the matching candidate
+            for &candidate_id in candidates.iter() {
+                if let Some(symbol) = ctx.model.query(SymbolFor { id: candidate_id })
+                    && let Some(callable) = get_callable_behavior(&symbol)
+                    && matches_signature(&callable, arguments.len(), arg_labels)
+                {
+                    validate_argument_access_modes(&callable, &arguments, &span, ctx);
+                    break;
+                }
+            }
+            let best_effort_ty = compute_overloaded_best_effort_return_type(
+                candidates,
+                &arguments,
+                arg_labels,
+                &span,
+                ctx,
+            );
+            Expression::deferred_function_call(
+                candidates.clone(),
+                arguments,
+                explicit_type_args,
+                best_effort_ty,
+                span,
+            )
         },
 
         // Method reference (from member access on a type)
@@ -723,6 +806,12 @@ pub fn try_resolve_subscript_call(
 ) -> Option<Expression> {
     let receiver_ty = &receiver.ty;
 
+    // If receiver type is Infer, we can't check for subscripts yet — defer.
+    // Return None so the caller can fall through to other resolution paths.
+    if matches!(receiver_ty.kind(), TyKind::Infer) {
+        return None;
+    }
+
     // Get the container (struct/enum/protocol) from the type
     let container = get_type_container(receiver_ty, ctx)?;
 
@@ -732,29 +821,21 @@ pub fn try_resolve_subscript_call(
         return None;
     }
 
-    // Try to find a matching subscript based on argument labels
-    let matching = find_matching_subscript(&subscripts, arguments, arg_labels)?;
+    // Compute best-effort return type from matching subscript
+    let best_effort_ty = find_matching_subscript(&subscripts, arguments, arg_labels)
+        .and_then(|matching| {
+            let behavior = matching.metadata().get_behavior::<SubscriptBehavior>()?;
+            let return_type = behavior.return_type().clone();
+            let return_type = substitute_self(&return_type, receiver_ty);
+            Some(substitute_receiver_type_args(&return_type, receiver_ty))
+        })
+        .unwrap_or_else(|| Ty::infer(span.clone()));
 
-    // Get the subscript behavior for parameter/return type info
-    let behavior = matching.metadata().get_behavior::<SubscriptBehavior>()?;
-
-    // Get the subscript's getter ID
-    let getter_id = matching.getter_id()?;
-
-    // Get return type and substitute Self with the receiver type
-    let return_type = behavior.return_type().clone();
-    let return_type = substitute_self(&return_type, receiver_ty);
-
-    // Substitute type arguments from the receiver type
-    let return_type = substitute_receiver_type_args(&return_type, receiver_ty);
-
-    // Create a call to the getter with the receiver as the first implicit argument
-    // The getter signature is: get(self, <params>) -> T
-    Some(Expression::subscript_call(
+    // Defer to type inference for full resolution
+    Some(Expression::deferred_subscript_call(
         receiver.clone(),
-        getter_id,
         arguments.to_vec(),
-        return_type,
+        best_effort_ty,
         span.clone(),
     ))
 }
@@ -1226,363 +1307,117 @@ fn infer_deferred_method_return_type(
     inferred.unwrap_or_else(|| Ty::infer(span.clone()))
 }
 
-/// Resolve a call to a single function (not overloaded)
-fn resolve_single_function_call(
+
+/// Compute a best-effort return type for a single function call.
+///
+/// Extracts return type from the callable behavior without full resolution.
+/// Used for deferred function calls to prevent cascading bind-time errors.
+fn compute_function_best_effort_return_type(
     symbol_id: SymbolId,
-    callee: Expression,
-    arguments: Vec<CallArgument>,
-    explicit_type_args: Option<Vec<Ty>>,
-    span: Span,
-    ctx: &mut BodyResolutionContext,
-) -> Expression {
-    // Get the function symbol
+    arguments: &[CallArgument],
+    explicit_type_args: &Option<Vec<Ty>>,
+    span: &Span,
+    ctx: &BodyResolutionContext,
+) -> Ty {
     let Some(symbol) = ctx.model.query(SymbolFor { id: symbol_id }) else {
-        return Expression::error(span);
+        return Ty::infer(span.clone());
     };
 
-    // Get the callable behavior
     let Some(callable) = get_callable_behavior(&symbol) else {
-        return Expression::error(span);
+        return Ty::infer(span.clone());
     };
 
-    // Check if this is an instance method being called without an instance
-    // This happens when we have Type.instanceMethod() instead of instance.instanceMethod()
-    if callable.is_instance_method() {
-        // Get the parent type name for the error message
-        let type_name = symbol
-            .metadata()
-            .parent()
-            .map(|p| p.metadata().name().value.clone())
-            .unwrap_or_else(|| "<unknown>".to_string());
-        let method_name = symbol.metadata().name().value.clone();
+    let return_ty = callable.return_type().clone();
 
-        let error = InstanceMethodOnTypeError {
-            span: span.clone(),
-            type_name,
-            method_name,
-        };
-        ctx.diagnostics.add_diagnostic(error.into_diagnostic());
-        return Expression::error(span);
-    }
-
-    // Check arity and labels
-    let arg_labels: Vec<Option<String>> = arguments.iter().map(|a| a.label.clone()).collect();
-
-    if !matches_signature(&callable, arguments.len(), &arg_labels) {
-        // Report error - wrong arity or labels
-        let function_name = symbol.metadata().name().value.clone();
-        let available_overloads = vec![collect_single_overload_description(&symbol)];
-
-        let error = NoMatchingOverloadError {
-            call_span: span.clone(),
-            name: function_name,
-            provided_labels: arg_labels,
-            provided_arity: arguments.len(),
-            available_overloads,
-        };
-        ctx.diagnostics.add_diagnostic(error.into_diagnostic());
-        return Expression::error(span);
-    }
-
-    // Validate access modes for arguments (mutating parameters require mutable lvalues)
-    validate_argument_access_modes(&callable, &arguments, &span, ctx);
-
-    // For static methods, get the parent type for Self substitution
-    use super::utils::substitute_self;
-    use kestrel_semantic_tree::behavior::typed::TypedBehavior;
-    let self_replacement: Option<Ty> = symbol.metadata().parent().and_then(|parent| {
-        parent
-            .metadata()
-            .get_behavior::<TypedBehavior>()
-            .map(|typed| typed.ty().clone())
-    });
-
-    // Get return type and substitutions, applying explicit type arguments if provided
-    // or inferring them from argument types
-    let (return_ty, call_substitutions) = if let Some(ref type_args) = explicit_type_args {
-        // Try to downcast to FunctionSymbol to access type parameters
+    // If explicit type args are provided, apply substitutions
+    if let Some(type_args) = explicit_type_args {
         if let Some(func_sym) = symbol.as_any().downcast_ref::<FunctionSymbol>() {
             let type_params = func_sym.type_parameters();
-            let function_name = symbol.metadata().name().value.clone();
-
-            // Validate: function must be generic if type args are provided
-            if type_params.is_empty() {
-                ctx.diagnostics.add_diagnostic(
-                    NotGenericError {
-                        span: span.clone(),
-                        type_name: function_name,
-                    }
-                    .into_diagnostic(),
-                );
-                return Expression::error(span);
-            }
-
-            // Validate: type arg count must match type param count
-            if type_args.len() < type_params.len() {
-                ctx.diagnostics.add_diagnostic(
-                    TooFewTypeArgumentsError {
-                        span: span.clone(),
-                        type_name: function_name,
-                        min_expected: type_params.len(),
-                        got: type_args.len(),
-                    }
-                    .into_diagnostic(),
-                );
-                return Expression::error(span);
-            }
-
-            if type_args.len() > type_params.len() {
-                ctx.diagnostics.add_diagnostic(
-                    TooManyTypeArgumentsError {
-                        span: span.clone(),
-                        type_name: function_name,
-                        max_expected: type_params.len(),
-                        got: type_args.len(),
-                    }
-                    .into_diagnostic(),
-                );
-                return Expression::error(span);
-            }
-
-            // Build substitutions from type parameters to provided type arguments
-            let mut substitutions = Substitutions::new();
-            for (param, arg_ty) in type_params.iter().zip(type_args.iter()) {
-                substitutions.insert(param.metadata().id(), arg_ty.clone());
-            }
-
-            // Verify constraints are satisfied
-            let where_clause = func_sym.where_clause();
-            verify_type_argument_constraints(
-                &type_params,
-                type_args,
-                &where_clause,
-                span.clone(),
-                ctx.model,
-                ctx.diagnostics,
-            );
-
-            // Apply substitution to return type
-            let return_ty = substitute_type(callable.return_type(), &substitutions);
-            (return_ty, substitutions)
-        } else {
-            (callable.return_type().clone(), Substitutions::new())
-        }
-    } else {
-        // No explicit type arguments - try to infer from argument types
-        if let Some(func_sym) = symbol.as_any().downcast_ref::<FunctionSymbol>() {
-            let type_params = func_sym.type_parameters();
-
-            if !type_params.is_empty() {
-                // Collect argument types
-                let arg_types: Vec<Ty> = arguments.iter().map(|a| a.value.ty.clone()).collect();
-
-                // Infer type arguments from argument types
-                let mut substitutions = infer_type_arguments(&type_params, &callable, &arg_types);
-
-                // Build inferred type args, using Infer for parameters that couldn't be determined
-                // Also ensure substitutions contains all type parameters (even those mapped to Infer)
-                let inferred_args: Vec<Ty> = type_params
-                    .iter()
-                    .map(|tp| {
-                        let tp_id = tp.metadata().id();
-                        if let Some(inferred_ty) = substitutions.get(tp_id) {
-                            inferred_ty.clone()
-                        } else {
-                            // Create fresh inference variable for this type parameter
-                            let infer_ty = Ty::infer(span.clone());
-                            substitutions.insert(tp_id, infer_ty.clone());
-                            infer_ty
-                        }
-                    })
-                    .collect();
-
-                // Verify constraints are satisfied
-                let where_clause = func_sym.where_clause();
-                verify_type_argument_constraints(
-                    &type_params,
-                    &inferred_args,
-                    &where_clause,
-                    span.clone(),
-                    ctx.model,
-                    ctx.diagnostics,
-                );
-
-                // Apply substitution to return type
-                let return_ty = substitute_type(callable.return_type(), &substitutions);
-                (return_ty, substitutions)
-            } else {
-                (callable.return_type().clone(), Substitutions::new())
-            }
-        } else if symbol.as_any().downcast_ref::<EnumCaseSymbol>().is_some() {
-            // Enum case - check if callee already has concrete types from qualified path
-            // e.g., Result[Int, Bool].Ok already has substitutions applied
-            let from_qualified_path = if let TyKind::Function { return_type, .. } = callee.ty.kind()
-            {
-                // Check if the return type is a concrete enum (not just type parameters)
-                if let TyKind::Enum { substitutions, .. } = return_type.kind() {
-                    // Check if substitutions contain concrete types (not just type parameters)
-                    let has_concrete_subs = substitutions
-                        .iter()
-                        .any(|(_, ty)| !matches!(ty.kind(), TyKind::TypeParameter(_)));
-                    if has_concrete_subs {
-                        // Use the already-substituted return type from the callee
-                        Some((return_type.as_ref().clone(), substitutions.clone()))
-                    } else {
-                        None
-                    }
-                } else {
-                    None
+            if !type_params.is_empty() && type_args.len() == type_params.len() {
+                let mut subs = Substitutions::new();
+                for (param, arg_ty) in type_params.iter().zip(type_args.iter()) {
+                    subs.insert(param.metadata().id(), arg_ty.clone());
                 }
-            } else {
-                None
-            };
+                return substitute_type(&return_ty, &subs);
+            }
+        }
+    }
 
-            if let Some((ret_ty, subs)) = from_qualified_path {
-                (ret_ty, subs)
-            } else if let Some(parent) = symbol.metadata().parent() {
-                // Fallback: infer type parameters from arguments
-                if let Some(enum_sym) = parent.as_any().downcast_ref::<EnumSymbol>() {
-                    let type_params = enum_sym.type_parameters();
+    // Try to infer type args from arguments for a best-effort return type
+    if let Some(func_sym) = symbol.as_any().downcast_ref::<FunctionSymbol>() {
+        let type_params = func_sym.type_parameters();
+        if !type_params.is_empty() {
+            let arg_types: Vec<Ty> = arguments.iter().map(|a| a.value.ty.clone()).collect();
+            let mut subs = infer_type_arguments(&type_params, &callable, &arg_types);
+            // Fill remaining with Infer
+            for tp in &type_params {
+                let tp_id = tp.metadata().id();
+                if subs.get(tp_id).is_none() {
+                    subs.insert(tp_id, Ty::infer(span.clone()));
+                }
+            }
+            return substitute_type(&return_ty, &subs);
+        }
+    }
 
-                    if !type_params.is_empty() {
-                        // Collect argument types
-                        let arg_types: Vec<Ty> =
-                            arguments.iter().map(|a| a.value.ty.clone()).collect();
-
-                        // Infer type arguments from argument types
-                        let mut substitutions =
-                            infer_type_arguments(&type_params, &callable, &arg_types);
-
-                        // Ensure all type parameters are in substitutions (use Infer for unknown)
-                        for tp in type_params {
-                            let tp_id = tp.metadata().id();
-                            if !substitutions.contains(tp_id) {
-                                substitutions.insert(tp_id, Ty::infer(span.clone()));
+    // For enum cases: build best-effort return type with Infer vars for parent type params
+    if symbol.metadata().kind() == KestrelSymbolKind::EnumCase {
+        use kestrel_semantic_tree::symbol::enum_symbol::EnumSymbol;
+        if let Some(parent) = symbol.metadata().parent() {
+            if let Some(enum_sym) = parent.as_any().downcast_ref::<EnumSymbol>() {
+                let type_params = enum_sym.type_parameters();
+                if type_params.is_empty() {
+                    // Non-generic enum: return as-is
+                    return callable.return_type().clone();
+                }
+                // Create infer vars for each type param, try to infer from arguments
+                let mut subs = Substitutions::new();
+                let arg_types: Vec<Ty> = arguments.iter().map(|a| a.value.ty.clone()).collect();
+                for tp in &type_params {
+                    let tp_id = tp.metadata().id();
+                    // Try to infer from argument types
+                    let mut inferred = None;
+                    for (param, arg_ty) in callable.parameters().iter().zip(arg_types.iter()) {
+                        if let TyKind::TypeParameter(param_tp) = param.ty.kind() {
+                            if param_tp.metadata().id() == tp_id {
+                                inferred = Some(arg_ty.clone());
+                                break;
                             }
                         }
-
-                        // Apply substitution to return type
-                        let return_ty = substitute_type(callable.return_type(), &substitutions);
-                        (return_ty, substitutions)
-                    } else {
-                        (callable.return_type().clone(), Substitutions::new())
                     }
-                } else {
-                    (callable.return_type().clone(), Substitutions::new())
+                    subs.insert(tp_id, inferred.unwrap_or_else(|| Ty::infer(span.clone())));
                 }
-            } else {
-                (callable.return_type().clone(), Substitutions::new())
+                // Build the enum type with substituted type args
+                if let Ok(enum_arc) = parent.clone().downcast_arc::<EnumSymbol>() {
+                    return Ty::generic_enum(enum_arc, subs, span.clone());
+                }
             }
-        } else {
-            (callable.return_type().clone(), Substitutions::new())
         }
-    };
-
-    // Substitute Self with the parent type if this is a static method
-    let return_ty = if let Some(ref replacement) = self_replacement {
-        substitute_self(&return_ty, replacement)
-    } else {
-        return_ty
-    };
-
-    // Instantiate callee type with substitutions.
-    // This is the key fix: the callee's function type needs to have type parameters
-    // replaced with their concrete types so that constraint generation can properly
-    // unify closure types with the expected parameter types.
-    let instantiated_callee = if !call_substitutions.is_empty() {
-        let instantiated_ty = callee.ty.apply_substitutions(&call_substitutions);
-        Expression {
-            ty: instantiated_ty,
-            ..callee
-        }
-    } else {
-        callee
-    };
-
-    Expression::generic_call(
-        instantiated_callee,
-        arguments,
-        call_substitutions,
-        return_ty,
-        span,
-    )
-}
-
-/// Collect a single overload description from a symbol.
-fn collect_single_overload_description(
-    symbol: &Arc<dyn Symbol<KestrelLanguage>>,
-) -> OverloadDescription {
-    let name = symbol.metadata().name().value.clone();
-    let callable = get_callable_behavior(symbol);
-
-    match callable {
-        Some(cb) => {
-            let labels: Vec<Option<String>> = cb
-                .parameters()
-                .iter()
-                .map(|p| p.external_label().map(|s| s.to_string()))
-                .collect();
-            let param_types: Vec<String> =
-                cb.parameters().iter().map(|p| p.ty.to_string()).collect();
-
-            OverloadDescription {
-                name,
-                labels,
-                param_types,
-                definition_span: Some(symbol.metadata().name().span.clone()),
-                definition_file_id: None,
-            }
-        },
-        None => OverloadDescription {
-            name,
-            labels: vec![],
-            param_types: vec![],
-            definition_span: Some(symbol.metadata().name().span.clone()),
-            definition_file_id: None,
-        },
     }
+
+    return_ty
 }
 
-/// Resolve an overloaded function call by matching arity + labels
-fn resolve_overloaded_call(
+/// Compute a best-effort return type for an overloaded function call.
+///
+/// Tries each candidate to find one that matches by labels/arity and returns
+/// its return type. Falls back to Infer if no match is found.
+fn compute_overloaded_best_effort_return_type(
     candidates: &[SymbolId],
-    callee: Expression,
-    arguments: Vec<CallArgument>,
+    arguments: &[CallArgument],
     arg_labels: &[Option<String>],
-    span: Span,
-    ctx: &mut BodyResolutionContext,
-) -> Expression {
-    // Find the matching overload
+    span: &Span,
+    ctx: &BodyResolutionContext,
+) -> Ty {
     for &candidate_id in candidates {
         if let Some(symbol) = ctx.model.query(SymbolFor { id: candidate_id })
             && let Some(callable) = get_callable_behavior(&symbol)
             && matches_signature(&callable, arguments.len(), arg_labels)
         {
-            // Validate access modes for arguments
-            validate_argument_access_modes(&callable, &arguments, &span, ctx);
-
-            let return_ty = callable.return_type().clone();
-            // Functions are not mutable lvalues
-            let resolved_callee =
-                Expression::symbol_ref(candidate_id, callee.ty.clone(), false, callee.span.clone());
-            return Expression::call(resolved_callee, arguments, return_ty, span);
+            return callable.return_type().clone();
         }
     }
-
-    // No match found - collect overload info for error message
-    let function_name = get_function_name_from_candidates(candidates, ctx.model);
-    let available_overloads = collect_overload_descriptions(candidates, ctx.model);
-
-    let error = NoMatchingOverloadError {
-        call_span: span.clone(),
-        name: function_name,
-        provided_labels: arg_labels.to_vec(),
-        provided_arity: arguments.len(),
-        available_overloads,
-    };
-    ctx.diagnostics.add_diagnostic(error.into_diagnostic());
-
-    Expression::error(span)
+    Ty::infer(span.clone())
 }
 
 /// Resolve struct instantiation: `StructName(x: 1, y: 2)` or `StructName[T, U](x: 1, y: 2)`
@@ -1782,52 +1617,6 @@ fn resolve_implicit_init(
     };
 
     Expression::implicit_struct_init(struct_ty, arguments, span)
-}
-
-/// Get the function name from a list of candidate symbol IDs.
-fn get_function_name_from_candidates(candidates: &[SymbolId], model: &SemanticModel) -> String {
-    for &candidate_id in candidates {
-        if let Some(symbol) = model.query(SymbolFor { id: candidate_id }) {
-            return symbol.metadata().name().value.clone();
-        }
-    }
-    "<unknown>".to_string()
-}
-
-/// Collect overload descriptions from a list of candidate symbol IDs.
-pub fn collect_overload_descriptions(
-    candidates: &[SymbolId],
-    model: &SemanticModel,
-) -> Vec<OverloadDescription> {
-    let mut descriptions = Vec::new();
-
-    for &candidate_id in candidates {
-        if let Some(symbol) = model.query(SymbolFor { id: candidate_id })
-            && let Some(callable) = get_callable_behavior(&symbol)
-        {
-            let name = symbol.metadata().name().value.clone();
-            let labels: Vec<Option<String>> = callable
-                .parameters()
-                .iter()
-                .map(|p| p.external_label().map(|s| s.to_string()))
-                .collect();
-            let param_types: Vec<String> = callable
-                .parameters()
-                .iter()
-                .map(|p| p.ty.to_string())
-                .collect();
-
-            descriptions.push(OverloadDescription {
-                name,
-                labels,
-                param_types,
-                definition_span: Some(symbol.metadata().name().span.clone()),
-                definition_file_id: None, // TODO: Get file ID from symbol
-            });
-        }
-    }
-
-    descriptions
 }
 
 /// Resolve an init call on a type parameter: `T()` where T is constrained by protocols.

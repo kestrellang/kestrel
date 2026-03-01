@@ -188,6 +188,30 @@ pub enum Constraint {
         /// Span for error reporting
         span: Span,
     },
+
+    /// Function call constraint: resolves direct function calls and overloaded calls.
+    ///
+    /// This constraint handles calls to free functions and overloaded functions,
+    /// deferring resolution until argument types are known for type-directed
+    /// overload selection.
+    FunctionCall {
+        /// Candidate function symbol IDs
+        candidates: Vec<SymbolId>,
+        /// Argument type IDs
+        arguments: Vec<TyId>,
+        /// Argument expression IDs (for recording promotions)
+        argument_expr_ids: Vec<ExprId>,
+        /// Argument labels for overload resolution
+        labels: Vec<Option<String>>,
+        /// Explicit type arguments from the call site
+        explicit_type_args: Option<Vec<kestrel_semantic_tree::ty::Ty>>,
+        /// The result type of the function call
+        result: TyId,
+        /// The expression ID for tracking the value resolution
+        expr_id: ExprId,
+        /// Span for error reporting
+        span: Span,
+    },
 }
 
 impl Constraint {
@@ -284,6 +308,7 @@ impl Constraint {
             Constraint::StructPatternBinding { span, .. } => span,
             Constraint::Promotable { span, .. } => span,
             Constraint::TupleIndexAccess { span, .. } => span,
+            Constraint::FunctionCall { span, .. } => span,
         }
     }
 

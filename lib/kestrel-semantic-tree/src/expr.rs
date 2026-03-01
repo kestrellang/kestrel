@@ -1186,6 +1186,32 @@ pub enum ExprKind {
         member: String,
     },
 
+    /// Deferred subscript call: `array(0)`, `dict(key: "foo")` deferred to type inference.
+    /// Created when the binder defers subscript resolution to allow the solver to handle
+    /// type-directed overload resolution and type argument inference.
+    ///
+    /// Type inference will resolve this via `oracle.resolve_subscript()`.
+    DeferredSubscriptCall {
+        /// The receiver expression being subscripted
+        receiver: Box<Expression>,
+        /// Arguments to the subscript (e.g., index, key)
+        arguments: Vec<CallArgument>,
+    },
+
+    /// Deferred function call: `foo(x)`, overloaded calls deferred to type inference.
+    /// Created when the binder defers function call resolution to allow the solver to
+    /// handle overload resolution with full type information.
+    ///
+    /// Type inference will resolve this via `oracle.resolve_function()`.
+    DeferredFunctionCall {
+        /// Candidate function symbol IDs (single for non-overloaded, multiple for overloaded)
+        candidates: Vec<SymbolId>,
+        /// Arguments to the function call
+        arguments: Vec<CallArgument>,
+        /// Explicit type arguments provided at the call site (e.g., `foo[Int](42)`)
+        explicit_type_args: Option<Vec<Ty>>,
+    },
+
     /// Implicit struct initialization: `Point(x: 1, y: 2)` when no explicit init exists.
     /// The compiler generates a memberwise initializer that assigns each argument to
     /// the corresponding field in declaration order.
@@ -1833,6 +1859,36 @@ impl Expression {
                 },
                 ExprKind::DeferredMemberAccess { receiver, member } => {
                     format!("{}.{}", format_expr(receiver), member)
+                },
+                ExprKind::DeferredSubscriptCall {
+                    receiver,
+                    arguments,
+                } => {
+                    let args: Vec<String> = arguments
+                        .iter()
+                        .map(|a| {
+                            if let Some(ref label) = a.label {
+                                format!("{}: {}", label, format_expr(&a.value))
+                            } else {
+                                format_expr(&a.value)
+                            }
+                        })
+                        .collect();
+                    format!("{}({})", format_expr(receiver), args.join(", "))
+                },
+                ExprKind::DeferredFunctionCall {
+                    candidates,
+                    arguments,
+                    ..
+                } => {
+                    let name = if candidates.len() == 1 {
+                        format!("{:?}", candidates[0])
+                    } else {
+                        format!("overloaded({} candidates)", candidates.len())
+                    };
+                    let args: Vec<String> =
+                        arguments.iter().map(|a| format_expr(&a.value)).collect();
+                    format!("{}({})", name, args.join(", "))
                 },
                 ExprKind::ImplicitStructInit {
                     struct_type,
@@ -2662,6 +2718,46 @@ impl Expression {
             ty: result_ty,
             span,
             mutable,
+        }
+    }
+
+    /// Create a deferred subscript call expression.
+    pub fn deferred_subscript_call(
+        receiver: Expression,
+        arguments: Vec<CallArgument>,
+        result_ty: Ty,
+        span: Span,
+    ) -> Self {
+        Expression {
+            id: ExprId::new(),
+            kind: ExprKind::DeferredSubscriptCall {
+                receiver: Box::new(receiver),
+                arguments,
+            },
+            ty: result_ty,
+            span,
+            mutable: false,
+        }
+    }
+
+    /// Create a deferred function call expression.
+    pub fn deferred_function_call(
+        candidates: Vec<SymbolId>,
+        arguments: Vec<CallArgument>,
+        explicit_type_args: Option<Vec<Ty>>,
+        result_ty: Ty,
+        span: Span,
+    ) -> Self {
+        Expression {
+            id: ExprId::new(),
+            kind: ExprKind::DeferredFunctionCall {
+                candidates,
+                arguments,
+                explicit_type_args,
+            },
+            ty: result_ty,
+            span,
+            mutable: false,
         }
     }
 
@@ -3647,6 +3743,40 @@ impl Expression {
                     receiver: Box::new(receiver.apply_substitutions(subs)),
                     member: member.clone(),
                 }
+            },
+
+            ExprKind::DeferredSubscriptCall {
+                receiver,
+                arguments,
+            } => ExprKind::DeferredSubscriptCall {
+                receiver: Box::new(receiver.apply_substitutions(subs)),
+                arguments: arguments
+                    .iter()
+                    .map(|arg| CallArgument {
+                        label: arg.label.clone(),
+                        value: arg.value.apply_substitutions(subs),
+                        span: arg.span.clone(),
+                    })
+                    .collect(),
+            },
+
+            ExprKind::DeferredFunctionCall {
+                candidates,
+                arguments,
+                explicit_type_args,
+            } => ExprKind::DeferredFunctionCall {
+                candidates: candidates.clone(),
+                arguments: arguments
+                    .iter()
+                    .map(|arg| CallArgument {
+                        label: arg.label.clone(),
+                        value: arg.value.apply_substitutions(subs),
+                        span: arg.span.clone(),
+                    })
+                    .collect(),
+                explicit_type_args: explicit_type_args.as_ref().map(|args| {
+                    args.iter().map(|ty| ty.apply_substitutions(subs)).collect()
+                }),
             },
 
             ExprKind::ImplicitStructInit {

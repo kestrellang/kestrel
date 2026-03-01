@@ -357,30 +357,7 @@ fn desugar_binary_op(
         CallArgument::unlabeled(rhs.clone(), rhs.span.clone())
     };
 
-    // Try to use the MethodRef pattern with builtin registry for better error messages.
-    // This produces "does not conform to X" errors instead of "no member Y".
-    if let Some(feature) = op.method_feature()
-        && let Some(method_id) = ctx.model.builtin_registry().method(feature)
-    {
-        // Create MethodRef with the protocol method as candidate, then wrap in Call
-        let method_ref = Expression::method_ref(
-            lhs,
-            vec![method_id],
-            method_name.to_string(),
-            full_span.clone(),
-        );
-        return Expression::call(method_ref, vec![arg], result_ty, full_span);
-    }
-
-    // Fallback: use DeferredMethodCall if builtin not registered
-    Expression::deferred_method_call(
-        lhs,
-        method_name.to_string(),
-        vec![arg],
-        None,
-        result_ty,
-        full_span,
-    )
+    ctx.builtin_method_call(lhs, op.method_feature().unwrap(), method_name, vec![arg], result_ty, full_span)
 }
 
 /// Desugar a unary operator into a method call: operand.method_name()
@@ -415,28 +392,12 @@ fn desugar_unary_op(
 
     // Try to use the MethodRef pattern with builtin registry for better error messages.
     // This produces "does not conform to X" errors instead of "no member Y".
-    if let Some(feature) = op.method_feature()
-        && let Some(method_id) = ctx.model.builtin_registry().method(feature)
-    {
-        // Create MethodRef with the protocol method as candidate, then wrap in Call
-        let method_ref = Expression::method_ref(
-            operand,
-            vec![method_id],
-            method_name.to_string(),
-            full_span.clone(),
-        );
-        return Expression::call(method_ref, vec![], result_ty, full_span);
+    if let Some(feature) = op.method_feature() {
+        return ctx.builtin_method_call(operand, feature, method_name, vec![], result_ty, full_span);
     }
 
-    // Fallback: use DeferredMethodCall if builtin not registered
-    Expression::deferred_method_call(
-        operand,
-        method_name.to_string(),
-        vec![],
-        None,
-        result_ty,
-        full_span,
-    )
+    // Unwrap operator — no protocol method, resolve via inference
+    Expression::deferred_method_call(operand, method_name.to_string(), vec![], None, result_ty, full_span)
 }
 
 /// Check if a type is a lang intrinsic type that should not support operators.
@@ -1089,6 +1050,41 @@ fn collect_captures_recursive(
                 captures,
                 seen_ids,
             );
+        },
+
+        ExprKind::DeferredSubscriptCall {
+            receiver,
+            arguments,
+            ..
+        } => {
+            collect_captures_recursive(
+                receiver,
+                closure_entry_depth,
+                local_scope,
+                captures,
+                seen_ids,
+            );
+            for arg in arguments {
+                collect_captures_recursive(
+                    &arg.value,
+                    closure_entry_depth,
+                    local_scope,
+                    captures,
+                    seen_ids,
+                );
+            }
+        },
+
+        ExprKind::DeferredFunctionCall { arguments, .. } => {
+            for arg in arguments {
+                collect_captures_recursive(
+                    &arg.value,
+                    closure_entry_depth,
+                    local_scope,
+                    captures,
+                    seen_ids,
+                );
+            }
         },
 
         ExprKind::DelegatingInit { arguments, .. } => {

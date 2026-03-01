@@ -846,6 +846,58 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
             );
         },
 
+        ExprKind::DeferredSubscriptCall {
+            receiver,
+            arguments,
+        } => {
+            generate_expression_constraints(ctx, receiver);
+            for arg in arguments {
+                generate_expression_constraints(ctx, &arg.value);
+            }
+            let arg_ty_ids: Vec<_> = arguments.iter().map(|a| a.value.ty.id()).collect();
+            let arg_labels: Vec<_> = arguments.iter().map(|a| a.label.clone()).collect();
+
+            ctx.register_type(&receiver.ty);
+            ctx.register_type(&expr.ty);
+            ctx.member_access(
+                receiver.ty.id(),
+                "subscript".to_string(),
+                false,
+                arg_ty_ids,
+                arg_labels,
+                expr.ty.id(),
+                expr.id,
+                Substitutions::new(),
+                None,
+                expr.span.clone(),
+            );
+        },
+
+        ExprKind::DeferredFunctionCall {
+            candidates,
+            arguments,
+            explicit_type_args,
+        } => {
+            for arg in arguments {
+                generate_expression_constraints(ctx, &arg.value);
+            }
+            let arg_ty_ids: Vec<_> = arguments.iter().map(|a| a.value.ty.id()).collect();
+            let arg_expr_ids: Vec<_> = arguments.iter().map(|a| a.value.id).collect();
+            let arg_labels: Vec<_> = arguments.iter().map(|a| a.label.clone()).collect();
+
+            ctx.register_type(&expr.ty);
+            ctx.push_constraint(crate::constraint::Constraint::FunctionCall {
+                candidates: candidates.clone(),
+                arguments: arg_ty_ids,
+                argument_expr_ids: arg_expr_ids,
+                labels: arg_labels,
+                explicit_type_args: explicit_type_args.clone(),
+                result: expr.ty.id(),
+                expr_id: expr.id,
+                span: expr.span.clone(),
+            });
+        },
+
         ExprKind::ImplicitStructInit { arguments, .. } => {
             for arg in arguments {
                 generate_expression_constraints(ctx, &arg.value);

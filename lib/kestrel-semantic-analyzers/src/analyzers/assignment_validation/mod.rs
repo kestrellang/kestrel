@@ -176,6 +176,8 @@ fn validate_assignment_target(
         | ExprKind::DeferredMethodCall { .. }
         | ExprKind::DeferredStaticCall { .. }
         | ExprKind::DeferredInitCall { .. }
+        | ExprKind::DeferredSubscriptCall { .. }
+        | ExprKind::DeferredFunctionCall { .. }
         | ExprKind::ImplicitStructInit { .. }
         | ExprKind::DelegatingInit { .. }
         | ExprKind::MethodRef { .. }

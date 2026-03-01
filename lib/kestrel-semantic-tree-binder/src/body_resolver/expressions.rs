@@ -717,19 +717,7 @@ fn resolve_compound_assignment_expression(
     let arg = CallArgument::unlabeled(value.clone(), value.span.clone());
     let result_ty = Ty::unit(span.clone());
 
-    // Try to use MethodRef pattern with builtin registry for better error messages
-    if let Some(method_id) = ctx.model.builtin_registry().method(op.method_feature()) {
-        let method_ref = Expression::method_ref(
-            target,
-            vec![method_id],
-            method_name.to_string(),
-            span.clone(),
-        );
-        return Expression::call(method_ref, vec![arg], result_ty, span);
-    }
-
-    // Fallback: use DeferredMethodCall if builtin not registered
-    Expression::deferred_method_call(target, method_name.to_string(), vec![arg], None, result_ty, span)
+    ctx.builtin_method_call(target, op.method_feature(), method_name, vec![arg], result_ty, span)
 }
 
 /// Resolve an if expression: if condition { then } else { else }
@@ -1318,30 +1306,14 @@ fn resolve_for_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) ->
 
     // Create the .iter() method call on the iterable using MethodRef pattern.
     // This produces "does not conform to Iterable" errors instead of "no member iter".
-    let iter_method_id = ctx
-        .model
-        .builtin_registry()
-        .method(LanguageFeature::IterableIterMethod);
-    let iter_call = if let Some(method_id) = iter_method_id {
-        // Create MethodRef with the protocol method as candidate, then wrap in Call
-        let method_ref = Expression::method_ref(
-            iterable_expr,
-            vec![method_id],
-            "iter".to_string(),
-            span.clone(),
-        );
-        Expression::call(method_ref, vec![], iter_ty.clone(), span.clone())
-    } else {
-        // Fallback if builtin not registered (shouldn't happen in practice)
-        Expression::deferred_method_call(
-            iterable_expr,
-            "iter".to_string(),
-            vec![],
-            None,
-            iter_ty.clone(),
-            span.clone(),
-        )
-    };
+    let iter_call = ctx.builtin_method_call(
+        iterable_expr,
+        LanguageFeature::IterableIterMethod,
+        "iter",
+        vec![],
+        iter_ty.clone(),
+        span.clone(),
+    );
 
     // Create the binding pattern for the iterator
     let iter_pattern = Pattern::local(
@@ -1368,26 +1340,14 @@ fn resolve_for_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) ->
     let item_ty = Ty::infer(span.clone());
     let optional_item_ty = Ty::infer(span.clone()); // Will be Optional[Item]
     let iter_ref = Expression::local_ref(iter_local_id, iter_ty, true, span.clone());
-    let next_method_id = ctx
-        .model
-        .builtin_registry()
-        .method(LanguageFeature::IteratorNextMethod);
-    let next_call = if let Some(method_id) = next_method_id {
-        // Create MethodRef with the protocol method as candidate, then wrap in Call
-        let method_ref =
-            Expression::method_ref(iter_ref, vec![method_id], "next".to_string(), span.clone());
-        Expression::call(method_ref, vec![], optional_item_ty.clone(), span.clone())
-    } else {
-        // Fallback if builtin not registered (shouldn't happen in practice)
-        Expression::deferred_method_call(
-            iter_ref,
-            "next".to_string(),
-            vec![],
-            None,
-            optional_item_ty.clone(),
-            span.clone(),
-        )
-    };
+    let next_call = ctx.builtin_method_call(
+        iter_ref,
+        LanguageFeature::IteratorNextMethod,
+        "next",
+        vec![],
+        optional_item_ty.clone(),
+        span.clone(),
+    );
 
     // Resolve the user's pattern with the item type
     let user_pattern = pattern_node
@@ -1695,30 +1655,14 @@ fn resolve_try_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) ->
     let operand = resolve_expression(&operand_node, ctx);
 
     // Create method call: operand.tryExtract()
-    // Try to use MethodRef pattern with builtin registry for better error messages
-    let try_extract_call = if let Some(method_id) = ctx
-        .model
-        .builtin_registry()
-        .method(LanguageFeature::TryExtractMethod)
-    {
-        let method_ref = Expression::method_ref(
-            operand,
-            vec![method_id],
-            "tryExtract".to_string(),
-            span.clone(),
-        );
-        Expression::call(method_ref, vec![], Ty::infer(span.clone()), span.clone())
-    } else {
-        // Fallback: use DeferredMethodCall if builtin not registered
-        Expression::deferred_method_call(
-            operand,
-            "tryExtract".to_string(),
-            vec![],
-            None,
-            Ty::infer(span.clone()), // ControlFlow[Output, Early]
-            span.clone(),
-        )
-    };
+    let try_extract_call = ctx.builtin_method_call(
+        operand,
+        LanguageFeature::TryExtractMethod,
+        "tryExtract",
+        vec![],
+        Ty::infer(span.clone()),
+        span.clone(),
+    );
 
     // Create locals for the bound variables in each arm
     // Push scope for continue arm
@@ -2148,6 +2092,21 @@ fn expression_references_local(
         ExprKind::DeferredMemberAccess { receiver, .. } => {
             expression_references_local(receiver, local_id)
         },
+
+        ExprKind::DeferredSubscriptCall {
+            receiver,
+            arguments,
+            ..
+        } => {
+            expression_references_local(receiver, local_id)
+                || arguments
+                    .iter()
+                    .any(|arg| expression_references_local(&arg.value, local_id))
+        },
+
+        ExprKind::DeferredFunctionCall { arguments, .. } => arguments
+            .iter()
+            .any(|arg| expression_references_local(&arg.value, local_id)),
 
         ExprKind::ImplicitStructInit { arguments, .. } => arguments
             .iter()
@@ -2898,6 +2857,21 @@ where
         },
         ExprKind::DeferredMemberAccess { receiver, .. } => {
             collect_captures_from_expression(receiver, process);
+        },
+        ExprKind::DeferredSubscriptCall {
+            receiver,
+            arguments,
+            ..
+        } => {
+            collect_captures_from_expression(receiver, process);
+            for arg in arguments {
+                collect_captures_from_expression(&arg.value, process);
+            }
+        },
+        ExprKind::DeferredFunctionCall { arguments, .. } => {
+            for arg in arguments {
+                collect_captures_from_expression(&arg.value, process);
+            }
         },
         ExprKind::MethodRef { receiver, .. } => {
             collect_captures_from_expression(receiver, process);

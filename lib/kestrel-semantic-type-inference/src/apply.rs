@@ -625,6 +625,70 @@ fn apply_to_expression(
             }
         },
 
+        ExprKind::DeferredSubscriptCall {
+            receiver,
+            arguments,
+        } => {
+            let resolved_receiver = apply_to_expression(receiver, solution, oracle);
+            let resolved_arguments: Vec<CallArgument> = arguments
+                .iter()
+                .map(|arg| apply_to_argument(arg, solution, oracle))
+                .collect();
+
+            if let Some(value_resolution) = solution.get_value(expr.id) {
+                ExprKind::SubscriptCall {
+                    receiver: Box::new(resolved_receiver),
+                    getter: value_resolution.symbol_id,
+                    arguments: resolved_arguments,
+                }
+            } else {
+                ExprKind::DeferredSubscriptCall {
+                    receiver: Box::new(resolved_receiver),
+                    arguments: resolved_arguments,
+                }
+            }
+        },
+
+        ExprKind::DeferredFunctionCall {
+            candidates,
+            arguments,
+            explicit_type_args,
+        } => {
+            let resolved_arguments: Vec<CallArgument> = arguments
+                .iter()
+                .map(|arg| apply_to_argument(arg, solution, oracle))
+                .collect();
+
+            if let Some(value_resolution) = solution.get_value(expr.id) {
+                // Build the function type from resolved argument and result types
+                let resolved_result_ty =
+                    resolve_type(&expr.ty, solution, oracle, &mut HashSet::new());
+                let param_tys: Vec<Ty> = resolved_arguments
+                    .iter()
+                    .map(|a| a.value.ty.clone())
+                    .collect();
+                let fn_ty = Ty::function(param_tys, resolved_result_ty, expr.span.clone());
+                let callee = Expression::symbol_ref(
+                    value_resolution.symbol_id,
+                    fn_ty,
+                    false,
+                    expr.span.clone(),
+                );
+
+                ExprKind::Call {
+                    callee: Box::new(callee),
+                    arguments: resolved_arguments,
+                    substitutions: value_resolution.substitutions.clone(),
+                }
+            } else {
+                ExprKind::DeferredFunctionCall {
+                    candidates: candidates.clone(),
+                    arguments: resolved_arguments,
+                    explicit_type_args: explicit_type_args.clone(),
+                }
+            }
+        },
+
         ExprKind::ImplicitStructInit {
             struct_type,
             arguments,

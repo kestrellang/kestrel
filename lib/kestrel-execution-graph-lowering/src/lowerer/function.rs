@@ -1424,6 +1424,21 @@ fn collect_closure_local_ids_from_expr(expr: &Expression, ids: &mut HashSet<Loca
         ExprKind::DeferredMemberAccess { receiver, .. } => {
             collect_closure_local_ids_from_expr(receiver, ids);
         },
+        ExprKind::DeferredSubscriptCall {
+            receiver,
+            arguments,
+            ..
+        } => {
+            collect_closure_local_ids_from_expr(receiver, ids);
+            for arg in arguments {
+                collect_closure_local_ids_from_expr(&arg.value, ids);
+            }
+        },
+        ExprKind::DeferredFunctionCall { arguments, .. } => {
+            for arg in arguments {
+                collect_closure_local_ids_from_expr(&arg.value, ids);
+            }
+        },
         ExprKind::ImplicitStructInit { arguments, .. } => {
             for arg in arguments {
                 collect_closure_local_ids_from_expr(&arg.value, ids);

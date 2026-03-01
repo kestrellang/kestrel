@@ -377,11 +377,6 @@ fn int64_bitwise() {
 
 #[test]
 fn int64_parsing() {
-    // TODO: Overloaded static method Int64.parse cannot be resolved by the compiler.
-    // The compiler reports "could not infer type" for Int64.parse calls because
-    // the two overloads (1-arg and 2-arg) prevent type inference from succeeding.
-    // This test should be updated to .expect(Compiles).expect(Runs) once
-    // overloaded static method resolution is fixed.
     Test::new(
         r#"module Test
 
@@ -399,7 +394,8 @@ fn int64_parsing() {
     "#,
     )
     .with_stdlib()
-    .expect(HasError("could not infer type"));
+    .expect(Compiles)
+    .expect(Runs);
 }
 
 #[test]

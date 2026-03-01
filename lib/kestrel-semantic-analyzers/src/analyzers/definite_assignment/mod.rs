@@ -479,6 +479,21 @@ fn analyze_expression(
         ExprKind::DeferredMemberAccess { receiver, .. } => {
             state = analyze_expression(receiver, state, false, ctx);
         },
+        ExprKind::DeferredSubscriptCall {
+            receiver,
+            arguments,
+            ..
+        } => {
+            state = analyze_expression(receiver, state, false, ctx);
+            for arg in arguments {
+                state = analyze_expression(&arg.value, state, false, ctx);
+            }
+        },
+        ExprKind::DeferredFunctionCall { arguments, .. } => {
+            for arg in arguments {
+                state = analyze_expression(&arg.value, state, false, ctx);
+            }
+        },
         ExprKind::ImplicitStructInit { arguments, .. } => {
             for arg in arguments {
                 state = analyze_expression(&arg.value, state, false, ctx);

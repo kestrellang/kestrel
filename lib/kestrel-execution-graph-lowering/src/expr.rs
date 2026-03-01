@@ -1358,7 +1358,10 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
             Value::Immediate(Immediate::error())
         },
 
-        ExprKind::DeferredInitCall { .. } | ExprKind::DeferredMemberAccess { .. } => {
+        ExprKind::DeferredInitCall { .. }
+        | ExprKind::DeferredMemberAccess { .. }
+        | ExprKind::DeferredSubscriptCall { .. }
+        | ExprKind::DeferredFunctionCall { .. } => {
             // Should be resolved by type inference
             ctx.emit_error(LoweringError::internal(
                 "unresolved deferred expression".to_string(),
