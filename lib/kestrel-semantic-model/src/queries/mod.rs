@@ -3,9 +3,11 @@
 //! This module contains all query implementations for the SemanticModel.
 //! Each query is a struct that implements the Query trait.
 
+mod all_conformances_for;
+mod all_initializers_for;
+mod all_methods_for;
 mod ancestor_of_kind;
-mod associated_type_bindings_for_enum;
-mod associated_type_bindings_for_struct;
+mod associated_type_bindings_for;
 mod callable_param_types_for_call;
 mod child_by_name;
 mod conformances_for_symbol;
@@ -38,12 +40,16 @@ mod struct_field_types;
 mod struct_fields;
 mod struct_methods;
 mod symbol_for;
+mod type_parameter_bounds;
 mod visible_children;
 mod visible_children_by_name;
+mod where_clauses_in_scope;
 
+pub use all_conformances_for::AllConformancesFor;
+pub use all_initializers_for::AllInitializersFor;
+pub use all_methods_for::AllMethodsFor;
 pub use ancestor_of_kind::AncestorOfKind;
-pub use associated_type_bindings_for_enum::AssociatedTypeBindingsForEnum;
-pub use associated_type_bindings_for_struct::AssociatedTypeBindingsForStruct;
+pub use associated_type_bindings_for::AssociatedTypeBindingsFor;
 pub use callable_param_types_for_call::CallableParamTypesForCall;
 pub use child_by_name::ChildByName;
 pub use conformances_for_symbol::ConformancesForSymbol;
@@ -76,5 +82,7 @@ pub use struct_field_types::{StructFieldTypeInfo, StructFieldTypes};
 pub use struct_fields::{StructFieldInfo, StructFields};
 pub use struct_methods::StructMethods;
 pub use symbol_for::SymbolFor;
+pub use type_parameter_bounds::TypeParameterBounds;
 pub use visible_children::VisibleChildren;
 pub use visible_children_by_name::VisibleChildrenByName;
+pub use where_clauses_in_scope::WhereClausesInScope;

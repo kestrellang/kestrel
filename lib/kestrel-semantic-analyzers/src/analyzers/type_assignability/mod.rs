@@ -3,43 +3,10 @@
 //! Provides helpers to check assignability while considering where-clause
 //! equality constraints in scope.
 
-use kestrel_semantic_model::{ContextualOracle, SemanticModel, SymbolFor};
-use kestrel_semantic_tree::behavior::extension_target::ExtensionTargetBehavior;
-use kestrel_semantic_tree::behavior::generics::GenericsBehavior;
-use kestrel_semantic_tree::ty::{Ty, TyKind, WhereClause};
+use kestrel_semantic_model::{ContextualOracle, SemanticModel, WhereClausesInScope};
+use kestrel_semantic_tree::ty::{Ty, TyKind};
 use kestrel_semantic_type_inference::TypeOracle;
-use semantic_tree::symbol::Symbol;
-use semantic_tree::symbol::SymbolId;
-
-/// Collect all where clauses from the context by walking up the parent chain.
-pub fn collect_where_clauses(model: &SemanticModel, context_id: SymbolId) -> Vec<WhereClause> {
-    let mut clauses = Vec::new();
-    let mut current_id = Some(context_id);
-
-    while let Some(id) = current_id {
-        let Some(symbol) = model.query(SymbolFor { id }) else {
-            break;
-        };
-
-        if let Some(generics_beh) = symbol.metadata().get_behavior::<GenericsBehavior>() {
-            let wc = generics_beh.where_clause();
-            if !wc.is_empty() {
-                clauses.push(wc.clone());
-            }
-        }
-
-        if let Some(target_beh) = symbol.metadata().get_behavior::<ExtensionTargetBehavior>() {
-            let wc = target_beh.where_clause();
-            if !wc.is_empty() {
-                clauses.push(wc.clone());
-            }
-        }
-
-        current_id = symbol.metadata().parent().map(|p| p.metadata().id());
-    }
-
-    clauses
-}
+use semantic_tree::symbol::{Symbol, SymbolId};
 
 /// Check if `from` is assignable to `to`, considering equality constraints in scope.
 pub fn is_assignable_with_constraints(
@@ -62,7 +29,7 @@ pub fn is_assignable_with_constraints(
         }
     }
 
-    let where_clauses = collect_where_clauses(model, context_id);
+    let where_clauses = model.query(WhereClausesInScope { context_id });
     if where_clauses.is_empty() {
         return false;
     }

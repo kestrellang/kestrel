@@ -18,7 +18,8 @@ mod type_oracle;
 pub use extension_registry::ExtensionRegistry;
 pub use model::SemanticModel;
 pub use queries::{
-    AncestorOfKind, AssociatedTypeBindingsForEnum, AssociatedTypeBindingsForStruct,
+    AllConformancesFor, AllInitializersFor, AllMethodsFor, AncestorOfKind,
+    AssociatedTypeBindingsFor,
     CallableParamTypesForCall, ChildByName, ConformancesForSymbol, DeclaredName,
     DeclaredNamesInScope, ExecutableBodyFor, ExtensionMethods, ExtensionsFor, FunctionsInSymbol,
     GenericsData, GenericsDataFor, HasBody, ImportsInScope, InferenceResultFor,
@@ -27,7 +28,8 @@ pub use queries::{
     ProtocolMethodsWithDefiner, ProtocolRequiredInitializers, ProtocolRequiredMethods,
     ProtocolRequiredProperties, ResolveModulePath, ResolveName, ResolveTypePath, ResolveValuePath,
     ResolvedAliasedType, ScopeFor, StructFieldInfo, StructFieldTypeInfo, StructFieldTypes,
-    StructFields, StructMethods, SymbolFor, VisibleChildren, VisibleChildrenByName,
+    StructFields, StructMethods, SymbolFor, TypeParameterBounds, VisibleChildren,
+    VisibleChildrenByName, WhereClausesInScope,
 };
 pub use query::Query;
 pub use registry::SymbolRegistry;

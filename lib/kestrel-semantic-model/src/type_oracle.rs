@@ -31,7 +31,10 @@ use kestrel_semantic_type_inference::{MemberError, MemberResolution, TypeOracle}
 use semantic_tree::symbol::{Symbol, SymbolId};
 
 use crate::SemanticModel;
-use crate::queries::{ConformancesForSymbol, ExtensionsFor, ResolvedAliasedType, SymbolFor};
+use crate::queries::{
+    ConformancesForSymbol, ExtensionsFor, ResolvedAliasedType, SymbolFor, TypeParameterBounds,
+    WhereClausesInScope,
+};
 
 impl TypeOracle for SemanticModel {
     fn resolve_member(
@@ -56,7 +59,7 @@ impl TypeOracle for SemanticModel {
         // Handle type parameters - look up member in protocol bounds from where clause
         if let TyKind::TypeParameter(type_param) = receiver_ty.kind() {
             // Get bounds by walking up the parent chain to find where clauses
-            let bounds = get_type_parameter_bounds_with_model(type_param, Some(self));
+            let bounds = self.query(TypeParameterBounds { param_id: type_param.metadata().id() });
 
             // If any bound is an error type, the type parameter's constraints couldn't be resolved.
             // Return UnknownType to suppress cascading error messages.
@@ -554,7 +557,7 @@ impl TypeOracle for SemanticModel {
 
         // Handle type parameters - check if any bound matches the protocol
         if let TyKind::TypeParameter(type_param) = ty.kind() {
-            let bounds = get_type_parameter_bounds_with_model(type_param, Some(self));
+            let bounds = self.query(TypeParameterBounds { param_id: type_param.metadata().id() });
             if bound_protocols_include(self, &bounds, protocol_id) {
                 return true;
             }
@@ -979,7 +982,7 @@ impl TypeOracle for SemanticModel {
             // For type parameters, look up in bounds from where clause
             TyKind::TypeParameter(type_param) => {
                 // Get bounds by walking up the parent chain to find where clauses
-                let bounds = get_type_parameter_bounds_with_model(type_param, Some(self));
+                let bounds = self.query(TypeParameterBounds { param_id: type_param.metadata().id() });
 
                 for bound in &bounds {
                     if let TyKind::Protocol {
@@ -1379,7 +1382,7 @@ impl TypeOracle for ContextualOracle<'_> {
 
         // Handle type parameters - include extension where-clause bounds from context
         if let TyKind::TypeParameter(type_param) = ty.kind() {
-            let mut bounds = get_type_parameter_bounds_with_model(type_param, Some(self.model));
+            let mut bounds = self.model.query(TypeParameterBounds { param_id: type_param.metadata().id() });
             if let Some(ext_bounds) = get_extension_bounds_for_param(
                 self.model,
                 self.context_symbol_id,
@@ -1643,7 +1646,7 @@ fn resolve_member_with_context(
     // Handle type parameters - look up member in protocol bounds from where clause
     if let TyKind::TypeParameter(type_param) = receiver_ty.kind() {
         // Get bounds by walking up the parent chain to find where clauses
-        let mut bounds = get_type_parameter_bounds_with_model(type_param, Some(model));
+        let mut bounds = model.query(TypeParameterBounds { param_id: type_param.metadata().id() });
 
         // If we have context, also check for extension bounds
         if let Some(ctx_id) = context
@@ -2621,7 +2624,7 @@ fn resolve_all_members_impl(
 
     // TypeParameter: collect from all protocol bounds
     if let TyKind::TypeParameter(type_param) = receiver_ty.kind() {
-        let bounds = get_type_parameter_bounds_with_model(type_param, Some(model));
+        let bounds = model.query(TypeParameterBounds { param_id: type_param.metadata().id() });
         if bounds.iter().any(|b| matches!(b.kind(), TyKind::Error)) {
             return Err(MemberError::UnknownType);
         }
@@ -4356,62 +4359,6 @@ fn apply_protocol_defaults(ty: Ty, self_ty: Option<&Ty>) -> Ty {
     }
 }
 
-fn get_type_parameter_bounds_with_model(
-    type_param: &Arc<TypeParameterSymbol>,
-    model: Option<&SemanticModel>,
-) -> Vec<Ty> {
-    let param_id = type_param.metadata().id();
-    let mut bounds = Vec::new();
-
-    // Walk up from the type parameter's parent to find where clauses
-    let mut current: Option<Arc<dyn Symbol<KestrelLanguage>>> = type_param.metadata().parent();
-
-    while let Some(parent) = current {
-        if let Some(where_clause) = get_where_clause_from_symbol(parent.as_ref()) {
-            // Extract bounds for this parameter from the where clause
-            for bound in where_clause.bounds_for(param_id) {
-                // Include both Protocol bounds and Error bounds.
-                // Error bounds indicate that protocol resolution failed - we include them
-                // so the caller can detect and suppress cascading error messages.
-                match bound.kind() {
-                    TyKind::Protocol { .. } | TyKind::Error => {
-                        bounds.push(bound.clone());
-                    },
-                    _ => {},
-                }
-            }
-        }
-
-        // Also check extensions on this parent for additional bounds.
-        // e.g., `extend Box[T] where T: Formattable` adds T: Formattable
-        // that the parent walk alone wouldn't find.
-        if let Some(model) = model {
-            let parent_id = parent.metadata().id();
-            let extensions = model.query(ExtensionsFor {
-                target_id: parent_id,
-            });
-            for ext in &extensions {
-                if let Some(target_beh) =
-                    ext.metadata().get_behavior::<ExtensionTargetBehavior>()
-                {
-                    let ext_where = target_beh.where_clause();
-                    for bound in ext_where.bounds_for(param_id) {
-                        match bound.kind() {
-                            TyKind::Protocol { .. } | TyKind::Error => {
-                                bounds.push(bound.clone());
-                            },
-                            _ => {},
-                        }
-                    }
-                }
-            }
-        }
-
-        current = parent.metadata().parent();
-    }
-
-    bounds
-}
 
 /// Check if protocol bounds (including transitive protocol extensions) include the target.
 fn bound_protocols_include(model: &SemanticModel, bounds: &[Ty], protocol_id: SymbolId) -> bool {
@@ -4455,7 +4402,7 @@ fn get_associated_type_bounds_with_context(
     };
 
     let assoc_name = assoc_type.metadata().name().value.clone();
-    let where_clauses = collect_where_clauses_for_context(model, context_id);
+    let where_clauses = model.query(WhereClausesInScope { context_id });
     for wc in where_clauses {
         for constraint in wc.constraints() {
             if let Constraint::SelfBound {
@@ -4510,7 +4457,7 @@ fn self_protocol_bounds(model: &SemanticModel, context_id: SymbolId) -> Vec<Symb
     let mut result = Vec::new();
 
     // Self bounds from where clauses (Self: Protocol)
-    let where_clauses = collect_where_clauses_for_context(model, context_id);
+    let where_clauses = model.query(WhereClausesInScope { context_id });
     for wc in where_clauses {
         for constraint in wc.constraints() {
             if let Constraint::SelfBound {
@@ -4566,7 +4513,7 @@ fn get_self_type_bounds_with_context(
     let mut bounds = Vec::new();
 
     // Self bounds from where clauses (Self: Protocol)
-    let where_clauses = collect_where_clauses_for_context(model, context_id);
+    let where_clauses = model.query(WhereClausesInScope { context_id });
     for wc in where_clauses {
         for constraint in wc.constraints() {
             if let Constraint::SelfBound {
@@ -5026,7 +4973,7 @@ fn check_from_value_conformance_impl(
 /// 2. Then applying all equality constraints to normalize the type
 fn normalize_type_with_context(model: &SemanticModel, ty: &Ty, context_id: SymbolId) -> Ty {
     // Collect where clauses by walking up the parent chain
-    let where_clauses = collect_where_clauses_for_context(model, context_id);
+    let where_clauses = model.query(WhereClausesInScope { context_id });
 
     // Collect explicit equality constraints
     let mut owned_equalities: Vec<(Ty, Ty)> = where_clauses
@@ -5191,39 +5138,6 @@ fn derive_protocol_associated_type_constraints(
             }
         }
     }
-}
-
-/// Collect all where clauses from the context by walking up the parent chain.
-fn collect_where_clauses_for_context(
-    model: &SemanticModel,
-    context_id: SymbolId,
-) -> Vec<WhereClause> {
-    let mut clauses = Vec::new();
-    let mut current_id = Some(context_id);
-
-    while let Some(id) = current_id {
-        let Some(symbol) = model.query(SymbolFor { id }) else {
-            break;
-        };
-
-        if let Some(generics_beh) = symbol.metadata().get_behavior::<GenericsBehavior>() {
-            let wc = generics_beh.where_clause();
-            if !wc.is_empty() {
-                clauses.push(wc.clone());
-            }
-        }
-
-        if let Some(target_beh) = symbol.metadata().get_behavior::<ExtensionTargetBehavior>() {
-            let wc = target_beh.where_clause();
-            if !wc.is_empty() {
-                clauses.push(wc.clone());
-            }
-        }
-
-        current_id = symbol.metadata().parent().map(|p| p.metadata().id());
-    }
-
-    clauses
 }
 
 /// Normalize a type using equality constraints (inner implementation).

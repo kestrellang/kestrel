@@ -5,10 +5,11 @@ use crate::analyzer::Analyzer;
 use crate::context::AnalysisContext;
 
 use kestrel_semantic_model::{
-    AssociatedTypeBindingsForEnum, AssociatedTypeBindingsForStruct, ConformancesForSymbol,
-    ExtensionsFor, PropertyRequirement, ProtocolAssociatedTypesWithDefaults,
-    ProtocolInitializersWithDefiner, ProtocolMethodsWithDefiner, ProtocolRequiredMethods,
-    ProtocolRequiredProperties, SemanticModel, StructFields, SymbolFor,
+    AllConformancesFor, AllInitializersFor, AllMethodsFor, AssociatedTypeBindingsFor,
+    ConformancesForSymbol, ExtensionsFor, PropertyRequirement,
+    ProtocolAssociatedTypesWithDefaults, ProtocolInitializersWithDefiner,
+    ProtocolMethodsWithDefiner, ProtocolRequiredMethods, ProtocolRequiredProperties,
+    SemanticModel, StructFields, SymbolFor,
 };
 use kestrel_semantic_tree::behavior::callable::CallableBehavior;
 use kestrel_semantic_tree::behavior::callable::{CallableSignature, ReceiverKind, SignatureType};
@@ -232,26 +233,18 @@ fn check_struct_conformance(
     let struct_name = &struct_sym.metadata().name().value;
     let struct_id = struct_sym.metadata().id();
 
-    let mut conformances = model.query(ConformancesForSymbol {
-        symbol_id: dyn_sym.metadata().id(),
-    });
-    let extensions = model.query(ExtensionsFor {
-        target_id: struct_id,
-    });
-    for extension in &extensions {
-        let ext_confs = model.query(ConformancesForSymbol {
-            symbol_id: extension.metadata().id(),
-        });
-        conformances.extend(ext_confs);
-    }
+    let conformances = model.query(AllConformancesFor { symbol_id: struct_id });
     if conformances.is_empty() {
         return;
     }
 
     // Check that extension-added conformances have their methods IN the extension
+    let extensions = model.query(ExtensionsFor {
+        target_id: struct_id,
+    });
     check_extension_conformances(struct_name, &extensions, model, ctx);
 
-    let associated_type_bindings = model.query(AssociatedTypeBindingsForStruct { struct_id });
+    let associated_type_bindings = model.query(AssociatedTypeBindingsFor { symbol_id: struct_id });
 
     // Compute self_type first - this is used for Self substitution in struct method signatures
     let self_type = dyn_sym
@@ -260,15 +253,7 @@ fn check_struct_conformance(
         .map(|tb| SignatureType::from_ty(tb.ty()))
         .unwrap_or_else(|| SignatureType::Named(vec![struct_name.clone()]));
 
-    let mut all_methods = collect_methods_from_symbol(dyn_sym);
-    let extensions = model.query(ExtensionsFor {
-        target_id: struct_id,
-    });
-    for extension in extensions {
-        let methods =
-            collect_methods_from_symbol(&(extension.clone() as Arc<dyn Symbol<KestrelLanguage>>));
-        all_methods.extend(methods);
-    }
+    let all_methods = model.query(AllMethodsFor { symbol_id: struct_id });
 
     // Build struct method map with Self substituted to the concrete type
     let mut self_bindings = HashMap::new();
@@ -599,18 +584,7 @@ fn link_protocol_methods_for_struct(
     let struct_name = &struct_sym.metadata().name().value;
     let struct_id = struct_sym.metadata().id();
 
-    let mut conformances = model.query(ConformancesForSymbol {
-        symbol_id: struct_dyn.metadata().id(),
-    });
-    let extensions = model.query(ExtensionsFor {
-        target_id: struct_id,
-    });
-    for extension in &extensions {
-        let ext_confs = model.query(ConformancesForSymbol {
-            symbol_id: extension.metadata().id(),
-        });
-        conformances.extend(ext_confs);
-    }
+    let conformances = model.query(AllConformancesFor { symbol_id: struct_id });
     if conformances.is_empty() {
         return;
     }
@@ -644,15 +618,7 @@ fn link_protocol_methods_for_struct(
         }
     }
 
-    let mut all_methods = collect_methods_from_symbol(struct_dyn);
-    let extensions = model.query(ExtensionsFor {
-        target_id: struct_id,
-    });
-    for extension in extensions {
-        let extension_methods =
-            collect_methods_from_symbol(&(extension.clone() as Arc<dyn Symbol<KestrelLanguage>>));
-        all_methods.extend(extension_methods);
-    }
+    let all_methods = model.query(AllMethodsFor { symbol_id: struct_id });
 
     for struct_method in &all_methods {
         let struct_sig = struct_method.signature();
@@ -763,9 +729,9 @@ fn resolve_protocol_type_for_link(
                 .map(|tb| SignatureType::from_ty(tb.ty()))
                 .unwrap_or_else(|| SignatureType::Named(vec![struct_name.to_string()]));
             bindings.insert("Self".to_string(), self_type);
-            if let Ok(struct_sym) = struct_dyn.clone().into_any_arc().downcast::<StructSymbol>() {
-                let assoc_bindings = model.query(AssociatedTypeBindingsForStruct {
-                    struct_id: struct_sym.metadata().id(),
+            {
+                let assoc_bindings = model.query(AssociatedTypeBindingsFor {
+                    symbol_id: struct_dyn.metadata().id(),
                 });
                 for (name, sig_type) in assoc_bindings {
                     bindings.insert(name, sig_type);
@@ -915,18 +881,6 @@ fn check_property_requirements(
     }
 }
 
-fn collect_initializers_from_symbol(
-    symbol: &Arc<dyn Symbol<KestrelLanguage>>,
-) -> Vec<Arc<InitializerSymbol>> {
-    symbol
-        .metadata()
-        .children()
-        .into_iter()
-        .filter(|child| child.metadata().kind() == KestrelSymbolKind::Initializer)
-        .filter_map(|child| child.into_any_arc().downcast::<InitializerSymbol>().ok())
-        .collect()
-}
-
 /// Link protocol initializers to struct initializers (attach ImplementsBehavior).
 ///
 /// This is similar to `link_protocol_methods_for_struct` but for initializers.
@@ -941,18 +895,7 @@ fn link_protocol_initializers_for_struct(
     let struct_name = &struct_sym.metadata().name().value;
     let struct_id = struct_sym.metadata().id();
 
-    let mut conformances = model.query(ConformancesForSymbol {
-        symbol_id: struct_dyn.metadata().id(),
-    });
-    let extensions = model.query(ExtensionsFor {
-        target_id: struct_id,
-    });
-    for extension in &extensions {
-        let ext_confs = model.query(ConformancesForSymbol {
-            symbol_id: extension.metadata().id(),
-        });
-        conformances.extend(ext_confs);
-    }
+    let conformances = model.query(AllConformancesFor { symbol_id: struct_id });
     if conformances.is_empty() {
         return;
     }
@@ -988,16 +931,7 @@ fn link_protocol_initializers_for_struct(
     }
 
     // Collect all initializers from struct and extensions
-    let mut all_initializers = collect_initializers_from_symbol(struct_dyn);
-    let extensions = model.query(ExtensionsFor {
-        target_id: struct_id,
-    });
-    for extension in extensions {
-        let extension_inits = collect_initializers_from_symbol(
-            &(extension.clone() as Arc<dyn Symbol<KestrelLanguage>>),
-        );
-        all_initializers.extend(extension_inits);
-    }
+    let all_initializers = model.query(AllInitializersFor { symbol_id: struct_id });
 
     // Match struct initializers to protocol initializers
     for struct_init in &all_initializers {
@@ -1064,24 +998,16 @@ fn check_enum_conformance(
     let enum_name = &enum_sym.metadata().name().value;
     let enum_id = enum_sym.metadata().id();
 
-    let mut conformances = model.query(ConformancesForSymbol {
-        symbol_id: dyn_sym.metadata().id(),
-    });
-    let extensions = model.query(ExtensionsFor { target_id: enum_id });
-    for extension in &extensions {
-        let ext_confs = model.query(ConformancesForSymbol {
-            symbol_id: extension.metadata().id(),
-        });
-        conformances.extend(ext_confs);
-    }
+    let conformances = model.query(AllConformancesFor { symbol_id: enum_id });
     if conformances.is_empty() {
         return;
     }
 
     // Check that extension-added conformances have their methods IN the extension
+    let extensions = model.query(ExtensionsFor { target_id: enum_id });
     check_extension_conformances(enum_name, &extensions, model, ctx);
 
-    let associated_type_bindings = model.query(AssociatedTypeBindingsForEnum { enum_id });
+    let associated_type_bindings = model.query(AssociatedTypeBindingsFor { symbol_id: enum_id });
 
     // Compute self_type first - this is used for Self substitution in enum method signatures
     let self_type = dyn_sym
@@ -1090,13 +1016,7 @@ fn check_enum_conformance(
         .map(|tb| SignatureType::from_ty(tb.ty()))
         .unwrap_or_else(|| SignatureType::Named(vec![enum_name.clone()]));
 
-    let mut all_methods = collect_methods_from_symbol(dyn_sym);
-    let extensions = model.query(ExtensionsFor { target_id: enum_id });
-    for extension in extensions {
-        let methods =
-            collect_methods_from_symbol(&(extension.clone() as Arc<dyn Symbol<KestrelLanguage>>));
-        all_methods.extend(methods);
-    }
+    let all_methods = model.query(AllMethodsFor { symbol_id: enum_id });
 
     // Build enum method map with Self substituted to the concrete type
     let mut self_bindings = HashMap::new();
@@ -1201,16 +1121,7 @@ fn link_protocol_methods_for_enum(
     let enum_name = &enum_sym.metadata().name().value;
     let enum_id = enum_sym.metadata().id();
 
-    let mut conformances = model.query(ConformancesForSymbol {
-        symbol_id: enum_dyn.metadata().id(),
-    });
-    let extensions = model.query(ExtensionsFor { target_id: enum_id });
-    for extension in &extensions {
-        let ext_confs = model.query(ConformancesForSymbol {
-            symbol_id: extension.metadata().id(),
-        });
-        conformances.extend(ext_confs);
-    }
+    let conformances = model.query(AllConformancesFor { symbol_id: enum_id });
     if conformances.is_empty() {
         return;
     }
@@ -1244,13 +1155,7 @@ fn link_protocol_methods_for_enum(
         }
     }
 
-    let mut all_methods = collect_methods_from_symbol(enum_dyn);
-    let extensions = model.query(ExtensionsFor { target_id: enum_id });
-    for extension in extensions {
-        let extension_methods =
-            collect_methods_from_symbol(&(extension.clone() as Arc<dyn Symbol<KestrelLanguage>>));
-        all_methods.extend(extension_methods);
-    }
+    let all_methods = model.query(AllMethodsFor { symbol_id: enum_id });
 
     for enum_method in &all_methods {
         let enum_sig = enum_method.signature();
@@ -1355,9 +1260,9 @@ fn resolve_protocol_type_for_link_enum(
                 .map(|tb| SignatureType::from_ty(tb.ty()))
                 .unwrap_or_else(|| SignatureType::Named(vec![enum_name.to_string()]));
             bindings.insert("Self".to_string(), self_type);
-            if let Ok(enum_sym) = enum_dyn.clone().into_any_arc().downcast::<EnumSymbol>() {
-                let assoc_bindings = model.query(AssociatedTypeBindingsForEnum {
-                    enum_id: enum_sym.metadata().id(),
+            {
+                let assoc_bindings = model.query(AssociatedTypeBindingsFor {
+                    symbol_id: enum_dyn.metadata().id(),
                 });
                 for (name, sig_type) in assoc_bindings {
                     bindings.insert(name, sig_type);
