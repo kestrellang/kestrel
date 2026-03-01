@@ -32,8 +32,8 @@ use semantic_tree::symbol::{Symbol, SymbolId};
 
 use crate::SemanticModel;
 use crate::queries::{
-    ConformancesForSymbol, ExtensionsFor, ResolvedAliasedType, SymbolFor, TypeParameterBounds,
-    WhereClausesInScope,
+    AssociatedTypeBoundsInContext, ConformancesForSymbol, ExtensionsFor, ResolvedAliasedType,
+    SymbolFor, TypeParameterBounds, WhereClausesInScope,
 };
 
 impl TypeOracle for SemanticModel {
@@ -144,11 +144,10 @@ impl TypeOracle for SemanticModel {
 
         // Handle associated types - look up member in protocol bounds
         if let TyKind::AssociatedType { symbol, container } = receiver_ty.kind() {
-            let bounds = get_associated_type_bounds_with_context(
-                self,
-                symbol,
-                self.context_symbol_id(),
-            );
+            let bounds = self.query(AssociatedTypeBoundsInContext {
+                assoc_type_id: symbol.metadata().id(),
+                context_id: self.context_symbol_id(),
+            });
 
             // If any bound is an error type, suppress cascading errors
             if bounds.iter().any(|b| matches!(b.kind(), TyKind::Error)) {
@@ -1402,11 +1401,10 @@ impl TypeOracle for ContextualOracle<'_> {
                 return self.conforms_to(&resolved, protocol_id);
             }
 
-            let bounds = get_associated_type_bounds_with_context(
-                self.model,
-                symbol,
-                Some(self.context_symbol_id),
-            );
+            let bounds = self.model.query(AssociatedTypeBoundsInContext {
+                assoc_type_id: symbol.metadata().id(),
+                context_id: Some(self.context_symbol_id),
+            });
             return bound_protocols_include(self.model, &bounds, protocol_id);
         }
 
@@ -1752,7 +1750,10 @@ fn resolve_member_with_context(
         symbol: assoc_type, ..
     } = receiver_ty.kind()
     {
-        let bounds = get_associated_type_bounds_with_context(model, assoc_type, context);
+        let bounds = model.query(AssociatedTypeBoundsInContext {
+            assoc_type_id: assoc_type.metadata().id(),
+            context_id: context,
+        });
 
         // If any bound is an error type, the associated type's constraints couldn't be resolved.
         // Return UnknownType to suppress cascading error messages.
@@ -2680,9 +2681,10 @@ fn resolve_all_members_impl(
 
     // AssociatedType: collect from all associated type bounds
     if let TyKind::AssociatedType { symbol, container } = receiver_ty.kind() {
-        let bounds = get_associated_type_bounds_with_context(
-            model, symbol, model.context_symbol_id(),
-        );
+        let bounds = model.query(AssociatedTypeBoundsInContext {
+            assoc_type_id: symbol.metadata().id(),
+            context_id: model.context_symbol_id(),
+        });
         if bounds.iter().any(|b| matches!(b.kind(), TyKind::Error)) {
             return Err(MemberError::UnknownType);
         }
@@ -4379,77 +4381,6 @@ fn bound_protocols_include(model: &SemanticModel, bounds: &[Ty], protocol_id: Sy
 
     let reachable = collect_protocol_ids_via_extensions(model, seed_protocols);
     reachable.contains(&protocol_id)
-}
-
-/// Get protocol bounds for an associated type, including context SelfBound constraints.
-fn get_associated_type_bounds_with_context(
-    model: &SemanticModel,
-    assoc_type: &Arc<kestrel_semantic_tree::symbol::associated_type::AssociatedTypeSymbol>,
-    context: Option<SymbolId>,
-) -> Vec<Ty> {
-    let mut bounds = Vec::new();
-
-    if let Some(direct_bounds) = assoc_type.bounds() {
-        for bound in direct_bounds {
-            if matches!(bound.kind(), TyKind::Protocol { .. } | TyKind::Error) {
-                bounds.push(bound.clone());
-            }
-        }
-    }
-
-    let Some(context_id) = context else {
-        return bounds;
-    };
-
-    let assoc_name = assoc_type.metadata().name().value.clone();
-    let where_clauses = model.query(WhereClausesInScope { context_id });
-    for wc in where_clauses {
-        for constraint in wc.constraints() {
-            if let Constraint::SelfBound {
-                associated_type_path,
-                bounds: self_bounds,
-                ..
-            } = constraint
-                && !associated_type_path.is_empty()
-                && associated_type_path.last() == Some(&assoc_name)
-            {
-                for bound in self_bounds {
-                    if matches!(bound.kind(), TyKind::Protocol { .. } | TyKind::Error) {
-                        bounds.push(bound.clone());
-                    }
-                }
-            }
-            if let Constraint::InheritedAssociatedTypeBound {
-                path,
-                bounds: assoc_bounds,
-                ..
-            } = constraint
-                && path.split('.').next_back() == Some(assoc_name.as_str())
-            {
-                for bound in assoc_bounds {
-                    if matches!(bound.kind(), TyKind::Protocol { .. } | TyKind::Error) {
-                        bounds.push(bound.clone());
-                    }
-                }
-            }
-            if let Constraint::TypeBound {
-                param: None,
-                param_name,
-                bounds: param_bounds,
-                ..
-            } = constraint
-                && param_name == &assoc_name
-            {
-                for bound in param_bounds {
-                    if matches!(bound.kind(), TyKind::Protocol { .. } | TyKind::Error) {
-                        bounds.push(bound.clone());
-                    }
-                }
-            }
-        }
-    }
-
-    bounds
 }
 
 /// Collect protocol bounds that apply to `Self` in the current context.

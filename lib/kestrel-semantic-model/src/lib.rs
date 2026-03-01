@@ -19,7 +19,7 @@ pub use extension_registry::ExtensionRegistry;
 pub use model::SemanticModel;
 pub use queries::{
     AllConformancesFor, AllInitializersFor, AllMethodsFor, AncestorOfKind,
-    AssociatedTypeBindingsFor,
+    AssociatedTypeBindingsFor, AssociatedTypeBoundsInContext,
     CallableParamTypesForCall, ChildByName, ConformancesForSymbol, DeclaredName,
     DeclaredNamesInScope, ExecutableBodyFor, ExtensionMethods, ExtensionsFor, FunctionsInSymbol,
     GenericsData, GenericsDataFor, HasBody, ImportsInScope, InferenceResultFor,

@@ -141,7 +141,7 @@ VALIDATE (check errors)         "diagnostics(entity)" query
 
 ## Existing Queries
 
-42 queries in `kestrel-semantic-model/src/queries/`:
+43 queries in `kestrel-semantic-model/src/queries/`:
 
 | Query | Input | Output | Call Sites |
 |-------|-------|--------|------------|
@@ -287,11 +287,11 @@ Normalizes a type using equality constraints from where clauses in scope. Called
 
 Files: `type_oracle.rs`: `normalize_type_with_context`
 
-#### `AssociatedTypeBoundsInContext(assoc_type, context_id) → Vec<Ty>`
+#### `AssociatedTypeBoundsInContext(assoc_type, context_id) → Vec<Ty>` ✅ DONE
 
-Protocol bounds on an associated type from its declaration + where clauses in context. **5 call sites** in type_oracle.
+Protocol bounds on an associated type from its declaration + where clauses in context. **4 call sites** in type_oracle, replaced with query.
 
-Files: `type_oracle.rs`: `get_associated_type_bounds_with_context`
+Files: `type_oracle.rs`: `get_associated_type_bounds_with_context` (deleted)
 
 ### Tier 3 — Structural Improvements (moderate value, better architecture)
 
