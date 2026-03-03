@@ -4310,37 +4310,40 @@ fn lower_call(
                             TyKind::Int(_) | TyKind::Float(_) | TyKind::Bool | TyKind::String
                         );
 
-                        // Debug logging for witness dispatch decisions (filtered to common protocol methods)
-                        let debug_methods = [
-                            "lessThan",
-                            "greaterThan",
-                            "equals",
-                            "add",
-                            "subtract",
-                            "multiply",
-                            "divide",
-                            "map",
-                            "filter",
-                            "next",
-                        ];
-                        if debug_methods.contains(&method_name.as_str()) {
-                            eprintln!("\n=== Witness Dispatch Debug: {} ===", method_name);
-                            eprintln!(
-                                "  protocol_symbol: {}",
-                                if let Some(ref ps) = protocol_symbol {
-                                    format!("Some({:?})", qualified_name_for_symbol(ctx, ps))
-                                } else {
-                                    "None".to_string()
-                                }
-                            );
-                            eprintln!("  receiver.ty: {:?}", receiver.ty);
-                            eprintln!("  is_type_param_call: {}", is_type_param_call);
-                            eprintln!("  is_static_type_param_call: {}", is_static_type_param_call);
-                            eprintln!("  is_assoc_type_call: {}", is_assoc_type_call);
-                            eprintln!("  is_static_assoc_type_call: {}", is_static_assoc_type_call);
-                            eprintln!("  is_self_type_call: {}", is_self_type_call);
-                            eprintln!("  is_protocol_type_call: {}", is_protocol_type_call);
-                            eprintln!("  is_builtin_type: {}", is_builtin_type);
+                        // Debug logging for witness dispatch decisions (only with VERBOSE_DEBUG_OUTPUT=1)
+                        let verbose_debug = std::env::var("VERBOSE_DEBUG_OUTPUT").is_ok();
+                        if verbose_debug {
+                            let debug_methods = [
+                                "lessThan",
+                                "greaterThan",
+                                "equals",
+                                "add",
+                                "subtract",
+                                "multiply",
+                                "divide",
+                                "map",
+                                "filter",
+                                "next",
+                            ];
+                            if debug_methods.contains(&method_name.as_str()) {
+                                eprintln!("\n=== Witness Dispatch Debug: {} ===", method_name);
+                                eprintln!(
+                                    "  protocol_symbol: {}",
+                                    if let Some(ref ps) = protocol_symbol {
+                                        format!("Some({:?})", qualified_name_for_symbol(ctx, ps))
+                                    } else {
+                                        "None".to_string()
+                                    }
+                                );
+                                eprintln!("  receiver.ty: {:?}", receiver.ty);
+                                eprintln!("  is_type_param_call: {}", is_type_param_call);
+                                eprintln!("  is_static_type_param_call: {}", is_static_type_param_call);
+                                eprintln!("  is_assoc_type_call: {}", is_assoc_type_call);
+                                eprintln!("  is_static_assoc_type_call: {}", is_static_assoc_type_call);
+                                eprintln!("  is_self_type_call: {}", is_self_type_call);
+                                eprintln!("  is_protocol_type_call: {}", is_protocol_type_call);
+                                eprintln!("  is_builtin_type: {}", is_builtin_type);
+                            }
                         }
 
                         // Check if this requires witness dispatch:
@@ -4362,9 +4365,15 @@ fn lower_call(
                             && !overloaded_protocol_extension_direct;
 
                         // Continue debug logging
-                        if debug_methods.contains(&method_name.as_str()) {
-                            eprintln!("  needs_witness_dispatch: {}", needs_witness_dispatch);
-                            eprintln!("===================================\n");
+                        if verbose_debug {
+                            let debug_methods = [
+                                "lessThan", "greaterThan", "equals", "add", "subtract",
+                                "multiply", "divide", "map", "filter", "next",
+                            ];
+                            if debug_methods.contains(&method_name.as_str()) {
+                                eprintln!("  needs_witness_dispatch: {}", needs_witness_dispatch);
+                                eprintln!("===================================\n");
+                            }
                         }
 
                         if needs_witness_dispatch {

@@ -3761,9 +3761,11 @@ fn compile_apply_partial(
 
             if is_aggregate {
                 // Copy nested struct data
-                eprintln!("DEBUG: About to call layout_of for nested aggregate");
-                eprintln!("  concrete_field_ty: {:?}", concrete_field_ty);
-                eprintln!("  field_mir_ty: {:?}", field_mir_ty);
+                if std::env::var("VERBOSE_DEBUG_OUTPUT").is_ok() {
+                    eprintln!("DEBUG: About to call layout_of for nested aggregate");
+                    eprintln!("  concrete_field_ty: {:?}", concrete_field_ty);
+                    eprintln!("  field_mir_ty: {:?}", field_mir_ty);
+                }
                 let nested_layout = ctx.layouts.layout_of(concrete_field_ty);
                 let dest_ptr = if offset == 0 {
                     env_ptr

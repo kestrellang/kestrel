@@ -209,11 +209,13 @@ fn compile_blocks(
                 let concrete_ty = subst
                     .apply_ty_readonly(ctx.mir, param.ty)
                     .unwrap_or(param.ty);
-                eprintln!("DEBUG: layout_of for param on stack");
-                eprintln!("  param.ty: {:?}", param.ty);
-                eprintln!("  param.ty MirTy: {:?}", ctx.mir.ty(param.ty));
-                eprintln!("  concrete_ty: {:?}", concrete_ty);
-                eprintln!("  concrete_ty MirTy: {:?}", ctx.mir.ty(concrete_ty));
+                if std::env::var("VERBOSE_DEBUG_OUTPUT").is_ok() {
+                    eprintln!("DEBUG: layout_of for param on stack");
+                    eprintln!("  param.ty: {:?}", param.ty);
+                    eprintln!("  param.ty MirTy: {:?}", ctx.mir.ty(param.ty));
+                    eprintln!("  concrete_ty: {:?}", concrete_ty);
+                    eprintln!("  concrete_ty MirTy: {:?}", ctx.mir.ty(concrete_ty));
+                }
                 let layout = ctx.layouts.layout_of(concrete_ty);
                 let size = if layout.size == 0 { 1 } else { layout.size };
                 let align = if layout.align == 0 { 1 } else { layout.align };

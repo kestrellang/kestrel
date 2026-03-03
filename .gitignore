@@ -4,4 +4,5 @@
 .vscode
 /temp
 *.c.o
+flock.lock
 /registry/

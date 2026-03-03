@@ -164,7 +164,101 @@ func handleInit() {
 }
 
 func handlePublish() {
-    let _ = eprintln("Publishing is not yet implemented. Server-side registry support required.");
+    let cwd = getcwd();
+    let manifestPath = joinPath(base: cwd, rel: "flock.toml");
+
+    if not fileExists(manifestPath) {
+        let _ = eprintln("flock.toml not found in current directory");
+        return
+    }
+
+    // Parse manifest
+    var manifest: Manifest = Manifest(
+        package: flock.manifest.PackageInfo(
+            name: "",
+            version: Version(major: 0, minor: 0, patch: 0),
+            description: .None,
+            source: "src"
+        ),
+        dependencies: Array[flock.dependency.Dependency]()
+    );
+    match readFileString(manifestPath) {
+        .Err(_) => {
+            let _ = eprintln("cannot read flock.toml");
+            return
+        },
+        .Ok(source) => {
+            match parseManifest(source: source) {
+                .Err(e) => {
+                    let _ = eprintln(e.description());
+                    return
+                },
+                .Ok(m) => manifest = m
+            }
+        }
+    }
+
+    let name = manifest.package.name;
+    let version = manifest.package.version.toString();
+
+    // Resolve org from FLOCK_ORG env var
+    var org = "";
+    match getenv("FLOCK_ORG") {
+        .Some(o) => org = o,
+        .None => {
+            let _ = eprintln("FLOCK_ORG environment variable not set");
+            let _ = eprintln("Usage: FLOCK_ORG=myorg flock publish");
+            return
+        }
+    }
+
+    // Read token from ~/.kestrel/credentials
+    var token = "";
+    match getenv("HOME") {
+        .Some(home) => {
+            let credPath = joinPath(base: home, rel: ".kestrel/credentials");
+            match readFileString(credPath) {
+                .Ok(contents) => token = trimWhitespace(contents),
+                .Err(_) => {}
+            }
+        },
+        .None => {}
+    }
+
+    // Fall back to FLOCK_TOKEN env var
+    if token.byteCount == 0 {
+        match getenv("FLOCK_TOKEN") {
+            .Some(t) => token = t,
+            .None => {
+                let _ = eprintln("No auth token found.");
+                let _ = eprintln("Set FLOCK_TOKEN or save your token to ~/.kestrel/credentials");
+                return
+            }
+        }
+    }
+
+    // Resolve registry URL
+    let regUrl = resolveRegistryUrl(projectUrl: manifest.registryUrl);
+
+    // Create archive
+    let archivePath = "/tmp/flock-publish-" + name + "-" + version + ".tar.gz";
+    let tarCmd = "tar czf " + archivePath + " -C " + quoteArg(cwd) + " .";
+    let tarExit = spawn(tarCmd);
+    if tarExit != 0 {
+        let _ = eprintln("failed to create archive");
+        return
+    }
+
+    // Upload via curl
+    let url = regUrl + "/api/v1/packages/" + org + "/" + name + "/" + version;
+    let curlCmd = "curl -s -X PUT " + quoteArg(url) + " -H \"Authorization: Bearer " + token + "\" -H \"Content-Type: application/gzip\" --data-binary @" + archivePath;
+    let _ = println("Publishing " + org + "/" + name + "@" + version + " to " + regUrl + "...");
+
+    let output = captureOutput(curlCmd);
+    let _ = println(output);
+
+    // Clean up
+    let _ = spawn("rm -f " + archivePath);
 }
 
 func handleUpdate() {
@@ -492,4 +586,28 @@ func lastPathComponent(path: String) -> String {
     }
 
     path.substringBytes(from: 0, to: end)
+}
+
+/// Trims leading and trailing whitespace (spaces, tabs, newlines) from a string.
+func trimWhitespace(s: String) -> String {
+    let len = s.byteCount;
+    var start: Int64 = 0;
+    while start < len {
+        let b = s.byteAtUnchecked(start);
+        if b == UInt8(intLiteral: 32) or b == UInt8(intLiteral: 9) or b == UInt8(intLiteral: 10) or b == UInt8(intLiteral: 13) {
+            start = start + 1
+        } else {
+            break
+        }
+    }
+    var end = len;
+    while end > start {
+        let b = s.byteAtUnchecked(end - 1);
+        if b == UInt8(intLiteral: 32) or b == UInt8(intLiteral: 9) or b == UInt8(intLiteral: 10) or b == UInt8(intLiteral: 13) {
+            end = end - 1
+        } else {
+            break
+        }
+    }
+    s.substringBytes(from: start, to: end)
 }
