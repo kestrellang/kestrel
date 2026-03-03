@@ -1,0 +1,6 @@
+[package]
+name = "quill"
+version = "0.1.0"
+description = "Format-agnostic serialization for Kestrel"
+
+[dependencies]

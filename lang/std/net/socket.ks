@@ -6,6 +6,7 @@ import std.num.(Int64, Int32, UInt8, UInt16)
 import std.result.(Result)
 import std.memory.(Slice, Pointer)
 import std.collections.(Array)
+import std.text.(String)
 import std.core.(Bool)
 import std.net.libc
 import std.io.error.(Error)
@@ -47,6 +48,89 @@ public struct TcpStream: Read, Write {
         if self.fd >= 0 {
             let _ = libc.close(self.fd);
         }
+    }
+}
+
+extend TcpStream {
+    /// Connects to a remote host and port, returning a TcpStream.
+    /// Uses getaddrinfo for DNS resolution.
+    public static func connect(host: String, port: UInt16) -> Result[TcpStream, Error] {
+        // Build port string for getaddrinfo
+        let port64 = Int64(from: port);
+        let portStr = port64.format();
+
+        // Set up hints: AF_INET, SOCK_STREAM, IPPROTO_TCP
+        // addrinfo struct is 48 bytes on macOS
+        var hints = Array[UInt8](capacity: 48);
+        var hi: Int64 = 0;
+        while hi < 48 {
+            hints.append(0);
+            hi = hi + 1
+        }
+        // ai_family = AF_INET (2) at offset 4
+        let hintsPtr = hints.asPointer();
+        hintsPtr.offset(by: 4).cast[Int32]().write(libc.AF_INET());
+        // ai_socktype = SOCK_STREAM (1) at offset 8
+        hintsPtr.offset(by: 8).cast[Int32]().write(libc.SOCK_STREAM());
+        // ai_protocol = IPPROTO_TCP (6) at offset 12
+        hintsPtr.offset(by: 12).cast[Int32]().write(libc.IPPROTO_TCP());
+
+        // Null-terminate host and port strings for C
+        var hostBuf = Array[UInt8]();
+        var hci: Int64 = 0;
+        while hci < host.byteCount {
+            hostBuf.append(host.byteAtUnchecked(hci));
+            hci = hci + 1
+        }
+        hostBuf.append(0);
+
+        var portBuf = Array[UInt8]();
+        var pci: Int64 = 0;
+        while pci < portStr.byteCount {
+            portBuf.append(portStr.byteAtUnchecked(pci));
+            pci = pci + 1
+        }
+        portBuf.append(0);
+
+        // Call getaddrinfo
+        var resultPtr = Pointer[UInt8].nullPointer();
+        let gaiResult = libc.getaddrinfo(
+            hostBuf.asPointer(),
+            portBuf.asPointer(),
+            hints.asPointer(),
+            Pointer(to: resultPtr).cast[Pointer[UInt8]]()
+        );
+        if gaiResult != 0 {
+            return .Err(Error(gaiResult))
+        }
+
+        // Extract address info from first result
+        // ai_family at offset 4, ai_socktype at offset 8, ai_protocol at offset 12
+        // ai_addrlen at offset 16, ai_addr at offset 32
+        let infoPtr = resultPtr;
+        let family = infoPtr.offset(by: 4).cast[Int32]().read();
+        let socktype = infoPtr.offset(by: 8).cast[Int32]().read();
+        let proto = infoPtr.offset(by: 12).cast[Int32]().read();
+        let addrlen = infoPtr.offset(by: 16).cast[Int32]().read();
+        let addrPtr = infoPtr.offset(by: 32).cast[Pointer[UInt8]]().read();
+
+        // Create socket
+        let fd = libc.socket(family, socktype, proto);
+        if fd < 0 {
+            libc.freeaddrinfo(resultPtr);
+            return .Err(Error.last())
+        }
+
+        // Connect
+        let connResult = libc.connect(fd, addrPtr, addrlen);
+        libc.freeaddrinfo(resultPtr);
+
+        if connResult < 0 {
+            let _ = libc.close(fd);
+            return .Err(Error.last())
+        }
+
+        .Ok(TcpStream(fd))
     }
 }
 

@@ -278,7 +278,7 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
     // Ensure unique storage for mutation (COW)
     private mutating func makeUnique() {
         if self.storage.isUnique() == false {
-            self.storage = self.storage.deepClone()
+            self.storage = RcBox(self.storage.getValue().clone())
         }
     }
 

@@ -1,0 +1,10 @@
+[package]
+name = "weather"
+version = "0.1.0"
+description = "Weather dashboard using Open-Meteo API"
+
+[dependencies]
+perch = { path = "../../lang/perch" }
+swoop = { path = "../../lang/swoop" }
+quill-json = { path = "../../lang/quill-json" }
+plume = { path = "../../lang/plume" }

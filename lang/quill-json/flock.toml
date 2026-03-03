@@ -1,0 +1,7 @@
+[package]
+name = "quill-json"
+version = "0.1.0"
+description = "JSON support for quill"
+
+[dependencies]
+quill = { path = "../quill" }

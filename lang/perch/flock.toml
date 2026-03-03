@@ -1,0 +1,9 @@
+[package]
+name = "perch"
+version = "0.1.0"
+description = "Web server framework for Kestrel"
+
+[dependencies]
+http = { path = "../http" }
+quill = { path = "../quill" }
+quill-json = { path = "../quill-json" }

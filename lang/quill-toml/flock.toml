@@ -1,0 +1,7 @@
+[package]
+name = "quill-toml"
+version = "0.1.0"
+description = "TOML support for quill"
+
+[dependencies]
+quill = { path = "../quill" }

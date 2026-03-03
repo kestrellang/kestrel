@@ -1,0 +1,9 @@
+[package]
+name = "flock"
+version = "0.1.0"
+description = "Package manager for Kestrel"
+
+[dependencies]
+clutch = { path = "../clutch" }
+quill = { path = "../quill" }
+quill-toml = { path = "../quill-toml" }

@@ -64,6 +64,15 @@ func libc_setsockopt(sockfd: lang.i32, level: lang.i32, optname: lang.i32, optva
 @extern(.C, mangleName: "htons")
 func libc_htons(hostshort: lang.i16) -> lang.i16
 
+@extern(.C, mangleName: "connect")
+func libc_connect(sockfd: lang.i32, addr: lang.ptr[lang.i8], addrlen: lang.i32) -> lang.i32
+
+@extern(.C, mangleName: "getaddrinfo")
+func libc_getaddrinfo(node: lang.ptr[lang.i8], service: lang.ptr[lang.i8], hints: lang.ptr[lang.i8], res: lang.ptr[lang.ptr[lang.i8]]) -> lang.i32
+
+@extern(.C, mangleName: "freeaddrinfo")
+func libc_freeaddrinfo(res: lang.ptr[lang.i8])
+
 // errno is accessed via __error() on macOS
 @extern(.C, mangleName: "__error")
 func __error() -> lang.ptr[lang.i32]
@@ -116,6 +125,39 @@ public func setsockopt(sockfd: Int32, level: Int32, optname: Int32, optval: Poin
 /// Converts host byte order to network byte order (16-bit).
 public func htons(hostshort: UInt16) -> UInt16 {
     UInt16(raw: libc_htons(hostshort.raw))
+}
+
+/// Connects a socket to a remote address. Returns 0 on success, -1 on error.
+public func connect(sockfd: Int32, addr: Pointer[UInt8], addrlen: Int32) -> Int32 {
+    Int32(raw: libc_connect(sockfd.raw, lang.cast_ptr[lang.i8](addr.raw), addrlen.raw))
+}
+
+/// Resolves a hostname to socket addresses.
+/// Returns 0 on success, non-zero error code on failure.
+/// The result pointer must be freed with freeaddrinfo().
+///
+/// addrinfo struct layout (macOS, 48 bytes):
+///   offset 0:  ai_flags    (i32)
+///   offset 4:  ai_family   (i32)
+///   offset 8:  ai_socktype (i32)
+///   offset 12: ai_protocol (i32)
+///   offset 16: ai_addrlen  (u32)
+///   offset 20: padding     (4 bytes on macOS, differs from Linux)
+///   offset 24: ai_canonname (ptr)
+///   offset 32: ai_addr     (ptr)
+///   offset 40: ai_next     (ptr)
+public func getaddrinfo(node: Pointer[UInt8], service: Pointer[UInt8], hints: Pointer[UInt8], res: Pointer[Pointer[UInt8]]) -> Int32 {
+    Int32(raw: libc_getaddrinfo(
+        lang.cast_ptr[lang.i8](node.raw),
+        lang.cast_ptr[lang.i8](service.raw),
+        lang.cast_ptr[lang.i8](hints.raw),
+        lang.cast_ptr[lang.ptr[lang.i8]](res.raw)
+    ))
+}
+
+/// Frees the addrinfo linked list returned by getaddrinfo().
+public func freeaddrinfo(res: Pointer[UInt8]) {
+    libc_freeaddrinfo(lang.cast_ptr[lang.i8](res.raw))
 }
 
 /// Returns the current errno value.

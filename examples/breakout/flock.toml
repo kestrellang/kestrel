@@ -1,0 +1,8 @@
+[package]
+name = "breakout"
+version = "0.1.0"
+description = "Terminal breakout game"
+source = "."
+
+[dependencies]
+games = { path = "../games" }

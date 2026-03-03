@@ -1,0 +1,8 @@
+[package]
+name = "counter"
+version = "0.1.0"
+description = "HTMX counter example using Perch"
+
+[dependencies]
+perch = { path = "../../lang/perch" }
+plume = { path = "../../lang/plume" }

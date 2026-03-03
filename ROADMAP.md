@@ -646,14 +646,14 @@ See [docs/memory-model/implementation-plan.md](docs/memory-model/implementation-
 - [x] Refactor symbol mangling
 - [x] Switch lookup from binding phase to type inference
 - [x] Consolidate type transformations
-- [ ] Refactor semantic model and passes
+- [x] Refactor semantic model and passes
 - [ ] Incremental compilation
 
 ### Tooling
 
 - [ ] Language Server Protocol (LSP)
-- [ ] Web Server
-- [ ] Flock package manager
+- [x] Web Server
+- [x] Flock package manager
 - [ ] Jessup version manager
 
 ### Documentation
