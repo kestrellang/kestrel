@@ -21,12 +21,17 @@ impl DeclarationBinder for GetterBinder {
     fn bind_signature(
         &self,
         symbol: &Arc<dyn Symbol<KestrelLanguage>>,
-        _syntax: &SyntaxNode,
+        syntax: &SyntaxNode,
         _context: &mut BindingContext,
     ) {
         // Only process getter symbols
         if symbol.metadata().kind() != KestrelSymbolKind::Getter {
             return;
+        }
+
+        // Extract doc comment
+        if let Some(doc) = crate::binders::utils::doc_comment::extract_doc_comment(syntax) {
+            symbol.metadata().add_behavior(doc);
         }
 
         let span = symbol.metadata().span().clone();

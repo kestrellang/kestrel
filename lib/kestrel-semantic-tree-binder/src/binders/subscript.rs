@@ -59,6 +59,11 @@ impl DeclarationBinder for SubscriptBinder {
         );
         symbol.metadata().add_behavior(attributes_behavior);
 
+        // Extract doc comment
+        if let Some(doc) = crate::binders::utils::doc_comment::extract_doc_comment(syntax) {
+            symbol.metadata().add_behavior(doc);
+        }
+
         // Resolve generics (type parameters and where clause)
         let generics_behavior = crate::binders::utils::generics::resolve_generics(
             syntax, &source, file_id, symbol_id, context,

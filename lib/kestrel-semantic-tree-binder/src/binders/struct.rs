@@ -50,6 +50,11 @@ impl DeclarationBinder for StructBinder {
         );
         symbol.metadata().add_behavior(attributes_behavior.clone());
 
+        // Extract doc comment
+        if let Some(doc) = crate::binders::utils::doc_comment::extract_doc_comment(syntax) {
+            symbol.metadata().add_behavior(doc);
+        }
+
         // Process @builtin attribute if present
         Self::process_builtin_attribute(symbol, &attributes_behavior, &source, context);
 

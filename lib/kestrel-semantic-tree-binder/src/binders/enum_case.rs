@@ -44,6 +44,11 @@ impl DeclarationBinder for EnumCaseBinder {
         );
         symbol.metadata().add_behavior(attributes_behavior);
 
+        // Extract doc comment
+        if let Some(doc) = crate::binders::utils::doc_comment::extract_doc_comment(syntax) {
+            symbol.metadata().add_behavior(doc);
+        }
+
         // 3. Check if case has parameters (associated values)
         // Look for EnumCaseParameterList in the syntax
         let has_parameters = syntax

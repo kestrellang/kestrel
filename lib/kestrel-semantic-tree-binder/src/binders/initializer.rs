@@ -44,6 +44,11 @@ impl DeclarationBinder for InitializerBinder {
         );
         symbol.metadata().add_behavior(attributes_behavior);
 
+        // Extract doc comment
+        if let Some(doc) = crate::binders::utils::doc_comment::extract_doc_comment(syntax) {
+            symbol.metadata().add_behavior(doc);
+        }
+
         // Extract type parameters and resolve where clause bounds FIRST
         // This must happen before resolving parameter/return types so that
         // T.Item paths can find the protocol bounds for T

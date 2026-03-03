@@ -69,6 +69,11 @@ impl DeclarationBinder for FieldBinder {
 
         symbol.metadata().add_behavior(attributes_behavior);
 
+        // Extract doc comment
+        if let Some(doc) = crate::binders::utils::doc_comment::extract_doc_comment(syntax) {
+            symbol.metadata().add_behavior(doc);
+        }
+
         // Resolve the type directly from syntax
         let resolved_type =
             resolve_field_type_from_syntax(syntax, &source, file_id, symbol_id, context);

@@ -265,11 +265,19 @@ public struct DefaultStringInterpolation: StringInterpolationProtocol {
         if partsCount == 0 {
             return ""
         }
-        var result = "";
+        if partsCount == 1 {
+            return self.parts(unchecked: 0)
+        }
+        var totalBytes: Int64 = 0;
+        var j: Int64 = 0;
+        while j < partsCount {
+            totalBytes = totalBytes + self.parts(unchecked: j).byteCount;
+            j = j + 1;
+        }
+        var result = String(capacity: totalBytes);
         var i: Int64 = 0;
         while i < partsCount {
-            let part = self.parts(unchecked: i);
-            result = result + part;
+            result.append(self.parts(unchecked: i));
             i = i + 1;
         }
         result

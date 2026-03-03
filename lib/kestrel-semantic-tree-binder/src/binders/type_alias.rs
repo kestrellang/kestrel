@@ -53,6 +53,11 @@ impl DeclarationBinder for TypeAliasBinder {
         let source = context.source_for_symbol(symbol);
         let file_id = context.file_id_for_symbol(symbol);
 
+        // Extract doc comment
+        if let Some(doc) = crate::binders::utils::doc_comment::extract_doc_comment(syntax) {
+            symbol.metadata().add_behavior(doc);
+        }
+
         match symbol_kind {
             KestrelSymbolKind::AssociatedType => {
                 // Associated type in protocol: resolve bounds and optional default

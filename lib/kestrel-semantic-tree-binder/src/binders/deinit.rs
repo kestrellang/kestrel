@@ -21,12 +21,17 @@ impl DeclarationBinder for DeinitBinder {
     fn bind_signature(
         &self,
         symbol: &Arc<dyn Symbol<KestrelLanguage>>,
-        _syntax: &SyntaxNode,
+        syntax: &SyntaxNode,
         context: &mut BindingContext,
     ) {
         // Only process deinit symbols
         if symbol.metadata().kind() != KestrelSymbolKind::Deinit {
             return;
+        }
+
+        // Extract doc comment
+        if let Some(doc) = crate::binders::utils::doc_comment::extract_doc_comment(syntax) {
+            symbol.metadata().add_behavior(doc);
         }
 
         // Attach DeinitBehavior to parent struct

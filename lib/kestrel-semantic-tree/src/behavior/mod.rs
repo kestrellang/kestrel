@@ -5,6 +5,7 @@ pub mod conformances;
 pub mod conforms_to;
 pub mod copy_semantics;
 pub mod deinit;
+pub mod doc_comment;
 pub mod executable;
 pub mod extension_target;
 pub mod extern_fn;
@@ -32,6 +33,7 @@ pub enum KestrelBehaviorKind {
     ConformsTo,
     CopySemantics,
     Deinit,
+    DocComment,
     Executable,
     Extern,
     ExtensionTarget,

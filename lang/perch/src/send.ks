@@ -9,7 +9,7 @@ import perch.response.(Response)
 /// Sends the status line, headers (including Content-Length and
 /// Connection: close), and body.
 public func sendResponse(response: Response, to fd: Int32) -> Result[(), Error] {
-    var resp = String();
+    var resp = String(capacity: 256 + response.bodyContent.byteCount);
 
     // Status line: HTTP/1.1 200 OK\r\n
     resp.append("HTTP/1.1 ");

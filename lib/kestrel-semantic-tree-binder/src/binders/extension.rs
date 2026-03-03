@@ -44,6 +44,11 @@ impl DeclarationBinder for ExtensionBinder {
         let source = context.source_for_symbol(symbol);
         let file_id = context.file_id_for_symbol(symbol);
 
+        // Extract doc comment
+        if let Some(doc) = crate::binders::utils::doc_comment::extract_doc_comment(syntax) {
+            symbol.metadata().add_behavior(doc);
+        }
+
         // Resolve the target type from the Ty node
         let target_result = resolve_extension_target(syntax, &source, file_id, symbol_id, context);
 
