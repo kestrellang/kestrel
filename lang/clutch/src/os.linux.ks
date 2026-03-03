@@ -18,7 +18,7 @@ public func getArgv() -> Array[String] {
 
     // Open /proc/self/cmdline using stdlib io functions
     let path = "/proc/self/cmdline".toCString();
-    let fd = open(path.raw, O_RDONLY(), 0);
+    let fd = std.io.libc.open(path.raw, O_RDONLY(), 0);
     path.free();
     if fd < 0 {
         return result
@@ -31,8 +31,8 @@ public func getArgv() -> Array[String] {
         buf.append(0);
         i = i + 1
     }
-    let n = read(fd, buf.asPointer(), 4096);
-    let _ = close(fd);
+    let n = std.io.libc.read(fd, buf.asPointer(), 4096);
+    let _ = std.io.libc.close(fd);
 
     if n <= 0 {
         return result
