@@ -18,10 +18,22 @@ fi
 echo "Bootstrapping flock..."
 
 # Resolve OpenSSL path (needed by swoop)
-OPENSSL_PREFIX="$(brew --prefix openssl@3 2>/dev/null || true)"
-if [ -z "$OPENSSL_PREFIX" ]; then
-    echo "Error: OpenSSL 3 not found. Install with: brew install openssl@3"
-    exit 1
+OPENSSL_PREFIX=""
+OPENSSL_LIB_FLAG=""
+
+if [ "$(uname -s)" = "Darwin" ]; then
+    OPENSSL_PREFIX="$(brew --prefix openssl@3 2>/dev/null || true)"
+    if [ -z "$OPENSSL_PREFIX" ]; then
+        echo "Error: OpenSSL 3 not found. Install with: brew install openssl@3"
+        exit 1
+    fi
+    OPENSSL_LIB_FLAG="-L $OPENSSL_PREFIX/lib"
+elif [ "$(uname -s)" = "Linux" ]; then
+    # On Linux, OpenSSL is typically in the default library path
+    if pkg-config --exists openssl 2>/dev/null; then
+        OPENSSL_LIB_FLAG="$(pkg-config --libs-only-L openssl)"
+    fi
+    # Default path works if libssl-dev is installed
 fi
 
 "$KESTREL" build \
@@ -75,7 +87,7 @@ fi
     "$SCRIPT_DIR/src/main.ks" \
     -o "$SCRIPT_DIR/flock" \
     -l ssl -l crypto \
-    -L "$OPENSSL_PREFIX/lib"
+    $OPENSSL_LIB_FLAG
 
 echo "Done! Built flock at $SCRIPT_DIR/flock"
 echo ""

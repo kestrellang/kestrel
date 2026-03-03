@@ -145,7 +145,7 @@ func handleInit() {
     // Extract directory name as default package name
     let dirName = lastPathComponent(cwd);
 
-    let content = "[package]\nname = \"" + dirName + "\"\nversion = \"0.1.0\"\ndescription = \"\"\n\n[dependencies]\n";
+    let content = "[package]\nname = \"" + dirName + "\"\nversion = \"0.1.0\"\ndescription = \"\"\nauthor = \"\"\nlicense = \"\"\nrepository = \"\"\nwebsite = \"\"\ndocumentation = \"\"\n\n[dependencies]\n";
 
     match writeFileString(manifestPath, content) {
         .Ok(_) => { let _ = println("Created flock.toml"); },

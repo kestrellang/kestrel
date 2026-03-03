@@ -1,12 +1,15 @@
 [package]
 name = "flock"
-version = "0.1.0"
+version = "0.1.1"
 description = "Package manager for Kestrel"
+author = "jkpdino"
+license = "MIT"
+repository = "https://github.com/jkpdino/kestrel"
 
 [dependencies]
-clutch = { path = "../clutch" }
-quill = { path = "../quill" }
-quill-toml = { path = "../quill-toml" }
-quill-json = { path = "../quill-json" }
-http = { path = "../http" }
-swoop = { path = "../swoop" }
+"kestrel/clutch" = "0.1.0"
+"kestrel/quill" = "0.1.0"
+"kestrel/quill-toml" = "0.1.0"
+"kestrel/quill-json" = "0.1.0"
+"kestrel/http" = "0.1.0"
+"kestrel/swoop" = "0.1.0"

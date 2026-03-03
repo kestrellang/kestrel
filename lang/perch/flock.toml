@@ -1,9 +1,12 @@
 [package]
 name = "perch"
-version = "0.1.0"
+version = "0.1.1"
 description = "Web server framework for Kestrel"
+author = "jkpdino"
+license = "MIT"
+repository = "https://github.com/jkpdino/kestrel"
 
 [dependencies]
-http = { path = "../http" }
-quill = { path = "../quill" }
-quill-json = { path = "../quill-json" }
+"kestrel/http" = "0.1.0"
+"kestrel/quill" = "0.1.0"
+"kestrel/quill-json" = "0.1.0"

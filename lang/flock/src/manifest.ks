@@ -17,6 +17,11 @@ public struct PackageInfo: Cloneable {
     public var name: String
     public var version: Version
     public var description: Optional[String]
+    public var author: Optional[String]
+    public var license: Optional[String]
+    public var repository: Optional[String]
+    public var website: Optional[String]
+    public var documentation: Optional[String]
     /// Source directory relative to the package root. Defaults to "src".
     public var source: String
 
@@ -24,16 +29,22 @@ public struct PackageInfo: Cloneable {
         self.name = name;
         self.version = version;
         self.description = description;
+        self.author = .None;
+        self.license = .None;
+        self.repository = .None;
+        self.website = .None;
+        self.documentation = .None;
         self.source = source;
     }
 
     public func clone() -> PackageInfo {
-        var desc: Optional[String] = .None;
-        match self.description {
-            .Some(s) => desc = .Some(s.clone()),
-            .None => {}
-        }
-        PackageInfo(name: self.name.clone(), version: self.version.clone(), description: desc, source: self.source.clone())
+        var info = PackageInfo(name: self.name.clone(), version: self.version.clone(), description: cloneOptionalString(self.description), source: self.source.clone());
+        info.author = cloneOptionalString(self.author);
+        info.license = cloneOptionalString(self.license);
+        info.repository = cloneOptionalString(self.repository);
+        info.website = cloneOptionalString(self.website);
+        info.documentation = cloneOptionalString(self.documentation);
+        info
     }
 }
 
@@ -187,12 +198,77 @@ public func parseManifest(source source: String) -> Result[Manifest, FlockError]
                 .None => {}
             }
 
-            let packageInfo = PackageInfo(
+            // Extract author (optional)
+            var author: Optional[String] = .None;
+            match pkg.value(forKey: "author") {
+                .Some(val) => {
+                    match val.asString() {
+                        .Some(s) => author = .Some(s),
+                        .None => {}
+                    }
+                },
+                .None => {}
+            }
+
+            // Extract license (optional)
+            var license: Optional[String] = .None;
+            match pkg.value(forKey: "license") {
+                .Some(val) => {
+                    match val.asString() {
+                        .Some(s) => license = .Some(s),
+                        .None => {}
+                    }
+                },
+                .None => {}
+            }
+
+            // Extract repository (optional)
+            var repository: Optional[String] = .None;
+            match pkg.value(forKey: "repository") {
+                .Some(val) => {
+                    match val.asString() {
+                        .Some(s) => repository = .Some(s),
+                        .None => {}
+                    }
+                },
+                .None => {}
+            }
+
+            var packageInfo = PackageInfo(
                 name: name,
                 version: version,
                 description: description,
                 source: sourceDir
             );
+            // Extract website (optional)
+            var website: Optional[String] = .None;
+            match pkg.value(forKey: "website") {
+                .Some(val) => {
+                    match val.asString() {
+                        .Some(s) => website = .Some(s),
+                        .None => {}
+                    }
+                },
+                .None => {}
+            }
+
+            // Extract documentation (optional)
+            var docs: Optional[String] = .None;
+            match pkg.value(forKey: "documentation") {
+                .Some(val) => {
+                    match val.asString() {
+                        .Some(s) => docs = .Some(s),
+                        .None => {}
+                    }
+                },
+                .None => {}
+            }
+
+            packageInfo.author = author;
+            packageInfo.license = license;
+            packageInfo.repository = repository;
+            packageInfo.website = website;
+            packageInfo.documentation = docs;
 
             // Extract [dependencies] section
             var deps = Array[Dependency]();
