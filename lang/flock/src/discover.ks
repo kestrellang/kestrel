@@ -35,9 +35,27 @@ public func discoverSources(rootDir rootDir: String) -> Array[String] {
                     j = j + 1
                 }
             } else if entry.ends(with: ".ks") {
-                result.append(fullPath)
+                if shouldIncludeForPlatform(entry) {
+                    result.append(fullPath)
+                }
             }
         }
     }
     result
+}
+
+/// Checks if a .ks file should be included for the current platform.
+/// Files like "foo.darwin.ks" are only included on macOS,
+/// "foo.linux.ks" only on Linux. Plain ".ks" files always included.
+func shouldIncludeForPlatform(filename: String) -> Bool {
+    let currentPlatform = platform();
+    if filename.ends(with: ".darwin.ks") {
+        currentPlatform.equals("darwin")
+    } else if filename.ends(with: ".linux.ks") {
+        currentPlatform.equals("linux")
+    } else if filename.ends(with: ".windows.ks") {
+        currentPlatform.equals("windows")
+    } else {
+        true
+    }
 }

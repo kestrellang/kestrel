@@ -68,10 +68,10 @@ extend TcpStream {
         let portStr = port64.format();
 
         // Set up hints: AF_INET, SOCK_STREAM, IPPROTO_TCP
-        // addrinfo struct is 48 bytes on macOS
-        var hints = Array[UInt8](capacity: 48);
+        let addrinfoSize = ADDRINFO_SIZE();
+        var hints = Array[UInt8](capacity: addrinfoSize);
         var hi: Int64 = 0;
-        while hi < 48 {
+        while hi < addrinfoSize {
             hints.append(0);
             hi = hi + 1
         }
@@ -114,13 +114,13 @@ extend TcpStream {
 
         // Extract address info from first result
         // ai_family at offset 4, ai_socktype at offset 8, ai_protocol at offset 12
-        // ai_addrlen at offset 16, ai_addr at offset 32
+        // ai_addrlen at offset 16, ai_addr offset is platform-specific
         let infoPtr = resultPtr;
         let family = infoPtr.offset(by: 4).cast[Int32]().read();
         let socktype = infoPtr.offset(by: 8).cast[Int32]().read();
         let proto = infoPtr.offset(by: 12).cast[Int32]().read();
         let addrlen = infoPtr.offset(by: 16).cast[Int32]().read();
-        let addrPtr = infoPtr.offset(by: 32).cast[Pointer[UInt8]]().read();
+        let addrPtr = infoPtr.offset(by: AI_ADDR_OFFSET()).cast[Pointer[UInt8]]().read();
 
         // Create socket
         let fd = libc.socket(family, socktype, proto);
@@ -164,25 +164,8 @@ public struct TcpListener {
             return .Err(Error.last())
         }
 
-        // Build sockaddr_in (macOS layout, 16 bytes)
-        var addr = Array[UInt8]();
-        // sin_len = 16, sin_family = 2
-        addr.append(16);
-        addr.append(2);
-        // sin_port in network byte order (big-endian)
-        let port64 = Int64(from: port);
-        let portHi = port64 / 256;
-        let portLo = port64 % 256;
-        let hi = UInt8(from: portHi);
-        let lo = UInt8(from: portLo);
-        addr.append(hi);
-        addr.append(lo);
-        // sin_addr = INADDR_ANY + zero padding (12 bytes)
-        var pad: Int64 = 0;
-        while pad < 12 {
-            addr.append(0);
-            pad = pad + 1
-        }
+        // Build sockaddr_in (platform-specific layout, 16 bytes)
+        var addr = buildSockaddrIn(port);
 
         let bindResult = libc.bind(fd, addr.asPointer(), libc.SOCKADDR_IN_SIZE());
         if bindResult < 0 {

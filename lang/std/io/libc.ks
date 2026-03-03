@@ -41,17 +41,7 @@ public func O_WRONLY() -> Int32 { 0x0001 }
 /// Open for reading and writing.
 public func O_RDWR() -> Int32 { 0x0002 }
 
-/// Create file if it doesn't exist.
-public func O_CREAT() -> Int32 { 0x0200 }
-
-/// Truncate file to zero length.
-public func O_TRUNC() -> Int32 { 0x0400 }
-
-/// Append to end of file.
-public func O_APPEND() -> Int32 { 0x0008 }
-
-/// Fail if file exists (with O_CREAT).
-public func O_EXCL() -> Int32 { 0x0800 }
+// O_CREAT, O_TRUNC, O_APPEND, O_EXCL are in libc.darwin.ks / libc.linux.ks
 
 // ============================================================================
 // SEEK WHENCE CONSTANTS
@@ -92,9 +82,7 @@ func libc_write(fd: lang.i32, buf: lang.ptr[lang.i8], count: lang.i64) -> lang.i
 @extern(.C, mangleName: "lseek")
 func libc_lseek(fd: lang.i32, offset: lang.i64, whence: lang.i32) -> lang.i64
 
-// errno is accessed via __error() on macOS
-@extern(.C, mangleName: "__error")
-func __error() -> lang.ptr[lang.i32]
+// __errno_ptr() is in libc.darwin.ks / libc.linux.ks
 
 // ============================================================================
 // PUBLIC WRAPPERS
@@ -127,6 +115,6 @@ public func lseek(fd: Int32, offset: Int64, whence: Int32) -> Int64 {
 
 /// Returns the current errno value.
 public func errno() -> Int32 {
-    let ptr = __error();
+    let ptr = __errno_ptr();
     Int32(raw: lang.ptr_read(ptr))
 }

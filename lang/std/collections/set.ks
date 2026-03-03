@@ -774,6 +774,14 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hash, H: H
 
     /// Returns the internal dictionary (for extensions).
     func getDict() -> Dictionary[T, Unit, H] { self.dict }
+
+    /// Creates a shallow clone of the set.
+    ///
+    /// Due to COW semantics, this is O(1) - the actual copy is deferred
+    /// until either set is mutated.
+    public func clone() -> Set[T, H] {
+        Set(dict: self.dict.clone())
+    }
 }
 
 // ============================================================================
@@ -831,20 +839,6 @@ extend Set[T, H]: Formattable where T: Formattable, T: Hash, H: Hasher, H: Defau
 // ============================================================================
 // CONDITIONAL EXTENSIONS - CLONEABLE
 // ============================================================================
-
-/// Cloneable conformance for sets.
-///
-/// Due to COW semantics, cloning is O(1) until mutation.
-extend Set[T, H]: Cloneable {
-
-    /// Creates a shallow clone of the set.
-    ///
-    /// Due to COW semantics, this is O(1) - the actual copy is deferred
-    /// until either set is mutated.
-    public func clone() -> Set[T, H] {
-        Set(dict: self.dict.clone())
-    }
-}
 
 /// Deep clone when T is Cloneable.
 extend Set[T, H] where T: Hash, T: Cloneable, H: Hasher, H: Defaultable {

@@ -17,23 +17,34 @@ fi
 
 echo "Bootstrapping flock..."
 
+# Detect platform
+PLATFORM=""
+EXTRA_LINK_FLAGS=""
+case "$(uname -s)" in
+    Darwin) PLATFORM="darwin" ;;
+    Linux)  PLATFORM="linux" ;;
+    *)      echo "Unsupported platform: $(uname -s)"; exit 1 ;;
+esac
+
 # Resolve OpenSSL path (needed by swoop)
 OPENSSL_PREFIX=""
 OPENSSL_LIB_FLAG=""
 
-if [ "$(uname -s)" = "Darwin" ]; then
+if [ "$PLATFORM" = "darwin" ]; then
     OPENSSL_PREFIX="$(brew --prefix openssl@3 2>/dev/null || true)"
     if [ -z "$OPENSSL_PREFIX" ]; then
         echo "Error: OpenSSL 3 not found. Install with: brew install openssl@3"
         exit 1
     fi
     OPENSSL_LIB_FLAG="-L $OPENSSL_PREFIX/lib"
-elif [ "$(uname -s)" = "Linux" ]; then
+elif [ "$PLATFORM" = "linux" ]; then
     # On Linux, OpenSSL is typically in the default library path
     if pkg-config --exists openssl 2>/dev/null; then
         OPENSSL_LIB_FLAG="$(pkg-config --libs-only-L openssl)"
     fi
     # Default path works if libssl-dev is installed
+    # Linux needs explicit libm for math functions
+    EXTRA_LINK_FLAGS="-l m"
 fi
 
 "$KESTREL" build \
@@ -57,7 +68,7 @@ fi
     "$LANG_DIR/clutch/src/parser.ks" \
     "$LANG_DIR/clutch/src/help.ks" \
     "$LANG_DIR/clutch/src/command.ks" \
-    "$LANG_DIR/clutch/src/os.ks" \
+    "$LANG_DIR/clutch/src/os.${PLATFORM}.ks" \
     "$LANG_DIR/clutch/src/clutch.ks" \
     "$LANG_DIR/http/src/method.ks" \
     "$LANG_DIR/http/src/url.ks" \
@@ -87,7 +98,7 @@ fi
     "$SCRIPT_DIR/src/main.ks" \
     -o "$SCRIPT_DIR/flock" \
     -l ssl -l crypto \
-    $OPENSSL_LIB_FLAG
+    $OPENSSL_LIB_FLAG $EXTRA_LINK_FLAGS
 
 echo "Done! Built flock at $SCRIPT_DIR/flock"
 echo ""

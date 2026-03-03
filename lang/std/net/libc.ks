@@ -21,11 +21,7 @@ public func SOCK_STREAM() -> Int32 { 1 }
 /// TCP protocol number.
 public func IPPROTO_TCP() -> Int32 { 6 }
 
-/// Socket-level options.
-public func SOL_SOCKET() -> Int32 { 0xFFFF }
-
-/// Allow address reuse.
-public func SO_REUSEADDR() -> Int32 { 0x0004 }
+// SOL_SOCKET and SO_REUSEADDR are in libc.darwin.ks / libc.linux.ks
 
 /// Bind to all interfaces.
 public func INADDR_ANY() -> Int32 { 0 }
@@ -73,9 +69,7 @@ func libc_getaddrinfo(node: lang.ptr[lang.i8], service: lang.ptr[lang.i8], hints
 @extern(.C, mangleName: "freeaddrinfo")
 func libc_freeaddrinfo(res: lang.ptr[lang.i8])
 
-// errno is accessed via __error() on macOS
-@extern(.C, mangleName: "__error")
-func __error() -> lang.ptr[lang.i32]
+// __errno_ptr() is in libc.darwin.ks / libc.linux.ks
 
 // ============================================================================
 // PUBLIC WRAPPERS
@@ -162,6 +156,6 @@ public func freeaddrinfo(res: Pointer[UInt8]) {
 
 /// Returns the current errno value.
 public func errno() -> Int32 {
-    let ptr = __error();
+    let ptr = __errno_ptr();
     Int32(raw: lang.ptr_read(ptr))
 }
