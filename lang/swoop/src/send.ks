@@ -20,14 +20,14 @@ import swoop.body.(Body)
 // SEND REQUEST
 // ============================================================================
 
-/// Sends an HTTP request over a TcpStream and reads the response.
-public func sendRequest(
-    stream: TcpStream,
+/// Sends an HTTP request over a stream and reads the response.
+public func sendRequest[S](
+    stream: S,
     method: HttpMethod,
     url: ClientUrl,
     headers: Headers,
     body: Body?
-) -> Result[Response, SwoopError] {
+) -> Result[Response, SwoopError] where S: Read, S: Write {
     // Build the request string
     var req = String();
 
@@ -116,8 +116,8 @@ public func sendRequest(
 // READ RESPONSE
 // ============================================================================
 
-/// Reads an HTTP response from a TcpStream.
-func readResponse(stream: TcpStream) -> Result[Response, SwoopError] {
+/// Reads an HTTP response from a stream.
+func readResponse[S](stream: S) -> Result[Response, SwoopError] where S: Read {
     var recvStream = stream;
 
     // Read bytes until we find \r\n\r\n (header end)
@@ -366,8 +366,8 @@ func hexDigitValue(b: UInt8) -> Int64 {
 // HELPERS
 // ============================================================================
 
-/// Sends all bytes of a string over a TcpStream.
-func sendAllString(stream: TcpStream, s: String) -> Result[(), Error] {
+/// Sends all bytes of a string over a stream.
+func sendAllString[S](stream: S, s: String) -> Result[(), Error] where S: Write {
     var mutStream = stream;
     let len = s.byteCount;
     if len == 0 {
@@ -384,8 +384,8 @@ func sendAllString(stream: TcpStream, s: String) -> Result[(), Error] {
     sendAllBytes(mutStream, buf)
 }
 
-/// Sends all bytes of a buffer over a TcpStream.
-func sendAllBytes(stream: TcpStream, buf: Array[UInt8]) -> Result[(), Error] {
+/// Sends all bytes of a buffer over a stream.
+func sendAllBytes[S](stream: S, buf: Array[UInt8]) -> Result[(), Error] where S: Write {
     var mutStream = stream;
     let len = buf.count;
     var sent: Int64 = 0;

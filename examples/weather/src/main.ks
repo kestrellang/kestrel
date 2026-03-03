@@ -1,9 +1,6 @@
 // Weather Dashboard
 //
 // A weather dashboard that wraps the Open-Meteo API using htmx.
-// Uses socat proxies for HTTP→HTTPS bridging:
-//   socat TCP-LISTEN:3002,reuseaddr,fork OPENSSL:api.open-meteo.com:443 &
-//   socat TCP-LISTEN:3001,reuseaddr,fork OPENSSL:geocoding-api.open-meteo.com:443 &
 
 module weather.main
 
@@ -23,9 +20,10 @@ import perch.middleware.(logger)
 struct Ctx: Cloneable {
     var geoBase: String
     var weatherBase: String
+    var landingHtml: String
 
     func clone() -> Ctx {
-        Ctx(geoBase: self.geoBase.clone(), weatherBase: self.weatherBase.clone())
+        Ctx(geoBase: self.geoBase.clone(), weatherBase: self.weatherBase.clone(), landingHtml: self.landingHtml.clone())
     }
 }
 
@@ -100,12 +98,13 @@ func handleWeather(req: Request, ctx: Ctx) -> Response {
 // ============================================================================
 
 func main() {
-    let ctx = Ctx(geoBase: "http://localhost:3001", weatherBase: "http://localhost:3002");
+    let landing = pageHtml();
+    let ctx = Ctx(geoBase: "http://localhost:3001", weatherBase: "http://localhost:3002", landingHtml: landing);
     var app = App[Ctx](ctx);
     app.use(logger[Ctx]());
 
     app.onGet("/", { (req: Request, ctx: Ctx) in
-        Response.ok(html: pageHtml())
+        Response.ok(html: ctx.landingHtml)
     });
 
     app.onGet("/search", { (req: Request, ctx: Ctx) in
@@ -118,9 +117,6 @@ func main() {
 
     let port: UInt16 = 8080;
     let _ = println("Starting weather dashboard on http://localhost:8080");
-    let _ = println("Make sure socat proxies are running:");
-    let _ = println("  socat TCP-LISTEN:3002,reuseaddr,fork OPENSSL:api.open-meteo.com:443 &");
-    let _ = println("  socat TCP-LISTEN:3001,reuseaddr,fork OPENSSL:geocoding-api.open-meteo.com:443 &");
     match app.listen(port) {
         .Ok(_) => {},
         .Err(e) => {

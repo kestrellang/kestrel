@@ -44,6 +44,14 @@ public struct TcpStream: Read, Write {
         self.fd
     }
 
+    /// Returns the file descriptor and detaches it from this stream.
+    /// After calling this, the TcpStream will NOT close the fd on destruction.
+    public mutating func detachFd() -> Int32 {
+        let fd = self.fd;
+        self.fd = -1;
+        fd
+    }
+
     deinit {
         if self.fd >= 0 {
             let _ = libc.close(self.fd);

@@ -31,6 +31,7 @@ import swoop.response.(Response)
 import swoop.url.(ClientUrl, parseClientUrl)
 import swoop.body.(Body)
 import swoop.send.(sendRequest)
+import swoop.tls.(TlsStream)
 
 // ============================================================================
 // SWOOP
@@ -120,8 +121,8 @@ public struct Swoop: Cloneable {
 
     /// Resolves the full URL (prepending baseUrl if needed) and executes the request.
     func execute(method: HttpMethod, url: String, body: Body?) -> Result[Response, SwoopError] {
-        // Resolve URL: if it starts with http://, use as-is; otherwise prepend baseUrl
-        let fullUrl = if url.starts(with: "http://") {
+        // Resolve URL: if it starts with http:// or https://, use as-is; otherwise prepend baseUrl
+        let fullUrl = if url.starts(with: "http://") or url.starts(with: "https://") {
             url
         } else {
             self._baseUrl + url
@@ -130,13 +131,19 @@ public struct Swoop: Cloneable {
         // Parse the URL
         let parsed = try parseClientUrl(fullUrl);
 
-        // Connect
-        let stream = match TcpStream.connect(parsed.host, parsed.port) {
-            .Ok(s) => s,
-            .Err(e) => return .Err(SwoopError.connectionFailed("could not connect to " + parsed.host))
-        };
-
-        // Send request and read response
-        sendRequest(stream, method, parsed, self._headers, body)
+        // Connect and send based on scheme
+        if parsed.scheme == "https" {
+            let tlsStream = match TlsStream.connect(parsed.host, parsed.port) {
+                .Ok(s) => s,
+                .Err(e) => return .Err(SwoopError.connectionFailed("TLS connection failed to " + parsed.host))
+            };
+            sendRequest(tlsStream, method, parsed, self._headers, body)
+        } else {
+            let stream = match TcpStream.connect(parsed.host, parsed.port) {
+                .Ok(s) => s,
+                .Err(e) => return .Err(SwoopError.connectionFailed("could not connect to " + parsed.host))
+            };
+            sendRequest(stream, method, parsed, self._headers, body)
+        }
     }
 }

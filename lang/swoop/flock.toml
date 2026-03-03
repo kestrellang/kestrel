@@ -7,3 +7,6 @@ description = "HTTP client library for Kestrel"
 http = { path = "../http" }
 quill = { path = "../quill" }
 quill-json = { path = "../quill-json" }
+
+[build]
+link = ["ssl", "crypto"]

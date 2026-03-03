@@ -43,9 +43,11 @@ public struct ClientUrl: Cloneable {
     }
 
     /// Returns "host" or "host:port" for the Host header.
+    /// Omits port when it matches the scheme default (80 for http, 443 for https).
     public func hostHeader() -> String {
-        let defaultPort: UInt16 = 80;
-        if self.port == defaultPort {
+        let httpDefault: UInt16 = 80;
+        let httpsDefault: UInt16 = 443;
+        if self.port == httpDefault or self.port == httpsDefault {
             self.host
         } else {
             self.host + ":" + Int64(from: self.port).format()
@@ -59,18 +61,26 @@ public struct ClientUrl: Cloneable {
 
 /// Parses a URL string into a ClientUrl.
 ///
-/// Supports: http://host/path, http://host:port/path, http://host:port/path?query
-/// Does not support HTTPS (v1).
+/// Supports: http://host/path, https://host/path, with optional :port and ?query
 public func parseClientUrl(raw: String) -> Result[ClientUrl, SwoopError] {
     let len = raw.byteCount;
 
-    // Check for "http://" prefix
-    if not raw.starts(with: "http://") {
-        return .Err(SwoopError.invalidUrl("only http:// URLs are supported"))
-    }
+    // Determine scheme
+    var scheme = String();
+    var afterScheme: Int64 = 0;
+    var defaultPort: UInt16 = 80;
 
-    // Skip "http://"
-    let afterScheme: Int64 = 7;
+    if raw.starts(with: "https://") {
+        scheme = "https";
+        afterScheme = 8;
+        defaultPort = 443
+    } else if raw.starts(with: "http://") {
+        scheme = "http";
+        afterScheme = 7;
+        defaultPort = 80
+    } else {
+        return .Err(SwoopError.invalidUrl("only http:// and https:// URLs are supported"))
+    }
 
     // Find end of host:port (first '/' after scheme, or end of string)
     var pathStart = len;
@@ -91,7 +101,7 @@ public func parseClientUrl(raw: String) -> Result[ClientUrl, SwoopError] {
 
     // Split host and port on ':'
     var host = hostPort;
-    var port: UInt16 = 80;
+    var port = defaultPort;
     match hostPort.find(":") {
         .Some(colonIdx) => {
             host = hostPort.substringBytes(from: 0, to: colonIdx);
@@ -122,7 +132,7 @@ public func parseClientUrl(raw: String) -> Result[ClientUrl, SwoopError] {
         }
     }
 
-    .Ok(ClientUrl("http", host, port, path, queryString))
+    .Ok(ClientUrl(scheme, host, port, path, queryString))
 }
 
 // parseDecimal imported from http.wire
