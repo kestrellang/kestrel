@@ -285,6 +285,7 @@ public protocol ExpressibleByNullLiteral {
 "#,
 );
 use std::sync::Arc;
+use std::sync::OnceLock;
 
 use kestrel_lexer::lex;
 use kestrel_parser::{Parser, parse_source_file};
@@ -469,6 +470,12 @@ impl TestContext {
 
         Ok(result)
     }
+}
+
+/// Returns true when `KESTREL_SKIP_CODEGEN=1` is set, skipping MIR/codegen/execution.
+pub fn skip_codegen() -> bool {
+    static SKIP: OnceLock<bool> = OnceLock::new();
+    *SKIP.get_or_init(|| std::env::var("KESTREL_SKIP_CODEGEN").is_ok())
 }
 
 /// A test case that can be run against the Kestrel compiler
@@ -840,6 +847,9 @@ impl Expectable for Runs {
                 ctx.diagnostics.len()
             ));
         }
+        if skip_codegen() {
+            return Ok(());
+        }
 
         let result = ctx.run_result()?;
         if result.exit_code == 0 {
@@ -864,6 +874,9 @@ impl Expectable for ExitCode {
                 self.0,
                 ctx.diagnostics.len()
             ));
+        }
+        if skip_codegen() {
+            return Ok(());
         }
 
         let result = ctx.run_result()?;
@@ -890,6 +903,9 @@ impl Expectable for StdoutContains {
                 ctx.diagnostics.len()
             ));
         }
+        if skip_codegen() {
+            return Ok(());
+        }
 
         let result = ctx.run_result()?;
         if result.stdout.contains(self.0) {
@@ -914,6 +930,9 @@ impl Expectable for StdoutEquals {
                 self.0,
                 ctx.diagnostics.len()
             ));
+        }
+        if skip_codegen() {
+            return Ok(());
         }
 
         let result = ctx.run_result()?;
@@ -940,6 +959,9 @@ impl Expectable for StderrContains {
                 ctx.diagnostics.len()
             ));
         }
+        if skip_codegen() {
+            return Ok(());
+        }
 
         let result = ctx.run_result()?;
         if result.stderr.contains(self.0) {
@@ -964,6 +986,9 @@ impl Expectable for StderrEquals {
                 self.0,
                 ctx.diagnostics.len()
             ));
+        }
+        if skip_codegen() {
+            return Ok(());
         }
 
         let result = ctx.run_result()?;

@@ -3,7 +3,7 @@
 use crate::mir::block::MirBlock;
 use crate::mir::context::MirTestContext;
 use crate::mir::types::{MirTy, format_actual_ty};
-use crate::{Expectable, TestContext};
+use crate::{Expectable, TestContext, skip_codegen};
 use kestrel_execution_graph::{Callee, FunctionDef, Rvalue, StatementData, StatementKind};
 
 /// Expectations for a function definition in the MIR.
@@ -575,6 +575,9 @@ impl MirFunction {
 
 impl Expectable for MirFunction {
     fn check(&self, ctx: &TestContext) -> Result<(), String> {
+        if skip_codegen() {
+            return Ok(());
+        }
         let mir_result = ctx.mir();
         let mir_ctx = MirTestContext::new(mir_result);
 

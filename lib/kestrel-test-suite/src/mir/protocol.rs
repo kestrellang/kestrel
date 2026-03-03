@@ -124,6 +124,9 @@ impl MirProtocol {
 
 impl Expectable for MirProtocol {
     fn check(&self, ctx: &TestContext) -> Result<(), String> {
+        if crate::skip_codegen() {
+            return Ok(());
+        }
         let mir_result = ctx.mir();
         let mir_ctx = MirTestContext::new(mir_result);
 

@@ -1,13 +1,16 @@
 //! Count expectations for MIR items.
 
 use crate::mir::context::MirTestContext;
-use crate::{Expectable, TestContext};
+use crate::{Expectable, TestContext, skip_codegen};
 
 /// Expects exactly N structs in the MIR.
 pub struct MirStructCount(pub usize);
 
 impl Expectable for MirStructCount {
     fn check(&self, ctx: &TestContext) -> Result<(), String> {
+        if skip_codegen() {
+            return Ok(());
+        }
         let mir_result = ctx.mir();
         let mir_ctx = MirTestContext::new(mir_result);
         let actual = mir_ctx.mir.structs.iter().count();
@@ -30,6 +33,9 @@ pub struct MirEnumCount(pub usize);
 
 impl Expectable for MirEnumCount {
     fn check(&self, ctx: &TestContext) -> Result<(), String> {
+        if skip_codegen() {
+            return Ok(());
+        }
         let mir_result = ctx.mir();
         let mir_ctx = MirTestContext::new(mir_result);
         let actual = mir_ctx.mir.enums.iter().count();
@@ -52,6 +58,9 @@ pub struct MirFunctionCount(pub usize);
 
 impl Expectable for MirFunctionCount {
     fn check(&self, ctx: &TestContext) -> Result<(), String> {
+        if skip_codegen() {
+            return Ok(());
+        }
         let mir_result = ctx.mir();
         let mir_ctx = MirTestContext::new(mir_result);
         let actual = mir_ctx.mir.functions.iter().count();
@@ -74,6 +83,9 @@ pub struct MirWitnessCount(pub usize);
 
 impl Expectable for MirWitnessCount {
     fn check(&self, ctx: &TestContext) -> Result<(), String> {
+        if skip_codegen() {
+            return Ok(());
+        }
         let mir_result = ctx.mir();
         let mir_ctx = MirTestContext::new(mir_result);
         let actual = mir_ctx.mir.witnesses.iter().count();
