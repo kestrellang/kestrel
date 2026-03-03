@@ -91,11 +91,28 @@ pub fn resolve_path_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContex
 
         // Check for type arguments on the variable itself (first segment only) - not allowed
         // Only check if this is a single-segment path (just `x[T]`), not `x.member[T]`
+        // because has_type_arguments_on_first_segment has a fallback that can false-positive
+        // on multi-segment paths where type args are on a later segment.
         if path_with_spans.len() == 1 && has_type_arguments_on_first_segment(node) {
             ctx.diagnostics.add_diagnostic(
                 TypeArgsOnNonGenericError {
                     span: span.clone(),
                     callee_description: "a variable".to_string(),
+                }
+                .into_diagnostic(),
+            );
+            return Expression::error(span);
+        }
+
+        // Check for type arguments on the last segment of a multi-segment path.
+        // e.g., `self.field[T]` or `x.member[T]` — brackets on member access are not valid.
+        // BUT: skip this check if the path is the callee of a call expression (e.g., `ptr.cast[T]()`)
+        // because the type args belong to the method call, handled by resolve_call_expression.
+        if path_with_spans.len() > 1 && has_type_arguments_on_last_segment(node) && !is_callee_of_call(node) {
+            ctx.diagnostics.add_diagnostic(
+                TypeArgsOnNonGenericError {
+                    span: span.clone(),
+                    callee_description: "a member access".to_string(),
                 }
                 .into_diagnostic(),
             );
@@ -1004,6 +1021,67 @@ fn has_type_arguments_on_first_segment(node: &SyntaxNode) -> bool {
         }
     }
 
+    false
+}
+
+/// Check if a path expression contains type arguments on the last segment.
+/// This is for detecting `x.field[T]` where the brackets are on a member access.
+fn has_type_arguments_on_last_segment(node: &SyntaxNode) -> bool {
+    // Check if there's a Path child
+    if let Some(path_node) = node.children().find(|c| c.kind() == SyntaxKind::Path) {
+        // Get the last PathElement
+        if let Some(last_elem) = path_node
+            .children()
+            .filter(|c| c.kind() == SyntaxKind::PathElement)
+            .last()
+        {
+            return last_elem
+                .children()
+                .any(|c| c.kind() == SyntaxKind::TypeArgumentList);
+        }
+    }
+
+    // Also check directly in ExprPath for simpler paths
+    let mut last_element: Option<SyntaxNode> = None;
+    for child in node.children() {
+        if child.kind() == SyntaxKind::PathElement {
+            last_element = Some(child);
+        }
+    }
+    if let Some(elem) = last_element {
+        return elem
+            .children()
+            .any(|c| c.kind() == SyntaxKind::TypeArgumentList);
+    }
+
+    // Check for TypeArgumentList directly (no PathElement wrapper)
+    let mut has_type_args = false;
+    for child in node.children() {
+        if child.kind() == SyntaxKind::TypeArgumentList {
+            has_type_args = true;
+        }
+    }
+    has_type_args
+}
+
+/// Check if this path expression node is the callee of a call expression.
+/// e.g., in `ptr.cast[T]()`, the ExprPath `ptr.cast[T]` is the callee of ExprCall.
+/// We check by looking at the parent (or grandparent) node for ExprCall.
+fn is_callee_of_call(node: &SyntaxNode) -> bool {
+    // The ExprPath may be directly inside ExprCall, or wrapped in an Expression node first
+    if let Some(parent) = node.parent() {
+        if parent.kind() == SyntaxKind::ExprCall {
+            return true;
+        }
+        // Check grandparent (ExprPath > Expression > ExprCall)
+        if parent.kind() == SyntaxKind::Expression {
+            if let Some(grandparent) = parent.parent() {
+                if grandparent.kind() == SyntaxKind::ExprCall {
+                    return true;
+                }
+            }
+        }
+    }
     false
 }
 

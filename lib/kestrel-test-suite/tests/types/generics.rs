@@ -1971,6 +1971,22 @@ mod constraint_enforcement {
     }
 
     #[test]
+    fn type_args_on_member_access_of_variable() {
+        // self.field[T] should error — brackets on member access are not subscript
+        Test::new(
+            r#"module Test
+            struct Foo {
+                var items: Array[lang.i64]
+                func bar() -> lang.i64 {
+                    return self.items[lang.i64]
+                }
+            }
+        "#,
+        )
+        .expect(HasError("type"));
+    }
+
+    #[test]
     fn explicit_type_arg_not_substituted() {
         // identity[lang.i64](1) + identity[lang.i64](2) should work, but types show as T
         Test::new(
