@@ -10,3 +10,4 @@ quill-json = { path = "../quill-json" }
 
 [build]
 link = ["ssl", "crypto"]
+link-cmd = "brew --prefix openssl@3 | xargs -I{} echo -L{}/lib"

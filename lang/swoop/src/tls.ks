@@ -1,19 +1,17 @@
-// TLS stream using LibreSSL
+// TLS stream using OpenSSL/LibreSSL
 //
 // Provides TlsStream, a TLS-encrypted TCP connection that implements
-// the Read and Write protocols. Uses macOS system LibreSSL.
+// the Read and Write protocols. Uses OpenSSL 3.x (homebrew) or LibreSSL.
 
 module swoop.tls
 
 // ============================================================================
-// LIBRESSL C BINDINGS
+// OPENSSL C BINDINGS
 // ============================================================================
 
-@extern(.C, mangleName: "SSL_library_init")
-func libc_SSL_library_init() -> lang.i64
-
-@extern(.C, mangleName: "SSL_load_error_strings")
-func libc_SSL_load_error_strings()
+// OPENSSL_init_ssl(opts, settings) — OpenSSL 3.x init (replaces SSL_library_init)
+@extern(.C, mangleName: "OPENSSL_init_ssl")
+func libc_OPENSSL_init_ssl(opts: lang.i64, settings: lang.ptr[lang.i8]) -> lang.i32
 
 @extern(.C, mangleName: "TLS_client_method")
 func libc_TLS_client_method() -> lang.ptr[lang.i8]
@@ -129,8 +127,9 @@ extend TlsStream {
     /// Connects to a remote host over TLS, returning a TlsStream.
     public static func connect(host: String, port: UInt16) -> Result[TlsStream, Error] {
         // One-time init (safe to call multiple times)
-        let _ = libc_SSL_library_init();
-        libc_SSL_load_error_strings();
+        // OPENSSL_INIT_LOAD_SSL_STRINGS (0x00200000) | OPENSSL_INIT_LOAD_CRYPTO_STRINGS (0x00000002)
+        let initOpts: Int64 = 2097154;
+        let _ = libc_OPENSSL_init_ssl(initOpts.raw, lang.ptr_null[lang.i8]());
 
         // TCP connect, then take ownership of the fd
         var tcpStream = try TcpStream.connect(host, port);
