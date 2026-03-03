@@ -634,7 +634,7 @@ public struct StepByIterator[I]: Iterator where I: Iterator {
 /// Reverses a double-ended iterator.
 ///
 /// Yields elements by calling `nextBack()` on the inner iterator.
-public struct RevIterator[I] where I: DoubleEndedIterator {
+public struct RevIterator[I]: Iterator where I: DoubleEndedIterator, I: Iterator {
     type Item = I.Item
 
     internal var inner: I

@@ -3,7 +3,7 @@
 module std.collections
 
 import std.core.(Bool, Equatable, Cloneable, Hash, Hasher, Defaultable, Addable)
-import std.text.(Formattable, FormatOptions)
+import std.text.(Formattable, FormatOptions, String)
 import std.num.(Int64, UInt64)
 import std.result.(Optional)
 import std.memory.(Layout, Pointer, RawPointer, SystemAllocator, RcBox)

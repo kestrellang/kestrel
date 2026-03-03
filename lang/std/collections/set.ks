@@ -81,7 +81,7 @@ public struct SetIterator[T, H = DefaultHasher]: Iterator where T: Hash, H: Hash
 /// Set literals use array syntax with type annotation:
 ///     let empty: Set[Int64] = []
 ///     let numbers: Set = [1, 2, 3]
-public struct Set[T, H = DefaultHasher]: Iterable where T: Hash, H: Hasher, H: Defaultable {
+public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hash, H: Hasher, H: Defaultable {
     type Item = T
     type Iter = SetIterator[T, H]
 
