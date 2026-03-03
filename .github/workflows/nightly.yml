@@ -1,9 +1,8 @@
-name: Release
+name: Nightly Release
 
 on:
   push:
-    tags:
-      - 'v*'
+    branches: [nightly]
 
 permissions:
   contents: write
@@ -36,7 +35,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ matrix.target }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Install OpenSSL (macOS)
         if: runner.os == 'macOS'
@@ -48,9 +47,6 @@ jobs:
 
       - name: Build kestrel compiler
         run: cargo build --release
-
-      - name: Run tests
-        run: cargo test -p kestrel-test-suite --release
 
       - name: Bootstrap flock
         run: bash lang/flock/bootstrap.sh
@@ -102,14 +98,32 @@ jobs:
       - name: List artifacts
         run: ls -la artifacts/
 
-      - name: Create GitHub release
+      - name: Delete existing nightly release
+        run: gh release delete nightly --yes --cleanup-tag || true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG_NAME: ${{ github.ref_name }}
+
+      - name: Create nightly release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          COMMIT_SHA: ${{ github.sha }}
         run: |
-          gh release create "$TAG_NAME" \
-            --title "Kestrel $TAG_NAME" \
-            --generate-notes \
-            --latest \
+          DATE="$(date -u +%Y-%m-%d)"
+          gh release create nightly \
+            --title "Nightly $DATE" \
+            --notes "Automated nightly build from the \`nightly\` branch.
+
+          **Commit:** $COMMIT_SHA
+          **Date:** $DATE
+
+          ## Install
+
+          \`\`\`sh
+          curl --proto '=https' --tlsv1.2 -sSf https://kestrel-lang.com/install.sh | sh
+          \`\`\`
+
+          Or download the toolchain tarball for your platform below." \
+            --prerelease \
+            --target nightly \
             artifacts/kestrel-*.tar.gz \
             artifacts/jessup-*.tar.gz

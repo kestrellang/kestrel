@@ -53,6 +53,7 @@ members = [
     "lib/kestrel-lsp",
     "lib/kestrel-test-suite"
 ]
+exclude = ["registry"]
 
 # Workspace-wide lint configuration
 # Individual crates inherit these with [lints] workspace = true

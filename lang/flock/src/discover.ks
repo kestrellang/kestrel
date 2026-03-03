@@ -4,7 +4,6 @@
 
 module flock.discover
 
-import clutch.os.(listDir, isDirectory)
 import flock.source.(joinPath)
 
 // ============================================================================
@@ -15,7 +14,7 @@ import flock.source.(joinPath)
 /// Skips hidden directories (starting with ".") and "target" directories.
 public func discoverSources(rootDir rootDir: String) -> Array[String] {
     var result = Array[String]();
-    let entries = listDir(path: rootDir);
+    let entries = listDir(rootDir);
     var i: Int64 = 0;
     while i < entries.count {
         let entry = entries(unchecked: i);
@@ -27,7 +26,7 @@ public func discoverSources(rootDir rootDir: String) -> Array[String] {
         } else {
             let fullPath = joinPath(base: rootDir, rel: entry);
 
-            if isDirectory(path: fullPath) {
+            if isDirectory(fullPath) {
                 // Recurse into subdirectories
                 let subFiles = discoverSources(rootDir: fullPath);
                 var j: Int64 = 0;

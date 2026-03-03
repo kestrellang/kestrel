@@ -11,6 +11,9 @@ public enum FlockError: Cloneable {
     case DependencyNotFound(String)
     case CompilerFailed(Int32)
     case IoError(String)
+    case RegistryError(String)
+    case ChecksumMismatch(String)
+    case CacheError(String)
 
     public func clone() -> FlockError {
         match self {
@@ -20,7 +23,10 @@ public enum FlockError: Cloneable {
             .DependencyCycle(a) => .DependencyCycle(a.clone()),
             .DependencyNotFound(s) => .DependencyNotFound(s.clone()),
             .CompilerFailed(c) => .CompilerFailed(c),
-            .IoError(s) => .IoError(s.clone())
+            .IoError(s) => .IoError(s.clone()),
+            .RegistryError(s) => .RegistryError(s.clone()),
+            .ChecksumMismatch(s) => .ChecksumMismatch(s.clone()),
+            .CacheError(s) => .CacheError(s.clone())
         }
     }
 
@@ -33,7 +39,10 @@ public enum FlockError: Cloneable {
             .DependencyCycle(names) => "dependency cycle detected: " + joinNames(names),
             .DependencyNotFound(name) => "dependency not found: " + name,
             .CompilerFailed(code) => "compiler exited with code " + Int64(from: code).format(),
-            .IoError(msg) => "I/O error: " + msg
+            .IoError(msg) => "I/O error: " + msg,
+            .RegistryError(msg) => "registry error: " + msg,
+            .ChecksumMismatch(msg) => "checksum mismatch: " + msg,
+            .CacheError(msg) => "cache error: " + msg
         }
     }
 }

@@ -6,7 +6,6 @@
 
 module flock.source
 
-import clutch.os.(fileExists)
 import flock.error.(FlockError)
 import flock.version.(Version)
 import flock.dependency.(DependencySpec)
@@ -62,7 +61,7 @@ public struct PathSource: PackageSource {
                 let pkgDir = joinPath(base: baseDir, rel: relPath);
                 let manifestPath = joinPath(base: pkgDir, rel: "flock.toml");
 
-                if not fileExists(path: manifestPath) {
+                if not fileExists(manifestPath) {
                     return .Err(FlockError.ManifestNotFound(manifestPath))
                 }
 

@@ -4,8 +4,9 @@ module flock.graph
 
 import flock.error.(FlockError)
 import flock.source.(ResolvedPackage, PathSource)
-import flock.dependency.(Dependency)
+import flock.dependency.(Dependency, DependencySpec)
 import flock.manifest.(BuildConfig)
+import flock.registry_source.(RegistrySource)
 
 // ============================================================================
 // DEPENDENCY NODE
@@ -40,9 +41,11 @@ public struct DepNode: Cloneable {
 
 /// Builds a dependency graph starting from the root package.
 /// Uses BFS to resolve all transitive dependencies.
+/// Dispatches to PathSource or RegistrySource based on the dependency spec.
 public func buildGraph(
     root root: ResolvedPackage,
-    source source: PathSource
+    pathSource pathSource: PathSource,
+    registrySource registrySource: RegistrySource
 ) -> Result[Array[DepNode], FlockError] {
     var nodes = Array[DepNode]();
     var visited = Array[String]();
@@ -66,7 +69,11 @@ public func buildGraph(
             // Resolve and enqueue if not yet visited
             if not contains(arr: visited, value: dep.name) {
                 visited.append(dep.name);
-                match source.resolve(name: dep.name, spec: dep.spec, baseDir: current.rootDir) {
+                let resolveResult = match dep.spec {
+                    .Path(_) => pathSource.resolve(name: dep.name, spec: dep.spec, baseDir: current.rootDir),
+                    .Registry(_) => registrySource.resolve(name: dep.name, spec: dep.spec, baseDir: current.rootDir)
+                };
+                match resolveResult {
                     .Ok(resolved) => queue.append(resolved),
                     .Err(e) => return .Err(e)
                 }

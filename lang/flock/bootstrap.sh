@@ -17,6 +17,13 @@ fi
 
 echo "Bootstrapping flock..."
 
+# Resolve OpenSSL path (needed by swoop)
+OPENSSL_PREFIX="$(brew --prefix openssl@3 2>/dev/null || true)"
+if [ -z "$OPENSSL_PREFIX" ]; then
+    echo "Error: OpenSSL 3 not found. Install with: brew install openssl@3"
+    exit 1
+fi
+
 "$KESTREL" build \
     --std "$LANG_DIR/std" \
     "$LANG_DIR/quill/src/error.ks" \
@@ -28,6 +35,10 @@ echo "Bootstrapping flock..."
     "$LANG_DIR/quill-toml/src/parser.ks" \
     "$LANG_DIR/quill-toml/src/emitter.ks" \
     "$LANG_DIR/quill-toml/src/toml.ks" \
+    "$LANG_DIR/quill-json/src/error.ks" \
+    "$LANG_DIR/quill-json/src/parser.ks" \
+    "$LANG_DIR/quill-json/src/emitter.ks" \
+    "$LANG_DIR/quill-json/src/json.ks" \
     "$LANG_DIR/clutch/src/error.ks" \
     "$LANG_DIR/clutch/src/arg.ks" \
     "$LANG_DIR/clutch/src/matches.ks" \
@@ -36,16 +47,35 @@ echo "Bootstrapping flock..."
     "$LANG_DIR/clutch/src/command.ks" \
     "$LANG_DIR/clutch/src/os.ks" \
     "$LANG_DIR/clutch/src/clutch.ks" \
+    "$LANG_DIR/http/src/method.ks" \
+    "$LANG_DIR/http/src/url.ks" \
+    "$LANG_DIR/http/src/status.ks" \
+    "$LANG_DIR/http/src/cookie.ks" \
+    "$LANG_DIR/http/src/headers.ks" \
+    "$LANG_DIR/http/src/wire.ks" \
+    "$LANG_DIR/swoop/src/error.ks" \
+    "$LANG_DIR/swoop/src/response.ks" \
+    "$LANG_DIR/swoop/src/body.ks" \
+    "$LANG_DIR/swoop/src/url.ks" \
+    "$LANG_DIR/swoop/src/send.ks" \
+    "$LANG_DIR/swoop/src/swoop.ks" \
+    "$LANG_DIR/swoop/src/tls.ks" \
     "$SCRIPT_DIR/src/error.ks" \
     "$SCRIPT_DIR/src/version.ks" \
     "$SCRIPT_DIR/src/dependency.ks" \
     "$SCRIPT_DIR/src/manifest.ks" \
     "$SCRIPT_DIR/src/source.ks" \
     "$SCRIPT_DIR/src/discover.ks" \
-    "$SCRIPT_DIR/src/graph.ks" \
     "$SCRIPT_DIR/src/compiler.ks" \
+    "$SCRIPT_DIR/src/registry.ks" \
+    "$SCRIPT_DIR/src/registry_source.ks" \
+    "$SCRIPT_DIR/src/cache.ks" \
+    "$SCRIPT_DIR/src/lock.ks" \
+    "$SCRIPT_DIR/src/graph.ks" \
     "$SCRIPT_DIR/src/main.ks" \
-    -o "$SCRIPT_DIR/flock"
+    -o "$SCRIPT_DIR/flock" \
+    -l ssl -l crypto \
+    -L "$OPENSSL_PREFIX/lib"
 
 echo "Done! Built flock at $SCRIPT_DIR/flock"
 echo ""

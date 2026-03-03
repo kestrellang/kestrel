@@ -88,7 +88,7 @@ export default function GetStarted() {
             </button>
           </div>
           <p className="mt-3 text-white/50 font-mono text-xs">
-            Installs kestrel and adds it to your PATH. Run kestrel --help to get started.
+            Installs jessup (version manager) and the latest stable kestrel toolchain. Run kestrel --help to get started.
           </p>
         </div>
 

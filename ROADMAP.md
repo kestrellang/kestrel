@@ -658,7 +658,7 @@ See [docs/memory-model/implementation-plan.md](docs/memory-model/implementation-
 
 ### Documentation
 
-- [ ] Doc comments - `///` with structured sections
+- [x] Doc comments - `///` with structured sections
 
 ## Phase 16+ Advanced Types & Runtime
 

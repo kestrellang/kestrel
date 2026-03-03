@@ -1,12 +1,12 @@
 [package]
-name = "flock"
+name = "jessup"
 version = "0.1.0"
-description = "Package manager for Kestrel"
+description = "Kestrel version manager"
 
 [dependencies]
 clutch = { path = "../clutch" }
 quill = { path = "../quill" }
 quill-toml = { path = "../quill-toml" }
 quill-json = { path = "../quill-json" }
-http = { path = "../http" }
 swoop = { path = "../swoop" }
+http = { path = "../http" }

@@ -8,7 +8,7 @@
 
 module flock.main
 
-import clutch.os.(getArgv, getcwd, fileExists, isDirectory, spawn, captureOutput)
+import clutch.os.(getArgv)
 import clutch.command.(Command)
 import clutch.arg.(Arg)
 import clutch.matches.(ArgMatches)
@@ -20,6 +20,9 @@ import flock.graph.(DepNode, buildGraph, topologicalSort)
 import flock.discover.(discoverSources)
 import flock.compiler.(invokeCompiler)
 import flock.version.(Version)
+import flock.registry.(RegistryConfig, resolveRegistryUrl, isRegistryName)
+import flock.registry_source.(RegistrySource)
+import flock.lock.(LockFile, LockEntry, parseLockFile, generateLockFile)
 
 // ============================================================================
 // ENTRY POINT
@@ -49,6 +52,14 @@ func main() {
     initCmd.setAbout(text: "Create a new flock.toml in the current directory");
     cmd.addSubcommand(sub: initCmd);
 
+    var publishCmd = Command(name: "publish");
+    publishCmd.setAbout(text: "Publish a package to the registry");
+    cmd.addSubcommand(sub: publishCmd);
+
+    var updateCmd = Command(name: "update");
+    updateCmd.setAbout(text: "Update dependencies (re-resolve and rewrite flock.lock)");
+    cmd.addSubcommand(sub: updateCmd);
+
     match cmd.parse(tokens: argv) {
         .Ok(matches) => {
             match matches.subcommand {
@@ -61,6 +72,10 @@ func main() {
                         handleCheck()
                     } else if sub.equals("init") {
                         handleInit()
+                    } else if sub.equals("publish") {
+                        handlePublish()
+                    } else if sub.equals("update") {
+                        handleUpdate()
                     }
                 },
                 .None => {
@@ -122,7 +137,7 @@ func handleInit() {
     let cwd = getcwd();
     let manifestPath = joinPath(base: cwd, rel: "flock.toml");
 
-    if fileExists(path: manifestPath) {
+    if fileExists( manifestPath) {
         let _ = eprintln("flock.toml already exists in this directory");
         return
     }
@@ -142,9 +157,32 @@ func handleInit() {
 
     // Create src/ directory
     let srcDir = joinPath(base: cwd, rel: "src");
-    if not isDirectory(path: srcDir) {
-        let _ = spawn(command: "mkdir -p " + srcDir);
+    if not isDirectory( srcDir) {
+        let _ = spawn( "mkdir -p " + srcDir);
         let _ = println("Created src/");
+    }
+}
+
+func handlePublish() {
+    let _ = eprintln("Publishing is not yet implemented. Server-side registry support required.");
+}
+
+func handleUpdate() {
+    let cwd = getcwd();
+    let lockPath = joinPath(base: cwd, rel: "flock.lock");
+
+    // Delete existing lock file to force re-resolution
+    if fileExists(lockPath) {
+        let _ = spawn("rm " + lockPath);
+        let _ = println("Removed flock.lock");
+    }
+
+    // Re-resolve everything
+    match resolveAndDiscover() {
+        .Err(e) => { let _ = eprintln(e.description()); },
+        .Ok(info) => {
+            let _ = println("Dependencies updated for " + info.name);
+        }
     }
 }
 
@@ -183,7 +221,7 @@ func resolveAndDiscover() -> Result[BuildInfo, FlockError] {
     let cwd = getcwd();
     let manifestPath = joinPath(base: cwd, rel: "flock.toml");
 
-    if not fileExists(path: manifestPath) {
+    if not fileExists( manifestPath) {
         return .Err(FlockError.ManifestNotFound(manifestPath))
     }
 
@@ -216,10 +254,14 @@ func resolveAndDiscover() -> Result[BuildInfo, FlockError] {
         manifest: manifest
     );
 
-    // Build dependency graph
-    let source = PathSource();
+    // Build dependency graph with both path and registry sources
+    let pathSrc = PathSource();
+    let regUrl = resolveRegistryUrl(projectUrl: manifest.registryUrl);
+    let regConfig = RegistryConfig(url: regUrl);
+    let regSrc = RegistrySource(config: regConfig);
+
     var nodes = Array[DepNode]();
-    match buildGraph(root: root, source: source) {
+    match buildGraph(root: root, pathSource: pathSrc, registrySource: regSrc) {
         .Err(e) => return .Err(e),
         .Ok(n) => nodes = n
     }
@@ -260,7 +302,7 @@ func resolveAndDiscover() -> Result[BuildInfo, FlockError] {
         }
         match build.cFlagsCmd {
             .Some(cmd) => {
-                let output = captureOutput(command: cmd);
+                let output = captureOutput( cmd);
                 let extra = splitWhitespace(output);
                 j = 0;
                 while j < extra.count {
@@ -287,7 +329,7 @@ func resolveAndDiscover() -> Result[BuildInfo, FlockError] {
             }
             ccCmd = ccCmd + " " + quoteArg(cPath) + " -o " + quoteArg(oPath);
 
-            let exitCode = spawn(command: ccCmd);
+            let exitCode = spawn( ccCmd);
             if exitCode != 0 {
                 return .Err(FlockError.CompilerFailed(exitCode))
             }
@@ -300,7 +342,7 @@ func resolveAndDiscover() -> Result[BuildInfo, FlockError] {
         // Resolve dynamic link flags if link-cmd is set
         match build.linkCmd {
             .Some(cmd) => {
-                let output = captureOutput(command: cmd);
+                let output = captureOutput( cmd);
                 let flags = splitWhitespace(output);
                 j = 0;
                 while j < flags.count {
@@ -343,6 +385,38 @@ func resolveAndDiscover() -> Result[BuildInfo, FlockError] {
         }
 
         i = i + 1
+    }
+
+    // Generate lock file from resolved dependencies
+    var lockEntries = Array[LockEntry]();
+    i = 0;
+    while i < sorted.count {
+        let node = sorted(unchecked: i);
+        // Skip the root package itself
+        if not node.name.equals(manifest.package.name) {
+            let isRegistry = isRegistryDep(name: node.name);
+            let src = if isRegistry { "registry" } else { "path" };
+            var entryPath: Optional[String] = .None;
+            if not isRegistry {
+                entryPath = .Some(node.rootDir)
+            }
+            let entry = LockEntry(
+                name: node.name,
+                version: Version(major: 0, minor: 0, patch: 0),
+                source: src,
+                checksum: .None,
+                path: entryPath
+            );
+            lockEntries.append(entry)
+        }
+        i = i + 1
+    }
+
+    let lockContent = generateLockFile(entries: lockEntries);
+    let lockPath = joinPath(base: cwd, rel: "flock.lock");
+    match writeFileString(lockPath, lockContent) {
+        .Ok(_) => {},
+        .Err(_) => {}
     }
 
     .Ok(BuildInfo(name: manifest.package.name, sources: allSources, linkLibs: allLinkLibs, linkPaths: allLinkPaths, frameworks: allFrameworks))
@@ -392,6 +466,11 @@ func quoteArg(s: String) -> String {
         i = i + 1
     }
     s
+}
+
+/// Checks if a dependency name looks like a registry dep (contains a slash).
+func isRegistryDep(name name: String) -> Bool {
+    isRegistryName(name: name)
 }
 
 /// Extracts the last component of a path.

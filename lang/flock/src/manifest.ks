@@ -90,21 +90,26 @@ public struct Manifest: Cloneable {
     public var package: PackageInfo
     public var dependencies: Array[Dependency]
     public var build: BuildConfig
+    /// Optional registry URL override from [registry] section.
+    public var registryUrl: Optional[String]
 
     public init(package package: PackageInfo, dependencies dependencies: Array[Dependency]) {
         self.package = package;
         self.dependencies = dependencies;
         self.build = BuildConfig();
+        self.registryUrl = .None;
     }
 
-    public init(package package: PackageInfo, dependencies dependencies: Array[Dependency], build build: BuildConfig) {
+    public init(package package: PackageInfo, dependencies dependencies: Array[Dependency], build build: BuildConfig, registryUrl registryUrl: Optional[String]) {
         self.package = package;
         self.dependencies = dependencies;
         self.build = build;
+        self.registryUrl = registryUrl;
     }
 
     public func clone() -> Manifest {
-        Manifest(package: self.package.clone(), dependencies: self.dependencies.clone(), build: self.build.clone())
+        var m = Manifest(package: self.package.clone(), dependencies: self.dependencies.clone(), build: self.build.clone(), registryUrl: cloneOptionalString(self.registryUrl));
+        m
     }
 }
 
@@ -216,7 +221,16 @@ public func parseManifest(source source: String) -> Result[Manifest, FlockError]
                 .None => {}
             }
 
-            .Ok(Manifest(package: packageInfo, dependencies: deps, build: buildCfg))
+            // Extract [registry] section (optional)
+            var registryUrl: Optional[String] = .None;
+            match root.value(forKey: "registry") {
+                .Some(regVal) => {
+                    registryUrl = parseOptionalString(regVal, "url")
+                },
+                .None => {}
+            }
+
+            .Ok(Manifest(package: packageInfo, dependencies: deps, build: buildCfg, registryUrl: registryUrl))
         }
     }
 }

@@ -4,7 +4,6 @@
 
 module flock.compiler
 
-import clutch.os.(spawn, getenv)
 import flock.error.(FlockError)
 
 // ============================================================================
@@ -29,7 +28,7 @@ public func invokeCompiler(
 ) -> Result[(), FlockError] {
     // Use KESTREL env var if set, otherwise fall back to "kestrel" in PATH
     var compiler = "kestrel";
-    match getenv(name: "KESTREL") {
+    match getenv("KESTREL") {
         .Some(path) => compiler = path,
         .None => {}
     }
@@ -37,7 +36,7 @@ public func invokeCompiler(
     var cmd = compiler + " " + mode;
 
     // Pass --std if KESTREL_STD is set
-    match getenv(name: "KESTREL_STD") {
+    match getenv("KESTREL_STD") {
         .Some(stdPath) => {
             cmd = cmd + " --std " + quoteArg(stdPath)
         },
@@ -82,7 +81,7 @@ public func invokeCompiler(
         i = i + 1
     }
 
-    let exitCode = spawn(command: cmd);
+    let exitCode = spawn(cmd);
     if exitCode != 0 {
         return .Err(FlockError.CompilerFailed(exitCode))
     }
