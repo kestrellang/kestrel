@@ -5,21 +5,7 @@
 
 module clutch.os
 
-// std.os functions (fileExists, isDirectory, listDir, getcwd, getenv, spawn, captureOutput)
-// are auto-imported from stdlib
-
-// ============================================================================
-// RAW FFI BINDINGS
-// ============================================================================
-
-@extern(.C, mangleName: "open")
-func libc_open(path: lang.ptr[lang.i8], flags: lang.i32, mode: lang.i32) -> lang.i32
-
-@extern(.C, mangleName: "read")
-func libc_read(fd: lang.i32, buf: lang.ptr[lang.i8], count: lang.i64) -> lang.i64
-
-@extern(.C, mangleName: "close")
-func libc_close(fd: lang.i32) -> lang.i32
+// std.os and std.io functions are auto-imported from stdlib
 
 // ============================================================================
 // PUBLIC API
@@ -30,9 +16,9 @@ func libc_close(fd: lang.i32) -> lang.i32
 public func getArgv() -> Array[String] {
     var result = Array[String]();
 
-    // Open /proc/self/cmdline
+    // Open /proc/self/cmdline using stdlib io functions
     let path = "/proc/self/cmdline".toCString();
-    let fd = Int32(raw: libc_open(lang.cast_ptr[lang.i8](path.raw.raw), 0, 0));
+    let fd = open(path.raw, O_RDONLY(), 0);
     path.free();
     if fd < 0 {
         return result
@@ -45,8 +31,8 @@ public func getArgv() -> Array[String] {
         buf.append(0);
         i = i + 1
     }
-    let n = Int64(raw: libc_read(fd.raw, lang.cast_ptr[lang.i8](buf.asPointer().raw), 4096));
-    let _ = Int32(raw: libc_close(fd.raw));
+    let n = read(fd, buf.asPointer(), 4096);
+    let _ = close(fd);
 
     if n <= 0 {
         return result
