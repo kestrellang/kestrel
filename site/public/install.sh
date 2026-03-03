@@ -153,8 +153,8 @@ main() {
         err "failed to download jessup from $_url"
     fi
 
-    # Extract jessup binary
-    tar xzf "$_archive" -C "$_tmpdir" 2>/dev/null || {
+    # Extract jessup binary (strip the top-level directory)
+    tar xzf "$_archive" -C "$_tmpdir" --strip-components=1 2>/dev/null || {
         rm -rf "$_tmpdir"
         err "failed to extract jessup archive"
     }
@@ -162,8 +162,6 @@ main() {
     # Install jessup binary
     if [ -f "$_tmpdir/jessup" ]; then
         mv "$_tmpdir/jessup" "$JESSUP_BIN/jessup"
-    elif [ -f "$_tmpdir/bin/jessup" ]; then
-        mv "$_tmpdir/bin/jessup" "$JESSUP_BIN/jessup"
     else
         rm -rf "$_tmpdir"
         err "jessup binary not found in archive"

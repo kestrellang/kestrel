@@ -48,6 +48,9 @@ pub use kestrel_reporting::{Diagnostic, DiagnosticContext, IntoDiagnostic, Label
 pub use kestrel_semantic_model::SemanticModel;
 pub use kestrel_syntax_tree::SyntaxNode;
 
+// Re-export semantic tree types
+pub use kestrel_semantic_tree::platform::TargetPlatform;
+
 // Re-export codegen types
 pub use kestrel_codegen::TargetConfig;
 pub use kestrel_codegen_cranelift::CodegenOptions;

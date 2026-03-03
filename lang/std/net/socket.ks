@@ -13,6 +13,64 @@ import std.io.error.(Error)
 import std.io.read.(Read)
 import std.io.write.(Write)
 
+// addrinfo struct size and layout (platform-specific)
+@platform(.darwin)
+func ADDRINFO_SIZE() -> Int64 { 48 }
+
+@platform(.linux)
+func ADDRINFO_SIZE() -> Int64 { 48 }
+
+@platform(.darwin)
+func AI_ADDR_OFFSET() -> Int64 { 32 }
+
+@platform(.linux)
+func AI_ADDR_OFFSET() -> Int64 { 24 }
+
+// Build sockaddr_in (platform-specific layout, 16 bytes)
+// macOS has sin_len (1 byte) + sin_family (1 byte)
+@platform(.darwin)
+func buildSockaddrIn(port: UInt16) -> Array[UInt8] {
+    var addr = Array[UInt8]();
+    // sin_len = 16, sin_family = AF_INET (2)
+    addr.append(16);
+    addr.append(2);
+    // sin_port in network byte order (big-endian)
+    let port64 = Int64(from: port);
+    let portHi = port64 / 256;
+    let portLo = port64 % 256;
+    addr.append(UInt8(from: portHi));
+    addr.append(UInt8(from: portLo));
+    // sin_addr = INADDR_ANY + zero padding (12 bytes)
+    var pad: Int64 = 0;
+    while pad < 12 {
+        addr.append(0);
+        pad = pad + 1
+    }
+    addr
+}
+
+// Linux has sin_family (2 bytes, uint16) — no sin_len
+@platform(.linux)
+func buildSockaddrIn(port: UInt16) -> Array[UInt8] {
+    var addr = Array[UInt8]();
+    // sin_family = AF_INET (2) as little-endian uint16
+    addr.append(2);
+    addr.append(0);
+    // sin_port in network byte order (big-endian)
+    let port64 = Int64(from: port);
+    let portHi = port64 / 256;
+    let portLo = port64 % 256;
+    addr.append(UInt8(from: portHi));
+    addr.append(UInt8(from: portLo));
+    // sin_addr = INADDR_ANY + zero padding (12 bytes)
+    var pad: Int64 = 0;
+    while pad < 12 {
+        addr.append(0);
+        pad = pad + 1
+    }
+    addr
+}
+
 public struct TcpStream: Read, Write {
     var fd: Int32
 

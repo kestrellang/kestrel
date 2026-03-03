@@ -11,6 +11,7 @@ use kestrel_reporting::{Diagnostic, DiagnosticContext, IntoDiagnostic, Label};
 use kestrel_semantic_analyzers::{AnalysisContext, Analyzer, run_all};
 use kestrel_semantic_model::SemanticModel;
 use kestrel_semantic_tree_binder::SemanticBinder;
+use kestrel_semantic_tree::platform::TargetPlatform;
 use kestrel_semantic_tree_builder::SemanticModelBuilder;
 use kestrel_span::Span;
 use std::path::Path;
@@ -42,12 +43,17 @@ impl Compilation {
     }
 
     /// Internal method to create a compilation from source files.
-    pub(crate) fn from_sources(sources: Vec<SourceEntry>, stdlib_enabled: bool) -> Self {
+    pub(crate) fn from_sources(
+        sources: Vec<SourceEntry>,
+        stdlib_enabled: bool,
+        target_platform: TargetPlatform,
+    ) -> Self {
         let mut diagnostics = DiagnosticContext::new();
         let mut source_files = Vec::new();
 
         // Create the semantic model builder (build/lowering phase)
         let mut builder = SemanticModelBuilder::new();
+        builder.with_target_platform(target_platform);
         if stdlib_enabled {
             builder.enable_std_auto_import();
         }

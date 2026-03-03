@@ -24,6 +24,11 @@ pub enum AttributeKind {
     /// Only valid on `let` declarations with `LiteralSlice[T]` type.
     FileConstant,
 
+    /// `@platform(.darwin)` or `@platform(.linux)` - Conditional compilation.
+    /// Declarations with this attribute are only included when compiling for
+    /// the specified platform.
+    Platform,
+
     /// `@dummy` - A placeholder attribute for testing the infrastructure.
     /// This attribute is recognized but has no semantic effect.
     Dummy,
@@ -40,6 +45,7 @@ impl AttributeKind {
             "builtin" => AttributeKind::Builtin,
             "extern" => AttributeKind::Extern,
             "fileconstant" => AttributeKind::FileConstant,
+            "platform" => AttributeKind::Platform,
             "dummy" => AttributeKind::Dummy,
             _ => AttributeKind::Unknown,
         }

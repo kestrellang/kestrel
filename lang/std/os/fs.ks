@@ -59,7 +59,14 @@ func libc_closedir(dirp: lang.ptr[lang.i8]) -> lang.i32
 @extern(.C, mangleName: "getcwd")
 func libc_getcwd(buf: lang.ptr[lang.i8], size: lang.i64) -> lang.ptr[lang.i8]
 
-// __errno_ptr() is in fs.darwin.ks / fs.linux.ks
+// errno access
+@platform(.darwin)
+@extern(.C, mangleName: "__error")
+func __errno_ptr() -> lang.ptr[lang.i32]
+
+@platform(.linux)
+@extern(.C, mangleName: "__errno_location")
+func __errno_ptr() -> lang.ptr[lang.i32]
 
 // ============================================================================
 // CONSTANTS
@@ -67,11 +74,23 @@ func libc_getcwd(buf: lang.ptr[lang.i8], size: lang.i64) -> lang.ptr[lang.i8]
 
 func F_OK() -> Int32 { 0 }
 func STAT_BUF_SIZE() -> Int64 { 144 }
-// ST_MODE_OFFSET is in fs.darwin.ks / fs.linux.ks
+
+@platform(.darwin)
+func ST_MODE_OFFSET() -> Int64 { 4 }
+
+@platform(.linux)
+func ST_MODE_OFFSET() -> Int64 { 24 }
+
 func S_IFMT() -> Int32 { 61440 }
 func S_IFDIR() -> Int32 { 16384 }
 func S_IFREG() -> Int32 { 32768 }
-// DIRENT_NAME_OFFSET is in fs.darwin.ks / fs.linux.ks
+
+@platform(.darwin)
+func DIRENT_NAME_OFFSET() -> Int64 { 21 }
+
+@platform(.linux)
+func DIRENT_NAME_OFFSET() -> Int64 { 19 }
+
 func MODE_DIR_DEFAULT() -> Int32 { 493 }
 
 func fsErrno() -> Int32 {

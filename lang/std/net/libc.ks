@@ -21,7 +21,32 @@ public func SOCK_STREAM() -> Int32 { 1 }
 /// TCP protocol number.
 public func IPPROTO_TCP() -> Int32 { 6 }
 
-// SOL_SOCKET and SO_REUSEADDR are in libc.darwin.ks / libc.linux.ks
+// errno access
+@platform(.darwin)
+@extern(.C, mangleName: "__error")
+func __errno_ptr() -> lang.ptr[lang.i32]
+
+@platform(.linux)
+@extern(.C, mangleName: "__errno_location")
+func __errno_ptr() -> lang.ptr[lang.i32]
+
+// Socket constants (platform-specific values)
+
+/// Socket-level options.
+@platform(.darwin)
+public func SOL_SOCKET() -> Int32 { 0xFFFF }
+
+/// Socket-level options.
+@platform(.linux)
+public func SOL_SOCKET() -> Int32 { 1 }
+
+/// Allow address reuse.
+@platform(.darwin)
+public func SO_REUSEADDR() -> Int32 { 0x0004 }
+
+/// Allow address reuse.
+@platform(.linux)
+public func SO_REUSEADDR() -> Int32 { 2 }
 
 /// Bind to all interfaces.
 public func INADDR_ANY() -> Int32 { 0 }
@@ -69,7 +94,6 @@ func libc_getaddrinfo(node: lang.ptr[lang.i8], service: lang.ptr[lang.i8], hints
 @extern(.C, mangleName: "freeaddrinfo")
 func libc_freeaddrinfo(res: lang.ptr[lang.i8])
 
-// __errno_ptr() is in libc.darwin.ks / libc.linux.ks
 
 // ============================================================================
 // PUBLIC WRAPPERS

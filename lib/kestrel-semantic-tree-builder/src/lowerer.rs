@@ -5,11 +5,12 @@ use kestrel_reporting::DiagnosticContext;
 use kestrel_semantic_model::SemanticModel;
 use kestrel_semantic_tree::behavior::visibility::{Visibility, VisibilityBehavior};
 use kestrel_semantic_tree::language::KestrelLanguage;
+use kestrel_semantic_tree::platform::TargetPlatform;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::symbol::module::ModuleSymbol;
 use kestrel_semantic_tree::symbol::source_file::SourceFileSymbol;
 use kestrel_span::{Span, Spanned};
-use kestrel_syntax_tree::SyntaxNode;
+use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::{Symbol, SymbolId, SymbolMetadata, SymbolMetadataBuilder};
 
 /// A single input file for semantic lowering.
@@ -26,6 +27,7 @@ pub struct SemanticModelBuilder {
     syntax_map: HashMap<SymbolId, SyntaxNode>,
     sources: HashMap<String, String>,
     std_auto_import: bool,
+    target_platform: Option<TargetPlatform>,
 }
 
 impl SemanticModelBuilder {
@@ -35,7 +37,16 @@ impl SemanticModelBuilder {
             syntax_map: HashMap::new(),
             sources: HashMap::new(),
             std_auto_import: false,
+            target_platform: None,
         }
+    }
+
+    /// Set the target platform for conditional compilation.
+    ///
+    /// Declarations annotated with `@platform(.X)` where X does not match
+    /// the target will be excluded from the semantic model.
+    pub fn with_target_platform(&mut self, platform: TargetPlatform) {
+        self.target_platform = Some(platform);
     }
 
     /// Enable auto-import of standard library modules.
@@ -199,6 +210,83 @@ impl SemanticModelBuilder {
         }
     }
 
+    /// Check if a syntax node should be excluded based on `@platform` attribute.
+    ///
+    /// Performs a lightweight syntax-level scan: looks for an `@platform(.X)` attribute
+    /// in the node's `AttributeList` child and checks if X matches the target platform.
+    /// Returns `true` if the declaration should be excluded.
+    fn is_platform_excluded(&self, syntax: &SyntaxNode) -> bool {
+        let Some(target) = self.target_platform else {
+            return false;
+        };
+
+        // Look for an AttributeList child
+        let Some(attr_list) = syntax
+            .children()
+            .find(|c| c.kind() == SyntaxKind::AttributeList)
+        else {
+            return false;
+        };
+
+        // Scan each Attribute node in the list
+        for attr_node in attr_list
+            .children()
+            .filter(|c| c.kind() == SyntaxKind::Attribute)
+        {
+            // Check if this attribute is named "platform"
+            let is_platform = attr_node
+                .children_with_tokens()
+                .filter_map(|c| c.into_token())
+                .any(|tok| tok.kind() == SyntaxKind::Identifier && tok.text() == "platform");
+
+            if !is_platform {
+                continue;
+            }
+
+            // Found @platform — extract the argument
+            let Some(args_node) = attr_node
+                .children()
+                .find(|c| c.kind() == SyntaxKind::AttributeArgs)
+            else {
+                // @platform with no args — don't exclude, let the binder report an error
+                return false;
+            };
+
+            // Look for the implicit member name in the first AttributeArg
+            for arg_node in args_node
+                .children()
+                .filter(|c| c.kind() == SyntaxKind::AttributeArg)
+            {
+                // Find the Identifier token after a Dot token
+                let tokens: Vec<_> = arg_node
+                    .children_with_tokens()
+                    .filter_map(|c| c.into_token())
+                    .collect();
+
+                let mut found_dot = false;
+                for tok in &tokens {
+                    if tok.kind() == SyntaxKind::Dot {
+                        found_dot = true;
+                    } else if found_dot && tok.kind() == SyntaxKind::Identifier {
+                        let platform_name = tok.text();
+                        return match TargetPlatform::from_name(platform_name) {
+                            Some(declared) => declared != target,
+                            None => false, // Unknown platform — let binder report error
+                        };
+                    }
+                }
+
+                // No implicit member found — let binder report error
+                return false;
+            }
+
+            // No args found — let binder report error
+            return false;
+        }
+
+        false
+    }
+
     /// Walk syntax tree and build symbols (iterative to avoid stack overflow on deep trees)
     fn walk_node(
         &mut self,
@@ -216,6 +304,11 @@ impl SemanticModelBuilder {
         let mut first_result: Option<Arc<dyn Symbol<KestrelLanguage>>> = None;
 
         while let Some((current_syntax, current_parent)) = stack.pop() {
+            // Skip declarations excluded by @platform attribute
+            if self.is_platform_excluded(&current_syntax) {
+                continue;
+            }
+
             let built_symbol = if let Some(builder) = builder_for(current_syntax.kind()) {
                 if let Some(symbol) = builder.build_declaration(
                     &current_syntax,

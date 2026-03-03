@@ -20,6 +20,7 @@ pub mod expr;
 pub mod language;
 pub mod operators;
 pub mod pattern;
+pub mod platform;
 pub mod stmt;
 pub mod symbol;
 pub mod ty;

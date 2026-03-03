@@ -299,6 +299,7 @@ use kestrel_semantic_tree::behavior::function_data::FunctionDataBehavior;
 use kestrel_semantic_tree::behavior::visibility::Visibility as SemanticVisibility;
 use kestrel_semantic_tree::behavior::visibility::VisibilityBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
+use kestrel_semantic_tree::platform::TargetPlatform;
 use kestrel_semantic_tree_binder::{SemanticBinder, SemanticModel};
 use kestrel_semantic_tree_builder::SemanticModelBuilder;
 use kestrel_span::Span;
@@ -560,6 +561,7 @@ impl Test {
         }
 
         let mut builder = SemanticModelBuilder::new();
+        builder.with_target_platform(TargetPlatform::host());
         let mut diagnostics = DiagnosticContext::new();
         let mut has_parse_errors = false;
         let mut file_paths: std::collections::HashMap<usize, std::path::PathBuf> =

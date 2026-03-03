@@ -74,8 +74,8 @@ public func installToolchain(channel channel: String) -> Result[String, JessupEr
     // Create toolchain directory
     let _ = spawn("mkdir -p " + tcDir);
 
-    // Extract archive
-    let tarCmd = "tar xzf " + archivePath + " -C " + tcDir;
+    // Extract archive (strip the top-level directory from the tarball)
+    let tarCmd = "tar xzf " + archivePath + " -C " + tcDir + " --strip-components=1";
     let tarExit = spawn(tarCmd);
     if tarExit != 0 {
         let _ = spawn("rm -rf " + tmpDir);
@@ -341,15 +341,22 @@ public func selfUpdate() -> Result[(), JessupError] {
         .Ok(dir) => bp = dir
     }
 
-    let tmpPath = "/tmp/jessup-update";
-    let curlCmd = "curl -sL -o " + tmpPath + " " + downloadUrl;
+    let tmpDir = "/tmp/jessup-self-update";
+    let _ = spawn("mkdir -p " + tmpDir);
+    let archivePath = tmpDir + "/jessup.tar.gz";
+
+    let curlCmd = "curl -sL -o " + archivePath + " " + downloadUrl;
     let exitCode = spawn(curlCmd);
     if exitCode != 0 {
+        let _ = spawn("rm -rf " + tmpDir);
         return .Err(JessupError.NetworkError("failed to download jessup update"))
     }
 
-    let _ = spawn("chmod +x " + tmpPath);
-    let _ = spawn("mv " + tmpPath + " " + bp + "/jessup");
+    // Extract and strip top-level directory
+    let _ = spawn("tar xzf " + archivePath + " -C " + tmpDir + " --strip-components=1");
+    let _ = spawn("chmod +x " + tmpDir + "/jessup");
+    let _ = spawn("mv " + tmpDir + "/jessup " + bp + "/jessup");
+    let _ = spawn("rm -rf " + tmpDir);
 
     let _ = println("jessup has been updated");
 

@@ -5,6 +5,7 @@
 use crate::diagnostics::{
     BuiltinInvalidArgumentError, BuiltinRequiresArgumentError, ExternInvalidCallingConventionError,
     ExternRequiresCallingConventionError, ExternUnknownCallingConventionError,
+    PlatformInvalidArgumentError, PlatformRequiresArgumentError, PlatformUnknownPlatformError,
     UnknownAttributeWarning, UnknownLanguageFeatureError,
 };
 use kestrel_reporting::DiagnosticContext;
@@ -12,6 +13,7 @@ use kestrel_semantic_tree::attributes::{Attribute, AttributeArg, AttributeKind};
 use kestrel_semantic_tree::behavior::attributes::AttributesBehavior;
 use kestrel_semantic_tree::behavior::extern_fn::CallingConvention;
 use kestrel_semantic_tree::builtins::LanguageFeature;
+use kestrel_semantic_tree::platform::TargetPlatform;
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
@@ -464,6 +466,71 @@ pub fn parse_fileconstant_attribute(
     FileConstantParseResult::Success {
         relative_path,
         span: attr.span.clone(),
+    }
+}
+
+/// Result of parsing a `@platform(.darwin)` attribute.
+pub enum PlatformParseResult {
+    /// Successfully parsed: contains the target platform
+    Success(TargetPlatform),
+    /// Not a platform attribute
+    NotPlatform,
+    /// Error occurred during parsing (diagnostic already emitted)
+    Error,
+}
+
+/// Parse a `@platform(.darwin)` or `@platform(.linux)` attribute from an AttributesBehavior.
+///
+/// This function checks if the attributes contain a `@platform` attribute,
+/// validates its arguments, and returns the parsed `TargetPlatform`.
+///
+/// Note: By the time this runs, non-matching platform declarations have already
+/// been filtered out by the semantic model builder. This validation catches
+/// malformed `@platform` attributes on declarations that passed the filter.
+pub fn parse_platform_attribute(
+    attributes: &AttributesBehavior,
+    source: &str,
+    diagnostics: &mut DiagnosticContext,
+) -> PlatformParseResult {
+    let Some(attr) = attributes.get_kind(AttributeKind::Platform) else {
+        return PlatformParseResult::NotPlatform;
+    };
+
+    if attr.args.is_empty() {
+        diagnostics.throw(PlatformRequiresArgumentError {
+            span: attr.span.clone(),
+        });
+        return PlatformParseResult::Error;
+    }
+
+    let arg = &attr.args[0];
+
+    if arg.is_labeled() {
+        diagnostics.throw(PlatformInvalidArgumentError {
+            span: arg.span.clone(),
+        });
+        return PlatformParseResult::Error;
+    }
+
+    let arg_text = &source[arg.value_span.range()];
+
+    if !arg_text.starts_with('.') {
+        diagnostics.throw(PlatformInvalidArgumentError {
+            span: arg.span.clone(),
+        });
+        return PlatformParseResult::Error;
+    }
+
+    let platform_name = &arg_text[1..];
+    match TargetPlatform::from_name(platform_name) {
+        Some(platform) => PlatformParseResult::Success(platform),
+        None => {
+            diagnostics.throw(PlatformUnknownPlatformError {
+                span: arg.value_span.clone(),
+                name: platform_name.to_string(),
+            });
+            PlatformParseResult::Error
+        },
     }
 }
 

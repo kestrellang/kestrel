@@ -41,7 +41,48 @@ public func O_WRONLY() -> Int32 { 0x0001 }
 /// Open for reading and writing.
 public func O_RDWR() -> Int32 { 0x0002 }
 
-// O_CREAT, O_TRUNC, O_APPEND, O_EXCL are in libc.darwin.ks / libc.linux.ks
+// errno access
+@platform(.darwin)
+@extern(.C, mangleName: "__error")
+func __errno_ptr() -> lang.ptr[lang.i32]
+
+@platform(.linux)
+@extern(.C, mangleName: "__errno_location")
+func __errno_ptr() -> lang.ptr[lang.i32]
+
+// Open flags (platform-specific values)
+
+/// Create file if it doesn't exist.
+@platform(.darwin)
+public func O_CREAT() -> Int32 { 0x0200 }
+
+/// Create file if it doesn't exist.
+@platform(.linux)
+public func O_CREAT() -> Int32 { 0x0040 }
+
+/// Truncate file to zero length.
+@platform(.darwin)
+public func O_TRUNC() -> Int32 { 0x0400 }
+
+/// Truncate file to zero length.
+@platform(.linux)
+public func O_TRUNC() -> Int32 { 0x0200 }
+
+/// Append to end of file.
+@platform(.darwin)
+public func O_APPEND() -> Int32 { 0x0008 }
+
+/// Append to end of file.
+@platform(.linux)
+public func O_APPEND() -> Int32 { 0x0400 }
+
+/// Fail if file exists (with O_CREAT).
+@platform(.darwin)
+public func O_EXCL() -> Int32 { 0x0800 }
+
+/// Fail if file exists (with O_CREAT).
+@platform(.linux)
+public func O_EXCL() -> Int32 { 0x0080 }
 
 // ============================================================================
 // SEEK WHENCE CONSTANTS
@@ -82,7 +123,6 @@ func libc_write(fd: lang.i32, buf: lang.ptr[lang.i8], count: lang.i64) -> lang.i
 @extern(.C, mangleName: "lseek")
 func libc_lseek(fd: lang.i32, offset: lang.i64, whence: lang.i32) -> lang.i64
 
-// __errno_ptr() is in libc.darwin.ks / libc.linux.ks
 
 // ============================================================================
 // PUBLIC WRAPPERS

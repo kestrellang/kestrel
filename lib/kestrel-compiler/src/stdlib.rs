@@ -109,7 +109,6 @@ impl StdLib {
         current: &Path,
         sources: &mut Vec<(String, String, PathBuf)>,
     ) -> Result<(), StdLibError> {
-        let platform = host_platform();
         let entries = fs::read_dir(current)?;
 
         for entry in entries {
@@ -119,10 +118,6 @@ impl StdLib {
             if path.is_dir() {
                 Self::collect_sources(root, &path, sources)?;
             } else if path.extension().is_some_and(|e| e == "ks") {
-                let filename = path.file_name().unwrap_or_default().to_string_lossy();
-                if !should_include_file(&filename, platform) {
-                    continue;
-                }
                 let content = fs::read_to_string(&path)?;
                 // Use relative path from stdlib root with std/ prefix
                 let rel_path = path
@@ -136,71 +131,6 @@ impl StdLib {
             }
         }
         Ok(())
-    }
-}
-
-/// Returns the platform suffix for the current host OS.
-fn host_platform() -> &'static str {
-    match std::env::consts::OS {
-        "macos" => "darwin",
-        other => other,
-    }
-}
-
-/// Checks whether a `.ks` file should be included for the given platform.
-///
-/// Files with a platform suffix (e.g., `foo.darwin.ks`, `foo.linux.ks`) are only
-/// included when the suffix matches the current platform. Plain `.ks` files are
-/// always included.
-fn should_include_file(filename: &str, platform: &str) -> bool {
-    let stem = match filename.strip_suffix(".ks") {
-        Some(s) => s,
-        None => return true,
-    };
-
-    for known in &["darwin", "linux", "windows"] {
-        let suffix = format!(".{}", known);
-        if stem.ends_with(&suffix) {
-            return *known == platform;
-        }
-    }
-
-    true
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_plain_files_always_included() {
-        assert!(should_include_file("libc.ks", "darwin"));
-        assert!(should_include_file("libc.ks", "linux"));
-    }
-
-    #[test]
-    fn test_darwin_files_only_on_darwin() {
-        assert!(should_include_file("libc.darwin.ks", "darwin"));
-        assert!(!should_include_file("libc.darwin.ks", "linux"));
-    }
-
-    #[test]
-    fn test_linux_files_only_on_linux() {
-        assert!(should_include_file("libc.linux.ks", "linux"));
-        assert!(!should_include_file("libc.linux.ks", "darwin"));
-    }
-
-    #[test]
-    fn test_windows_files_only_on_windows() {
-        assert!(should_include_file("os.windows.ks", "windows"));
-        assert!(!should_include_file("os.windows.ks", "darwin"));
-        assert!(!should_include_file("os.windows.ks", "linux"));
-    }
-
-    #[test]
-    fn test_non_ks_files_always_included() {
-        assert!(should_include_file("readme.md", "darwin"));
-        assert!(should_include_file("readme.md", "linux"));
     }
 }
 

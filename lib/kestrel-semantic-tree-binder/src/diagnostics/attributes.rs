@@ -28,6 +28,63 @@ impl IntoDiagnostic for UnknownAttributeWarning {
 // File Constant Attribute Errors
 // ============================================================================
 
+// ============================================================================
+// Platform Attribute Errors
+// ============================================================================
+
+/// Error when @platform is missing a platform argument.
+pub struct PlatformRequiresArgumentError {
+    pub span: Span,
+}
+
+impl IntoDiagnostic for PlatformRequiresArgumentError {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
+        Diagnostic::error()
+            .with_message("@platform requires a platform argument")
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message("expected @platform(.darwin) or @platform(.linux)"),
+            ])
+    }
+}
+
+/// Error when @platform has an invalid argument format.
+pub struct PlatformInvalidArgumentError {
+    pub span: Span,
+}
+
+impl IntoDiagnostic for PlatformInvalidArgumentError {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
+        Diagnostic::error()
+            .with_message("@platform argument must be an implicit member like .darwin")
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message("expected .darwin or .linux"),
+            ])
+    }
+}
+
+/// Error when @platform specifies an unknown platform.
+pub struct PlatformUnknownPlatformError {
+    pub span: Span,
+    pub name: String,
+}
+
+impl IntoDiagnostic for PlatformUnknownPlatformError {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
+        Diagnostic::error()
+            .with_message(format!("unknown platform '{}'", self.name))
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message("expected 'darwin' or 'linux'"),
+            ])
+    }
+}
+
+// ============================================================================
+// File Constant Attribute Errors
+// ============================================================================
+
 /// Error when @fileconstant is missing a path argument.
 pub struct FileConstantRequiresPathError {
     pub span: Span,

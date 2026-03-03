@@ -1,5 +1,6 @@
 use crate::compilation::Compilation;
 use crate::stdlib::{StdLib, StdLibConfig, StdLibError};
+use kestrel_semantic_tree::platform::TargetPlatform;
 use std::fs;
 use std::io;
 use std::path::PathBuf;
@@ -36,10 +37,16 @@ impl SourceEntry {
 ///
 /// Use this to add source files from strings or file paths,
 /// then call `build()` to compile all sources.
-#[derive(Default)]
 pub struct CompilationBuilder {
     sources: Vec<SourceEntry>,
     stdlib_config: StdLibConfig,
+    target_platform: TargetPlatform,
+}
+
+impl Default for CompilationBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl CompilationBuilder {
@@ -48,7 +55,14 @@ impl CompilationBuilder {
         Self {
             sources: Vec::new(),
             stdlib_config: StdLibConfig::default(),
+            target_platform: TargetPlatform::host(),
         }
+    }
+
+    /// Set the target platform for conditional compilation.
+    pub fn with_target_platform(mut self, platform: TargetPlatform) -> Self {
+        self.target_platform = platform;
+        self
     }
 
     /// Configure the standard library path.
@@ -147,6 +161,7 @@ impl CompilationBuilder {
         Ok(Compilation::from_sources(
             all_sources,
             self.stdlib_config.enabled,
+            self.target_platform,
         ))
     }
 }
