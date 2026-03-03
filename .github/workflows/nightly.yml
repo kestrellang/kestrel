@@ -35,7 +35,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ matrix.target }}-cargo-v2-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Install OpenSSL (macOS)
         if: runner.os == 'macOS'
