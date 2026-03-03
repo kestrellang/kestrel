@@ -31,9 +31,9 @@ public func getArgv() -> Array[String] {
     var result = Array[String]();
 
     // Open /proc/self/cmdline
-    let pathBytes = "/proc/self/cmdline";
-    let pathPtr = Pointer(to: pathBytes).cast[UInt8]();
-    let fd = Int32(raw: libc_open(lang.cast_ptr[lang.i8](pathPtr.raw), 0, 0));
+    let path = "/proc/self/cmdline".toCString();
+    let fd = Int32(raw: libc_open(lang.cast_ptr[lang.i8](path.raw.raw), 0, 0));
+    path.free();
     if fd < 0 {
         return result
     }
