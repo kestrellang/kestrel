@@ -10,13 +10,12 @@ use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::ty::TyKind;
 use kestrel_semantic_type_inference::TypeOracle;
 use kestrel_syntax_tree::SyntaxNode;
-use semantic_tree::cycle::CycleDetector;
 use semantic_tree::symbol::Symbol;
 
 use crate::binders::utils::attributes::{BuiltinParseResult, parse_builtin_attribute};
 use crate::declaration_binder::{BindingContext, DeclarationBinder};
 use crate::diagnostics::{
-    BuiltinWrongKindError, CloneableFieldRequiresCloneableConformance, DuplicateBuiltinError,
+    BuiltinWrongKindError, DuplicateBuiltinError,
     FieldsNotConformingToProtocolError, NonConformingField, NotAProtocolContext,
 };
 use crate::syntax::helpers::resolve_conformance_list;
@@ -93,9 +92,18 @@ impl DeclarationBinder for StructBinder {
             return;
         }
 
-        // Compute and attach CopySemanticsBehavior based on conformances and field types
-        // This is done in bind_body because fields are bound after the struct's signature
-        Self::compute_copy_semantics(symbol, context);
+        // Compute and attach CopySemanticsBehavior via query (unified for struct/enum)
+        let semantics = context.model.query(kestrel_semantic_model::CopySemanticsFor {
+            symbol_id: symbol.metadata().id(),
+        });
+        symbol
+            .metadata()
+            .add_behavior(CopySemanticsBehavior::new(semantics));
+
+        // Emit diagnostic if struct has cloneable field but doesn't conform to Cloneable
+        crate::binders::copy_semantics_diagnostic::check_cloneable_field_diagnostic(
+            symbol, "struct", context,
+        );
 
         // Validate that protocols with requires_fields_conform have all fields conforming
         Self::validate_protocol_field_conformances(symbol, context);
@@ -103,170 +111,6 @@ impl DeclarationBinder for StructBinder {
 }
 
 impl StructBinder {
-    /// Compute and attach CopySemanticsBehavior based on conformances and field types.
-    ///
-    /// A struct's copy semantics are determined as follows:
-    /// 1. If it has explicit `not Copyable` in its conformance list → NotCopyable
-    /// 2. If any of its fields has a non-copyable type → NotCopyable
-    /// 3. If it conforms to `Cloneable` → Cloneable
-    /// 4. If any field is Cloneable but struct doesn't conform to Cloneable → ERROR
-    /// 5. Otherwise → Copyable
-    ///
-    /// Uses cycle detection to handle recursive struct types - if a cycle is detected
-    /// during computation, we just skip (another analyzer will catch the cycle error).
-    fn compute_copy_semantics(
-        symbol: &Arc<dyn Symbol<KestrelLanguage>>,
-        context: &mut BindingContext,
-    ) {
-        let symbol_id = symbol.metadata().id();
-
-        // Use cycle detector to handle recursive types (e.g., struct A { b: B }, struct B { a: A })
-        // If we're already computing this type's copy semantics, just return.
-        // The other analyzer will catch the actual cycle error.
-        if CycleDetector::enter_ref(context.copy_semantics_cycle_detector, symbol_id).is_err() {
-            // Cycle detected - just return, don't attach behavior
-            // The final behavior will be determined when we unwind
-            return;
-        }
-
-        // Check if the Copyable protocol is registered
-        let copyable_id = match context.model.builtin_registry().copyable_protocol() {
-            Some(id) => id,
-            None => {
-                // Copyable protocol not registered yet; default to copyable
-                symbol
-                    .metadata()
-                    .add_behavior(CopySemanticsBehavior::copyable());
-                CycleDetector::exit_ref(context.copy_semantics_cycle_detector);
-                return;
-            },
-        };
-
-        // Get the conformances behavior for checking protocol conformances
-        let conformances = symbol.metadata().get_behavior::<ConformancesBehavior>();
-
-        // Check if struct has explicit `not Copyable`
-        let has_not_copyable = conformances
-            .as_ref()
-            .map(|c| c.has_negative_conformance_to(copyable_id))
-            .unwrap_or(false);
-
-        // Check if any field has a non-copyable type
-        let has_non_copyable_field = symbol
-            .metadata()
-            .children()
-            .iter()
-            .filter(|child| child.metadata().kind() == KestrelSymbolKind::Field)
-            .any(|field| {
-                field
-                    .metadata()
-                    .get_behavior::<TypedBehavior>()
-                    .map(|typed| !typed.ty().is_copyable())
-                    .unwrap_or(false)
-            });
-
-        // Rule 1 & 2: If explicitly not copyable or has non-copyable field → NotCopyable
-        if has_not_copyable || has_non_copyable_field {
-            symbol
-                .metadata()
-                .add_behavior(CopySemanticsBehavior::not_copyable());
-            CycleDetector::exit_ref(context.copy_semantics_cycle_detector);
-            return;
-        }
-
-        // Check if struct conforms to Cloneable
-        let conforms_to_cloneable = context
-            .model
-            .builtin_registry()
-            .cloneable_protocol()
-            .map(|cloneable_id| {
-                conformances
-                    .as_ref()
-                    .map(|c| Self::has_conformance_to(c, cloneable_id))
-                    .unwrap_or(false)
-            })
-            .unwrap_or(false);
-
-        // Check if any field has a cloneable type
-        let has_cloneable_field = symbol
-            .metadata()
-            .children()
-            .iter()
-            .filter(|child| child.metadata().kind() == KestrelSymbolKind::Field)
-            .any(|field| {
-                field
-                    .metadata()
-                    .get_behavior::<TypedBehavior>()
-                    .map(|typed| typed.ty().is_cloneable())
-                    .unwrap_or(false)
-            });
-
-        // Rule 3: If conforms to Cloneable → Cloneable
-        if conforms_to_cloneable {
-            symbol
-                .metadata()
-                .add_behavior(CopySemanticsBehavior::cloneable());
-            CycleDetector::exit_ref(context.copy_semantics_cycle_detector);
-            return;
-        }
-
-        // Rule 4: If any field is Cloneable but struct doesn't conform to Cloneable → ERROR
-        if has_cloneable_field {
-            // Find the first cloneable field for the diagnostic
-            if let Some(cloneable_field) = symbol
-                .metadata()
-                .children()
-                .iter()
-                .filter(|child| child.metadata().kind() == KestrelSymbolKind::Field)
-                .find(|field| {
-                    field
-                        .metadata()
-                        .get_behavior::<TypedBehavior>()
-                        .map(|typed| typed.ty().is_cloneable())
-                        .unwrap_or(false)
-                })
-            {
-                context
-                    .diagnostics
-                    .throw(CloneableFieldRequiresCloneableConformance {
-                        type_span: symbol.metadata().span().clone(),
-                        type_name: symbol.metadata().name().value.clone(),
-                        field_name: cloneable_field.metadata().name().value.clone(),
-                        field_span: cloneable_field.metadata().span().clone(),
-                        type_kind: "struct",
-                    });
-            }
-
-            // Make it NotCopyable to be safe (can't implicitly copy cloneable fields)
-            symbol
-                .metadata()
-                .add_behavior(CopySemanticsBehavior::not_copyable());
-            CycleDetector::exit_ref(context.copy_semantics_cycle_detector);
-            return;
-        }
-
-        // Rule 5: Otherwise → Copyable
-        symbol
-            .metadata()
-            .add_behavior(CopySemanticsBehavior::copyable());
-        CycleDetector::exit_ref(context.copy_semantics_cycle_detector);
-    }
-
-    /// Check if conformances include a specific protocol by symbol ID
-    fn has_conformance_to(
-        conformances: &ConformancesBehavior,
-        protocol_id: semantic_tree::symbol::SymbolId,
-    ) -> bool {
-        use kestrel_semantic_tree::ty::TyKind;
-        conformances.conformances().iter().any(|ty| {
-            if let TyKind::Protocol { symbol, .. } = ty.kind() {
-                symbol.metadata().id() == protocol_id
-            } else {
-                false
-            }
-        })
-    }
-
     /// Process @builtin attribute on a struct.
     fn process_builtin_attribute(
         symbol: &Arc<dyn Symbol<KestrelLanguage>>,

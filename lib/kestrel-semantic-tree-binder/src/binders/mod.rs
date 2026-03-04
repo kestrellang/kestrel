@@ -1,3 +1,4 @@
+pub(crate) mod copy_semantics_diagnostic;
 mod deinit;
 mod enum_binder;
 mod enum_case;

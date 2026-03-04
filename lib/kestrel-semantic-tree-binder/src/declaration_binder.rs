@@ -74,8 +74,6 @@ pub struct BindingContext<'a> {
     pub diagnostics: &'a mut kestrel_reporting::DiagnosticContext,
     /// Cycle detector for type alias resolution (uses RefCell for interior mutability)
     pub type_alias_cycle_detector: &'a RefCell<CycleDetector<SymbolId>>,
-    /// Cycle detector for copy semantics computation (to handle recursive types)
-    pub copy_semantics_cycle_detector: &'a RefCell<CycleDetector<SymbolId>>,
     /// Source code by file name
     pub sources: &'a SourceMap,
 }

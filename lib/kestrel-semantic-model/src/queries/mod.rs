@@ -4,6 +4,11 @@
 //! Each query is a struct that implements the Query trait.
 
 mod all_conformances_for;
+mod conforms_to;
+mod copy_semantics_for;
+mod protocol_conformances_for_type;
+mod resolve_associated_type;
+mod normalize_with_constraints;
 mod all_initializers_for;
 mod all_methods_for;
 mod ancestor_of_kind;
@@ -52,6 +57,11 @@ mod visibility_level_of;
 mod where_clauses_in_scope;
 
 pub use all_conformances_for::AllConformancesFor;
+pub use conforms_to::ConformsToQuery;
+pub use copy_semantics_for::{CopySemanticsFor, collect_child_types};
+pub use protocol_conformances_for_type::ProtocolConformancesForType;
+pub use resolve_associated_type::ResolveAssociatedTypeQuery;
+pub use normalize_with_constraints::NormalizeWithConstraints;
 pub use all_initializers_for::AllInitializersFor;
 pub use all_methods_for::AllMethodsFor;
 pub use ancestor_of_kind::AncestorOfKind;

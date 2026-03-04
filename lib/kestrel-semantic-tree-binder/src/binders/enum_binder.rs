@@ -10,13 +10,12 @@ use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::ty::TyKind;
 use kestrel_semantic_type_inference::TypeOracle;
 use kestrel_syntax_tree::SyntaxNode;
-use semantic_tree::cycle::CycleDetector;
 use semantic_tree::symbol::Symbol;
 
 use crate::binders::utils::attributes::{BuiltinParseResult, parse_builtin_attribute};
 use crate::declaration_binder::{BindingContext, DeclarationBinder};
 use crate::diagnostics::{
-    BuiltinWrongKindError, CloneableFieldRequiresCloneableConformance, DuplicateBuiltinError,
+    BuiltinWrongKindError, DuplicateBuiltinError,
     FieldsNotConformingToProtocolError, NonConformingField, NotAProtocolContext,
     ProtocolDisallowsEnumConformanceError,
 };
@@ -64,7 +63,7 @@ impl DeclarationBinder for EnumBinder {
         );
         symbol.metadata().add_behavior(generics_behavior);
 
-        // 3. Resolve conformances (protocol conformance)
+        // 4. Resolve conformances (protocol conformance)
         resolve_conformance_list(
             syntax,
             &source,
@@ -91,9 +90,18 @@ impl DeclarationBinder for EnumBinder {
             return;
         }
 
-        // Compute and attach CopySemanticsBehavior based on conformances and case payload types
-        // This is done in bind_body because enum cases are bound after the enum's signature
-        Self::compute_copy_semantics(symbol, context);
+        // Compute and attach CopySemanticsBehavior via query (unified for struct/enum)
+        let semantics = context.model.query(kestrel_semantic_model::CopySemanticsFor {
+            symbol_id: symbol.metadata().id(),
+        });
+        symbol
+            .metadata()
+            .add_behavior(CopySemanticsBehavior::new(semantics));
+
+        // Emit diagnostic if enum has cloneable payload but doesn't conform to Cloneable
+        crate::binders::copy_semantics_diagnostic::check_cloneable_field_diagnostic(
+            symbol, "enum", context,
+        );
 
         // Validate that protocols with disallow_enum_conformance are not conformed to
         Self::validate_disallowed_conformances(symbol, context);
@@ -104,172 +112,6 @@ impl DeclarationBinder for EnumBinder {
 }
 
 impl EnumBinder {
-    /// Compute and attach CopySemanticsBehavior based on conformances and case payload types.
-    ///
-    /// An enum's copy semantics are determined as follows:
-    /// 1. If it has explicit `not Copyable` in its conformance list → NotCopyable
-    /// 2. If any of its enum cases has a non-copyable payload type → NotCopyable
-    /// 3. If it conforms to `Cloneable` → Cloneable
-    /// 4. If any case payload is Cloneable but enum doesn't conform to Cloneable → ERROR
-    /// 5. Otherwise → Copyable
-    ///
-    /// Uses cycle detection to handle recursive enum types.
-    fn compute_copy_semantics(
-        symbol: &Arc<dyn Symbol<KestrelLanguage>>,
-        context: &mut BindingContext,
-    ) {
-        let symbol_id = symbol.metadata().id();
-
-        // Use cycle detector to handle recursive types
-        if CycleDetector::enter_ref(context.copy_semantics_cycle_detector, symbol_id).is_err() {
-            // Cycle detected - just return, don't attach behavior
-            return;
-        }
-
-        // Check if the Copyable protocol is registered
-        let copyable_id = match context.model.builtin_registry().copyable_protocol() {
-            Some(id) => id,
-            None => {
-                // Copyable protocol not registered yet; default to copyable
-                symbol
-                    .metadata()
-                    .add_behavior(CopySemanticsBehavior::copyable());
-                CycleDetector::exit_ref(context.copy_semantics_cycle_detector);
-                return;
-            },
-        };
-
-        // Get the conformances behavior for checking protocol conformances
-        let conformances = symbol.metadata().get_behavior::<ConformancesBehavior>();
-
-        // Check if enum has explicit `not Copyable`
-        let has_not_copyable = conformances
-            .as_ref()
-            .map(|c| c.has_negative_conformance_to(copyable_id))
-            .unwrap_or(false);
-
-        // Check if any enum case has a non-copyable payload type
-        // Enum cases with payloads have a CallableBehavior with parameter types
-        let has_non_copyable_payload = symbol
-            .metadata()
-            .children()
-            .iter()
-            .filter(|child| child.metadata().kind() == KestrelSymbolKind::EnumCase)
-            .any(|case| {
-                case.metadata()
-                    .get_behavior::<CallableBehavior>()
-                    .map(|callable| {
-                        callable
-                            .parameters()
-                            .iter()
-                            .any(|param| !param.ty.is_copyable())
-                    })
-                    .unwrap_or(false)
-            });
-
-        // Rule 1 & 2: If explicitly not copyable or has non-copyable payload → NotCopyable
-        if has_not_copyable || has_non_copyable_payload {
-            symbol
-                .metadata()
-                .add_behavior(CopySemanticsBehavior::not_copyable());
-            CycleDetector::exit_ref(context.copy_semantics_cycle_detector);
-            return;
-        }
-
-        // Check if enum conforms to Cloneable
-        let conforms_to_cloneable = context
-            .model
-            .builtin_registry()
-            .cloneable_protocol()
-            .map(|cloneable_id| {
-                conformances
-                    .as_ref()
-                    .map(|c| Self::has_conformance_to(c, cloneable_id))
-                    .unwrap_or(false)
-            })
-            .unwrap_or(false);
-
-        // Check if any case payload has a cloneable type
-        let has_cloneable_payload = symbol
-            .metadata()
-            .children()
-            .iter()
-            .filter(|child| child.metadata().kind() == KestrelSymbolKind::EnumCase)
-            .any(|case| {
-                case.metadata()
-                    .get_behavior::<CallableBehavior>()
-                    .map(|callable| {
-                        callable
-                            .parameters()
-                            .iter()
-                            .any(|param| param.ty.is_cloneable())
-                    })
-                    .unwrap_or(false)
-            });
-
-        // Rule 3: If conforms to Cloneable → Cloneable
-        if conforms_to_cloneable {
-            symbol
-                .metadata()
-                .add_behavior(CopySemanticsBehavior::cloneable());
-            CycleDetector::exit_ref(context.copy_semantics_cycle_detector);
-            return;
-        }
-
-        // Rule 4: If any case payload is Cloneable but enum doesn't conform to Cloneable → ERROR
-        if has_cloneable_payload {
-            // Find the first cloneable case and parameter for the diagnostic
-            for case in symbol
-                .metadata()
-                .children()
-                .iter()
-                .filter(|child| child.metadata().kind() == KestrelSymbolKind::EnumCase)
-            {
-                if let Some(callable) = case.metadata().get_behavior::<CallableBehavior>()
-                    && let Some(param) = callable.parameters().iter().find(|p| p.ty.is_cloneable())
-                {
-                    context
-                        .diagnostics
-                        .throw(CloneableFieldRequiresCloneableConformance {
-                            type_span: symbol.metadata().span().clone(),
-                            type_name: symbol.metadata().name().value.clone(),
-                            field_name: param.bind_name.value.clone(),
-                            field_span: case.metadata().span().clone(),
-                            type_kind: "enum",
-                        });
-                    break;
-                }
-            }
-
-            // Make it NotCopyable to be safe (can't implicitly copy cloneable payloads)
-            symbol
-                .metadata()
-                .add_behavior(CopySemanticsBehavior::not_copyable());
-            CycleDetector::exit_ref(context.copy_semantics_cycle_detector);
-            return;
-        }
-
-        // Rule 5: Otherwise → Copyable
-        symbol
-            .metadata()
-            .add_behavior(CopySemanticsBehavior::copyable());
-        CycleDetector::exit_ref(context.copy_semantics_cycle_detector);
-    }
-
-    /// Check if conformances include a specific protocol by symbol ID
-    fn has_conformance_to(
-        conformances: &ConformancesBehavior,
-        protocol_id: semantic_tree::symbol::SymbolId,
-    ) -> bool {
-        conformances.conformances().iter().any(|ty| {
-            if let TyKind::Protocol { symbol, .. } = ty.kind() {
-                symbol.metadata().id() == protocol_id
-            } else {
-                false
-            }
-        })
-    }
-
     /// Process @builtin attribute on an enum.
     fn process_builtin_attribute(
         symbol: &Arc<dyn Symbol<KestrelLanguage>>,

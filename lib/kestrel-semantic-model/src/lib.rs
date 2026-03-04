@@ -13,12 +13,14 @@ mod query;
 mod registry;
 mod resolution;
 mod scope;
+mod ty_cache_key;
 mod type_oracle;
 
 pub use extension_registry::ExtensionRegistry;
 pub use model::SemanticModel;
 pub use queries::{
-    AllConformancesFor, AllInitializersFor, AllMethodsFor, AncestorOfKind,
+    AllConformancesFor, AllInitializersFor, AllMethodsFor, AncestorOfKind, ConformsToQuery, CopySemanticsFor,
+    ProtocolConformancesForType,
     AssociatedTypeBindingsFor, AssociatedTypeBoundsInContext,
     ChildByName, ConcreteSelfType, ConformancesForSymbol, DeclaredName,
     DeclaredNamesInScope, ExecutableBodyFor, ExtensionBoundsForParam, ExtensionMethods,
@@ -36,6 +38,7 @@ pub use queries::{
     callable_param_types_for_call,
 };
 pub use query::Query;
+pub use ty_cache_key::TyCacheKey;
 pub use registry::SymbolRegistry;
 pub use resolution::{SymbolResolution, TypePathResolution, ValuePathResolution};
 pub use scope::{Import, ImportItem, Scope};

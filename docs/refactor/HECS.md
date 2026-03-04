@@ -39,4 +39,4 @@ Queries are able to call each other, through which the query system will build u
 
 For example, you might have a query that takes a generic parameter, and returns all constraints on it across everything.
 
-Or there might be a query for a builtin, which will find the item with the builtin, and 
+Or there might be a query for a builtin, which will find the item with the builtin, and return it.

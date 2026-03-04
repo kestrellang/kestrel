@@ -540,481 +540,13 @@ impl TypeOracle for SemanticModel {
     }
 
     fn conforms_to(&self, ty: &Ty, protocol_id: SymbolId) -> bool {
-        // Handle inference placeholders - can't check conformance yet
-        if matches!(ty.kind(), TyKind::Infer) {
-            return false;
-        }
-
-        // Handle error types - treat as conforming to suppress cascading errors
-        if matches!(ty.kind(), TyKind::Error) {
-            return true;
-        }
-
-        // Handle never type - the bottom type conforms to any protocol
-        if matches!(ty.kind(), TyKind::Never) {
-            return true;
-        }
-
-        // Handle type parameters - check if any bound matches the protocol
-        if let TyKind::TypeParameter(type_param) = ty.kind() {
-            let bounds = self.query(TypeParameterBounds { param_id: type_param.metadata().id() });
-            if bound_protocols_include(self, &bounds, protocol_id) {
-                return true;
-            }
-            return false;
-        }
-
-        // Handle associated types - check bounds on the associated type definition
-        if let TyKind::AssociatedType { symbol, container } = ty.kind() {
-            // If the associated type can be resolved to a concrete type, defer to that
-            let assoc_name = symbol.metadata().name().value.clone();
-            if let Some(container) = container
-                && let Some(resolved) = self.resolve_associated_type(container, &assoc_name)
-            {
-                return self.conforms_to(&resolved, protocol_id);
-            }
-
-            if let Some(bounds) = symbol.bounds()
-                && bound_protocols_include(self, &bounds, protocol_id)
-            {
-                return true;
-            }
-            return false;
-        }
-
-        // Expand type aliases before checking conformance.
-        // e.g., `Int` is a type alias for `Int64`, so we need to check `Int64`'s conformances.
-        let ty = &ty.expand_aliases();
-
-        // Handle tuple types - check if protocol has tuple_conformance_propagation flag
-        if let TyKind::Tuple(elements) = ty.kind() {
-            // Look up if this protocol has tuple_conformance_propagation flag
-            if let Some(feature) = self.builtin_registry().protocol_feature(protocol_id) {
-                let definition = feature.definition();
-                if let BuiltinKind::Protocol {
-                    tuple_conformance_propagation: true,
-                    ..
-                } = definition.kind
-                {
-                    // Tuple conforms if all elements conform
-                    return elements
-                        .iter()
-                        .all(|elem| self.conforms_to(elem, protocol_id));
-                }
-            }
-            // Protocol doesn't have the flag or isn't a builtin, tuples don't conform
-            return false;
-        }
-
-        // Handle FFISafe conformance for primitive machine types.
-        //
-        // This is primarily used by @extern(.C) validation and by the built-in
-        // "all fields must conform" rule for FFISafe structs.
-        //
-        // Note: `Pointer` here refers to the primitive `lang.ptr[T]` type, not the
-        // stdlib `std.memory.Pointer[T]` struct (which conforms via an extension).
-        if let Some(ffi_safe_id) = self.builtin_protocol(LanguageFeature::FFISafe)
-            && protocol_id == ffi_safe_id
-        {
-            match ty.kind() {
-                TyKind::Int(_) | TyKind::Float(_) | TyKind::Bool | TyKind::String => {
-                    return true;
-                },
-                TyKind::Pointer(pointee) => {
-                    // A pointer is FFI-safe if the pointee type is FFI-safe.
-                    // (If the pointee is an error type, we treat it as conforming
-                    // to suppress cascading diagnostics.)
-                    return self.conforms_to(pointee, protocol_id);
-                },
-                _ => {},
-            }
-        }
-
-        // Handle primitive types - they implicitly conform to their literal protocols
-        match ty.kind() {
-            TyKind::Int(_) => {
-                // Primitive ints implicitly conform to ExpressibleByIntLiteral
-                if let Some(lit_protocol_id) =
-                    self.builtin_protocol(LanguageFeature::ExpressibleByIntLiteral)
-                    && protocol_id == lit_protocol_id
-                {
-                    return true;
-                }
-                // Primitives don't conform to any other protocols
-                return false;
-            },
-            TyKind::Float(_) => {
-                // Primitive floats implicitly conform to ExpressibleByFloatLiteral
-                if let Some(lit_protocol_id) =
-                    self.builtin_protocol(LanguageFeature::ExpressibleByFloatLiteral)
-                    && protocol_id == lit_protocol_id
-                {
-                    return true;
-                }
-                // Also ExpressibleByIntLiteral since floats can be created from int literals
-                if let Some(lit_protocol_id) =
-                    self.builtin_protocol(LanguageFeature::ExpressibleByIntLiteral)
-                    && protocol_id == lit_protocol_id
-                {
-                    return true;
-                }
-                // Primitives don't conform to any other protocols
-                return false;
-            },
-            TyKind::Bool => {
-                // Primitive bool implicitly conforms to ExpressibleByBoolLiteral
-                if let Some(lit_protocol_id) =
-                    self.builtin_protocol(LanguageFeature::ExpressibleByBoolLiteral)
-                    && protocol_id == lit_protocol_id
-                {
-                    return true;
-                }
-                return false;
-            },
-            TyKind::String => {
-                // Primitive string implicitly conforms to ExpressibleByStringLiteral
-                if let Some(lit_protocol_id) =
-                    self.builtin_protocol(LanguageFeature::ExpressibleByStringLiteral)
-                    && protocol_id == lit_protocol_id
-                {
-                    return true;
-                }
-                return false;
-            },
-            _ => {},
-        }
-
-        // Get the type's symbol ID to check conformances
-        let type_symbol_id = match get_type_symbol_id(ty) {
-            Some(id) => id,
-            None => return false,
-        };
-
-        // Get all conformances for this type
-        let conformances = self.query(ConformancesForSymbol {
-            symbol_id: type_symbol_id,
-        });
-
-        // Check if any conformance matches the protocol
-        for conformance in conformances {
-            if let TyKind::Protocol { symbol, .. } = conformance.kind()
-                && symbol.metadata().id() == protocol_id
-            {
-                return true;
-            }
-        }
-
-        // Also check extensions for conformances
-        // Get actual type's substitutions for filtering applicable extensions
-        let actual_subs = get_type_substitutions(ty);
-
-        let extensions = self.query(ExtensionsFor {
-            target_id: type_symbol_id,
-        });
-
-        // Filter to only applicable extensions based on type arguments and where clauses
-        let applicable_extensions =
-            filter_applicable_extensions_for_conformance(Some(self), &extensions, &actual_subs);
-
-        for extension in &applicable_extensions {
-            let ext_conformances = self.query(ConformancesForSymbol {
-                symbol_id: extension.metadata().id(),
-            });
-
-            for conformance in ext_conformances {
-                if let TyKind::Protocol { symbol, .. } = conformance.kind()
-                    && symbol.metadata().id() == protocol_id
-                {
-                    return true;
-                }
-            }
-        }
-
-        // Check transitive conformance through protocol extensions.
-        // If ty conforms to protocol P, and there's "extend P: Q[...]", then ty conforms to Q[...].
-        //
-        // Example: Int64 conforms to Comparable, and there's "extend Comparable: Less[Self]"
-        // So Int64 transitively conforms to Less[Int64] (Self substituted with Int64)
-        if self.check_transitive_conformance(
-            ty,
-            protocol_id,
-            type_symbol_id,
-            &applicable_extensions,
-        ) {
-            return true;
-        }
-
-        false
+        use crate::queries::ConformsToQuery;
+        self.query(ConformsToQuery::new(ty, protocol_id))
     }
 
     fn resolve_associated_type(&self, container: &Ty, assoc_name: &str) -> Option<Ty> {
-        // Handle inference placeholders
-        if matches!(container.kind(), TyKind::Infer) {
-            return None;
-        }
-
-        match container.kind() {
-            // For struct types, look for type alias with that name
-            TyKind::Struct {
-                symbol,
-                substitutions,
-            } => {
-                // Look for a type alias child with the given name
-                for child in symbol.metadata().children() {
-                    if child.metadata().kind() == KestrelSymbolKind::TypeAlias
-                        && child.metadata().name().value == assoc_name
-                        && let Ok(type_alias) = child.downcast_arc::<TypeAliasSymbol>()
-                        && let Some(resolved) = self.query(ResolvedAliasedType {
-                            type_alias_id: type_alias.metadata().id(),
-                        })
-                    {
-                        let result = resolved.apply_substitutions(substitutions);
-                        // Recursively resolve any nested associated types
-                        let mut visited = std::collections::HashSet::new();
-                        return Some(deeply_resolve_associated_types(self, &result, &mut visited));
-                    }
-                }
-
-                // Also look for associated type definitions (e.g., `type Item = U` in struct)
-                for child in symbol.metadata().children() {
-                    if child.metadata().kind() == KestrelSymbolKind::AssociatedType
-                        && child.metadata().name().value == assoc_name
-                        && let Ok(assoc_type) = child.downcast_arc::<AssociatedTypeSymbol>()
-                        && let Some(default_ty) = assoc_type.default_type()
-                    {
-                        let result = default_ty.apply_substitutions(substitutions);
-                        // Recursively resolve any nested associated types
-                        let mut visited = std::collections::HashSet::new();
-                        return Some(deeply_resolve_associated_types(self, &result, &mut visited));
-                    }
-                }
-
-                // Also check protocol conformances for associated type defaults
-                let conformances = self.query(ConformancesForSymbol {
-                    symbol_id: symbol.metadata().id(),
-                });
-
-                for conformance in conformances {
-                    if let TyKind::Protocol {
-                        symbol: proto,
-                        substitutions: proto_subs,
-                    } = conformance.kind()
-                        && let Some(ty) =
-                            resolve_associated_type_from_protocol(proto, assoc_name, proto_subs)
-                    {
-                        let result = ty.apply_substitutions(substitutions);
-                        // Recursively resolve any nested associated types
-                        let mut visited = std::collections::HashSet::new();
-                        return Some(deeply_resolve_associated_types(self, &result, &mut visited));
-                    }
-                }
-
-                // Check extensions for associated type bindings
-                // (e.g., `extend Maker: Factory { type Product = Int }`)
-                let extensions = self.query(ExtensionsFor {
-                    target_id: symbol.metadata().id(),
-                });
-
-                let applicable_extensions = filter_applicable_extensions_for_conformance(
-                    Some(self),
-                    &extensions,
-                    &Some(substitutions.clone()),
-                );
-
-                for extension in applicable_extensions {
-                    // Look for a type alias in the extension
-                    for child in extension.metadata().children() {
-                        if child.metadata().kind() == KestrelSymbolKind::TypeAlias
-                            && child.metadata().name().value == assoc_name
-                            && let Ok(type_alias) = child.downcast_arc::<TypeAliasSymbol>()
-                            && let Some(resolved) = self.query(ResolvedAliasedType {
-                                type_alias_id: type_alias.metadata().id(),
-                            })
-                        {
-                            let result = resolved.apply_substitutions(substitutions);
-                            // Recursively resolve any nested associated types
-                            let mut visited = std::collections::HashSet::new();
-                            return Some(deeply_resolve_associated_types(
-                                self,
-                                &result,
-                                &mut visited,
-                            ));
-                        }
-                    }
-
-                    // Also look for associated type definitions in extensions
-                    for child in extension.metadata().children() {
-                        if child.metadata().kind() == KestrelSymbolKind::AssociatedType
-                            && child.metadata().name().value == assoc_name
-                            && let Ok(assoc_type) = child.downcast_arc::<AssociatedTypeSymbol>()
-                            && let Some(default_ty) = assoc_type.default_type()
-                        {
-                            let result = default_ty.apply_substitutions(substitutions);
-                            // Recursively resolve any nested associated types
-                            let mut visited = std::collections::HashSet::new();
-                            return Some(deeply_resolve_associated_types(
-                                self,
-                                &result,
-                                &mut visited,
-                            ));
-                        }
-                    }
-                }
-
-                None
-            },
-
-            // For enum types, look for type alias or associated type with that name
-            TyKind::Enum {
-                symbol,
-                substitutions,
-            } => {
-                // Look for a type alias child with the given name
-                for child in symbol.metadata().children() {
-                    if child.metadata().kind() == KestrelSymbolKind::TypeAlias
-                        && child.metadata().name().value == assoc_name
-                        && let Ok(type_alias) = child.downcast_arc::<TypeAliasSymbol>()
-                        && let Some(resolved) = self.query(ResolvedAliasedType {
-                            type_alias_id: type_alias.metadata().id(),
-                        })
-                    {
-                        let result = resolved.apply_substitutions(substitutions);
-                        // Recursively resolve any nested associated types
-                        let mut visited = std::collections::HashSet::new();
-                        return Some(deeply_resolve_associated_types(self, &result, &mut visited));
-                    }
-                }
-
-                // Also look for associated type definitions (e.g., `type Item = U` in enum)
-                for child in symbol.metadata().children() {
-                    if child.metadata().kind() == KestrelSymbolKind::AssociatedType
-                        && child.metadata().name().value == assoc_name
-                        && let Ok(assoc_type) = child.downcast_arc::<AssociatedTypeSymbol>()
-                        && let Some(default_ty) = assoc_type.default_type()
-                    {
-                        let result = default_ty.apply_substitutions(substitutions);
-                        // Recursively resolve any nested associated types
-                        let mut visited = std::collections::HashSet::new();
-                        return Some(deeply_resolve_associated_types(self, &result, &mut visited));
-                    }
-                }
-
-                // Also check protocol conformances for associated type defaults
-                let conformances = self.query(ConformancesForSymbol {
-                    symbol_id: symbol.metadata().id(),
-                });
-
-                for conformance in conformances {
-                    if let TyKind::Protocol {
-                        symbol: proto,
-                        substitutions: proto_subs,
-                    } = conformance.kind()
-                        && let Some(ty) =
-                            resolve_associated_type_from_protocol(proto, assoc_name, proto_subs)
-                    {
-                        let result = ty.apply_substitutions(substitutions);
-                        // Recursively resolve any nested associated types
-                        let mut visited = std::collections::HashSet::new();
-                        return Some(deeply_resolve_associated_types(self, &result, &mut visited));
-                    }
-                }
-
-                // Check extensions for associated type bindings
-                let extensions = self.query(ExtensionsFor {
-                    target_id: symbol.metadata().id(),
-                });
-
-                let applicable_extensions = filter_applicable_extensions_for_conformance(
-                    Some(self),
-                    &extensions,
-                    &Some(substitutions.clone()),
-                );
-
-                for extension in applicable_extensions {
-                    // Look for a type alias in the extension
-                    for child in extension.metadata().children() {
-                        if child.metadata().kind() == KestrelSymbolKind::TypeAlias
-                            && child.metadata().name().value == assoc_name
-                            && let Ok(type_alias) = child.downcast_arc::<TypeAliasSymbol>()
-                            && let Some(resolved) = self.query(ResolvedAliasedType {
-                                type_alias_id: type_alias.metadata().id(),
-                            })
-                        {
-                            let result = resolved.apply_substitutions(substitutions);
-                            // Recursively resolve any nested associated types
-                            let mut visited = std::collections::HashSet::new();
-                            return Some(deeply_resolve_associated_types(
-                                self,
-                                &result,
-                                &mut visited,
-                            ));
-                        }
-                    }
-
-                    // Also look for associated type definitions in extensions
-                    for child in extension.metadata().children() {
-                        if child.metadata().kind() == KestrelSymbolKind::AssociatedType
-                            && child.metadata().name().value == assoc_name
-                            && let Ok(assoc_type) = child.downcast_arc::<AssociatedTypeSymbol>()
-                            && let Some(default_ty) = assoc_type.default_type()
-                        {
-                            let result = default_ty.apply_substitutions(substitutions);
-                            // Recursively resolve any nested associated types
-                            let mut visited = std::collections::HashSet::new();
-                            return Some(deeply_resolve_associated_types(
-                                self,
-                                &result,
-                                &mut visited,
-                            ));
-                        }
-                    }
-                }
-
-                None
-            },
-
-            // For protocol types, look for associated type declaration
-            TyKind::Protocol {
-                symbol,
-                substitutions,
-            } => resolve_associated_type_from_protocol(symbol, assoc_name, substitutions),
-
-            // For type parameters, look up in bounds from where clause
-            TyKind::TypeParameter(type_param) => {
-                // Get bounds by walking up the parent chain to find where clauses
-                let bounds = self.query(TypeParameterBounds { param_id: type_param.metadata().id() });
-
-                for bound in &bounds {
-                    if let TyKind::Protocol {
-                        symbol,
-                        substitutions,
-                    } = bound.kind()
-                        && let Some(ty) =
-                            resolve_associated_type_from_protocol(symbol, assoc_name, substitutions)
-                    {
-                        return Some(ty);
-                    }
-                }
-                None
-            },
-
-            // For nested associated types, resolve step-by-step:
-            //   (Container.Assoc).Target
-            // We must first resolve `Container.Assoc`, then resolve `Target` on that result.
-            TyKind::AssociatedType { symbol, container } => {
-                if let Some(base_container) = container {
-                    let base_assoc_name = symbol.metadata().name().value.clone();
-                    self.resolve_associated_type(base_container, &base_assoc_name)
-                        .and_then(|resolved_base| {
-                            self.resolve_associated_type(&resolved_base, assoc_name)
-                        })
-                } else {
-                    None
-                }
-            },
-
-            _ => None,
-        }
+        use crate::queries::ResolveAssociatedTypeQuery;
+        self.query(ResolveAssociatedTypeQuery::new(container, assoc_name))
     }
 
     fn expand_type_alias(&self, ty: &Ty) -> Ty {
@@ -1151,28 +683,8 @@ impl SemanticModel {
     ///
     /// This returns protocol types with their type parameter substitutions preserved.
     pub fn protocol_conformances_for_type(&self, ty: &Ty) -> Vec<Ty> {
-        collect_protocol_conformances_for_type(self, ty)
-    }
-
-    /// Check for transitive conformance through protocol extensions.
-    ///
-    /// This is a wrapper that initializes the visited set for cycle detection.
-    fn check_transitive_conformance(
-        &self,
-        concrete_ty: &Ty,
-        target_protocol_id: SymbolId,
-        type_symbol_id: SymbolId,
-        applicable_extensions: &[&Arc<ExtensionSymbol>],
-    ) -> bool {
-        let mut visited = std::collections::HashSet::new();
-        check_transitive_conformance_impl(
-            self,
-            concrete_ty,
-            target_protocol_id,
-            type_symbol_id,
-            applicable_extensions,
-            &mut visited,
-        )
+        use crate::queries::ProtocolConformancesForType;
+        self.query(ProtocolConformancesForType::new(ty))
     }
 
     fn function_where_clause(&self, function_id: SymbolId) -> WhereClause {
@@ -1467,7 +979,8 @@ impl TypeOracle for ContextualOracle<'_> {
     }
 
     fn normalize_with_constraints(&self, ty: &Ty) -> Ty {
-        normalize_type_with_context(self.model, ty, self.context_symbol_id)
+        use crate::queries::NormalizeWithConstraints;
+        self.model.query(NormalizeWithConstraints::new(ty, self.context_symbol_id))
     }
 
     fn function_where_clause(&self, function_id: SymbolId) -> WhereClause {
@@ -3075,7 +2588,240 @@ fn get_type_container_with_subs(
 }
 
 /// Get the symbol ID for a type (if it has one).
-fn get_type_symbol_id(ty: &Ty) -> Option<SymbolId> {
+/// Core implementation of `resolve_associated_type`, extracted for use by the query.
+///
+/// Recursive calls go through `TypeOracle::resolve_associated_type` on model,
+/// which delegates to `ResolveAssociatedTypeQuery` and benefits from caching.
+pub(crate) fn resolve_associated_type_impl(
+    model: &SemanticModel,
+    container: &Ty,
+    assoc_name: &str,
+) -> Option<Ty> {
+    use crate::queries::ResolveAssociatedTypeQuery;
+
+    // Handle inference placeholders
+    if matches!(container.kind(), TyKind::Infer) {
+        return None;
+    }
+
+    match container.kind() {
+        // For struct types, look for type alias with that name
+        TyKind::Struct {
+            symbol,
+            substitutions,
+        } => {
+            // Look for type alias or associated type children
+            for child in symbol.metadata().children() {
+                if child.metadata().kind() == KestrelSymbolKind::TypeAlias
+                    && child.metadata().name().value == assoc_name
+                    && let Ok(type_alias) = child.downcast_arc::<TypeAliasSymbol>()
+                    && let Some(resolved) = model.query(ResolvedAliasedType {
+                        type_alias_id: type_alias.metadata().id(),
+                    })
+                {
+                    let result = resolved.apply_substitutions(substitutions);
+                    let mut visited = std::collections::HashSet::new();
+                    return Some(deeply_resolve_associated_types(model, &result, &mut visited));
+                }
+            }
+            for child in symbol.metadata().children() {
+                if child.metadata().kind() == KestrelSymbolKind::AssociatedType
+                    && child.metadata().name().value == assoc_name
+                    && let Ok(assoc_type) = child.downcast_arc::<AssociatedTypeSymbol>()
+                    && let Some(default_ty) = assoc_type.default_type()
+                {
+                    let result = default_ty.apply_substitutions(substitutions);
+                    let mut visited = std::collections::HashSet::new();
+                    return Some(deeply_resolve_associated_types(model, &result, &mut visited));
+                }
+            }
+
+            // Check protocol conformances for associated type defaults
+            let conformances = model.query(ConformancesForSymbol {
+                symbol_id: symbol.metadata().id(),
+            });
+            for conformance in conformances {
+                if let TyKind::Protocol {
+                    symbol: proto,
+                    substitutions: proto_subs,
+                } = conformance.kind()
+                    && let Some(ty) =
+                        resolve_associated_type_from_protocol(proto, assoc_name, proto_subs)
+                {
+                    let result = ty.apply_substitutions(substitutions);
+                    let mut visited = std::collections::HashSet::new();
+                    return Some(deeply_resolve_associated_types(model, &result, &mut visited));
+                }
+            }
+
+            // Check extensions
+            let extensions = model.query(ExtensionsFor {
+                target_id: symbol.metadata().id(),
+            });
+            let applicable_extensions = filter_applicable_extensions_for_conformance(
+                Some(model),
+                &extensions,
+                &Some(substitutions.clone()),
+            );
+            for extension in applicable_extensions {
+                for child in extension.metadata().children() {
+                    if child.metadata().kind() == KestrelSymbolKind::TypeAlias
+                        && child.metadata().name().value == assoc_name
+                        && let Ok(type_alias) = child.downcast_arc::<TypeAliasSymbol>()
+                        && let Some(resolved) = model.query(ResolvedAliasedType {
+                            type_alias_id: type_alias.metadata().id(),
+                        })
+                    {
+                        let result = resolved.apply_substitutions(substitutions);
+                        let mut visited = std::collections::HashSet::new();
+                        return Some(deeply_resolve_associated_types(model, &result, &mut visited));
+                    }
+                }
+                for child in extension.metadata().children() {
+                    if child.metadata().kind() == KestrelSymbolKind::AssociatedType
+                        && child.metadata().name().value == assoc_name
+                        && let Ok(assoc_type) = child.downcast_arc::<AssociatedTypeSymbol>()
+                        && let Some(default_ty) = assoc_type.default_type()
+                    {
+                        let result = default_ty.apply_substitutions(substitutions);
+                        let mut visited = std::collections::HashSet::new();
+                        return Some(deeply_resolve_associated_types(model, &result, &mut visited));
+                    }
+                }
+            }
+
+            None
+        },
+
+        // For enum types — same structure as struct
+        TyKind::Enum {
+            symbol,
+            substitutions,
+        } => {
+            for child in symbol.metadata().children() {
+                if child.metadata().kind() == KestrelSymbolKind::TypeAlias
+                    && child.metadata().name().value == assoc_name
+                    && let Ok(type_alias) = child.downcast_arc::<TypeAliasSymbol>()
+                    && let Some(resolved) = model.query(ResolvedAliasedType {
+                        type_alias_id: type_alias.metadata().id(),
+                    })
+                {
+                    let result = resolved.apply_substitutions(substitutions);
+                    let mut visited = std::collections::HashSet::new();
+                    return Some(deeply_resolve_associated_types(model, &result, &mut visited));
+                }
+            }
+            for child in symbol.metadata().children() {
+                if child.metadata().kind() == KestrelSymbolKind::AssociatedType
+                    && child.metadata().name().value == assoc_name
+                    && let Ok(assoc_type) = child.downcast_arc::<AssociatedTypeSymbol>()
+                    && let Some(default_ty) = assoc_type.default_type()
+                {
+                    let result = default_ty.apply_substitutions(substitutions);
+                    let mut visited = std::collections::HashSet::new();
+                    return Some(deeply_resolve_associated_types(model, &result, &mut visited));
+                }
+            }
+
+            let conformances = model.query(ConformancesForSymbol {
+                symbol_id: symbol.metadata().id(),
+            });
+            for conformance in conformances {
+                if let TyKind::Protocol {
+                    symbol: proto,
+                    substitutions: proto_subs,
+                } = conformance.kind()
+                    && let Some(ty) =
+                        resolve_associated_type_from_protocol(proto, assoc_name, proto_subs)
+                {
+                    let result = ty.apply_substitutions(substitutions);
+                    let mut visited = std::collections::HashSet::new();
+                    return Some(deeply_resolve_associated_types(model, &result, &mut visited));
+                }
+            }
+
+            let extensions = model.query(ExtensionsFor {
+                target_id: symbol.metadata().id(),
+            });
+            let applicable_extensions = filter_applicable_extensions_for_conformance(
+                Some(model),
+                &extensions,
+                &Some(substitutions.clone()),
+            );
+            for extension in applicable_extensions {
+                for child in extension.metadata().children() {
+                    if child.metadata().kind() == KestrelSymbolKind::TypeAlias
+                        && child.metadata().name().value == assoc_name
+                        && let Ok(type_alias) = child.downcast_arc::<TypeAliasSymbol>()
+                        && let Some(resolved) = model.query(ResolvedAliasedType {
+                            type_alias_id: type_alias.metadata().id(),
+                        })
+                    {
+                        let result = resolved.apply_substitutions(substitutions);
+                        let mut visited = std::collections::HashSet::new();
+                        return Some(deeply_resolve_associated_types(model, &result, &mut visited));
+                    }
+                }
+                for child in extension.metadata().children() {
+                    if child.metadata().kind() == KestrelSymbolKind::AssociatedType
+                        && child.metadata().name().value == assoc_name
+                        && let Ok(assoc_type) = child.downcast_arc::<AssociatedTypeSymbol>()
+                        && let Some(default_ty) = assoc_type.default_type()
+                    {
+                        let result = default_ty.apply_substitutions(substitutions);
+                        let mut visited = std::collections::HashSet::new();
+                        return Some(deeply_resolve_associated_types(model, &result, &mut visited));
+                    }
+                }
+            }
+
+            None
+        },
+
+        // For protocol types, look for associated type declaration
+        TyKind::Protocol {
+            symbol,
+            substitutions,
+        } => resolve_associated_type_from_protocol(symbol, assoc_name, substitutions),
+
+        // For type parameters, look up in bounds from where clause
+        TyKind::TypeParameter(type_param) => {
+            let bounds = model.query(TypeParameterBounds {
+                param_id: type_param.metadata().id(),
+            });
+            for bound in &bounds {
+                if let TyKind::Protocol {
+                    symbol,
+                    substitutions,
+                } = bound.kind()
+                    && let Some(ty) =
+                        resolve_associated_type_from_protocol(symbol, assoc_name, substitutions)
+                {
+                    return Some(ty);
+                }
+            }
+            None
+        },
+
+        // For nested associated types, resolve step-by-step
+        TyKind::AssociatedType { symbol, container } => {
+            if let Some(base_container) = container {
+                let base_assoc_name = symbol.metadata().name().value.clone();
+                model
+                    .query(ResolveAssociatedTypeQuery::new(base_container, &base_assoc_name))
+                    .and_then(|resolved_base| {
+                        model.query(ResolveAssociatedTypeQuery::new(&resolved_base, assoc_name))
+                    })
+            } else {
+                None
+            }
+        },
+
+        _ => None,
+    }
+}
+
+pub(crate) fn get_type_symbol_id(ty: &Ty) -> Option<SymbolId> {
     match ty.kind() {
         TyKind::Struct { symbol, .. } => Some(symbol.metadata().id()),
         TyKind::Enum { symbol, .. } => Some(symbol.metadata().id()),
@@ -3311,7 +3057,7 @@ fn combine_substitutions(outer: &Substitutions, inner: &Substitutions) -> Substi
 ///
 /// Example: Int64 conforms to Comparable, and there's "extend Comparable: Less[Self]"
 /// So Int64 transitively conforms to Less[Int64] (Self substituted with Int64)
-fn check_transitive_conformance_impl(
+pub(crate) fn check_transitive_conformance_impl(
     model: &SemanticModel,
     _concrete_ty: &Ty,
     target_protocol_id: SymbolId,
@@ -3527,7 +3273,7 @@ fn collect_protocol_conformance_ids_for_type(model: &SemanticModel, ty: &Ty) -> 
 /// This returns protocol types (not just IDs), applying the concrete type's
 /// substitutions and any protocol extension conformances (with `Self` replaced
 /// by the concrete type).
-fn collect_protocol_conformances_for_type(model: &SemanticModel, ty: &Ty) -> Vec<Ty> {
+pub(crate) fn collect_protocol_conformances_for_type(model: &SemanticModel, ty: &Ty) -> Vec<Ty> {
     let ty = ty.expand_aliases();
     let type_symbol_id = match get_type_symbol_id(&ty) {
         Some(id) => id,
@@ -3640,7 +3386,10 @@ fn resolve_member_via_protocol_conformance(
     member: &str,
     expected_arity: Option<usize>,
 ) -> Option<MemberResolution> {
-    let conformances = collect_protocol_conformances_for_type(model, receiver_ty);
+    let conformances = {
+        use crate::queries::ProtocolConformancesForType;
+        model.query(ProtocolConformancesForType::new(receiver_ty))
+    };
 
     for conformance in &conformances {
         let TyKind::Protocol {
@@ -3816,7 +3565,7 @@ fn resolve_member_via_protocol_conformance(
 }
 
 /// Get the substitutions from a type (struct or enum).
-fn get_type_substitutions(ty: &Ty) -> Option<Substitutions> {
+pub(crate) fn get_type_substitutions(ty: &Ty) -> Option<Substitutions> {
     match ty.kind() {
         TyKind::Struct { substitutions, .. } => Some(substitutions.clone()),
         TyKind::Enum { substitutions, .. } => Some(substitutions.clone()),
@@ -3831,7 +3580,7 @@ fn get_type_substitutions(ty: &Ty) -> Option<Substitutions> {
 ///
 /// When `model` is provided, also checks that where clause constraints are satisfied.
 /// This is necessary for conditional conformances like `extend Pointer: FFISafe where T: FFISafe`.
-fn filter_applicable_extensions_for_conformance<'a>(
+pub(crate) fn filter_applicable_extensions_for_conformance<'a>(
     model: Option<&SemanticModel>,
     extensions: &'a [Arc<ExtensionSymbol>],
     actual_subs: &Option<Substitutions>,
@@ -4146,7 +3895,7 @@ fn types_match_for_conformance(a: &Ty, b: &Ty) -> bool {
 ///
 /// This is used when resolving members on type parameters - we need to search
 /// all inherited protocols, not just the direct bounds.
-fn collect_protocols_with_inherited(
+pub(crate) fn collect_protocols_with_inherited(
     proto: &Arc<ProtocolSymbol>,
     subs: &Substitutions,
     receiver_ty: Option<&Ty>,
@@ -4264,7 +4013,7 @@ fn collect_protocols_with_inherited_impl(
 /// The `self_ty` parameter is used to substitute `Self` in default types that
 /// reference it. For example, `Equal[Rhs = Self]` where Self is `Int` becomes
 /// `Equal[Rhs = Int]`.
-fn apply_protocol_defaults(ty: Ty, self_ty: Option<&Ty>) -> Ty {
+pub(crate) fn apply_protocol_defaults(ty: Ty, self_ty: Option<&Ty>) -> Ty {
     let TyKind::Protocol {
         symbol,
         substitutions,
@@ -4306,7 +4055,7 @@ fn apply_protocol_defaults(ty: Ty, self_ty: Option<&Ty>) -> Ty {
 
 
 /// Check if protocol bounds (including transitive protocol extensions) include the target.
-fn bound_protocols_include(model: &SemanticModel, bounds: &[Ty], protocol_id: SymbolId) -> bool {
+pub(crate) fn bound_protocols_include(model: &SemanticModel, bounds: &[Ty], protocol_id: SymbolId) -> bool {
     let mut seed_protocols = Vec::new();
     for bound in bounds {
         if let TyKind::Protocol { symbol, .. } = bound.kind() {
@@ -4793,7 +4542,7 @@ fn check_from_value_conformance_impl(
 /// Also handles nested associated types like `I.Iter.Item` by:
 /// 1. First collecting derived equality constraints from protocol associated types
 /// 2. Then applying all equality constraints to normalize the type
-fn normalize_type_with_context(model: &SemanticModel, ty: &Ty, context_id: SymbolId) -> Ty {
+pub(crate) fn normalize_type_with_context(model: &SemanticModel, ty: &Ty, context_id: SymbolId) -> Ty {
     // Collect where clauses by walking up the parent chain
     let where_clauses = model.query(WhereClausesInScope { context_id });
 
