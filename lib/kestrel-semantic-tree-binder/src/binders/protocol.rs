@@ -3,7 +3,6 @@ use std::sync::Arc;
 use kestrel_semantic_tree::behavior::attributes::AttributesBehavior;
 use kestrel_semantic_tree::builtins::BuiltinKind;
 use kestrel_semantic_tree::language::KestrelLanguage;
-use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::symbol::protocol::ProtocolSymbol;
 use kestrel_syntax_tree::SyntaxNode;
 use semantic_tree::symbol::Symbol;
@@ -26,11 +25,6 @@ impl DeclarationBinder for ProtocolBinder {
         syntax: &SyntaxNode,
         context: &mut BindingContext,
     ) {
-        // Only process protocol symbols
-        if symbol.metadata().kind() != KestrelSymbolKind::Protocol {
-            return;
-        }
-
         let symbol_id = symbol.metadata().id();
 
         let source = context.source_for_symbol(symbol);

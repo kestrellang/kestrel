@@ -7,7 +7,6 @@ use kestrel_semantic_model::ExecutableBodyFor;
 use kestrel_semantic_tree::expr::{ElseBranch, ExprKind, Expression, IfCondition};
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::stmt::{Statement, StatementKind};
-use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use semantic_tree::symbol::Symbol;
 
 mod diagnostics;
@@ -37,14 +36,6 @@ impl Analyzer for DeadCodeAnalyzer {
         symbol: &Arc<dyn Symbol<KestrelLanguage>>,
         ctx: &mut AnalysisContext,
     ) {
-        let kind = symbol.metadata().kind();
-        if !matches!(
-            kind,
-            KestrelSymbolKind::Function | KestrelSymbolKind::Initializer
-        ) {
-            return;
-        }
-
         let symbol_id = symbol.metadata().id();
         let Some(body) = ctx.model.query(ExecutableBodyFor { symbol_id }) else {
             return;

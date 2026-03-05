@@ -5,7 +5,7 @@
 use std::sync::Arc;
 
 use kestrel_semantic_model::IsInsideAny;
-use kestrel_semantic_tree::behavior::function_data::FunctionDataBehavior;
+use kestrel_semantic_tree::behavior::StaticBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use semantic_tree::symbol::Symbol;
@@ -39,10 +39,10 @@ impl Analyzer for StaticContextAnalyzer {
             return;
         }
 
-        // Get the FunctionDataBehavior
-        let Some(data) = symbol.metadata().get_behavior::<FunctionDataBehavior>() else {
+        // Check if the function is static via marker behavior
+        if symbol.metadata().get_behavior::<StaticBehavior>().is_none() {
             return;
-        };
+        }
 
         // Static is only valid inside structs, protocols, or extensions
         let symbol_id = symbol.metadata().id();
@@ -55,7 +55,7 @@ impl Analyzer for StaticContextAnalyzer {
                 KestrelSymbolKind::Enum,
             ],
         });
-        if !data.is_static() || in_valid_context {
+        if in_valid_context {
             return;
         }
 

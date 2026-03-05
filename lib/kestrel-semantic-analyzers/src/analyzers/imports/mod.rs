@@ -13,6 +13,7 @@ use kestrel_semantic_model::{ChildByName, IsVisibleFrom, ResolveModulePath, Visi
 use kestrel_semantic_tree::error::{
     ImportConflictError, SymbolNotFoundInModuleError, SymbolNotVisibleError,
 };
+use kestrel_semantic_tree::behavior::NamespaceScopeMarker;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::import::ImportDataBehavior;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
@@ -40,11 +41,7 @@ impl Analyzer for ImportAnalyzer {
         symbol: &Arc<dyn Symbol<KestrelLanguage>>,
         ctx: &mut AnalysisContext,
     ) {
-        let kind = symbol.metadata().kind();
-        if !matches!(
-            kind,
-            KestrelSymbolKind::Module | KestrelSymbolKind::SourceFile
-        ) {
+        if symbol.metadata().get_behavior::<NamespaceScopeMarker>().is_none() {
             return;
         }
 

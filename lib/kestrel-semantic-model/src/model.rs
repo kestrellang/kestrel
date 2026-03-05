@@ -340,9 +340,8 @@ impl SemanticModel {
 
             if let Some(fd) = b.downcast_ref::<FunctionDataBehavior>() {
                 return Some(format!(
-                    "FunctionData(has_body={}, is_static={})",
-                    fd.has_body(),
-                    fd.is_static()
+                    "FunctionData(has_body={})",
+                    fd.has_body()
                 ));
             }
 

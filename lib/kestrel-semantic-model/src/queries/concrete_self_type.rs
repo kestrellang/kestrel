@@ -1,5 +1,6 @@
 //! ConcreteSelfType query - resolve what Self refers to in a context
 
+use kestrel_semantic_tree::behavior::ConcreteTypeMarker;
 use kestrel_semantic_tree::behavior::extension_target::ExtensionTargetBehavior;
 use kestrel_semantic_tree::behavior::typed::TypedBehavior;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
@@ -39,10 +40,8 @@ impl Query for ConcreteSelfType {
                 return None;
             }
 
-            if matches!(
-                symbol.metadata().kind(),
-                KestrelSymbolKind::Struct | KestrelSymbolKind::Enum
-            ) && let Some(typed) = symbol.metadata().get_behavior::<TypedBehavior>()
+            if symbol.metadata().get_behavior::<ConcreteTypeMarker>().is_some()
+                && let Some(typed) = symbol.metadata().get_behavior::<TypedBehavior>()
             {
                 let ty = typed.ty();
                 if !matches!(ty.kind(), TyKind::SelfType) {

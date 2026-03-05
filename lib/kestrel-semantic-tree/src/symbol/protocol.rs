@@ -6,9 +6,14 @@ use semantic_tree::behavior::Behavior;
 use semantic_tree::symbol::{Symbol, SymbolMetadata, SymbolMetadataBuilder};
 
 use crate::{
-    behavior::KestrelBehaviorKind, behavior::generics::GenericsBehavior,
-    behavior::visibility::VisibilityBehavior, language::KestrelLanguage,
-    symbol::kind::KestrelSymbolKind, symbol::type_parameter::TypeParameterSymbol, ty::WhereClause,
+    behavior::KestrelBehaviorKind,
+    behavior::generics::GenericsBehavior,
+    behavior::markers::{CallableScopeMarker, HasMembersMarker, MethodContainerMarker},
+    behavior::visibility::VisibilityBehavior,
+    language::KestrelLanguage,
+    symbol::kind::KestrelSymbolKind,
+    symbol::type_parameter::TypeParameterSymbol,
+    ty::WhereClause,
 };
 
 use super::associated_type::AssociatedTypeSymbol;
@@ -46,7 +51,10 @@ impl ProtocolSymbol {
             .with_name(name.clone())
             .with_declaration_span(name.span.clone())
             .with_span(span)
-            .with_behavior(Arc::new(visibility));
+            .with_behavior(Arc::new(visibility))
+            .with_behavior(Arc::new(HasMembersMarker))
+            .with_behavior(Arc::new(MethodContainerMarker))
+            .with_behavior(Arc::new(CallableScopeMarker));
 
         if let Some(p) = parent {
             builder = builder.with_parent(Arc::downgrade(&p));

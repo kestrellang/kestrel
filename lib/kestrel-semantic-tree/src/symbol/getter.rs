@@ -3,7 +3,10 @@ use std::sync::Arc;
 use kestrel_span::{Name, Span};
 use semantic_tree::symbol::{Symbol, SymbolId, SymbolMetadata, SymbolMetadataBuilder};
 
-use crate::{language::KestrelLanguage, symbol::kind::KestrelSymbolKind};
+use crate::{
+    behavior::markers::AccessorMarker, language::KestrelLanguage,
+    symbol::kind::KestrelSymbolKind,
+};
 
 /// Represents a synthetic getter for a computed property.
 ///
@@ -44,7 +47,8 @@ impl GetterSymbol {
             .with_name(name)
             .with_declaration_span(name_span)
             .with_span(full_span)
-            .with_parent(Arc::downgrade(parent));
+            .with_parent(Arc::downgrade(parent))
+            .with_behavior(Arc::new(AccessorMarker));
 
         GetterSymbol {
             metadata: builder.build(),

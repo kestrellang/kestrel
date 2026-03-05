@@ -3,7 +3,10 @@ use std::sync::Arc;
 use kestrel_span::{Name, Span};
 use semantic_tree::symbol::{Symbol, SymbolId, SymbolMetadata, SymbolMetadataBuilder};
 
-use crate::{language::KestrelLanguage, symbol::kind::KestrelSymbolKind};
+use crate::{
+    behavior::markers::AccessorMarker, language::KestrelLanguage,
+    symbol::kind::KestrelSymbolKind,
+};
 
 /// Represents a synthetic setter for a computed property.
 ///
@@ -46,6 +49,7 @@ impl SetterSymbol {
             .with_declaration_span(name_span)
             .with_span(full_span)
             .with_parent(Arc::downgrade(parent))
+            .with_behavior(Arc::new(AccessorMarker))
             .build();
 
         SetterSymbol { metadata }

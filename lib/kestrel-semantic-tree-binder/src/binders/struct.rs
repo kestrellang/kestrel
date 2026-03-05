@@ -30,11 +30,6 @@ impl DeclarationBinder for StructBinder {
         syntax: &SyntaxNode,
         context: &mut BindingContext,
     ) {
-        // Only process struct symbols
-        if symbol.metadata().kind() != KestrelSymbolKind::Struct {
-            return;
-        }
-
         let symbol_id = symbol.metadata().id();
 
         let source = context.source_for_symbol(symbol);
@@ -87,11 +82,6 @@ impl DeclarationBinder for StructBinder {
         _syntax: &SyntaxNode,
         context: &mut BindingContext,
     ) {
-        // Only process struct symbols
-        if symbol.metadata().kind() != KestrelSymbolKind::Struct {
-            return;
-        }
-
         // Compute and attach CopySemanticsBehavior via query (unified for struct/enum)
         let semantics = context.model.query(kestrel_semantic_model::CopySemanticsFor {
             symbol_id: symbol.metadata().id(),

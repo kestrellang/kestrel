@@ -201,15 +201,13 @@ fn collect_static_fields_with_initializers(
 ) {
     use kestrel_semantic_tree::behavior::FileConstantBehavior;
     use kestrel_semantic_tree::behavior::executable::ExecutableBehavior;
-    use kestrel_semantic_tree::symbol::field::FieldSymbol;
+    use kestrel_semantic_tree::behavior::{ComputedPropertyMarker, NamespaceScopeMarker, StaticBehavior};
     use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 
     let kind = symbol.metadata().kind();
 
     // Check if this is a static field with an initializer
-    if kind == KestrelSymbolKind::Field
-        && let Some(field) = symbol.as_ref().downcast_ref::<FieldSymbol>()
-    {
+    if kind == KestrelSymbolKind::Field {
         // Skip file constants - they don't need runtime initialization
         if symbol
             .metadata()
@@ -227,16 +225,17 @@ fn collect_static_fields_with_initializers(
         let is_module_level = symbol
             .metadata()
             .parent()
-            .map(|p| {
-                let pk = p.metadata().kind();
-                pk == KestrelSymbolKind::Module || pk == KestrelSymbolKind::SourceFile
-            })
+            .map(|p| p.metadata().get_behavior::<NamespaceScopeMarker>().is_some())
             .unwrap_or(false);
 
-        let is_static_field = field.is_static() || is_module_level;
+        let is_static_field =
+            symbol.metadata().get_behavior::<StaticBehavior>().is_some() || is_module_level;
 
         if is_static_field
-            && !field.is_computed()
+            && symbol
+                .metadata()
+                .get_behavior::<ComputedPropertyMarker>()
+                .is_none()
             && symbol
                 .metadata()
                 .get_behavior::<ExecutableBehavior>()

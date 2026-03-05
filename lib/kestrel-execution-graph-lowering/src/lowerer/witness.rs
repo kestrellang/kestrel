@@ -7,6 +7,7 @@
 use kestrel_execution_graph::{Id, TypeParam};
 use kestrel_semantic_model::SymbolFor;
 use kestrel_semantic_model::queries::ExtensionsFor;
+use kestrel_semantic_tree::behavior::ComputedPropertyMarker;
 use kestrel_semantic_tree::behavior::callable::CallableBehavior;
 use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
 use kestrel_semantic_tree::behavior::conforms_to::ConformsToBehavior;
@@ -620,9 +621,11 @@ fn bind_property_accessors(
         .into_iter()
         .filter(|c| c.metadata().kind() == KestrelSymbolKind::Field)
         .filter_map(|c| {
-            let field = c.downcast_arc::<FieldSymbol>().ok()?;
-            if field.is_computed() {
-                Some(field.metadata().name().value.clone())
+            if c.metadata()
+                .get_behavior::<ComputedPropertyMarker>()
+                .is_some()
+            {
+                Some(c.metadata().name().value.clone())
             } else {
                 None
             }
@@ -640,7 +643,7 @@ fn bind_property_accessors(
         };
 
         // Only process computed properties
-        if !field.is_computed() {
+        if field.metadata().get_behavior::<ComputedPropertyMarker>().is_none() {
             continue;
         }
 

@@ -425,12 +425,8 @@ pub fn resolve_path_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContex
                 && symbol.metadata().kind() == KestrelSymbolKind::Field
             {
                 // Check if this is a static field - static fields don't use implicit self
-                use kestrel_semantic_tree::symbol::field::FieldSymbol;
-                let is_static = symbol
-                    .as_ref()
-                    .downcast_ref::<FieldSymbol>()
-                    .map(|f| f.is_static())
-                    .unwrap_or(false);
+                use kestrel_semantic_tree::behavior::StaticBehavior;
+                let is_static = symbol.metadata().get_behavior::<StaticBehavior>().is_some();
 
                 // This is a field reference like `x` that should become `self.x`
                 // Look for 'self' in local scope (but not for static fields)
@@ -513,6 +509,7 @@ pub fn resolve_path_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContex
                         let field_name = symbol.metadata().name().value.clone();
 
                         // Get field mutability from FieldSymbol
+                        use kestrel_semantic_tree::symbol::field::FieldSymbol;
                         let field_mutable = symbol
                             .as_ref()
                             .downcast_ref::<FieldSymbol>()

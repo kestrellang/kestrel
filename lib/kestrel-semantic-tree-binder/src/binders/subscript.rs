@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use kestrel_semantic_tree::behavior::StaticBehavior;
 use kestrel_semantic_tree::behavior::callable::{
     CallableBehavior, CallableParameter, ParameterAccessMode, ReceiverKind,
 };
@@ -39,11 +40,6 @@ impl DeclarationBinder for SubscriptBinder {
         syntax: &SyntaxNode,
         context: &mut BindingContext,
     ) {
-        // Only process subscript symbols
-        if symbol.metadata().kind() != KestrelSymbolKind::Subscript {
-            return;
-        }
-
         let symbol_id = symbol.metadata().id();
         let span = symbol.metadata().span().clone();
 
@@ -84,12 +80,12 @@ impl DeclarationBinder for SubscriptBinder {
         let typed_behavior = TypedBehavior::new(return_type.clone(), span.clone());
         symbol.metadata().add_behavior(typed_behavior);
 
-        // Downcast to SubscriptSymbol to access is_static and getter/setter
+        // Check static via marker behavior, then downcast for getter/setter access
+        let is_static = symbol.metadata().get_behavior::<StaticBehavior>().is_some();
+
         let Some(subscript) = symbol.as_ref().downcast_ref::<SubscriptSymbol>() else {
             return;
         };
-
-        let is_static = subscript.is_static();
 
         // Bind getter signature
         if let Some(getter) = subscript.getter() {
@@ -127,11 +123,6 @@ impl DeclarationBinder for SubscriptBinder {
         syntax: &SyntaxNode,
         context: &mut BindingContext,
     ) {
-        // Only process subscript symbols
-        if symbol.metadata().kind() != KestrelSymbolKind::Subscript {
-            return;
-        }
-
         let source = context.source_for_symbol(symbol);
         let file_id = context.file_id_for_symbol(symbol);
 

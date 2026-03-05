@@ -669,17 +669,10 @@ fn collect_outer_type_parameters(
 
 /// Check if the symbol is a static method.
 fn is_static_method(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> bool {
-    use kestrel_semantic_tree::symbol::function::FunctionSymbol;
+    use kestrel_semantic_tree::behavior::StaticBehavior;
 
-    if symbol.metadata().kind() != KestrelSymbolKind::Function {
-        return false;
-    }
-
-    if let Ok(func) = symbol.clone().downcast_arc::<FunctionSymbol>() {
-        func.is_static()
-    } else {
-        false
-    }
+    symbol.metadata().kind() == KestrelSymbolKind::Function
+        && symbol.metadata().get_behavior::<StaticBehavior>().is_some()
 }
 
 /// Check if a type parameter is from the immediate parent of the symbol.

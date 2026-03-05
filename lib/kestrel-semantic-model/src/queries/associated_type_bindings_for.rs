@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use kestrel_semantic_tree::behavior::ConcreteTypeMarker;
 use kestrel_semantic_tree::behavior::callable::SignatureType;
 use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
 use kestrel_semantic_tree::behavior::conforms_to::ConformsToBehavior;
@@ -34,8 +35,7 @@ impl Query for AssociatedTypeBindingsFor {
             return HashMap::new();
         };
 
-        let kind = symbol.metadata().kind();
-        if kind != KestrelSymbolKind::Struct && kind != KestrelSymbolKind::Enum {
+        if symbol.metadata().get_behavior::<ConcreteTypeMarker>().is_none() {
             return HashMap::new();
         }
 
@@ -57,7 +57,7 @@ impl Query for AssociatedTypeBindingsFor {
         // 3) For structs: also collect bindings from protocol extensions
         // (When a struct conforms to a protocol that has extensions adding more
         // conformances, we need type alias bindings from those protocol extensions.)
-        if kind == KestrelSymbolKind::Struct {
+        if symbol_dyn.metadata().kind() == KestrelSymbolKind::Struct {
             collect_protocol_extension_bindings(&symbol_dyn, model, &mut bindings);
         }
 

@@ -3,6 +3,7 @@
 use kestrel_execution_graph::{Id, QualifiedName, QualifiedNameData};
 use kestrel_semantic_tree::behavior::callable::CallableBehavior;
 use kestrel_semantic_tree::behavior::subscript::SubscriptBehavior;
+use kestrel_semantic_tree::behavior::{ComputedPropertyMarker, NamespaceScopeMarker, StaticBehavior};
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::extension::ExtensionSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
@@ -246,30 +247,23 @@ fn collect_name_segments(symbol: &Arc<dyn Symbol<KestrelLanguage>>, segments: &m
         // Fields contribute their name for static stored fields (needed for global variable access).
         // Instance fields don't contribute since they use getters/setters (e.g., "get:fieldName").
         KestrelSymbolKind::Field => {
-            use kestrel_semantic_tree::symbol::field::FieldSymbol;
-
             // Check if field is explicitly static
             let explicit_static = symbol
-                .as_ref()
-                .downcast_ref::<FieldSymbol>()
-                .map(|f| f.is_static())
-                .unwrap_or(false);
+                .metadata()
+                .get_behavior::<StaticBehavior>()
+                .is_some();
 
             // Check if field is module-level (implicitly static)
             let is_module_level = symbol
                 .metadata()
                 .parent()
-                .map(|p| {
-                    let kind = p.metadata().kind();
-                    kind == KestrelSymbolKind::Module || kind == KestrelSymbolKind::SourceFile
-                })
+                .map(|p| p.metadata().get_behavior::<NamespaceScopeMarker>().is_some())
                 .unwrap_or(false);
 
             let is_computed = symbol
-                .as_ref()
-                .downcast_ref::<FieldSymbol>()
-                .map(|f| f.is_computed())
-                .unwrap_or(false);
+                .metadata()
+                .get_behavior::<ComputedPropertyMarker>()
+                .is_some();
 
             // Add field name if it's a static/module-level stored field
             if (explicit_static || is_module_level) && !is_computed {

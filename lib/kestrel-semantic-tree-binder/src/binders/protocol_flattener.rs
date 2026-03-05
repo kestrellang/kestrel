@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use kestrel_semantic_model::SymbolFor;
 use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
+use kestrel_semantic_tree::behavior::{ComputedPropertyMarker, StaticBehavior};
 use kestrel_semantic_tree::symbol::associated_type::AssociatedTypeSymbol;
 use kestrel_semantic_tree::symbol::field::FieldSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
@@ -221,8 +222,9 @@ fn flatten_protocol_recursive(
                 // Collect computed property requirements from protocol
                 if let Ok(field) = child.clone().downcast_arc::<FieldSymbol>() {
                     // Only include computed properties (those with getter/setter requirements)
-                    if field.is_computed() {
+                    if child.metadata().get_behavior::<ComputedPropertyMarker>().is_some() {
                         let field_name = field.metadata().name().value.clone();
+                        let is_static = child.metadata().get_behavior::<StaticBehavior>().is_some();
                         // Child protocol properties override inherited ones
                         properties.insert(
                             field_name,
@@ -232,7 +234,7 @@ fn flatten_protocol_recursive(
                                 definition_span: child.metadata().name().span.clone(),
                                 has_getter: field.getter().is_some(),
                                 has_setter: field.setter().is_some(),
-                                is_static: field.is_static(),
+                                is_static,
                             },
                         );
                     }

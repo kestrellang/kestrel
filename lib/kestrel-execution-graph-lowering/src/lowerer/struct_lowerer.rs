@@ -2,6 +2,7 @@
 
 use kestrel_execution_graph::TypeParamOwner;
 use kestrel_semantic_tree::behavior::typed::TypedBehavior;
+use kestrel_semantic_tree::behavior::{ComputedPropertyMarker, StaticBehavior};
 use kestrel_semantic_tree::symbol::field::FieldSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
@@ -41,11 +42,11 @@ pub fn lower_struct(ctx: &mut LoweringContext, struct_symbol: &Arc<StructSymbol>
             && let Ok(field_symbol) = child.downcast_arc::<FieldSymbol>()
         {
             // Skip static fields - they're not part of the instance layout
-            if field_symbol.is_static() {
+            if field_symbol.metadata().get_behavior::<StaticBehavior>().is_some() {
                 continue;
             }
             // Skip computed properties - they have getters, not storage
-            if field_symbol.is_computed() {
+            if field_symbol.metadata().get_behavior::<ComputedPropertyMarker>().is_some() {
                 continue;
             }
             lower_field(ctx, struct_id, &field_symbol);

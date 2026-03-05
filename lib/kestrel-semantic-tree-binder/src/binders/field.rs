@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use kestrel_semantic_tree::behavior::ComputedMemberAccessBehavior;
+use kestrel_semantic_tree::behavior::{ComputedPropertyMarker, NamespaceScopeMarker, StaticBehavior};
 use kestrel_semantic_tree::behavior::FileConstantBehavior;
 use kestrel_semantic_tree::behavior::executable::ExecutableBehavior;
 use kestrel_semantic_tree::behavior::member_access::MemberAccessBehavior;
@@ -8,7 +9,6 @@ use kestrel_semantic_tree::behavior::typed::TypedBehavior;
 use kestrel_semantic_tree::behavior::valued::ValueBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::field::FieldSymbol;
-use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::ty::Ty;
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
@@ -30,11 +30,6 @@ impl DeclarationBinder for FieldBinder {
         syntax: &SyntaxNode,
         context: &mut BindingContext,
     ) {
-        // Only process field symbols
-        if symbol.metadata().kind() != KestrelSymbolKind::Field {
-            return;
-        }
-
         let symbol_id = symbol.metadata().id();
         let span = symbol.metadata().span().clone();
 
@@ -88,28 +83,27 @@ impl DeclarationBinder for FieldBinder {
         let is_module_level = symbol
             .metadata()
             .parent()
-            .map(|p| {
-                let kind = p.metadata().kind();
-                kind == KestrelSymbolKind::Module || kind == KestrelSymbolKind::SourceFile
-            })
+            .map(|p| p.metadata().get_behavior::<NamespaceScopeMarker>().is_some())
             .unwrap_or(false);
 
         // Add appropriate member access behavior so this field can be accessed via dot notation
         let field_name = symbol.metadata().name().value.clone();
 
-        // Get field properties from the FieldSymbol
-        if let Some(field_symbol) = symbol.as_ref().downcast_ref::<FieldSymbol>() {
-            let is_static = field_symbol.is_static();
+        // Check field properties via marker behaviors
+        let is_static = symbol.metadata().get_behavior::<StaticBehavior>().is_some();
+        let is_computed = symbol.metadata().get_behavior::<ComputedPropertyMarker>().is_some();
 
-            // Add ValueBehavior for module-level or static fields
-            // This allows them to be resolved as values in path expressions
-            if is_module_level || is_static {
-                let value_behavior = ValueBehavior::new(resolved_type.clone(), span.clone());
-                symbol.metadata().add_behavior(value_behavior);
-            }
+        // Add ValueBehavior for module-level or static fields
+        // This allows them to be resolved as values in path expressions
+        if is_module_level || is_static {
+            let value_behavior = ValueBehavior::new(resolved_type.clone(), span.clone());
+            symbol.metadata().add_behavior(value_behavior);
+        }
 
-            if field_symbol.is_computed() {
-                // Computed property: use ComputedMemberAccessBehavior
+        if is_computed {
+            // Computed property: use ComputedMemberAccessBehavior
+            // Downcast needed here only for getter/setter IDs (structural children, not is_computed)
+            if let Some(field_symbol) = symbol.as_ref().downcast_ref::<FieldSymbol>() {
                 let getter_id = field_symbol
                     .getter()
                     .expect("computed property must have a getter");
@@ -121,22 +115,16 @@ impl DeclarationBinder for FieldBinder {
                     setter_id,
                 );
                 symbol.metadata().add_behavior(computed_behavior);
-            } else {
-                // Stored field: use MemberAccessBehavior
-                let is_mutable = field_symbol.is_mutable();
-                let member_access_behavior =
-                    MemberAccessBehavior::new(field_name, resolved_type, is_mutable);
-                symbol.metadata().add_behavior(member_access_behavior);
             }
         } else {
-            // Fallback: treat as immutable stored field
-            // Also add ValueBehavior for module-level fields
-            if is_module_level {
-                let value_behavior = ValueBehavior::new(resolved_type.clone(), span.clone());
-                symbol.metadata().add_behavior(value_behavior);
-            }
+            // Stored field: use MemberAccessBehavior
+            let is_mutable = symbol
+                .as_ref()
+                .downcast_ref::<FieldSymbol>()
+                .map(|f| f.is_mutable())
+                .unwrap_or(false);
             let member_access_behavior =
-                MemberAccessBehavior::new(field_name, resolved_type, false);
+                MemberAccessBehavior::new(field_name, resolved_type, is_mutable);
             symbol.metadata().add_behavior(member_access_behavior);
         }
     }
@@ -147,11 +135,6 @@ impl DeclarationBinder for FieldBinder {
         syntax: &SyntaxNode,
         context: &mut BindingContext,
     ) {
-        // Only process field symbols
-        if symbol.metadata().kind() != KestrelSymbolKind::Field {
-            return;
-        }
-
         // Skip file constants - they don't have runtime initializers
         if symbol
             .metadata()
@@ -161,13 +144,8 @@ impl DeclarationBinder for FieldBinder {
             return;
         }
 
-        // Only process static fields with initializers
-        let Some(field_symbol) = symbol.as_ref().downcast_ref::<FieldSymbol>() else {
-            return;
-        };
-
         // Skip computed properties (they use getter/setter bodies instead)
-        if field_symbol.is_computed() {
+        if symbol.metadata().get_behavior::<ComputedPropertyMarker>().is_some() {
             return;
         }
 
@@ -175,15 +153,13 @@ impl DeclarationBinder for FieldBinder {
         let is_module_level = symbol
             .metadata()
             .parent()
-            .map(|p| {
-                let kind = p.metadata().kind();
-                kind == KestrelSymbolKind::Module || kind == KestrelSymbolKind::SourceFile
-            })
+            .map(|p| p.metadata().get_behavior::<NamespaceScopeMarker>().is_some())
             .unwrap_or(false);
 
         // Skip non-static instance fields (their initialization is handled by constructors)
         // Module-level fields are implicitly static even without the 'static' keyword
-        if !field_symbol.is_static() && !is_module_level {
+        let is_static = symbol.metadata().get_behavior::<StaticBehavior>().is_some();
+        if !is_static && !is_module_level {
             return;
         }
 

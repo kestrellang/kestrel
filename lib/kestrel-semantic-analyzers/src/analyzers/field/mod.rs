@@ -8,6 +8,7 @@
 
 use std::sync::Arc;
 
+use kestrel_semantic_tree::behavior::NamespaceScopeMarker;
 use kestrel_semantic_tree::behavior::generics::GenericsBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::field::FieldSymbol;
@@ -76,10 +77,7 @@ impl Analyzer for FieldAnalyzer {
 
         // Check 2: static modifier in global context
         if field.is_static()
-            && matches!(
-                parent_kind,
-                KestrelSymbolKind::Module | KestrelSymbolKind::SourceFile
-            )
+            && parent.metadata().get_behavior::<NamespaceScopeMarker>().is_some()
         {
             ctx.report(GlobalPropertyStaticModifierError {
                 span: symbol.metadata().span().clone(),

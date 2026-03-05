@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
+use kestrel_semantic_tree::behavior::{NamespaceScopeMarker, StaticBehavior};
 use kestrel_semantic_tree::behavior::callable::{CallableBehavior, ReceiverKind};
 use kestrel_semantic_tree::behavior::typed::TypedBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
-use kestrel_semantic_tree::symbol::field::FieldSymbol;
 use kestrel_semantic_tree::symbol::getter::GetterSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::ty::Ty;
@@ -24,11 +24,6 @@ impl DeclarationBinder for GetterBinder {
         syntax: &SyntaxNode,
         _context: &mut BindingContext,
     ) {
-        // Only process getter symbols
-        if symbol.metadata().kind() != KestrelSymbolKind::Getter {
-            return;
-        }
-
         // Extract doc comment
         if let Some(doc) = crate::binders::utils::doc_comment::extract_doc_comment(syntax) {
             symbol.metadata().add_behavior(doc);
@@ -52,21 +47,14 @@ impl DeclarationBinder for GetterBinder {
             .map(|tb| tb.ty().clone())
             .unwrap_or_else(|| Ty::error(span.clone()));
 
-        // Check if the field is static by downcasting to FieldSymbol
-        let explicit_static = parent
-            .as_ref()
-            .downcast_ref::<FieldSymbol>()
-            .map(|f| f.is_static())
-            .unwrap_or(false);
+        // Check if the field is static via marker behavior
+        let explicit_static = parent.metadata().get_behavior::<StaticBehavior>().is_some();
 
         // Module-level fields are implicitly static even without the 'static' keyword
         let is_module_level = parent
             .metadata()
             .parent()
-            .map(|gp| {
-                let kind = gp.metadata().kind();
-                kind == KestrelSymbolKind::Module || kind == KestrelSymbolKind::SourceFile
-            })
+            .map(|gp| gp.metadata().get_behavior::<NamespaceScopeMarker>().is_some())
             .unwrap_or(false);
 
         let is_static = explicit_static || is_module_level;
@@ -98,11 +86,6 @@ impl DeclarationBinder for GetterBinder {
         syntax: &SyntaxNode,
         context: &mut BindingContext,
     ) {
-        // Only process getter symbols
-        if symbol.metadata().kind() != KestrelSymbolKind::Getter {
-            return;
-        }
-
         // Check if this getter belongs to a subscript
         // If so, the SubscriptBinder will handle body binding (including parameters)
         if let Some(parent) = symbol.metadata().parent()

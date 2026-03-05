@@ -10,6 +10,7 @@ use kestrel_execution_graph::{
 };
 use kestrel_semantic_model::{ResolvedAliasedType, StructFields, SymbolFor};
 use kestrel_semantic_tree::behavior::FileConstantBehavior;
+use kestrel_semantic_tree::behavior::{ComputedPropertyMarker, StaticBehavior};
 use kestrel_semantic_tree::behavior::callable::{
     CallableBehavior, ParameterAccessMode, ReceiverKind,
 };
@@ -678,10 +679,9 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
 
                             // Check if this is a computed property
                             let is_computed = sym
-                                .as_ref()
-                                .downcast_ref::<FieldSymbol>()
-                                .map(|f| f.is_computed())
-                                .unwrap_or(false);
+                                .metadata()
+                                .get_behavior::<ComputedPropertyMarker>()
+                                .is_some();
 
                             if is_computed {
                                 // Computed property - need to call the getter
@@ -892,10 +892,9 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
             {
                 // Check if it's a computed property
                 let is_computed = symbol
-                    .as_ref()
-                    .downcast_ref::<FieldSymbol>()
-                    .map(|f| f.is_computed())
-                    .unwrap_or(false);
+                    .metadata()
+                    .get_behavior::<ComputedPropertyMarker>()
+                    .is_some();
 
                 if is_computed {
                     // Get the setter ID
@@ -5082,9 +5081,11 @@ fn find_field_info(ctx: &LoweringContext, ty: &Ty, field_name: &str) -> Option<(
                 && child.metadata().name().value == field_name
             {
                 // Check if this field is computed
-                if let Ok(field_sym) = child.clone().downcast_arc::<FieldSymbol>() {
-                    return Some((field_sym.metadata().id(), field_sym.is_computed()));
-                }
+                let is_computed = child
+                    .metadata()
+                    .get_behavior::<ComputedPropertyMarker>()
+                    .is_some();
+                return Some((child.metadata().id(), is_computed));
             }
         }
     }
@@ -5149,7 +5150,7 @@ fn lower_getter_call(
     };
 
     // Check if this is a static computed property
-    let is_static = field_sym.is_static();
+    let is_static = field_sym.metadata().get_behavior::<StaticBehavior>().is_some();
 
     // Get the result type and create a temp for the result
     let result_ty = lower_type(ctx, &expr.ty);
@@ -5615,7 +5616,7 @@ fn lower_setter_call(
     };
 
     // Check if this is a static computed property
-    let is_static = field_sym.is_static();
+    let is_static = field_sym.metadata().get_behavior::<StaticBehavior>().is_some();
 
     // Lower the right-hand side value
     let rhs_value = lower_expression(ctx, rhs);

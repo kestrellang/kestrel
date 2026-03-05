@@ -4,9 +4,15 @@ use kestrel_span::{Name, Span};
 use semantic_tree::symbol::{Symbol, SymbolMetadata, SymbolMetadataBuilder};
 
 use crate::{
-    behavior::generics::GenericsBehavior, behavior::visibility::VisibilityBehavior,
-    language::KestrelLanguage, symbol::kind::KestrelSymbolKind,
-    symbol::type_parameter::TypeParameterSymbol, ty::WhereClause,
+    behavior::generics::GenericsBehavior,
+    behavior::markers::{
+        AccessorParentMarker, CallableScopeMarker, ConcreteTypeMarker, MethodContainerMarker,
+    },
+    behavior::visibility::VisibilityBehavior,
+    language::KestrelLanguage,
+    symbol::kind::KestrelSymbolKind,
+    symbol::type_parameter::TypeParameterSymbol,
+    ty::WhereClause,
 };
 
 use super::enum_case::EnumCaseSymbol;
@@ -45,7 +51,11 @@ impl EnumSymbol {
             .with_name(name.clone())
             .with_declaration_span(name.span.clone())
             .with_span(span)
-            .with_behavior(Arc::new(visibility));
+            .with_behavior(Arc::new(visibility))
+            .with_behavior(Arc::new(ConcreteTypeMarker))
+            .with_behavior(Arc::new(MethodContainerMarker))
+            .with_behavior(Arc::new(AccessorParentMarker))
+            .with_behavior(Arc::new(CallableScopeMarker));
 
         if let Some(p) = parent {
             builder = builder.with_parent(Arc::downgrade(&p));

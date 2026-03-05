@@ -356,11 +356,6 @@ impl DeclarationBinder for FunctionBinder {
         syntax: &SyntaxNode,
         context: &mut BindingContext,
     ) {
-        // Only process function symbols
-        if symbol.metadata().kind() != KestrelSymbolKind::Function {
-            return;
-        }
-
         let symbol_id = symbol.metadata().id();
         let span = symbol.metadata().span().clone();
 
@@ -466,11 +461,6 @@ impl DeclarationBinder for FunctionBinder {
         syntax: &SyntaxNode,
         context: &mut BindingContext,
     ) {
-        // Only process function symbols
-        if symbol.metadata().kind() != KestrelSymbolKind::Function {
-            return;
-        }
-
         // Get the CallableBehavior to extract resolved parameters
         let Some(callable) = symbol.metadata().get_behavior::<CallableBehavior>() else {
             return;

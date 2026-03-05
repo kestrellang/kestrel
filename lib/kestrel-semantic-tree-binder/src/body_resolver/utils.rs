@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use kestrel_reporting::IntoDiagnostic;
 use kestrel_semantic_model::SymbolFor;
-use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
+use kestrel_semantic_tree::behavior::{ConcreteTypeMarker, HasMembersMarker, KestrelBehaviorKind};
 use kestrel_semantic_tree::behavior::callable::CallableBehavior;
 use kestrel_semantic_tree::behavior::extension_target::ExtensionTargetBehavior;
 use kestrel_semantic_tree::behavior::generics::GenericsBehavior;
@@ -350,7 +350,7 @@ pub fn get_type_container(
             })?;
             let parent = function.metadata().parent()?;
             match parent.metadata().kind() {
-                KestrelSymbolKind::Struct | KestrelSymbolKind::Protocol => Some(parent),
+                _ if parent.metadata().get_behavior::<HasMembersMarker>().is_some() => Some(parent),
                 KestrelSymbolKind::Extension => {
                     // For extension methods, Self refers to the target type
                     // Get the ExtensionTargetBehavior and return the target struct/enum/protocol
@@ -380,7 +380,7 @@ pub fn get_type_container(
                     // We need the grandparent (the Struct)
                     let grandparent = parent.metadata().parent()?;
                     match grandparent.metadata().kind() {
-                        KestrelSymbolKind::Struct | KestrelSymbolKind::Protocol => {
+                        _ if grandparent.metadata().get_behavior::<HasMembersMarker>().is_some() => {
                             Some(grandparent)
                         },
                         _ => None,
@@ -707,7 +707,7 @@ pub fn get_associated_type_bounds_from_context(
                 .metadata()
                 .get_behavior::<ExtensionTargetBehavior>()
                 .map(|t| t.where_clause().clone()),
-            KestrelSymbolKind::Struct | KestrelSymbolKind::Enum => parent
+            _ if parent.metadata().get_behavior::<ConcreteTypeMarker>().is_some() => parent
                 .metadata()
                 .get_behavior::<GenericsBehavior>()
                 .map(|g| g.where_clause().clone()),

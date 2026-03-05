@@ -5,6 +5,7 @@ use semantic_tree::symbol::{Symbol, SymbolMetadata, SymbolMetadataBuilder};
 
 use crate::{
     behavior::extension_target::ExtensionTargetBehavior,
+    behavior::markers::{AccessorParentMarker, CallableScopeMarker, MethodContainerMarker},
     language::KestrelLanguage,
     symbol::kind::KestrelSymbolKind,
     symbol::type_parameter::TypeParameterSymbol,
@@ -48,7 +49,10 @@ impl ExtensionSymbol {
         let mut builder = SymbolMetadataBuilder::new(KestrelSymbolKind::Extension)
             .with_span(span.clone())
             .with_declaration_span(span)
-            .with_name(synthetic_name);
+            .with_name(synthetic_name)
+            .with_behavior(Arc::new(MethodContainerMarker))
+            .with_behavior(Arc::new(AccessorParentMarker))
+            .with_behavior(Arc::new(CallableScopeMarker));
 
         if let Some(p) = parent {
             builder = builder.with_parent(Arc::downgrade(&p));

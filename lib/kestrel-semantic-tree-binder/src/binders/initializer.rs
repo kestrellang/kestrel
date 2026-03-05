@@ -24,11 +24,6 @@ impl DeclarationBinder for InitializerBinder {
         syntax: &SyntaxNode,
         context: &mut BindingContext,
     ) {
-        // Only process initializer symbols
-        if symbol.metadata().kind() != KestrelSymbolKind::Initializer {
-            return;
-        }
-
         let symbol_id = symbol.metadata().id();
         let span = symbol.metadata().span().clone();
 
@@ -87,11 +82,6 @@ impl DeclarationBinder for InitializerBinder {
         syntax: &SyntaxNode,
         context: &mut BindingContext,
     ) {
-        // Only process initializer symbols
-        if symbol.metadata().kind() != KestrelSymbolKind::Initializer {
-            return;
-        }
-
         // Get the CallableBehavior to extract resolved parameters
         let Some(callable) = symbol.metadata().get_behavior::<CallableBehavior>() else {
             return;

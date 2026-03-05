@@ -5,7 +5,6 @@ use kestrel_semantic_tree::behavior::valued::ValueBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::enum_symbol::EnumSymbol;
 use kestrel_semantic_tree::symbol::function::Parameter;
-use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::ty::{Substitutions, Ty};
 use kestrel_span::Spanned;
 use kestrel_syntax_tree::utils::{extract_identifier_from_name, find_child, get_node_span};
@@ -25,11 +24,6 @@ impl DeclarationBinder for EnumCaseBinder {
         syntax: &SyntaxNode,
         context: &mut BindingContext,
     ) {
-        // 1. Guard: Only process enum case symbols
-        if symbol.metadata().kind() != KestrelSymbolKind::EnumCase {
-            return;
-        }
-
         let symbol_id = symbol.metadata().id();
         let span = symbol.metadata().span().clone();
         let source = context.source_for_symbol(symbol);

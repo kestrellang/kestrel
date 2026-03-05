@@ -31,11 +31,6 @@ impl DeclarationBinder for EnumBinder {
         syntax: &SyntaxNode,
         context: &mut BindingContext,
     ) {
-        // 1. Guard: Only process enum symbols
-        if symbol.metadata().kind() != KestrelSymbolKind::Enum {
-            return;
-        }
-
         let symbol_id = symbol.metadata().id();
         let source = context.source_for_symbol(symbol);
         let file_id = context.file_id_for_symbol(symbol);
@@ -85,11 +80,6 @@ impl DeclarationBinder for EnumBinder {
         _syntax: &SyntaxNode,
         context: &mut BindingContext,
     ) {
-        // Only process enum symbols
-        if symbol.metadata().kind() != KestrelSymbolKind::Enum {
-            return;
-        }
-
         // Compute and attach CopySemanticsBehavior via query (unified for struct/enum)
         let semantics = context.model.query(kestrel_semantic_model::CopySemanticsFor {
             symbol_id: symbol.metadata().id(),

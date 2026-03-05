@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use kestrel_semantic_model::DeclaredNamesInScope;
+use kestrel_semantic_tree::behavior::{HasMembersMarker, NamespaceScopeMarker};
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use semantic_tree::symbol::Symbol;
@@ -46,21 +47,13 @@ impl Analyzer for DuplicateSymbolAnalyzer {
         symbol: &Arc<dyn Symbol<KestrelLanguage>>,
         ctx: &mut AnalysisContext,
     ) {
-        let kind = symbol.metadata().kind();
-
         // Check for duplicate types in scopes that can contain types
-        if matches!(
-            kind,
-            KestrelSymbolKind::Module | KestrelSymbolKind::SourceFile
-        ) {
+        if symbol.metadata().get_behavior::<NamespaceScopeMarker>().is_some() {
             check_duplicate_types(symbol, ctx);
         }
 
         // Check for duplicate members in types
-        if matches!(
-            kind,
-            KestrelSymbolKind::Struct | KestrelSymbolKind::Protocol
-        ) {
+        if symbol.metadata().get_behavior::<HasMembersMarker>().is_some() {
             check_duplicate_members(symbol, ctx);
         }
     }

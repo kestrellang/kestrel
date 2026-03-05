@@ -10,7 +10,6 @@ use kestrel_semantic_tree::behavior::extension_target::ExtensionTargetBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::enum_symbol::EnumSymbol;
 use kestrel_semantic_tree::symbol::extension::ExtensionSymbol;
-use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::symbol::protocol::ProtocolSymbol;
 use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
 use kestrel_semantic_tree::symbol::type_parameter::TypeParameterSymbol;
@@ -35,11 +34,6 @@ impl DeclarationBinder for ExtensionBinder {
         syntax: &SyntaxNode,
         context: &mut BindingContext,
     ) {
-        // Only process extension symbols
-        if symbol.metadata().kind() != KestrelSymbolKind::Extension {
-            return;
-        }
-
         let symbol_id = symbol.metadata().id();
         let source = context.source_for_symbol(symbol);
         let file_id = context.file_id_for_symbol(symbol);

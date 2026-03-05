@@ -1636,16 +1636,8 @@ fn get_field_count(symbol: &Arc<dyn SymbolTrait<KestrelLanguage>>) -> usize {
 
 /// Helper to check if a function is static
 fn get_is_static(symbol: &Arc<dyn SymbolTrait<KestrelLanguage>>) -> Option<bool> {
-    use kestrel_semantic_tree::symbol::function::FunctionSymbol;
-
-    let symbol_ref: &dyn SymbolTrait<KestrelLanguage> = symbol.as_ref();
-
-    if let Some(f) = symbol_ref.as_any().downcast_ref::<FunctionSymbol>() {
-        return Some(f.is_static());
-    }
-
-    // Also check via FunctionDataBehavior
-    get_function_data_behavior(symbol).map(|fdb| fdb.is_static())
+    use kestrel_semantic_tree::behavior::StaticBehavior;
+    Some(symbol.metadata().get_behavior::<StaticBehavior>().is_some())
 }
 
 /// Helper to check if a function has a body

@@ -3,7 +3,11 @@ use std::sync::Arc;
 use kestrel_span::{Name, Span};
 use semantic_tree::symbol::{Symbol, SymbolMetadata, SymbolMetadataBuilder};
 
-use crate::{language::KestrelLanguage, symbol::kind::KestrelSymbolKind};
+use crate::{
+    behavior::markers::{CallableScopeMarker, NamespaceScopeMarker},
+    language::KestrelLanguage,
+    symbol::kind::KestrelSymbolKind,
+};
 
 #[derive(Debug)]
 pub struct SourceFileSymbol {
@@ -22,7 +26,9 @@ impl SourceFileSymbol {
         let mut builder = SymbolMetadataBuilder::new(KestrelSymbolKind::SourceFile)
             .with_name(name.clone())
             .with_declaration_span(name.span.clone())
-            .with_span(span);
+            .with_span(span)
+            .with_behavior(Arc::new(NamespaceScopeMarker))
+            .with_behavior(Arc::new(CallableScopeMarker));
 
         if let Some(p) = parent {
             builder = builder.with_parent(Arc::downgrade(&p));

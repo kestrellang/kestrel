@@ -13,7 +13,6 @@ use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
 use kestrel_semantic_tree::behavior::subscript::SubscriptBehavior;
 use kestrel_semantic_tree::expr::{CallArgument, ExprKind, Expression};
 use kestrel_semantic_tree::language::KestrelLanguage;
-use kestrel_semantic_tree::symbol::field::FieldSymbol;
 use kestrel_semantic_tree::symbol::function::FunctionSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::symbol::protocol::ProtocolSymbol;
@@ -1525,11 +1524,10 @@ fn resolve_implicit_init(
         .filter(|c| c.metadata().kind() == KestrelSymbolKind::Field)
         .filter(|c| {
             // Exclude computed and static fields from memberwise init
-            if let Some(field) = c.as_ref().downcast_ref::<FieldSymbol>() {
-                !field.is_computed() && !field.is_static()
-            } else {
-                true // Include if we can't downcast (shouldn't happen)
-            }
+            use kestrel_semantic_tree::behavior::{ComputedPropertyMarker, StaticBehavior};
+            let is_computed = c.metadata().get_behavior::<ComputedPropertyMarker>().is_some();
+            let is_static = c.metadata().get_behavior::<StaticBehavior>().is_some();
+            !is_computed && !is_static
         })
         .collect();
 
@@ -1986,9 +1984,11 @@ fn classify_field_chain_mutability(
             if child.metadata().kind() == KestrelSymbolKind::Field
                 && child.metadata().name().value == current_field
             {
+                use kestrel_semantic_tree::behavior::ComputedPropertyMarker;
+                let is_computed = child.metadata().get_behavior::<ComputedPropertyMarker>().is_some();
                 if let Some(field_sym) = child.as_any().downcast_ref::<FieldSymbol>() {
                     // Computed properties with setters are assignable
-                    if field_sym.is_computed() {
+                    if is_computed {
                         if field_sym.setter().is_none() {
                             // Read-only computed property (no setter)
                             return MutabilityClassification::ImmutableField {
@@ -2013,9 +2013,11 @@ fn classify_field_chain_mutability(
             if child.metadata().kind() == KestrelSymbolKind::Field
                 && child.metadata().name().value == current_field
             {
+                use kestrel_semantic_tree::behavior::ComputedPropertyMarker;
+                let is_computed = child.metadata().get_behavior::<ComputedPropertyMarker>().is_some();
                 if let Some(field_sym) = child.as_any().downcast_ref::<FieldSymbol>() {
                     // Computed properties with setters are assignable
-                    if field_sym.is_computed() {
+                    if is_computed {
                         if field_sym.setter().is_none() {
                             // Read-only computed property (no setter)
                             return MutabilityClassification::ImmutableField {

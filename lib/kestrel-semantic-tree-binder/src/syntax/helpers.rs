@@ -4,6 +4,7 @@
 
 use std::sync::Arc;
 
+use kestrel_semantic_tree::behavior::ConcreteTypeMarker;
 use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::ty::{Substitutions, Ty, TyKind};
@@ -209,11 +210,9 @@ fn validate_no_conflicting_conformances(
     ctx: &mut BindingContext,
 ) {
     use crate::diagnostics::ConflictingCopyableConformanceError;
-    use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 
     // Only validate structs and enums, not protocols
-    let kind = symbol.metadata().kind();
-    if kind != KestrelSymbolKind::Struct && kind != KestrelSymbolKind::Enum {
+    if symbol.metadata().get_behavior::<ConcreteTypeMarker>().is_none() {
         return;
     }
 

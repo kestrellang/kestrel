@@ -3,6 +3,7 @@
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
+use kestrel_semantic_tree::behavior::ConcreteTypeMarker;
 use kestrel_semantic_tree::behavior::callable::CallableBehavior;
 use kestrel_semantic_tree::behavior::valued::ValueBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
@@ -148,10 +149,7 @@ impl Query for ResolveValuePath {
             // If no direct children match, search extensions for static methods
             // This handles cases like Point.origin() where origin is a static method in an extension
             if matches.is_empty()
-                && matches!(
-                    current_symbol.metadata().kind(),
-                    KestrelSymbolKind::Struct | KestrelSymbolKind::Enum
-                )
+                && current_symbol.metadata().get_behavior::<ConcreteTypeMarker>().is_some()
             {
                 let current_id = current_symbol.metadata().id();
                 let extensions = model.query(ExtensionsFor {

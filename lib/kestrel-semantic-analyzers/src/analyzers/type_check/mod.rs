@@ -45,16 +45,6 @@ impl Analyzer for TypeCheckAnalyzer {
         symbol: &Arc<dyn Symbol<KestrelLanguage>>,
         ctx: &mut AnalysisContext,
     ) {
-        use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
-
-        let kind = symbol.metadata().kind();
-        if !matches!(
-            kind,
-            KestrelSymbolKind::Function | KestrelSymbolKind::Initializer
-        ) {
-            return;
-        }
-
         let Some(callable) = symbol.metadata().get_behavior::<CallableBehavior>() else {
             return;
         };

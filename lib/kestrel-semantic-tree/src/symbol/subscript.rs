@@ -4,6 +4,7 @@ use kestrel_span::Span;
 use semantic_tree::symbol::{Symbol, SymbolId, SymbolMetadata, SymbolMetadataBuilder};
 
 use crate::{
+    behavior::static_marker::StaticBehavior,
     behavior::visibility::VisibilityBehavior,
     language::KestrelLanguage,
     symbol::getter::GetterSymbol,
@@ -53,7 +54,6 @@ use crate::{
 #[derive(Debug)]
 pub struct SubscriptSymbol {
     metadata: SymbolMetadata<KestrelLanguage>,
-    is_static: bool,
     /// Local variables within this subscript (parameters)
     /// Populated during binding phase.
     locals: RwLock<Vec<Local>>,
@@ -122,20 +122,23 @@ impl SubscriptSymbol {
             .with_span(span)
             .with_behavior(Arc::new(visibility));
 
+        if is_static {
+            builder = builder.with_behavior(Arc::new(StaticBehavior));
+        }
+
         if let Some(p) = parent {
             builder = builder.with_parent(Arc::downgrade(&p));
         }
 
         SubscriptSymbol {
             metadata: builder.build(),
-            is_static,
             locals: RwLock::new(Vec::new()),
         }
     }
 
     /// Check if this subscript is static
     pub fn is_static(&self) -> bool {
-        self.is_static
+        self.metadata.get_behavior::<StaticBehavior>().is_some()
     }
 
     /// Get the getter child symbol for this subscript

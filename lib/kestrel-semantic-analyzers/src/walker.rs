@@ -10,7 +10,6 @@ use kestrel_semantic_tree::expr::{ExprKind, Expression};
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::pattern::Pattern;
 use kestrel_semantic_tree::stmt::{Statement, StatementKind};
-use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::ty::Ty;
 use semantic_tree::symbol::Symbol;
 
@@ -41,12 +40,8 @@ fn walk_symbol(
         return;
     }
     if !ctx.skip_children {
-        // Visit body if function or initializer
-        let kind = symbol.metadata().kind();
-        if matches!(
-            kind,
-            KestrelSymbolKind::Function | KestrelSymbolKind::Initializer
-        ) && let Some(body) = get_executable_body(symbol)
+        // Visit body if symbol has an executable body
+        if let Some(body) = get_executable_body(symbol)
         {
             for stmt in &body.statements {
                 walk_statement(stmt, analyzers, model, ctx);

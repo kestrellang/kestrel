@@ -7,6 +7,7 @@ use crate::{
     behavior::callable::{CallableBehavior, CallableSignature, SignatureType},
     behavior::function_data::FunctionDataBehavior,
     behavior::generics::GenericsBehavior,
+    behavior::static_marker::StaticBehavior,
     behavior::visibility::VisibilityBehavior,
     language::KestrelLanguage,
     symbol::kind::KestrelSymbolKind,
@@ -44,7 +45,6 @@ pub use crate::behavior::callable::CallableParameter as Parameter;
 #[derive(Debug)]
 pub struct FunctionSymbol {
     metadata: SymbolMetadata<KestrelLanguage>,
-    is_static: bool,
     has_body: bool,
     /// Local variables within this function (populated during body resolution)
     /// This includes function parameters and any let/var declarations.
@@ -98,7 +98,7 @@ impl FunctionSymbol {
         parent: Option<Arc<dyn Symbol<KestrelLanguage>>>,
     ) -> Self {
         // Create the function data behavior
-        let function_data = FunctionDataBehavior::new(has_body, is_static);
+        let function_data = FunctionDataBehavior::new(has_body);
 
         // Note: CallableBehavior and GenericsBehavior are added during bind phase
         let mut builder = SymbolMetadataBuilder::new(KestrelSymbolKind::Function)
@@ -108,13 +108,16 @@ impl FunctionSymbol {
             .with_behavior(Arc::new(visibility))
             .with_behavior(Arc::new(function_data));
 
+        if is_static {
+            builder = builder.with_behavior(Arc::new(StaticBehavior));
+        }
+
         if let Some(p) = parent {
             builder = builder.with_parent(Arc::downgrade(&p));
         }
 
         FunctionSymbol {
             metadata: builder.build(),
-            is_static,
             has_body,
             locals: RwLock::new(Vec::new()),
         }
@@ -122,7 +125,7 @@ impl FunctionSymbol {
 
     /// Check if this function is static
     pub fn is_static(&self) -> bool {
-        self.is_static
+        self.metadata.get_behavior::<StaticBehavior>().is_some()
     }
 
     /// Check if this function has a body
