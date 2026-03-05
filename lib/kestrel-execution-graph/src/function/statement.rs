@@ -178,20 +178,12 @@ pub enum Rvalue {
     StrPtr(Value),
     /// `str.len <value>`
     StrLen(Value),
-    /// `str.from_parts <ptr>, <len>`
-    StrFromParts { ptr: Value, len: Value },
     /// `int.to_string <value>` - convert integer to string
     IntToString(Value),
-    /// `str.concat [parts...]` - concatenate multiple strings
-    StrConcat { parts: Vec<Value> },
 
     // === Pointer operations ===
     /// `ptr.offset <ptr>, <offset>` - byte offset
     PtrOffset { ptr: Value, offset: Value },
-    /// `ptr.to.ref <value>`
-    PtrToRef(Value),
-    /// `ptr.to.ref_var <value>`
-    PtrToRefMut(Value),
     /// `ref.to.ptr <value>`
     RefToPtr(Value),
     /// `ptr.null` - create null pointer
@@ -230,8 +222,6 @@ pub enum Rvalue {
     AtomicSub { ptr: Value, delta: Value },
 
     // === Callable operations ===
-    /// `func.to.escaping path.to.function`
-    FuncToEscaping(Id<QualifiedName>),
     /// `apply partial func(captures...)`
     ApplyPartial {
         func: Id<QualifiedName>,
@@ -563,14 +553,6 @@ impl fmt::Display for RvalueDisplay<'_> {
             },
             Rvalue::StrPtr(v) => write!(f, "str.ptr {}", v.display(self.ctx)),
             Rvalue::StrLen(v) => write!(f, "str.len {}", v.display(self.ctx)),
-            Rvalue::StrFromParts { ptr, len } => {
-                write!(
-                    f,
-                    "str.from_parts {}, {}",
-                    ptr.display(self.ctx),
-                    len.display(self.ctx)
-                )
-            },
             Rvalue::IntToString(v) => write!(f, "int.to_string {}", v.display(self.ctx)),
             Rvalue::PtrOffset { ptr, offset } => {
                 write!(
@@ -580,12 +562,7 @@ impl fmt::Display for RvalueDisplay<'_> {
                     offset.display(self.ctx)
                 )
             },
-            Rvalue::PtrToRef(v) => write!(f, "ptr.to.ref {}", v.display(self.ctx)),
-            Rvalue::PtrToRefMut(v) => write!(f, "ptr.to.ref_var {}", v.display(self.ctx)),
             Rvalue::RefToPtr(v) => write!(f, "ref.to.ptr {}", v.display(self.ctx)),
-            Rvalue::FuncToEscaping(name) => {
-                write!(f, "func.to.escaping {}", self.ctx.name(*name))
-            },
             Rvalue::ApplyPartial { func, captures } => {
                 write!(f, "apply partial {}(", self.ctx.name(*func))?;
                 for (i, cap) in captures.iter().enumerate() {
@@ -805,16 +782,6 @@ impl fmt::Display for RvalueDisplay<'_> {
                     ptr.display(self.ctx),
                     delta.display(self.ctx)
                 )
-            },
-            Rvalue::StrConcat { parts } => {
-                write!(f, "str.concat [")?;
-                for (i, part) in parts.iter().enumerate() {
-                    if i > 0 {
-                        write!(f, ", ")?;
-                    }
-                    write!(f, "{}", part.display(self.ctx))?;
-                }
-                write!(f, "]")
             },
         }
     }

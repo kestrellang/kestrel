@@ -6,7 +6,7 @@ use crate::monomorphize::{Substitution, build_substitution, resolve_witness};
 use crate::place::{compile_place_read, get_enum_payload_offset};
 use crate::types::{get_wrapper_primitive, translate_type, translate_type_ext};
 
-use kestrel_codegen::{Layout, mangle_name};
+use kestrel_codegen::Layout;
 use kestrel_execution_graph::{
     BinOp, CallArg, Callee, CastKind, FloatBits, Function, FunctionDef, Id, Immediate,
     ImmediateKind, IntBits, Local, MirTy, Origin, PassingMode, Place, PlaceKind, QualifiedName,
@@ -327,9 +327,8 @@ pub fn compile_rvalue(
             compile_ref(ctx, place, builder, local_map, subst, stack_locals)
         },
 
-        // Pointer/reference conversions - these are no-ops at runtime
-        Rvalue::PtrToRef(value) | Rvalue::PtrToRefMut(value) | Rvalue::RefToPtr(value) => {
-            // All three are semantically different but have the same runtime representation
+        // Pointer/reference conversion - no-op at runtime
+        Rvalue::RefToPtr(value) => {
             compile_value(
                 ctx,
                 func_def,
@@ -387,17 +386,6 @@ pub fn compile_rvalue(
             local_map,
             stack_locals,
         ),
-        Rvalue::StrFromParts { ptr, len } => compile_str_from_parts(
-            ctx,
-            func_def,
-            subst,
-            ptr,
-            len,
-            builder,
-            local_map,
-            stack_locals,
-        ),
-
         Rvalue::Tuple(values) => compile_tuple(
             ctx,
             func_def,
@@ -429,8 +417,6 @@ pub fn compile_rvalue(
             local_map,
             stack_locals,
         ),
-
-        Rvalue::FuncToEscaping(func) => compile_func_to_escaping(ctx, *func, builder),
 
         Rvalue::IntToString(_) => Err(CodegenError::Unsupported(
             "IntToString requires runtime support".into(),
@@ -815,12 +801,6 @@ pub fn compile_rvalue(
             ))
         },
 
-        Rvalue::StrConcat { .. } => {
-            // TODO: String concatenation is not yet implemented
-            // This should allocate a buffer and copy strings into it
-            // For now, return an error value
-            Ok(builder.ins().iconst(cranelift_codegen::ir::types::I64, 0))
-        },
     }
 }
 
@@ -3285,45 +3265,6 @@ fn compile_str_len(
         .load(ptr_type, MemFlags::new(), str_ptr, ptr_size))
 }
 
-/// Compile str.from_parts operation - create a string fat pointer from ptr and len.
-fn compile_str_from_parts(
-    ctx: &mut CodegenContext<'_>,
-    func_def: &FunctionDef,
-    subst: &Substitution,
-    ptr: &Value,
-    len: &Value,
-    builder: &mut FunctionBuilder<'_>,
-    local_map: &HashMap<Id<Local>, Variable>,
-    stack_locals: &std::collections::HashSet<Id<Local>>,
-) -> Result<CraneliftValue, CodegenError> {
-    let ptr_val = compile_value(ctx, func_def, subst, ptr, builder, local_map, stack_locals)?;
-    let len_val = compile_value(ctx, func_def, subst, len, builder, local_map, stack_locals)?;
-
-    let ptr_type = if ctx.target.is_64bit() {
-        cl_types::I64
-    } else {
-        cl_types::I32
-    };
-    let ptr_size: i32 = if ctx.target.is_64bit() { 8 } else { 4 };
-
-    // Allocate stack slot for the fat pointer struct (ptr + len)
-    let slot = builder.create_sized_stack_slot(StackSlotData::new(
-        StackSlotKind::ExplicitSlot,
-        (ptr_size * 2) as u32,
-        align_to_shift(ptr_size as usize),
-    ));
-    let struct_ptr = builder.ins().stack_addr(ptr_type, slot, 0);
-
-    // Store ptr at offset 0
-    builder.ins().store(MemFlags::new(), ptr_val, struct_ptr, 0);
-    // Store len at offset ptr_size
-    builder
-        .ins()
-        .store(MemFlags::new(), len_val, struct_ptr, ptr_size);
-
-    Ok(struct_ptr)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3837,85 +3778,6 @@ fn find_closure_function_and_env(
         "closure function not found: {}",
         ctx.mir.name(func_name)
     )))
-}
-
-/// Compile a function-to-escaping conversion.
-///
-/// This converts a regular function to an escaping (thick) function pointer.
-/// The thick callable has the layout: { func_ptr: *const (), env_ptr: *const () }
-/// Since there are no captures, env_ptr is null.
-///
-/// Note: The function being converted must have a compatible signature. When called
-/// through the thick pointer, it will receive a null env pointer as the first argument,
-/// which it should ignore. This means we need to create a wrapper function that:
-/// 1. Accepts (env_ptr, args...)
-/// 2. Ignores env_ptr and calls the original function with just args...
-///
-/// For now, we assume the function already has the correct signature (env_ptr as first param).
-fn compile_func_to_escaping(
-    ctx: &mut CodegenContext<'_>,
-    func: Id<QualifiedName>,
-    builder: &mut FunctionBuilder<'_>,
-) -> Result<CraneliftValue, CodegenError> {
-    let ptr_type = if ctx.target.is_64bit() {
-        cl_types::I64
-    } else {
-        cl_types::I32
-    };
-    let ptr_size = if ctx.target.is_64bit() { 8 } else { 4 };
-
-    // Look up the function by name to get func_id for mangling
-    let func_lookup = ctx.mir.functions.iter().find(|(_, def)| def.name == func);
-
-    // Get the function pointer
-    let mangled_name = match func_lookup {
-        Some((_, def)) => {
-            if !def.type_params.is_empty() {
-                return Err(CodegenError::Unsupported(format!(
-                    "generic function requires type arguments for escaping conversion: {}",
-                    ctx.mir.name(func)
-                )));
-            }
-            if func_uses_self(ctx.mir, def) {
-                return Err(CodegenError::Unsupported(format!(
-                    "function requires Self type for escaping conversion: {}",
-                    ctx.mir.name(func)
-                )));
-            }
-            ctx.resolve_symbol_name(func, &[], None)
-        },
-        None => mangle_name(ctx.mir, func, &[]), // Fallback
-    };
-    let cl_func_id = ctx.func_ids_by_name.get(&mangled_name).ok_or_else(|| {
-        CodegenError::Unsupported(format!(
-            "function not found for escaping conversion: {} (mangled: {})",
-            ctx.mir.name(func),
-            mangled_name
-        ))
-    })?;
-
-    let func_ref = ctx.module.declare_func_in_func(*cl_func_id, builder.func);
-    let func_ptr = builder.ins().func_addr(ptr_type, func_ref);
-
-    // Create a null environment pointer (no captures)
-    let env_ptr = builder.ins().iconst(ptr_type, 0);
-
-    // Create the thick callable struct: { func_ptr, env_ptr }
-    let thick_slot = builder.create_sized_stack_slot(StackSlotData::new(
-        StackSlotKind::ExplicitSlot,
-        (ptr_size * 2) as u32,
-        align_to_shift(ptr_size),
-    ));
-    let thick_ptr = builder.ins().stack_addr(ptr_type, thick_slot, 0);
-
-    // Store func_ptr at offset 0
-    builder.ins().store(MemFlags::new(), func_ptr, thick_ptr, 0);
-    // Store env_ptr at offset ptr_size
-    builder
-        .ins()
-        .store(MemFlags::new(), env_ptr, thick_ptr, ptr_size as i32);
-
-    Ok(thick_ptr)
 }
 
 /// Compile a thin function pointer call.

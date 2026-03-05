@@ -322,51 +322,13 @@ impl<'a> CollectionContext<'a> {
             Rvalue::StrPtr(v)
             | Rvalue::StrLen(v)
             | Rvalue::IntToString(v)
-            | Rvalue::PtrToRef(v)
-            | Rvalue::PtrToRefMut(v)
             | Rvalue::RefToPtr(v) => {
                 self.scan_value(v, subst);
-            },
-
-            Rvalue::StrFromParts { ptr, len } => {
-                self.scan_value(ptr, subst);
-                self.scan_value(len, subst);
             },
 
             Rvalue::PtrOffset { ptr, offset } => {
                 self.scan_value(ptr, subst);
                 self.scan_value(offset, subst);
-            },
-
-            Rvalue::FuncToEscaping(name) => {
-                // Non-generic function reference
-                if let Some(&func_id) = self.functions_by_name.get(name) {
-                    let func_def = &self.mir.functions[func_id];
-                    if !func_def.type_params.is_empty() {
-                        self.errors
-                            .push(MonomorphizeError::UnsupportedFunctionReference {
-                                name: *name,
-                                reason: "generic function requires type arguments".to_string(),
-                            });
-                        return;
-                    }
-                    let needs_self = func_def.params.iter().any(|&param_id| {
-                        let param = &self.mir.params[param_id];
-                        self.type_needs_self(self.mir.ty(param.ty))
-                    }) || self.type_needs_self(self.mir.ty(func_def.ret));
-                    if needs_self {
-                        self.errors
-                            .push(MonomorphizeError::UnsupportedFunctionReference {
-                                name: *name,
-                                reason: "function reference requires Self type".to_string(),
-                            });
-                        return;
-                    }
-                    let inst = FunctionInstantiation::non_generic(func_id);
-                    if self.result.add_function(inst.clone()) {
-                        self.pending.push_back(inst);
-                    }
-                }
             },
 
             Rvalue::ApplyPartial { func, captures } => {
@@ -513,12 +475,6 @@ impl<'a> CollectionContext<'a> {
                 self.scan_value(delta, subst);
             },
 
-            // String concatenation
-            Rvalue::StrConcat { parts } => {
-                for part in parts {
-                    self.scan_value(part, subst);
-                }
-            },
         }
     }
 

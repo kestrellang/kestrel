@@ -79,11 +79,6 @@ pub enum StatementPattern {
     /// Any call
     AnyCall,
 
-    /// func.to.escaping
-    FuncToEscaping {
-        func: String,
-    },
-
     /// apply partial
     ApplyPartial {
         func: String,
@@ -105,12 +100,8 @@ pub enum StatementPattern {
     /// String operations
     StrPtr,
     StrLen,
-    StrFromParts,
-
     /// Pointer operations
     PtrOffset,
-    PtrToRef,
-    PtrToRefMut,
     RefToPtr,
 
     /// Deinit operations
@@ -295,14 +286,6 @@ impl StatementPattern {
 
             StatementPattern::AnyCall => matches!(rvalue, Rvalue::Call { .. }),
 
-            StatementPattern::FuncToEscaping { func } => {
-                if let Rvalue::FuncToEscaping(name) = rvalue {
-                    ctx.name(*name).to_string() == *func
-                } else {
-                    false
-                }
-            },
-
             StatementPattern::ApplyPartial {
                 func,
                 capture_count,
@@ -357,10 +340,7 @@ impl StatementPattern {
 
             StatementPattern::StrPtr => matches!(rvalue, Rvalue::StrPtr(_)),
             StatementPattern::StrLen => matches!(rvalue, Rvalue::StrLen(_)),
-            StatementPattern::StrFromParts => matches!(rvalue, Rvalue::StrFromParts { .. }),
             StatementPattern::PtrOffset => matches!(rvalue, Rvalue::PtrOffset { .. }),
-            StatementPattern::PtrToRef => matches!(rvalue, Rvalue::PtrToRef(_)),
-            StatementPattern::PtrToRefMut => matches!(rvalue, Rvalue::PtrToRefMut(_)),
             StatementPattern::RefToPtr => matches!(rvalue, Rvalue::RefToPtr(_)),
 
             // Deinit patterns don't match assignments
@@ -536,7 +516,6 @@ impl StatementPattern {
             },
             StatementPattern::CallEscaping => "escaping call".to_string(),
             StatementPattern::AnyCall => "any call".to_string(),
-            StatementPattern::FuncToEscaping { func } => format!("func.to.escaping {}", func),
             StatementPattern::ApplyPartial {
                 func,
                 capture_count,
@@ -550,10 +529,7 @@ impl StatementPattern {
             },
             StatementPattern::StrPtr => "str.ptr".to_string(),
             StatementPattern::StrLen => "str.len".to_string(),
-            StatementPattern::StrFromParts => "str.from_parts".to_string(),
             StatementPattern::PtrOffset => "ptr.offset".to_string(),
-            StatementPattern::PtrToRef => "ptr.to.ref".to_string(),
-            StatementPattern::PtrToRefMut => "ptr.to.ref_var".to_string(),
             StatementPattern::RefToPtr => "ref.to.ptr".to_string(),
             StatementPattern::Deinit { local } => format!("deinit %{}", local),
             StatementPattern::AnyDeinit => "any deinit".to_string(),

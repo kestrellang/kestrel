@@ -7,7 +7,6 @@
 //! ## String Operations (implemented in rvalue.rs)
 //! - `Rvalue::StrPtr` - Extract pointer from string fat pointer
 //! - `Rvalue::StrLen` - Extract length from string fat pointer
-//! - `Rvalue::StrFromParts` - Construct string from ptr + len
 //!
 //! ## Type Casts (implemented in rvalue.rs)
 //! - `Rvalue::Cast` - Type conversion operations
@@ -21,8 +20,6 @@
 //!   - RefToImmut: Convert mutable ref to immutable ref
 //!
 //! ## Pointer Operations (implemented in rvalue.rs)
-//! - `Rvalue::PtrToRef` - Pointer to immutable reference
-//! - `Rvalue::PtrToRefMut` - Pointer to mutable reference  
 //! - `Rvalue::RefToPtr` - Reference to pointer
 //! - `Rvalue::PtrOffset` - Pointer arithmetic
 //!
