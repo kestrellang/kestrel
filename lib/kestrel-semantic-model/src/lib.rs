@@ -14,6 +14,7 @@ mod registry;
 mod resolution;
 mod scope;
 mod ty_cache_key;
+pub mod type_resolution;
 mod type_oracle;
 
 pub use extension_registry::ExtensionRegistry;
@@ -33,7 +34,7 @@ pub use queries::{
     ProtocolRequiredProperties, ResolveModulePath, ResolveName, ResolveTypePath, ResolveValuePath,
     ResolvedAliasedType, ScopeFor, SelfProtocolBounds, StructFieldInfo, StructFieldTypeInfo,
     StructFieldTypes,
-    StructFields, StructMethods, SymbolFor, TypeParameterBounds, VisibleChildren,
+    StructFields, StructMethods, SymbolFor, TypeFor, TypeParameterBounds, VisibleChildren,
     VisibilityLevel, VisibilityLevelOf, VisibleChildrenByName, WhereClausesInScope,
     callable_param_types_for_call,
 };

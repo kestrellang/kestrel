@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
+use kestrel_semantic_model::TypeFor;
 use kestrel_semantic_tree::behavior::{NamespaceScopeMarker, StaticBehavior};
 use kestrel_semantic_tree::behavior::callable::{
     CallableBehavior, CallableParameter, ParameterAccessMode, ReceiverKind,
 };
-use kestrel_semantic_tree::behavior::typed::TypedBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::symbol::setter::SetterSymbol;
@@ -24,7 +24,7 @@ impl DeclarationBinder for SetterBinder {
         &self,
         symbol: &Arc<dyn Symbol<KestrelLanguage>>,
         syntax: &SyntaxNode,
-        _context: &mut BindingContext,
+        context: &mut BindingContext,
     ) {
         // Extract doc comment
         if let Some(doc) = crate::binders::utils::doc_comment::extract_doc_comment(syntax) {
@@ -42,11 +42,12 @@ impl DeclarationBinder for SetterBinder {
             return;
         }
 
-        // Get the field type from the parent field's TypedBehavior
-        let field_type = parent
-            .metadata()
-            .get_behavior::<TypedBehavior>()
-            .map(|tb| tb.ty().clone())
+        // Get the field type via query (order-independent — works even if field binder hasn't run)
+        let field_type = context
+            .model
+            .query(TypeFor {
+                symbol_id: parent.metadata().id(),
+            })
             .unwrap_or_else(|| Ty::error(span.clone()));
 
         // Check if the field is static via marker behavior
