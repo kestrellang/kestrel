@@ -54,23 +54,15 @@ impl FunctionBinder {
             .map(|a| a.span.clone())
             .unwrap_or_else(|| symbol.metadata().span().clone());
 
-        let symbol_id = symbol.metadata().id();
-
-        // Check if this is a protocol method builtin
+        // Handle ProtocolMethod builtins separately (only applies to functions)
         if let BuiltinKind::ProtocolMethod { protocol_feature } = &definition.kind {
             Self::process_protocol_method_builtin(
-                symbol,
-                feature,
-                *protocol_feature,
-                attr_span,
-                syntax,
-                source,
-                context,
+                symbol, feature, *protocol_feature, attr_span, syntax, source, context,
             );
             return;
         }
 
-        // Validate: feature must expect a function
+        // Common path: kind check + duplicate detection
         if !definition.kind.is_function() {
             context.diagnostics.throw(BuiltinWrongKindError {
                 span: attr_span,
@@ -81,8 +73,7 @@ impl FunctionBinder {
             return;
         }
 
-        // Registration happens in the pre-pass (register_all_builtins).
-        // Here we only check for duplicates (a different symbol claiming the same feature).
+        let symbol_id = symbol.metadata().id();
         let existing = context.model.builtin_registry().builtin_function(feature);
         if existing.is_some() && existing != Some(symbol_id) {
             context.diagnostics.throw(DuplicateBuiltinError {
@@ -582,13 +573,8 @@ fn resolve_function_body(
     // - Mutating: mutable (read-write, but caller keeps ownership)
     // - Consuming: mutable (takes ownership, can modify)
     for (i, param) in params.iter().enumerate() {
-        use kestrel_semantic_tree::behavior::callable::ParameterAccessMode;
         let param_ty = param.ty.clone();
-        let is_mutable = match param.access_mode {
-            ParameterAccessMode::Borrow => false,
-            ParameterAccessMode::Mutating => true,
-            ParameterAccessMode::Consuming => true,
-        };
+        let is_mutable = param.access_mode.is_mutable();
         let mutability = if is_mutable {
             Mutability::Mutable
         } else {
@@ -770,62 +756,8 @@ fn resolve_return_type_from_syntax(
 /// For structs/enums, this includes type parameters (e.g., `Optional[T]`).
 /// For protocols, we use Self type which remains abstract.
 fn get_self_type(symbol: &Arc<dyn Symbol<KestrelLanguage>>, model: &kestrel_semantic_model::SemanticModel) -> Option<Ty> {
-    use kestrel_semantic_model::ExtensionTargetFor;
-    use kestrel_semantic_tree::symbol::enum_symbol::EnumSymbol;
-    use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
-    use kestrel_semantic_tree::ty::{Substitutions, TyKind};
-
     let parent = symbol.metadata().parent()?;
-    let parent_span = parent.metadata().span().clone();
-
-    match parent.metadata().kind() {
-        KestrelSymbolKind::Struct => {
-            // Create concrete struct type with type parameters mapping to themselves
-            let struct_arc = Arc::clone(&parent).downcast_arc::<StructSymbol>().ok()?;
-            let mut substitutions = Substitutions::new();
-            if let Some(generics) = parent.metadata().get_behavior::<GenericsBehavior>() {
-                for param in generics.type_parameters() {
-                    let param_id = param.metadata().id();
-                    let param_ty = Ty::type_parameter(param.clone(), parent_span.clone());
-                    substitutions.insert(param_id, param_ty);
-                }
-            }
-            Some(Ty::generic_struct(struct_arc, substitutions, parent_span))
-        },
-        KestrelSymbolKind::Enum => {
-            // Create concrete enum type with type parameters mapping to themselves
-            let enum_arc = Arc::clone(&parent).downcast_arc::<EnumSymbol>().ok()?;
-            let mut substitutions = Substitutions::new();
-            if let Some(generics) = parent.metadata().get_behavior::<GenericsBehavior>() {
-                for param in generics.type_parameters() {
-                    let param_id = param.metadata().id();
-                    let param_ty = Ty::type_parameter(param.clone(), parent_span.clone());
-                    substitutions.insert(param_id, param_ty);
-                }
-            }
-            Some(Ty::generic_enum(enum_arc, substitutions, parent_span))
-        },
-        KestrelSymbolKind::Protocol => {
-            // For protocol methods, Self remains abstract
-            // (protocol methods can be implemented by different concrete types)
-            Some(Ty::self_type(parent_span))
-        },
-        KestrelSymbolKind::Extension => {
-            // For extension methods, use the target type via query (order-independent)
-            // For protocol extensions, use SelfType so constraint methods can be resolved
-            let target = model.query(ExtensionTargetFor {
-                symbol_id: parent.metadata().id(),
-            })?;
-            if matches!(target.kind(), TyKind::Protocol { .. }) {
-                // Protocol extensions need SelfType for constraint method resolution
-                // (e.g., `extend Proto where Self: OtherProto` needs to find OtherProto methods)
-                Some(Ty::self_type(parent_span))
-            } else {
-                Some(target)
-            }
-        },
-        _ => None,
-    }
+    crate::binders::utils::self_type::self_type_for_parent(&parent, model)
 }
 
 /// Determine the receiver kind for a function declaration

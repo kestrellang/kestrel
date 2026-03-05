@@ -190,7 +190,7 @@ fn resolve_extension_target(
             _ => {
                 ctx.diagnostics.throw(CannotExtendTypeError {
                     span: ty_span.clone(),
-                    type_name: format_type_kind(ty.kind()),
+                    type_name: format!("{}", ty),
                 });
                 return None;
             },
@@ -433,22 +433,6 @@ fn collect_referenced_type_params(type_args: &[Ty]) -> Vec<Arc<TypeParameterSymb
     params
 }
 
-/// Format a TyKind for error messages
-fn format_type_kind(kind: &TyKind) -> String {
-    match kind {
-        TyKind::Int { .. } => "lang.i*".to_string(),
-        TyKind::Float { .. } => "lang.f*".to_string(),
-        TyKind::Bool => "lang.i1".to_string(),
-        TyKind::String => "lang.str".to_string(),
-        TyKind::Protocol { symbol, .. } => symbol.metadata().name().value.clone(),
-        TyKind::Struct { symbol, .. } => symbol.metadata().name().value.clone(),
-        TyKind::TypeAlias { symbol, .. } => symbol.metadata().name().value.clone(),
-        TyKind::TypeParameter(symbol) => symbol.metadata().name().value.clone(),
-        TyKind::SelfType => "Self".to_string(),
-        TyKind::Error => "<error>".to_string(),
-        _ => "<unknown>".to_string(),
-    }
-}
 
 /// Error for trying to extend a non-extendable type
 #[derive(Debug, Clone)]

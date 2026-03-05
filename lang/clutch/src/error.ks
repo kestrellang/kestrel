@@ -38,11 +38,36 @@ extend ParseError {
     /// Returns a human-readable description of the error.
     public func description() -> String {
         match self {
-            .UnknownFlag(name) => "error: unknown flag: " + name,
-            .MissingValue(name) => "error: missing value for option: " + name,
-            .MissingRequired(name) => "error: missing required argument: " + name,
-            .UnknownSubcommand(name) => "error: unknown subcommand: " + name,
-            .UnexpectedPositional(val) => "error: unexpected positional argument: " + val,
+            .UnknownFlag(name) => {
+                var msg = String();
+                msg.append("error: unknown flag: ");
+                msg.append(name);
+                msg
+            },
+            .MissingValue(name) => {
+                var msg = String();
+                msg.append("error: missing value for option: ");
+                msg.append(name);
+                msg
+            },
+            .MissingRequired(name) => {
+                var msg = String();
+                msg.append("error: missing required argument: ");
+                msg.append(name);
+                msg
+            },
+            .UnknownSubcommand(name) => {
+                var msg = String();
+                msg.append("error: unknown subcommand: ");
+                msg.append(name);
+                msg
+            },
+            .UnexpectedPositional(val) => {
+                var msg = String();
+                msg.append("error: unexpected positional argument: ");
+                msg.append(val);
+                msg
+            },
             .Message(msg) => msg
         }
     }

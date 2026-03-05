@@ -165,7 +165,8 @@ impl Compilation {
             InitializerVerificationAnalyzer, IrrefutablePatternAnalyzer, ProtocolMethodAnalyzer,
             RecursiveEnumAnalyzer, RefutablePatternAnalyzer, StaticContextAnalyzer,
             StructCycleAnalyzer, SubscriptValidationAnalyzer, TypeAliasCycleAnalyzer,
-            TypeCheckAnalyzer, TypeInferenceAnalyzer, VisibilityConsistencyAnalyzer,
+            TypeAliasValidationAnalyzer, TypeCheckAnalyzer, TypeInferenceAnalyzer,
+            VisibilityConsistencyAnalyzer,
         };
 
         // Phase 1: Pre-inference analyzers (cycle detection, conformance, validation)
@@ -183,9 +184,10 @@ impl Compilation {
             let mut a10 = ExhaustiveReturnAnalyzer::new();
             let mut a11 = GuardLetDivergenceAnalyzer::new();
             let mut a12 = ClosureAnalyzer::new();
+            let mut a13 = TypeAliasValidationAnalyzer::new();
             let mut analyzers: Vec<&mut dyn Analyzer> = vec![
                 &mut a0, &mut a1, &mut a2, &mut a3, &mut a4, &mut a5, &mut a6, &mut a7, &mut a8,
-                &mut a9, &mut a10, &mut a11, &mut a12,
+                &mut a9, &mut a10, &mut a11, &mut a12, &mut a13,
             ];
             let mut ctx = AnalysisContext::new(&model, &mut diagnostics);
             run_all(&mut analyzers, &model, &mut ctx);

@@ -22,7 +22,7 @@ struct Config {
 // Styles
 // ============================================
 
-struct Styles: Cloneable {
+struct Styles {
     static var border: Style { [.White, .Dim] }
     static var paddle1: Style { [.Green, .Bold] }
     static var paddle2: Style { [.Cyan, .Bold] }
@@ -31,10 +31,6 @@ struct Styles: Cloneable {
     static var label: Style { [.Gray] }
     static var value: Style { [.White, .Bold] }
     static var centerLine: Style { [.White, .Dim] }
-
-    func clone() -> Styles {
-        Styles()
-    }
 }
 
 // ============================================

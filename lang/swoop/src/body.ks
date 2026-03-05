@@ -85,11 +85,9 @@ func percentEncode(s: String) -> String {
             or b == 45 or b == 95 or b == 46 or b == 126 {
             result.appendByte(byte)
         } else if b == 32 {
-            // Space -> +
-            result.appendByte(43)
+            result.append("+")
         } else {
-            // %XX encoding
-            result.appendByte(37); // '%'
+            result.append("%");
             result.appendByte(hexChar(b / 16));
             result.appendByte(hexChar(b % 16))
         }

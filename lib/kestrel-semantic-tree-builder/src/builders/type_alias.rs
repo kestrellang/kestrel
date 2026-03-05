@@ -22,7 +22,7 @@ use kestrel_semantic_tree::behavior::visibility::{Visibility, find_visibility_sc
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TypeAliasContext {
     Protocol,
-    Struct,
+    ConcreteType,
     Module,
 }
 
@@ -69,7 +69,7 @@ impl Builder for TypeAliasBuilder {
 
                 Some(symbol_arc_dyn)
             },
-            TypeAliasContext::Struct | TypeAliasContext::Module => {
+            TypeAliasContext::ConcreteType | TypeAliasContext::Module => {
                 let placeholder_type = Ty::error(full_span.clone());
                 let syntactic_typed_behavior =
                     TypedBehavior::new(placeholder_type, full_span.clone());
@@ -114,7 +114,7 @@ fn determine_context(parent: Option<&Arc<dyn Symbol<KestrelLanguage>>>) -> TypeA
     match parent {
         Some(p) => match p.metadata().kind() {
             KestrelSymbolKind::Protocol => TypeAliasContext::Protocol,
-            KestrelSymbolKind::Struct => TypeAliasContext::Struct,
+            KestrelSymbolKind::Struct | KestrelSymbolKind::Enum | KestrelSymbolKind::Extension => TypeAliasContext::ConcreteType,
             _ => TypeAliasContext::Module,
         },
         None => TypeAliasContext::Module,

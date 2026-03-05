@@ -76,7 +76,7 @@ public func percentDecode(s: String) -> String {
                 i = i + 1
             }
         } else if byte == 43 { // '+' -> space
-            result.appendByte(32);
+            result.append(" ");
             i = i + 1
         } else {
             result.appendByte(byte);

@@ -86,7 +86,7 @@ public struct Template: Cloneable {
                     if i > runStart {
                         out.append(pattern.substringBytes(from: runStart, to: i))
                     };
-                    out.appendByte(123);
+                    out.append("{");
                     i = i + 2;
                     runStart = i
                 } else {
@@ -106,8 +106,7 @@ public struct Template: Cloneable {
                         };
                         i = j + 1
                     } else {
-                        // No closing brace — copy { literally
-                        out.appendByte(123);
+                        out.append("{");
                         i = keyStart
                     };
                     runStart = i
@@ -118,7 +117,7 @@ public struct Template: Cloneable {
                     if i > runStart {
                         out.append(pattern.substringBytes(from: runStart, to: i))
                     };
-                    out.appendByte(125);
+                    out.append("}");
                     i = i + 2;
                     runStart = i
                 } else {

@@ -69,3 +69,30 @@ impl ConformsToBehavior {
         self.associated_type_id
     }
 }
+
+/// Marker behavior for qualified associated type bindings (e.g., `type Protocol.Item = T`).
+///
+/// Attached during binding when the syntax uses a qualified form with an explicit
+/// protocol target. Used by the TypeAliasValidationAnalyzer to distinguish qualified
+/// from unqualified bindings without needing syntax access.
+#[derive(Debug, Clone)]
+pub struct QualifiedBindingBehavior {
+    /// The protocol name from the qualified syntax (e.g., "Iterator" in `type Iterator.Item = T`)
+    protocol_name: String,
+}
+
+impl Behavior<KestrelLanguage> for QualifiedBindingBehavior {
+    fn kind(&self) -> KestrelBehaviorKind {
+        KestrelBehaviorKind::QualifiedBinding
+    }
+}
+
+impl QualifiedBindingBehavior {
+    pub fn new(protocol_name: String) -> Self {
+        QualifiedBindingBehavior { protocol_name }
+    }
+
+    pub fn protocol_name(&self) -> &str {
+        &self.protocol_name
+    }
+}

@@ -29,7 +29,11 @@ public struct Platform: Cloneable {
     /// Returns the asset suffix for this platform.
     /// e.g., "aarch64-apple-darwin" or "x86_64-unknown-linux"
     public func assetTarget() -> String {
-        self.arch + "-" + self.os
+        var s = String();
+        s.append(self.arch);
+        s.append("-");
+        s.append(self.os);
+        s
     }
 }
 
@@ -52,7 +56,10 @@ public func detectPlatform() -> Result[Platform, JessupError] {
     } else if os.equals("Linux") {
         mappedOs = "unknown-linux"
     } else {
-        return .Err(JessupError.InstallError("unsupported operating system: " + os))
+        var errMsg = String();
+        errMsg.append("unsupported operating system: ");
+        errMsg.append(os);
+        return .Err(JessupError.InstallError(errMsg))
     };
 
     // Map architecture
@@ -62,7 +69,10 @@ public func detectPlatform() -> Result[Platform, JessupError] {
     } else if arch.equals("x86_64") {
         mappedArch = "x86_64"
     } else {
-        return .Err(JessupError.InstallError("unsupported architecture: " + arch))
+        var errMsg = String();
+        errMsg.append("unsupported architecture: ");
+        errMsg.append(arch);
+        return .Err(JessupError.InstallError(errMsg))
     };
 
     return .Ok(Platform(os: mappedOs, arch: mappedArch))
@@ -79,7 +89,7 @@ func trimWhitespace(s: String) -> String {
     while end > 0 {
         let b = s.byteAtUnchecked(end - 1);
         // space=32, tab=9, newline=10, carriage return=13
-        if b == UInt8(intLiteral: 32) or b == UInt8(intLiteral: 9) or b == UInt8(intLiteral: 10) or b == UInt8(intLiteral: 13) {
+        if b == 32 or b == 9 or b == 10 or b == 13 {
             end = end - 1
         } else {
             return s.substringBytes(from: 0, to: end)

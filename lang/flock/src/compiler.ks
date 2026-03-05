@@ -33,52 +33,53 @@ public func invokeCompiler(
         .None => {}
     }
 
-    var cmd = compiler + " " + mode;
+    var cmd = String();
+    cmd.append(compiler);
+    cmd.append(" ");
+    cmd.append(mode);
 
     // Pass --std if KESTREL_STD is set
     match getenv("KESTREL_STD") {
         .Some(stdPath) => {
-            cmd = cmd + " --std " + quoteArg(stdPath)
+            cmd.append(" --std ");
+            cmd.append(quoteArg(stdPath))
         },
         .None => {}
     }
 
     // Add all source files
-    var i: Int64 = 0;
-    while i < sources.count {
-        cmd = cmd + " " + quoteArg(sources(unchecked: i));
-        i = i + 1
+    for source in sources {
+        cmd.append(" ");
+        cmd.append(quoteArg(source))
     }
 
     // Add output flag for build mode
     match output {
         .Some(out) => {
             if mode.equals("build") {
-                cmd = cmd + " -o " + quoteArg(out)
+                cmd.append(" -o ");
+                cmd.append(quoteArg(out))
             }
         },
         .None => {}
     }
 
     // Add link libraries (-l flags)
-    i = 0;
-    while i < linkLibs.count {
-        cmd = cmd + " -l " + quoteArg(linkLibs(unchecked: i));
-        i = i + 1
+    for lib in linkLibs {
+        cmd.append(" -l ");
+        cmd.append(quoteArg(lib))
     }
 
     // Add library search paths (-L flags)
-    i = 0;
-    while i < linkPaths.count {
-        cmd = cmd + " -L " + quoteArg(linkPaths(unchecked: i));
-        i = i + 1
+    for path in linkPaths {
+        cmd.append(" -L ");
+        cmd.append(quoteArg(path))
     }
 
     // Add frameworks (--framework flags)
-    i = 0;
-    while i < frameworks.count {
-        cmd = cmd + " --framework " + quoteArg(frameworks(unchecked: i));
-        i = i + 1
+    for framework in frameworks {
+        cmd.append(" --framework ");
+        cmd.append(quoteArg(framework))
     }
 
     let exitCode = spawn(cmd);
@@ -92,7 +93,11 @@ public func invokeCompiler(
 /// Quotes a shell argument if it contains spaces.
 func quoteArg(s: String) -> String {
     if containsSpace(s) {
-        "\"" + s + "\""
+        var q = String();
+        q.append("\"");
+        q.append(s);
+        q.append("\"");
+        q
     } else {
         s
     }
@@ -101,7 +106,7 @@ func quoteArg(s: String) -> String {
 func containsSpace(s: String) -> Bool {
     var i: Int64 = 0;
     while i < s.byteCount {
-        if s.byteAtUnchecked(i) == UInt8(intLiteral: 32) { // space
+        if s.byteAtUnchecked(i) == 32 { // space
             return true
         }
         i = i + 1

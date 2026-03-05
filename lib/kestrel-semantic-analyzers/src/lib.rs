@@ -25,13 +25,14 @@ pub fn default_analyzers() -> Vec<Box<dyn Analyzer>> {
         ParentProtocolConformanceAnalyzer, ProtocolFieldConformanceAnalyzer,
         ProtocolMethodAnalyzer, RecursiveEnumAnalyzer, RefutablePatternAnalyzer,
         StaticContextAnalyzer, StructCycleAnalyzer, SubscriptValidationAnalyzer,
-        TypeAliasCycleAnalyzer, TypeCheckAnalyzer, TypeInferenceAnalyzer,
-        VisibilityConsistencyAnalyzer,
+        TypeAliasCycleAnalyzer, TypeAliasValidationAnalyzer, TypeCheckAnalyzer,
+        TypeInferenceAnalyzer, VisibilityConsistencyAnalyzer,
     };
 
     // Match historical order from builder ValidationRunner where possible
     vec![
         Box::new(TypeAliasCycleAnalyzer::new()),
+        Box::new(TypeAliasValidationAnalyzer::new()),
         Box::new(StructCycleAnalyzer::new()),
         Box::new(ConstraintCycleAnalyzer::new()),
         Box::new(ConformanceAnalyzer::new()),

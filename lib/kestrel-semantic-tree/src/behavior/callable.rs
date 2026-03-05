@@ -52,6 +52,13 @@ pub enum ParameterAccessMode {
     Consuming,
 }
 
+impl ParameterAccessMode {
+    /// Whether this access mode allows mutation (mutating or consuming).
+    pub fn is_mutable(self) -> bool {
+        matches!(self, Self::Mutating | Self::Consuming)
+    }
+}
+
 /// Represents a function parameter with optional label for overload resolution.
 ///
 /// Parameters support Swift-style labeled arguments:

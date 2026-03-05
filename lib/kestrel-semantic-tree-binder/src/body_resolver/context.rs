@@ -579,15 +579,10 @@ pub fn resolve_and_attach_body(
     // - Mutating: mutable (read-write, but caller keeps ownership)
     // - Consuming: mutable (takes ownership, can modify)
     for param in func_sym.parameters() {
-        use kestrel_semantic_tree::behavior::callable::ParameterAccessMode;
         let param_ty = param.ty.clone();
         let param_name = param.bind_name.value.clone();
         let param_span = param.bind_name.span.clone();
-        let is_mutable = match param.access_mode {
-            ParameterAccessMode::Borrow => false,
-            ParameterAccessMode::Mutating => true,
-            ParameterAccessMode::Consuming => true,
-        };
+        let is_mutable = param.access_mode.is_mutable();
         ctx.local_scope
             .bind(param_name, param_ty, is_mutable, param_span);
     }

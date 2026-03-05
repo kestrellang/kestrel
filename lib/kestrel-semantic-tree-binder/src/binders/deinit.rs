@@ -2,8 +2,6 @@ use std::sync::Arc;
 
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::deinit::DeinitSymbol;
-use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
-use kestrel_semantic_tree::ty::Ty;
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
@@ -74,7 +72,9 @@ fn resolve_deinit_body(
     // Inject `self` as the first local
     // In deinit, self is read-only - we can access fields but shouldn't modify them
     // (though the language design could allow mutable access before drop)
-    if let Some(self_type) = get_self_type(symbol) {
+    let parent = symbol.metadata().parent();
+    let self_type = parent.as_ref().and_then(|p| crate::binders::utils::self_type::self_type_for_parent(p, context.model));
+    if let Some(self_type) = self_type {
         let decl_span = symbol.metadata().span().clone();
         let self_span = Span::new(decl_span.file_id, decl_span.start..decl_span.start);
 
@@ -103,31 +103,3 @@ fn resolve_deinit_body(
     resolve_body_and_attach_executable(symbol, body_node, &mut body_ctx);
 }
 
-/// Get the type of `self` for a deinit
-///
-/// Returns the concrete type of the containing struct with type parameters.
-fn get_self_type(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> Option<Ty> {
-    use kestrel_semantic_tree::behavior::generics::GenericsBehavior;
-    use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
-    use kestrel_semantic_tree::ty::Substitutions;
-
-    let parent = symbol.metadata().parent()?;
-    let parent_span = parent.metadata().span().clone();
-
-    match parent.metadata().kind() {
-        KestrelSymbolKind::Struct => {
-            // Create concrete struct type with type parameters mapping to themselves
-            let struct_arc = Arc::clone(&parent).downcast_arc::<StructSymbol>().ok()?;
-            let mut substitutions = Substitutions::new();
-            if let Some(generics) = parent.metadata().get_behavior::<GenericsBehavior>() {
-                for param in generics.type_parameters() {
-                    let param_id = param.metadata().id();
-                    let param_ty = Ty::type_parameter(param.clone(), parent_span.clone());
-                    substitutions.insert(param_id, param_ty);
-                }
-            }
-            Some(Ty::generic_struct(struct_arc, substitutions, parent_span))
-        },
-        _ => None,
-    }
-}

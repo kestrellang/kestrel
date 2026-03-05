@@ -94,9 +94,9 @@ public struct Style: ExpressibleByArrayLiteral, _ExpressibleByArrayLiteral, Clon
 
     // Build the ANSI prefix codes
     func codes() -> String {
-        var result = "";
+        var result = String();
         for option in self.options {
-            result = result + option.toAnsi();
+            result.append(option.toAnsi());
         }
         result
     }
@@ -104,7 +104,11 @@ public struct Style: ExpressibleByArrayLiteral, _ExpressibleByArrayLiteral, Clon
     // Callable subscript: style("text") -> String
     public subscript[F](value: F) -> String where F: Formattable {
         get {
-            self.codes() + value.format() + "\x1b[0m"
+            var s = String();
+            s.append(self.codes());
+            s.append(value.format());
+            s.append("\x1b[0m");
+            s
         }
     }
 
@@ -121,7 +125,13 @@ public struct Style: ExpressibleByArrayLiteral, _ExpressibleByArrayLiteral, Clon
 
 // Move cursor to position (0-indexed)
 public func moveTo(x x: Int64, y y: Int64) -> String {
-    "\x1b[" + (y + 1).format() + ";" + (x + 1).format() + "H"
+    var s = String();
+    s.append("\x1b[");
+    s.append((y + 1).format());
+    s.append(";");
+    s.append((x + 1).format());
+    s.append("H");
+    s
 }
 
 // Move cursor to home position (0,0)
@@ -241,9 +251,9 @@ public struct Box: Cloneable {
 // ============================================
 
 public func repeatStr(s s: String, count count: Int64) -> String {
-    var result = "";
+    var result = String();
     for _ in Range[Int64](0, count) {
-        result = result + s;
+        result.append(s);
     }
     result
 }

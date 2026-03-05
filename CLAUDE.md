@@ -24,4 +24,10 @@ workflows.md
 
 ### Fluid Memory
 
-Whenever you get stuck, and figure something out, add a memory for it so you won't get stuck in that way again
+Whenever you get stuck, and figure something out, add a memory for it so you won't get stuck in that way again1
+
+# Code Quality
+
+Prioritize early returns, avoid code smells such as deep nesting and long functions
+Try to reuse existing code rather than rewriting new functions
+Code should be terse but include comments explaining what it does and why

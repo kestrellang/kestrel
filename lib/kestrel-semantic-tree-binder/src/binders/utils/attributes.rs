@@ -3,7 +3,8 @@
 //! This module provides functions to extract and resolve attributes from syntax nodes.
 
 use crate::diagnostics::{
-    BuiltinInvalidArgumentError, BuiltinRequiresArgumentError, ExternInvalidCallingConventionError,
+    BuiltinInvalidArgumentError, BuiltinRequiresArgumentError, BuiltinWrongKindError,
+    DuplicateBuiltinError, ExternInvalidCallingConventionError,
     ExternRequiresCallingConventionError, ExternUnknownCallingConventionError,
     PlatformInvalidArgumentError, PlatformRequiresArgumentError, PlatformUnknownPlatformError,
     UnknownAttributeWarning, UnknownLanguageFeatureError,
@@ -531,6 +532,51 @@ pub fn parse_platform_attribute(
             });
             PlatformParseResult::Error
         },
+    }
+}
+
+/// Validate a @builtin attribute: check kind matches and no duplicate registration.
+///
+/// This is the shared logic for struct, enum, protocol, function, and type alias binders.
+/// The `kind_check` predicate tests whether the feature's kind matches the declaration,
+/// and `registry_lookup` retrieves any existing registration for duplicate detection.
+pub fn validate_builtin_attribute(
+    symbol: &std::sync::Arc<dyn semantic_tree::symbol::Symbol<kestrel_semantic_tree::language::KestrelLanguage>>,
+    attributes: &AttributesBehavior,
+    source: &str,
+    context: &mut crate::declaration_binder::BindingContext,
+    actual_kind: &str,
+    kind_check: impl Fn(&kestrel_semantic_tree::builtins::BuiltinKind) -> bool,
+    registry_lookup: impl Fn(LanguageFeature) -> Option<semantic_tree::symbol::SymbolId>,
+) {
+    let feature = match parse_builtin_attribute(attributes, source, context.diagnostics) {
+        BuiltinParseResult::Success(f) => f,
+        BuiltinParseResult::NotBuiltin | BuiltinParseResult::Error => return,
+    };
+
+    let definition = feature.definition();
+    let attr_span = attributes
+        .get_kind(AttributeKind::Builtin)
+        .map(|a| a.span.clone())
+        .unwrap_or_else(|| symbol.metadata().span().clone());
+
+    if !kind_check(&definition.kind) {
+        context.diagnostics.throw(BuiltinWrongKindError {
+            span: attr_span,
+            feature_name: feature.name().to_string(),
+            expected_kind: definition.kind.kind_name().to_string(),
+            actual_kind: actual_kind.to_string(),
+        });
+        return;
+    }
+
+    let symbol_id = symbol.metadata().id();
+    let existing = registry_lookup(feature);
+    if existing.is_some() && existing != Some(symbol_id) {
+        context.diagnostics.throw(DuplicateBuiltinError {
+            span: attr_span,
+            feature_name: feature.name().to_string(),
+        });
     }
 }
 

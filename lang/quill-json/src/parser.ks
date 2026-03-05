@@ -545,7 +545,7 @@ func parseFloat64(s: String) -> Optional[Float64] {
     var fracDiv: Float64 = 1.0;
     if i < len {
         let dotByte = s.byteAtUnchecked(i);
-        if Int64(from: dotByte) == 46 { // '.'
+        if dotByte == 46 { // '.'
             i = i + 1;
             while i < len {
                 let b = Int64(from: s.byteAtUnchecked(i));
@@ -564,12 +564,12 @@ func parseFloat64(s: String) -> Optional[Float64] {
 
     // Exponent part
     if i < len {
-        let eByte = Int64(from: s.byteAtUnchecked(i));
+        let eByte = s.byteAtUnchecked(i);
         if eByte == 101 or eByte == 69 { // 'e' or 'E'
             i = i + 1;
             var expNeg = false;
             if i < len {
-                let signByte = Int64(from: s.byteAtUnchecked(i));
+                let signByte = s.byteAtUnchecked(i);
                 if signByte == 43 { // '+'
                     i = i + 1
                 } else if signByte == 45 { // '-'

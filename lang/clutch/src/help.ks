@@ -23,27 +23,27 @@ public func generateHelp(
     buf.append(name);
     match version {
         .Some(v) => {
-            buf.appendByte(32); // space
+            buf.append(" ");
             buf.append(v)
         },
         .None => {}
     }
-    buf.appendByte(10); // newline
+    buf.append("\n");
 
     // About
     match about {
         .Some(a) => {
             buf.append(a);
-            buf.appendByte(10)
+            buf.append("\n")
         },
         .None => {}
     }
 
-    buf.appendByte(10);
+    buf.append("\n");
 
     // USAGE line
     buf.append("USAGE:");
-    buf.appendByte(10);
+    buf.append("\n");
     buf.append("    ");
     buf.append(name);
 
@@ -66,15 +66,15 @@ public func generateHelp(
     while i < args.count {
         let arg = args(unchecked: i);
         if arg.isPositional() {
-            buf.appendByte(32); // space
+            buf.append(" ");
             if arg.required {
-                buf.appendByte(60); // '<'
+                buf.append("<");
                 buf.append(arg.name);
-                buf.appendByte(62)  // '>'
+                buf.append(">")
             } else {
-                buf.appendByte(91); // '['
+                buf.append("[");
                 buf.append(arg.name);
-                buf.appendByte(93)  // ']'
+                buf.append("]")
             }
         }
         i = i + 1
@@ -84,13 +84,13 @@ public func generateHelp(
         buf.append(" [COMMAND]")
     }
 
-    buf.appendByte(10);
-    buf.appendByte(10);
+    buf.append("\n");
+    buf.append("\n");
 
     // OPTIONS section
     if hasOptions {
         buf.append("OPTIONS:");
-        buf.appendByte(10);
+        buf.append("\n");
 
         // First pass: compute max left column width
         var maxLeft: Int64 = 0;
@@ -121,7 +121,7 @@ public func generateHelp(
                 // Pad to alignment
                 var pad = padTo - left.byteCount;
                 while pad > 0 {
-                    buf.appendByte(32); // space
+                    buf.append(" ");
                     pad = pad - 1
                 }
 
@@ -130,7 +130,7 @@ public func generateHelp(
                     .None => {}
                 }
 
-                buf.appendByte(10)
+                buf.append("\n")
             }
             i = i + 1
         }
@@ -141,13 +141,13 @@ public func generateHelp(
         buf.append(helpLeft);
         var helpPad = padTo - helpLeft.byteCount;
         while helpPad > 0 {
-            buf.appendByte(32);
+            buf.append(" ");
             helpPad = helpPad - 1
         }
         buf.append("Print help");
-        buf.appendByte(10);
+        buf.append("\n");
 
-        buf.appendByte(10)
+        buf.append("\n")
     }
 
     // ARGS section (positionals)
@@ -163,7 +163,7 @@ public func generateHelp(
 
     if hasPositionals {
         buf.append("ARGS:");
-        buf.appendByte(10);
+        buf.append("\n");
 
         // Compute max name width
         var maxName: Int64 = 0;
@@ -183,21 +183,21 @@ public func generateHelp(
             if arg.isPositional() {
                 buf.append("    ");
                 if arg.required {
-                    buf.appendByte(60); // '<'
+                    buf.append("<");
                     buf.append(arg.name);
-                    buf.appendByte(62); // '>'
+                    buf.append(">");
                     var np = namePadTo - arg.name.byteCount - 2;
                     while np > 0 {
-                        buf.appendByte(32);
+                        buf.append(" ");
                         np = np - 1
                     }
                 } else {
-                    buf.appendByte(91); // '['
+                    buf.append("[");
                     buf.append(arg.name);
-                    buf.appendByte(93); // ']'
+                    buf.append("]");
                     var np = namePadTo - arg.name.byteCount - 2;
                     while np > 0 {
-                        buf.appendByte(32);
+                        buf.append(" ");
                         np = np - 1
                     }
                 }
@@ -207,18 +207,18 @@ public func generateHelp(
                     .None => {}
                 }
 
-                buf.appendByte(10)
+                buf.append("\n")
             }
             i = i + 1
         }
 
-        buf.appendByte(10)
+        buf.append("\n")
     }
 
     // SUBCOMMANDS section
     if subcommandNames.count > 0 {
         buf.append("COMMANDS:");
-        buf.appendByte(10);
+        buf.append("\n");
 
         // Compute max subcommand name width
         var maxSubName: Int64 = 0;
@@ -240,7 +240,7 @@ public func generateHelp(
 
             var sp = subPadTo - sn.byteCount;
             while sp > 0 {
-                buf.appendByte(32);
+                buf.append(" ");
                 sp = sp - 1
             }
 
@@ -248,11 +248,11 @@ public func generateHelp(
                 buf.append(subcommandAbouts(unchecked: i))
             }
 
-            buf.appendByte(10);
+            buf.append("\n");
             i = i + 1
         }
 
-        buf.appendByte(10)
+        buf.append("\n")
     }
 
     buf
@@ -307,7 +307,7 @@ func formatLeftColumn(arg: Arg) -> String {
 
     match arg.shortFlag {
         .Some(s) => {
-            buf.appendByte(45); // '-'
+            buf.append("-");
             buf.append(s)
         },
         .None => {}
@@ -321,8 +321,7 @@ func formatLeftColumn(arg: Arg) -> String {
                 },
                 .None => {}
             }
-            buf.appendByte(45); // '-'
-            buf.appendByte(45); // '-'
+            buf.append("--");
             buf.append(l)
         },
         .None => {}
@@ -330,13 +329,13 @@ func formatLeftColumn(arg: Arg) -> String {
 
     // Value placeholder for options
     if arg.isOption() {
-        buf.appendByte(32); // space
-        buf.appendByte(60); // '<'
+        buf.append(" ");
+        buf.append("<");
         match arg.valueName {
             .Some(v) => buf.append(v),
             .None => buf.append("VALUE")
         }
-        buf.appendByte(62) // '>'
+        buf.append(">")
     }
 
     buf

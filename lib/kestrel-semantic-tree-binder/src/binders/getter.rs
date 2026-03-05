@@ -181,52 +181,8 @@ fn resolve_getter_body(
 /// Returns the concrete type of the containing struct/enum (grandparent of the getter).
 /// The hierarchy is: Struct/Enum -> Field -> Getter
 fn get_self_type(symbol: &Arc<dyn Symbol<KestrelLanguage>>, model: &kestrel_semantic_model::SemanticModel) -> Option<Ty> {
-    use kestrel_semantic_model::ExtensionTargetFor;
-    use kestrel_semantic_tree::behavior::generics::GenericsBehavior;
-    use kestrel_semantic_tree::symbol::enum_symbol::EnumSymbol;
-    use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
-    use kestrel_semantic_tree::ty::Substitutions;
-
-    // Getter's parent is Field, Field's parent is Struct/Enum/Extension
+    // Getter's parent is Field, Field's parent is the type container
     let field = symbol.metadata().parent()?;
     let type_parent = field.metadata().parent()?;
-    let type_span = type_parent.metadata().span().clone();
-
-    match type_parent.metadata().kind() {
-        KestrelSymbolKind::Struct => {
-            // Create concrete struct type with type parameters mapping to themselves
-            let struct_arc = Arc::clone(&type_parent)
-                .downcast_arc::<StructSymbol>()
-                .ok()?;
-            let mut substitutions = Substitutions::new();
-            if let Some(generics) = type_parent.metadata().get_behavior::<GenericsBehavior>() {
-                for param in generics.type_parameters() {
-                    let param_id = param.metadata().id();
-                    let param_ty = Ty::type_parameter(param.clone(), type_span.clone());
-                    substitutions.insert(param_id, param_ty);
-                }
-            }
-            Some(Ty::generic_struct(struct_arc, substitutions, type_span))
-        },
-        KestrelSymbolKind::Enum => {
-            // Create concrete enum type with type parameters mapping to themselves
-            let enum_arc = Arc::clone(&type_parent).downcast_arc::<EnumSymbol>().ok()?;
-            let mut substitutions = Substitutions::new();
-            if let Some(generics) = type_parent.metadata().get_behavior::<GenericsBehavior>() {
-                for param in generics.type_parameters() {
-                    let param_id = param.metadata().id();
-                    let param_ty = Ty::type_parameter(param.clone(), type_span.clone());
-                    substitutions.insert(param_id, param_ty);
-                }
-            }
-            Some(Ty::generic_enum(enum_arc, substitutions, type_span))
-        },
-        KestrelSymbolKind::Extension => {
-            // For extension properties, use the target type via query (order-independent)
-            model.query(ExtensionTargetFor {
-                symbol_id: type_parent.metadata().id(),
-            })
-        },
-        _ => None,
-    }
+    crate::binders::utils::self_type::self_type_for_parent(&type_parent, model)
 }

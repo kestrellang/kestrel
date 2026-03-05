@@ -84,7 +84,7 @@ public func resolveRegistryUrl(projectUrl projectUrl: Optional[String]) -> Strin
 public func splitPackageName(name name: String) -> Optional[(String, String)] {
     var i: Int64 = 0;
     while i < name.byteCount {
-        if name.byteAtUnchecked(i) == UInt8(intLiteral: 47) {
+        if name.byteAtUnchecked(i) == 47 {
             let org = name.substringBytes(from: 0, to: i);
             let pkg = name.substringBytes(from: i + 1, to: name.byteCount);
             return .Some((org, pkg))
@@ -98,7 +98,7 @@ public func splitPackageName(name name: String) -> Optional[(String, String)] {
 public func isRegistryName(name name: String) -> Bool {
     var i: Int64 = 0;
     while i < name.byteCount {
-        if name.byteAtUnchecked(i) == UInt8(intLiteral: 47) {
+        if name.byteAtUnchecked(i) == 47 {
             return true
         }
         i = i + 1

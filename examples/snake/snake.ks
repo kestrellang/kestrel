@@ -20,7 +20,7 @@ struct Config {
 // Styles
 // ============================================
 
-struct Styles : Cloneable {
+struct Styles {
     static var border: Style { [.White] }
     static var title: Style { [.Yellow, .Bold] }
     static var score: Style { [.White, .Bold] }
@@ -30,8 +30,19 @@ struct Styles : Cloneable {
     static var food: Style { [.Red, .Bold] }
     static var gameOver: Style { [.Red, .Bold] }
     static var prompt: Style { [.Yellow] }
+}
 
-    func clone() -> Styles { Styles() }
+// ============================================
+// Point
+// ============================================
+
+struct Point : Cloneable {
+    var x: Int64
+    var y: Int64
+
+    func clone() -> Point {
+        Point(x: self.x, y: self.y)
+    }
 }
 
 // ============================================
@@ -60,10 +71,8 @@ struct SnakeGame: not Copyable {
     var direction: Int64      // 0=up, 1=right, 2=down, 3=left
     var nextDirection: Int64  // Buffered direction to prevent 180-degree turns
 
-    // Body segments (parallel arrays for x and y coordinates)
-    var bodyX: Array[Int64]
-    var bodyY: Array[Int64]
-    var length: Int64
+    // Body segments
+    var body: Array[Point]
 
     // Food position
     var foodX: Int64
@@ -87,15 +96,10 @@ struct SnakeGame: not Copyable {
         self.nextDirection = 1;
 
         // Initialize body with 3 segments behind the head
-        self.bodyX = Array[Int64]();
-        self.bodyY = Array[Int64]();
-        self.bodyX.append(self.headX - 1);
-        self.bodyY.append(self.headY);
-        self.bodyX.append(self.headX - 2);
-        self.bodyY.append(self.headY);
-        self.bodyX.append(self.headX - 3);
-        self.bodyY.append(self.headY);
-        self.length = 3;
+        self.body = Array[Point]();
+        self.body.append(Point(x: self.headX - 1, y: self.headY));
+        self.body.append(Point(x: self.headX - 2, y: self.headY));
+        self.body.append(Point(x: self.headX - 3, y: self.headY));
 
         self.state = .Playing;
         self.score = 0;
@@ -158,14 +162,10 @@ struct SnakeGame: not Copyable {
 
     // Check if a position is part of the snake body
     func isBody(x x: Int64, y y: Int64) -> Bool {
-        var i: Int64 = 0;
-        while i < self.length {
-            let bx = self.bodyX(unchecked: i);
-            let by = self.bodyY(unchecked: i);
-            if bx == x and by == y {
+        for p in self.body {
+            if p.x == x and p.y == y {
                 return true;
             }
-            i = i + 1;
         }
         false
     }
@@ -260,23 +260,18 @@ struct SnakeGame: not Copyable {
                 if ateFood {
                     self.score = self.score + 10;
                     // Add old head position to front of body (snake grows)
-                    self.bodyX.insert(oldHeadX, at: 0);
-                    self.bodyY.insert(oldHeadY, at: 0);
-                    self.length = self.length + 1;
+                    self.body.insert(Point(x: oldHeadX, y: oldHeadY), at: 0);
                     // Spawn new food
                     self.spawnFood();
                 } else {
                     // Move body: shift all segments, add old head at front
-                    var i = self.length - 1;
+                    var i = self.body.count - 1;
                     while i > 0 {
-                        let prevX = self.bodyX(unchecked: i - 1);
-                        let prevY = self.bodyY(unchecked: i - 1);
-                        self.bodyX.setUnchecked(i, prevX);
-                        self.bodyY.setUnchecked(i, prevY);
+                        let prev = self.body(unchecked: i - 1);
+                        self.body.setUnchecked(i, prev);
                         i = i - 1;
                     }
-                    self.bodyX.setUnchecked(0, oldHeadX);
-                    self.bodyY.setUnchecked(0, oldHeadY);
+                    self.body.setUnchecked(0, Point(x: oldHeadX, y: oldHeadY));
                 }
             },
             .GameOver => {
@@ -298,15 +293,10 @@ struct SnakeGame: not Copyable {
         self.nextDirection = 1;
 
         // Clear and reinitialize body
-        self.bodyX = Array[Int64]();
-        self.bodyY = Array[Int64]();
-        self.bodyX.append(self.headX - 1);
-        self.bodyY.append(self.headY);
-        self.bodyX.append(self.headX - 2);
-        self.bodyY.append(self.headY);
-        self.bodyX.append(self.headX - 3);
-        self.bodyY.append(self.headY);
-        self.length = 3;
+        self.body = Array[Point]();
+        self.body.append(Point(x: self.headX - 1, y: self.headY));
+        self.body.append(Point(x: self.headX - 2, y: self.headY));
+        self.body.append(Point(x: self.headX - 3, y: self.headY));
 
         self.state = .Playing;
         self.score = 0;
@@ -387,15 +377,6 @@ struct SnakeGame: not Copyable {
         print(clearLine());
     }
 
-    func shouldQuit() -> Bool {
-        match self.state {
-            .GameOver => {
-                // Check if quit was requested (we need to re-check since we don't store it)
-                false
-            },
-            _ => false
-        }
-    }
 }
 
 // ============================================

@@ -141,7 +141,10 @@ func handleInstall(matches matches: ArgMatches) {
             }
         },
         .Err(e) => {
-            let _ = eprintln("error: " + e.description());
+            var errMsg = String();
+            errMsg.append("error: ");
+            errMsg.append(e.description());
+            let _ = eprintln(errMsg);
         }
     }
 }
@@ -162,7 +165,10 @@ func handleDefault(matches matches: ArgMatches) {
     match setDefault(toolchainName: toolchainName) {
         .Ok(_) => {},
         .Err(e) => {
-            let _ = eprintln("error: " + e.description());
+            var errMsg = String();
+            errMsg.append("error: ");
+            errMsg.append(e.description());
+            let _ = eprintln(errMsg);
         }
     }
 }
@@ -171,7 +177,10 @@ func handleList() {
     match listToolchains() {
         .Ok(_) => {},
         .Err(e) => {
-            let _ = eprintln("error: " + e.description());
+            var errMsg = String();
+            errMsg.append("error: ");
+            errMsg.append(e.description());
+            let _ = eprintln(errMsg);
         }
     }
 }
@@ -180,7 +189,10 @@ func handleUpdate() {
     match updateToolchains() {
         .Ok(_) => {},
         .Err(e) => {
-            let _ = eprintln("error: " + e.description());
+            var errMsg = String();
+            errMsg.append("error: ");
+            errMsg.append(e.description());
+            let _ = eprintln(errMsg);
         }
     }
 }
@@ -201,7 +213,10 @@ func handleRemove(matches matches: ArgMatches) {
     match removeToolchain(toolchainName: toolchainName) {
         .Ok(_) => {},
         .Err(e) => {
-            let _ = eprintln("error: " + e.description());
+            var errMsg = String();
+            errMsg.append("error: ");
+            errMsg.append(e.description());
+            let _ = eprintln(errMsg);
         }
     }
 }
@@ -210,7 +225,10 @@ func handleShow() {
     match showActive() {
         .Ok(_) => {},
         .Err(e) => {
-            let _ = eprintln("error: " + e.description());
+            var errMsg = String();
+            errMsg.append("error: ");
+            errMsg.append(e.description());
+            let _ = eprintln(errMsg);
         }
     }
 }
@@ -225,7 +243,10 @@ func handleSelf(matches matches: ArgMatches) {
                     match selfUpdate() {
                         .Ok(_) => {},
                         .Err(e) => {
-                            let _ = eprintln("error: " + e.description());
+                            var errMsg = String();
+                            errMsg.append("error: ");
+                            errMsg.append(e.description());
+                            let _ = eprintln(errMsg);
                         }
                     }
                     return

@@ -36,7 +36,7 @@ func emitTable(obj: Dictionary[String, Value], mutating buf: String, prefix: Str
                 emitKey(key, buf);
                 buf.append(" = ");
                 emitTomlValue(val, buf);
-                buf.appendByte(10)  // '\n'
+                buf.append("\n")
             }
         }
     }
@@ -50,11 +50,11 @@ func emitTable(obj: Dictionary[String, Value], mutating buf: String, prefix: Str
                 } else {
                     key
                 };
-                buf.appendByte(10); // blank line before section
-                buf.appendByte(91); // '['
+                buf.append("\n");
+                buf.append("[");
                 buf.append(fullKey);
-                buf.appendByte(93); // ']'
-                buf.appendByte(10); // '\n'
+                buf.append("]");
+                buf.append("\n");
                 emitTable(subObj, buf, fullKey)
             },
             _ => {}  // already emitted
@@ -85,7 +85,7 @@ func emitTomlValue(value: Value, mutating buf: String) {
             var i: Int64 = 0;
             let len = s.byteCount;
             while i < len {
-                let b = Int64(from: s.byteAtUnchecked(i));
+                let b = s.byteAtUnchecked(i);
                 if b == 46 or b == 101 or b == 69 {
                     hasDot = true
                 }
@@ -97,7 +97,7 @@ func emitTomlValue(value: Value, mutating buf: String) {
         },
         .Str(s) => emitTomlString(s, buf),
         .Arr(arr) => {
-            buf.appendByte(91); // '['
+            buf.append("[");
             var i: Int64 = 0;
             while i < arr.count {
                 if i > 0 {
@@ -106,7 +106,7 @@ func emitTomlValue(value: Value, mutating buf: String) {
                 emitTomlValue(arr(unchecked: i), buf);
                 i = i + 1
             }
-            buf.appendByte(93)  // ']'
+            buf.append("]")
         },
         .Obj(_) => {
             // Nested objects shouldn't appear as inline values in our emitter
@@ -137,11 +137,11 @@ func isBareKey(s: String) -> Bool {
     }
     var i: Int64 = 0;
     while i < len {
-        let b = Int64(from: s.byteAtUnchecked(i));
+        let b = s.byteAtUnchecked(i);
         let isAlpha = (b >= 65 and b <= 90) or (b >= 97 and b <= 122);
         let isDigit = b >= 48 and b <= 57;
-        let isDash = b == 45;  // '-'
-        let isUnderscore = b == 95;  // '_'
+        let isDash = b == 45;
+        let isUnderscore = b == 95;
         if isAlpha or isDigit or isDash or isUnderscore {
             i = i + 1
         } else {
@@ -153,34 +153,27 @@ func isBareKey(s: String) -> Bool {
 
 /// Emits a quoted TOML string with escape sequences.
 func emitTomlString(s: String, mutating buf: String) {
-    buf.appendByte(34); // '"'
+    buf.append("\"");
     var i: Int64 = 0;
     let len = s.byteCount;
     while i < len {
         let b = s.byteAtUnchecked(i);
-        let n = Int64(from: b);
-        if n == 34 { // '"'
-            buf.appendByte(92);
-            buf.appendByte(34)
-        } else if n == 92 { // '\'
-            buf.appendByte(92);
-            buf.appendByte(92)
-        } else if n == 10 { // newline
-            buf.appendByte(92);
-            buf.appendByte(110)
-        } else if n == 13 { // carriage return
-            buf.appendByte(92);
-            buf.appendByte(114)
-        } else if n == 9 { // tab
-            buf.appendByte(92);
-            buf.appendByte(116)
-        } else if n == 8 { // backspace
-            buf.appendByte(92);
-            buf.appendByte(98)
+        if b == 34 {
+            buf.append("\\\"")
+        } else if b == 92 {
+            buf.append("\\\\")
+        } else if b == 10 {
+            buf.append("\\n")
+        } else if b == 13 {
+            buf.append("\\r")
+        } else if b == 9 {
+            buf.append("\\t")
+        } else if b == 8 {
+            buf.append("\\b")
         } else {
             buf.appendByte(b)
         }
         i = i + 1
     }
-    buf.appendByte(34) // '"'
+    buf.append("\"")
 }

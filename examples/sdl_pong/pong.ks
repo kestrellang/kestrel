@@ -100,7 +100,7 @@ struct Paddle {
     }
 
     func containsY(y: Float64) -> Bool {
-        y >= self.y and y <= self.y + Float64(intLiteral: self.height.raw)
+        y >= self.y and y <= self.y + Float64(from: self.height)
     }
 
     func render(renderer: Renderer) {

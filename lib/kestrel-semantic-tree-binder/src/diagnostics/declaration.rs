@@ -42,8 +42,8 @@ pub struct TypeAliasRequiresTypeError {
 pub enum TypeAliasContext {
     /// Type alias at module level (requires `= Type`)
     ModuleLevel,
-    /// Type alias in struct body without conformance (requires `= Type`)
-    StructWithoutConformance,
+    /// Type alias in struct/enum body without conformance (requires `= Type`)
+    ConcreteTypeWithoutConformance,
     /// Type alias in extension body without conformance (requires `= Type`)
     ExtensionWithoutConformance,
 }
@@ -55,7 +55,7 @@ impl IntoDiagnostic for TypeAliasRequiresTypeError {
                 format!("type alias requires a type: '{}'", self.name),
                 "must specify a type",
             ),
-            TypeAliasContext::StructWithoutConformance => (
+            TypeAliasContext::ConcreteTypeWithoutConformance => (
                 format!("associated type binding requires a type: '{}'", self.name),
                 "must specify a type with = Type",
             ),

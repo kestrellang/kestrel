@@ -497,7 +497,7 @@ fn unify(
     // This helps unify types like `I.Iter.Item` with `T` when constraints equate them.
     let norm_a = normalize_with_constraints_if_needed(ctx, &ty_a);
     let norm_b = normalize_with_constraints_if_needed(ctx, &ty_b);
-    if norm_a.to_string() != ty_a.to_string() || norm_b.to_string() != ty_b.to_string() {
+    if norm_a.id() != ty_a.id() || norm_b.id() != ty_b.id() {
         return unify(ctx, norm_a.id(), norm_b.id(), span);
     }
 

@@ -36,14 +36,11 @@ public func sendRequest[S](
     req.append(" ");
     req.append(url.requestPath());
     req.append(" HTTP/1.1");
-    req.appendByte(13);
-    req.appendByte(10);
+    req.append("\r\n");
 
-    // Host header
     req.append("Host: ");
     req.append(url.hostHeader());
-    req.appendByte(13);
-    req.appendByte(10);
+    req.append("\r\n");
 
     // User headers
     var hi: Int64 = 0;
@@ -52,8 +49,7 @@ public func sendRequest[S](
         req.append(pair.0);
         req.append(": ");
         req.append(pair.1);
-        req.appendByte(13);
-        req.appendByte(10);
+        req.append("\r\n");
         hi = hi + 1
     }
 
@@ -68,8 +64,7 @@ public func sendRequest[S](
                 match b {
                     .Form(_) => {
                         req.append("Content-Type: application/x-www-form-urlencoded");
-                        req.appendByte(13);
-                        req.appendByte(10)
+                        req.append("\r\n")
                     },
                     _ => {}
                 }
@@ -78,20 +73,15 @@ public func sendRequest[S](
             // Content-Length
             req.append("Content-Length: ");
             req.append(bodyBytes.count.format());
-            req.appendByte(13);
-            req.appendByte(10)
+            req.append("\r\n")
         },
         .None => {}
     }
 
-    // Connection: close
     req.append("Connection: close");
-    req.appendByte(13);
-    req.appendByte(10);
+    req.append("\r\n");
 
-    // End of headers
-    req.appendByte(13);
-    req.appendByte(10);
+    req.append("\r\n");
 
     // Send headers
     var sendStream = stream;

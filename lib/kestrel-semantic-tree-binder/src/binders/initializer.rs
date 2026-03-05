@@ -4,7 +4,6 @@ use kestrel_semantic_tree::behavior::callable::{CallableBehavior, ReceiverKind};
 use kestrel_semantic_tree::behavior::generics::GenericsBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::function::Parameter;
-use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::ty::Ty;
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
@@ -152,15 +151,10 @@ fn resolve_initializer_body(
     // - Mutating: mutable (read-write, but caller keeps ownership)
     // - Consuming: mutable (takes ownership, can modify)
     for param in params {
-        use kestrel_semantic_tree::behavior::callable::ParameterAccessMode;
         let param_ty = param.ty.clone();
         let param_name = param.bind_name.value.clone();
         let param_span = param.bind_name.span.clone();
-        let is_mutable = match param.access_mode {
-            ParameterAccessMode::Borrow => false,
-            ParameterAccessMode::Mutating => true,
-            ParameterAccessMode::Consuming => true,
-        };
+        let is_mutable = param.access_mode.is_mutable();
         // Add to local scope
         local_scope.bind(
             param_name.clone(),
@@ -194,34 +188,6 @@ fn resolve_initializer_body(
 ///
 /// Returns the concrete type of the containing struct with type parameters.
 fn get_self_type(symbol: &Arc<dyn Symbol<KestrelLanguage>>, model: &kestrel_semantic_model::SemanticModel) -> Option<Ty> {
-    use kestrel_semantic_model::ExtensionTargetFor;
-    use kestrel_semantic_tree::behavior::generics::GenericsBehavior;
-    use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
-    use kestrel_semantic_tree::ty::Substitutions;
-
     let parent = symbol.metadata().parent()?;
-    let parent_span = parent.metadata().span().clone();
-
-    match parent.metadata().kind() {
-        KestrelSymbolKind::Struct => {
-            // Create concrete struct type with type parameters mapping to themselves
-            let struct_arc = Arc::clone(&parent).downcast_arc::<StructSymbol>().ok()?;
-            let mut substitutions = Substitutions::new();
-            if let Some(generics) = parent.metadata().get_behavior::<GenericsBehavior>() {
-                for param in generics.type_parameters() {
-                    let param_id = param.metadata().id();
-                    let param_ty = Ty::type_parameter(param.clone(), parent_span.clone());
-                    substitutions.insert(param_id, param_ty);
-                }
-            }
-            Some(Ty::generic_struct(struct_arc, substitutions, parent_span))
-        },
-        KestrelSymbolKind::Extension => {
-            // For extension initializers, get the target type via query (order-independent)
-            model.query(ExtensionTargetFor {
-                symbol_id: parent.metadata().id(),
-            })
-        },
-        _ => None,
-    }
+    crate::binders::utils::self_type::self_type_for_parent(&parent, model)
 }

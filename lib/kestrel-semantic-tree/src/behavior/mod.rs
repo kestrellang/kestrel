@@ -61,6 +61,7 @@ pub enum KestrelBehaviorKind {
     MemberAccess,
     MethodContainer,
     NamespaceScope,
+    QualifiedBinding,
     ResolvedExecutable,
     Static,
     Subscript,

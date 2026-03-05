@@ -6,9 +6,8 @@ use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_syntax_tree::SyntaxNode;
 use semantic_tree::symbol::Symbol;
 
-use crate::binders::utils::attributes::{BuiltinParseResult, parse_builtin_attribute};
 use crate::declaration_binder::{BindingContext, DeclarationBinder};
-use crate::diagnostics::{BuiltinWrongKindError, DuplicateBuiltinError, NotAProtocolContext};
+use crate::diagnostics::NotAProtocolContext;
 use crate::syntax::helpers::resolve_conformance_list;
 
 /// Binder for enum declarations
@@ -91,38 +90,13 @@ impl EnumBinder {
         source: &str,
         context: &mut BindingContext,
     ) {
-        let feature = match parse_builtin_attribute(attributes, source, context.diagnostics) {
-            BuiltinParseResult::Success(f) => f,
-            BuiltinParseResult::NotBuiltin | BuiltinParseResult::Error => return,
-        };
-
-        let definition = feature.definition();
-        let attr_span = attributes
-            .get_kind(kestrel_semantic_tree::attributes::AttributeKind::Builtin)
-            .map(|a| a.span.clone())
-            .unwrap_or_else(|| symbol.metadata().span().clone());
-
-        // Validate: feature must expect an enum
-        if !definition.kind.is_enum() {
-            context.diagnostics.throw(BuiltinWrongKindError {
-                span: attr_span,
-                feature_name: feature.name().to_string(),
-                expected_kind: definition.kind.kind_name().to_string(),
-                actual_kind: "enum".to_string(),
-            });
-            return;
-        }
-
-        // Registration happens in the pre-pass (register_all_builtins).
-        // Here we only check for duplicates (a different symbol claiming the same feature).
-        let symbol_id = symbol.metadata().id();
-        let existing = context.model.builtin_registry().builtin_enum(feature);
-        if existing.is_some() && existing != Some(symbol_id) {
-            context.diagnostics.throw(DuplicateBuiltinError {
-                span: attr_span,
-                feature_name: feature.name().to_string(),
-            });
-        }
+        let registry = context.model.builtin_registry().clone();
+        crate::binders::utils::attributes::validate_builtin_attribute(
+            symbol, attributes, source, context,
+            "enum",
+            |k| k.is_enum(),
+            |f| registry.builtin_enum(f),
+        );
     }
 
 }
