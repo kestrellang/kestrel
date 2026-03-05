@@ -237,7 +237,8 @@ fn resolve_extension_target(
             ty_span.clone(),
             None,
         ));
-        // Register the synthetic Self with the symbol registry so SymbolFor can find it
+        // Register the synthetic Self so SymbolFor can find it (needed by ResolveTypePath
+        // when resolving Self.Item in child type aliases).
         ctx.model.registry().register(self_param.clone());
         ctx.model.invalidate_cache();
 

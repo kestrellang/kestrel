@@ -1,24 +1,14 @@
 use std::sync::Arc;
 
 use kestrel_semantic_tree::behavior::attributes::AttributesBehavior;
-use kestrel_semantic_tree::behavior::callable::CallableBehavior;
-use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
 use kestrel_semantic_tree::behavior::copy_semantics::CopySemanticsBehavior;
-use kestrel_semantic_tree::builtins::BuiltinKind;
 use kestrel_semantic_tree::language::KestrelLanguage;
-use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
-use kestrel_semantic_tree::ty::TyKind;
-use kestrel_semantic_type_inference::TypeOracle;
 use kestrel_syntax_tree::SyntaxNode;
 use semantic_tree::symbol::Symbol;
 
 use crate::binders::utils::attributes::{BuiltinParseResult, parse_builtin_attribute};
 use crate::declaration_binder::{BindingContext, DeclarationBinder};
-use crate::diagnostics::{
-    BuiltinWrongKindError, DuplicateBuiltinError,
-    FieldsNotConformingToProtocolError, NonConformingField, NotAProtocolContext,
-    ProtocolDisallowsEnumConformanceError,
-};
+use crate::diagnostics::{BuiltinWrongKindError, DuplicateBuiltinError, NotAProtocolContext};
 use crate::syntax::helpers::resolve_conformance_list;
 
 /// Binder for enum declarations
@@ -88,16 +78,8 @@ impl DeclarationBinder for EnumBinder {
             .metadata()
             .add_behavior(CopySemanticsBehavior::new(semantics));
 
-        // Emit diagnostic if enum has cloneable payload but doesn't conform to Cloneable
-        crate::binders::copy_semantics_diagnostic::check_cloneable_field_diagnostic(
-            symbol, "enum", context,
-        );
-
-        // Validate that protocols with disallow_enum_conformance are not conformed to
-        Self::validate_disallowed_conformances(symbol, context);
-
-        // Validate that protocols with requires_fields_conform have all payloads conforming
-        Self::validate_protocol_field_conformances(symbol, context);
+        // Diagnostic validations (cloneable field, disallowed conformance,
+        // protocol field conformances) are now in analyzers.
     }
 }
 
@@ -143,132 +125,4 @@ impl EnumBinder {
         }
     }
 
-    /// Validate that protocols with disallow_enum_conformance are not conformed to by this enum.
-    fn validate_disallowed_conformances(
-        symbol: &Arc<dyn Symbol<KestrelLanguage>>,
-        context: &mut BindingContext,
-    ) {
-        let Some(conformances) = symbol.metadata().get_behavior::<ConformancesBehavior>() else {
-            return;
-        };
-
-        for conformance_ty in conformances.conformances() {
-            let TyKind::Protocol {
-                symbol: protocol_sym,
-                ..
-            } = conformance_ty.kind()
-            else {
-                continue;
-            };
-
-            let protocol_id = protocol_sym.metadata().id();
-
-            // Check if this is a builtin protocol with disallow_enum_conformance
-            let Some(feature) = context
-                .model
-                .builtin_registry()
-                .protocol_feature(protocol_id)
-            else {
-                continue;
-            };
-
-            let definition = feature.definition();
-            if let BuiltinKind::Protocol {
-                disallow_enum_conformance: true,
-                ..
-            } = definition.kind
-            {
-                context
-                    .diagnostics
-                    .throw(ProtocolDisallowsEnumConformanceError {
-                        span: symbol.metadata().span().clone(),
-                        enum_name: symbol.metadata().name().value.clone(),
-                        protocol_name: protocol_sym.metadata().name().value.clone(),
-                    });
-            }
-        }
-    }
-
-    /// Validate that protocols with requires_fields_conform have all case payloads conforming.
-    ///
-    /// For each protocol that the enum conforms to, if the protocol has the
-    /// `requires_fields_conform` flag set, all enum case payloads must also conform to that protocol.
-    fn validate_protocol_field_conformances(
-        symbol: &Arc<dyn Symbol<KestrelLanguage>>,
-        context: &mut BindingContext,
-    ) {
-        let Some(conformances) = symbol.metadata().get_behavior::<ConformancesBehavior>() else {
-            return;
-        };
-
-        // For each protocol conformance, check if it has requires_fields_conform flag
-        for conformance_ty in conformances.conformances() {
-            let TyKind::Protocol {
-                symbol: protocol_sym,
-                ..
-            } = conformance_ty.kind()
-            else {
-                continue;
-            };
-
-            let protocol_id = protocol_sym.metadata().id();
-
-            // Check if this is a builtin protocol with requires_fields_conform
-            let Some(feature) = context
-                .model
-                .builtin_registry()
-                .protocol_feature(protocol_id)
-            else {
-                continue;
-            };
-
-            let definition = feature.definition();
-            let BuiltinKind::Protocol {
-                requires_fields_conform: true,
-                ..
-            } = definition.kind
-            else {
-                continue;
-            };
-
-            // Collect non-conforming case payloads
-            let mut non_conforming: Vec<NonConformingField> = Vec::new();
-
-            for case in symbol
-                .metadata()
-                .children()
-                .iter()
-                .filter(|c| c.metadata().kind() == KestrelSymbolKind::EnumCase)
-            {
-                // Enum cases with payloads have a CallableBehavior with parameter types
-                if let Some(callable) = case.metadata().get_behavior::<CallableBehavior>() {
-                    for param in callable.parameters() {
-                        if !context.model.conforms_to(&param.ty, protocol_id) {
-                            non_conforming.push(NonConformingField {
-                                field_name: format!(
-                                    "{}.{}",
-                                    case.metadata().name().value,
-                                    param.bind_name.value
-                                ),
-                                field_ty: param.ty.to_string(),
-                                span: case.metadata().span().clone(),
-                            });
-                        }
-                    }
-                }
-            }
-
-            if !non_conforming.is_empty() {
-                context
-                    .diagnostics
-                    .throw(FieldsNotConformingToProtocolError {
-                        type_span: symbol.metadata().span().clone(),
-                        type_name: symbol.metadata().name().value.clone(),
-                        type_kind: "enum",
-                        protocol_name: protocol_sym.metadata().name().value.clone(),
-                        non_conforming_fields: non_conforming,
-                    });
-            }
-        }
-    }
 }

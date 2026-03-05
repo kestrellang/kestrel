@@ -14,17 +14,19 @@ pub use runner::{run, run_all};
 /// This list grows as validators are migrated from the builder.
 pub fn default_analyzers() -> Vec<Box<dyn Analyzer>> {
     use analyzers::{
-        AssignmentValidationAnalyzer, ClosureAnalyzer, ConformanceAnalyzer,
-        ConstraintCycleAnalyzer, DeadCodeAnalyzer, DefiniteAssignmentAnalyzer,
-        DuplicateCallableAnalyzer, DuplicateCaseAnalyzer, DuplicateDeinitAnalyzer,
-        DuplicateLabelAnalyzer,
+        AssignmentValidationAnalyzer, BuiltinMarkerProtocolAnalyzer, CloneableFieldAnalyzer,
+        ClosureAnalyzer, ConformanceAnalyzer, ConstraintCycleAnalyzer, DeadCodeAnalyzer,
+        DefiniteAssignmentAnalyzer, DisallowedConformanceAnalyzer, DuplicateCallableAnalyzer,
+        DuplicateCaseAnalyzer, DuplicateDeinitAnalyzer, DuplicateLabelAnalyzer,
         DuplicateSymbolAnalyzer, ExhaustiveReturnAnalyzer, ExhaustivenessAnalyzer,
-        ExtensionConflictAnalyzer, FieldAnalyzer, ForLoopPatternAnalyzer, FunctionBodyAnalyzer,
-        GenericsAnalyzer, GuardLetDivergenceAnalyzer, ImportAnalyzer,
-        InitializerVerificationAnalyzer, IrrefutablePatternAnalyzer, ProtocolMethodAnalyzer,
-        RecursiveEnumAnalyzer, RefutablePatternAnalyzer, StaticContextAnalyzer,
-        StructCycleAnalyzer, SubscriptValidationAnalyzer, TypeAliasCycleAnalyzer,
-        TypeCheckAnalyzer, TypeInferenceAnalyzer, VisibilityConsistencyAnalyzer,
+        ExternFFISafeAnalyzer, ExtensionConflictAnalyzer, FieldAnalyzer, ForLoopPatternAnalyzer,
+        FunctionBodyAnalyzer, GenericsAnalyzer, GuardLetDivergenceAnalyzer, ImportAnalyzer,
+        InitializerVerificationAnalyzer, IrrefutablePatternAnalyzer,
+        ParentProtocolConformanceAnalyzer, ProtocolFieldConformanceAnalyzer,
+        ProtocolMethodAnalyzer, RecursiveEnumAnalyzer, RefutablePatternAnalyzer,
+        StaticContextAnalyzer, StructCycleAnalyzer, SubscriptValidationAnalyzer,
+        TypeAliasCycleAnalyzer, TypeCheckAnalyzer, TypeInferenceAnalyzer,
+        VisibilityConsistencyAnalyzer,
     };
 
     // Match historical order from builder ValidationRunner where possible
@@ -55,6 +57,12 @@ pub fn default_analyzers() -> Vec<Box<dyn Analyzer>> {
         Box::new(SubscriptValidationAnalyzer::new()),
         Box::new(ProtocolMethodAnalyzer::new()),
         Box::new(StaticContextAnalyzer::new()),
+        Box::new(BuiltinMarkerProtocolAnalyzer::new()),
+        Box::new(ExternFFISafeAnalyzer::new()),
+        Box::new(ProtocolFieldConformanceAnalyzer::new()),
+        Box::new(CloneableFieldAnalyzer::new()),
+        Box::new(ParentProtocolConformanceAnalyzer::new()),
+        Box::new(DisallowedConformanceAnalyzer::new()),
         Box::new(DuplicateDeinitAnalyzer::new()),
         Box::new(DuplicateSymbolAnalyzer::new()),
         Box::new(DuplicateCallableAnalyzer::new()),

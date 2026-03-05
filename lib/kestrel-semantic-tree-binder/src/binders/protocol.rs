@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use kestrel_semantic_tree::behavior::attributes::AttributesBehavior;
-use kestrel_semantic_tree::builtins::BuiltinKind;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::protocol::ProtocolSymbol;
 use kestrel_syntax_tree::SyntaxNode;
@@ -10,9 +9,7 @@ use semantic_tree::symbol::Symbol;
 use crate::binders::flatten_protocol;
 use crate::binders::utils::attributes::{BuiltinParseResult, parse_builtin_attribute};
 use crate::declaration_binder::{BindingContext, DeclarationBinder};
-use crate::diagnostics::{
-    BuiltinMustBeMarkerError, BuiltinWrongKindError, DuplicateBuiltinError, NotAProtocolContext,
-};
+use crate::diagnostics::{BuiltinWrongKindError, DuplicateBuiltinError, NotAProtocolContext};
 use crate::syntax::helpers::resolve_conformance_list;
 
 /// Binder for protocol declarations
@@ -114,19 +111,7 @@ impl ProtocolBinder {
             return;
         }
 
-        // Validate: if must_be_marker, check that protocol has no required members
-        if let BuiltinKind::Protocol { must_be_marker, .. } = &definition.kind
-            && *must_be_marker
-            && !context.model.query(kestrel_semantic_model::IsMarkerProtocol {
-                protocol_id: symbol.metadata().id(),
-            })
-        {
-            context.diagnostics.throw(BuiltinMustBeMarkerError {
-                span: attr_span,
-                feature_name: feature.name().to_string(),
-            });
-            return;
-        }
+        // must_be_marker validation is now in BuiltinMarkerProtocolAnalyzer.
 
         // Registration happens in the pre-pass (register_all_builtins).
         // Here we only check for duplicates (a different symbol claiming the same feature).

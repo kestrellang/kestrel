@@ -1,23 +1,14 @@
 use std::sync::Arc;
 
 use kestrel_semantic_tree::behavior::attributes::AttributesBehavior;
-use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
 use kestrel_semantic_tree::behavior::copy_semantics::CopySemanticsBehavior;
-use kestrel_semantic_tree::behavior::typed::TypedBehavior;
-use kestrel_semantic_tree::builtins::BuiltinKind;
 use kestrel_semantic_tree::language::KestrelLanguage;
-use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
-use kestrel_semantic_tree::ty::TyKind;
-use kestrel_semantic_type_inference::TypeOracle;
 use kestrel_syntax_tree::SyntaxNode;
 use semantic_tree::symbol::Symbol;
 
 use crate::binders::utils::attributes::{BuiltinParseResult, parse_builtin_attribute};
 use crate::declaration_binder::{BindingContext, DeclarationBinder};
-use crate::diagnostics::{
-    BuiltinWrongKindError, DuplicateBuiltinError,
-    FieldsNotConformingToProtocolError, NonConformingField, NotAProtocolContext,
-};
+use crate::diagnostics::{BuiltinWrongKindError, DuplicateBuiltinError, NotAProtocolContext};
 use crate::syntax::helpers::resolve_conformance_list;
 
 /// Binder for struct declarations
@@ -90,26 +81,8 @@ impl DeclarationBinder for StructBinder {
             .metadata()
             .add_behavior(CopySemanticsBehavior::new(semantics));
 
-        // Emit diagnostic if struct has cloneable field but doesn't conform to Cloneable
-        crate::binders::copy_semantics_diagnostic::check_cloneable_field_diagnostic(
-            symbol, "struct", context,
-        );
-
-        // Validate parent protocol conformances (deferred from bind_signature to bind_body
-        // so that ExtensionRegistry is populated for default implementation lookup)
-        if let Some(conformances) = symbol
-            .metadata()
-            .get_behavior::<ConformancesBehavior>()
-        {
-            crate::syntax::helpers::validate_parent_protocol_conformances(
-                conformances.conformances(),
-                symbol,
-                context,
-            );
-        }
-
-        // Validate that protocols with requires_fields_conform have all fields conforming
-        Self::validate_protocol_field_conformances(symbol, context);
+        // Diagnostic validations (cloneable field, parent protocol conformances,
+        // protocol field conformances) are now in analyzers.
     }
 }
 
@@ -155,80 +128,4 @@ impl StructBinder {
         }
     }
 
-    /// Validate that protocols with requires_fields_conform have all fields conforming.
-    ///
-    /// For each protocol that the struct conforms to, if the protocol has the
-    /// `requires_fields_conform` flag set, all fields must also conform to that protocol.
-    fn validate_protocol_field_conformances(
-        symbol: &Arc<dyn Symbol<KestrelLanguage>>,
-        context: &mut BindingContext,
-    ) {
-        let Some(conformances) = symbol.metadata().get_behavior::<ConformancesBehavior>() else {
-            return;
-        };
-
-        // For each protocol conformance, check if it has requires_fields_conform flag
-        for conformance_ty in conformances.conformances() {
-            let TyKind::Protocol {
-                symbol: protocol_sym,
-                ..
-            } = conformance_ty.kind()
-            else {
-                continue;
-            };
-
-            let protocol_id = protocol_sym.metadata().id();
-
-            // Check if this is a builtin protocol with requires_fields_conform
-            let Some(feature) = context
-                .model
-                .builtin_registry()
-                .protocol_feature(protocol_id)
-            else {
-                continue;
-            };
-
-            let definition = feature.definition();
-            let BuiltinKind::Protocol {
-                requires_fields_conform: true,
-                ..
-            } = definition.kind
-            else {
-                continue;
-            };
-
-            // Collect non-conforming fields
-            let mut non_conforming: Vec<NonConformingField> = Vec::new();
-
-            for field in symbol
-                .metadata()
-                .children()
-                .iter()
-                .filter(|c| c.metadata().kind() == KestrelSymbolKind::Field)
-            {
-                if let Some(typed) = field.metadata().get_behavior::<TypedBehavior>() {
-                    let field_ty = typed.ty();
-                    if !context.model.conforms_to(field_ty, protocol_id) {
-                        non_conforming.push(NonConformingField {
-                            field_name: field.metadata().name().value.clone(),
-                            field_ty: field_ty.to_string(),
-                            span: field.metadata().span().clone(),
-                        });
-                    }
-                }
-            }
-
-            if !non_conforming.is_empty() {
-                context
-                    .diagnostics
-                    .throw(FieldsNotConformingToProtocolError {
-                        type_span: symbol.metadata().span().clone(),
-                        type_name: symbol.metadata().name().value.clone(),
-                        type_kind: "struct",
-                        protocol_name: protocol_sym.metadata().name().value.clone(),
-                        non_conforming_fields: non_conforming,
-                    });
-            }
-        }
-    }
 }
