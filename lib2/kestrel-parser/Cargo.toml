@@ -1,0 +1,14 @@
+[package]
+name = "kestrel-parser2"
+version.workspace = true
+edition.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+chumsky = { workspace = true }
+stacker = { workspace = true }
+kestrel-span2 = { path = "../kestrel-span" }
+kestrel-lexer2 = { path = "../kestrel-lexer" }
+kestrel-syntax-tree2 = { path = "../kestrel-syntax-tree" }

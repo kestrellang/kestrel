@@ -8,7 +8,6 @@ Hierarchical Entity Component System with incremental queries, designed for use 
 |------|--------|-------------|
 | `World` | `world.rs` | Central database. Owns entities, components, hierarchy, queries, accumulators |
 | `Entity` | `entity.rs` | Compact runtime handle (u32 index). Cheap to copy and compare |
-| `EntityKey` | `entity.rs` | Stable path-based identity that survives across compilations |
 | `Component` | `component.rs` | Trait alias for `Any + Clone + 'static`. Any cloneable type qualifies |
 | `ComponentStore` | `component.rs` | Type-erased column storage. Each component type gets its own dense column |
 | `QueryFn` | `query.rs` | Trait for memoized queries with automatic dependency tracking |
@@ -30,7 +29,7 @@ World::new()
 begin_revision()          ── advances revision, clears change set
     │
     ▼
-intern_entity(key)        ── create/lookup entities by stable key
+spawn()                   ── allocate a fresh entity
 set(entity, component)    ── attach components, marks entity changed
 set_parent(child, parent) ── build hierarchy
     │
@@ -53,7 +52,7 @@ begin_revision()          ── next cycle (caches persist for reuse)
 | File | Responsibility |
 |------|---------------|
 | `lib.rs` | Crate root, re-exports primary types |
-| `entity.rs` | `Entity` handle and `EntityKey` stable identity |
+| `entity.rs` | `Entity` handle (compact u32 index) |
 | `component.rs` | `Component` trait, `TypedColumn` sparse-dense storage, `ComponentStore` |
 | `world.rs` | `World` database, `Hierarchy`, `Revision`, `snapshot()` |
 | `query.rs` | `QueryFn` trait, `QueryContext`, memoization with dependency tracking |

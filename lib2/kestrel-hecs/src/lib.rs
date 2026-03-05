@@ -1,7 +1,7 @@
 //! kestrel-hecs: Hierarchical Entity Component System with incremental queries.
 //!
 //! A standalone ECS designed for incremental compilation. Provides:
-//! - **Entities** with stable keys for cross-compilation identity
+//! - **Entities** as lightweight handles into the world
 //! - **Components** stored in typed columns (struct-of-arrays)
 //! - **Queries** with automatic dependency tracking and memoization
 //! - **Change detection** via fingerprinting with early cutoff (backdating)
@@ -10,7 +10,7 @@
 //! # Usage
 //!
 //! ```
-//! use kestrel_hecs::{World, EntityKey, QueryFn, QueryContext};
+//! use kestrel_hecs::{World, QueryFn, QueryContext};
 //!
 //! // Define components (any Clone + 'static type)
 //! #[derive(Clone)]
@@ -30,7 +30,7 @@
 //! // Use the world
 //! let mut world = World::new();
 //! world.begin_revision();
-//! let e = world.intern_entity(EntityKey::root("test", 0));
+//! let e = world.spawn();
 //! world.set(e, Name("Alice".into()));
 //!
 //! let ctx = world.query_context();
@@ -46,7 +46,7 @@ pub mod query;
 pub mod world;
 
 // Re-export primary types at crate root
-pub use entity::{Entity, EntityKey};
+pub use entity::Entity;
 pub use fingerprint::Fingerprint;
 pub use query::{QueryContext, QueryFn, QueryKey};
 pub use world::{Revision, World};

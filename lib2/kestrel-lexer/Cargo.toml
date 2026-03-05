@@ -1,0 +1,12 @@
+[package]
+name = "kestrel-lexer2"
+version.workspace = true
+edition.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+logos = { workspace = true }
+unicode-xid = { workspace = true }
+kestrel-span2 = { path = "../kestrel-span" }

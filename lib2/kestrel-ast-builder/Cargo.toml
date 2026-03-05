@@ -1,0 +1,17 @@
+[package]
+name = "kestrel-ast-builder"
+version.workspace = true
+edition.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+kestrel-hecs = { path = "../kestrel-hecs" }
+kestrel-span2 = { path = "../kestrel-span" }
+kestrel-syntax-tree2 = { path = "../kestrel-syntax-tree" }
+rowan = { workspace = true }
+
+[dev-dependencies]
+kestrel-lexer2 = { path = "../kestrel-lexer" }
+kestrel-parser2 = { path = "../kestrel-parser" }

@@ -1,10 +1,10 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 
 use crate::accumulator::AccumulatorStore;
 use crate::change::ChangeSet;
 use crate::component::{Component, ComponentStore};
-use crate::entity::{Entity, EntityKey};
+use crate::entity::Entity;
 use crate::query::{QueryContext, QueryStorage};
 
 /// Global revision counter. Incremented each compilation cycle.
@@ -28,7 +28,6 @@ impl Revision {
 /// Metadata for a single entity. Clone support enables `World::snapshot()`.
 #[derive(Clone)]
 struct EntityRecord {
-    key: EntityKey,
     last_changed: Revision,
     alive: bool,
 }
@@ -108,12 +107,14 @@ impl Iterator for AncestorIter<'_> {
 pub struct World {
     revision: Revision,
     entities: Vec<EntityRecord>,
-    key_to_entity: HashMap<EntityKey, Entity>,
     components: ComponentStore,
     hierarchy: Hierarchy,
     changes: ChangeSet,
     queries: RefCell<QueryStorage>,
     accumulators: RefCell<AccumulatorStore>,
+    /// Counter for actual query executions (not cache hits).
+    /// Incremented by QueryContext::execute_query().
+    query_exec_count: Cell<u64>,
 }
 
 impl World {
@@ -121,12 +122,12 @@ impl World {
         Self {
             revision: Revision::initial(),
             entities: Vec::new(),
-            key_to_entity: HashMap::new(),
             components: ComponentStore::new(),
             hierarchy: Hierarchy::new(),
             changes: ChangeSet::new(),
             queries: RefCell::new(QueryStorage::new()),
             accumulators: RefCell::new(AccumulatorStore::new()),
+            query_exec_count: Cell::new(0),
         }
     }
 
@@ -142,29 +143,15 @@ impl World {
         self.revision
     }
 
-    /// Intern an entity key, returning its handle.
-    ///
-    /// If the key was seen in a previous compilation, returns the SAME
-    /// Entity handle — this is how cross-compilation identity works.
-    pub fn intern_entity(&mut self, key: EntityKey) -> Entity {
-        if let Some(&entity) = self.key_to_entity.get(&key) {
-            return entity;
-        }
+    /// Allocate a fresh entity. Returns a unique handle.
+    pub fn spawn(&mut self) -> Entity {
         let entity = Entity::from_raw(self.entities.len() as u32);
         self.entities.push(EntityRecord {
-            key: key.clone(),
             last_changed: self.revision,
             alive: true,
         });
-        self.key_to_entity.insert(key, entity);
-        // New entities are inherently changed
         self.changes.mark_changed(entity);
         entity
-    }
-
-    /// Get the stable key for an entity.
-    pub fn entity_key(&self, entity: Entity) -> &EntityKey {
-        &self.entities[entity.index()].key
     }
 
     pub fn is_alive(&self, entity: Entity) -> bool {
@@ -265,7 +252,14 @@ impl World {
             &self.hierarchy,
             &self.queries,
             &self.accumulators,
+            &self.query_exec_count,
         )
+    }
+
+    /// Number of actual query executions since the world was created.
+    /// Does not count cache hits or verifications — only full re-executions.
+    pub fn query_exec_count(&self) -> u64 {
+        self.query_exec_count.get()
     }
 
     // -- Snapshot --
@@ -280,12 +274,12 @@ impl World {
         World {
             revision: self.revision,
             entities: self.entities.clone(),
-            key_to_entity: self.key_to_entity.clone(),
             components: self.components.clone(),
             hierarchy: self.hierarchy.clone(),
             changes: self.changes.clone(),
             queries: RefCell::new(QueryStorage::new()),
             accumulators: RefCell::new(AccumulatorStore::new()),
+            query_exec_count: Cell::new(0),
         }
     }
 
@@ -318,27 +312,10 @@ mod tests {
     struct Health(i32);
 
     #[test]
-    fn intern_entity_stable() {
-        let mut world = World::new();
-        let key = EntityKey::root("test", 0);
-        let e1 = world.intern_entity(key.clone());
-        let e2 = world.intern_entity(key);
-        assert_eq!(e1, e2);
-    }
-
-    #[test]
-    fn intern_different_keys() {
-        let mut world = World::new();
-        let e1 = world.intern_entity(EntityKey::root("a", 0));
-        let e2 = world.intern_entity(EntityKey::root("b", 0));
-        assert_ne!(e1, e2);
-    }
-
-    #[test]
     fn set_and_get_components() {
         let mut world = World::new();
         world.begin_revision();
-        let e = world.intern_entity(EntityKey::root("test", 0));
+        let e = world.spawn();
         world.set(e, Name("Alice".into()));
         world.set(e, Health(100));
 
@@ -349,9 +326,9 @@ mod tests {
     #[test]
     fn hierarchy() {
         let mut world = World::new();
-        let parent = world.intern_entity(EntityKey::root("parent", 0));
-        let child1 = world.intern_entity(EntityKey::root("parent", 0).child("c1", 1));
-        let child2 = world.intern_entity(EntityKey::root("parent", 0).child("c2", 1));
+        let parent = world.spawn();
+        let child1 = world.spawn();
+        let child2 = world.spawn();
 
         world.set_parent(child1, parent);
         world.set_parent(child2, parent);
@@ -366,9 +343,9 @@ mod tests {
     #[test]
     fn ancestor_walk() {
         let mut world = World::new();
-        let root = world.intern_entity(EntityKey::root("root", 0));
-        let mid = world.intern_entity(EntityKey::root("root", 0).child("mid", 0));
-        let leaf = world.intern_entity(EntityKey::root("root", 0).child("mid", 0).child("leaf", 0));
+        let root = world.spawn();
+        let mid = world.spawn();
+        let leaf = world.spawn();
 
         world.set_parent(mid, root);
         world.set_parent(leaf, mid);
@@ -380,9 +357,9 @@ mod tests {
     #[test]
     fn reparent() {
         let mut world = World::new();
-        let p1 = world.intern_entity(EntityKey::root("p1", 0));
-        let p2 = world.intern_entity(EntityKey::root("p2", 0));
-        let child = world.intern_entity(EntityKey::root("child", 0));
+        let p1 = world.spawn();
+        let p2 = world.spawn();
+        let child = world.spawn();
 
         world.set_parent(child, p1);
         assert_eq!(world.children_of(p1).len(), 1);
@@ -410,8 +387,8 @@ mod tests {
     fn set_marks_entity_changed() {
         let mut world = World::new();
         world.begin_revision();
-        let e = world.intern_entity(EntityKey::root("test", 0));
-        assert!(world.changes().is_changed(e)); // intern marks changed
+        let e = world.spawn();
+        assert!(world.changes().is_changed(e)); // spawn marks changed
 
         world.begin_revision(); // clears changes
         assert!(!world.changes().is_changed(e));
@@ -424,7 +401,7 @@ mod tests {
     fn remove_component() {
         let mut world = World::new();
         world.begin_revision();
-        let e = world.intern_entity(EntityKey::root("test", 0));
+        let e = world.spawn();
         world.set(e, Health(100));
         assert!(world.has::<Health>(e));
 
@@ -433,20 +410,12 @@ mod tests {
     }
 
     #[test]
-    fn entity_key_roundtrip() {
-        let mut world = World::new();
-        let key = EntityKey::root("main.ks", 0);
-        let e = world.intern_entity(key.clone());
-        assert_eq!(world.entity_key(e), &key);
-    }
-
-    #[test]
     fn iter_components() {
         let mut world = World::new();
         world.begin_revision();
 
-        let e1 = world.intern_entity(EntityKey::root("a", 0));
-        let e2 = world.intern_entity(EntityKey::root("b", 0));
+        let e1 = world.spawn();
+        let e2 = world.spawn();
 
         world.set(e1, Health(10));
         world.set(e2, Health(20));
@@ -455,28 +424,13 @@ mod tests {
         assert_eq!(healths.len(), 2);
     }
 
-    #[test]
-    fn intern_survives_across_revisions() {
-        let mut world = World::new();
-        let key = EntityKey::root("persistent", 0);
-
-        world.begin_revision();
-        let e1 = world.intern_entity(key.clone());
-        world.set(e1, Name("v1".into()));
-
-        world.begin_revision();
-        let e2 = world.intern_entity(key);
-        assert_eq!(e1, e2); // same handle
-        assert_eq!(world.get::<Name>(e2), Some(&Name("v1".into()))); // data persists
-    }
-
     // -- Snapshot tests --
 
     #[test]
     fn snapshot_preserves_entities_and_components() {
         let mut world = World::new();
         world.begin_revision();
-        let e = world.intern_entity(EntityKey::root("test", 0));
+        let e = world.spawn();
         world.set(e, Name("Alice".into()));
         world.set(e, Health(100));
 
@@ -485,15 +439,14 @@ mod tests {
         assert_eq!(snap.get::<Name>(e), Some(&Name("Alice".into())));
         assert_eq!(snap.get::<Health>(e), Some(&Health(100)));
         assert!(snap.is_alive(e));
-        assert_eq!(snap.entity_key(e), &EntityKey::root("test", 0));
     }
 
     #[test]
     fn snapshot_preserves_hierarchy() {
         let mut world = World::new();
         world.begin_revision();
-        let parent = world.intern_entity(EntityKey::root("parent", 0));
-        let child = world.intern_entity(EntityKey::root("parent", 0).child("c", 1));
+        let parent = world.spawn();
+        let child = world.spawn();
         world.set_parent(child, parent);
 
         let snap = world.snapshot();
@@ -505,7 +458,7 @@ mod tests {
     fn snapshot_isolates_mutations() {
         let mut world = World::new();
         world.begin_revision();
-        let e = world.intern_entity(EntityKey::root("test", 0));
+        let e = world.spawn();
         world.set(e, Health(100));
 
         let mut snap = world.snapshot();
@@ -513,7 +466,7 @@ mod tests {
         // Mutate the snapshot
         snap.begin_revision();
         snap.set(e, Health(999));
-        let e2 = snap.intern_entity(EntityKey::root("new", 0));
+        let e2 = snap.spawn();
         snap.set(e2, Name("Snapshot-only".into()));
 
         // Original is unaffected
@@ -547,7 +500,7 @@ mod tests {
 
         let mut world = World::new();
         world.begin_revision();
-        let e = world.intern_entity(EntityKey::root("test", 0));
+        let e = world.spawn();
         world.set(e, Health(42));
 
         // Execute query on original — populates cache

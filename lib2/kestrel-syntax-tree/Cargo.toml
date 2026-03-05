@@ -1,0 +1,12 @@
+[package]
+name = "kestrel-syntax-tree2"
+version.workspace = true
+edition.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+rowan = { workspace = true }
+kestrel-span2 = { path = "../kestrel-span" }
+kestrel-lexer2 = { path = "../kestrel-lexer" }

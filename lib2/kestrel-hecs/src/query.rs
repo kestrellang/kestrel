@@ -1,7 +1,8 @@
 use std::any::{Any, TypeId};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
+use std::sync::Arc;
 
 use crate::accumulator::AccumulatorStore;
 use crate::change::ChangeSet;
@@ -75,16 +76,27 @@ struct MemoEntry<V> {
     changed_at: Revision,
 }
 
+/// Type-erased function that verifies a sub-query and returns its changed_at.
+///
+/// Used by `deps_unchanged` to recursively verify sub-query dependencies
+/// without knowing the sub-query's concrete type.
+type VerifierFn = Arc<dyn Fn(&QueryContext<'_>) -> Revision>;
+
 /// Type-erased memoization storage. Each query type Q gets its own
 /// `HashMap<Q, MemoEntry<Q::Output>>`.
 pub(crate) struct QueryStorage {
     stores: HashMap<TypeId, Box<dyn Any>>,
+    /// Type-erased verifiers keyed by QueryKey. Registered when a query
+    /// is first computed. Called during dep verification to recursively
+    /// check if sub-queries have changed.
+    verifiers: HashMap<QueryKey, VerifierFn>,
 }
 
 impl QueryStorage {
     pub fn new() -> Self {
         Self {
             stores: HashMap::new(),
+            verifiers: HashMap::new(),
         }
     }
 
@@ -111,6 +123,10 @@ impl QueryStorage {
         {
             memo.verified_at = revision;
         }
+    }
+
+    fn register_verifier(&mut self, key: QueryKey, verifier: VerifierFn) {
+        self.verifiers.insert(key, verifier);
     }
 }
 
@@ -139,6 +155,8 @@ pub struct QueryContext<'a> {
     pub(crate) hierarchy: &'a crate::world::Hierarchy,
     pub(crate) queries: &'a RefCell<QueryStorage>,
     pub(crate) accumulators: &'a RefCell<AccumulatorStore>,
+    /// Counter for actual query executions (not cache hits).
+    pub(crate) exec_count: &'a Cell<u64>,
     /// Dependencies recorded during the current query's execution.
     deps: RefCell<Vec<Dependency>>,
     /// Call stack for cycle detection.
@@ -153,6 +171,7 @@ impl<'a> QueryContext<'a> {
         hierarchy: &'a crate::world::Hierarchy,
         queries: &'a RefCell<QueryStorage>,
         accumulators: &'a RefCell<AccumulatorStore>,
+        exec_count: &'a Cell<u64>,
     ) -> Self {
         Self {
             revision,
@@ -161,6 +180,7 @@ impl<'a> QueryContext<'a> {
             hierarchy,
             queries,
             accumulators,
+            exec_count,
             deps: RefCell::new(Vec::new()),
             active: RefCell::new(Vec::new()),
         }
@@ -212,27 +232,58 @@ impl<'a> QueryContext<'a> {
         // Record dependency on this sub-query
         self.deps.borrow_mut().push(Dependency::Query(qk.clone()));
 
-        // Check memoization cache
-        {
+        self.ensure_fresh(&q, &qk).0
+    }
+
+    /// Core query logic: verify from cache or re-execute.
+    /// Returns (value, changed_at). Does NOT record a dependency —
+    /// the caller (query() or a verifier) handles that.
+    fn ensure_fresh<Q: QueryFn>(&self, q: &Q, qk: &QueryKey) -> (Q::Output, Revision) {
+        // Phase 1: Check memo (borrow, clone what we need, drop borrow)
+        let memo_info = {
             let storage = self.queries.borrow();
-            if let Some(memo) = storage.get_memo::<Q>(&q) {
-                if memo.verified_at >= self.revision {
-                    return memo.value.clone();
-                }
-                // Try to verify: check if deps are still valid
-                if self.deps_unchanged(&memo.deps, memo.verified_at) {
-                    drop(storage);
-                    self.queries.borrow_mut().update_verified::<Q>(&q, self.revision);
-                    return self.queries.borrow().get_memo::<Q>(&q).unwrap().value.clone();
-                }
+            storage.get_memo::<Q>(q).map(|memo| {
+                (
+                    memo.value.clone(),
+                    memo.verified_at,
+                    memo.changed_at,
+                    memo.deps.clone(),
+                    memo.fingerprint,
+                )
+            })
+        };
+
+        if let Some((value, verified_at, changed_at, deps, _fp)) = memo_info {
+            // Already verified this revision — fast path
+            if verified_at >= self.revision {
+                return (value, changed_at);
             }
+
+            // Tentatively mark as verified to break verification cycles.
+            // If deps check fails, we'll re-execute and overwrite the memo.
+            self.queries
+                .borrow_mut()
+                .update_verified::<Q>(q, self.revision);
+
+            // Check if all deps are still valid (may recursively verify sub-queries)
+            if self.deps_unchanged(&deps, verified_at) {
+                return (value, changed_at);
+            }
+
+            // Deps changed — fall through to re-execute
         }
 
+        // Phase 2: Execute the query
+        self.execute_query(q, qk)
+    }
+
+    /// Execute a query from scratch (no valid cache).
+    fn execute_query<Q: QueryFn>(&self, q: &Q, qk: &QueryKey) -> (Q::Output, Revision) {
         // Cycle detection
         {
             let stack = self.active.borrow();
             for aq in stack.iter() {
-                if aq.key == qk {
+                if aq.key == *qk {
                     panic!(
                         "Query cycle detected: {} is already on the stack",
                         std::any::type_name::<Q>()
@@ -240,13 +291,16 @@ impl<'a> QueryContext<'a> {
                 }
             }
         }
-        self.active.borrow_mut().push(ActiveQuery { key: qk.clone() });
+        self.active
+            .borrow_mut()
+            .push(ActiveQuery { key: qk.clone() });
 
         // Clear old accumulators for this query
-        self.accumulators.borrow_mut().clear_for_query(&qk);
+        self.accumulators.borrow_mut().clear_for_query(qk);
 
         // Execute in a fresh dependency scope
         let saved_deps = self.deps.take();
+        self.exec_count.set(self.exec_count.get() + 1);
         let result = q.execute(self);
         let new_deps = self.deps.take();
         self.deps.replace(saved_deps);
@@ -254,12 +308,12 @@ impl<'a> QueryContext<'a> {
         // Pop from active stack
         self.active.borrow_mut().pop();
 
-        // Check for backdating: if the result is the same as before,
-        // keep the old changed_at so dependents don't re-execute.
+        // Backdating: if the result fingerprint matches the old memo,
+        // keep the old changed_at so dependents skip re-execution.
         let new_fp = Fingerprint::of(&hash_of(&result));
         let changed_at = {
             let storage = self.queries.borrow();
-            if let Some(old_memo) = storage.get_memo::<Q>(&q) {
+            if let Some(old_memo) = storage.get_memo::<Q>(q) {
                 if old_memo.fingerprint == new_fp {
                     old_memo.changed_at
                 } else {
@@ -279,12 +333,28 @@ impl<'a> QueryContext<'a> {
             verified_at: self.revision,
             changed_at,
         };
-        self.queries.borrow_mut().insert_memo(q, entry);
+        self.queries.borrow_mut().insert_memo(q.clone(), entry);
 
-        result
+        // Register a type-erased verifier so deps_unchanged can
+        // recursively verify this query when it appears as a sub-query dep.
+        let q_for_verifier = q.clone();
+        let qk_for_verifier = qk.clone();
+        self.queries.borrow_mut().register_verifier(
+            qk.clone(),
+            Arc::new(move |ctx| {
+                ctx.ensure_fresh(&q_for_verifier, &qk_for_verifier).1
+            }),
+        );
+
+        (result, changed_at)
     }
 
     /// Check if all dependencies are still unchanged.
+    ///
+    /// For component deps, checks the ChangeSet directly.
+    /// For sub-query deps, recursively verifies the sub-query via its
+    /// registered type-erased verifier and checks if its changed_at
+    /// is still within bounds.
     fn deps_unchanged(&self, deps: &[Dependency], since: Revision) -> bool {
         for dep in deps {
             match dep {
@@ -293,14 +363,24 @@ impl<'a> QueryContext<'a> {
                         return false;
                     }
                 }
-                Dependency::Query(_sub_qk) => {
-                    // We can't easily check sub-query staleness without
-                    // knowing its type. Conservative: assume changed if
-                    // any entity in the world changed. This is refined by
-                    // the sub-query's own verification when it's called.
-                    //
-                    // For now, just check if we're in a new revision.
-                    if since < self.revision {
+                Dependency::Query(sub_qk) => {
+                    // Get the verifier for this sub-query (clone Arc, drop borrow)
+                    let verifier = {
+                        let storage = self.queries.borrow();
+                        storage.verifiers.get(sub_qk).cloned()
+                    };
+
+                    if let Some(verify) = verifier {
+                        // Recursively verify the sub-query. This may trigger
+                        // its own deps_unchanged check, or re-execute if its
+                        // deps changed.
+                        let sub_changed_at = verify(self);
+                        if sub_changed_at > since {
+                            return false;
+                        }
+                    } else {
+                        // No verifier registered (e.g. after snapshot).
+                        // Conservative: assume changed.
                         return false;
                     }
                 }
@@ -419,8 +499,7 @@ mod tests {
     fn basic_query_execution() {
         let mut world = World::new();
         world.begin_revision();
-        let key = crate::entity::EntityKey::root("test", 0);
-        let e = world.intern_entity(key);
+        let e = world.spawn();
         world.set(e, Name("Alice".into()));
 
         let ctx = world.query_context();
@@ -433,8 +512,7 @@ mod tests {
         reset_counter();
         let mut world = World::new();
         world.begin_revision();
-        let key = crate::entity::EntityKey::root("test", 0);
-        let e = world.intern_entity(key);
+        let e = world.spawn();
         world.set(e, Name("Bob".into()));
 
         let ctx = world.query_context();
@@ -455,8 +533,7 @@ mod tests {
         reset_counter();
         let mut world = World::new();
         world.begin_revision();
-        let key = crate::entity::EntityKey::root("test", 0);
-        let e = world.intern_entity(key);
+        let e = world.spawn();
         world.set(e, Name("Alice".into()));
 
         // Rev 1: execute
@@ -482,8 +559,7 @@ mod tests {
     fn sub_query_composition() {
         let mut world = World::new();
         world.begin_revision();
-        let key = crate::entity::EntityKey::root("test", 0);
-        let e = world.intern_entity(key);
+        let e = world.spawn();
         world.set(e, Name("alice".into()));
 
         let ctx = world.query_context();
@@ -496,8 +572,7 @@ mod tests {
     fn cycle_detection() {
         let mut world = World::new();
         world.begin_revision();
-        let key = crate::entity::EntityKey::root("test", 0);
-        let e = world.intern_entity(key);
+        let e = world.spawn();
 
         let ctx = world.query_context();
         ctx.query(CyclicQuery { entity: e });
@@ -527,8 +602,7 @@ mod tests {
 
         let mut world = World::new();
         world.begin_revision();
-        let key = crate::entity::EntityKey::root("test", 0);
-        let e = world.intern_entity(key);
+        let e = world.spawn();
         world.set(e, Name("".into()));
 
         let ctx = world.query_context();
@@ -544,8 +618,7 @@ mod tests {
     fn dependency_recording() {
         let mut world = World::new();
         world.begin_revision();
-        let key = crate::entity::EntityKey::root("test", 0);
-        let e = world.intern_entity(key);
+        let e = world.spawn();
         world.set(e, Name("X".into()));
         world.set(e, Value(42));
 
@@ -568,5 +641,68 @@ mod tests {
         let ctx = world.query_context();
         let result = ctx.query(ReadBoth { entity: e });
         assert_eq!(result, "X=42");
+    }
+
+    #[test]
+    fn sub_query_skips_when_unchanged() {
+        // Verify that a query depending on a sub-query is NOT re-executed
+        // when the sub-query's inputs haven't changed in a new revision.
+        let mut world = World::new();
+        world.begin_revision();
+
+        let e1 = world.spawn();
+        let e2 = world.spawn();
+        world.set(e1, Name("Alice".into()));
+        world.set(e2, Name("Bob".into()));
+
+        // Rev 1: execute both GetNameUpper queries
+        {
+            let ctx = world.query_context();
+            ctx.query(GetNameUpper { entity: e1 });
+            ctx.query(GetNameUpper { entity: e2 });
+        }
+        // GetName x2 + GetNameUpper x2 = 4 executions
+        assert_eq!(world.query_exec_count(), 4);
+
+        // Rev 2: change only e1
+        world.begin_revision();
+        world.set(e1, Name("Alicia".into()));
+
+        let before = world.query_exec_count();
+        {
+            let ctx = world.query_context();
+            // e1 changed — both GetName and GetNameUpper must re-execute
+            let r1 = ctx.query(GetNameUpper { entity: e1 });
+            assert_eq!(r1, Some("ALICIA".into()));
+
+            // e2 unchanged — should be verified from cache, no re-execution
+            let r2 = ctx.query(GetNameUpper { entity: e2 });
+            assert_eq!(r2, Some("BOB".into()));
+        }
+        // Only e1's GetName + GetNameUpper = 2 new executions
+        assert_eq!(world.query_exec_count() - before, 2);
+    }
+
+    #[test]
+    fn exec_count_tracking() {
+        let mut world = World::new();
+        world.begin_revision();
+        let e = world.spawn();
+        world.set(e, Name("X".into()));
+
+        assert_eq!(world.query_exec_count(), 0);
+
+        {
+            let ctx = world.query_context();
+            ctx.query(GetName { entity: e });
+        }
+        assert_eq!(world.query_exec_count(), 1);
+
+        // Same revision, cached — no new execution
+        {
+            let ctx = world.query_context();
+            ctx.query(GetName { entity: e });
+        }
+        assert_eq!(world.query_exec_count(), 1);
     }
 }

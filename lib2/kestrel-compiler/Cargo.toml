@@ -1,0 +1,15 @@
+[package]
+name = "kestrel-compiler2"
+version.workspace = true
+edition.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+kestrel-hecs = { path = "../kestrel-hecs" }
+kestrel-lexer2 = { path = "../kestrel-lexer" }
+kestrel-parser2 = { path = "../kestrel-parser" }
+kestrel-span2 = { path = "../kestrel-span" }
+kestrel-syntax-tree2 = { path = "../kestrel-syntax-tree" }
+kestrel-ast-builder = { path = "../kestrel-ast-builder" }

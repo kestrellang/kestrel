@@ -24,6 +24,7 @@ downcast-rs = "2.0.2"
 logos = "0.16.0"
 parking_lot = "0.12.5"
 rowan = "0.16.1"
+stacker = "0.1"
 tokio = { version = "1", features = ["full"] }
 tower-lsp = "0.20"
 unicode-xid = "0.2"
@@ -52,7 +53,13 @@ members = [
     "lib/kestrel-codegen-cranelift",
     "lib/kestrel-lsp",
     "lib/kestrel-test-suite",
-    "lib/kestrel-hecs"
+    "lib2/kestrel-hecs",
+    "lib2/kestrel-span",
+    "lib2/kestrel-lexer",
+    "lib2/kestrel-syntax-tree",
+    "lib2/kestrel-parser",
+    "lib2/kestrel-compiler",
+    "lib2/kestrel-ast-builder"
 ]
 exclude = ["registry"]
 
@@ -84,4 +91,7 @@ type_complexity = "allow"     # Parser combinators have complex types
 opt-level = 1
 
 [profile.dev.package.kestrel-parser]
+opt-level = 2
+
+[profile.dev.package.kestrel-parser2]
 opt-level = 2

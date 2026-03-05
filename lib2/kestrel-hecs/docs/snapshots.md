@@ -17,8 +17,7 @@
 Snapshot splits the world into two categories:
 
 **Cloned** (structural data):
-- `entities` — entity metadata (keys, liveness, change revision)
-- `key_to_entity` — stable key-to-handle mapping
+- `entities` — entity metadata (liveness, change revision)
 - `components` — all typed component columns (via `clone_box()`)
 - `hierarchy` — parent/child relationships
 - `changes` — change tracking state and fingerprints
@@ -37,12 +36,12 @@ The snapshot keeps the same `revision` counter so `begin_revision()` advances na
 // Build stdlib once
 let mut stdlib_world = World::new();
 stdlib_world.begin_revision();
-// ... intern entities, set components for all stdlib symbols ...
+// ... spawn entities, set components for all stdlib symbols ...
 
 // For each test: snapshot, then compile the test into the snapshot
 let mut test_world = stdlib_world.snapshot();
 test_world.begin_revision();
-let e = test_world.intern_entity(EntityKey::root("test.ks", 0));
+let e = test_world.spawn();
 test_world.set(e, MyComponent { ... });
 
 let ctx = test_world.query_context();
