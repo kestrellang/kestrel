@@ -146,7 +146,7 @@ fn resolve_getter_body(
         .unwrap_or(false);
 
     // If this is an instance getter, inject `self` as the first local (immutable)
-    if has_receiver && let Some(self_type) = get_self_type(symbol) {
+    if has_receiver && let Some(self_type) = get_self_type(symbol, context.model) {
         let decl_span = symbol.metadata().span().clone();
         let self_span = Span::new(decl_span.file_id, decl_span.start..decl_span.start);
 
@@ -180,8 +180,8 @@ fn resolve_getter_body(
 ///
 /// Returns the concrete type of the containing struct/enum (grandparent of the getter).
 /// The hierarchy is: Struct/Enum -> Field -> Getter
-fn get_self_type(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> Option<Ty> {
-    use kestrel_semantic_tree::behavior::extension_target::ExtensionTargetBehavior;
+fn get_self_type(symbol: &Arc<dyn Symbol<KestrelLanguage>>, model: &kestrel_semantic_model::SemanticModel) -> Option<Ty> {
+    use kestrel_semantic_model::ExtensionTargetFor;
     use kestrel_semantic_tree::behavior::generics::GenericsBehavior;
     use kestrel_semantic_tree::symbol::enum_symbol::EnumSymbol;
     use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
@@ -222,11 +222,10 @@ fn get_self_type(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> Option<Ty> {
             Some(Ty::generic_enum(enum_arc, substitutions, type_span))
         },
         KestrelSymbolKind::Extension => {
-            // For extension properties, use the target type
-            type_parent
-                .metadata()
-                .get_behavior::<ExtensionTargetBehavior>()
-                .map(|b| b.target_type().clone())
+            // For extension properties, use the target type via query (order-independent)
+            model.query(ExtensionTargetFor {
+                symbol_id: type_parent.metadata().id(),
+            })
         },
         _ => None,
     }

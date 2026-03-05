@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use kestrel_semantic_model::SymbolFor;
-use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
 use kestrel_semantic_tree::behavior::{ComputedPropertyMarker, StaticBehavior};
 use kestrel_semantic_tree::symbol::associated_type::AssociatedTypeSymbol;
 use kestrel_semantic_tree::symbol::field::FieldSymbol;
@@ -19,21 +18,22 @@ use crate::declaration_binder::BindingContext;
 use crate::diagnostics::{CircularProtocolInheritanceError, InheritedAssociatedTypeConflictError};
 
 /// Check if `potential_ancestor` is an ancestor of `protocol` by recursively checking parent protocols.
-fn is_ancestor_protocol(protocol: &Arc<ProtocolSymbol>, potential_ancestor_name: &str) -> bool {
-    // Check direct parents
-    if let Some(conformances) = protocol.metadata().get_behavior::<ConformancesBehavior>() {
-        for parent_ty in conformances.conformances() {
-            if let TyKind::Protocol { symbol: parent, .. } = parent_ty.kind() {
-                let parent_name_value = parent.metadata().name().value.clone();
-                let parent_name = parent_name_value.as_str();
-                // Check if this parent is the ancestor we're looking for
-                if parent_name == potential_ancestor_name {
-                    return true;
-                }
-                // Recursively check if the ancestor is higher up in the hierarchy
-                if is_ancestor_protocol(parent, potential_ancestor_name) {
-                    return true;
-                }
+fn is_ancestor_protocol(protocol: &Arc<ProtocolSymbol>, potential_ancestor_name: &str, model: &kestrel_semantic_model::SemanticModel) -> bool {
+    // Check direct parents via query (order-independent)
+    let conformances = model.query(kestrel_semantic_model::ConformancesForSymbol {
+        symbol_id: protocol.metadata().id(),
+    });
+    for parent_ty in &conformances {
+        if let TyKind::Protocol { symbol: parent, .. } = parent_ty.kind() {
+            let parent_name_value = parent.metadata().name().value.clone();
+            let parent_name = parent_name_value.as_str();
+            // Check if this parent is the ancestor we're looking for
+            if parent_name == potential_ancestor_name {
+                return true;
+            }
+            // Recursively check if the ancestor is higher up in the hierarchy
+            if is_ancestor_protocol(parent, potential_ancestor_name, model) {
+                return true;
             }
         }
     }
@@ -122,10 +122,12 @@ fn flatten_protocol_recursive(
     let protocol_name = protocol.metadata().name().value.clone();
 
     // First recurse into inherited protocols (so we get parent definitions first)
-    let result =
-        if let Some(conformances) = protocol.metadata().get_behavior::<ConformancesBehavior>() {
+    let conformances_vec = ctx.model.query(kestrel_semantic_model::ConformancesForSymbol {
+        symbol_id: protocol_id,
+    });
+    let result = {
             let mut res = Ok(());
-            for parent_ty in conformances.conformances() {
+            for parent_ty in &conformances_vec {
                 if let TyKind::Protocol { symbol: parent, .. } = parent_ty.kind()
                     && let Err(e) = flatten_protocol_recursive(
                         parent,
@@ -144,8 +146,6 @@ fn flatten_protocol_recursive(
                 }
             }
             res
-        } else {
-            Ok(())
         };
 
     // If recursion failed, exit and return error
@@ -175,7 +175,7 @@ fn flatten_protocol_recursive(
                 if let Some(existing) = associated_types.get(&type_name) {
                     // Check if the existing associated type came from an ancestor protocol
                     let is_from_ancestor =
-                        is_ancestor_protocol(protocol, &existing.source_protocol_name);
+                        is_ancestor_protocol(protocol, &existing.source_protocol_name, ctx.model);
 
                     if is_from_ancestor {
                         // This is OK: child protocol is refining/redeclaring parent's associated type

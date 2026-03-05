@@ -338,7 +338,7 @@ fn resolve_getter_body(
         .unwrap_or(false);
 
     // If this is an instance getter, inject `self` as the first local (immutable)
-    if has_receiver && let Some(self_type) = get_self_type(subscript_symbol) {
+    if has_receiver && let Some(self_type) = get_self_type(subscript_symbol, context.model) {
         let decl_span = getter.metadata().span().clone();
         let self_span = Span::new(decl_span.file_id, decl_span.start..decl_span.start);
         local_scope.bind("self".to_string(), self_type, false, self_span);
@@ -403,7 +403,7 @@ fn resolve_setter_body(
         .unwrap_or(false);
 
     // If this is an instance setter, inject `self` as the first local (mutable)
-    if has_receiver && let Some(self_type) = get_self_type(subscript_symbol) {
+    if has_receiver && let Some(self_type) = get_self_type(subscript_symbol, context.model) {
         let decl_span = setter.metadata().span().clone();
         let self_span = Span::new(decl_span.file_id, decl_span.start..decl_span.start);
         local_scope.bind("self".to_string(), self_type, true, self_span);
@@ -452,8 +452,8 @@ fn resolve_setter_body(
 ///
 /// Returns the concrete type of the containing struct, enum, or extension target.
 /// The hierarchy is: Struct/Extension/Enum -> Subscript
-fn get_self_type(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> Option<Ty> {
-    use kestrel_semantic_tree::behavior::extension_target::ExtensionTargetBehavior;
+fn get_self_type(symbol: &Arc<dyn Symbol<KestrelLanguage>>, model: &kestrel_semantic_model::SemanticModel) -> Option<Ty> {
+    use kestrel_semantic_model::ExtensionTargetFor;
     use kestrel_semantic_tree::behavior::generics::GenericsBehavior;
     use kestrel_semantic_tree::symbol::enum_symbol::EnumSymbol;
     use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
@@ -494,11 +494,10 @@ fn get_self_type(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> Option<Ty> {
             Some(Ty::self_type(parent_span))
         },
         KestrelSymbolKind::Extension => {
-            // For extension subscripts, use the target type
-            parent
-                .metadata()
-                .get_behavior::<ExtensionTargetBehavior>()
-                .map(|b| b.target_type().clone())
+            // For extension subscripts, use the target type via query (order-independent)
+            model.query(ExtensionTargetFor {
+                symbol_id: parent.metadata().id(),
+            })
         },
         _ => None,
     }

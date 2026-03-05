@@ -25,7 +25,7 @@ pub use queries::{
     AssociatedTypeBindingsFor, AssociatedTypeBoundsInContext,
     ChildByName, ConcreteSelfType, ConformancesForSymbol, DeclaredName,
     DeclaredNamesInScope, ExecutableBodyFor, ExtensionBoundsForParam, ExtensionMethods,
-    ExtensionsFor, FunctionsInSymbol,
+    ExtensionTargetFor, ExtensionsFor, FunctionsInSymbol,
     GenericsData, GenericsDataFor, HasBody, ImportsInScope, InferenceResultFor,
     InheritedProtocolMember, IsInsideAny, IsMarkerProtocol, IsVisibleFrom, LocalName,
     PropertyRequirement,

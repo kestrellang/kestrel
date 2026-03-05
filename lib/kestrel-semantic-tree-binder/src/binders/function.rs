@@ -505,7 +505,7 @@ fn resolve_function_body(
 
     // If this is an instance method, inject `self` as the first local
     if let Some(receiver) = receiver_kind
-        && let Some(self_type) = get_self_type(symbol)
+        && let Some(self_type) = get_self_type(symbol, context.model)
     {
         let is_mutable = matches!(receiver, ReceiverKind::Mutating);
         let decl_span = symbol.metadata().span().clone();
@@ -769,11 +769,11 @@ fn resolve_return_type_from_syntax(
 /// Returns the concrete type of the containing struct, enum, or extension target.
 /// For structs/enums, this includes type parameters (e.g., `Optional[T]`).
 /// For protocols, we use Self type which remains abstract.
-fn get_self_type(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> Option<Ty> {
-    use kestrel_semantic_tree::behavior::extension_target::ExtensionTargetBehavior;
+fn get_self_type(symbol: &Arc<dyn Symbol<KestrelLanguage>>, model: &kestrel_semantic_model::SemanticModel) -> Option<Ty> {
+    use kestrel_semantic_model::ExtensionTargetFor;
     use kestrel_semantic_tree::symbol::enum_symbol::EnumSymbol;
     use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
-    use kestrel_semantic_tree::ty::Substitutions;
+    use kestrel_semantic_tree::ty::{Substitutions, TyKind};
 
     let parent = symbol.metadata().parent()?;
     let parent_span = parent.metadata().span().clone();
@@ -811,20 +811,18 @@ fn get_self_type(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> Option<Ty> {
             Some(Ty::self_type(parent_span))
         },
         KestrelSymbolKind::Extension => {
-            // For extension methods, use the target type from ExtensionTargetBehavior
+            // For extension methods, use the target type via query (order-independent)
             // For protocol extensions, use SelfType so constraint methods can be resolved
-            parent
-                .metadata()
-                .get_behavior::<ExtensionTargetBehavior>()
-                .map(|b| {
-                    if b.is_protocol_extension() {
-                        // Protocol extensions need SelfType for constraint method resolution
-                        // (e.g., `extend Proto where Self: OtherProto` needs to find OtherProto methods)
-                        Ty::self_type(parent_span.clone())
-                    } else {
-                        b.target_type().clone()
-                    }
-                })
+            let target = model.query(ExtensionTargetFor {
+                symbol_id: parent.metadata().id(),
+            })?;
+            if matches!(target.kind(), TyKind::Protocol { .. }) {
+                // Protocol extensions need SelfType for constraint method resolution
+                // (e.g., `extend Proto where Self: OtherProto` needs to find OtherProto methods)
+                Some(Ty::self_type(parent_span))
+            } else {
+                Some(target)
+            }
         },
         _ => None,
     }

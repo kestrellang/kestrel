@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use kestrel_semantic_tree::behavior::attributes::AttributesBehavior;
-use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
 use kestrel_semantic_tree::behavior::conforms_to::ConformsToBehavior;
 use kestrel_semantic_tree::behavior::extension_target::ExtensionTargetBehavior;
 use kestrel_semantic_tree::behavior::generics::GenericsBehavior;
@@ -152,6 +151,7 @@ impl DeclarationBinder for TypeAliasBinder {
                             &name,
                             &parent,
                             qualified_protocol_name.as_deref(),
+                            context,
                         );
                     }
 
@@ -388,12 +388,10 @@ fn validate_conformance_associated_type_binding(
 
     let binding_span = get_node_span(syntax, file_id);
 
-    // Get the struct's conformances
-    let conformances = parent
-        .metadata()
-        .get_behavior::<ConformancesBehavior>()
-        .map(|cb| cb.conformances().to_vec())
-        .unwrap_or_default();
+    // Get the struct's conformances via query (order-independent)
+    let conformances = ctx.model.query(kestrel_semantic_model::ConformancesForSymbol {
+        symbol_id: parent.metadata().id(),
+    });
 
     // Check if this is a qualified binding (has AssociatedTypeTarget with protocol path)
     if let Some(target_node) = find_child(syntax, SyntaxKind::AssociatedTypeTarget) {
@@ -564,12 +562,10 @@ fn validate_struct_binding_constraint_satisfaction(
 ) {
     use kestrel_semantic_tree::symbol::associated_type::AssociatedTypeSymbol;
 
-    // Get the struct's conformances
-    let conformances = parent
-        .metadata()
-        .get_behavior::<ConformancesBehavior>()
-        .map(|cb| cb.conformances().to_vec())
-        .unwrap_or_default();
+    // Get the struct's conformances via query (order-independent)
+    let conformances = ctx.model.query(kestrel_semantic_model::ConformancesForSymbol {
+        symbol_id: parent.metadata().id(),
+    });
 
     // Collect all protocols (direct and inherited) to check for associated type definitions
     let mut all_protocols = Vec::new();
@@ -584,14 +580,12 @@ fn validate_struct_binding_constraint_satisfaction(
         {
             all_protocols.push(conformance.clone());
 
-            // Add inherited protocols (protocol conformances)
-            if let Some(inherited_conformances) = protocol_symbol
-                .metadata()
-                .get_behavior::<ConformancesBehavior>()
-            {
-                for inherited in inherited_conformances.conformances() {
-                    to_check.push(inherited.clone());
-                }
+            // Add inherited protocols (protocol conformances) via query
+            let inherited_conformances = ctx.model.query(kestrel_semantic_model::ConformancesForSymbol {
+                symbol_id: protocol_symbol.metadata().id(),
+            });
+            for inherited in inherited_conformances {
+                to_check.push(inherited);
             }
         }
     }
@@ -672,12 +666,28 @@ fn validate_type_satisfies_bounds(
             // Check if the bound type conforms to this protocol
             let conforms = match bound_type.kind() {
                 TyKind::Struct { symbol, .. } => {
-                    // Get the struct's conformances
-                    let conformances = symbol
-                        .metadata()
-                        .get_behavior::<ConformancesBehavior>()
-                        .map(|cb| cb.conformances().to_vec())
-                        .unwrap_or_default();
+                    // Get the type's conformances via query (order-independent)
+                    let conformances = ctx.model.query(kestrel_semantic_model::ConformancesForSymbol {
+                        symbol_id: symbol.metadata().id(),
+                    });
+
+                    // Check if any conformance matches the required protocol
+                    // We need to compare by symbol ID, not name, to handle same-named protocols in different scopes
+                    conformances.iter().any(|conf| {
+                        if let TyKind::Protocol {
+                            symbol: proto_sym, ..
+                        } = conf.kind()
+                        {
+                            proto_sym.metadata().id() == required_proto_symbol.metadata().id()
+                        } else {
+                            false
+                        }
+                    })
+                },
+                TyKind::Enum { symbol, .. } => {
+                    let conformances = ctx.model.query(kestrel_semantic_model::ConformancesForSymbol {
+                        symbol_id: symbol.metadata().id(),
+                    });
 
                     // Check if any conformance matches the required protocol
                     // We need to compare by symbol ID, not name, to handle same-named protocols in different scopes
@@ -751,14 +761,12 @@ fn validate_inherited_where_clause_constraints(
         {
             all_protocols.push(conformance.clone());
 
-            // Add inherited protocols (protocol conformances)
-            if let Some(inherited_conformances) = protocol_symbol
-                .metadata()
-                .get_behavior::<ConformancesBehavior>()
-            {
-                for inherited in inherited_conformances.conformances() {
-                    to_check.push(inherited.clone());
-                }
+            // Add inherited protocols (protocol conformances) via query
+            let inherited_conformances = ctx.model.query(kestrel_semantic_model::ConformancesForSymbol {
+                symbol_id: protocol_symbol.metadata().id(),
+            });
+            for inherited in inherited_conformances {
+                to_check.push(inherited);
             }
         }
     }
@@ -860,13 +868,12 @@ fn add_conforms_to_behavior(
     type_name: &str,
     parent: &Arc<dyn Symbol<KestrelLanguage>>,
     qualified_protocol_name: Option<&str>,
+    ctx: &mut BindingContext,
 ) {
-    // Get the struct's conformances
-    let conformances = parent
-        .metadata()
-        .get_behavior::<ConformancesBehavior>()
-        .map(|cb| cb.conformances().to_vec())
-        .unwrap_or_default();
+    // Get the struct's conformances via query (order-independent)
+    let conformances = ctx.model.query(kestrel_semantic_model::ConformancesForSymbol {
+        symbol_id: parent.metadata().id(),
+    });
 
     // Collect all protocols (direct and inherited) to find associated type definitions
     let mut all_protocols = Vec::new();
@@ -881,14 +888,12 @@ fn add_conforms_to_behavior(
         {
             all_protocols.push(protocol_symbol.clone());
 
-            // Add inherited protocols (protocol conformances)
-            if let Some(inherited_conformances) = protocol_symbol
-                .metadata()
-                .get_behavior::<ConformancesBehavior>()
-            {
-                for inherited in inherited_conformances.conformances() {
-                    to_check.push(inherited.clone());
-                }
+            // Add inherited protocols (protocol conformances) via query
+            let inherited_conformances = ctx.model.query(kestrel_semantic_model::ConformancesForSymbol {
+                symbol_id: protocol_symbol.metadata().id(),
+            });
+            for inherited in inherited_conformances {
+                to_check.push(inherited);
             }
         }
     }

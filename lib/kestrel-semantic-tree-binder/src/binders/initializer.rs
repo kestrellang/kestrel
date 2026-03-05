@@ -133,7 +133,7 @@ fn resolve_initializer_body(
 
     // Inject `self` as the first local (with initializing semantics)
     // In initializers, self is mutable so we can assign to fields
-    if let Some(self_type) = get_self_type(symbol) {
+    if let Some(self_type) = get_self_type(symbol, context.model) {
         let decl_span = symbol.metadata().span().clone();
         let self_span = Span::new(decl_span.file_id, decl_span.start..decl_span.start);
 
@@ -193,8 +193,8 @@ fn resolve_initializer_body(
 /// Get the type of `self` for an initializer
 ///
 /// Returns the concrete type of the containing struct with type parameters.
-fn get_self_type(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> Option<Ty> {
-    use kestrel_semantic_tree::behavior::extension_target::ExtensionTargetBehavior;
+fn get_self_type(symbol: &Arc<dyn Symbol<KestrelLanguage>>, model: &kestrel_semantic_model::SemanticModel) -> Option<Ty> {
+    use kestrel_semantic_model::ExtensionTargetFor;
     use kestrel_semantic_tree::behavior::generics::GenericsBehavior;
     use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
     use kestrel_semantic_tree::ty::Substitutions;
@@ -217,11 +217,10 @@ fn get_self_type(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> Option<Ty> {
             Some(Ty::generic_struct(struct_arc, substitutions, parent_span))
         },
         KestrelSymbolKind::Extension => {
-            // For extension initializers, get the target struct type from ExtensionTargetBehavior
-            let target_behavior = parent
-                .metadata()
-                .get_behavior::<ExtensionTargetBehavior>()?;
-            Some(target_behavior.target_type().clone())
+            // For extension initializers, get the target type via query (order-independent)
+            model.query(ExtensionTargetFor {
+                symbol_id: parent.metadata().id(),
+            })
         },
         _ => None,
     }
