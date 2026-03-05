@@ -51,7 +51,8 @@ members = [
     "lib/kestrel-codegen",
     "lib/kestrel-codegen-cranelift",
     "lib/kestrel-lsp",
-    "lib/kestrel-test-suite"
+    "lib/kestrel-test-suite",
+    "lib/kestrel-hecs"
 ]
 exclude = ["registry"]
 
