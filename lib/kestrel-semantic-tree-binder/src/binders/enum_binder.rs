@@ -131,13 +131,11 @@ impl EnumBinder {
             return;
         }
 
-        // Register the builtin
+        // Registration happens in the pre-pass (register_all_builtins).
+        // Here we only check for duplicates (a different symbol claiming the same feature).
         let symbol_id = symbol.metadata().id();
-        if !context
-            .model
-            .builtin_registry()
-            .register_enum(feature, symbol_id)
-        {
+        let existing = context.model.builtin_registry().builtin_enum(feature);
+        if existing.is_some() && existing != Some(symbol_id) {
             context.diagnostics.throw(DuplicateBuiltinError {
                 span: attr_span,
                 feature_name: feature.name().to_string(),

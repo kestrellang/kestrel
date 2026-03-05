@@ -9,7 +9,6 @@ use kestrel_semantic_model::{ResolveTypePath, TypePathResolution};
 use kestrel_semantic_tree::behavior::extension_target::ExtensionTargetBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::enum_symbol::EnumSymbol;
-use kestrel_semantic_tree::symbol::extension::ExtensionSymbol;
 use kestrel_semantic_tree::symbol::protocol::ProtocolSymbol;
 use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
 use kestrel_semantic_tree::symbol::type_parameter::TypeParameterSymbol;
@@ -90,13 +89,8 @@ impl DeclarationBinder for ExtensionBinder {
             );
             symbol.metadata().add_behavior(target_behavior);
 
-            // Register extension in the ExtensionRegistry
-            let target_id = target_symbol.id();
-            if let Ok(extension_symbol) = symbol.clone().downcast_arc::<ExtensionSymbol>() {
-                context
-                    .model
-                    .register_extension(target_id, extension_symbol);
-            }
+            // Extension registration in ExtensionRegistry is deferred to
+            // register_extensions() pass (after all bind_signatures complete).
         }
 
         // Resolve conformances from syntax

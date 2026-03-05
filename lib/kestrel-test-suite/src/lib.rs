@@ -1858,9 +1858,13 @@ fn get_is_cloneable(symbol: &Arc<dyn SymbolTrait<KestrelLanguage>>) -> Option<bo
         .map(|csb| csb.is_cloneable())
 }
 
-/// Helper to check if a struct has a deinit (has DeinitBehavior)
+/// Helper to check if a struct has a deinit child
 fn get_has_deinit(symbol: &Arc<dyn SymbolTrait<KestrelLanguage>>) -> bool {
-    use kestrel_semantic_tree::behavior::deinit::DeinitBehavior;
+    use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 
-    symbol.metadata().get_behavior::<DeinitBehavior>().is_some()
+    symbol
+        .metadata()
+        .children()
+        .into_iter()
+        .any(|c| c.metadata().kind() == KestrelSymbolKind::Deinit)
 }

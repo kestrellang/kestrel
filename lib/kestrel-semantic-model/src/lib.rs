@@ -19,7 +19,7 @@ mod type_oracle;
 pub use extension_registry::ExtensionRegistry;
 pub use model::SemanticModel;
 pub use queries::{
-    AllConformancesFor, AllInitializersFor, AllMethodsFor, AncestorOfKind, ConformsToQuery, CopySemanticsFor,
+    AllConformancesFor, AllInitializersFor, AllMethodsFor, AncestorOfKind, ConformsToQuery, CopySemanticsFor, DeinitFor,
     ProtocolConformancesForType,
     AssociatedTypeBindingsFor, AssociatedTypeBoundsInContext,
     ChildByName, ConcreteSelfType, ConformancesForSymbol, DeclaredName,

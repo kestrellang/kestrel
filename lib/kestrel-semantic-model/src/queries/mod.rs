@@ -6,6 +6,7 @@
 mod all_conformances_for;
 mod conforms_to;
 mod copy_semantics_for;
+mod deinit_for;
 mod protocol_conformances_for_type;
 mod resolve_associated_type;
 mod normalize_with_constraints;
@@ -59,6 +60,7 @@ mod where_clauses_in_scope;
 pub use all_conformances_for::AllConformancesFor;
 pub use conforms_to::ConformsToQuery;
 pub use copy_semantics_for::{CopySemanticsFor, collect_child_types};
+pub use deinit_for::DeinitFor;
 pub use protocol_conformances_for_type::ProtocolConformancesForType;
 pub use resolve_associated_type::ResolveAssociatedTypeQuery;
 pub use normalize_with_constraints::NormalizeWithConstraints;

@@ -189,9 +189,6 @@ pub fn resolve_conformance_list(
         }
     }
 
-    // Validate that all parent protocols are also declared
-    validate_parent_protocol_conformances(&resolved, symbol, ctx);
-
     // Validate no conflicting conformances (e.g., Cloneable + not Copyable)
     validate_no_conflicting_conformances(&resolved, &negative_resolved, symbol, ctx);
 
@@ -293,7 +290,7 @@ fn validate_no_conflicting_conformances(
 ///
 /// Exception: If all methods in the parent protocol have default implementations via
 /// protocol extensions, explicit conformance is not required.
-fn validate_parent_protocol_conformances(
+pub fn validate_parent_protocol_conformances(
     conformances: &[Ty],
     symbol: &Arc<dyn Symbol<KestrelLanguage>>,
     ctx: &mut BindingContext,

@@ -82,12 +82,10 @@ impl FunctionBinder {
             return;
         }
 
-        // Register the builtin
-        if !context
-            .model
-            .builtin_registry()
-            .register_function(feature, symbol_id)
-        {
+        // Registration happens in the pre-pass (register_all_builtins).
+        // Here we only check for duplicates (a different symbol claiming the same feature).
+        let existing = context.model.builtin_registry().builtin_function(feature);
+        if existing.is_some() && existing != Some(symbol_id) {
             context.diagnostics.throw(DuplicateBuiltinError {
                 span: attr_span,
                 feature_name: feature.name().to_string(),
@@ -142,12 +140,10 @@ impl FunctionBinder {
             return;
         }
 
-        // Register the builtin method
-        if !context
-            .model
-            .builtin_registry()
-            .register_method(feature, symbol_id)
-        {
+        // Registration happens in the pre-pass (register_all_builtins).
+        // Here we only check for duplicates (a different symbol claiming the same feature).
+        let existing = context.model.builtin_registry().method(feature);
+        if existing.is_some() && existing != Some(symbol_id) {
             context.diagnostics.throw(DuplicateBuiltinError {
                 span: attr_span,
                 feature_name: feature.name().to_string(),

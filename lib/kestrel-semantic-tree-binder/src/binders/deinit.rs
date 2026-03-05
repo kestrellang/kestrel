@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use kestrel_semantic_tree::behavior::deinit::DeinitBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::deinit::DeinitSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
@@ -10,7 +9,6 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
 
 use crate::declaration_binder::{BindingContext, DeclarationBinder};
-use crate::diagnostics::DuplicateDeinitError;
 use crate::resolution::LocalScope;
 use kestrel_syntax_tree::utils::find_child;
 
@@ -22,16 +20,15 @@ impl DeclarationBinder for DeinitBinder {
         &self,
         symbol: &Arc<dyn Symbol<KestrelLanguage>>,
         syntax: &SyntaxNode,
-        context: &mut BindingContext,
+        _context: &mut BindingContext,
     ) {
         // Extract doc comment
         if let Some(doc) = crate::binders::utils::doc_comment::extract_doc_comment(syntax) {
             symbol.metadata().add_behavior(doc);
         }
 
-        // Attach DeinitBehavior to parent struct
-        // Also check for duplicate deinit (struct can only have one)
-        attach_deinit_behavior_to_parent(symbol, context);
+        // Duplicate deinit detection is handled by DuplicateDeinitAnalyzer
+        // No cross-entity mutations needed here
     }
 
     fn bind_body(
@@ -48,48 +45,6 @@ impl DeclarationBinder for DeinitBinder {
             resolve_deinit_body(symbol, &body_node, context, &source, file_id);
         }
     }
-}
-
-/// Attach DeinitBehavior to the parent struct.
-///
-/// This also validates that only one deinit exists per struct.
-fn attach_deinit_behavior_to_parent(
-    symbol: &Arc<dyn Symbol<KestrelLanguage>>,
-    context: &mut BindingContext,
-) {
-    let Some(parent) = symbol.metadata().parent() else {
-        return;
-    };
-
-    // Only structs can have deinit
-    if parent.metadata().kind() != KestrelSymbolKind::Struct {
-        return;
-    }
-
-    let deinit_id = symbol.metadata().id();
-
-    // Check if parent already has a DeinitBehavior (duplicate deinit error)
-    if let Some(existing_deinit) = parent.metadata().get_behavior::<DeinitBehavior>() {
-        // Get the existing deinit symbol for span information
-        let existing_span = context
-            .model
-            .registry()
-            .get(existing_deinit.deinit_symbol())
-            .map(|s| s.metadata().span().clone())
-            .unwrap_or_else(|| symbol.metadata().span().clone());
-
-        context.diagnostics.throw(DuplicateDeinitError {
-            first_span: existing_span,
-            duplicate_span: symbol.metadata().span().clone(),
-            struct_name: parent.metadata().name().value.clone(),
-        });
-        return;
-    }
-
-    // Attach the DeinitBehavior to the parent struct
-    parent
-        .metadata()
-        .add_behavior(DeinitBehavior::new(deinit_id));
 }
 
 /// Resolve a deinit's body and attach ExecutableBehavior to the symbol

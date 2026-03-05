@@ -12,7 +12,7 @@ use crate::thunk::{ThunkCache, ThunkKey};
 use kestrel_reporting::{Diagnostic, IntoDiagnostic};
 use kestrel_semantic_model::SemanticModel;
 use kestrel_semantic_tree::behavior::copy_semantics::CopySemanticsBehavior;
-use kestrel_semantic_tree::behavior::deinit::DeinitBehavior;
+use kestrel_semantic_model::DeinitFor;
 use kestrel_semantic_tree::expr::LoopId;
 use kestrel_semantic_tree::symbol::local::LocalId;
 use kestrel_semantic_tree::ty::TyKind;
@@ -1166,7 +1166,7 @@ impl<'a> LoweringContext<'a> {
     /// Check if a type needs deinit (has non-trivial drop).
     ///
     /// A type needs deinit if:
-    /// 1. It has a DeinitBehavior (custom deinit block), OR
+    /// 1. It has a deinit child (custom deinit block), OR
     /// 2. It contains fields that need deinit (recursive check), AND
     /// 3. It is NOT copyable
     pub fn type_needs_deinit(&self, ty: &kestrel_semantic_tree::ty::Ty) -> bool {
@@ -1184,8 +1184,8 @@ impl<'a> LoweringContext<'a> {
                     return false;
                 }
 
-                // Check if has deinit behavior
-                if meta.get_behavior::<DeinitBehavior>().is_some() {
+                // Check if has deinit child
+                if self.model.query(DeinitFor { symbol_id: meta.id() }).is_some() {
                     return true;
                 }
 
@@ -1212,8 +1212,8 @@ impl<'a> LoweringContext<'a> {
                     return false;
                 }
 
-                // Check if has deinit behavior
-                if meta.get_behavior::<DeinitBehavior>().is_some() {
+                // Check if has deinit child
+                if self.model.query(DeinitFor { symbol_id: meta.id() }).is_some() {
                     return true;
                 }
 
@@ -1278,7 +1278,7 @@ impl<'a> LoweringContext<'a> {
                 let meta = symbol.metadata();
 
                 // 1. Call deinit function if present (body runs FIRST)
-                if let Some(_deinit_beh) = meta.get_behavior::<DeinitBehavior>() {
+                if self.model.query(DeinitFor { symbol_id: meta.id() }).is_some() {
                     let deinit_name = self.build_struct_deinit_function_name(symbol);
                     let self_ref = Value::Place(place.clone());
                     let call_args = vec![CallArg::mutating(self_ref)];
@@ -1315,7 +1315,7 @@ impl<'a> LoweringContext<'a> {
                 let meta = symbol.metadata();
 
                 // 1. Call enum's deinit function if present (body runs FIRST)
-                if let Some(_deinit_beh) = meta.get_behavior::<DeinitBehavior>() {
+                if self.model.query(DeinitFor { symbol_id: meta.id() }).is_some() {
                     let deinit_name = self.build_enum_deinit_function_name(symbol);
                     let self_ref = Value::Place(place.clone());
                     let call_args = vec![CallArg::mutating(self_ref)];

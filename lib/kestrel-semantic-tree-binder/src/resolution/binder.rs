@@ -9,7 +9,9 @@ use std::sync::Arc;
 use kestrel_reporting::DiagnosticContext;
 use kestrel_semantic_model::{ExtensionRegistry, SemanticModel, SymbolRegistry};
 use kestrel_semantic_tree::builtins::BuiltinRegistry;
+use kestrel_semantic_tree::behavior::extension_target::ExtensionTargetBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
+use kestrel_semantic_tree::symbol::extension::ExtensionSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_syntax_tree::SyntaxKind;
 use semantic_tree::cycle::CycleDetector;
@@ -88,13 +90,23 @@ impl SemanticBinder {
     /// This ensures that when resolving a function body, all functions in the file
     /// (including those declared later) have their CallableBehavior attached.
     fn run_binding(&mut self, diagnostics: &mut DiagnosticContext) -> SemanticModel {
-        // Pre-pass: Register all @builtin protocol IDs before binding.
-        // This ensures builtin protocol lookups (e.g., Copyable for `not Copyable`)
+        // Pre-pass: Register ALL @builtin symbol IDs before binding.
+        // This ensures builtin lookups (e.g., Copyable for `not Copyable`)
         // work regardless of module traversal order during bind_signatures.
-        self.register_builtin_protocols(&self.root.clone());
+        // Registration only needs symbol metadata + syntax (@builtin attribute) + source text.
+        // Validation (wrong kind, duplicate, must_be_marker, signature checks) stays in
+        // each binder's `process_builtin_attribute` during `bind_signature`.
+        self.register_all_builtins(&self.root.clone());
 
         // Pass 1: Bind all signatures (behaviors only, no bodies)
         self.bind_signatures(&self.root.clone(), diagnostics);
+
+        // Pass 1.5: Register extensions in ExtensionRegistry.
+        // This reads ExtensionTargetBehavior (attached during bind_signature) and
+        // writes to ExtensionRegistry. Deferred here so bind_signature is read-only
+        // w.r.t. shared state (ExtensionRegistry). Extension queries (ExtensionsFor)
+        // are only used during body resolution, analysis, and lowering.
+        self.register_extensions(&self.root.clone());
 
         // Pass 2: Resolve all bodies (all CallableBehaviors now exist)
         self.bind_bodies(&self.root.clone(), diagnostics);
@@ -180,9 +192,9 @@ impl SemanticBinder {
         }
     }
 
-    /// Pre-pass: Register all `@builtin` protocol IDs in the BuiltinRegistry.
+    /// Pre-pass: Register ALL `@builtin` symbol IDs in the BuiltinRegistry.
     ///
-    /// This walks the symbol tree looking for protocols with `@builtin` attributes
+    /// This walks the symbol tree looking for symbols with `@builtin` attributes
     /// and registers them before `bind_signatures` runs. This eliminates ordering
     /// dependencies — e.g., `not Copyable` works in any module regardless of whether
     /// `std.core.copy.Copyable` has been bound yet.
@@ -190,8 +202,18 @@ impl SemanticBinder {
     /// Only registration happens here; validation (wrong kind, must-be-marker,
     /// duplicate detection) is handled by `process_builtin_attribute` during
     /// `bind_signatures`.
-    fn register_builtin_protocols(&self, symbol: &Arc<dyn Symbol<KestrelLanguage>>) {
-        if symbol.metadata().kind() == KestrelSymbolKind::Protocol {
+    fn register_all_builtins(&self, symbol: &Arc<dyn Symbol<KestrelLanguage>>) {
+        let kind = symbol.metadata().kind();
+        let is_registrable = matches!(
+            kind,
+            KestrelSymbolKind::Protocol
+                | KestrelSymbolKind::Struct
+                | KestrelSymbolKind::Enum
+                | KestrelSymbolKind::Function
+                | KestrelSymbolKind::TypeAlias
+        );
+
+        if is_registrable {
             if let Some(syntax_node) = self.syntax_map.get(&symbol.metadata().id()) {
                 let source = Self::source_for_symbol(symbol, &self.sources);
                 // Use a scratch diagnostic context to avoid duplicate warnings
@@ -210,17 +232,76 @@ impl SemanticBinder {
                         &mut scratch_diagnostics,
                     )
                 {
-                    if feature.definition().kind.is_protocol() {
-                        let _ = self
-                            .builtin_registry
-                            .register_protocol(feature, symbol.metadata().id());
+                    let symbol_id = symbol.metadata().id();
+                    let def_kind = &feature.definition().kind;
+
+                    // Register based on the feature's expected kind, matching against
+                    // the actual symbol kind. Kind mismatches are silently skipped —
+                    // validation catches them later in bind_signature.
+                    match kind {
+                        KestrelSymbolKind::Protocol if def_kind.is_protocol() => {
+                            let _ = self.builtin_registry.register_protocol(feature, symbol_id);
+                        },
+                        KestrelSymbolKind::Struct if def_kind.is_struct() => {
+                            let _ = self.builtin_registry.register_struct(feature, symbol_id);
+                        },
+                        KestrelSymbolKind::Enum if def_kind.is_enum() => {
+                            let _ = self.builtin_registry.register_enum(feature, symbol_id);
+                        },
+                        KestrelSymbolKind::Function if def_kind.is_function() => {
+                            let _ = self.builtin_registry.register_function(feature, symbol_id);
+                        },
+                        KestrelSymbolKind::Function if def_kind.is_protocol_method() => {
+                            let _ = self.builtin_registry.register_method(feature, symbol_id);
+                        },
+                        KestrelSymbolKind::TypeAlias if def_kind.is_type_alias() => {
+                            let _ = self.builtin_registry.register_type_alias(feature, symbol_id);
+                        },
+                        _ => {
+                            // Kind mismatch — silently skip.
+                            // Validation in bind_signature will emit BuiltinWrongKindError.
+                        },
                     }
                 }
             }
         }
 
         for child in symbol.metadata().children() {
-            self.register_builtin_protocols(&child);
+            self.register_all_builtins(&child);
+        }
+    }
+
+    /// Pass 1.5: Register extensions in ExtensionRegistry.
+    ///
+    /// Walks the tree looking for extension symbols. For each one that has an
+    /// ExtensionTargetBehavior (attached during bind_signature), extracts the
+    /// target symbol ID and registers the extension.
+    fn register_extensions(&self, symbol: &Arc<dyn Symbol<KestrelLanguage>>) {
+        if symbol.metadata().kind() == KestrelSymbolKind::Extension {
+            if let Some(target_beh) = symbol.metadata().get_behavior::<ExtensionTargetBehavior>() {
+                let target_id = match target_beh.target_type().kind() {
+                    kestrel_semantic_tree::ty::TyKind::Struct { symbol: s, .. } => {
+                        Some(s.metadata().id())
+                    },
+                    kestrel_semantic_tree::ty::TyKind::Enum { symbol: s, .. } => {
+                        Some(s.metadata().id())
+                    },
+                    kestrel_semantic_tree::ty::TyKind::Protocol { symbol: s, .. } => {
+                        Some(s.metadata().id())
+                    },
+                    _ => None,
+                };
+
+                if let Some(target_id) = target_id {
+                    if let Ok(ext) = symbol.clone().downcast_arc::<ExtensionSymbol>() {
+                        self.model.register_extension(target_id, ext);
+                    }
+                }
+            }
+        }
+
+        for child in symbol.metadata().children() {
+            self.register_extensions(&child);
         }
     }
 

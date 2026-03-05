@@ -128,23 +128,15 @@ impl ProtocolBinder {
             return;
         }
 
-        // Register the builtin (may already be registered by the pre-pass)
+        // Registration happens in the pre-pass (register_all_builtins).
+        // Here we only check for duplicates (a different symbol claiming the same feature).
         let symbol_id = symbol.metadata().id();
-        if !context
-            .model
-            .builtin_registry()
-            .register_protocol(feature, symbol_id)
-        {
-            // The pre-pass registers all @builtin protocols before bind_signatures.
-            // If the same symbol tries to register again, that's expected — skip it.
-            // Only report an error if a *different* symbol claims the same feature.
-            let existing = context.model.builtin_registry().protocol(feature);
-            if existing != Some(symbol_id) {
-                context.diagnostics.throw(DuplicateBuiltinError {
-                    span: attr_span,
-                    feature_name: feature.name().to_string(),
-                });
-            }
+        let existing = context.model.builtin_registry().protocol(feature);
+        if existing.is_some() && existing != Some(symbol_id) {
+            context.diagnostics.throw(DuplicateBuiltinError {
+                span: attr_span,
+                feature_name: feature.name().to_string(),
+            });
         }
     }
 

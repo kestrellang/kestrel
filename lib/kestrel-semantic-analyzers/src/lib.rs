@@ -16,7 +16,8 @@ pub fn default_analyzers() -> Vec<Box<dyn Analyzer>> {
     use analyzers::{
         AssignmentValidationAnalyzer, ClosureAnalyzer, ConformanceAnalyzer,
         ConstraintCycleAnalyzer, DeadCodeAnalyzer, DefiniteAssignmentAnalyzer,
-        DuplicateCallableAnalyzer, DuplicateCaseAnalyzer, DuplicateLabelAnalyzer,
+        DuplicateCallableAnalyzer, DuplicateCaseAnalyzer, DuplicateDeinitAnalyzer,
+        DuplicateLabelAnalyzer,
         DuplicateSymbolAnalyzer, ExhaustiveReturnAnalyzer, ExhaustivenessAnalyzer,
         ExtensionConflictAnalyzer, FieldAnalyzer, ForLoopPatternAnalyzer, FunctionBodyAnalyzer,
         GenericsAnalyzer, GuardLetDivergenceAnalyzer, ImportAnalyzer,
@@ -54,6 +55,7 @@ pub fn default_analyzers() -> Vec<Box<dyn Analyzer>> {
         Box::new(SubscriptValidationAnalyzer::new()),
         Box::new(ProtocolMethodAnalyzer::new()),
         Box::new(StaticContextAnalyzer::new()),
+        Box::new(DuplicateDeinitAnalyzer::new()),
         Box::new(DuplicateSymbolAnalyzer::new()),
         Box::new(DuplicateCallableAnalyzer::new()),
         Box::new(DuplicateCaseAnalyzer::new()),
