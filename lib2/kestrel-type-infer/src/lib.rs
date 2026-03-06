@@ -19,9 +19,9 @@ pub mod solver;
 pub mod ty;
 pub mod unify;
 
-use kestrel_ast_builder::{Callable, TypeAnnotation};
+use kestrel_ast_builder::Callable;
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
-use kestrel_hir_lower::LowerBody;
+use kestrel_hir_lower::{LowerBody, LowerCallableTypes, LowerTypeAnnotation};
 
 use ctx::InferCtx;
 use resolve::WorldResolver;
@@ -41,6 +41,10 @@ pub struct InferBody {
 
 impl QueryFn for InferBody {
     type Output = Option<TypedBody>;
+
+    fn describe(&self) -> String {
+        format!("InferBody(entity={:?})", self.entity)
+    }
 
     fn execute(&self, query_ctx: &QueryContext<'_>) -> Option<TypedBody> {
         // Get the HIR body
@@ -90,25 +94,45 @@ fn create_param_types(
 
     // If method has a receiver, create self type
     if callable.receiver.is_some() {
-        // Self type = the parent type entity
+        // Self type = the parent type entity with fresh TyVars for type params.
+        // For methods in extensions, resolve to the extension's target type.
         let self_tv = if let Some(parent) = query_ctx.parent_of(entity) {
-            ctx.named(parent, vec![])
+            let parent_kind = query_ctx.get::<kestrel_ast_builder::NodeKind>(parent);
+            if parent_kind == Some(&kestrel_ast_builder::NodeKind::Extension) {
+                // Resolve extension target to the actual type
+                match query_ctx.query(kestrel_name_res::ExtensionTargetEntity {
+                    extension: parent,
+                    root: ctx.root,
+                }) {
+                    Some(target) => {
+                        let fresh_args = fresh_type_args(ctx, query_ctx, target);
+                        ctx.named(target, fresh_args)
+                    }
+                    None => ctx.fresh(),
+                }
+            } else {
+                let fresh_args = fresh_type_args(ctx, query_ctx, parent);
+                ctx.named(parent, fresh_args)
+            }
         } else {
             ctx.fresh()
         };
         param_tvs.push(self_tv);
     }
 
-    // Create TyVars for each declared parameter
-    for param in &callable.params {
-        let tv = if let Some(ast_ty) = &param.ty {
-            // Parameter has a type annotation — resolve AstType → HirTy → TyVar
-            let hir_ty = generate::lower_ast_type(query_ctx, entity, ctx.root, ast_ty);
-            generate::lower_hir_ty(ctx, &hir_ty)
-        } else {
-            ctx.fresh()
-        };
-        param_tvs.push(tv);
+    // Create TyVars for each declared parameter via lowered types
+    let lowered = query_ctx.query(LowerCallableTypes {
+        entity,
+        root: ctx.root,
+    });
+    if let Some(hir_tys) = &lowered {
+        for t in hir_tys {
+            let tv = match t {
+                Some(hir_ty) => generate::lower_hir_ty(ctx, hir_ty),
+                None => ctx.fresh(),
+            };
+            param_tvs.push(tv);
+        }
     }
 
     param_tvs
@@ -120,12 +144,23 @@ fn create_return_type(
     query_ctx: &QueryContext<'_>,
     entity: Entity,
 ) -> ty::TyVar {
-    // If entity has a TypeAnnotation, use it as the return type
-    if let Some(type_ann) = query_ctx.get::<TypeAnnotation>(entity) {
-        let hir_ty = generate::lower_ast_type(query_ctx, entity, ctx.root, &type_ann.0);
-        generate::lower_hir_ty(ctx, &hir_ty)
-    } else {
-        // No return type annotation — infer from body
-        ctx.fresh()
-    }
+    query_ctx
+        .query(LowerTypeAnnotation {
+            entity,
+            root: ctx.root,
+        })
+        .map(|hir_ty| generate::lower_hir_ty(ctx, &hir_ty))
+        .unwrap_or_else(|| ctx.fresh())
+}
+
+/// Create fresh TyVars for each type parameter of an entity.
+fn fresh_type_args(
+    ctx: &mut InferCtx<'_>,
+    query_ctx: &QueryContext<'_>,
+    entity: Entity,
+) -> Vec<ty::TyVar> {
+    query_ctx
+        .get::<kestrel_ast_builder::TypeParams>(entity)
+        .map(|tp| tp.0.iter().map(|_| ctx.fresh()).collect())
+        .unwrap_or_default()
 }

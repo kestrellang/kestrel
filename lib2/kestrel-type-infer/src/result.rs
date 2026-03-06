@@ -35,6 +35,9 @@ pub struct TypedBody {
 
     /// Errors accumulated during inference.
     pub errors: Vec<InferError>,
+
+    /// Human-readable error descriptions with resolved types.
+    pub error_details: Vec<String>,
 }
 
 /// Manual Hash: hash each map as sorted (key, value) pairs for determinism.
@@ -167,6 +170,8 @@ pub fn build_result(ctx: &InferCtx<'_>) -> TypedBody {
         })
         .collect();
 
+    let error_details = ctx.errors.iter().map(|err| describe_error(ctx, err)).collect();
+
     TypedBody {
         expr_types,
         local_types,
@@ -174,5 +179,94 @@ pub fn build_result(ctx: &InferCtx<'_>) -> TypedBody {
         promotions,
         type_args,
         errors: ctx.errors.clone(),
+        error_details,
+    }
+}
+
+/// Describe a TyVar as a short type name string (for diagnostics).
+fn describe_tyvar(ctx: &InferCtx<'_>, tv: TyVar) -> String {
+    let resolved = ctx.resolve(tv);
+    match &ctx.types[resolved.0 as usize] {
+        TySlot::Resolved(kind) => describe_tykind(ctx, kind),
+        TySlot::Unresolved { .. } => "?".into(),
+        TySlot::Redirect(_) => "?redirect".into(),
+    }
+}
+
+/// Describe a TyKind as a short type name string.
+fn describe_tykind(ctx: &InferCtx<'_>, kind: &TyKind) -> String {
+    match kind {
+        TyKind::Named { entity, args } => {
+            let name = ctx.query_ctx
+                .get::<kestrel_ast_builder::Name>(*entity)
+                .map(|n| n.0.clone())
+                .unwrap_or_else(|| {
+                    // Show NodeKind + entity for unnamed entities
+                    let kind = ctx.query_ctx.get::<kestrel_ast_builder::NodeKind>(*entity)
+                        .map(|k| format!("{:?}", k))
+                        .unwrap_or_else(|| "?".into());
+                    format!("{}({:?})", kind, entity)
+                });
+            if args.is_empty() {
+                name
+            } else {
+                let arg_strs: Vec<_> = args.iter().map(|&tv| describe_tyvar(ctx, tv)).collect();
+                format!("{}[{}]", name, arg_strs.join(", "))
+            }
+        }
+        TyKind::Param { entity } => {
+            ctx.query_ctx
+                .get::<kestrel_ast_builder::Name>(*entity)
+                .map(|n| n.0.clone())
+                .unwrap_or("Param".into())
+        }
+        TyKind::Tuple(elems) => {
+            if elems.is_empty() {
+                "()".into()
+            } else {
+                let strs: Vec<_> = elems.iter().map(|&tv| describe_tyvar(ctx, tv)).collect();
+                format!("({})", strs.join(", "))
+            }
+        }
+        TyKind::Function { params, ret } => {
+            let p: Vec<_> = params.iter().map(|&tv| describe_tyvar(ctx, tv)).collect();
+            format!("({}) -> {}", p.join(", "), describe_tyvar(ctx, *ret))
+        }
+        TyKind::Never => "Never".into(),
+        TyKind::Error => "Error".into(),
+    }
+}
+
+/// Build a human-readable error description with resolved types.
+fn describe_error(ctx: &InferCtx<'_>, err: &InferError) -> String {
+    match err {
+        InferError::TypeMismatch { expected, got, .. } => {
+            format!("expected {} got {}", describe_tyvar(ctx, *expected), describe_tyvar(ctx, *got))
+        }
+        InferError::DoesNotConform { ty, protocol, .. } => {
+            let ty_name = describe_tyvar(ctx, *ty);
+            let proto_name = ctx.query_ctx
+                .get::<kestrel_ast_builder::Name>(*protocol)
+                .map(|n| n.0.clone())
+                .unwrap_or_else(|| format!("{:?}", protocol));
+            format!("{} !: {}", ty_name, proto_name)
+        }
+        InferError::NoMember { receiver, name, .. } => {
+            format!("{}.{} not found", describe_tyvar(ctx, *receiver), name)
+        }
+        InferError::AmbiguousMember { receiver, name, .. } => {
+            format!("{}.{} ambiguous", describe_tyvar(ctx, *receiver), name)
+        }
+        InferError::MemberNotVisible { receiver, name, .. } => {
+            format!("{}.{} not visible", describe_tyvar(ctx, *receiver), name)
+        }
+        InferError::NoAssociatedType { container, name, .. } => {
+            format!("{}.{} no assoc type", describe_tyvar(ctx, *container), name)
+        }
+        InferError::ImplicitMemberNotFound { expected, name, .. } => {
+            format!(".{} not found on {}", name, describe_tyvar(ctx, *expected))
+        }
+        InferError::InfiniteType { .. } => "infinite type".into(),
+        InferError::FromHir { .. } => "from-hir".into(),
     }
 }

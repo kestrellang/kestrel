@@ -4,17 +4,16 @@
 //! statement binding, and local variable, then emits constraints
 //! capturing the type relationships between them.
 
-use kestrel_ast_builder::{AstType, Callable, Name, NodeKind, TypeAnnotation, TypeParams};
-use kestrel_hecs::{Entity, QueryContext};
+use kestrel_ast_builder::{AstParam, Callable, Name, NodeKind, TypeParams};
+use kestrel_hecs::Entity;
 use kestrel_hir::body::*;
 use kestrel_hir::ty::HirTy;
-use kestrel_name_res::{ResolveTypePath, TypeResolution};
+use kestrel_hir_lower::{LowerCallableTypes, LowerTypeAnnotation};
 use kestrel_span2::Span;
 
 use crate::constraint::CallArg;
 use crate::ctx::InferCtx;
 use crate::error::InferError;
-use kestrel_hir::Builtin;
 use crate::ty::{LiteralKind, TyVar};
 
 // ===== Entry point =====
@@ -67,6 +66,9 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
         HirExpr::Local(local_id, _) => {
             // Return the TyVar assigned when this local was declared
             ctx.local_types.get(local_id).copied().unwrap_or_else(|| {
+                let local = &hir.locals[*local_id];
+                kestrel_debug::ktrace!("hir-lower", "missing local type for {:?} (local_id {:?})",
+                    local.name, local_id);
                 ctx.report_error(InferError::FromHir {
                     span: expr_span(hir, id),
                 })
@@ -81,16 +83,21 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
 
         // === Calls ===
         HirExpr::Call { callee, args, span } => {
+            // Struct construction: Def(struct) used as callee
+            if let HirExpr::Def(entity, _) = &hir.exprs[*callee] {
+                if ctx.query_ctx.get::<NodeKind>(*entity) == Some(&NodeKind::Struct) {
+                    let arg_tvs = gen_call_args(ctx, hir, args);
+                    return gen_struct_init(ctx, *entity, &arg_tvs, id, span);
+                }
+            }
+
+            // Emit Call constraint — solver dispatches based on callee type:
+            // Function → unify params/return, Named → subscript resolution
             let callee_tv = gen_expr(ctx, hir, *callee);
             let arg_tvs = gen_call_args(ctx, hir, args);
             let result_tv = ctx.fresh();
 
-            // Build expected function type: (arg_tys) -> result_tv
-            let param_tvs: Vec<TyVar> = arg_tvs.iter().map(|a| a.ty).collect();
-            let fn_tv = ctx.function(param_tvs, result_tv);
-
-            // Callee type must match the function type
-            ctx.equal(callee_tv, fn_tv, span.clone());
+            ctx.call(callee_tv, arg_tvs, result_tv, id, span.clone());
             result_tv
         }
 
@@ -181,12 +188,11 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             else_body,
             span,
         } => {
-            // Condition must be Bool
-            let cond_tv = gen_expr(ctx, hir, *condition);
-            if let Some(bool_entity) = ctx.resolver.builtin(Builtin::Bool) {
-                let bool_tv = ctx.named(bool_entity, vec![]);
-                ctx.equal(cond_tv, bool_tv, span.clone());
-            }
+            // Condition type is not constrained during inference.
+            // Like lib1, validation of BooleanConditional conformance
+            // happens in a later pass. This avoids i1/Bool mismatches
+            // when stdlib code uses lang intrinsics directly in conditions.
+            let _cond_tv = gen_expr(ctx, hir, *condition);
 
             let then_tv = gen_block(ctx, hir, then_body);
 
@@ -217,11 +223,8 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
 
                 // Guard must be bool
                 if let Some(guard) = arm.guard {
-                    let guard_tv = gen_expr(ctx, hir, guard);
-                    if let Some(bool_entity) = ctx.resolver.builtin(Builtin::Bool) {
-                        let bool_tv = ctx.named(bool_entity, vec![]);
-                        ctx.equal(guard_tv, bool_tv, span.clone());
-                    }
+                    // Guard type validated later (same as if-condition)
+                    let _guard_tv = gen_expr(ctx, hir, guard);
                 }
 
                 // Body must match result type
@@ -402,6 +405,126 @@ fn gen_pat(ctx: &mut InferCtx<'_>, hir: &HirBody, pat_id: HirPatId, scrutinee_tv
     }
 }
 
+// ===== Struct construction =====
+
+/// Generate constraints for a struct constructor call.
+/// Finds a matching init (by arity + label pattern) or uses memberwise from fields.
+fn gen_struct_init(
+    ctx: &mut InferCtx<'_>,
+    struct_entity: Entity,
+    args: &[CallArg],
+    expr_id: HirExprId,
+    span: &Span,
+) -> TyVar {
+    let qctx = ctx.query_ctx;
+    let root = ctx.root;
+
+    // Build the result type: struct with fresh type args
+    let type_params: Vec<Entity> = qctx
+        .get::<TypeParams>(struct_entity)
+        .map(|tp| tp.0.clone())
+        .unwrap_or_default();
+    let fresh_args: Vec<TyVar> = type_params.iter().map(|_| ctx.fresh()).collect();
+    let result_tv = ctx.named(struct_entity, fresh_args.clone());
+
+    // Substitution map: struct type params → fresh TyVars.
+    // Used to instantiate init param/field types with the right type vars.
+    let struct_subs: Vec<(Entity, TyVar)> = type_params
+        .iter()
+        .zip(fresh_args.iter())
+        .map(|(&e, &tv)| (e, tv))
+        .collect();
+
+    // Collect arg labels for init matching
+    let arg_labels: Vec<Option<&str>> = args.iter().map(|a| a.label.as_deref()).collect();
+
+    // Find initializer children
+    let children = qctx.children_of(struct_entity).to_vec();
+    let inits: Vec<Entity> = children
+        .iter()
+        .filter(|&&c| qctx.get::<NodeKind>(c) == Some(&NodeKind::Initializer))
+        .copied()
+        .collect();
+
+    if !inits.is_empty() {
+        // Collect all inits matching by arity + label pattern
+        let matched: Vec<Entity> = inits
+            .iter()
+            .copied()
+            .filter(|&init| {
+                let Some(callable) = qctx.get::<Callable>(init) else {
+                    return false;
+                };
+                labels_match(&callable.params, &arg_labels)
+            })
+            .collect();
+
+        // Only emit arg constraints when exactly one init matches.
+        // Multiple matches (e.g. Int64.init(from: Int8/UInt8/...)) need
+        // type-directed disambiguation which happens during solving.
+        if let [init] = matched.as_slice() {
+            let init = *init;
+            // Build subs that includes both struct type params AND init's own type params
+            let init_type_params: Vec<Entity> = qctx
+                .get::<TypeParams>(init)
+                .map(|tp| tp.0.clone())
+                .unwrap_or_default();
+            let init_fresh: Vec<TyVar> = init_type_params.iter().map(|_| ctx.fresh()).collect();
+            let mut init_subs = struct_subs.clone();
+            for (&e, &tv) in init_type_params.iter().zip(init_fresh.iter()) {
+                init_subs.push((e, tv));
+            }
+
+            // Constrain args against the matched init's param types
+            if let Some(param_tys) = qctx.query(LowerCallableTypes { entity: init, root }) {
+                for (arg, param_ty) in args.iter().zip(param_tys.iter()) {
+                    if let Some(hir_ty) = param_ty {
+                        let param_tv = lower_hir_ty_with_subs(ctx, hir_ty, &init_subs);
+                        ctx.coerce(arg.ty, param_tv, expr_id, span.clone());
+                    }
+                }
+            }
+        } else if matched.is_empty() {
+            kestrel_debug::ktrace!(
+                "type-infer",
+                "no matching init for {:?} with labels {:?}",
+                qctx.get::<Name>(struct_entity),
+                arg_labels
+            );
+        }
+        // else: multiple matches — skip arg constraints, solver will disambiguate
+    } else {
+        // Memberwise init: match args against field types (in order)
+        let fields: Vec<Entity> = children
+            .iter()
+            .filter(|&&c| qctx.get::<NodeKind>(c) == Some(&NodeKind::Field))
+            .copied()
+            .collect();
+
+        for (arg, &field) in args.iter().zip(fields.iter()) {
+            if let Some(hir_ty) = qctx.query(LowerTypeAnnotation { entity: field, root }) {
+                let field_tv = lower_hir_ty_with_subs(ctx, &hir_ty, &struct_subs);
+                ctx.coerce(arg.ty, field_tv, expr_id, span.clone());
+            }
+        }
+    }
+
+    // Record this expr's type and return
+    ctx.expr_types.insert(expr_id, result_tv);
+    result_tv
+}
+
+/// Check if call arg labels match an init's param labels.
+fn labels_match(params: &[AstParam], arg_labels: &[Option<&str>]) -> bool {
+    if params.len() != arg_labels.len() {
+        return false;
+    }
+    params
+        .iter()
+        .zip(arg_labels.iter())
+        .all(|(param, arg_label)| param.label.as_deref() == *arg_label)
+}
+
 // ===== Helpers =====
 
 /// Generate constraints for call arguments, returning CallArg list.
@@ -471,6 +594,14 @@ fn instantiate_entity(ctx: &mut InferCtx<'_>, entity: Entity) -> TyVar {
         .unwrap_or_default();
     let fresh_type_args: Vec<TyVar> = type_param_entities.iter().map(|_| ctx.fresh()).collect();
 
+    // Build substitution map: type param entity → fresh TyVar.
+    // Used to instantiate generic param/return types with fresh vars.
+    let subs: Vec<(Entity, TyVar)> = type_param_entities
+        .iter()
+        .zip(fresh_type_args.iter())
+        .map(|(&e, &tv)| (e, tv))
+        .collect();
+
     // Emit where clause constraints for the type params
     for clause in ctx.resolver.where_clauses(entity) {
         match clause {
@@ -494,7 +625,7 @@ fn instantiate_entity(ctx: &mut InferCtx<'_>, entity: Entity) -> TyVar {
                         assoc_result,
                         span.clone(),
                     );
-                    let rhs_tv = crate::solver::kind_to_tyvar(ctx, &rhs);
+                    let rhs_tv = lower_hir_ty_with_subs(ctx, &rhs, &subs);
                     ctx.equal(assoc_result, rhs_tv, span);
                 }
             }
@@ -506,26 +637,19 @@ fn instantiate_entity(ctx: &mut InferCtx<'_>, entity: Entity) -> TyVar {
     match kind {
         // Functions and initializers: build Function type from Callable + return type
         Some(NodeKind::Function | NodeKind::Initializer) => {
-            if let Some(callable) = qctx.get::<Callable>(entity) {
-                let param_tvs: Vec<TyVar> = callable
-                    .params
+            if let Some(param_hir_tys) = qctx.query(LowerCallableTypes { entity, root }) {
+                let param_tvs: Vec<TyVar> = param_hir_tys
                     .iter()
-                    .map(|p| {
-                        if let Some(ast_ty) = &p.ty {
-                            let hir_ty = lower_ast_type(qctx, entity, root, ast_ty);
-                            lower_hir_ty(ctx, &hir_ty)
-                        } else {
-                            ctx.fresh()
-                        }
+                    .map(|t| match t {
+                        Some(hir_ty) => lower_hir_ty_with_subs(ctx, hir_ty, &subs),
+                        None => ctx.fresh(),
                     })
                     .collect();
 
-                let ret_tv = if let Some(type_ann) = qctx.get::<TypeAnnotation>(entity) {
-                    let hir_ty = lower_ast_type(qctx, entity, root, &type_ann.0);
-                    lower_hir_ty(ctx, &hir_ty)
-                } else {
-                    ctx.fresh()
-                };
+                let ret_tv = qctx
+                    .query(LowerTypeAnnotation { entity, root })
+                    .map(|hir_ty| lower_hir_ty_with_subs(ctx, &hir_ty, &subs))
+                    .unwrap_or_else(|| ctx.fresh());
 
                 ctx.function(param_tvs, ret_tv)
             } else {
@@ -538,30 +662,33 @@ fn instantiate_entity(ctx: &mut InferCtx<'_>, entity: Entity) -> TyVar {
         Some(NodeKind::EnumCase) => {
             let parent_enum = qctx.parent_of(entity);
 
-            if let Some(callable) = qctx.get::<Callable>(entity) {
+            // For enum cases, type params come from the parent enum.
+            // Build subs from parent's type params.
+            let parent_subs: Vec<(Entity, TyVar)> = if let Some(pe) = parent_enum {
+                let parent_tps: Vec<Entity> = qctx
+                    .get::<TypeParams>(pe)
+                    .map(|tp| tp.0.clone())
+                    .unwrap_or_default();
+                let parent_args: Vec<TyVar> =
+                    parent_tps.iter().map(|_| ctx.fresh()).collect();
+                parent_tps.into_iter().zip(parent_args.into_iter()).collect()
+            } else {
+                vec![]
+            };
+
+            if let Some(param_hir_tys) = qctx.query(LowerCallableTypes { entity, root }) {
                 // Case with payload → function from payload to enum type
-                let param_tvs: Vec<TyVar> = callable
-                    .params
+                let param_tvs: Vec<TyVar> = param_hir_tys
                     .iter()
-                    .map(|p| {
-                        if let Some(ast_ty) = &p.ty {
-                            let hir_ty = lower_ast_type(qctx, entity, root, ast_ty);
-                            lower_hir_ty(ctx, &hir_ty)
-                        } else {
-                            ctx.fresh()
-                        }
+                    .map(|t| match t {
+                        Some(hir_ty) => lower_hir_ty_with_subs(ctx, hir_ty, &parent_subs),
+                        None => ctx.fresh(),
                     })
                     .collect();
 
-                // Return type is the parent enum
+                // Return type is the parent enum with the same fresh args
                 let ret_tv = if let Some(pe) = parent_enum {
-                    // Get parent's type params and create corresponding fresh TyVars
-                    let parent_tps: Vec<Entity> = qctx
-                        .get::<TypeParams>(pe)
-                        .map(|tp| tp.0.clone())
-                        .unwrap_or_default();
-                    let parent_args: Vec<TyVar> =
-                        parent_tps.iter().map(|_| ctx.fresh()).collect();
+                    let parent_args: Vec<TyVar> = parent_subs.iter().map(|&(_, tv)| tv).collect();
                     ctx.named(pe, parent_args)
                 } else {
                     ctx.fresh()
@@ -571,12 +698,7 @@ fn instantiate_entity(ctx: &mut InferCtx<'_>, entity: Entity) -> TyVar {
             } else {
                 // Unit case (no payload) → the parent enum type
                 if let Some(pe) = parent_enum {
-                    let parent_tps: Vec<Entity> = qctx
-                        .get::<TypeParams>(pe)
-                        .map(|tp| tp.0.clone())
-                        .unwrap_or_default();
-                    let parent_args: Vec<TyVar> =
-                        parent_tps.iter().map(|_| ctx.fresh()).collect();
+                    let parent_args: Vec<TyVar> = parent_subs.iter().map(|&(_, tv)| tv).collect();
                     ctx.named(pe, parent_args)
                 } else {
                     ctx.named(entity, vec![])
@@ -590,14 +712,10 @@ fn instantiate_entity(ctx: &mut InferCtx<'_>, entity: Entity) -> TyVar {
         }
 
         // Fields: return the field's type
-        Some(NodeKind::Field) => {
-            if let Some(type_ann) = qctx.get::<TypeAnnotation>(entity) {
-                let hir_ty = lower_ast_type(qctx, entity, root, &type_ann.0);
-                lower_hir_ty(ctx, &hir_ty)
-            } else {
-                ctx.fresh()
-            }
-        }
+        Some(NodeKind::Field) => qctx
+            .query(LowerTypeAnnotation { entity, root })
+            .map(|hir_ty| lower_hir_ty(ctx, &hir_ty))
+            .unwrap_or_else(|| ctx.fresh()),
 
         // Default: Named type wrapping the entity
         _ => ctx.named(entity, fresh_type_args),
@@ -606,21 +724,37 @@ fn instantiate_entity(ctx: &mut InferCtx<'_>, entity: Entity) -> TyVar {
 
 /// Convert an HirTy (already resolved during HIR lowering) to a TyVar.
 pub fn lower_hir_ty(ctx: &mut InferCtx<'_>, ty: &HirTy) -> TyVar {
+    lower_hir_ty_with_subs(ctx, ty, &[])
+}
+
+/// Convert HirTy to TyVar, substituting type params found in `subs`.
+/// Used when instantiating generic entities: type params become fresh TyVars.
+fn lower_hir_ty_with_subs(
+    ctx: &mut InferCtx<'_>,
+    ty: &HirTy,
+    subs: &[(Entity, TyVar)],
+) -> TyVar {
     match ty {
         HirTy::Named { entity, args, .. } => {
-            let arg_tvs: Vec<TyVar> = args.iter().map(|a| lower_hir_ty(ctx, a)).collect();
+            let arg_tvs: Vec<TyVar> = args.iter().map(|a| lower_hir_ty_with_subs(ctx, a, subs)).collect();
             ctx.named(*entity, arg_tvs)
         }
         HirTy::Tuple(types, _) => {
-            let elem_tvs: Vec<TyVar> = types.iter().map(|t| lower_hir_ty(ctx, t)).collect();
+            let elem_tvs: Vec<TyVar> = types.iter().map(|t| lower_hir_ty_with_subs(ctx, t, subs)).collect();
             ctx.tuple(elem_tvs)
         }
         HirTy::Function { params, ret, .. } => {
-            let param_tvs: Vec<TyVar> = params.iter().map(|p| lower_hir_ty(ctx, p)).collect();
-            let ret_tv = lower_hir_ty(ctx, ret);
+            let param_tvs: Vec<TyVar> = params.iter().map(|p| lower_hir_ty_with_subs(ctx, p, subs)).collect();
+            let ret_tv = lower_hir_ty_with_subs(ctx, ret, subs);
             ctx.function(param_tvs, ret_tv)
         }
-        HirTy::Param(entity, _) => ctx.param(*entity),
+        HirTy::Param(entity, _) => {
+            // Check substitution map first (for instantiated type params)
+            if let Some(&(_, tv)) = subs.iter().find(|(e, _)| e == entity) {
+                return tv;
+            }
+            ctx.param(*entity)
+        }
         HirTy::Infer(_) => ctx.fresh(),
         HirTy::Error(span) => ctx.report_error(InferError::FromHir { span: span.clone() }),
     }
@@ -694,23 +828,18 @@ fn gen_variant_pat(
     }
 
     // Get case's payload types from its Callable component
-    let payload_types: Vec<TyVar> = if let Some(callable) = qctx.get::<Callable>(entity) {
-        callable
-            .params
-            .iter()
-            .map(|p| {
-                if let Some(ast_ty) = &p.ty {
-                    let hir_ty = lower_ast_type(qctx, entity, root, ast_ty);
-                    lower_hir_ty(ctx, &hir_ty)
-                } else {
-                    ctx.fresh()
-                }
-            })
-            .collect()
-    } else {
-        // No Callable → unit case, args should be empty
-        vec![]
-    };
+    let payload_types: Vec<TyVar> =
+        match qctx.query(LowerCallableTypes { entity, root }) {
+            Some(types) => types
+                .iter()
+                .map(|t| match t {
+                    Some(hir_ty) => lower_hir_ty(ctx, hir_ty),
+                    None => ctx.fresh(),
+                })
+                .collect(),
+            // No Callable → unit case, args should be empty
+            None => vec![],
+        };
 
     // Constrain each arg pattern against the corresponding payload type
     let payload_len = payload_types.len();
@@ -781,10 +910,8 @@ fn gen_struct_pat(
                         .is_some_and(|n| n.0 == field.field_name)
             })
             .and_then(|&child| {
-                qctx.get::<TypeAnnotation>(child).map(|ann| {
-                    let hir_ty = lower_ast_type(qctx, entity, root, &ann.0);
-                    lower_hir_ty(ctx, &hir_ty)
-                })
+                qctx.query(LowerTypeAnnotation { entity: child, root })
+                    .map(|hir_ty| lower_hir_ty(ctx, &hir_ty))
             })
             .unwrap_or_else(|| ctx.fresh());
 
@@ -794,168 +921,3 @@ fn gen_struct_pat(
     }
 }
 
-// ===== AstType → HirTy conversion =====
-
-/// Convert an AstType to HirTy using name resolution.
-/// Mirrors `kestrel-hir-lower/src/ty.rs`'s `lower_type()` logic
-/// but as a standalone function (no LowerCtx needed).
-pub fn lower_ast_type(
-    ctx: &QueryContext<'_>,
-    owner: Entity,
-    root: Entity,
-    ty: &AstType,
-) -> HirTy {
-    match ty {
-        AstType::Named { segments, span } => {
-            let seg_names: Vec<String> = segments.iter().map(|s| s.name.clone()).collect();
-            let result = ctx.query(ResolveTypePath {
-                segments: seg_names,
-                context: owner,
-                root,
-            });
-
-            match result {
-                TypeResolution::Found(entity) => {
-                    // Type parameter → HirTy::Param
-                    if ctx.get::<NodeKind>(entity) == Some(&NodeKind::TypeParameter) {
-                        return HirTy::Param(entity, span.clone());
-                    }
-
-                    // Lower type arguments from all segments
-                    let args: Vec<HirTy> = segments
-                        .iter()
-                        .flat_map(|s| s.type_args.iter())
-                        .map(|a| lower_ast_type(ctx, owner, root, a))
-                        .collect();
-
-                    HirTy::Named {
-                        entity,
-                        args,
-                        span: span.clone(),
-                    }
-                }
-                TypeResolution::SelfType => {
-                    // Walk up from owner to find enclosing type
-                    if let Some(self_entity) = find_self_type(ctx, owner) {
-                        HirTy::Named {
-                            entity: self_entity,
-                            args: Vec::new(),
-                            span: span.clone(),
-                        }
-                    } else {
-                        HirTy::Error(span.clone())
-                    }
-                }
-                TypeResolution::NotFound(_) | TypeResolution::NotAType(_) => {
-                    HirTy::Error(span.clone())
-                }
-            }
-        }
-
-        AstType::Tuple(types, span) => {
-            let lowered: Vec<HirTy> = types
-                .iter()
-                .map(|t| lower_ast_type(ctx, owner, root, t))
-                .collect();
-            HirTy::Tuple(lowered, span.clone())
-        }
-
-        AstType::Function {
-            params,
-            return_type,
-            span,
-        } => {
-            let lowered_params: Vec<HirTy> = params
-                .iter()
-                .map(|t| lower_ast_type(ctx, owner, root, t))
-                .collect();
-            let lowered_ret = Box::new(lower_ast_type(ctx, owner, root, return_type));
-            HirTy::Function {
-                params: lowered_params,
-                ret: lowered_ret,
-                span: span.clone(),
-            }
-        }
-
-        // Sugar types: resolve stdlib entity + Named
-        AstType::Array(elem, span) => lower_sugar_type(ctx, owner, root, "Array", &[elem], span),
-        AstType::Optional(inner, span) => {
-            lower_sugar_type(ctx, owner, root, "Optional", &[inner], span)
-        }
-        AstType::Dictionary(key, val, span) => {
-            lower_sugar_type(ctx, owner, root, "Dictionary", &[key, val], span)
-        }
-        AstType::Result { ok, err, span } => {
-            lower_sugar_type(ctx, owner, root, "Result", &[ok, err], span)
-        }
-        AstType::Unit(span) => HirTy::Tuple(Vec::new(), span.clone()),
-        AstType::Never(span) => {
-            if let Some(entity) = resolve_std_type(ctx, owner, root, "Never") {
-                HirTy::Named {
-                    entity,
-                    args: Vec::new(),
-                    span: span.clone(),
-                }
-            } else {
-                HirTy::Error(span.clone())
-            }
-        }
-        AstType::Inferred(span) => HirTy::Infer(span.clone()),
-    }
-}
-
-/// Lower a sugar type by resolving the stdlib entity.
-fn lower_sugar_type(
-    ctx: &QueryContext<'_>,
-    owner: Entity,
-    root: Entity,
-    name: &str,
-    type_args: &[&Box<AstType>],
-    span: &Span,
-) -> HirTy {
-    let lowered_args: Vec<HirTy> = type_args
-        .iter()
-        .map(|t| lower_ast_type(ctx, owner, root, t))
-        .collect();
-
-    if let Some(entity) = resolve_std_type(ctx, owner, root, name) {
-        HirTy::Named {
-            entity,
-            args: lowered_args,
-            span: span.clone(),
-        }
-    } else {
-        HirTy::Error(span.clone())
-    }
-}
-
-/// Resolve a well-known stdlib type name to an entity.
-fn resolve_std_type(
-    ctx: &QueryContext<'_>,
-    owner: Entity,
-    root: Entity,
-    name: &str,
-) -> Option<Entity> {
-    match ctx.query(ResolveTypePath {
-        segments: vec![name.to_string()],
-        context: owner,
-        root,
-    }) {
-        TypeResolution::Found(entity) => Some(entity),
-        _ => None,
-    }
-}
-
-/// Walk up from entity to find the enclosing type (Struct/Enum/Protocol).
-fn find_self_type(ctx: &QueryContext<'_>, entity: Entity) -> Option<Entity> {
-    let mut current = Some(entity);
-    while let Some(e) = current {
-        match ctx.get::<NodeKind>(e) {
-            Some(NodeKind::Struct | NodeKind::Enum | NodeKind::Protocol | NodeKind::Extension) => {
-                return Some(e);
-            }
-            _ => current = ctx.parent_of(e),
-        }
-    }
-    None
-}

@@ -47,6 +47,10 @@ pub struct ResolveName {
 impl QueryFn for ResolveName {
     type Output = NameResolution;
 
+    fn describe(&self) -> String {
+        format!("ResolveName({:?}, ctx={:?})", self.name, self.context)
+    }
+
     fn execute(&self, ctx: &QueryContext<'_>) -> NameResolution {
         let mut current = self.context;
 
@@ -219,11 +223,14 @@ fn resolve_inherited_protocol_member(
             continue;
         }
 
-        // Resolve full path (supports multi-segment like std.core.Equatable)
+        // Resolve full path (supports multi-segment like std.core.Equatable).
+        // Use the protocol's PARENT as context to avoid cycles: resolving from
+        // the protocol itself would re-enter resolve_inherited_protocol_member.
         let seg_names: Vec<String> = segments.iter().map(|s| s.name.clone()).collect();
+        let resolve_ctx = ctx.parent_of(protocol).unwrap_or(protocol);
         let type_result = ctx.query(crate::resolve_type::ResolveTypePath {
             segments: seg_names,
-            context: protocol,
+            context: resolve_ctx,
             root,
         });
 

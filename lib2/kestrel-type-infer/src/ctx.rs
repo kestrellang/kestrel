@@ -233,6 +233,23 @@ impl<'a> InferCtx<'a> {
         });
     }
 
+    pub fn call(
+        &mut self,
+        callee: TyVar,
+        args: Vec<CallArg>,
+        result: TyVar,
+        expr: HirExprId,
+        span: Span,
+    ) {
+        self.constraints.push(Constraint::Call {
+            callee,
+            args,
+            result,
+            expr,
+            span,
+        });
+    }
+
     pub fn implicit(
         &mut self,
         expected: TyVar,

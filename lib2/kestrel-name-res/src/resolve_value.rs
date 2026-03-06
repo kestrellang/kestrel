@@ -3,7 +3,7 @@
 //! Resolves value names (variables, functions, enum cases, etc.) to
 //! entities. Used by HIR lowering for expression paths.
 
-use kestrel_ast_builder::{Callable, Gettable, NodeKind, Static, Typed};
+use kestrel_ast_builder::{Callable, Conformances, ConformanceItem, Gettable, NodeKind, Static, Typed, WhereClause, Name};
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
 
 use crate::extensions::ExtensionsFor;
@@ -233,6 +233,18 @@ fn resolve_multi_segment(
             }
         }
 
+        // For associated types (abstract TypeAlias), search protocol bounds
+        // for static members (e.g. Item.zero where Item: Addable)
+        if ctx.get::<NodeKind>(current) == Some(&NodeKind::TypeAlias) {
+            if let Some(found) = resolve_assoc_type_static_member(ctx, current, segment, context, root) {
+                if is_last {
+                    return classify_value_results(ctx, vec![found]);
+                }
+                current = found;
+                continue;
+            }
+        }
+
         // Check for enum case or field/getter used as intermediate value
         // (e.g. MyEnum.caseA where caseA has no children to walk into)
         let segment_index = i + 1; // index in original segments
@@ -299,6 +311,120 @@ fn resolve_type_alias_target(
 
     match result {
         TypeResolution::Found(entity) => Some(entity),
+        _ => None,
+    }
+}
+
+/// Search protocol bounds on an associated type for a static member.
+///
+/// For `Item.zero` where `Item: Addable`, finds the `zero` static member
+/// inside the `Addable` protocol. Checks both direct conformances on the
+/// TypeAlias and where-clause bounds in ancestor entities.
+fn resolve_assoc_type_static_member(
+    ctx: &QueryContext<'_>,
+    assoc_type: Entity,
+    member_name: &str,
+    context: Entity,
+    root: Entity,
+) -> Option<Entity> {
+    let assoc_name = ctx.get::<Name>(assoc_type)?;
+
+    // Collect all protocol entities that bound this associated type
+    let mut bound_protocols = Vec::new();
+
+    // 1. Direct conformances on the TypeAlias (e.g. `type Item: Addable`)
+    if let Some(conformances) = ctx.get::<Conformances>(assoc_type) {
+        for item in &conformances.0 {
+            let ConformanceItem::Positive(ast_type, _) = item else { continue };
+            if let Some(proto) = resolve_protocol_from_ast(ctx, ast_type, context, root) {
+                bound_protocols.push(proto);
+            }
+        }
+    }
+
+    // 2. Where-clause bounds in ancestor chain (e.g. `where Item: Addable`)
+    let mut ancestor = Some(context);
+    while let Some(anc) = ancestor {
+        if let Some(where_clause) = ctx.get::<WhereClause>(anc) {
+            for constraint in &where_clause.0 {
+                let kestrel_ast_builder::WhereConstraint::Bound {
+                    subject, protocols, ..
+                } = constraint
+                else {
+                    continue;
+                };
+                let kestrel_ast::AstType::Named { segments, .. } = subject else {
+                    continue;
+                };
+                // Match single-segment "Item" or two-segment "Self.Item"
+                let matches = match segments.len() {
+                    1 => segments[0].name == assoc_name.0,
+                    2 => segments[0].name == "Self" && segments[1].name == assoc_name.0,
+                    _ => false,
+                };
+                if matches {
+                    for proto_ty in protocols {
+                        if let Some(proto) = resolve_protocol_from_ast(ctx, proto_ty, anc, root) {
+                            bound_protocols.push(proto);
+                        }
+                    }
+                }
+            }
+        }
+        ancestor = ctx.parent_of(anc);
+    }
+
+    // Search each protocol for a static member with the requested name
+    for proto in &bound_protocols {
+        let children = ctx.query(VisibleChildrenByName {
+            parent: *proto,
+            name: member_name.to_string(),
+            context,
+        });
+        if !children.is_empty() {
+            return Some(children[0]);
+        }
+
+        // Also check extensions of the protocol
+        let extensions = ctx.query(ExtensionsFor {
+            target: *proto,
+            root,
+        });
+        for &ext in &extensions {
+            let ext_children = ctx.query(VisibleChildrenByName {
+                parent: ext,
+                name: member_name.to_string(),
+                context,
+            });
+            if !ext_children.is_empty() {
+                return Some(ext_children[0]);
+            }
+        }
+    }
+
+    None
+}
+
+/// Resolve an AstType to a protocol entity.
+fn resolve_protocol_from_ast(
+    ctx: &QueryContext<'_>,
+    ast_type: &kestrel_ast::AstType,
+    scope: Entity,
+    root: Entity,
+) -> Option<Entity> {
+    let kestrel_ast::AstType::Named { segments, .. } = ast_type else {
+        return None;
+    };
+    let seg_names: Vec<String> = segments.iter().map(|s| s.name.clone()).collect();
+    let result = ctx.query(ResolveTypePath {
+        segments: seg_names,
+        context: scope,
+        root,
+    });
+    match result {
+        TypeResolution::Found(entity) if ctx.get::<NodeKind>(entity) == Some(&NodeKind::Protocol) => {
+            Some(entity)
+        }
         _ => None,
     }
 }

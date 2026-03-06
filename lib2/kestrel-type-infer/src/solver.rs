@@ -9,6 +9,7 @@
 use crate::constraint::{CallArg, Constraint};
 use crate::ctx::InferCtx;
 use crate::error::InferError;
+use kestrel_ast_builder::TypeParams;
 use kestrel_hir::Builtin;
 use crate::ty::{LiteralKind, TyKind, TySlot, TyVar};
 use crate::unify::{self, UnifyError};
@@ -84,6 +85,13 @@ fn try_solve(ctx: &mut InferCtx<'_>, c: Constraint) -> SolveResult {
             result,
             span,
         } => solve_associated(ctx, container, &name, result, span),
+        Constraint::Call {
+            callee,
+            args,
+            result,
+            expr,
+            span,
+        } => solve_call(ctx, callee, args, result, expr, span),
         Constraint::Member {
             receiver,
             name,
@@ -249,8 +257,8 @@ fn solve_associated(
 
     match ctx.resolver.resolve_associated_type(&kind, name) {
         Some(assoc) => {
-            // Convert the resolved TyKind into a TyVar
-            let assoc_tv = kind_to_tyvar(ctx, &assoc.resolved);
+            // Convert the resolved HirTy into a TyVar
+            let assoc_tv = lower_hir_ty_plain(ctx, &assoc.resolved);
             solve_equal(ctx, assoc_tv, result, span)
         }
         None => SolveResult::Error(InferError::NoAssociatedType {
@@ -258,6 +266,57 @@ fn solve_associated(
             name: name.to_string(),
             span,
         }),
+    }
+}
+
+fn solve_call(
+    ctx: &mut InferCtx<'_>,
+    callee: TyVar,
+    args: Vec<CallArg>,
+    result: TyVar,
+    expr: kestrel_hir::body::HirExprId,
+    span: Span,
+) -> SolveResult {
+    let resolved = ctx.resolve(callee);
+    if !ctx.is_concrete(resolved) {
+        return SolveResult::Deferred(Constraint::Call {
+            callee,
+            args,
+            result,
+            expr,
+            span,
+        });
+    }
+    if ctx.is_error(resolved) {
+        return SolveResult::Solved;
+    }
+
+    let kind = match ctx.slot(resolved) {
+        TySlot::Resolved(k) => k.clone(),
+        _ => unreachable!(),
+    };
+
+    match kind {
+        TyKind::Function { params, ret } => {
+            // Normal function call — unify params and return
+            for (arg, param) in args.iter().zip(params.iter()) {
+                ctx.coerce(arg.ty, *param, expr, span.clone());
+            }
+            ctx.equal(result, ret, span);
+            SolveResult::Solved
+        }
+        TyKind::Named { .. } | TyKind::Param { .. } => {
+            // Not a function — try subscript resolution via member system
+            solve_member(ctx, callee, "(subscript)", args, result, expr, span)
+        }
+        _ => {
+            // Tuples, Never, etc. are not callable
+            SolveResult::Error(InferError::NoMember {
+                receiver: callee,
+                name: "(subscript)".to_string(),
+                span,
+            })
+        }
     }
 }
 
@@ -291,6 +350,16 @@ fn solve_member(
         TySlot::Resolved(k) => k.clone(),
         _ => unreachable!(),
     };
+
+    // Tuple index access: "0", "1", etc. on a Tuple type
+    if let TyKind::Tuple(ref elems) = recv_kind {
+        if let Ok(idx) = name.parse::<usize>() {
+            if idx < elems.len() {
+                ctx.equal(result, elems[idx], span);
+                return SolveResult::Solved;
+            }
+        }
+    }
 
     // Resolve the member via the type resolver
     let resolution = match ctx.resolver.resolve_member(&recv_kind, name, &args) {
@@ -328,6 +397,35 @@ fn solve_member(
         ctx.type_args.insert(expr, fresh_params.clone());
     }
 
+    // Build type param substitution map:
+    // 1. Struct type params → receiver type args
+    // 2. Method's own type params → fresh vars
+    let mut subs: Vec<(kestrel_hecs::Entity, TyVar)> = Vec::new();
+
+    // Map struct type params to the receiver's actual type args
+    let recv_type_args: Vec<TyVar> = match &recv_kind {
+        TyKind::Named { args, .. } => args.clone(),
+        _ => vec![],
+    };
+    let recv_entity = match &recv_kind {
+        TyKind::Named { entity, .. } => Some(*entity),
+        _ => None,
+    };
+    if let Some(entity) = recv_entity {
+        let struct_type_params: Vec<kestrel_hecs::Entity> = ctx.query_ctx
+            .get::<TypeParams>(entity)
+            .map(|tp| tp.0.clone())
+            .unwrap_or_default();
+        for (&param, &arg) in struct_type_params.iter().zip(recv_type_args.iter()) {
+            subs.push((param, arg));
+        }
+    }
+
+    // Map method's own type params to fresh vars
+    for (&param, &fresh) in resolution.type_params.iter().zip(&fresh_params) {
+        subs.push((param, fresh));
+    }
+
     // Emit where clause constraints
     for clause in &resolution.where_clauses {
         match clause {
@@ -352,21 +450,25 @@ fn solve_member(
                 {
                     let assoc_result = ctx.fresh();
                     ctx.associated(fresh_params[idx], assoc_name, assoc_result, span.clone());
-                    let rhs_tv = kind_to_tyvar(ctx, rhs);
+                    let rhs_tv = lower_hir_ty_sub(ctx, rhs, None, TyVar(0), &subs);
                     ctx.equal(assoc_result, rhs_tv, span.clone());
                 }
             }
         }
     }
 
+    // For protocol methods, Self in param/return types needs substitution
+    // with the actual receiver type.
+    let self_entity = resolution.self_type;
+
     // Equate argument types with parameter types
     for (arg, param_info) in args.iter().zip(&resolution.param_types) {
-        let param_tv = kind_to_tyvar(ctx, &param_info.ty);
+        let param_tv = lower_hir_ty_sub(ctx, &param_info.ty, self_entity, receiver, &subs);
         ctx.coerce(arg.ty, param_tv, expr, span.clone());
     }
 
     // Equate result with return type
-    let ret_tv = kind_to_tyvar(ctx, &resolution.return_type);
+    let ret_tv = lower_hir_ty_sub(ctx, &resolution.return_type, self_entity, receiver, &subs);
     ctx.equal(result, ret_tv, span.clone());
 
     SolveResult::Solved
@@ -461,19 +563,40 @@ fn apply_literal_defaults(ctx: &mut InferCtx<'_>) {
 
 /// Convert a TyKind to a new TyVar.
 pub fn kind_to_tyvar(ctx: &mut InferCtx<'_>, kind: &TyKind) -> TyVar {
+    kind_to_tyvar_sub(ctx, kind, None, TyVar(0))
+}
+
+/// Convert a TyKind to a TyVar, substituting `self_entity` with `recv_tv`.
+/// Used for protocol method dispatch where Self needs to become the concrete receiver.
+pub fn kind_to_tyvar_sub(
+    ctx: &mut InferCtx<'_>,
+    kind: &TyKind,
+    self_entity: Option<kestrel_hecs::Entity>,
+    recv_tv: TyVar,
+) -> TyVar {
     match kind {
         TyKind::Named { entity, args } => {
-            let arg_tvs: Vec<TyVar> = args.iter().map(|a| kind_to_tyvar(ctx, &resolve_kind(ctx, *a))).collect();
+            // Substitute Self type with receiver
+            if self_entity == Some(*entity) {
+                return recv_tv;
+            }
+            let arg_tvs: Vec<TyVar> = args.iter()
+                .map(|a| kind_to_tyvar_sub(ctx, &resolve_kind(ctx, *a), self_entity, recv_tv))
+                .collect();
             ctx.named(*entity, arg_tvs)
         }
         TyKind::Param { entity } => ctx.param(*entity),
         TyKind::Tuple(elems) => {
-            let elem_tvs: Vec<TyVar> = elems.iter().map(|e| kind_to_tyvar(ctx, &resolve_kind(ctx, *e))).collect();
+            let elem_tvs: Vec<TyVar> = elems.iter()
+                .map(|e| kind_to_tyvar_sub(ctx, &resolve_kind(ctx, *e), self_entity, recv_tv))
+                .collect();
             ctx.tuple(elem_tvs)
         }
         TyKind::Function { params, ret } => {
-            let param_tvs: Vec<TyVar> = params.iter().map(|p| kind_to_tyvar(ctx, &resolve_kind(ctx, *p))).collect();
-            let ret_tv = kind_to_tyvar(ctx, &resolve_kind(ctx, *ret));
+            let param_tvs: Vec<TyVar> = params.iter()
+                .map(|p| kind_to_tyvar_sub(ctx, &resolve_kind(ctx, *p), self_entity, recv_tv))
+                .collect();
+            let ret_tv = kind_to_tyvar_sub(ctx, &resolve_kind(ctx, *ret), self_entity, recv_tv);
             ctx.function(param_tvs, ret_tv)
         }
         TyKind::Never => ctx.never(),
@@ -492,4 +615,88 @@ fn resolve_kind(ctx: &InferCtx<'_>, tv: TyVar) -> TyKind {
         TySlot::Resolved(k) => k.clone(),
         _ => TyKind::Error, // unresolved — shouldn't happen in well-formed member types
     }
+}
+
+/// Convert HirTy to TyVar with substitutions.
+/// - Self entity → receiver TyVar
+/// - Type params in `subs` → their mapped TyVars (struct type params + method type params)
+fn lower_hir_ty_sub(
+    ctx: &mut InferCtx<'_>,
+    ty: &kestrel_hir::ty::HirTy,
+    self_entity: Option<kestrel_hecs::Entity>,
+    recv_tv: TyVar,
+    subs: &[(kestrel_hecs::Entity, TyVar)],
+) -> TyVar {
+    use kestrel_hir::ty::HirTy;
+    match ty {
+        HirTy::Named { entity, args, .. } => {
+            // Substitute Self type with receiver
+            if self_entity == Some(*entity) {
+                return recv_tv;
+            }
+            // Check substitution map (type params of the method/struct)
+            if let Some(&(_, tv)) = subs.iter().find(|(e, _)| e == entity) {
+                return tv;
+            }
+            // Associated type resolution: if this entity is a TypeAlias
+            // (e.g., `Iter` in `protocol Iterable { type Iter }`) and we have
+            // a concrete receiver (not the protocol itself or a type param),
+            // emit an Associated constraint so the solver resolves it via the
+            // concrete type (e.g., ArrayIterator[T] for Array).
+            if self_entity.is_some()
+                && ctx.query_ctx.get::<kestrel_ast_builder::NodeKind>(*entity)
+                    == Some(&kestrel_ast_builder::NodeKind::TypeAlias)
+            {
+                let recv_resolved = ctx.resolve(recv_tv);
+                let is_concrete_non_self = match ctx.slot(recv_resolved) {
+                    TySlot::Resolved(TyKind::Named { entity: recv_entity, .. }) => {
+                        self_entity != Some(*recv_entity)
+                    }
+                    _ => false,
+                };
+                if is_concrete_non_self {
+                    if let Some(name) = ctx.query_ctx.get::<kestrel_ast_builder::Name>(*entity) {
+                        let result = ctx.fresh();
+                        ctx.associated(recv_tv, &name.0, result, kestrel_span2::Span::synthetic(0));
+                        return result;
+                    }
+                }
+            }
+            let arg_tvs: Vec<TyVar> = args.iter()
+                .map(|a| lower_hir_ty_sub(ctx, a, self_entity, recv_tv, subs))
+                .collect();
+            ctx.named(*entity, arg_tvs)
+        }
+        HirTy::Param(entity, _) => {
+            // Check substitution map
+            if let Some(&(_, tv)) = subs.iter().find(|(e, _)| e == entity) {
+                return tv;
+            }
+            ctx.param(*entity)
+        }
+        HirTy::Tuple(types, _) => {
+            let elem_tvs: Vec<TyVar> = types.iter()
+                .map(|t| lower_hir_ty_sub(ctx, t, self_entity, recv_tv, subs))
+                .collect();
+            ctx.tuple(elem_tvs)
+        }
+        HirTy::Function { params, ret, .. } => {
+            let param_tvs: Vec<TyVar> = params.iter()
+                .map(|p| lower_hir_ty_sub(ctx, p, self_entity, recv_tv, subs))
+                .collect();
+            let ret_tv = lower_hir_ty_sub(ctx, ret, self_entity, recv_tv, subs);
+            ctx.function(param_tvs, ret_tv)
+        }
+        HirTy::Infer(_) => ctx.fresh(),
+        HirTy::Error(_) => {
+            let idx = ctx.types.len() as u32;
+            ctx.types.push(TySlot::Resolved(TyKind::Error));
+            TyVar(idx)
+        }
+    }
+}
+
+/// Convert HirTy to TyVar without substitution.
+pub fn lower_hir_ty_plain(ctx: &mut InferCtx<'_>, ty: &kestrel_hir::ty::HirTy) -> TyVar {
+    lower_hir_ty_sub(ctx, ty, None, TyVar(0), &[])
 }

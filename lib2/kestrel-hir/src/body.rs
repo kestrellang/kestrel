@@ -332,40 +332,40 @@ pub struct HirStructPatField {
 /// Label is `None` for single-name params (no external label in Kestrel),
 /// `Some("by")` for shift ops, `Some("to")` for range ops.
 pub const BINARY_OP_PROTOCOLS: &[(BinaryOp, Builtin, &str, Option<&str>)] = &[
-    (BinaryOp::Add, Builtin::Addable, "add", None),
-    (BinaryOp::Sub, Builtin::Subtractable, "subtract", None),
-    (BinaryOp::Mul, Builtin::Multipliable, "multiply", None),
-    (BinaryOp::Div, Builtin::Divisible, "divide", None),
-    (BinaryOp::Rem, Builtin::Modulo, "modulo", None),
-    (BinaryOp::Eq, Builtin::Equal, "equals", None),
-    (BinaryOp::Ne, Builtin::NotEqual, "notEquals", None),
-    (BinaryOp::Lt, Builtin::Less, "lessThan", None),
-    (BinaryOp::Gt, Builtin::Greater, "greaterThan", None),
-    (BinaryOp::Le, Builtin::LessOrEqual, "lessThanOrEqual", None),
-    (BinaryOp::Ge, Builtin::GreaterOrEqual, "greaterThanOrEqual", None),
-    (BinaryOp::BitAnd, Builtin::BitwiseAnd, "bitwiseAnd", None),
-    (BinaryOp::BitOr, Builtin::BitwiseOr, "bitwiseOr", None),
-    (BinaryOp::BitXor, Builtin::BitwiseXor, "bitwiseXor", None),
-    (BinaryOp::Shl, Builtin::LeftShift, "shiftLeft", Some("by")),
-    (BinaryOp::Shr, Builtin::RightShift, "shiftRight", Some("by")),
-    (BinaryOp::RangeInclusive, Builtin::ClosedRangeConstructible, "inclusiveRange", Some("to")),
-    (BinaryOp::RangeExclusive, Builtin::RangeConstructible, "exclusiveRange", Some("to")),
+    (BinaryOp::Add, Builtin::AddOperatorProtocol, "add", None),
+    (BinaryOp::Sub, Builtin::SubtractOperatorProtocol, "subtract", None),
+    (BinaryOp::Mul, Builtin::MultiplyOperatorProtocol, "multiply", None),
+    (BinaryOp::Div, Builtin::DivideOperatorProtocol, "divide", None),
+    (BinaryOp::Rem, Builtin::ModuloOperatorProtocol, "modulo", None),
+    (BinaryOp::Eq, Builtin::EqualsOperatorProtocol, "equals", None),
+    (BinaryOp::Ne, Builtin::NotEqualsOperatorProtocol, "notEquals", None),
+    (BinaryOp::Lt, Builtin::LessThanOperatorProtocol, "lessThan", None),
+    (BinaryOp::Gt, Builtin::GreaterThanOperatorProtocol, "greaterThan", None),
+    (BinaryOp::Le, Builtin::LessOrEqualOperatorProtocol, "lessThanOrEqual", None),
+    (BinaryOp::Ge, Builtin::GreaterOrEqualOperatorProtocol, "greaterThanOrEqual", None),
+    (BinaryOp::BitAnd, Builtin::BitwiseAndOperatorProtocol, "bitwiseAnd", None),
+    (BinaryOp::BitOr, Builtin::BitwiseOrOperatorProtocol, "bitwiseOr", None),
+    (BinaryOp::BitXor, Builtin::BitwiseXorOperatorProtocol, "bitwiseXor", None),
+    (BinaryOp::Shl, Builtin::ShiftLeftOperatorProtocol, "shiftLeft", Some("by")),
+    (BinaryOp::Shr, Builtin::ShiftRightOperatorProtocol, "shiftRight", Some("by")),
+    (BinaryOp::RangeInclusive, Builtin::InclusiveRangeOperatorProtocol, "inclusiveRange", Some("to")),
+    (BinaryOp::RangeExclusive, Builtin::ExclusiveRangeOperatorProtocol, "exclusiveRange", Some("to")),
 ];
 
 /// Short-circuit operators: right operand is wrapped in a closure.
 /// `logicalAnd(other:)` and `logicalOr(other:)` are single-name params (no label).
 /// `coalesce(default:)` is also single-name (no label).
 pub const SHORT_CIRCUIT_OP_PROTOCOLS: &[(BinaryOp, Builtin, &str, Option<&str>)] = &[
-    (BinaryOp::And, Builtin::And, "logicalAnd", None),
-    (BinaryOp::Or, Builtin::Or, "logicalOr", None),
-    (BinaryOp::Coalesce, Builtin::Coalesce, "coalesce", None),
+    (BinaryOp::And, Builtin::LogicalAndOperatorProtocol, "logicalAnd", None),
+    (BinaryOp::Or, Builtin::LogicalOrOperatorProtocol, "logicalOr", None),
+    (BinaryOp::Coalesce, Builtin::CoalesceOperatorProtocol, "coalesce", None),
 ];
 
 /// (operator, protocol_builtin, method_name)
 pub const UNARY_OP_PROTOCOLS: &[(UnaryOp, Builtin, &str)] = &[
-    (UnaryOp::Neg, Builtin::Negatable, "negate"),
-    (UnaryOp::BitNot, Builtin::BitwiseNot, "bitwiseNot"),
-    (UnaryOp::LogicalNot, Builtin::Not, "logicalNot"),
+    (UnaryOp::Neg, Builtin::NegateOperatorProtocol, "negate"),
+    (UnaryOp::BitNot, Builtin::BitwiseNotOperatorProtocol, "bitwiseNot"),
+    (UnaryOp::LogicalNot, Builtin::LogicalNotOperatorProtocol, "logicalNot"),
 ];
 
 /// (operator, protocol_builtin, method_name, arg_label)
@@ -373,16 +373,16 @@ pub const UNARY_OP_PROTOCOLS: &[(UnaryOp, Builtin, &str)] = &[
 /// Most compound assign methods use single-name params (no label).
 /// Only shift-assign ops have a `"by"` label.
 pub const COMPOUND_ASSIGN_PROTOCOLS: &[(CompoundAssignOp, Builtin, &str, Option<&str>)] = &[
-    (CompoundAssignOp::AddAssign, Builtin::AddAssign, "addAssign", None),
-    (CompoundAssignOp::SubAssign, Builtin::SubtractAssign, "subtractAssign", None),
-    (CompoundAssignOp::MulAssign, Builtin::MultiplyAssign, "multiplyAssign", None),
-    (CompoundAssignOp::DivAssign, Builtin::DivideAssign, "divideAssign", None),
-    (CompoundAssignOp::RemAssign, Builtin::ModuloAssign, "modAssign", None),
-    (CompoundAssignOp::BitAndAssign, Builtin::BitwiseAndAssign, "bitwiseAndAssign", None),
-    (CompoundAssignOp::BitOrAssign, Builtin::BitwiseOrAssign, "bitwiseOrAssign", None),
-    (CompoundAssignOp::BitXorAssign, Builtin::BitwiseXorAssign, "bitwiseXorAssign", None),
-    (CompoundAssignOp::ShlAssign, Builtin::LeftShiftAssign, "shiftLeftAssign", Some("by")),
-    (CompoundAssignOp::ShrAssign, Builtin::RightShiftAssign, "shiftRightAssign", Some("by")),
+    (CompoundAssignOp::AddAssign, Builtin::AddAssignProtocol, "addAssign", None),
+    (CompoundAssignOp::SubAssign, Builtin::SubtractAssignProtocol, "subtractAssign", None),
+    (CompoundAssignOp::MulAssign, Builtin::MultiplyAssignProtocol, "multiplyAssign", None),
+    (CompoundAssignOp::DivAssign, Builtin::DivideAssignProtocol, "divideAssign", None),
+    (CompoundAssignOp::RemAssign, Builtin::ModuloAssignProtocol, "modAssign", None),
+    (CompoundAssignOp::BitAndAssign, Builtin::BitwiseAndAssignProtocol, "bitwiseAndAssign", None),
+    (CompoundAssignOp::BitOrAssign, Builtin::BitwiseOrAssignProtocol, "bitwiseOrAssign", None),
+    (CompoundAssignOp::BitXorAssign, Builtin::BitwiseXorAssignProtocol, "bitwiseXorAssign", None),
+    (CompoundAssignOp::ShlAssign, Builtin::ShiftLeftAssignProtocol, "shiftLeftAssign", Some("by")),
+    (CompoundAssignOp::ShrAssign, Builtin::ShiftRightAssignProtocol, "shiftRightAssign", Some("by")),
 ];
 
 /// Look up the protocol for a binary operator.

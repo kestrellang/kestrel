@@ -7,6 +7,7 @@
 //! - Literal markers: guard against unification with non-conforming types
 
 use crate::ctx::InferCtx;
+use kestrel_ast_builder::{Intrinsic, Name, NodeKind};
 use kestrel_hir::Builtin;
 use crate::ty::{LiteralKind, TyKind, TySlot, TyVar};
 
@@ -203,6 +204,12 @@ pub fn conforms_to_literal_protocol(
     ty: &TyKind,
     lit: LiteralKind,
 ) -> bool {
+    // Special case: intrinsic types (lang.i32, lang.f64, etc.) don't have
+    // protocol conformances but should accept matching literals directly.
+    if is_intrinsic_literal_compatible(ctx, ty, lit) {
+        return true;
+    }
+
     let feature = match lit {
         LiteralKind::Integer => Builtin::ExpressibleByIntegerLiteral,
         LiteralKind::Float => Builtin::ExpressibleByFloatLiteral,
@@ -217,6 +224,34 @@ pub fn conforms_to_literal_protocol(
         return false;
     };
     ctx.resolver.conforms_to(ty, protocol)
+}
+
+/// Intrinsic types accept matching literals without protocol conformance.
+/// e.g. integer literals → i8/i16/i32/i64/u8/u16/u32/u64,
+///      bool literals → i1, string literals → str
+fn is_intrinsic_literal_compatible(ctx: &InferCtx<'_>, ty: &TyKind, lit: LiteralKind) -> bool {
+    let TyKind::Named { entity, .. } = ty else {
+        return false;
+    };
+    // Must be an intrinsic struct
+    if ctx.query_ctx.get::<Intrinsic>(*entity).is_none()
+        || ctx.query_ctx.get::<NodeKind>(*entity) != Some(&NodeKind::Struct)
+    {
+        return false;
+    }
+    let Some(name) = ctx.query_ctx.get::<Name>(*entity) else {
+        return false;
+    };
+    match lit {
+        LiteralKind::Integer => matches!(
+            name.0.as_str(),
+            "i1" | "i8" | "i16" | "i32" | "i64"
+        ),
+        LiteralKind::Float => matches!(name.0.as_str(), "f32" | "f64"),
+        LiteralKind::Bool => matches!(name.0.as_str(), "i1"),
+        LiteralKind::String => matches!(name.0.as_str(), "str"),
+        _ => false,
+    }
 }
 
 #[cfg(test)]

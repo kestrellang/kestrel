@@ -49,12 +49,20 @@ fn extract_single_param(node: &SyntaxNode, file_id: usize) -> Option<AstParam> {
                 .map(|t| t.text().to_string())
         })?;
 
-    // Check for a label: a bare Identifier or Underscore token at the top
-    // level, appearing BEFORE the Pattern child
+    // Check for a label before the Pattern child. The emitter wraps labels
+    // in Name nodes (Name > Identifier), but they could also appear as bare
+    // Identifier tokens. Handle both forms.
     let mut label = None;
     for elem in node.children_with_tokens() {
         match elem {
             rowan::NodeOrToken::Node(n) if n.kind() == SyntaxKind::Pattern => break,
+            rowan::NodeOrToken::Node(n) if n.kind() == SyntaxKind::Name => {
+                // Label wrapped in Name node: Name > Identifier
+                label = n.children_with_tokens()
+                    .filter_map(|e| e.into_token())
+                    .find(|t| t.kind() == SyntaxKind::Identifier)
+                    .map(|t| t.text().to_string());
+            }
             rowan::NodeOrToken::Token(t) if t.kind() == SyntaxKind::Identifier => {
                 label = Some(t.text().to_string());
             }

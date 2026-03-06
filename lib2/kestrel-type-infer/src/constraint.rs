@@ -1,6 +1,6 @@
 //! Constraint definitions for type inference.
 //!
-//! Six constraint variants cover the entire type system. Each is emitted
+//! Seven constraint variants cover the entire type system. Each is emitted
 //! during constraint generation and consumed by the fixpoint solver.
 
 use kestrel_hecs::Entity;
@@ -53,6 +53,18 @@ pub enum Constraint {
     Member {
         receiver: TyVar,
         name: String,
+        args: Vec<CallArg>,
+        result: TyVar,
+        expr: HirExprId,
+        span: Span,
+    },
+
+    /// `callee(args) → result` — function or subscript call.
+    /// Deferred until callee type is concrete.
+    /// If callee is a Function type, unifies params/return directly.
+    /// If callee is a Named type, resolves subscript via member system.
+    Call {
+        callee: TyVar,
         args: Vec<CallArg>,
         result: TyVar,
         expr: HirExprId,

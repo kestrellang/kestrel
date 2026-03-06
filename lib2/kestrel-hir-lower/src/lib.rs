@@ -14,12 +14,14 @@ mod desugar;
 mod expr;
 pub(crate) mod pat;
 mod stmt;
-mod ty;
+pub mod ty;
 
 use kestrel_ast_builder::{Body, Callable};
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
 use kestrel_hir::body::HirBody;
 use kestrel_span2::Span;
+
+pub use ty::{lower_ast_type, LowerCallableTypes, LowerTypeAnnotation};
 
 use ctx::LowerCtx;
 

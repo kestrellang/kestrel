@@ -56,6 +56,11 @@ pub trait QueryFn: Hash + Eq + Clone + 'static {
     /// Execute the query. All component reads and sub-query calls go
     /// through `ctx`, which records dependencies automatically.
     fn execute(&self, ctx: &QueryContext<'_>) -> Self::Output;
+
+    /// Debug description for cycle detection diagnostics.
+    fn describe(&self) -> String {
+        std::any::type_name::<Self>().to_string()
+    }
 }
 
 /// A memoized query result with dependency and revision tracking.
@@ -140,6 +145,8 @@ impl Default for QueryStorage {
 #[derive(Clone, Debug)]
 struct ActiveQuery {
     key: QueryKey,
+    /// Debug label for cycle diagnostics (from QueryFn::describe).
+    label: String,
 }
 
 /// Context for query execution. Provides read access to the world
@@ -284,6 +291,12 @@ impl<'a> QueryContext<'a> {
             let stack = self.active.borrow();
             for aq in stack.iter() {
                 if aq.key == *qk {
+                    eprintln!("=== QUERY CYCLE ===");
+                    for (i, s) in stack.iter().enumerate() {
+                        eprintln!("  [{}] {}", i, s.label);
+                    }
+                    let label = q.describe();
+                    eprintln!("  --> {}", label);
                     panic!(
                         "Query cycle detected: {} is already on the stack",
                         std::any::type_name::<Q>()
@@ -293,7 +306,7 @@ impl<'a> QueryContext<'a> {
         }
         self.active
             .borrow_mut()
-            .push(ActiveQuery { key: qk.clone() });
+            .push(ActiveQuery { key: qk.clone(), label: q.describe() });
 
         // Clear old accumulators for this query
         self.accumulators.borrow_mut().clear_for_query(qk);

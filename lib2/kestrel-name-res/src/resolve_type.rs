@@ -49,6 +49,10 @@ pub struct ResolveTypePath {
 impl QueryFn for ResolveTypePath {
     type Output = TypeResolution;
 
+    fn describe(&self) -> String {
+        format!("ResolveTypePath({:?}, ctx={:?})", self.segments.join("."), self.context)
+    }
+
     fn execute(&self, ctx: &QueryContext<'_>) -> TypeResolution {
         if self.segments.is_empty() {
             return TypeResolution::NotFound("<empty>".into());
@@ -139,7 +143,14 @@ impl QueryFn for ResolveTypePath {
                 None if visible.is_empty() => {
                     return TypeResolution::NotFound(segment.clone());
                 }
-                None => return TypeResolution::NotAType(visible[0]),
+                None => {
+                    // Allow modules as intermediate segments (e.g. std.collections.Array)
+                    if ctx.get::<NodeKind>(visible[0]) == Some(&NodeKind::Module) {
+                        current = visible[0];
+                    } else {
+                        return TypeResolution::NotAType(visible[0]);
+                    }
+                }
             }
         }
 
@@ -206,44 +217,52 @@ fn resolve_type_param_assoc(
     ctx: &QueryContext<'_>,
     type_param: Entity,
     assoc_name: &str,
-    _context: Entity,
+    context: Entity,
     root: Entity,
 ) -> Option<Entity> {
     let tp_name = ctx.get::<Name>(type_param)?;
 
-    // Walk the ancestor chain collecting bounds for this type parameter.
-    // Bounds can come from where-clauses at multiple levels (function → struct → extension).
+    // Walk the type param's ancestor chain for where-clause bounds.
     let mut ancestor = ctx.parent_of(type_param);
     while let Some(anc) = ancestor {
-        if let Some(where_clause) = ctx.get::<WhereClause>(anc) {
-            if let Some(found) = search_bounds_for_assoc(ctx, where_clause, &tp_name.0, assoc_name, anc, root) {
-                return Some(found);
-            }
-
-            // Also check inherited associated type bounds (e.g. `where T.Item: Comparable`)
-            // These are Bound constraints where subject is a dotted path like T.AssocName
-            if let Some(found) = search_inherited_assoc_bounds(ctx, where_clause, &tp_name.0, assoc_name, anc, root) {
-                return Some(found);
-            }
+        if let Some(found) = search_entity_bounds(ctx, anc, &tp_name.0, assoc_name, root) {
+            return Some(found);
         }
-
-        // If ancestor is an extension, also check its target's where clause
-        if ctx.get::<NodeKind>(anc) == Some(&NodeKind::Extension) {
-            // Extension conformances can carry bounds too
-            if let Some(conformances) = ctx.get::<Conformances>(anc) {
-                for item in &conformances.0 {
-                    let ConformanceItem::Positive(ast_type, _) = item else { continue };
-                    // Check if this conformance is for our type param
-                    // (extensions can have `where T: Protocol` in conformances)
-                    let kestrel_ast::AstType::Named { segments, .. } = ast_type else { continue };
-                    if segments.is_empty() { continue; }
-                }
-            }
-        }
-
         ancestor = ctx.parent_of(anc);
     }
 
+    // Also walk the context's ancestor chain — the context (e.g. a method inside
+    // an extension) may have where-clause bounds on a type param defined elsewhere
+    // (e.g. `extend Array[T] where T: Iterable` — T is Array's param, but the
+    // where-clause is on the extension which is an ancestor of context, not of T).
+    let mut ancestor = Some(context);
+    while let Some(anc) = ancestor {
+        if let Some(found) = search_entity_bounds(ctx, anc, &tp_name.0, assoc_name, root) {
+            return Some(found);
+        }
+        ancestor = ctx.parent_of(anc);
+    }
+
+    None
+}
+
+/// Search a single entity's where-clause and conformances for bounds
+/// on `type_param_name` that contain an associated type `assoc_name`.
+fn search_entity_bounds(
+    ctx: &QueryContext<'_>,
+    entity: Entity,
+    type_param_name: &str,
+    assoc_name: &str,
+    root: Entity,
+) -> Option<Entity> {
+    if let Some(where_clause) = ctx.get::<WhereClause>(entity) {
+        if let Some(found) = search_bounds_for_assoc(ctx, where_clause, type_param_name, assoc_name, entity, root) {
+            return Some(found);
+        }
+        if let Some(found) = search_inherited_assoc_bounds(ctx, where_clause, type_param_name, assoc_name, entity, root) {
+            return Some(found);
+        }
+    }
     None
 }
 
@@ -340,11 +359,14 @@ fn search_protocols_for_assoc(
             continue;
         }
 
-        // Resolve the protocol via full type path
+        // Resolve the protocol via full type path.
+        // Use scope's parent to avoid cycles when scope is a protocol
+        // (resolving from a protocol re-enters inherited member search).
         let seg_names: Vec<String> = proto_segs.iter().map(|s| s.name.clone()).collect();
+        let resolve_ctx = ctx.parent_of(scope).unwrap_or(scope);
         let proto_result = ctx.query(ResolveTypePath {
             segments: seg_names,
-            context: scope,
+            context: resolve_ctx,
             root,
         });
 
@@ -518,9 +540,11 @@ fn find_inherited_assoc_type(
         }
 
         let seg_names: Vec<String> = segments.iter().map(|s| s.name.clone()).collect();
+        // Use scope's parent to avoid cycles when scope is a protocol
+        let resolve_ctx = ctx.parent_of(scope).unwrap_or(scope);
         let result = ctx.query(ResolveTypePath {
             segments: seg_names,
-            context: scope,
+            context: resolve_ctx,
             root,
         });
 
@@ -537,7 +561,7 @@ fn find_inherited_assoc_type(
         }
 
         // Recursively check grandparent protocols
-        if let Some(found) = find_inherited_assoc_type(ctx, parent_proto, name, scope, root) {
+        if let Some(found) = find_inherited_assoc_type(ctx, parent_proto, name, resolve_ctx, root) {
             return Some(found);
         }
     }

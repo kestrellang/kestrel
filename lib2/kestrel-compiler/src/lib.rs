@@ -168,9 +168,23 @@ impl Compiler {
                     summary.errors += typed.errors.len();
 
                     // Classify each error by variant
-                    for err in &typed.errors {
+                    for (i, err) in typed.errors.iter().enumerate() {
                         let variant = error_variant_name(err);
                         *summary.error_breakdown.entry(variant).or_insert(0) += 1;
+                        if let InferError::NoMember { name, .. } = err {
+                            *summary.no_member_breakdown.entry(name.clone()).or_insert(0) += 1;
+                        }
+                        if let InferError::DoesNotConform { protocol, .. } = err {
+                            let proto_name = ctx.get::<kestrel_ast_builder::Name>(*protocol)
+                                .map(|n| n.0.clone())
+                                .unwrap_or_else(|| format!("{:?}", protocol));
+                            *summary.does_not_conform_breakdown.entry(proto_name).or_insert(0) += 1;
+                        }
+                        if let InferError::TypeMismatch { .. } = err {
+                            if let Some(detail) = typed.error_details.get(i) {
+                                *summary.type_mismatch_breakdown.entry(detail.clone()).or_insert(0) += 1;
+                            }
+                        }
                     }
 
                     // Collect samples (first 50 errors with context)
@@ -184,6 +198,21 @@ impl Compiler {
                                 error: format_error(err),
                             });
                         }
+                    }
+
+                    // Track per-body error counts, with ordered detail for top bodies
+                    if !typed.errors.is_empty() {
+                        let mut details = Vec::new();
+                        if typed.errors.len() >= 15 {
+                            for (i, err) in typed.errors.iter().enumerate() {
+                                let span_info = error_span(err);
+                                let detail = typed.error_details.get(i)
+                                    .cloned()
+                                    .unwrap_or_else(|| format_error(err));
+                                details.push(format!("@{} {}", span_info, detail));
+                            }
+                        }
+                        summary.body_error_counts.push((entity_path, typed.errors.len(), details));
                     }
                 }
                 Ok(None) => summary.skipped += 1,
@@ -274,10 +303,18 @@ pub struct InferSummary {
     pub errors: usize,
     /// Error counts by variant name.
     pub error_breakdown: HashMap<&'static str, usize>,
+    /// NoMember breakdown by member name.
+    pub no_member_breakdown: HashMap<String, usize>,
+    /// DoesNotConform breakdown by protocol name.
+    pub does_not_conform_breakdown: HashMap<String, usize>,
+    /// TypeMismatch breakdown by "expected X got Y" pattern.
+    pub type_mismatch_breakdown: HashMap<String, usize>,
     /// Sample errors with entity context.
     pub error_samples: Vec<ErrorSample>,
     /// Details of panics (entity name + message).
     pub panic_details: Vec<String>,
+    /// Per-body error counts: (entity_path, error_count, detail_descriptions).
+    pub body_error_counts: Vec<(String, usize, Vec<String>)>,
 }
 
 /// A single error sample with the entity it came from.
@@ -302,6 +339,22 @@ fn error_variant_name(err: &InferError) -> &'static str {
 }
 
 /// Format an InferError into a human-readable one-liner.
+/// Extract byte offset from an error span.
+fn error_span(err: &InferError) -> String {
+    let span = match err {
+        InferError::TypeMismatch { span, .. }
+        | InferError::DoesNotConform { span, .. }
+        | InferError::NoMember { span, .. }
+        | InferError::AmbiguousMember { span, .. }
+        | InferError::MemberNotVisible { span, .. }
+        | InferError::NoAssociatedType { span, .. }
+        | InferError::InfiniteType { span }
+        | InferError::FromHir { span }
+        | InferError::ImplicitMemberNotFound { span, .. } => span,
+    };
+    format!("{}", span.start)
+}
+
 fn format_error(err: &InferError) -> String {
     match err {
         InferError::TypeMismatch { span, .. } => {
@@ -354,11 +407,60 @@ impl fmt::Display for InferSummary {
             }
         }
 
+        if !self.no_member_breakdown.is_empty() {
+            writeln!(f)?;
+            writeln!(f, "  NoMember breakdown:")?;
+            let mut nm: Vec<_> = self.no_member_breakdown.iter().collect();
+            nm.sort_by(|a, b| b.1.cmp(a.1));
+            for (name, count) in &nm {
+                writeln!(f, "    {:30} {:>5}", name, count)?;
+            }
+        }
+
+        if !self.does_not_conform_breakdown.is_empty() {
+            writeln!(f)?;
+            writeln!(f, "  DoesNotConform breakdown:")?;
+            let mut dc: Vec<_> = self.does_not_conform_breakdown.iter().collect();
+            dc.sort_by(|a, b| b.1.cmp(a.1));
+            for (name, count) in &dc {
+                writeln!(f, "    {:30} {:>5}", name, count)?;
+            }
+        }
+
+        if !self.type_mismatch_breakdown.is_empty() {
+            writeln!(f)?;
+            writeln!(f, "  TypeMismatch breakdown (top 30):")?;
+            let mut tm: Vec<_> = self.type_mismatch_breakdown.iter().collect();
+            tm.sort_by(|a, b| b.1.cmp(a.1));
+            for (desc, count) in tm.iter().take(30) {
+                writeln!(f, "    {:50} {:>5}", desc, count)?;
+            }
+        }
+
         if !self.error_samples.is_empty() {
             writeln!(f)?;
             writeln!(f, "  Error samples (first 50):")?;
             for sample in &self.error_samples {
                 writeln!(f, "    [{}] {}", sample.entity_path, sample.error)?;
+            }
+        }
+
+        if !self.body_error_counts.is_empty() {
+            writeln!(f)?;
+            writeln!(f, "  Bodies with most errors (top 20):")?;
+            let mut bc = self.body_error_counts.clone();
+            bc.sort_by(|a, b| b.1.cmp(&a.1));
+            for (path, count, details) in bc.iter().take(20) {
+                writeln!(f, "    {:60} {:>5}", path, count)?;
+                // Show first 5 unique error details for high-error bodies
+                if !details.is_empty() {
+                    let mut seen = std::collections::HashSet::new();
+                    for d in details.iter().take(10) {
+                        if seen.insert(d.clone()) {
+                            writeln!(f, "      - {}", d)?;
+                        }
+                    }
+                }
             }
         }
 

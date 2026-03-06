@@ -78,14 +78,28 @@ fn extract_attribute_arg(node: &SyntaxNode) -> Option<AstAttributeArg> {
     if let Some(pos) = colon_pos {
         let label = tokens.get(pos.wrapping_sub(1))
             .map(|t| t.text().to_string());
-        let value = tokens.get(pos + 1)
-            .map(|t| t.text().to_string())
+        let value = extract_value_from_tokens(&tokens[(pos + 1)..])
             .unwrap_or_default();
         Some(AstAttributeArg { label, value })
     } else {
         // Just a value, no label
-        let value = tokens.first()?.text().to_string();
+        let value = extract_value_from_tokens(&tokens)?;
         Some(AstAttributeArg { label: None, value })
+    }
+}
+
+/// Extract a value from tokens, handling implicit member syntax (.Name).
+///
+/// For `@builtin(.Copyable)`, the tokens are [Dot, Identifier("Copyable")].
+/// We combine them into ".Copyable" so consumers can recognize the pattern.
+fn extract_value_from_tokens(tokens: &[kestrel_syntax_tree2::SyntaxToken]) -> Option<String> {
+    if tokens.len() >= 2
+        && tokens[0].kind() == SyntaxKind::Dot
+        && tokens[1].kind() == SyntaxKind::Identifier
+    {
+        Some(format!(".{}", tokens[1].text()))
+    } else {
+        tokens.first().map(|t| t.text().to_string())
     }
 }
 
@@ -176,8 +190,8 @@ pub fn set_where_clause(world: &mut World, entity: Entity, node: &SyntaxNode, fi
         .filter_map(|child| {
             match child.kind() {
                 SyntaxKind::TypeBound => {
-                    // Subject is a Name child
-                    let subject = name_to_ast_type(&child, file_id)?;
+                    // Subject is a Name (simple: T) or AssociatedTypeTarget (dotted: T.Item)
+                    let subject = bound_subject_to_ast_type(&child, file_id)?;
 
                     // Protocol conformances come from Path children
                     let protocols: Vec<_> = child
@@ -233,6 +247,19 @@ pub fn set_where_clause(world: &mut World, entity: Entity, node: &SyntaxNode, fi
     if !constraints.is_empty() {
         world.set(entity, WhereClause(constraints));
     }
+}
+
+/// Extract the subject of a TypeBound as AstType.
+/// Handles both simple `Name` (T) and `AssociatedTypeTarget` (T.Item) nodes.
+fn bound_subject_to_ast_type(parent: &SyntaxNode, file_id: usize) -> Option<AstType> {
+    // Try AssociatedTypeTarget first (T.Item — contains a Path)
+    if let Some(assoc) = find_child(parent, SyntaxKind::AssociatedTypeTarget) {
+        if let Some(path) = find_child(&assoc, SyntaxKind::Path) {
+            return path_to_ast_type(&path, file_id);
+        }
+    }
+    // Fall back to simple Name (T)
+    name_to_ast_type(parent, file_id)
 }
 
 /// Convert a Name node to AstType::Named.

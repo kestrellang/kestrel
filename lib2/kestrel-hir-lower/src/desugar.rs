@@ -15,100 +15,59 @@ use crate::ctx::LowerCtx;
 impl LowerCtx<'_> {
     // ===== Binary operators =====
 
-    /// Desugar a binary expression. Dispatches to regular, short-circuit, or range.
-    pub(crate) fn desugar_binary(
+    /// Desugar a binary op where lhs/rhs are already lowered HirExprIds.
+    /// Used by Pratt parser which lowers operands before combining them.
+    pub(crate) fn desugar_binary_hir(
         &mut self,
-        body: &AstBody,
-        lhs: ExprId,
-        op: &BinaryOp,
-        rhs: ExprId,
+        op: BinaryOp,
+        lhs: HirExprId,
+        rhs: HirExprId,
         span: &Span,
     ) -> HirExprId {
-        // Check short-circuit operators first
-        if let Some((proto, method, label)) = lookup_short_circuit_op(op) {
-            return self.desugar_short_circuit_op(body, proto, method, label, lhs, rhs, span);
+        // Short-circuit ops wrap RHS in a closure
+        if let Some((proto, method, label)) = lookup_short_circuit_op(&op) {
+            let rhs_closure = self.alloc_expr(HirExpr::Closure {
+                params: Vec::new(),
+                body: HirBlock {
+                    stmts: Vec::new(),
+                    tail_expr: Some(rhs),
+                },
+                span: span.clone(),
+            });
+            if let Some(protocol) = self.resolve_builtin(proto) {
+                return self.alloc_expr(HirExpr::ProtocolCall {
+                    receiver: lhs,
+                    protocol,
+                    method: method.to_string(),
+                    type_args: None,
+                    args: vec![HirCallArg {
+                        label: label.map(|l| l.to_string()),
+                        value: rhs_closure,
+                    }],
+                    span: span.clone(),
+                });
+            }
+            return self.alloc_expr(HirExpr::Error { span: span.clone() });
         }
 
-        // Regular binary operator → ProtocolCall
-        if let Some((proto, method, label)) = lookup_binary_op(op) {
-            return self.desugar_binary_op(body, proto, method, label, lhs, rhs, span);
+        // Regular binary op
+        if let Some((proto, method, label)) = lookup_binary_op(&op) {
+            if let Some(protocol) = self.resolve_builtin(proto) {
+                return self.alloc_expr(HirExpr::ProtocolCall {
+                    receiver: lhs,
+                    protocol,
+                    method: method.to_string(),
+                    type_args: None,
+                    args: vec![HirCallArg {
+                        label: label.map(|l| l.to_string()),
+                        value: rhs,
+                    }],
+                    span: span.clone(),
+                });
+            }
         }
 
-        // Fallback (shouldn't happen if tables are complete)
         self.alloc_expr(HirExpr::Error { span: span.clone() })
-    }
-
-    /// Desugar a regular binary operator to a ProtocolCall.
-    fn desugar_binary_op(
-        &mut self,
-        body: &AstBody,
-        protocol: Builtin,
-        method_name: &str,
-        label: Option<&str>,
-        lhs: ExprId,
-        rhs: ExprId,
-        span: &Span,
-    ) -> HirExprId {
-        let lowered_lhs = self.lower_expr(body, lhs);
-        let lowered_rhs = self.lower_expr(body, rhs);
-
-        if let Some(protocol) = self.resolve_builtin(protocol) {
-            self.alloc_expr(HirExpr::ProtocolCall {
-                receiver: lowered_lhs,
-                protocol,
-                method: method_name.to_string(),
-                type_args: None,
-                args: vec![HirCallArg {
-                    label: label.map(|l| l.to_string()),
-                    value: lowered_rhs,
-                }],
-                span: span.clone(),
-            })
-        } else {
-            self.alloc_expr(HirExpr::Error { span: span.clone() })
-        }
-    }
-
-    /// Desugar a short-circuit operator (&&, ||, ??).
-    /// The RHS is wrapped in a closure to prevent eager evaluation.
-    fn desugar_short_circuit_op(
-        &mut self,
-        body: &AstBody,
-        protocol: Builtin,
-        method_name: &str,
-        label: Option<&str>,
-        lhs: ExprId,
-        rhs: ExprId,
-        span: &Span,
-    ) -> HirExprId {
-        let lowered_lhs = self.lower_expr(body, lhs);
-        let lowered_rhs = self.lower_expr(body, rhs);
-
-        // Wrap RHS in a closure: { () -> T in rhs }
-        let rhs_closure = self.alloc_expr(HirExpr::Closure {
-            params: Vec::new(),
-            body: HirBlock {
-                stmts: Vec::new(),
-                tail_expr: Some(lowered_rhs),
-            },
-            span: span.clone(),
-        });
-
-        if let Some(protocol) = self.resolve_builtin(protocol) {
-            self.alloc_expr(HirExpr::ProtocolCall {
-                receiver: lowered_lhs,
-                protocol,
-                method: method_name.to_string(),
-                type_args: None,
-                args: vec![HirCallArg {
-                    label: label.map(|l| l.to_string()),
-                    value: rhs_closure,
-                }],
-                span: span.clone(),
-            })
-        } else {
-            self.alloc_expr(HirExpr::Error { span: span.clone() })
-        }
     }
 
     /// Desugar && to a ProtocolCall (used by if-condition chains).
@@ -128,7 +87,7 @@ impl LowerCtx<'_> {
             span: span.clone(),
         });
 
-        if let Some(protocol) = self.resolve_builtin(Builtin::And) {
+        if let Some(protocol) = self.resolve_builtin(Builtin::LogicalAndOperatorProtocol) {
             self.alloc_expr(HirExpr::ProtocolCall {
                 receiver: lhs,
                 protocol,
@@ -226,7 +185,7 @@ impl LowerCtx<'_> {
         let lowered_cond = self.lower_expr(body, condition);
 
         // Negate condition: !condition
-        let negated = if let Some(protocol) = self.resolve_builtin(Builtin::Not) {
+        let negated = if let Some(protocol) = self.resolve_builtin(Builtin::LogicalNotOperatorProtocol) {
             self.alloc_expr(HirExpr::ProtocolCall {
                 receiver: lowered_cond,
                 protocol,
@@ -294,7 +253,7 @@ impl LowerCtx<'_> {
         });
 
         // Negate: if !cond { break }
-        let negated = if let Some(protocol) = self.resolve_builtin(Builtin::Not) {
+        let negated = if let Some(protocol) = self.resolve_builtin(Builtin::LogicalNotOperatorProtocol) {
             self.alloc_expr(HirExpr::ProtocolCall {
                 receiver: cond,
                 protocol,
@@ -341,9 +300,9 @@ impl LowerCtx<'_> {
 
     /// Desugar `for pattern in iterable { body }` to:
     /// ```text
-    /// let $iter = iterable.iterate()
+    /// let $iter = iterable.iter()   // via Iterable protocol
     /// loop {
-    ///     match $iter.next() {
+    ///     match $iter.next() {       // via Iterator protocol
     ///         .Some(pattern) => { body }
     ///         .None => break
     ///     }
@@ -360,14 +319,25 @@ impl LowerCtx<'_> {
     ) -> HirExprId {
         let lowered_iterable = self.lower_expr(body, iterable);
 
-        // $iter = iterable.iterate()
-        let iterate_call = self.alloc_expr(HirExpr::MethodCall {
-            receiver: lowered_iterable,
-            method: "iterate".to_string(),
-            type_args: None,
-            args: Vec::new(),
-            span: span.clone(),
-        });
+        // $iter = iterable.iter() via Iterable protocol
+        let iterate_call = if let Some(protocol) = self.resolve_builtin(Builtin::IterableProtocol) {
+            self.alloc_expr(HirExpr::ProtocolCall {
+                receiver: lowered_iterable,
+                protocol,
+                method: "iter".to_string(),
+                type_args: None,
+                args: Vec::new(),
+                span: span.clone(),
+            })
+        } else {
+            self.alloc_expr(HirExpr::MethodCall {
+                receiver: lowered_iterable,
+                method: "iter".to_string(),
+                type_args: None,
+                args: Vec::new(),
+                span: span.clone(),
+            })
+        };
 
         let iter_local = self.define_local("$iter", true, span.clone());
         let iter_let = self.alloc_stmt(HirStmt::Let {
@@ -377,15 +347,26 @@ impl LowerCtx<'_> {
             span: span.clone(),
         });
 
-        // $iter.next()
+        // $iter.next() via Iterator protocol
         let iter_ref = self.alloc_expr(HirExpr::Local(iter_local, span.clone()));
-        let next_call = self.alloc_expr(HirExpr::MethodCall {
-            receiver: iter_ref,
-            method: "next".to_string(),
-            type_args: None,
-            args: Vec::new(),
-            span: span.clone(),
-        });
+        let next_call = if let Some(protocol) = self.resolve_builtin(Builtin::IteratorProtocol) {
+            self.alloc_expr(HirExpr::ProtocolCall {
+                receiver: iter_ref,
+                protocol,
+                method: "next".to_string(),
+                type_args: None,
+                args: Vec::new(),
+                span: span.clone(),
+            })
+        } else {
+            self.alloc_expr(HirExpr::MethodCall {
+                receiver: iter_ref,
+                method: "next".to_string(),
+                type_args: None,
+                args: Vec::new(),
+                span: span.clone(),
+            })
+        };
 
         // Pattern for .Some(pattern)
         self.push_scope();
@@ -684,7 +665,7 @@ impl LowerCtx<'_> {
 
         let mut result = exprs[0];
         for &next in &exprs[1..] {
-            if let Some(protocol) = self.resolve_builtin(Builtin::Addable) {
+            if let Some(protocol) = self.resolve_builtin(Builtin::AddOperatorProtocol) {
                 result = self.alloc_expr(HirExpr::ProtocolCall {
                     receiver: result,
                     protocol,

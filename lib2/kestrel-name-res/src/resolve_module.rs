@@ -71,10 +71,11 @@ fn find_child_module(ctx: &QueryContext<'_>, parent: Entity, name: &str) -> Opti
 
 // ===== StdModules =====
 
-/// Query: collect all leaf submodules of the `std` module.
+/// Query: collect all submodules of the `std` module.
 ///
-/// A leaf module is one with no child modules. These are used for
-/// auto-importing stdlib declarations into user code.
+/// Includes parent modules (not just leaves) because modules like
+/// `std.text` contain declarations even though they have child modules.
+/// Used for auto-importing stdlib declarations into user code.
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct StdModules {
     pub root: Entity,
@@ -89,29 +90,22 @@ impl QueryFn for StdModules {
             return Vec::new();
         };
 
-        // Collect all leaf submodules
-        let mut leaves = Vec::new();
-        collect_leaf_modules(ctx, std_mod, &mut leaves);
-        leaves
+        // Collect all submodules (not just leaves — parent modules
+        // like std.text also contain declarations that need importing)
+        let mut modules = Vec::new();
+        collect_all_modules(ctx, std_mod, &mut modules);
+        modules
     }
 }
 
-/// Recursively collect leaf modules (modules with no child modules).
-fn collect_leaf_modules(ctx: &QueryContext<'_>, module: Entity, out: &mut Vec<Entity>) {
-    let child_modules: Vec<Entity> = ctx
-        .children_of(module)
-        .iter()
-        .filter(|&&child| ctx.get::<NodeKind>(child) == Some(&NodeKind::Module))
-        .copied()
-        .collect();
-
-    if child_modules.is_empty() {
-        // This is a leaf module
-        out.push(module);
-    } else {
-        // Recurse into child modules
-        for child in child_modules {
-            collect_leaf_modules(ctx, child, out);
+/// Recursively collect all submodules (including those with child modules).
+/// Parent modules like `std.text` contain declarations (e.g. `Char`) that
+/// must be auto-imported even though they also have child modules.
+fn collect_all_modules(ctx: &QueryContext<'_>, module: Entity, out: &mut Vec<Entity>) {
+    for &child in ctx.children_of(module) {
+        if ctx.get::<NodeKind>(child) == Some(&NodeKind::Module) {
+            out.push(child);
+            collect_all_modules(ctx, child, out);
         }
     }
 }
@@ -206,19 +200,20 @@ mod tests {
     }
 
     #[test]
-    fn std_modules_collects_leaves() {
+    fn std_modules_collects_all_submodules() {
         let (world, root) = setup();
         let ctx = world.query_context();
         let modules = ctx.query(StdModules { root });
 
-        // Leaves are: core, array, dictionary (not std, not collections)
-        assert_eq!(modules.len(), 3);
+        // All submodules: core, collections, array, dictionary
+        assert_eq!(modules.len(), 4);
 
         let names: Vec<String> = modules
             .iter()
             .map(|&e| ctx.get::<Name>(e).unwrap().0.clone())
             .collect();
         assert!(names.contains(&"core".to_string()));
+        assert!(names.contains(&"collections".to_string()));
         assert!(names.contains(&"array".to_string()));
         assert!(names.contains(&"dictionary".to_string()));
     }

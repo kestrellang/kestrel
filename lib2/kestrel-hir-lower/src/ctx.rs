@@ -9,7 +9,6 @@ use kestrel_ast::arena::Arena;
 use kestrel_hecs::{Entity, QueryContext};
 use kestrel_hir::body::*;
 use kestrel_hir::res::{Local, LocalId};
-use kestrel_name_res::{ResolveTypePath, TypeResolution};
 use kestrel_span2::Span;
 
 /// Mutable context for lowering a single function/getter/setter body.
@@ -92,22 +91,6 @@ impl<'a> LowerCtx<'a> {
 
     pub fn alloc_stmt(&mut self, stmt: HirStmt) -> HirStmtId {
         self.stmts.alloc(stmt)
-    }
-
-    // ===== Type resolution helpers =====
-
-    /// Resolve a well-known standard library type name (e.g. "Array", "Optional").
-    /// Used for type sugar expansion.
-    pub fn resolve_std_type(&self, name: &str) -> Option<Entity> {
-        let result = self.ctx.query(ResolveTypePath {
-            segments: vec![name.to_string()],
-            context: self.owner,
-            root: self.root,
-        });
-        match result {
-            TypeResolution::Found(entity) => Some(entity),
-            _ => None,
-        }
     }
 
 }

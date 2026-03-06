@@ -89,8 +89,8 @@ impl LowerCtx<'_> {
             AstExpr::Postfix { operand, op, span } => match op {
                 PostfixOp::Unwrap => self.desugar_unwrap(body, operand, &span),
             },
-            AstExpr::Binary { lhs, op, rhs, span } => {
-                self.desugar_binary(body, lhs, &op, rhs, &span)
+            AstExpr::Binary { .. } => {
+                self.lower_binary_with_precedence(body, id)
             },
             AstExpr::Assignment { lhs, rhs, span } => {
                 let target = self.lower_expr(body, lhs);
@@ -261,6 +261,11 @@ impl LowerCtx<'_> {
     }
 
     /// Lower a call expression. Detect method calls vs direct calls.
+    ///
+    /// Method calls come from two AST shapes:
+    /// 1. `AstExpr::MemberAccess { base, member }` — computed-base access like `expr.method()`
+    /// 2. `AstExpr::Path { segments: [local, method] }` — when parser emits `local.method()`
+    ///    as a path (first segment is a local variable, last segment is the method)
     fn lower_call(
         &mut self,
         body: &AstBody,
@@ -293,6 +298,43 @@ impl LowerCtx<'_> {
                     span: span.clone(),
                 })
             },
+
+            // Path where first segment is a local: `local.method(args)` → MethodCall
+            // The parser emits this as Path when the base is a simple name.
+            AstExpr::Path { segments, .. } if segments.len() >= 2 => {
+                let first = &segments[0];
+                if first.type_args.is_none() {
+                    if let Some(_) = self.lookup_local(&first.name) {
+                        // Lower all segments except the last as nested Field accesses
+                        let last = &segments[segments.len() - 1];
+                        let method = last.name.clone();
+                        let type_args = last.type_args.clone();
+
+                        // Build receiver from first N-1 segments
+                        let current = self.lower_path_prefix(segments);
+
+                        let lowered_type_args = type_args
+                            .map(|args| args.iter().map(|t| self.lower_type(t)).collect());
+
+                        return self.alloc_expr(HirExpr::MethodCall {
+                            receiver: current,
+                            method,
+                            type_args: lowered_type_args,
+                            args: lowered_args,
+                            span: span.clone(),
+                        });
+                    }
+                }
+
+                // Not a local-based path — direct call
+                let lowered_callee = self.lower_expr(body, callee);
+                self.alloc_expr(HirExpr::Call {
+                    callee: lowered_callee,
+                    args: lowered_args,
+                    span: span.clone(),
+                })
+            },
+
             _ => {
                 // Direct call
                 let lowered_callee = self.lower_expr(body, callee);
@@ -303,6 +345,102 @@ impl LowerCtx<'_> {
                 })
             },
         }
+    }
+
+    /// Lower Path segments except the last one as receiver.
+    /// For `[a, b, c]` returns `Field { base: Field { base: Local(a), name: "b" }, name: ... }`
+    /// but stops before the last segment.
+    fn lower_path_prefix(
+        &mut self,
+        segments: &[ExprPathSegment],
+    ) -> HirExprId {
+        let first = &segments[0];
+        let local_id = self.lookup_local(&first.name).unwrap();
+        let mut current = self.alloc_expr(HirExpr::Local(local_id, first.span.clone()));
+        // Build Field chain for all segments except first and last
+        for seg in &segments[1..segments.len() - 1] {
+            current = self.alloc_expr(HirExpr::Field {
+                base: current,
+                name: seg.name.clone(),
+                span: seg.span.clone(),
+            });
+        }
+        current
+    }
+
+    // ===== Binary expression Pratt parsing =====
+
+    /// Flatten a nested Binary chain into operands + operators, then Pratt parse
+    /// to produce correct precedence.
+    fn lower_binary_with_precedence(&mut self, body: &AstBody, expr_id: ExprId) -> HirExprId {
+        let mut operands: Vec<ExprId> = Vec::new();
+        let mut operators: Vec<(BinaryOp, Span)> = Vec::new();
+
+        Self::flatten_binary(body, expr_id, &mut operands, &mut operators);
+
+        if operands.len() == 1 {
+            return self.lower_expr(body, operands[0]);
+        }
+
+        self.pratt_parse(
+            body,
+            &mut operands.into_iter().peekable(),
+            &mut operators.into_iter().peekable(),
+            0,
+        )
+    }
+
+    /// Recursively flatten nested Binary exprs into flat operand/operator lists.
+    fn flatten_binary(
+        body: &AstBody,
+        expr_id: ExprId,
+        operands: &mut Vec<ExprId>,
+        operators: &mut Vec<(BinaryOp, Span)>,
+    ) {
+        match &body.exprs[expr_id] {
+            AstExpr::Binary { lhs, op, rhs, span } => {
+                let (lhs, op, rhs, span) = (*lhs, op.clone(), *rhs, span.clone());
+                Self::flatten_binary(body, lhs, operands, operators);
+                operators.push((op, span));
+                Self::flatten_binary(body, rhs, operands, operators);
+            }
+            _ => {
+                operands.push(expr_id);
+            }
+        }
+    }
+
+    /// Pratt parser: precedence climbing over flat operand/operator lists.
+    fn pratt_parse<I, J>(
+        &mut self,
+        body: &AstBody,
+        operands: &mut std::iter::Peekable<I>,
+        operators: &mut std::iter::Peekable<J>,
+        min_bp: u8,
+    ) -> HirExprId
+    where
+        I: Iterator<Item = ExprId>,
+        J: Iterator<Item = (BinaryOp, Span)>,
+    {
+        let first = operands.next().expect("pratt_parse: no operand");
+        let mut lhs = self.lower_expr(body, first);
+
+        loop {
+            let Some(&(ref op, _)) = operators.peek() else {
+                break;
+            };
+            let prec = op.precedence();
+            if prec < min_bp {
+                break;
+            }
+
+            let (op, span) = operators.next().unwrap();
+            let next_min = if op.is_right_assoc() { prec } else { prec + 1 };
+            let rhs = self.pratt_parse(body, operands, operators, next_min);
+            lhs = self.desugar_binary_hir(op, lhs, rhs, &span);
+        }
+
+        lhs
     }
 
     /// Lower call arguments.

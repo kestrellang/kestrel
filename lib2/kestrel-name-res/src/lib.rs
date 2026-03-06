@@ -19,7 +19,7 @@ pub mod visibility;
 
 // Re-export primary query types
 pub use extensions::{ExtensionTargetEntity, ExtensionsFor, ResolvedExtensionTarget};
-pub use resolve_builtin::ResolveBuiltin;
+pub use resolve_builtin::{BuiltinIndex, BuiltinMap, EntityBuiltin, ResolveBuiltin};
 pub use resolve_module::{ResolveModulePath, StdModules};
 pub use resolve_name::{NameResolution, ResolveName};
 pub use resolve_type::{ResolveTypePath, TypeResolution};
