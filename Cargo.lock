@@ -846,6 +846,15 @@ name = "kestrel-hecs"
 version = "0.15.0"
 
 [[package]]
+name = "kestrel-hir"
+version = "0.15.0"
+dependencies = [
+ "kestrel-ast",
+ "kestrel-hecs",
+ "kestrel-span2",
+]
+
+[[package]]
 name = "kestrel-lexer"
 version = "0.15.0"
 dependencies = [

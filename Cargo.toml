@@ -60,7 +60,8 @@ members = [
     "lib2/kestrel-parser",
     "lib2/kestrel-compiler",
     "lib2/kestrel-ast",
-    "lib2/kestrel-ast-builder"
+    "lib2/kestrel-ast-builder",
+    "lib2/kestrel-hir"
 ]
 exclude = ["registry"]
 
