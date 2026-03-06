@@ -888,6 +888,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "kestrel-name-res"
+version = "0.15.0"
+dependencies = [
+ "kestrel-ast",
+ "kestrel-ast-builder",
+ "kestrel-hecs",
+ "kestrel-lexer2",
+ "kestrel-parser2",
+ "kestrel-span2",
+]
+
+[[package]]
 name = "kestrel-parser"
 version = "0.15.0"
 dependencies = [

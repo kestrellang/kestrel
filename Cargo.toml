@@ -61,7 +61,8 @@ members = [
     "lib2/kestrel-compiler",
     "lib2/kestrel-ast",
     "lib2/kestrel-ast-builder",
-    "lib2/kestrel-hir"
+    "lib2/kestrel-hir",
+    "lib2/kestrel-name-res"
 ]
 exclude = ["registry"]
 

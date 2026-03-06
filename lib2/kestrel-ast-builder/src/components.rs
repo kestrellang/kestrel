@@ -177,6 +177,11 @@ pub struct ExtensionTarget(pub AstType);
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct IsIndirect;
 
+/// Marker: this is a compiler-intrinsic entity (lang module type or function).
+/// Codegen handles these specially — they don't have real bodies or layouts.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct Intrinsic;
+
 // ===== Metadata =====
 
 /// Attributes on a declaration (e.g. `@inline`, `@available`).
