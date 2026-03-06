@@ -59,6 +59,7 @@ members = [
     "lib2/kestrel-syntax-tree",
     "lib2/kestrel-parser",
     "lib2/kestrel-compiler",
+    "lib2/kestrel-ast",
     "lib2/kestrel-ast-builder"
 ]
 exclude = ["registry"]

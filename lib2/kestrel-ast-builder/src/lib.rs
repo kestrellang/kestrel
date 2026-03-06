@@ -9,7 +9,13 @@ pub mod ast_type;
 pub mod build;
 pub mod builders;
 pub mod components;
+pub mod lower;
 
-pub use ast_type::{AstType, PathSegment};
+// Re-export kestrel-ast types for backward compatibility
+pub use kestrel_ast::arena;
+pub use kestrel_ast::ast_body;
+pub use kestrel_ast::{Arena, Idx, AstType, PathSegment};
+pub use kestrel_ast::ast_body::*;
+
 pub use build::build_declarations;
 pub use components::*;

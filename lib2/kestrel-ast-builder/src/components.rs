@@ -8,7 +8,8 @@ use kestrel_hecs::Entity;
 use kestrel_span2::Span;
 use kestrel_syntax_tree2::SyntaxNode;
 
-use crate::ast_type::AstType;
+use kestrel_ast::AstBody;
+use kestrel_ast::AstType;
 
 // ===== Identity (on every declaration entity) =====
 
@@ -105,6 +106,10 @@ pub struct Settable;
 /// Has body/initializer — CstNode of the body subtree.
 #[derive(Clone, Debug)]
 pub struct Valued(pub SyntaxNode);
+
+/// Lowered body — arena-based AST for a function/getter/default value.
+#[derive(Clone, Debug)]
+pub struct Body(pub AstBody);
 
 /// Marker: accessed through type, not instance.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]

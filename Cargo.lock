@@ -741,9 +741,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "kestrel-ast"
+version = "0.15.0"
+dependencies = [
+ "kestrel-span2",
+]
+
+[[package]]
 name = "kestrel-ast-builder"
 version = "0.15.0"
 dependencies = [
+ "kestrel-ast",
  "kestrel-hecs",
  "kestrel-lexer2",
  "kestrel-parser2",

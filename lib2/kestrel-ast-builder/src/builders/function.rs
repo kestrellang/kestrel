@@ -6,6 +6,7 @@ use kestrel_syntax_tree2::utils::{extract_name, find_child, get_node_span};
 
 use crate::ast_type::ast_type_from_cst;
 use crate::components::*;
+use crate::lower;
 use super::helpers::*;
 use super::params::extract_params;
 use super::type_param::build_type_parameters;
@@ -55,6 +56,7 @@ pub fn build_function(
     // Body — CST wraps it in FunctionBody > CodeBlock
     if let Some(fn_body) = find_child(node, SyntaxKind::FunctionBody) {
         if let Some(code_block) = find_child(&fn_body, SyntaxKind::CodeBlock) {
+            world.set(entity, Body(lower::lower_body(&code_block, file_id)));
             world.set(entity, Valued(code_block));
         }
     }
@@ -95,6 +97,7 @@ pub fn build_initializer(
     // Body — CST wraps it in FunctionBody > CodeBlock
     if let Some(fn_body) = find_child(node, SyntaxKind::FunctionBody) {
         if let Some(code_block) = find_child(&fn_body, SyntaxKind::CodeBlock) {
+            world.set(entity, Body(lower::lower_body(&code_block, file_id)));
             world.set(entity, Valued(code_block));
         }
     }
@@ -126,6 +129,7 @@ pub fn build_deinit(
     // Body — CST wraps it in FunctionBody > CodeBlock
     if let Some(fn_body) = find_child(node, SyntaxKind::FunctionBody) {
         if let Some(code_block) = find_child(&fn_body, SyntaxKind::CodeBlock) {
+            world.set(entity, Body(lower::lower_body(&code_block, file_id)));
             world.set(entity, Valued(code_block));
         }
     }

@@ -6,6 +6,7 @@ use kestrel_syntax_tree2::utils::{extract_name, find_child, get_node_span};
 
 use crate::ast_type::ast_type_from_cst;
 use crate::components::*;
+use crate::lower;
 use super::helpers::*;
 
 /// Build a field declaration entity from CST.
@@ -67,9 +68,10 @@ pub fn build_field(
             world.set(entity, Settable);
         }
 
-        // Store getter body as Valued if present
+        // Store getter body as Valued + Body if present
         if let Some(getter) = find_child(&accessors, SyntaxKind::GetterClause) {
             if let Some(body) = find_child(&getter, SyntaxKind::CodeBlock) {
+                world.set(entity, Body(lower::lower_body(&body, file_id)));
                 world.set(entity, Valued(body));
             }
         }
@@ -80,9 +82,21 @@ pub fn build_field(
             world.set(entity, Settable);
         }
 
-        // Default value expression
-        if let Some(default_node) = find_child(node, SyntaxKind::DefaultValue) {
-            world.set(entity, Valued(default_node));
+        // Default value — field initializers are emitted as `= Expression`
+        // directly under FieldDeclaration (NOT wrapped in DefaultValue).
+        // Find the first Expression child after an Equals token.
+        let mut found_equals = false;
+        for child in node.children_with_tokens() {
+            if child.as_token().is_some_and(|t| t.kind() == SyntaxKind::Equals) {
+                found_equals = true;
+            } else if found_equals {
+                if let Some(expr_node) = child.into_node() {
+                    // The parser wraps initializer exprs in Expression nodes
+                    world.set(entity, Body(lower::lower_default_value_expr(&expr_node, file_id)));
+                    world.set(entity, Valued(expr_node));
+                    break;
+                }
+            }
         }
     }
 

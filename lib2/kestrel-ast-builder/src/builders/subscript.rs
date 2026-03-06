@@ -6,6 +6,7 @@ use kestrel_syntax_tree2::utils::{find_child, get_node_span};
 
 use crate::ast_type::ast_type_from_cst;
 use crate::components::*;
+use crate::lower;
 use super::helpers::*;
 use super::params::extract_params;
 use super::type_param::build_type_parameters;
@@ -47,12 +48,18 @@ pub fn build_subscript(
         }
     }
 
-    // Check for setter in SubscriptBody > PropertyAccessors
+    // Check for getter/setter in SubscriptBody > PropertyAccessors
     if let Some(body) = find_child(node, SyntaxKind::SubscriptBody) {
-        let accessors = find_child(&body, SyntaxKind::PropertyAccessors);
-        if let Some(acc) = &accessors {
-            if find_child(acc, SyntaxKind::SetterClause).is_some() {
+        if let Some(acc) = find_child(&body, SyntaxKind::PropertyAccessors) {
+            if find_child(&acc, SyntaxKind::SetterClause).is_some() {
                 world.set(entity, Settable);
+            }
+            // Lower getter body if present
+            if let Some(getter) = find_child(&acc, SyntaxKind::GetterClause) {
+                if let Some(code_block) = find_child(&getter, SyntaxKind::CodeBlock) {
+                    world.set(entity, Body(lower::lower_body(&code_block, file_id)));
+                    world.set(entity, Valued(code_block));
+                }
             }
         }
     }

@@ -1,59 +1,13 @@
-//! AST-level type representation.
+//! CST-to-AST type lowering.
 //!
-//! Types are data (not entities). Extracted from the CST during build so
-//! downstream queries don't need to touch CstNodes for type information.
-//! Spans are included for error reporting.
+//! Converts CST type nodes into `AstType` data types (defined in kestrel-ast).
+//! The data types themselves live in `kestrel_ast::ast_type`.
 
 use kestrel_span2::Span;
 use kestrel_syntax_tree2::{SyntaxKind, SyntaxNode};
 use kestrel_syntax_tree2::utils::{extract_path_segments, find_child};
 
-/// A single segment in a qualified type path.
-/// Each segment has a name and optional type arguments.
-/// e.g. in `Array[Int].Iterator`, `Array[Int]` and `Iterator` are segments.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct PathSegment {
-    pub name: String,
-    pub type_args: Vec<AstType>,
-    pub span: Span,
-}
-
-/// AST-level type representation extracted from CST.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub enum AstType {
-    /// Named type with path segments, each optionally having type arguments.
-    /// e.g. `Int64`, `std.collections.Array[Int64]`, `Array[Int].Iterator`
-    Named {
-        segments: Vec<PathSegment>,
-        span: Span,
-    },
-    /// Tuple type, e.g. `(Int, String)`
-    Tuple(Vec<AstType>, Span),
-    /// Function type, e.g. `(Int) -> String`
-    Function {
-        params: Vec<AstType>,
-        return_type: Box<AstType>,
-        span: Span,
-    },
-    /// Array type, e.g. `[Int]`
-    Array(Box<AstType>, Span),
-    /// Dictionary type, e.g. `[String: Int]`
-    Dictionary(Box<AstType>, Box<AstType>, Span),
-    /// Optional type, e.g. `Int?`
-    Optional(Box<AstType>, Span),
-    /// Result type, e.g. `Int throws Error`
-    Result {
-        ok: Box<AstType>,
-        err: Box<AstType>,
-        span: Span,
-    },
-    /// Unit type `()`
-    Unit(Span),
-    /// Never type `Never`
-    Never(Span),
-    /// Inferred type `_`
-    Inferred(Span),
-}
+pub use kestrel_ast::{AstType, PathSegment};
 
 /// Convert a CST type node to an AstType.
 ///
