@@ -855,6 +855,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "kestrel-hir-lower"
+version = "0.15.0"
+dependencies = [
+ "kestrel-ast",
+ "kestrel-ast-builder",
+ "kestrel-hecs",
+ "kestrel-hir",
+ "kestrel-lexer2",
+ "kestrel-name-res",
+ "kestrel-parser2",
+ "kestrel-span2",
+]
+
+[[package]]
 name = "kestrel-lexer"
 version = "0.15.0"
 dependencies = [
