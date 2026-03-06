@@ -14,7 +14,7 @@ use crate::visibility::VisibleChildrenByName;
 // ===== NameResolution =====
 
 /// Result of resolving a name.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Hash)]
 pub enum NameResolution {
     /// One or more matching entities (overloaded functions share a name)
     Found(Vec<Entity>),

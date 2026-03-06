@@ -18,7 +18,7 @@ impl LowerCtx<'_> {
             AstExpr::Literal { kind, span } => self.lower_literal(&kind, &span),
             AstExpr::InterpolatedString { parts, span } => {
                 self.desugar_interpolated_string(body, &parts, &span)
-            }
+            },
             AstExpr::Array { elements, span } => {
                 let lowered: Vec<HirExprId> =
                     elements.iter().map(|&e| self.lower_expr(body, e)).collect();
@@ -26,7 +26,7 @@ impl LowerCtx<'_> {
                     elements: lowered,
                     span,
                 })
-            }
+            },
             AstExpr::Dictionary { entries, span } => {
                 let lowered: Vec<HirDictEntry> = entries
                     .iter()
@@ -39,7 +39,7 @@ impl LowerCtx<'_> {
                     entries: lowered,
                     span,
                 })
-            }
+            },
             AstExpr::Tuple { elements, span } => {
                 let lowered: Vec<HirExprId> =
                     elements.iter().map(|&e| self.lower_expr(body, e)).collect();
@@ -47,7 +47,7 @@ impl LowerCtx<'_> {
                     elements: lowered,
                     span,
                 })
-            }
+            },
             AstExpr::Path { segments, span } => self.lower_path(body, &segments, &span),
             AstExpr::MemberAccess {
                 base,
@@ -62,7 +62,7 @@ impl LowerCtx<'_> {
                     name: member,
                     span,
                 })
-            }
+            },
             AstExpr::TupleIndex { base, index, span } => {
                 let lowered_base = self.lower_expr(body, base);
                 self.alloc_expr(HirExpr::TupleIndex {
@@ -70,7 +70,7 @@ impl LowerCtx<'_> {
                     index,
                     span,
                 })
-            }
+            },
             AstExpr::ImplicitMember {
                 member,
                 arguments,
@@ -82,16 +82,16 @@ impl LowerCtx<'_> {
                     args: lowered_args,
                     span,
                 })
-            }
+            },
             AstExpr::Unary { op, operand, span } => {
                 self.desugar_unary_op(body, &op, operand, &span)
-            }
+            },
             AstExpr::Postfix { operand, op, span } => match op {
                 PostfixOp::Unwrap => self.desugar_unwrap(body, operand, &span),
             },
             AstExpr::Binary { lhs, op, rhs, span } => {
                 self.desugar_binary(body, lhs, &op, rhs, &span)
-            }
+            },
             AstExpr::Assignment { lhs, rhs, span } => {
                 let target = self.lower_expr(body, lhs);
                 let value = self.lower_expr(body, rhs);
@@ -100,10 +100,10 @@ impl LowerCtx<'_> {
                     value,
                     span,
                 })
-            }
+            },
             AstExpr::CompoundAssignment { lhs, op, rhs, span } => {
                 self.desugar_compound_assign(body, lhs, &op, rhs, &span)
-            }
+            },
             AstExpr::Call {
                 callee,
                 arguments,
@@ -127,14 +127,18 @@ impl LowerCtx<'_> {
                 body: while_body,
                 span,
             } => self.desugar_while_let(body, label.as_deref(), &conditions, &while_body, &span),
-            AstExpr::Loop { label, body: loop_body, span } => {
+            AstExpr::Loop {
+                label,
+                body: loop_body,
+                span,
+            } => {
                 let lowered = self.lower_block(body, &loop_body);
                 self.alloc_expr(HirExpr::Loop {
                     label,
                     body: lowered,
                     span,
                 })
-            }
+            },
             AstExpr::For {
                 label,
                 pattern,
@@ -143,16 +147,14 @@ impl LowerCtx<'_> {
                 span,
             } => self.desugar_for_loop(body, label.as_deref(), pattern, iterable, &for_body, &span),
             AstExpr::Break { label, span } => self.alloc_expr(HirExpr::Break { label, span }),
-            AstExpr::Continue { label, span } => {
-                self.alloc_expr(HirExpr::Continue { label, span })
-            }
+            AstExpr::Continue { label, span } => self.alloc_expr(HirExpr::Continue { label, span }),
             AstExpr::Return { value, span } => {
                 let lowered = value.map(|v| self.lower_expr(body, v));
                 self.alloc_expr(HirExpr::Return {
                     value: lowered,
                     span,
                 })
-            }
+            },
             AstExpr::Throw { value, span } => self.desugar_throw(body, value, &span),
             AstExpr::Try { operand, span } => self.desugar_try(body, operand, &span),
             AstExpr::Closure {
@@ -183,7 +185,7 @@ impl LowerCtx<'_> {
                     elements: Vec::new(),
                     span: span.clone(),
                 });
-            }
+            },
         };
         self.alloc_expr(HirExpr::Literal {
             value,
@@ -204,34 +206,9 @@ impl LowerCtx<'_> {
 
         let first = &segments[0];
 
-        // Check for "self"
-        if first.name == "self" && first.type_args.is_none() {
-            if let Some(self_local) = self.lookup_local("self") {
-                if segments.len() == 1 {
-                    return self.alloc_expr(HirExpr::Local(self_local, span.clone()));
-                }
-                // self.field.field...
-                let mut current = self.alloc_expr(HirExpr::Local(self_local, span.clone()));
-                for seg in &segments[1..] {
-                    current = self.alloc_expr(HirExpr::Field {
-                        base: current,
-                        name: seg.name.clone(),
-                        span: seg.span.clone(),
-                    });
-                }
-                return current;
-            }
-        }
-
-        // Single segment, no type args: check locals first
-        if segments.len() == 1 && first.type_args.is_none() {
-            if let Some(local_id) = self.lookup_local(&first.name) {
-                return self.alloc_expr(HirExpr::Local(local_id, span.clone()));
-            }
-        }
-
-        // Check if first segment is a local (multi-segment: local.field.field...)
-        if segments.len() > 1 && first.type_args.is_none() {
+        // Check if first segment is a local (covers self, params, let/var bindings).
+        // Remaining segments become field accesses — type inference resolves them later.
+        if first.type_args.is_none() {
             if let Some(local_id) = self.lookup_local(&first.name) {
                 let mut current = self.alloc_expr(HirExpr::Local(local_id, first.span.clone()));
                 for seg in &segments[1..] {
@@ -256,23 +233,23 @@ impl LowerCtx<'_> {
         match result {
             ValueResolution::Def(entity) | ValueResolution::TypeParameter(entity) => {
                 self.alloc_expr(HirExpr::Def(entity, span.clone()))
-            }
+            },
             ValueResolution::Overloaded(entities) => {
                 // Pick first — type inference disambiguates later
                 self.alloc_expr(HirExpr::Def(entities[0], span.clone()))
-            }
+            },
             ValueResolution::EnumCaseValue { entity, .. } => {
                 self.alloc_expr(HirExpr::Def(entity, span.clone()))
-            }
+            },
             ValueResolution::FieldValue { entity, .. } => {
                 self.alloc_expr(HirExpr::Def(entity, span.clone()))
-            }
+            },
             ValueResolution::AssociatedType { entity, .. } => {
                 self.alloc_expr(HirExpr::Def(entity, span.clone()))
-            }
+            },
             ValueResolution::Ambiguous(_) | ValueResolution::NotFound(_) => {
                 self.alloc_expr(HirExpr::Error { span: span.clone() })
-            }
+            },
         }
     }
 
@@ -308,7 +285,7 @@ impl LowerCtx<'_> {
                     args: lowered_args,
                     span: span.clone(),
                 })
-            }
+            },
             _ => {
                 // Direct call
                 let lowered_callee = self.lower_expr(body, callee);
@@ -317,7 +294,7 @@ impl LowerCtx<'_> {
                     args: lowered_args,
                     span: span.clone(),
                 })
-            }
+            },
         }
     }
 
@@ -351,7 +328,7 @@ impl LowerCtx<'_> {
                     stmts: Vec::new(),
                     tail_expr: Some(lowered),
                 }
-            }
+            },
         });
 
         self.alloc_expr(HirExpr::If {
@@ -395,9 +372,7 @@ impl LowerCtx<'_> {
                         value: HirLiteral::Bool(false),
                         span: span.clone(),
                     });
-                    let wildcard = self.alloc_pat(HirPat::Wildcard {
-                        span: span.clone(),
-                    });
+                    let wildcard = self.alloc_pat(HirPat::Wildcard { span: span.clone() });
 
                     self.alloc_expr(HirExpr::Match {
                         scrutinee: lowered_value,
@@ -415,7 +390,7 @@ impl LowerCtx<'_> {
                         ],
                         span: span.clone(),
                     })
-                }
+                },
             };
         }
 

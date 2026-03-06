@@ -14,7 +14,7 @@ use crate::visibility::VisibleChildrenByName;
 // ===== ValueResolution =====
 
 /// Result of resolving a value path.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Hash)]
 pub enum ValueResolution {
     /// Single definition
     Def(Entity),

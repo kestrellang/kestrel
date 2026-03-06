@@ -162,17 +162,17 @@ impl LowerCtx<'_> {
 
         let lowered_operand = self.lower_expr(body, operand);
 
-        if let Some((proto, method)) = lookup_unary_op(op) {
-            if let Some(protocol) = self.resolve_protocol(proto) {
-                return self.alloc_expr(HirExpr::ProtocolCall {
-                    receiver: lowered_operand,
-                    protocol,
-                    method: method.to_string(),
-                    type_args: None,
-                    args: Vec::new(),
-                    span: span.clone(),
-                });
-            }
+        if let Some((proto, method)) = lookup_unary_op(op)
+            && let Some(protocol) = self.resolve_protocol(proto)
+        {
+            return self.alloc_expr(HirExpr::ProtocolCall {
+                receiver: lowered_operand,
+                protocol,
+                method: method.to_string(),
+                type_args: None,
+                args: Vec::new(),
+                span: span.clone(),
+            });
         }
 
         self.alloc_expr(HirExpr::Error { span: span.clone() })
@@ -657,7 +657,7 @@ impl LowerCtx<'_> {
                             span: span.clone(),
                         }));
                     }
-                }
+                },
                 StringPart::Interpolation { expr, format: _ } => {
                     let lowered = self.lower_expr(body, *expr);
                     // Call .description() on the interpolated expression
@@ -669,7 +669,7 @@ impl LowerCtx<'_> {
                         span: span.clone(),
                     });
                     exprs.push(formatted);
-                }
+                },
             }
         }
 

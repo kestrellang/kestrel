@@ -16,7 +16,7 @@ use crate::visibility::VisibleChildrenByName;
 // ===== TypeResolution =====
 
 /// Result of resolving a type path.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Hash)]
 pub enum TypeResolution {
     /// Resolved to a type entity (struct, enum, protocol, alias, type param)
     Found(Entity),

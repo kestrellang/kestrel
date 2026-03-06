@@ -10,7 +10,7 @@ use kestrel_span2::Span;
 /// A resolved type in HIR. All syntactic sugar has been expanded:
 /// Optional, Array, Dictionary, Result are just `Named` with the
 /// appropriate entity and type arguments.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Hash)]
 pub enum HirTy {
     /// Named type resolved to an entity. Covers structs, enums, protocols,
     /// type aliases, Optional, Array, Dictionary, Result — all just Named.

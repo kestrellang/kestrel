@@ -94,6 +94,12 @@ impl<T> Arena<T> {
     }
 }
 
+impl<T: std::hash::Hash> std::hash::Hash for Arena<T> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.data.hash(state);
+    }
+}
+
 impl<T> Default for Arena<T> {
     fn default() -> Self {
         Self::new()

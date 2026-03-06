@@ -4,6 +4,7 @@
 //! declarations, selective imports, and wildcard import sources.
 
 use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use kestrel_ast_builder::{ImportAlias, ImportItems, ModulePath, Name, NodeKind};
@@ -31,6 +32,32 @@ pub struct Scope {
     pub wildcard_imports: Vec<Entity>,
     /// Parent entity for scope chain walkup
     pub parent: Option<Entity>,
+}
+
+/// Hash for Scope: HashMap doesn't implement Hash, so we sort
+/// entries by key to produce a deterministic hash.
+impl Hash for Scope {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.entity.hash(state);
+
+        // Sort HashMap entries by key for deterministic hashing
+        let mut selective: Vec<_> = self.selective_imports.iter().collect();
+        selective.sort_by_key(|(k, _)| *k);
+        for (k, v) in &selective {
+            k.hash(state);
+            v.hash(state);
+        }
+
+        let mut decls: Vec<_> = self.declarations.iter().collect();
+        decls.sort_by_key(|(k, _)| *k);
+        for (k, v) in &decls {
+            k.hash(state);
+            v.hash(state);
+        }
+
+        self.wildcard_imports.hash(state);
+        self.parent.hash(state);
+    }
 }
 
 // ===== ScopeFor =====

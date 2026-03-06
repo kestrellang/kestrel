@@ -16,7 +16,7 @@ pub type LocalId = Idx<Local>;
 /// A local variable slot. Allocated during HIR lowering for every `let`/`var`
 /// binding, function parameter, pattern binding, and synthetic variable
 /// (from desugaring like for-loop iterators).
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Hash)]
 pub struct Local {
     pub name: String,
     pub is_mut: bool,

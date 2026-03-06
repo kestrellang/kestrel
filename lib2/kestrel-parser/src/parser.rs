@@ -240,7 +240,7 @@ fn build_error_message(expected: &[String], found: Option<&str>) -> String {
 }
 
 /// The kind of parse error
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ParseErrorKind {
     /// An unexpected token was encountered
     UnexpectedToken,
@@ -264,7 +264,7 @@ impl fmt::Display for ParseErrorKind {
 }
 
 /// A parse error with detailed information
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ParseError {
     /// The kind of error
     pub kind: ParseErrorKind,
@@ -381,6 +381,16 @@ pub struct ParseResult {
     pub tree: SyntaxNode,
     /// Any parse errors encountered
     pub errors: Vec<ParseError>,
+}
+
+/// Hash by tree structure text + errors. SyntaxNode doesn't impl Hash,
+/// so we hash its text representation which captures the full tree content.
+impl std::hash::Hash for ParseResult {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        // SyntaxText doesn't impl Hash, convert to String
+        self.tree.text().to_string().hash(state);
+        self.errors.hash(state);
+    }
 }
 
 /// High-level parser that provides a convenient API for parsing

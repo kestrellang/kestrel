@@ -1,9 +1,7 @@
 # kestrel-hecs Issues
 
-## 1. `hash_of` uses stack pointer — backdating never fires
-`query.rs` — `hash_of` computes fingerprints using the stack pointer, so every re-execution produces a different fingerprint regardless of value equality. The fingerprint comparison in `execute_query` (`old_memo.fingerprint == new_fp`) is always false, meaning early cutoff never triggers. The entire incremental architecture is O(batch) at runtime until this is fixed.
-
-**Fix:** Require `QueryFn::Output: Hash` and compute fingerprints from the actual value. Alternatively, add a `Fingerprint` associated type or a separate `FingerprintOf` trait for types where `Hash` isn't semantically appropriate.
+## ~~1. `hash_of` uses stack pointer — backdating never fires~~ FIXED
+Added `Hash` bound to `QueryFn::Output`, deleted `hash_of`, fingerprint the actual value via `Fingerprint::of(&result)`. Added `Hash` impls across all query output types (manual impls for `Scope`, `ParseResult`, `HirLiteral`). Backdating test confirms early cutoff works.
 
 ## 2. No cycle recovery — panics on query cycles
 If two queries depend on each other (e.g., mutually recursive types, protocol conformance cycles), the `active` stack detects the cycle and panics. Production compilers need to handle this gracefully.

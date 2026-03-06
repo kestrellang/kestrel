@@ -51,7 +51,7 @@ pub enum Dependency {
 /// }
 /// ```
 pub trait QueryFn: Hash + Eq + Clone + 'static {
-    type Output: Clone + 'static;
+    type Output: Clone + Hash + 'static;
 
     /// Execute the query. All component reads and sub-query calls go
     /// through `ctx`, which records dependencies automatically.
@@ -310,7 +310,7 @@ impl<'a> QueryContext<'a> {
 
         // Backdating: if the result fingerprint matches the old memo,
         // keep the old changed_at so dependents skip re-execution.
-        let new_fp = Fingerprint::of(&hash_of(&result));
+        let new_fp = Fingerprint::of(&result);
         let changed_at = {
             let storage = self.queries.borrow();
             if let Some(old_memo) = storage.get_memo::<Q>(q) {
@@ -407,18 +407,6 @@ fn query_key<Q: QueryFn>(q: &Q) -> QueryKey {
         type_id: type_id_hash,
         key_hash,
     }
-}
-
-/// Hash any Clone value by its Debug-like fingerprint.
-fn hash_of<T: 'static>(value: &T) -> u64 {
-    // Use the raw pointer bits as a proxy — this is for fingerprinting
-    // the memoized value. Since we store the value, pointer identity
-    // isn't useful. Instead, use the type + size as a rough discriminant.
-    // Real fingerprinting should be done by the user via Hash impl.
-    //
-    // For proper backdating, QueryFn::Output should implement Hash.
-    // We use a conservative approach: pointer to stack = always different.
-    value as *const T as u64
 }
 
 #[cfg(test)]
@@ -681,6 +669,47 @@ mod tests {
         }
         // Only e1's GetName + GetNameUpper = 2 new executions
         assert_eq!(world.query_exec_count() - before, 2);
+    }
+
+    #[test]
+    fn backdating_skips_downstream_when_value_unchanged() {
+        // Tests that backdating (early cutoff) works: if a leaf query
+        // re-executes but produces the same value, dependents skip.
+        //
+        // Setup: GetNameUpper depends on GetName.
+        // We change an UNRELATED component on the entity so the entity
+        // is marked as changed, forcing GetName to re-execute.
+        // But GetName produces the same result → its changed_at is
+        // backdated → GetNameUpper should NOT re-execute.
+        let mut world = World::new();
+        world.begin_revision();
+
+        let e = world.spawn();
+        world.set(e, Name("Alice".into()));
+        world.set(e, Value(1));
+
+        // Rev 1: execute the query chain (GetName + GetNameUpper = 2)
+        {
+            let ctx = world.query_context();
+            ctx.query(GetNameUpper { entity: e });
+        }
+        assert_eq!(world.query_exec_count(), 2);
+
+        // Rev 2: change Value (not Name) — entity is marked changed
+        world.begin_revision();
+        world.set(e, Value(2));
+
+        let before = world.query_exec_count();
+        {
+            let ctx = world.query_context();
+            let result = ctx.query(GetNameUpper { entity: e });
+            assert_eq!(result, Some("ALICE".into()));
+        }
+        // GetName re-executes (entity changed) but produces same result
+        // → backdating keeps changed_at at rev1
+        // → GetNameUpper sees sub_changed_at <= its verified_at → skips
+        let new_execs = world.query_exec_count() - before;
+        assert_eq!(new_execs, 1); // Only GetName re-executes, not GetNameUpper
     }
 
     #[test]

@@ -351,7 +351,7 @@ pub struct ClosureParam {
 
 // ===== Operators =====
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum UnaryOp {
     Neg,
     BitNot,
@@ -359,12 +359,12 @@ pub enum UnaryOp {
     Pos,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum PostfixOp {
     Unwrap,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum BinaryOp {
     Add,
     Sub,
@@ -389,7 +389,7 @@ pub enum BinaryOp {
     RangeExclusive,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum CompoundAssignOp {
     AddAssign,
     SubAssign,

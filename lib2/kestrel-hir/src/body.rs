@@ -24,7 +24,7 @@ pub type HirStmtId = Idx<HirStmt>;
 
 /// A function/getter/setter body after HIR lowering: arenas of desugared
 /// expressions, patterns, and statements, plus a locals table.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Hash)]
 pub struct HirBody {
     pub exprs: Arena<HirExpr>,
     pub pats: Arena<HirPat>,
@@ -39,7 +39,7 @@ pub struct HirBody {
 }
 
 /// A nested code block (if/loop/match arm bodies, desugared blocks).
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Hash)]
 pub struct HirBlock {
     pub stmts: Vec<HirStmtId>,
     pub tail_expr: Option<HirExprId>,
@@ -49,7 +49,7 @@ pub struct HirBlock {
 
 /// Desugared expression. All operators, for-loops, while-loops, try/throw,
 /// and string interpolation have been lowered into calls and control flow.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Hash)]
 pub enum HirExpr {
     // === Values ===
     Literal {
@@ -171,7 +171,7 @@ pub enum HirExpr {
 // ===== Statements (3 variants) =====
 
 /// HIR statement. GuardLet is desugared into if + diverging block.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Hash)]
 pub enum HirStmt {
     Let {
         local: LocalId,
@@ -194,7 +194,7 @@ pub enum HirStmt {
 // ===== Patterns (10 variants) =====
 
 /// HIR pattern. `At` and `Rest` patterns are absorbed during lowering.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Hash)]
 pub enum HirPat {
     Wildcard {
         span: Span,
@@ -261,22 +261,38 @@ pub enum HirLiteral {
     Null,
 }
 
+/// Manual Hash because f64 doesn't implement Hash.
+/// We hash the bit representation which is deterministic.
+impl std::hash::Hash for HirLiteral {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        std::mem::discriminant(self).hash(state);
+        match self {
+            HirLiteral::Integer(v) => v.hash(state),
+            HirLiteral::Float(v) => v.to_bits().hash(state),
+            HirLiteral::String(v) => v.hash(state),
+            HirLiteral::Char(v) => v.hash(state),
+            HirLiteral::Bool(v) => v.hash(state),
+            HirLiteral::Null => {}
+        }
+    }
+}
+
 /// A single argument in a call expression.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Hash)]
 pub struct HirCallArg {
     pub label: Option<String>,
     pub value: HirExprId,
 }
 
 /// A key-value entry in a dictionary literal.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Hash)]
 pub struct HirDictEntry {
     pub key: HirExprId,
     pub value: HirExprId,
 }
 
 /// A single arm in a match expression.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Hash)]
 pub struct HirMatchArm {
     pub pattern: HirPatId,
     pub guard: Option<HirExprId>,
@@ -284,21 +300,21 @@ pub struct HirMatchArm {
 }
 
 /// A parameter in a closure expression.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Hash)]
 pub struct HirClosureParam {
     pub local: LocalId,
     pub ty: Option<HirTy>,
 }
 
 /// A single argument in an enum/variant pattern.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Hash)]
 pub struct HirPatArg {
     pub label: Option<String>,
     pub pattern: HirPatId,
 }
 
 /// A single field in a struct pattern.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Hash)]
 pub struct HirStructPatField {
     pub field_name: String,
     pub pattern: Option<HirPatId>,
