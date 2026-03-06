@@ -808,12 +808,21 @@ name = "kestrel-compiler2"
 version = "0.15.0"
 dependencies = [
  "kestrel-ast-builder",
+ "kestrel-debug",
  "kestrel-hecs",
+ "kestrel-hir",
+ "kestrel-hir-lower",
  "kestrel-lexer2",
+ "kestrel-name-res",
  "kestrel-parser2",
  "kestrel-span2",
  "kestrel-syntax-tree2",
+ "kestrel-type-infer",
 ]
+
+[[package]]
+name = "kestrel-debug"
+version = "0.15.0"
 
 [[package]]
 name = "kestrel-execution-graph"
@@ -860,6 +869,7 @@ version = "0.15.0"
 dependencies = [
  "kestrel-ast",
  "kestrel-ast-builder",
+ "kestrel-debug",
  "kestrel-hecs",
  "kestrel-hir",
  "kestrel-lexer2",
@@ -908,6 +918,7 @@ dependencies = [
  "kestrel-ast",
  "kestrel-ast-builder",
  "kestrel-hecs",
+ "kestrel-hir",
  "kestrel-lexer2",
  "kestrel-parser2",
  "kestrel-span2",
@@ -1087,6 +1098,21 @@ dependencies = [
  "kestrel-span",
  "kestrel-syntax-tree",
  "semantic-tree",
+]
+
+[[package]]
+name = "kestrel-type-infer"
+version = "0.15.0"
+dependencies = [
+ "kestrel-ast-builder",
+ "kestrel-debug",
+ "kestrel-hecs",
+ "kestrel-hir",
+ "kestrel-hir-lower",
+ "kestrel-lexer2",
+ "kestrel-name-res",
+ "kestrel-parser2",
+ "kestrel-span2",
 ]
 
 [[package]]

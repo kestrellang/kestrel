@@ -8,6 +8,7 @@ workspace = true
 
 [dependencies]
 kestrel-hecs = { path = "../kestrel-hecs" }
+kestrel-hir = { path = "../kestrel-hir" }
 kestrel-ast-builder = { path = "../kestrel-ast-builder" }
 kestrel-ast = { path = "../kestrel-ast" }
 

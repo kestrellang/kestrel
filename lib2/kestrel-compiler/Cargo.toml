@@ -13,3 +13,8 @@ kestrel-parser2 = { path = "../kestrel-parser" }
 kestrel-span2 = { path = "../kestrel-span" }
 kestrel-syntax-tree2 = { path = "../kestrel-syntax-tree" }
 kestrel-ast-builder = { path = "../kestrel-ast-builder" }
+kestrel-hir = { path = "../kestrel-hir" }
+kestrel-hir-lower = { path = "../kestrel-hir-lower" }
+kestrel-name-res = { path = "../kestrel-name-res" }
+kestrel-type-infer = { path = "../kestrel-type-infer" }
+kestrel-debug = { path = "../kestrel-debug" }

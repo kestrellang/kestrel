@@ -68,11 +68,16 @@ pub fn build_field(
             world.set(entity, Settable);
         }
 
-        // Store getter body as Valued + Body if present
+        // Store getter body as Valued + Body if present.
+        // Computed properties access `self` via a borrowing receiver.
         if let Some(getter) = find_child(&accessors, SyntaxKind::GetterClause) {
             if let Some(body) = find_child(&getter, SyntaxKind::CodeBlock) {
                 world.set(entity, Body(lower::lower_body(&body, file_id)));
                 world.set(entity, Valued(body));
+                world.set(entity, Callable {
+                    params: Vec::new(),
+                    receiver: Some(ReceiverKind::Borrowing),
+                });
             }
         }
     } else {

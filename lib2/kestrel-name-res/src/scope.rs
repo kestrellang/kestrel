@@ -109,6 +109,12 @@ impl QueryFn for ScopeFor {
             wildcard_imports.extend(std_modules);
         }
 
+        // Dedup selective imports (same entity imported from multiple files in same module)
+        for entries in selective_imports.values_mut() {
+            entries.sort_by_key(|e| e.index());
+            entries.dedup();
+        }
+
         let parent = ctx.parent_of(self.entity);
 
         Arc::new(Scope {

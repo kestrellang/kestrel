@@ -1,0 +1,69 @@
+//! Type inference errors.
+//!
+//! Each variant maps to a user-facing diagnostic. Every `TyKind::Error`
+//! in the system has a corresponding `InferError` (ErrorGuaranteed pattern).
+
+use kestrel_hecs::Entity;
+use kestrel_span2::Span;
+
+use crate::ty::TyVar;
+
+/// A type inference error. Accumulated during solving; each produces
+/// a `TyKind::Error` TyVar that silently absorbs further constraints.
+#[derive(Clone, Debug)]
+pub enum InferError {
+    /// Types don't match (structural mismatch).
+    TypeMismatch {
+        expected: TyVar,
+        got: TyVar,
+        span: Span,
+    },
+
+    /// Type doesn't conform to a protocol.
+    DoesNotConform {
+        ty: TyVar,
+        protocol: Entity,
+        span: Span,
+    },
+
+    /// No member with this name on the receiver type.
+    NoMember {
+        receiver: TyVar,
+        name: String,
+        span: Span,
+    },
+
+    /// Multiple candidates for a member — ambiguous.
+    AmbiguousMember {
+        receiver: TyVar,
+        name: String,
+        span: Span,
+    },
+
+    /// Member exists but is not visible from the current context.
+    MemberNotVisible {
+        receiver: TyVar,
+        name: String,
+        span: Span,
+    },
+
+    /// No associated type with this name on the container.
+    NoAssociatedType {
+        container: TyVar,
+        name: String,
+        span: Span,
+    },
+
+    /// Infinite type (occurs check failure).
+    InfiniteType { span: Span },
+
+    /// Error propagated from HIR (HirExpr::Error, HirPat::Error, etc.)
+    FromHir { span: Span },
+
+    /// Implicit member `.name` not found on expected type.
+    ImplicitMemberNotFound {
+        expected: TyVar,
+        name: String,
+        span: Span,
+    },
+}

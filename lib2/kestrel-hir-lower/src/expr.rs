@@ -247,7 +247,14 @@ impl LowerCtx<'_> {
             ValueResolution::AssociatedType { entity, .. } => {
                 self.alloc_expr(HirExpr::Def(entity, span.clone()))
             },
-            ValueResolution::Ambiguous(_) | ValueResolution::NotFound(_) => {
+            ValueResolution::Ambiguous(entities) => {
+                kestrel_debug::ktrace!("hir-lower", "path ambiguous: {:?} → {} candidates",
+                    segments.iter().map(|s| &s.name).collect::<Vec<_>>(), entities.len());
+                self.alloc_expr(HirExpr::Error { span: span.clone() })
+            },
+            ValueResolution::NotFound(seg) => {
+                kestrel_debug::ktrace!("hir-lower", "path not found: {:?} (failed at {:?})",
+                    segments.iter().map(|s| &s.name).collect::<Vec<_>>(), seg);
                 self.alloc_expr(HirExpr::Error { span: span.clone() })
             },
         }

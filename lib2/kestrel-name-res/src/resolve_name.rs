@@ -130,7 +130,11 @@ impl QueryFn for ResolveName {
 }
 
 /// Check for ambiguity: multiple non-function matches are ambiguous.
-fn check_ambiguity(ctx: &QueryContext<'_>, entities: Vec<Entity>) -> NameResolution {
+fn check_ambiguity(ctx: &QueryContext<'_>, mut entities: Vec<Entity>) -> NameResolution {
+    // Dedup (same entity from multiple import sources)
+    entities.sort_by_key(|e| e.index());
+    entities.dedup();
+
     if entities.len() > 1 {
         let all_fns = entities
             .iter()

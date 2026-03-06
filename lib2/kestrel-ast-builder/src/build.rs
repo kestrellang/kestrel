@@ -316,7 +316,8 @@ mod tests {
         let callable = world.get::<Callable>(bar).unwrap();
         assert_eq!(callable.params.len(), 1);
         assert_eq!(callable.params[0].name, "x");
-        assert_eq!(callable.receiver, Some(ReceiverKind::Mutating));
+        // Static functions have no receiver, even with mutating keyword
+        assert_eq!(callable.receiver, None);
 
         // Return type
         assert!(world.get::<TypeAnnotation>(bar).is_some());
@@ -599,7 +600,10 @@ mod tests {
         let deinit = find_child_by_kind(&world, s, &NodeKind::Deinit).unwrap();
 
         assert!(world.has::<Valued>(deinit));
-        assert!(!world.has::<Callable>(deinit));
+        // Deinits now have Callable with consuming self receiver
+        let callable = world.get::<Callable>(deinit).unwrap();
+        assert_eq!(callable.receiver, Some(ReceiverKind::Consuming));
+        assert!(callable.params.is_empty());
     }
 
     // ================================================================

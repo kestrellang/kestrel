@@ -35,8 +35,18 @@ pub fn build_function(
         world.set(entity, Name(name));
     }
 
-    // Receiver from mutating/consuming/borrowing keyword
-    let receiver = extract_receiver(node);
+    // Determine receiver: non-static functions inside type declarations are methods.
+    // Explicit keyword (mutating/consuming) overrides, otherwise defaults to Borrowing.
+    let is_static = has_static_modifier(node);
+    let parent_is_type = matches!(
+        world.get::<NodeKind>(parent),
+        Some(NodeKind::Struct | NodeKind::Enum | NodeKind::Protocol | NodeKind::Extension)
+    );
+    let receiver = if is_static || !parent_is_type {
+        None
+    } else {
+        Some(extract_receiver_kind(node))
+    };
 
     // Parameters
     let params = extract_params(node, file_id);
@@ -92,7 +102,8 @@ pub fn build_initializer(
     world.set_parent(entity, parent);
 
     let params = extract_params(node, file_id);
-    world.set(entity, Callable { params, receiver: None });
+    // Inits always have a `self` receiver (mutating — they're building the instance)
+    world.set(entity, Callable { params, receiver: Some(ReceiverKind::Mutating) });
 
     // Body — CST wraps it in FunctionBody > CodeBlock
     if let Some(fn_body) = find_child(node, SyntaxKind::FunctionBody) {
@@ -126,6 +137,12 @@ pub fn build_deinit(
     world.set(entity, CstNode(node.clone()));
     world.set_parent(entity, parent);
 
+    // Deinits always have a `self` receiver (consuming — they're destroying the instance)
+    world.set(entity, Callable {
+        params: Vec::new(),
+        receiver: Some(ReceiverKind::Consuming),
+    });
+
     // Body — CST wraps it in FunctionBody > CodeBlock
     if let Some(fn_body) = find_child(node, SyntaxKind::FunctionBody) {
         if let Some(code_block) = find_child(&fn_body, SyntaxKind::CodeBlock) {
@@ -136,18 +153,18 @@ pub fn build_deinit(
 }
 
 /// Extract receiver kind from function modifier keywords.
-fn extract_receiver(node: &SyntaxNode) -> Option<ReceiverKind> {
+/// Defaults to Borrowing if no explicit keyword.
+fn extract_receiver_kind(node: &SyntaxNode) -> ReceiverKind {
     for elem in node.children_with_tokens() {
         if let Some(token) = elem.as_token() {
             match token.kind() {
-                SyntaxKind::Mutating => return Some(ReceiverKind::Mutating),
-                SyntaxKind::Consuming => return Some(ReceiverKind::Consuming),
-                // Borrowing is the default for methods — only set if explicit
+                SyntaxKind::Mutating => return ReceiverKind::Mutating,
+                SyntaxKind::Consuming => return ReceiverKind::Consuming,
                 _ => {}
             }
         }
     }
-    None
+    ReceiverKind::Borrowing
 }
 
 fn is_type_kind(kind: SyntaxKind) -> bool {

@@ -2,11 +2,12 @@
 //! interpolated strings.
 //!
 //! Each desugaring function takes AST-level inputs and produces HIR nodes.
-//! Protocol entities are resolved via name resolution.
+//! Protocol entities are resolved via ResolveBuiltin (entity IDs, not strings).
 
 use kestrel_ast::ast_body::*;
 use kestrel_hir::body::*;
-use kestrel_name_res::{ResolveTypePath, TypeResolution};
+use kestrel_hir::Builtin;
+use kestrel_name_res::ResolveBuiltin;
 use kestrel_span2::Span;
 
 use crate::ctx::LowerCtx;
@@ -41,7 +42,7 @@ impl LowerCtx<'_> {
     fn desugar_binary_op(
         &mut self,
         body: &AstBody,
-        protocol_name: &str,
+        protocol: Builtin,
         method_name: &str,
         label: Option<&str>,
         lhs: ExprId,
@@ -51,7 +52,7 @@ impl LowerCtx<'_> {
         let lowered_lhs = self.lower_expr(body, lhs);
         let lowered_rhs = self.lower_expr(body, rhs);
 
-        if let Some(protocol) = self.resolve_protocol(protocol_name) {
+        if let Some(protocol) = self.resolve_builtin(protocol) {
             self.alloc_expr(HirExpr::ProtocolCall {
                 receiver: lowered_lhs,
                 protocol,
@@ -73,7 +74,7 @@ impl LowerCtx<'_> {
     fn desugar_short_circuit_op(
         &mut self,
         body: &AstBody,
-        protocol_name: &str,
+        protocol: Builtin,
         method_name: &str,
         label: Option<&str>,
         lhs: ExprId,
@@ -93,7 +94,7 @@ impl LowerCtx<'_> {
             span: span.clone(),
         });
 
-        if let Some(protocol) = self.resolve_protocol(protocol_name) {
+        if let Some(protocol) = self.resolve_builtin(protocol) {
             self.alloc_expr(HirExpr::ProtocolCall {
                 receiver: lowered_lhs,
                 protocol,
@@ -127,7 +128,7 @@ impl LowerCtx<'_> {
             span: span.clone(),
         });
 
-        if let Some(protocol) = self.resolve_protocol("And") {
+        if let Some(protocol) = self.resolve_builtin(Builtin::And) {
             self.alloc_expr(HirExpr::ProtocolCall {
                 receiver: lhs,
                 protocol,
@@ -163,7 +164,7 @@ impl LowerCtx<'_> {
         let lowered_operand = self.lower_expr(body, operand);
 
         if let Some((proto, method)) = lookup_unary_op(op)
-            && let Some(protocol) = self.resolve_protocol(proto)
+            && let Some(protocol) = self.resolve_builtin(proto)
         {
             return self.alloc_expr(HirExpr::ProtocolCall {
                 receiver: lowered_operand,
@@ -193,7 +194,7 @@ impl LowerCtx<'_> {
         let lowered_rhs = self.lower_expr(body, rhs);
 
         if let Some((proto, method, label)) = lookup_compound_assign_op(op) {
-            if let Some(protocol) = self.resolve_protocol(proto) {
+            if let Some(protocol) = self.resolve_builtin(proto) {
                 return self.alloc_expr(HirExpr::ProtocolCall {
                     receiver: lowered_lhs,
                     protocol,
@@ -225,7 +226,7 @@ impl LowerCtx<'_> {
         let lowered_cond = self.lower_expr(body, condition);
 
         // Negate condition: !condition
-        let negated = if let Some(protocol) = self.resolve_protocol("Not") {
+        let negated = if let Some(protocol) = self.resolve_builtin(Builtin::Not) {
             self.alloc_expr(HirExpr::ProtocolCall {
                 receiver: lowered_cond,
                 protocol,
@@ -293,7 +294,7 @@ impl LowerCtx<'_> {
         });
 
         // Negate: if !cond { break }
-        let negated = if let Some(protocol) = self.resolve_protocol("Not") {
+        let negated = if let Some(protocol) = self.resolve_builtin(Builtin::Not) {
             self.alloc_expr(HirExpr::ProtocolCall {
                 receiver: cond,
                 protocol,
@@ -683,7 +684,7 @@ impl LowerCtx<'_> {
 
         let mut result = exprs[0];
         for &next in &exprs[1..] {
-            if let Some(protocol) = self.resolve_protocol("Addable") {
+            if let Some(protocol) = self.resolve_builtin(Builtin::Addable) {
                 result = self.alloc_expr(HirExpr::ProtocolCall {
                     receiver: result,
                     protocol,
@@ -701,44 +702,44 @@ impl LowerCtx<'_> {
         result
     }
 
-    // ===== Protocol resolution helper =====
+    // ===== Builtin resolution helper =====
 
-    /// Resolve a protocol name to its entity via type path resolution.
-    fn resolve_protocol(&self, name: &str) -> Option<kestrel_hecs::Entity> {
-        let result = self.ctx.query(ResolveTypePath {
-            segments: vec![name.to_string()],
-            context: self.owner,
+    /// Resolve a builtin type/protocol to its entity ID.
+    /// Uses ResolveBuiltin query (cached, resolves from root context).
+    fn resolve_builtin(&self, builtin: Builtin) -> Option<kestrel_hecs::Entity> {
+        let result = self.ctx.query(ResolveBuiltin {
+            builtin,
             root: self.root,
         });
-        match result {
-            TypeResolution::Found(entity) => Some(entity),
-            _ => None,
+        if result.is_none() {
+            kestrel_debug::ktrace!("hir-lower", "builtin not found: {:?}", builtin);
         }
+        result
     }
 }
 
 // ===== Operator table lookups =====
 
 /// Look up protocol for a binary operator.
-fn lookup_binary_op(op: &BinaryOp) -> Option<(&'static str, &'static str, Option<&'static str>)> {
+fn lookup_binary_op(op: &BinaryOp) -> Option<(Builtin, &'static str, Option<&'static str>)> {
     kestrel_hir::body::lookup_binary_op(op)
 }
 
 /// Look up protocol for a short-circuit operator.
 fn lookup_short_circuit_op(
     op: &BinaryOp,
-) -> Option<(&'static str, &'static str, Option<&'static str>)> {
+) -> Option<(Builtin, &'static str, Option<&'static str>)> {
     kestrel_hir::body::lookup_short_circuit_op(op)
 }
 
 /// Look up protocol for a unary operator.
-fn lookup_unary_op(op: &UnaryOp) -> Option<(&'static str, &'static str)> {
+fn lookup_unary_op(op: &UnaryOp) -> Option<(Builtin, &'static str)> {
     kestrel_hir::body::lookup_unary_op(op)
 }
 
 /// Look up protocol for a compound assignment operator.
 fn lookup_compound_assign_op(
     op: &CompoundAssignOp,
-) -> Option<(&'static str, &'static str, Option<&'static str>)> {
+) -> Option<(Builtin, &'static str, Option<&'static str>)> {
     kestrel_hir::body::lookup_compound_assign_op(op)
 }

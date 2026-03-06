@@ -25,10 +25,16 @@ pub use kestrel_ast_builder;
 pub use queries::{LexFile, ParseFile};
 
 use std::collections::HashMap;
+use std::fmt;
+use std::panic::AssertUnwindSafe;
+use std::path::Path;
 
+use kestrel_ast_builder::Body;
 use kestrel_hecs::{Entity, World};
 use kestrel_lexer2::SpannedToken;
 use kestrel_parser2::ParseResult;
+use kestrel_type_infer::error::InferError;
+use kestrel_type_infer::InferBody;
 
 /// Compiler database backed by an ECS world.
 ///
@@ -50,6 +56,8 @@ impl Compiler {
         let root = world.spawn();
         world.set(root, kestrel_ast_builder::NodeKind::Module);
         world.set(root, kestrel_ast_builder::Name("<root>".to_string()));
+        // Seed the lang module so lang.* builtins (lang.i64, lang.alloc, etc.) are available
+        kestrel_ast_builder::seed_lang_module(&mut world, root);
         Self { world, files: HashMap::new(), root }
     }
 
@@ -131,6 +139,243 @@ impl Compiler {
     }
 }
 
+impl Compiler {
+    /// Run type inference on all entities that have bodies.
+    /// Returns a summary of how many succeeded, failed, panicked, etc.
+    pub fn infer_all(&self) -> InferSummary {
+        // Collect entities with Body component (mutation-phase API)
+        let entities: Vec<Entity> = self
+            .world
+            .iter_component::<Body>()
+            .map(|(e, _)| e)
+            .collect();
+
+        let ctx = self.world.query_context();
+        let mut summary = InferSummary::default();
+
+        for entity in entities {
+            summary.total += 1;
+            let root = self.root;
+
+            // Build entity path for error reporting (e.g. "std.core.Bool.init")
+            let entity_path = self.entity_path(entity);
+
+            match std::panic::catch_unwind(AssertUnwindSafe(|| {
+                ctx.query(InferBody { entity, root })
+            })) {
+                Ok(Some(typed)) => {
+                    summary.success += 1;
+                    summary.errors += typed.errors.len();
+
+                    // Classify each error by variant
+                    for err in &typed.errors {
+                        let variant = error_variant_name(err);
+                        *summary.error_breakdown.entry(variant).or_insert(0) += 1;
+                    }
+
+                    // Collect samples (first 50 errors with context)
+                    if summary.error_samples.len() < 50 {
+                        for err in &typed.errors {
+                            if summary.error_samples.len() >= 50 {
+                                break;
+                            }
+                            summary.error_samples.push(ErrorSample {
+                                entity_path: entity_path.clone(),
+                                error: format_error(err),
+                            });
+                        }
+                    }
+                }
+                Ok(None) => summary.skipped += 1,
+                Err(panic) => {
+                    summary.panics += 1;
+                    let msg = panic
+                        .downcast_ref::<String>()
+                        .map(|s| s.as_str())
+                        .or_else(|| panic.downcast_ref::<&str>().copied())
+                        .unwrap_or("unknown panic");
+                    summary
+                        .panic_details
+                        .push(format!("{}: {}", entity_path, msg));
+                }
+            }
+        }
+
+        summary
+    }
+
+    /// Build a human-readable path for an entity (e.g. "std.core.Bool.init")
+    fn entity_path(&self, entity: Entity) -> String {
+        let mut parts = Vec::new();
+        let mut current = Some(entity);
+        while let Some(e) = current {
+            if e == self.root {
+                break;
+            }
+            if let Some(name) = self.world.get::<kestrel_ast_builder::Name>(e) {
+                parts.push(name.0.clone());
+            }
+            current = self.world.parent_of(e);
+        }
+        parts.reverse();
+        if parts.is_empty() {
+            format!("{:?}", entity)
+        } else {
+            parts.join(".")
+        }
+    }
+
+    /// Load all .ks files from a directory, parse and build declarations.
+    pub fn load_dir(&mut self, path: &Path) {
+        let mut files: Vec<_> = Self::collect_ks_files(path);
+        files.sort(); // deterministic order
+
+        for file_path in files {
+            let source = match std::fs::read_to_string(&file_path) {
+                Ok(s) => s,
+                Err(_) => continue,
+            };
+            let name = file_path.to_string_lossy().to_string();
+            let entity = self.set_source(&name, source);
+            self.build(entity);
+        }
+    }
+
+    /// Recursively collect all .ks files from a directory.
+    fn collect_ks_files(dir: &Path) -> Vec<std::path::PathBuf> {
+        let mut result = Vec::new();
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return result;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                result.extend(Self::collect_ks_files(&path));
+            } else if path.extension().is_some_and(|e| e == "ks") {
+                result.push(path);
+            }
+        }
+        result
+    }
+}
+
+/// Summary of type inference results across all bodies.
+#[derive(Default)]
+pub struct InferSummary {
+    /// Total entities with bodies.
+    pub total: usize,
+    /// Successfully inferred (may still have type errors).
+    pub success: usize,
+    /// Skipped — no HIR body produced (e.g., missing Body component path).
+    pub skipped: usize,
+    /// Panicked during inference.
+    pub panics: usize,
+    /// Total type errors across all successful inferences.
+    pub errors: usize,
+    /// Error counts by variant name.
+    pub error_breakdown: HashMap<&'static str, usize>,
+    /// Sample errors with entity context.
+    pub error_samples: Vec<ErrorSample>,
+    /// Details of panics (entity name + message).
+    pub panic_details: Vec<String>,
+}
+
+/// A single error sample with the entity it came from.
+pub struct ErrorSample {
+    pub entity_path: String,
+    pub error: String,
+}
+
+/// Classify an InferError into a variant name for breakdown.
+fn error_variant_name(err: &InferError) -> &'static str {
+    match err {
+        InferError::TypeMismatch { .. } => "TypeMismatch",
+        InferError::DoesNotConform { .. } => "DoesNotConform",
+        InferError::NoMember { .. } => "NoMember",
+        InferError::AmbiguousMember { .. } => "AmbiguousMember",
+        InferError::MemberNotVisible { .. } => "MemberNotVisible",
+        InferError::NoAssociatedType { .. } => "NoAssociatedType",
+        InferError::InfiniteType { .. } => "InfiniteType",
+        InferError::FromHir { .. } => "FromHir",
+        InferError::ImplicitMemberNotFound { .. } => "ImplicitMemberNotFound",
+    }
+}
+
+/// Format an InferError into a human-readable one-liner.
+fn format_error(err: &InferError) -> String {
+    match err {
+        InferError::TypeMismatch { span, .. } => {
+            format!("TypeMismatch at {}:{}", span.file_id, span.start)
+        }
+        InferError::DoesNotConform { span, .. } => {
+            format!("DoesNotConform at {}:{}", span.file_id, span.start)
+        }
+        InferError::NoMember { name, span, .. } => {
+            format!("NoMember '{}' at {}:{}", name, span.file_id, span.start)
+        }
+        InferError::AmbiguousMember { name, span, .. } => {
+            format!("AmbiguousMember '{}' at {}:{}", name, span.file_id, span.start)
+        }
+        InferError::MemberNotVisible { name, span, .. } => {
+            format!("MemberNotVisible '{}' at {}:{}", name, span.file_id, span.start)
+        }
+        InferError::NoAssociatedType { name, span, .. } => {
+            format!("NoAssociatedType '{}' at {}:{}", name, span.file_id, span.start)
+        }
+        InferError::InfiniteType { span } => {
+            format!("InfiniteType at {}:{}", span.file_id, span.start)
+        }
+        InferError::FromHir { span } => {
+            format!("FromHir at {}:{}", span.file_id, span.start)
+        }
+        InferError::ImplicitMemberNotFound { name, span, .. } => {
+            format!("ImplicitMemberNotFound '{}' at {}:{}", name, span.file_id, span.start)
+        }
+    }
+}
+
+impl fmt::Display for InferSummary {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Type Inference Summary:")?;
+        writeln!(f, "  Total bodies:  {}", self.total)?;
+        writeln!(f, "  Success:       {}", self.success)?;
+        writeln!(f, "  Skipped:       {}", self.skipped)?;
+        writeln!(f, "  Panics:        {}", self.panics)?;
+        writeln!(f, "  Type errors:   {}", self.errors)?;
+
+        if !self.error_breakdown.is_empty() {
+            writeln!(f)?;
+            writeln!(f, "  Error breakdown:")?;
+            // Sort by count descending
+            let mut breakdown: Vec<_> = self.error_breakdown.iter().collect();
+            breakdown.sort_by(|a, b| b.1.cmp(a.1));
+            for (variant, count) in &breakdown {
+                writeln!(f, "    {:30} {:>5}", variant, count)?;
+            }
+        }
+
+        if !self.error_samples.is_empty() {
+            writeln!(f)?;
+            writeln!(f, "  Error samples (first 50):")?;
+            for sample in &self.error_samples {
+                writeln!(f, "    [{}] {}", sample.entity_path, sample.error)?;
+            }
+        }
+
+        if !self.panic_details.is_empty() {
+            writeln!(f)?;
+            writeln!(f, "  Panic details (first 10):")?;
+            for detail in self.panic_details.iter().take(10) {
+                writeln!(f, "    - {}", detail)?;
+            }
+            if self.panic_details.len() > 10 {
+                writeln!(f, "    ... and {} more", self.panic_details.len() - 10)?;
+            }
+        }
+        Ok(())
+    }
+}
+
 impl Default for Compiler {
     fn default() -> Self {
         Self::new()
@@ -142,6 +387,15 @@ mod tests {
     use super::*;
     use kestrel_lexer2::Token;
     use kestrel_syntax_tree2::SyntaxKind;
+    use std::path::PathBuf;
+
+    /// Path to the stdlib directory (relative to workspace root).
+    fn stdlib_path() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../lang/std")
+            .canonicalize()
+            .expect("stdlib path should exist at lang/std")
+    }
 
     /// Helper: extract non-trivia token kinds from a token stream.
     fn structural_tokens(tokens: &[SpannedToken]) -> Vec<Token> {
@@ -582,5 +836,53 @@ mod tests {
         // Verify f2 actually got updated results
         let r2 = c.parse(f2);
         assert_eq!(r2.tree.children().count(), 2, "f2 should have module + struct");
+    }
+
+    // ================================================================
+    // Type inference: smoke tests on stdlib
+    // ================================================================
+
+    #[test]
+    fn compile_simple_function() {
+        // Baseline: inference on a trivial function without stdlib
+        let mut c = Compiler::new();
+        let f = c.set_source("test.ks", "module Test\nfunc foo() { let x = 42; x }".into());
+        c.build(f);
+
+        let summary = c.infer_all();
+        eprintln!("{}", summary);
+        assert!(summary.total > 0, "should have at least one body");
+        assert_eq!(summary.panics, 0, "simple function should not panic");
+    }
+
+    #[test]
+    fn compile_full_stdlib() {
+        // Load the entire stdlib and see how far inference gets
+        let mut c = Compiler::new();
+        let path = stdlib_path();
+        c.load_dir(&path);
+
+        let summary = c.infer_all();
+        eprintln!("{}", summary);
+
+        // Just report — don't assert hard failures since many things
+        // are expected to fail at this stage
+        assert!(summary.total > 0, "should have found bodies in stdlib");
+    }
+
+    #[test]
+    fn compile_stdlib_bool() {
+        // A specific, small stdlib file
+        let mut c = Compiler::new();
+        let path = stdlib_path();
+
+        // Load core/bool.ks — needs core/protocols.ks for Equatable etc.
+        let core_path = path.join("core");
+        c.load_dir(&core_path);
+
+        let summary = c.infer_all();
+        eprintln!("=== Bool + core ===");
+        eprintln!("{}", summary);
+        assert!(summary.total > 0);
     }
 }

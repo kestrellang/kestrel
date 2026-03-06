@@ -33,9 +33,19 @@ pub fn build_subscript(
     world.set(entity, Gettable);
     world.set_parent(entity, parent);
 
-    // Parameters
+    // Parameters — subscripts inside types have a borrowing receiver
     let params = extract_params(node, file_id);
-    world.set(entity, Callable { params, receiver: None });
+    let is_static = has_static_modifier(node);
+    let parent_is_type = matches!(
+        world.get::<NodeKind>(parent),
+        Some(NodeKind::Struct | NodeKind::Enum | NodeKind::Protocol | NodeKind::Extension)
+    );
+    let receiver = if is_static || !parent_is_type {
+        None
+    } else {
+        Some(ReceiverKind::Borrowing)
+    };
+    world.set(entity, Callable { params, receiver });
 
     // Return type
     if let Some(return_node) = find_child(node, SyntaxKind::ReturnType) {

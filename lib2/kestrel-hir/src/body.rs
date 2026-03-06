@@ -11,6 +11,7 @@ use kestrel_ast::{BinaryOp, CompoundAssignOp, UnaryOp};
 use kestrel_hecs::Entity;
 use kestrel_span2::Span;
 
+use crate::builtin::Builtin;
 use crate::res::{Local, LocalId};
 use crate::ty::HirTy;
 
@@ -330,65 +331,65 @@ pub struct HirStructPatField {
 ///
 /// Label is `None` for single-name params (no external label in Kestrel),
 /// `Some("by")` for shift ops, `Some("to")` for range ops.
-pub const BINARY_OP_PROTOCOLS: &[(BinaryOp, &str, &str, Option<&str>)] = &[
-    (BinaryOp::Add, "Addable", "add", None),
-    (BinaryOp::Sub, "Subtractable", "subtract", None),
-    (BinaryOp::Mul, "Multipliable", "multiply", None),
-    (BinaryOp::Div, "Divisible", "divide", None),
-    (BinaryOp::Rem, "Modulo", "modulo", None),
-    (BinaryOp::Eq, "Equal", "equals", None),
-    (BinaryOp::Ne, "NotEqual", "notEquals", None),
-    (BinaryOp::Lt, "Less", "lessThan", None),
-    (BinaryOp::Gt, "Greater", "greaterThan", None),
-    (BinaryOp::Le, "LessOrEqual", "lessThanOrEqual", None),
-    (BinaryOp::Ge, "GreaterOrEqual", "greaterThanOrEqual", None),
-    (BinaryOp::BitAnd, "BitwiseAnd", "bitwiseAnd", None),
-    (BinaryOp::BitOr, "BitwiseOr", "bitwiseOr", None),
-    (BinaryOp::BitXor, "BitwiseXor", "bitwiseXor", None),
-    (BinaryOp::Shl, "LeftShift", "shiftLeft", Some("by")),
-    (BinaryOp::Shr, "RightShift", "shiftRight", Some("by")),
-    (BinaryOp::RangeInclusive, "ClosedRangeConstructible", "inclusiveRange", Some("to")),
-    (BinaryOp::RangeExclusive, "RangeConstructible", "exclusiveRange", Some("to")),
+pub const BINARY_OP_PROTOCOLS: &[(BinaryOp, Builtin, &str, Option<&str>)] = &[
+    (BinaryOp::Add, Builtin::Addable, "add", None),
+    (BinaryOp::Sub, Builtin::Subtractable, "subtract", None),
+    (BinaryOp::Mul, Builtin::Multipliable, "multiply", None),
+    (BinaryOp::Div, Builtin::Divisible, "divide", None),
+    (BinaryOp::Rem, Builtin::Modulo, "modulo", None),
+    (BinaryOp::Eq, Builtin::Equal, "equals", None),
+    (BinaryOp::Ne, Builtin::NotEqual, "notEquals", None),
+    (BinaryOp::Lt, Builtin::Less, "lessThan", None),
+    (BinaryOp::Gt, Builtin::Greater, "greaterThan", None),
+    (BinaryOp::Le, Builtin::LessOrEqual, "lessThanOrEqual", None),
+    (BinaryOp::Ge, Builtin::GreaterOrEqual, "greaterThanOrEqual", None),
+    (BinaryOp::BitAnd, Builtin::BitwiseAnd, "bitwiseAnd", None),
+    (BinaryOp::BitOr, Builtin::BitwiseOr, "bitwiseOr", None),
+    (BinaryOp::BitXor, Builtin::BitwiseXor, "bitwiseXor", None),
+    (BinaryOp::Shl, Builtin::LeftShift, "shiftLeft", Some("by")),
+    (BinaryOp::Shr, Builtin::RightShift, "shiftRight", Some("by")),
+    (BinaryOp::RangeInclusive, Builtin::ClosedRangeConstructible, "inclusiveRange", Some("to")),
+    (BinaryOp::RangeExclusive, Builtin::RangeConstructible, "exclusiveRange", Some("to")),
 ];
 
 /// Short-circuit operators: right operand is wrapped in a closure.
 /// `logicalAnd(other:)` and `logicalOr(other:)` are single-name params (no label).
 /// `coalesce(default:)` is also single-name (no label).
-pub const SHORT_CIRCUIT_OP_PROTOCOLS: &[(BinaryOp, &str, &str, Option<&str>)] = &[
-    (BinaryOp::And, "And", "logicalAnd", None),
-    (BinaryOp::Or, "Or", "logicalOr", None),
-    (BinaryOp::Coalesce, "Coalesce", "coalesce", None),
+pub const SHORT_CIRCUIT_OP_PROTOCOLS: &[(BinaryOp, Builtin, &str, Option<&str>)] = &[
+    (BinaryOp::And, Builtin::And, "logicalAnd", None),
+    (BinaryOp::Or, Builtin::Or, "logicalOr", None),
+    (BinaryOp::Coalesce, Builtin::Coalesce, "coalesce", None),
 ];
 
-/// (operator, protocol_name, method_name)
-pub const UNARY_OP_PROTOCOLS: &[(UnaryOp, &str, &str)] = &[
-    (UnaryOp::Neg, "Negatable", "negate"),
-    (UnaryOp::BitNot, "BitwiseNot", "bitwiseNot"),
-    (UnaryOp::LogicalNot, "Not", "logicalNot"),
+/// (operator, protocol_builtin, method_name)
+pub const UNARY_OP_PROTOCOLS: &[(UnaryOp, Builtin, &str)] = &[
+    (UnaryOp::Neg, Builtin::Negatable, "negate"),
+    (UnaryOp::BitNot, Builtin::BitwiseNot, "bitwiseNot"),
+    (UnaryOp::LogicalNot, Builtin::Not, "logicalNot"),
 ];
 
-/// (operator, protocol_name, method_name, arg_label)
+/// (operator, protocol_builtin, method_name, arg_label)
 ///
 /// Most compound assign methods use single-name params (no label).
 /// Only shift-assign ops have a `"by"` label.
-pub const COMPOUND_ASSIGN_PROTOCOLS: &[(CompoundAssignOp, &str, &str, Option<&str>)] = &[
-    (CompoundAssignOp::AddAssign, "AddAssign", "addAssign", None),
-    (CompoundAssignOp::SubAssign, "SubtractAssign", "subtractAssign", None),
-    (CompoundAssignOp::MulAssign, "MultiplyAssign", "multiplyAssign", None),
-    (CompoundAssignOp::DivAssign, "DivideAssign", "divideAssign", None),
-    (CompoundAssignOp::RemAssign, "ModuloAssign", "modAssign", None),
-    (CompoundAssignOp::BitAndAssign, "BitwiseAndAssign", "bitwiseAndAssign", None),
-    (CompoundAssignOp::BitOrAssign, "BitwiseOrAssign", "bitwiseOrAssign", None),
-    (CompoundAssignOp::BitXorAssign, "BitwiseXorAssign", "bitwiseXorAssign", None),
-    (CompoundAssignOp::ShlAssign, "LeftShiftAssign", "shiftLeftAssign", Some("by")),
-    (CompoundAssignOp::ShrAssign, "RightShiftAssign", "shiftRightAssign", Some("by")),
+pub const COMPOUND_ASSIGN_PROTOCOLS: &[(CompoundAssignOp, Builtin, &str, Option<&str>)] = &[
+    (CompoundAssignOp::AddAssign, Builtin::AddAssign, "addAssign", None),
+    (CompoundAssignOp::SubAssign, Builtin::SubtractAssign, "subtractAssign", None),
+    (CompoundAssignOp::MulAssign, Builtin::MultiplyAssign, "multiplyAssign", None),
+    (CompoundAssignOp::DivAssign, Builtin::DivideAssign, "divideAssign", None),
+    (CompoundAssignOp::RemAssign, Builtin::ModuloAssign, "modAssign", None),
+    (CompoundAssignOp::BitAndAssign, Builtin::BitwiseAndAssign, "bitwiseAndAssign", None),
+    (CompoundAssignOp::BitOrAssign, Builtin::BitwiseOrAssign, "bitwiseOrAssign", None),
+    (CompoundAssignOp::BitXorAssign, Builtin::BitwiseXorAssign, "bitwiseXorAssign", None),
+    (CompoundAssignOp::ShlAssign, Builtin::LeftShiftAssign, "shiftLeftAssign", Some("by")),
+    (CompoundAssignOp::ShrAssign, Builtin::RightShiftAssign, "shiftRightAssign", Some("by")),
 ];
 
 /// Look up the protocol for a binary operator.
-/// Returns `(protocol_name, method_name, arg_label)` or `None` if not found.
+/// Returns `(protocol_builtin, method_name, arg_label)` or `None` if not found.
 pub fn lookup_binary_op(
     op: &BinaryOp,
-) -> Option<(&'static str, &'static str, Option<&'static str>)> {
+) -> Option<(Builtin, &'static str, Option<&'static str>)> {
     BINARY_OP_PROTOCOLS
         .iter()
         .find(|(o, ..)| o == op)
@@ -396,10 +397,10 @@ pub fn lookup_binary_op(
 }
 
 /// Look up the protocol for a short-circuit binary operator.
-/// Returns `(protocol_name, method_name, arg_label)` or `None` if not found.
+/// Returns `(protocol_builtin, method_name, arg_label)` or `None` if not found.
 pub fn lookup_short_circuit_op(
     op: &BinaryOp,
-) -> Option<(&'static str, &'static str, Option<&'static str>)> {
+) -> Option<(Builtin, &'static str, Option<&'static str>)> {
     SHORT_CIRCUIT_OP_PROTOCOLS
         .iter()
         .find(|(o, ..)| o == op)
@@ -407,8 +408,8 @@ pub fn lookup_short_circuit_op(
 }
 
 /// Look up the protocol for a unary operator.
-/// Returns `(protocol_name, method_name)` or `None` if not found.
-pub fn lookup_unary_op(op: &UnaryOp) -> Option<(&'static str, &'static str)> {
+/// Returns `(protocol_builtin, method_name)` or `None` if not found.
+pub fn lookup_unary_op(op: &UnaryOp) -> Option<(Builtin, &'static str)> {
     UNARY_OP_PROTOCOLS
         .iter()
         .find(|(o, ..)| o == op)
@@ -416,10 +417,10 @@ pub fn lookup_unary_op(op: &UnaryOp) -> Option<(&'static str, &'static str)> {
 }
 
 /// Look up the protocol for a compound assignment operator.
-/// Returns `(protocol_name, method_name, arg_label)` or `None` if not found.
+/// Returns `(protocol_builtin, method_name, arg_label)` or `None` if not found.
 pub fn lookup_compound_assign_op(
     op: &CompoundAssignOp,
-) -> Option<(&'static str, &'static str, Option<&'static str>)> {
+) -> Option<(Builtin, &'static str, Option<&'static str>)> {
     COMPOUND_ASSIGN_PROTOCOLS
         .iter()
         .find(|(o, ..)| o == op)
