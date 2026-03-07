@@ -106,10 +106,31 @@ impl LowerCtx {
         let mut stmts = Vec::new();
         let mut tail_expr = None;
 
-        for child in node.children() {
+        // Collect children with their CST nodes for later analysis
+        let children: Vec<_> = node.children().collect();
+        let child_count = children.len();
+
+        for (i, child) in children.iter().enumerate() {
             match child.kind() {
                 // Statement wrapper nodes contain the actual statement
                 SyntaxKind::Statement => {
+                    // If this is the last child and it's a bare ExpressionStatement
+                    // (statement-like expr without semicolon), promote to tail expr.
+                    // This handles `if/else`, `match`, etc. at the end of a block.
+                    let is_last = i == child_count - 1
+                        || children[i + 1..].iter().all(|c| c.kind() == SyntaxKind::RBrace);
+                    if is_last && tail_expr.is_none() {
+                        if let Some(inner) = child.children().next() {
+                            if inner.kind() == SyntaxKind::ExpressionStatement
+                                && !has_semicolon(&inner)
+                            {
+                                // Promote to tail expression
+                                let expr_id = self.lower_expr_stmt_as_expr(&inner);
+                                tail_expr = Some(expr_id);
+                                continue;
+                            }
+                        }
+                    }
                     if let Some(inner) = child.children().next() {
                         let stmt_id = self.lower_stmt(&inner);
                         stmts.push(stmt_id);
@@ -207,6 +228,16 @@ impl LowerCtx {
     }
 
     /// `expression;`
+    /// Extract the expression from an ExpressionStatement, used when
+    /// promoting the last expression statement to a tail expression.
+    fn lower_expr_stmt_as_expr(&mut self, node: &SyntaxNode) -> ExprId {
+        let span = self.span(node);
+        node.children()
+            .find(|c| c.kind() == SyntaxKind::Expression || is_expr_kind(c.kind()))
+            .map(|c| self.lower_expr(&c))
+            .unwrap_or_else(|| self.alloc_expr(AstExpr::Error { span }))
+    }
+
     fn lower_expr_stmt(&mut self, node: &SyntaxNode) -> StmtId {
         let span = self.span(node);
 
@@ -1075,6 +1106,18 @@ impl LowerCtx {
 
     // ----- Closure -----
 
+    /// Lower a parameterless closure as a block expression.
+    /// Used in match arm bodies where `{ stmts; expr }` is parsed as a closure.
+    fn lower_closure_as_block(&mut self, node: &SyntaxNode) -> ExprId {
+        let span = self.span(node);
+        let body = node
+            .children()
+            .find(|c| c.kind() == SyntaxKind::CodeBlock)
+            .map(|c| self.lower_block(&c))
+            .unwrap_or_else(|| self.lower_closure_body(node));
+        self.alloc_expr(AstExpr::Block { body, span })
+    }
+
     fn lower_closure(&mut self, node: &SyntaxNode) -> ExprId {
         let span = self.span(node);
 
@@ -1206,12 +1249,26 @@ impl LowerCtx {
         });
 
         // Body: expression after FatArrow
-        // The body expression is the last expression child (after pattern + guard)
+        // The body expression is the last expression child (after pattern + guard).
+        // Special case: `{ stmts; expr }` may be parsed as a closure with no params
+        // instead of a block expression. Detect and unwrap — use the closure body's
+        // tail expression directly (or wrap statements + tail into an if-true block).
         let body = node
             .children()
             .filter(|c| c.kind() == SyntaxKind::Expression || is_expr_kind(c.kind()))
             .last()
-            .map(|c| self.lower_expr(&c))
+            .map(|c| {
+                let inner = unwrap_expr(&c);
+                if inner.kind() == SyntaxKind::ExprClosure
+                    && find_child(&inner, SyntaxKind::ClosureParams).is_none()
+                {
+                    // Parameterless closure = block expression in match arm.
+                    // Lower it as a closure and extract the body.
+                    self.lower_closure_as_block(&inner)
+                } else {
+                    self.lower_expr(&c)
+                }
+            })
             .unwrap_or_else(|| {
                 self.alloc_expr(AstExpr::Error {
                     span: self.span(node),
@@ -1669,6 +1726,12 @@ fn unwrap_pattern(node: &SyntaxNode) -> SyntaxNode {
 }
 
 /// Check if a SyntaxKind is an expression node.
+/// Check if an ExpressionStatement node has a trailing semicolon token.
+fn has_semicolon(node: &SyntaxNode) -> bool {
+    node.children_with_tokens()
+        .any(|e| e.as_token().is_some_and(|t| t.kind() == SyntaxKind::Semicolon))
+}
+
 fn is_expr_kind(kind: SyntaxKind) -> bool {
     matches!(
         kind,

@@ -305,9 +305,28 @@ fn solve_call(
             ctx.equal(result, ret, span);
             SolveResult::Solved
         }
-        TyKind::Named { .. } | TyKind::Param { .. } => {
-            // Not a function — try subscript resolution via member system
-            solve_member(ctx, callee, "(subscript)", args, result, expr, span)
+        TyKind::Named { ref entity, .. } | TyKind::Param { ref entity } => {
+            // Check if callee is a type parameter — T() is an init call, not subscript.
+            // Type params appear as Named(TypeParameter_entity) or Param(entity).
+            let is_type_param = matches!(kind, TyKind::Param { .. })
+                || ctx.query_ctx.get::<kestrel_ast_builder::NodeKind>(*entity)
+                    == Some(&kestrel_ast_builder::NodeKind::TypeParameter);
+
+            if is_type_param {
+                // Resolve init on the type parameter's protocol bounds.
+                // The init's return annotation is () but the actual result
+                // is an instance of the type param. Override the result:
+                // solve_member will equate result with (), then we equate
+                // result with callee to fix it.
+                let init_result = ctx.fresh();
+                let res = solve_member(ctx, callee, "init", args, init_result, expr, span.clone());
+                // The result of T() is T, not the init's return type
+                ctx.equal(result, callee, span);
+                res
+            } else {
+                // Instance subscript call (e.g., dict(key))
+                solve_member(ctx, callee, "(subscript)", args, result, expr, span)
+            }
         }
         _ => {
             // Tuples, Never, etc. are not callable
@@ -424,6 +443,20 @@ fn solve_member(
     // Map method's own type params to fresh vars
     for (&param, &fresh) in resolution.type_params.iter().zip(&fresh_params) {
         subs.push((param, fresh));
+    }
+
+    // Map protocol type params to receiver when member comes from a protocol.
+    // E.g., Addable[Rhs = Self] — Rhs defaults to Self, so map Rhs → receiver.
+    if let Some(self_entity) = resolution.self_type {
+        let proto_type_params: Vec<kestrel_hecs::Entity> = ctx.query_ctx
+            .get::<TypeParams>(self_entity)
+            .map(|tp| tp.0.clone())
+            .unwrap_or_default();
+        for &param in &proto_type_params {
+            if !subs.iter().any(|(e, _)| *e == param) {
+                subs.push((param, receiver));
+            }
+        }
     }
 
     // Emit where clause constraints
@@ -638,6 +671,13 @@ fn lower_hir_ty_sub(
             if let Some(&(_, tv)) = subs.iter().find(|(e, _)| e == entity) {
                 return tv;
             }
+            // Check where clause associated type subs (e.g., Output → Item
+            // from extension where clause `Item.Output = Item`).
+            if args.is_empty() {
+                if let Some(&(_, tv)) = ctx.where_clause_assoc_subs.iter().find(|(e, _)| e == entity) {
+                    return tv;
+                }
+            }
             // Associated type resolution: if this entity is a TypeAlias
             // (e.g., `Iter` in `protocol Iterable { type Iter }`) and we have
             // a concrete receiver (not the protocol itself or a type param),
@@ -687,6 +727,7 @@ fn lower_hir_ty_sub(
             let ret_tv = lower_hir_ty_sub(ctx, ret, self_entity, recv_tv, subs);
             ctx.function(param_tvs, ret_tv)
         }
+        HirTy::Never(_) => ctx.never(),
         HirTy::Infer(_) => ctx.fresh(),
         HirTy::Error(_) => {
             let idx = ctx.types.len() as u32;

@@ -1047,7 +1047,7 @@ extend Iterator {
 // ============================================================================
 
 /// Extension for iterators with addable elements.
-extend Iterator where Item: Addable {
+extend Iterator where Item: Addable, Item.Output = Item {
 
     /// Returns the sum of all elements.
     ///
@@ -1067,7 +1067,7 @@ extend Iterator where Item: Addable {
 }
 
 /// Extension for iterators with multipliable elements.
-extend Iterator where Item: Multipliable {
+extend Iterator where Item: Multipliable, Item.Output = Item {
 
     /// Returns the product of all elements.
     ///

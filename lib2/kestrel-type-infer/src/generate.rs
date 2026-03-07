@@ -75,16 +75,18 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             })
         }
 
-        HirExpr::Def(entity, _) => {
+        HirExpr::Def(entity, explicit_type_args, _) => {
             // Read the entity's type from the world via the resolver.
             // For generic entities, this will instantiate fresh TyVars.
-            instantiate_entity(ctx, *entity)
+            // If explicit type args are provided (e.g., Pointer[UInt8]),
+            // use them instead of fresh inference variables.
+            instantiate_entity_with_args(ctx, *entity, explicit_type_args)
         }
 
         // === Calls ===
         HirExpr::Call { callee, args, span } => {
             // Struct construction: Def(struct) used as callee
-            if let HirExpr::Def(entity, _) = &hir.exprs[*callee] {
+            if let HirExpr::Def(entity, _, _) = &hir.exprs[*callee] {
                 if ctx.query_ctx.get::<NodeKind>(*entity) == Some(&NodeKind::Struct) {
                     let arg_tvs = gen_call_args(ctx, hir, args);
                     return gen_struct_init(ctx, *entity, &arg_tvs, id, span);
@@ -292,6 +294,9 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             let elem_tvs: Vec<TyVar> = elements.iter().map(|&e| gen_expr(ctx, hir, e)).collect();
             ctx.tuple(elem_tvs)
         }
+
+        // Block expression: execute stmts, result is the tail expr
+        HirExpr::Block { body, .. } => gen_block(ctx, hir, body),
 
         HirExpr::Error { span } => ctx.report_error(InferError::FromHir { span: span.clone() }),
     };
@@ -547,8 +552,27 @@ fn gen_block(ctx: &mut InferCtx<'_>, hir: &HirBody, block: &HirBlock) -> TyVar {
     }
     if let Some(tail) = block.tail_expr {
         gen_expr(ctx, hir, tail)
+    } else if block_diverges(hir, &block.stmts) {
+        // Block ends in return/break/continue — type is Never (bottom)
+        ctx.never()
     } else {
         ctx.tuple(vec![]) // void block = unit
+    }
+}
+
+/// Check if a block's last statement is a diverging expression (return/break/continue).
+/// Used so `{ return .None }` has type Never instead of unit.
+fn block_diverges(hir: &HirBody, stmts: &[HirStmtId]) -> bool {
+    let Some(&last_id) = stmts.last() else {
+        return false;
+    };
+    if let HirStmt::Expr { expr, .. } = &hir.stmts[last_id] {
+        matches!(
+            hir.exprs[*expr],
+            HirExpr::Return { .. } | HirExpr::Break { .. } | HirExpr::Continue { .. }
+        )
+    } else {
+        false
     }
 }
 
@@ -583,24 +607,61 @@ fn gen_closure(
 /// Instantiate an entity's type: reads the ECS to determine what kind of
 /// entity it is, creates fresh TyVars for type params, and returns the
 /// appropriate type (Function for callables, Named for types, etc.).
-fn instantiate_entity(ctx: &mut InferCtx<'_>, entity: Entity) -> TyVar {
+/// Instantiate an entity, using explicit type args if provided.
+fn instantiate_entity_with_args(
+    ctx: &mut InferCtx<'_>,
+    entity: Entity,
+    explicit_type_args: &[HirTy],
+) -> TyVar {
+    instantiate_entity_inner(ctx, entity, explicit_type_args)
+}
+
+fn instantiate_entity_inner(
+    ctx: &mut InferCtx<'_>,
+    entity: Entity,
+    explicit_type_args: &[HirTy],
+) -> TyVar {
     let qctx = ctx.query_ctx;
     let root = ctx.root;
 
-    // Read type params and create fresh TyVars for them
+    // Read type params and create fresh TyVars for them,
+    // or use explicit type args if provided (e.g., Pointer[UInt8]).
     let type_param_entities: Vec<Entity> = qctx
         .get::<TypeParams>(entity)
         .map(|tp| tp.0.clone())
         .unwrap_or_default();
-    let fresh_type_args: Vec<TyVar> = type_param_entities.iter().map(|_| ctx.fresh()).collect();
+    let fresh_type_args: Vec<TyVar> = if !explicit_type_args.is_empty()
+        && explicit_type_args.len() == type_param_entities.len()
+    {
+        explicit_type_args.iter().map(|t| lower_hir_ty(ctx, t)).collect()
+    } else {
+        type_param_entities.iter().map(|_| ctx.fresh()).collect()
+    };
 
     // Build substitution map: type param entity → fresh TyVar.
     // Used to instantiate generic param/return types with fresh vars.
-    let subs: Vec<(Entity, TyVar)> = type_param_entities
+    let mut subs: Vec<(Entity, TyVar)> = type_param_entities
         .iter()
         .zip(fresh_type_args.iter())
         .map(|(&e, &tv)| (e, tv))
         .collect();
+
+    // If explicit type args don't match this entity's params (e.g., Pointer[UInt8].nullPointer
+    // where [UInt8] is for Pointer's T, not nullPointer's params), check the parent entity.
+    if !explicit_type_args.is_empty() && explicit_type_args.len() != type_param_entities.len() {
+        if let Some(parent) = qctx.parent_of(entity) {
+            let parent_type_params: Vec<Entity> = qctx
+                .get::<TypeParams>(parent)
+                .map(|tp| tp.0.clone())
+                .unwrap_or_default();
+            if explicit_type_args.len() == parent_type_params.len() {
+                for (i, &param) in parent_type_params.iter().enumerate() {
+                    let tv = lower_hir_ty(ctx, &explicit_type_args[i]);
+                    subs.push((param, tv));
+                }
+            }
+        }
+    }
 
     // Emit where clause constraints for the type params
     for clause in ctx.resolver.where_clauses(entity) {
@@ -729,13 +790,20 @@ pub fn lower_hir_ty(ctx: &mut InferCtx<'_>, ty: &HirTy) -> TyVar {
 
 /// Convert HirTy to TyVar, substituting type params found in `subs`.
 /// Used when instantiating generic entities: type params become fresh TyVars.
-fn lower_hir_ty_with_subs(
+/// Also substitutes Named entities (e.g., TypeAlias for associated types) in subs.
+pub(crate) fn lower_hir_ty_with_subs(
     ctx: &mut InferCtx<'_>,
     ty: &HirTy,
     subs: &[(Entity, TyVar)],
 ) -> TyVar {
     match ty {
         HirTy::Named { entity, args, .. } => {
+            // Check substitution map (e.g., associated type entities from where clauses)
+            if args.is_empty() {
+                if let Some(&(_, tv)) = subs.iter().find(|(e, _)| e == entity) {
+                    return tv;
+                }
+            }
             let arg_tvs: Vec<TyVar> = args.iter().map(|a| lower_hir_ty_with_subs(ctx, a, subs)).collect();
             ctx.named(*entity, arg_tvs)
         }
@@ -755,6 +823,7 @@ fn lower_hir_ty_with_subs(
             }
             ctx.param(*entity)
         }
+        HirTy::Never(_) => ctx.never(),
         HirTy::Infer(_) => ctx.fresh(),
         HirTy::Error(span) => ctx.report_error(InferError::FromHir { span: span.clone() }),
     }
@@ -781,7 +850,7 @@ fn expr_span(hir: &HirBody, id: HirExprId) -> Span {
         | HirExpr::Dict { span, .. }
         | HirExpr::Closure { span, .. }
         | HirExpr::Local(_, span)
-        | HirExpr::Def(_, span)
+        | HirExpr::Def(_, _, span)
         | HirExpr::Field { span, .. }
         | HirExpr::TupleIndex { span, .. }
         | HirExpr::ImplicitMember { span, .. }
@@ -795,6 +864,7 @@ fn expr_span(hir: &HirBody, id: HirExprId) -> Span {
         | HirExpr::Continue { span, .. }
         | HirExpr::Return { span, .. }
         | HirExpr::Assign { span, .. }
+        | HirExpr::Block { span, .. }
         | HirExpr::Error { span } => span.clone(),
     }
 }

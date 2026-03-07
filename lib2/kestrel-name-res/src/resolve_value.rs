@@ -30,6 +30,9 @@ pub enum ValueResolution {
     EnumCaseValue { entity: Entity, resolved_index: usize },
     /// Field/getter used as intermediate value (e.g. `obj.field.method()`)
     FieldValue { entity: Entity, resolved_index: usize },
+    /// Static member accessed through associated type (e.g., `Item.zero` where `Item: Addable`)
+    /// Preserves the associated type context for Self-substitution in type inference.
+    AssociatedTypeStaticMember { entity: Entity, assoc_type: Entity },
     /// Not found
     NotFound(String),
 }
@@ -234,11 +237,16 @@ fn resolve_multi_segment(
         }
 
         // For associated types (abstract TypeAlias), search protocol bounds
-        // for static members (e.g. Item.zero where Item: Addable)
+        // for static members (e.g. Item.zero where Item: Addable).
+        // Return AssociatedTypeStaticMember to preserve the associated type
+        // context for Self-substitution in type inference.
         if ctx.get::<NodeKind>(current) == Some(&NodeKind::TypeAlias) {
             if let Some(found) = resolve_assoc_type_static_member(ctx, current, segment, context, root) {
                 if is_last {
-                    return classify_value_results(ctx, vec![found]);
+                    return ValueResolution::AssociatedTypeStaticMember {
+                        entity: found,
+                        assoc_type: current,
+                    };
                 }
                 current = found;
                 continue;

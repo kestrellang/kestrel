@@ -223,10 +223,10 @@ pub fn set_where_clause(world: &mut World, entity: Entity, node: &SyntaxNode, fi
                     }
                 }
                 SyntaxKind::TypeEquality => {
-                    // Type equality uses Ty nodes or Name/Path
+                    // Type equality uses Ty nodes, Name/Path, or AssociatedTypeTarget (wraps a Path)
                     let mut type_children = child
                         .children()
-                        .filter(|c| is_type_kind(c.kind()) || c.kind() == SyntaxKind::Name || c.kind() == SyntaxKind::Path);
+                        .filter(|c| is_type_kind(c.kind()) || c.kind() == SyntaxKind::Name || c.kind() == SyntaxKind::Path || c.kind() == SyntaxKind::AssociatedTypeTarget);
 
                     let lhs_node = type_children.next()?;
                     let lhs = node_to_ast_type(&lhs_node, file_id)?;
@@ -301,6 +301,10 @@ fn node_to_ast_type(node: &SyntaxNode, file_id: usize) -> Option<AstType> {
             })
         }
         SyntaxKind::Path => path_to_ast_type(node, file_id),
+        // AssociatedTypeTarget wraps a Path (e.g., Item.Output in where clauses)
+        SyntaxKind::AssociatedTypeTarget => {
+            find_child(node, SyntaxKind::Path).and_then(|p| path_to_ast_type(&p, file_id))
+        }
         _ if is_type_kind(node.kind()) => ast_type_from_cst(node, file_id),
         _ => None,
     }

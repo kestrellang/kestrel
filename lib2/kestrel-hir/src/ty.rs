@@ -29,6 +29,8 @@ pub enum HirTy {
     },
     /// Type parameter resolved to its declaring entity
     Param(Entity, Span),
+    /// Never type (diverging expressions, e.g. `panic()`)
+    Never(Span),
     /// Inferred type (user wrote `_` or omitted)
     Infer(Span),
     /// Error recovery

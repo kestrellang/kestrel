@@ -176,6 +176,12 @@ pub enum AstExpr {
         arms: Vec<MatchArm>,
         span: Span,
     },
+    /// Block expression: `{ stmts; tail_expr }`.
+    /// Used when the parser treats a match arm body block as a closure.
+    Block {
+        body: AstBlock,
+        span: Span,
+    },
     /// Malformed expression (parse error recovery)
     Error {
         span: Span,

@@ -696,6 +696,22 @@ mod tests {
     }
 
     #[test]
+    fn test_where_clause_bound_with_equality() {
+        let result = parse_where("where Item: Addable, Item.Output = Item");
+        assert!(result.is_some(), "Failed to parse bound + equality where clause");
+        let data = result.unwrap();
+        assert_eq!(data.constraints.len(), 2, "Expected 2 constraints, got {}: {:?}", data.constraints.len(), data.constraints);
+        match &data.constraints[0] {
+            WhereConstraintData::Bound(_) => {},
+            c => panic!("Expected Bound for first constraint, got {:?}", c),
+        }
+        match &data.constraints[1] {
+            WhereConstraintData::Equality(_) => {},
+            c => panic!("Expected Equality for second constraint, got {:?}", c),
+        }
+    }
+
+    #[test]
     fn test_type_arguments_simple() {
         let result = parse_type_args("[Int]");
         assert!(result.is_some());

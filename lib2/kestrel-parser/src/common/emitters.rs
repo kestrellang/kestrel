@@ -653,23 +653,23 @@ fn emit_associated_type_target(sink: &mut EventSink, target: &AssociatedTypeTarg
 
 /// Emit events for associated type bounds (: Equatable, Hashable)
 fn emit_associated_type_bounds(sink: &mut EventSink, bounds: &AssociatedTypeBoundsData) {
+    // Wrap in ConformanceList so set_conformances() in the builder can find them.
+    // `type Iter: Iterator` → ConformanceList { ConformanceItem { Iterator } }
+    sink.start_node(SyntaxKind::ConformanceList);
     sink.add_token(SyntaxKind::Colon, bounds.colon_span.clone());
     for (i, bound) in bounds.bounds.iter().enumerate() {
         if i > 0 {
-            // Emit comma between bounds (approximated span)
-            let prev_end = if i > 0 {
-                // This is approximate - we don't track comma positions
-                bounds.colon_span.end + i
-            } else {
-                bounds.colon_span.end
-            };
+            let prev_end = bounds.colon_span.end + i;
             sink.add_token(
                 SyntaxKind::Comma,
                 Span::new(bounds.colon_span.file_id, prev_end..prev_end + 1),
             );
         }
+        sink.start_node(SyntaxKind::ConformanceItem);
         emit_ty_variant(sink, bound);
+        sink.finish_node(); // ConformanceItem
     }
+    sink.finish_node(); // ConformanceList
 }
 
 /// Emit events for a type alias declaration

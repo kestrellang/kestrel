@@ -132,18 +132,7 @@ pub fn lower_ast_type(
             lower_sugar_type(ctx, owner, root, "Result", &[ok, err], span)
         }
         AstType::Unit(span) => HirTy::Tuple(Vec::new(), span.clone()),
-        AstType::Never(span) => {
-            if let Some(entity) = resolve_std_type(ctx, owner, root, "Never") {
-                HirTy::Named {
-                    entity,
-                    args: Vec::new(),
-                    span: span.clone(),
-                }
-            } else {
-                kestrel_debug::ktrace!("hir-lower", "Never type not found");
-                HirTy::Error(span.clone())
-            }
-        }
+        AstType::Never(span) => HirTy::Never(span.clone()),
         AstType::Inferred(span) => HirTy::Infer(span.clone()),
     }
 }

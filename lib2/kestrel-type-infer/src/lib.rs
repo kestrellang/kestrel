@@ -19,9 +19,12 @@ pub mod solver;
 pub mod ty;
 pub mod unify;
 
-use kestrel_ast_builder::Callable;
+use std::collections::HashMap;
+
+use kestrel_ast_builder::{Callable, NodeKind};
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
 use kestrel_hir_lower::{LowerBody, LowerCallableTypes, LowerTypeAnnotation};
+use kestrel_span2::Span;
 
 use ctx::InferCtx;
 use resolve::WorldResolver;
@@ -97,8 +100,8 @@ fn create_param_types(
         // Self type = the parent type entity with fresh TyVars for type params.
         // For methods in extensions, resolve to the extension's target type.
         let self_tv = if let Some(parent) = query_ctx.parent_of(entity) {
-            let parent_kind = query_ctx.get::<kestrel_ast_builder::NodeKind>(parent);
-            if parent_kind == Some(&kestrel_ast_builder::NodeKind::Extension) {
+            let parent_kind = query_ctx.get::<NodeKind>(parent);
+            if parent_kind == Some(&NodeKind::Extension) {
                 // Resolve extension target to the actual type
                 match query_ctx.query(kestrel_name_res::ExtensionTargetEntity {
                     extension: parent,
@@ -106,7 +109,15 @@ fn create_param_types(
                 }) {
                     Some(target) => {
                         let fresh_args = fresh_type_args(ctx, query_ctx, target);
-                        ctx.named(target, fresh_args)
+                        let self_tv = ctx.named(target, fresh_args.clone());
+
+                        // Emit extension where clause constraints so the solver
+                        // knows about bounds like Item: Addable, Item.Output = Item
+                        emit_extension_where_clauses(
+                            ctx, query_ctx, parent, target, &fresh_args, self_tv,
+                        );
+
+                        self_tv
                     }
                     None => ctx.fresh(),
                 }
@@ -163,4 +174,135 @@ fn fresh_type_args(
         .get::<kestrel_ast_builder::TypeParams>(entity)
         .map(|tp| tp.0.iter().map(|_| ctx.fresh()).collect())
         .unwrap_or_default()
+}
+
+/// Emit extension where clause constraints for the method body being inferred.
+///
+/// Extension where clauses (e.g., `extend Iterator where Item: Addable, Item.Output = Item`)
+/// need to be emitted as constraints so the solver knows about bounds on associated types
+/// and type parameters when inferring method bodies inside the extension.
+fn emit_extension_where_clauses(
+    ctx: &mut InferCtx<'_>,
+    query_ctx: &QueryContext<'_>,
+    extension: Entity,
+    target: Entity,
+    fresh_args: &[ty::TyVar],
+    self_tv: ty::TyVar,
+) {
+    // Build type param entity → TyVar map for the target type's params
+    let target_type_params: Vec<Entity> = query_ctx
+        .get::<kestrel_ast_builder::TypeParams>(target)
+        .map(|tp| tp.0.clone())
+        .unwrap_or_default();
+
+    // Cache for associated type TyVars so we reuse the same TyVar
+    // if the same associated type appears in multiple constraints
+    let mut assoc_type_tvs: HashMap<Entity, ty::TyVar> = HashMap::new();
+
+    let clauses = ctx.resolver.where_clauses(extension);
+    for clause in clauses {
+        match clause {
+            resolve::WhereClause::Bound { param, protocol } => {
+                let span = Span::synthetic(0);
+                let subject_tv = get_or_create_subject_tv(
+                    ctx, &target_type_params, fresh_args,
+                    &mut assoc_type_tvs, param, self_tv, query_ctx,
+                );
+                ctx.conforms(subject_tv, protocol, span);
+            }
+            resolve::WhereClause::TypeEquality { param, assoc_name, rhs } => {
+                let span = Span::synthetic(0);
+                let subject_tv = get_or_create_subject_tv(
+                    ctx, &target_type_params, fresh_args,
+                    &mut assoc_type_tvs, param, self_tv, query_ctx,
+                );
+                let assoc_result = ctx.fresh();
+                ctx.associated(subject_tv, &assoc_name, assoc_result, span.clone());
+
+                // Build subs so RHS references to type params and associated types
+                // resolve to the same TyVars used in constraints (not raw Named entities)
+                let mut rhs_subs: Vec<(Entity, ty::TyVar)> = target_type_params
+                    .iter()
+                    .zip(fresh_args.iter())
+                    .map(|(&e, &tv)| (e, tv))
+                    .collect();
+                for (&e, &tv) in &assoc_type_tvs {
+                    rhs_subs.push((e, tv));
+                }
+                let rhs_tv = generate::lower_hir_ty_with_subs(ctx, &rhs, &rhs_subs);
+                ctx.equal(assoc_result, rhs_tv, span);
+
+                // Register the associated type entity → rhs_tv mapping so the solver
+                // can substitute it in protocol member signatures (e.g., Output → Item).
+                // Search param's protocol bounds for a child TypeAlias named assoc_name.
+                if let Some(assoc_entity) = find_assoc_type_in_bounds(
+                    ctx, param, &assoc_name,
+                ) {
+                    ctx.where_clause_assoc_subs.push((assoc_entity, rhs_tv));
+                }
+            }
+        }
+    }
+}
+
+/// Get or create a TyVar for a where clause subject entity.
+///
+/// If the entity is a type parameter of the target type, return its fresh TyVar.
+/// If it's an associated type (TypeAlias), create an `associated` constraint
+/// on self_tv and return the result TyVar (cached for reuse).
+fn get_or_create_subject_tv(
+    ctx: &mut InferCtx<'_>,
+    target_type_params: &[Entity],
+    fresh_args: &[ty::TyVar],
+    assoc_type_tvs: &mut HashMap<Entity, ty::TyVar>,
+    param: Entity,
+    self_tv: ty::TyVar,
+    query_ctx: &QueryContext<'_>,
+) -> ty::TyVar {
+    // Check if param is a type parameter of the target type
+    if let Some(idx) = target_type_params.iter().position(|&p| p == param) {
+        if idx < fresh_args.len() {
+            return fresh_args[idx];
+        }
+    }
+
+    // Check if param is an associated type (TypeAlias) — create via associated constraint
+    if query_ctx.get::<NodeKind>(param) == Some(&NodeKind::TypeAlias) {
+        if let Some(&cached) = assoc_type_tvs.get(&param) {
+            return cached;
+        }
+        // Get the name of the associated type
+        if let Some(name) = query_ctx.get::<kestrel_ast_builder::Name>(param) {
+            let result_tv = ctx.fresh();
+            ctx.associated(self_tv, &name.0, result_tv, Span::synthetic(0));
+            assoc_type_tvs.insert(param, result_tv);
+            return result_tv;
+        }
+    }
+
+    // Fallback: create a fresh TyVar
+    ctx.fresh()
+}
+
+/// Find an associated type entity by searching protocol bounds of a TypeAlias.
+/// E.g., for param=Item (which conforms to Addable), find Addable's "Output" child.
+/// Uses the resolver to find protocol bounds, then searches their children.
+fn find_assoc_type_in_bounds(
+    ctx: &InferCtx<'_>,
+    param: Entity,
+    assoc_name: &str,
+) -> Option<Entity> {
+    // Resolve the associated type through the resolver's associated type mechanism.
+    // Build a TyKind::Named for the param entity to query the resolver.
+    let param_kind = ty::TyKind::Named {
+        entity: param,
+        args: vec![],
+    };
+    let resolved = ctx.resolver.resolve_associated_type(&param_kind, assoc_name)?;
+    // The resolved HirTy should be Named { entity: assoc_type_entity } for abstract types
+    if let kestrel_hir::ty::HirTy::Named { entity, .. } = &resolved.resolved {
+        Some(*entity)
+    } else {
+        None
+    }
 }

@@ -167,6 +167,13 @@ impl LowerCtx<'_> {
                 arms,
                 span,
             } => self.lower_match(body, scrutinee, &arms, &span),
+            AstExpr::Block { body: block, span } => {
+                let lowered = self.lower_block(body, &block);
+                self.alloc_expr(HirExpr::Block {
+                    body: lowered,
+                    span: span.clone(),
+                })
+            }
             AstExpr::Error { span } => self.alloc_expr(HirExpr::Error { span }),
         }
     }
@@ -230,22 +237,40 @@ impl LowerCtx<'_> {
             root: self.root,
         });
 
+        // Collect explicit type args from all path segments (e.g., Pointer[UInt8])
+        let explicit_type_args: Vec<kestrel_hir::ty::HirTy> = segments
+            .iter()
+            .flat_map(|s| s.type_args.iter().flatten())
+            .map(|t| self.lower_type(t))
+            .collect();
+
         match result {
             ValueResolution::Def(entity) | ValueResolution::TypeParameter(entity) => {
-                self.alloc_expr(HirExpr::Def(entity, span.clone()))
+                self.alloc_expr(HirExpr::Def(entity, explicit_type_args.clone(), span.clone()))
             },
             ValueResolution::Overloaded(entities) => {
                 // Pick first — type inference disambiguates later
-                self.alloc_expr(HirExpr::Def(entities[0], span.clone()))
+                self.alloc_expr(HirExpr::Def(entities[0], explicit_type_args.clone(), span.clone()))
             },
             ValueResolution::EnumCaseValue { entity, .. } => {
-                self.alloc_expr(HirExpr::Def(entity, span.clone()))
+                self.alloc_expr(HirExpr::Def(entity, explicit_type_args.clone(), span.clone()))
             },
             ValueResolution::FieldValue { entity, .. } => {
-                self.alloc_expr(HirExpr::Def(entity, span.clone()))
+                self.alloc_expr(HirExpr::Def(entity, vec![], span.clone()))
             },
             ValueResolution::AssociatedType { entity, .. } => {
-                self.alloc_expr(HirExpr::Def(entity, span.clone()))
+                self.alloc_expr(HirExpr::Def(entity, vec![], span.clone()))
+            },
+            ValueResolution::AssociatedTypeStaticMember { entity: _, assoc_type } => {
+                // Emit Field { base: Def(assoc_type), name: member } so the solver
+                // can do Self-substitution (e.g., Item.zero → Member(Item, "zero"))
+                let member_name = segments.last().map(|s| s.name.clone()).unwrap_or_default();
+                let base = self.alloc_expr(HirExpr::Def(assoc_type, vec![], span.clone()));
+                self.alloc_expr(HirExpr::Field {
+                    base,
+                    name: member_name,
+                    span: span.clone(),
+                })
             },
             ValueResolution::Ambiguous(entities) => {
                 kestrel_debug::ktrace!("hir-lower", "path ambiguous: {:?} → {} candidates",

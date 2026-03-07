@@ -78,8 +78,9 @@ pub enum HirExpr {
     // === Resolved references ===
     /// Local variable, resolved by name resolution
     Local(LocalId, Span),
-    /// Function, enum case, type, etc. — resolved by name resolution
-    Def(Entity, Span),
+    /// Function, enum case, type, etc. — resolved by name resolution.
+    /// Optional type args for explicit generic instantiation (e.g., `Pointer[UInt8]`).
+    Def(Entity, Vec<crate::ty::HirTy>, Span),
 
     // === Access (member name resolved by type inference) ===
     Field {
@@ -161,6 +162,12 @@ pub enum HirExpr {
     Assign {
         target: HirExprId,
         value: HirExprId,
+        span: Span,
+    },
+    /// Block expression: `{ stmts; tail_expr }`.
+    /// Used when a match arm body contains statements before its result expression.
+    Block {
+        body: HirBlock,
         span: Span,
     },
     /// Malformed expression (error recovery)

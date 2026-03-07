@@ -339,9 +339,10 @@ fn seed_pointer_ops(world: &mut World, lang: Entity) {
 fn seed_misc_ops(world: &mut World, lang: Entity) {
     let str_ty = lang_ty("str");
 
-    // panic(message) → unit (should be Never, but unit works for now)
-    seed_fn(world, lang, "panic", &[("message", str_ty.clone())], unit_ty());
-    seed_fn(world, lang, "panic_unwind", &[("message", str_ty)], unit_ty());
+    // panic(message) → Never (diverging function)
+    let never = AstType::Never(Span::synthetic(0));
+    seed_fn(world, lang, "panic", &[("message", str_ty.clone())], never.clone());
+    seed_fn(world, lang, "panic_unwind", &[("message", str_ty)], never);
 
     // Atomic ops — generic over value type
     let t = param_ty("T");

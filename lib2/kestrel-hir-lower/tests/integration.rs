@@ -206,7 +206,7 @@ fn lower_function_reference() {
 
     let tail = hir.tail_expr.expect("should have tail expr");
     match &hir.exprs[tail] {
-        HirExpr::Def(entity, _) => {
+        HirExpr::Def(entity, _, _) => {
             assert_eq!(ctx.get::<Name>(*entity).unwrap().0, "bar");
         }
         other => panic!("expected Def, got {:?}", other),

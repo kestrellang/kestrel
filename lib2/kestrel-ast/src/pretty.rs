@@ -358,6 +358,21 @@ impl PrettyCtx<'_> {
                 self.indent(depth);
                 self.buf.push('}');
             }
+            AstExpr::Block { body, .. } => {
+                self.buf.push_str("{\n");
+                for &stmt in &body.stmts {
+                    self.indent(depth + 1);
+                    self.print_stmt(stmt, depth + 1);
+                    self.buf.push('\n');
+                }
+                if let Some(tail) = body.tail_expr {
+                    self.indent(depth + 1);
+                    self.print_expr(tail, depth + 1);
+                    self.buf.push('\n');
+                }
+                self.indent(depth);
+                self.buf.push('}');
+            }
             AstExpr::Error { .. } => {
                 self.buf.push_str("<error>");
             }

@@ -56,6 +56,11 @@ pub struct InferCtx<'a> {
     #[allow(dead_code)]
     pub(crate) owner: Entity,
     pub(crate) root: Entity,
+
+    /// Where clause associated type substitutions (e.g., Output_entity → Item_tv
+    /// from `Item.Output = Item`). Used by lower_hir_ty_sub to substitute
+    /// associated type entities found in protocol member signatures.
+    pub(crate) where_clause_assoc_subs: Vec<(Entity, TyVar)>,
 }
 
 /// Info about a promotion inserted at a Coerce site.
@@ -92,6 +97,7 @@ impl<'a> InferCtx<'a> {
             return_ty: TyVar(0),
             owner,
             root,
+            where_clause_assoc_subs: Vec::new(),
         }
     }
 
