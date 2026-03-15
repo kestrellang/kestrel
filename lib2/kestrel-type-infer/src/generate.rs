@@ -690,6 +690,15 @@ fn instantiate_entity_inner(
                     ctx.equal(assoc_result, rhs_tv, span);
                 }
             }
+            crate::resolve::WhereClause::DirectEquality { param, rhs } => {
+                // Direct type param equality: V = Array[E]
+                // Redirect the param's TyVar to the concrete RHS type.
+                if let Some(idx) = type_param_entities.iter().position(|&p| p == param) {
+                    let rhs_tv = lower_hir_ty_with_subs(ctx, &rhs, &subs);
+                    ctx.types[fresh_type_args[idx].0 as usize] =
+                        crate::ty::TySlot::Redirect(rhs_tv);
+                }
+            }
         }
     }
 
@@ -777,6 +786,9 @@ fn instantiate_entity_inner(
             .query(LowerTypeAnnotation { entity, root })
             .map(|hir_ty| lower_hir_ty(ctx, &hir_ty))
             .unwrap_or_else(|| ctx.fresh()),
+
+        // Type parameters: return Param type, not Named
+        Some(NodeKind::TypeParameter) => ctx.param(entity),
 
         // Default: Named type wrapping the entity
         _ => ctx.named(entity, fresh_type_args),

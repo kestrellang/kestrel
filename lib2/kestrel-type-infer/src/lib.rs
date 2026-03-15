@@ -146,7 +146,95 @@ fn create_param_types(
         }
     }
 
+    // Emit the method's own where clause constraints (e.g., `where I: Iterable, V = Array[E]`).
+    // Extension where clauses are handled by emit_extension_where_clauses above;
+    // this handles where clauses declared on the method/init itself.
+    emit_method_where_clauses(ctx, query_ctx, entity);
+
     param_tvs
+}
+
+/// Emit where clause constraints for the method entity's own type parameters.
+/// Handles bounds (`I: Iterable`), associated type equalities (`I.Item = E`),
+/// and direct type param equalities (`V = Array[E]`).
+fn emit_method_where_clauses(
+    ctx: &mut InferCtx<'_>,
+    query_ctx: &QueryContext<'_>,
+    entity: Entity,
+) {
+    let clauses = ctx.resolver.where_clauses(entity);
+    if clauses.is_empty() {
+        return;
+    }
+
+    // Build entity → TyVar mapping for type params already created (by lower_hir_ty).
+    // Method type params get Param TyVars; struct type params get Param TyVars from fresh_type_args.
+    // We need to find the existing TyVars for each type param entity.
+    let type_params: Vec<Entity> = query_ctx
+        .get::<kestrel_ast_builder::TypeParams>(entity)
+        .map(|tp| tp.0.clone())
+        .unwrap_or_default();
+
+    // Also include the parent struct's type params (for where clauses like `V = Array[E]`)
+    let parent_type_params: Vec<Entity> = query_ctx
+        .parent_of(entity)
+        .and_then(|p| query_ctx.get::<kestrel_ast_builder::TypeParams>(p))
+        .map(|tp| tp.0.clone())
+        .unwrap_or_default();
+
+    let span = Span::synthetic(0);
+
+    for clause in clauses {
+        match clause {
+            resolve::WhereClause::Bound { param, protocol } => {
+                // Find or create a TyVar for this param
+                let tv = find_or_create_param_tv(ctx, param);
+                ctx.conforms(tv, protocol, span.clone());
+            }
+            resolve::WhereClause::TypeEquality { param, assoc_name, rhs } => {
+                let subject_tv = find_or_create_param_tv(ctx, param);
+                let assoc_result = ctx.fresh();
+                ctx.associated(subject_tv, &assoc_name, assoc_result, span.clone());
+
+                // Build subs for type params
+                let mut subs: Vec<(Entity, ty::TyVar)> = Vec::new();
+                for &tp in type_params.iter().chain(parent_type_params.iter()) {
+                    subs.push((tp, find_or_create_param_tv(ctx, tp)));
+                }
+                let rhs_tv = generate::lower_hir_ty_with_subs(ctx, &rhs, &subs);
+                ctx.equal(assoc_result, rhs_tv, span.clone());
+
+                if let Some(assoc_entity) = find_assoc_type_in_bounds(ctx, param, &assoc_name) {
+                    ctx.where_clause_assoc_subs.push((assoc_entity, rhs_tv));
+                }
+            }
+            resolve::WhereClause::DirectEquality { param, rhs } => {
+                let param_tv = find_or_create_param_tv(ctx, param);
+                // Build subs for type params
+                let mut subs: Vec<(Entity, ty::TyVar)> = Vec::new();
+                for &tp in type_params.iter().chain(parent_type_params.iter()) {
+                    subs.push((tp, find_or_create_param_tv(ctx, tp)));
+                }
+                let rhs_tv = generate::lower_hir_ty_with_subs(ctx, &rhs, &subs);
+                // Redirect the param to the RHS type
+                ctx.types[param_tv.0 as usize] = ty::TySlot::Redirect(rhs_tv);
+            }
+        }
+    }
+}
+
+/// Find an existing Param TyVar for a type parameter entity, or create one.
+fn find_or_create_param_tv(ctx: &mut InferCtx<'_>, param: Entity) -> ty::TyVar {
+    // Search existing types for a Param with this entity
+    for i in 0..ctx.types.len() {
+        if let ty::TySlot::Resolved(ty::TyKind::Param { entity }) = &ctx.types[i] {
+            if *entity == param {
+                return ty::TyVar(i as u32);
+            }
+        }
+    }
+    // Not found — create a new Param
+    ctx.param(param)
 }
 
 /// Create return type TyVar from the TypeAnnotation component.
@@ -164,7 +252,9 @@ fn create_return_type(
         .unwrap_or_else(|| ctx.fresh())
 }
 
-/// Create fresh TyVars for each type parameter of an entity.
+/// Create Param TyVars for the struct's type parameters in method body setup.
+/// Params are concrete, enabling protocol-based member resolution for generic code
+/// (e.g., V.add() resolves via V: Addable).
 fn fresh_type_args(
     ctx: &mut InferCtx<'_>,
     query_ctx: &QueryContext<'_>,
@@ -172,7 +262,7 @@ fn fresh_type_args(
 ) -> Vec<ty::TyVar> {
     query_ctx
         .get::<kestrel_ast_builder::TypeParams>(entity)
-        .map(|tp| tp.0.iter().map(|_| ctx.fresh()).collect())
+        .map(|tp| tp.0.iter().map(|&param| ctx.param(param)).collect())
         .unwrap_or_default()
 }
 
@@ -239,6 +329,25 @@ fn emit_extension_where_clauses(
                     ctx, param, &assoc_name,
                 ) {
                     ctx.where_clause_assoc_subs.push((assoc_entity, rhs_tv));
+                }
+            }
+            resolve::WhereClause::DirectEquality { param, rhs } => {
+                // Direct type param equality: V = Array[E]
+                // Overwrite the param's TyVar slot with the concrete RHS type.
+                if let Some(idx) = target_type_params.iter().position(|&p| p == param) {
+                    let param_tv = fresh_args[idx];
+                    // Build subs so RHS type param references resolve correctly
+                    let mut rhs_subs: Vec<(Entity, ty::TyVar)> = target_type_params
+                        .iter()
+                        .zip(fresh_args.iter())
+                        .map(|(&e, &tv)| (e, tv))
+                        .collect();
+                    for (&e, &tv) in &assoc_type_tvs {
+                        rhs_subs.push((e, tv));
+                    }
+                    let rhs_tv = generate::lower_hir_ty_with_subs(ctx, &rhs, &rhs_subs);
+                    // Overwrite the Param slot → the param IS the RHS type in this scope
+                    ctx.types[param_tv.0 as usize] = ty::TySlot::Redirect(rhs_tv);
                 }
             }
         }

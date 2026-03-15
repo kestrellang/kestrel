@@ -213,7 +213,6 @@ fn solve_conforms(
     let resolved = ctx.resolve(ty);
     match ctx.slot(resolved) {
         TySlot::Unresolved { .. } => {
-            // Not concrete yet — defer
             SolveResult::Deferred(Constraint::Conforms { ty, protocol, span })
         }
         TySlot::Resolved(TyKind::Error) => SolveResult::Solved,
@@ -307,7 +306,7 @@ fn solve_call(
         }
         TyKind::Named { ref entity, .. } | TyKind::Param { ref entity } => {
             // Check if callee is a type parameter — T() is an init call, not subscript.
-            // Type params appear as Named(TypeParameter_entity) or Param(entity).
+            // Type params appear as Named(TypeParameter_entity), Param(entity), or Param.
             let is_type_param = matches!(kind, TyKind::Param { .. })
                 || ctx.query_ctx.get::<kestrel_ast_builder::NodeKind>(*entity)
                     == Some(&kestrel_ast_builder::NodeKind::TypeParameter);
@@ -349,7 +348,15 @@ fn solve_member(
     span: Span,
 ) -> SolveResult {
     let resolved = ctx.resolve(receiver);
-    if !ctx.is_concrete(resolved) {
+    let recv_kind = if ctx.is_concrete(resolved) {
+        if ctx.is_error(resolved) {
+            return SolveResult::Solved;
+        }
+        match ctx.slot(resolved) {
+            TySlot::Resolved(k) => k.clone(),
+            _ => unreachable!(),
+        }
+    } else {
         return SolveResult::Deferred(Constraint::Member {
             receiver,
             name: name.to_string(),
@@ -358,16 +365,6 @@ fn solve_member(
             expr,
             span,
         });
-    }
-
-    if ctx.is_error(resolved) {
-        return SolveResult::Solved;
-    }
-
-    // Get the concrete TyKind, clone to avoid borrow issues
-    let recv_kind = match ctx.slot(resolved) {
-        TySlot::Resolved(k) => k.clone(),
-        _ => unreachable!(),
     };
 
     // Tuple index access: "0", "1", etc. on a Tuple type
@@ -405,6 +402,48 @@ fn solve_member(
             });
         }
     };
+
+    // Field/property with call args → field access + call on the field value.
+    // Handles both function-typed fields (e.g., `self.transform(item)`) and
+    // subscriptable fields (e.g., `self.data(unchecked: i)` where data is Array[T]).
+    // The Call constraint dispatches correctly: Function → direct call, Named → subscript.
+    if matches!(
+        resolution.kind,
+        crate::resolve::MemberKind::Field { .. } | crate::resolve::MemberKind::ComputedProperty { .. }
+    ) && !args.is_empty()
+    {
+        ctx.resolutions.insert(expr, resolution.entity);
+        // Get the field's type (with struct type param substitution)
+        let recv_entity = match &recv_kind {
+            TyKind::Named { entity, .. } => Some(*entity),
+            _ => None,
+        };
+        let recv_type_args: Vec<TyVar> = match &recv_kind {
+            TyKind::Named { args, .. } => args.clone(),
+            _ => vec![],
+        };
+        let mut field_subs: Vec<(kestrel_hecs::Entity, TyVar)> = Vec::new();
+        if let Some(entity) = recv_entity {
+            let struct_type_params: Vec<kestrel_hecs::Entity> = ctx
+                .query_ctx
+                .get::<TypeParams>(entity)
+                .map(|tp| tp.0.clone())
+                .unwrap_or_default();
+            for (&param, &arg) in struct_type_params.iter().zip(recv_type_args.iter()) {
+                field_subs.push((param, arg));
+            }
+        }
+        let self_entity = resolution.self_type;
+        let field_tv = lower_hir_ty_sub(
+            ctx,
+            &resolution.return_type,
+            self_entity,
+            receiver,
+            &field_subs,
+        );
+        // Dispatch via solve_call — handles both function calls and subscript calls
+        return solve_call(ctx, field_tv, args, result, expr, span);
+    }
 
     // Record the resolved entity
     ctx.resolutions.insert(expr, resolution.entity);
@@ -485,6 +524,18 @@ fn solve_member(
                     ctx.associated(fresh_params[idx], assoc_name, assoc_result, span.clone());
                     let rhs_tv = lower_hir_ty_sub(ctx, rhs, None, TyVar(0), &subs);
                     ctx.equal(assoc_result, rhs_tv, span.clone());
+                }
+            }
+            crate::resolve::WhereClause::DirectEquality { param, rhs } => {
+                // Direct type param equality: redirect the method type param to the RHS
+                if let Some(idx) = resolution
+                    .type_params
+                    .iter()
+                    .position(|&p| p == *param)
+                {
+                    let rhs_tv = lower_hir_ty_sub(ctx, rhs, None, TyVar(0), &subs);
+                    ctx.types[fresh_params[idx].0 as usize] =
+                        crate::ty::TySlot::Redirect(rhs_tv);
                 }
             }
         }

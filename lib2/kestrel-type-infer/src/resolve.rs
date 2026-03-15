@@ -75,12 +75,14 @@ pub struct AssociatedTypeResolution {
 pub enum WhereClause {
     /// `T: Protocol`
     Bound { param: Entity, protocol: Entity },
-    /// `T.Item = SomeType`
+    /// `T.Item = SomeType` (associated type equality)
     TypeEquality {
         param: Entity,
         assoc_name: String,
         rhs: HirTy,
     },
+    /// `V = Array[E]` (direct type parameter equality)
+    DirectEquality { param: Entity, rhs: HirTy },
 }
 
 /// Slim trait abstracting world queries for testability.
@@ -445,19 +447,24 @@ impl TypeResolver for WorldResolver<'_> {
                     }
                 }
                 WhereConstraint::Equality { lhs, rhs, .. } => {
-                    // Type equality: resolve both sides
-                    // lhs is typically T.Assoc, rhs is a concrete type
-                    // For now, we need to extract the param and assoc name from lhs
+                    let rhs_hir = kestrel_hir_lower::lower_ast_type(
+                        self.ctx,
+                        self.owner,
+                        self.root,
+                        rhs,
+                    );
+                    // Resolve the LHS and inspect what it is
                     if let Some((param, assoc_name)) = self.extract_associated_type_path(lhs) {
-                        let rhs_hir = kestrel_hir_lower::lower_ast_type(
-                            self.ctx,
-                            self.owner,
-                            self.root,
-                            rhs,
-                        );
+                        // 2-segment path like T.Item → associated type equality
                         result.push(WhereClause::TypeEquality {
                             param,
                             assoc_name,
+                            rhs: rhs_hir,
+                        });
+                    } else if let Some(param) = self.resolve_type_param(lhs) {
+                        // Bare type param like V → direct type equality
+                        result.push(WhereClause::DirectEquality {
+                            param,
                             rhs: rhs_hir,
                         });
                     }
@@ -1123,6 +1130,28 @@ impl WorldResolver<'_> {
                     }
                 }
             }
+        }
+    }
+
+    /// Resolve a type path to a TypeParameter entity (for direct equalities like `V = Array[E]`).
+    fn resolve_type_param(
+        &self,
+        ast_ty: &kestrel_ast_builder::AstType,
+    ) -> Option<Entity> {
+        use kestrel_ast_builder::AstType;
+        let AstType::Named { segments, .. } = ast_ty else { return None };
+        let all_names: Vec<String> = segments.iter().map(|s| s.name.clone()).collect();
+        match self.ctx.query(ResolveTypePath {
+            segments: all_names,
+            context: self.owner,
+            root: self.root,
+        }) {
+            TypeResolution::Found(entity)
+                if self.ctx.get::<NodeKind>(entity) == Some(&NodeKind::TypeParameter) =>
+            {
+                Some(entity)
+            }
+            _ => None,
         }
     }
 
