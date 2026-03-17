@@ -2,7 +2,7 @@
 
 module std.result
 
-import std.core.(Equatable, Comparable, Ordering, Hash, Hasher, Bool, ControlFlow, Tryable, FromResidual, FromValue, ExpressibleByNullLiteral, Coalesce)
+import std.core.(Equatable, Comparable, Ordering, Hash, Hasher, Bool, ControlFlow, Tryable, FromResidual, FromValue, ExpressibleByNullLiteral, Coalesce, fatalError)
 import std.text.(String, FormatOptions, Formattable)
 import std.result.(Result)
 import std.num.(Int64, UInt8)
@@ -145,7 +145,7 @@ public enum Optional[T] {
     public func expect(message: String) -> T {
         match self {
             .Some(value) => value,
-            .None => lang.panic(message)
+            .None => fatalError(message)
         }
     }
 
