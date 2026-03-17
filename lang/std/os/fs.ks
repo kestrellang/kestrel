@@ -310,7 +310,7 @@ public func readlink(path: String) -> Result[String, Error] {
     let count = Int64(raw: bytesRead);
     while i < count {
         let byte = lang.ptr_read(lang.cast_ptr[lang.i8](lang.ptr_offset(buf, i.raw)));
-        let ch = UInt8(raw: lang.cast_i8_u8(byte));
+        let ch = UInt8(raw: byte);
         result.appendByte(ch);
         i = i + 1
     }
