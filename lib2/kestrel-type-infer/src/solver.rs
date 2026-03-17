@@ -256,8 +256,33 @@ fn solve_associated(
 
     match ctx.resolver.resolve_associated_type(&kind, name) {
         Some(assoc) => {
-            // Convert the resolved HirTy into a TyVar
-            let assoc_tv = lower_hir_ty_plain(ctx, &assoc.resolved);
+            // Check where_clause_assoc_subs first — if a where clause directly
+            // equated this associated type (e.g., `where Item = Optional[T]`),
+            // use that TyVar instead of creating a new one.
+            // Check where_clause_assoc_subs and param_tyvars before creating
+            // a new TyVar — ensures we reuse the TyVar from where clause equalities.
+            let assoc_tv = if let kestrel_hir::ty::HirTy::Named { entity, args, .. } = &assoc.resolved {
+                if args.is_empty() {
+                    if let Some(&(_, tv)) = ctx.where_clause_assoc_subs.iter().find(|(e, _)| e == entity) {
+                        tv
+                    } else if let Some(&(_, tv)) = ctx.where_clause_assoc_subs.iter().find(|(e, _)| {
+                        // Name-based fallback: different protocols can define the same
+                        // associated type (e.g., Iterator.Item vs Iterable.Item)
+                        ctx.query_ctx.get::<kestrel_ast_builder::Name>(*e)
+                            == ctx.query_ctx.get::<kestrel_ast_builder::Name>(*entity)
+                    }) {
+                        tv
+                    } else if let Some(&tv) = ctx.param_tyvars.get(entity) {
+                        tv
+                    } else {
+                        lower_hir_ty_plain(ctx, &assoc.resolved)
+                    }
+                } else {
+                    lower_hir_ty_plain(ctx, &assoc.resolved)
+                }
+            } else {
+                lower_hir_ty_plain(ctx, &assoc.resolved)
+            };
             solve_equal(ctx, assoc_tv, result, span)
         }
         None => SolveResult::Error(InferError::NoAssociatedType {

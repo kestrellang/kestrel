@@ -815,6 +815,14 @@ pub(crate) fn lower_hir_ty_with_subs(
                 if let Some(&(_, tv)) = subs.iter().find(|(e, _)| e == entity) {
                     return tv;
                 }
+                // Check where_clause_assoc_subs for associated types (e.g., Item → Optional[T])
+                if let Some(&(_, tv)) = ctx.where_clause_assoc_subs.iter().find(|(e, _)| e == entity) {
+                    return tv;
+                }
+                // Also check param_tyvars for redirected params (from DirectEquality)
+                if let Some(&tv) = ctx.param_tyvars.get(entity) {
+                    return tv;
+                }
             }
             let arg_tvs: Vec<TyVar> = args.iter().map(|a| lower_hir_ty_with_subs(ctx, a, subs)).collect();
             ctx.named(*entity, arg_tvs)
