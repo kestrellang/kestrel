@@ -188,18 +188,18 @@ fn emit_method_where_clauses(
         match clause {
             resolve::WhereClause::Bound { param, protocol } => {
                 // Find or create a TyVar for this param
-                let tv = find_or_create_param_tv(ctx, param);
+                let tv = ctx.param(param);
                 ctx.conforms(tv, protocol, span.clone());
             }
             resolve::WhereClause::TypeEquality { param, assoc_name, rhs } => {
-                let subject_tv = find_or_create_param_tv(ctx, param);
+                let subject_tv = ctx.param(param);
                 let assoc_result = ctx.fresh();
                 ctx.associated(subject_tv, &assoc_name, assoc_result, span.clone());
 
                 // Build subs for type params
                 let mut subs: Vec<(Entity, ty::TyVar)> = Vec::new();
                 for &tp in type_params.iter().chain(parent_type_params.iter()) {
-                    subs.push((tp, find_or_create_param_tv(ctx, tp)));
+                    subs.push((tp, ctx.param(tp)));
                 }
                 let rhs_tv = generate::lower_hir_ty_with_subs(ctx, &rhs, &subs);
                 ctx.equal(assoc_result, rhs_tv, span.clone());
@@ -209,11 +209,11 @@ fn emit_method_where_clauses(
                 }
             }
             resolve::WhereClause::DirectEquality { param, rhs } => {
-                let param_tv = find_or_create_param_tv(ctx, param);
+                let param_tv = ctx.param(param);
                 // Build subs for type params
                 let mut subs: Vec<(Entity, ty::TyVar)> = Vec::new();
                 for &tp in type_params.iter().chain(parent_type_params.iter()) {
-                    subs.push((tp, find_or_create_param_tv(ctx, tp)));
+                    subs.push((tp, ctx.param(tp)));
                 }
                 let rhs_tv = generate::lower_hir_ty_with_subs(ctx, &rhs, &subs);
                 // Redirect the param to the RHS type
@@ -223,19 +223,6 @@ fn emit_method_where_clauses(
     }
 }
 
-/// Find an existing Param TyVar for a type parameter entity, or create one.
-fn find_or_create_param_tv(ctx: &mut InferCtx<'_>, param: Entity) -> ty::TyVar {
-    // Search existing types for a Param with this entity
-    for i in 0..ctx.types.len() {
-        if let ty::TySlot::Resolved(ty::TyKind::Param { entity }) = &ctx.types[i] {
-            if *entity == param {
-                return ty::TyVar(i as u32);
-            }
-        }
-    }
-    // Not found — create a new Param
-    ctx.param(param)
-}
 
 /// Create return type TyVar from the TypeAnnotation component.
 fn create_return_type(

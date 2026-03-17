@@ -61,6 +61,11 @@ pub struct InferCtx<'a> {
     /// from `Item.Output = Item`). Used by lower_hir_ty_sub to substitute
     /// associated type entities found in protocol member signatures.
     pub(crate) where_clause_assoc_subs: Vec<(Entity, TyVar)>,
+
+    /// Maps type parameter entities to their canonical TyVars.
+    /// Ensures all references to the same type param share one TyVar,
+    /// even after the TyVar is redirected by DirectEquality.
+    pub(crate) param_tyvars: HashMap<Entity, TyVar>,
 }
 
 /// Info about a promotion inserted at a Coerce site.
@@ -98,6 +103,7 @@ impl<'a> InferCtx<'a> {
             owner,
             root,
             where_clause_assoc_subs: Vec::new(),
+            param_tyvars: HashMap::new(),
         }
     }
 
@@ -151,11 +157,20 @@ impl<'a> InferCtx<'a> {
     }
 
     /// Allocate a TyVar bound to a type parameter.
+    /// Get or create a Param TyVar for a type parameter entity.
+    /// Reuses an existing TyVar if one already exists for this entity,
+    /// ensuring all references to the same type param share one TyVar
+    /// (so redirects from where clause equalities are visible everywhere).
     pub fn param(&mut self, entity: Entity) -> TyVar {
+        if let Some(&tv) = self.param_tyvars.get(&entity) {
+            return tv;
+        }
         let idx = self.types.len() as u32;
+        let tv = TyVar(idx);
         self.types
             .push(TySlot::Resolved(TyKind::Param { entity }));
-        TyVar(idx)
+        self.param_tyvars.insert(entity, tv);
+        tv
     }
 
     // ===== Error reporting =====
