@@ -609,12 +609,48 @@ fn solve_implicit(
 // ===== Literal defaults =====
 
 /// Apply default types for unconstrained literal TyVars.
+///
+/// Before applying the default (Int64/Float64), check if context already
+/// constrains the literal through a deferred Member chain. E.g., `-1` assigned
+/// to an Int32 field: the negate result is already Int32, so the literal should
+/// adopt Int32 instead of defaulting to Int64.
 fn apply_literal_defaults(ctx: &mut InferCtx<'_>) {
+    // First pass: collect context-driven types for literals that have deferred
+    // Member constraints with already-resolved result TyVars.
+    let mut context_types: Vec<(TyVar, TyVar)> = Vec::new();
+    for constraint in &ctx.constraints {
+        if let Constraint::Member { receiver, result, .. }
+            | Constraint::Call { callee: receiver, result, .. } = constraint
+        {
+            let recv_resolved = ctx.resolve(*receiver);
+            let lit = match &ctx.types[recv_resolved.0 as usize] {
+                TySlot::Unresolved { literal: Some(lit) } => *lit,
+                _ => continue,
+            };
+            // Check if the result TyVar is already concrete (constrained by context)
+            let result_resolved = ctx.resolve(*result);
+            if let TySlot::Resolved(kind) = &ctx.types[result_resolved.0 as usize] {
+                // Verify the concrete type conforms to the literal protocol
+                if unify::conforms_to_literal_protocol(ctx, kind, lit) {
+                    context_types.push((recv_resolved, result_resolved));
+                }
+            }
+        }
+    }
+
+    // Apply context-driven types
+    for (literal_tv, context_tv) in &context_types {
+        if matches!(&ctx.types[literal_tv.0 as usize], TySlot::Unresolved { literal: Some(_) }) {
+            ctx.types[literal_tv.0 as usize] = TySlot::Redirect(*context_tv);
+        }
+    }
+
+    // Second pass: apply defaults for remaining unconstrained literals
     for idx in 0..ctx.types.len() {
         let tv = TyVar(idx as u32);
         let resolved = ctx.resolve(tv);
         if resolved != tv {
-            continue; // skip redirects
+            continue;
         }
 
         let literal = match &ctx.types[resolved.0 as usize] {
@@ -636,7 +672,6 @@ fn apply_literal_defaults(ctx: &mut InferCtx<'_>) {
         };
 
         if let Some(entity) = ctx.resolver.builtin(feature) {
-            // Create the default type and bind the literal to it
             let default_tv = ctx.named(entity, vec![]);
             ctx.types[resolved.0 as usize] = TySlot::Redirect(default_tv);
         }
