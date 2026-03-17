@@ -218,6 +218,13 @@ fn emit_method_where_clauses(
                 let rhs_tv = generate::lower_hir_ty_with_subs(ctx, &rhs, &subs);
                 // Redirect the param to the RHS type
                 ctx.types[param_tv.0 as usize] = ty::TySlot::Redirect(rhs_tv);
+                // For TypeAlias entities (associated types like Item), also register
+                // in where_clause_assoc_subs so lower_hir_ty_sub can find it
+                if query_ctx.get::<kestrel_ast_builder::NodeKind>(param)
+                    == Some(&kestrel_ast_builder::NodeKind::TypeAlias)
+                {
+                    ctx.where_clause_assoc_subs.push((param, rhs_tv));
+                }
             }
         }
     }

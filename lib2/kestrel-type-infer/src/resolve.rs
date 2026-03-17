@@ -461,8 +461,8 @@ impl TypeResolver for WorldResolver<'_> {
                             assoc_name,
                             rhs: rhs_hir,
                         });
-                    } else if let Some(param) = self.resolve_type_param(lhs) {
-                        // Bare type param like V → direct type equality
+                    } else if let Some(param) = self.resolve_type_param_or_assoc(lhs) {
+                        // Bare type param (V) or associated type (Item) → direct equality
                         result.push(WhereClause::DirectEquality {
                             param,
                             rhs: rhs_hir,
@@ -1133,8 +1133,9 @@ impl WorldResolver<'_> {
         }
     }
 
-    /// Resolve a type path to a TypeParameter entity (for direct equalities like `V = Array[E]`).
-    fn resolve_type_param(
+    /// Resolve a type path to a TypeParameter or TypeAlias entity
+    /// (for direct equalities like `V = Array[E]` or `Item = Optional[T]`).
+    fn resolve_type_param_or_assoc(
         &self,
         ast_ty: &kestrel_ast_builder::AstType,
     ) -> Option<Entity> {
@@ -1147,7 +1148,10 @@ impl WorldResolver<'_> {
             root: self.root,
         }) {
             TypeResolution::Found(entity)
-                if self.ctx.get::<NodeKind>(entity) == Some(&NodeKind::TypeParameter) =>
+                if matches!(
+                    self.ctx.get::<NodeKind>(entity),
+                    Some(&NodeKind::TypeParameter) | Some(&NodeKind::TypeAlias)
+                ) =>
             {
                 Some(entity)
             }

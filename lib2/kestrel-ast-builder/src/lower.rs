@@ -1122,7 +1122,8 @@ impl LowerCtx {
         let span = self.span(node);
 
         // ClosureParams child (optional)
-        let params = find_child(node, SyntaxKind::ClosureParams)
+        let has_explicit_params = find_child(node, SyntaxKind::ClosureParams).is_some();
+        let mut params: Vec<ClosureParam> = find_child(node, SyntaxKind::ClosureParams)
             .map(|cp| {
                 cp.children()
                     .filter(|c| c.kind() == SyntaxKind::ClosureParam)
@@ -1147,6 +1148,18 @@ impl LowerCtx {
                     .collect()
             })
             .unwrap_or_default();
+
+        // Implicit `it` parameter: when a closure has no explicit params and its
+        // body references `it` (not inside a nested closure), inject `it` as a param.
+        // `{ it + 1 }` becomes `{ (it) in it + 1 }`.
+        if !has_explicit_params && params.is_empty() && closure_body_references_it(node) {
+            let pat = self.alloc_pat(AstPat::Binding {
+                is_mut: false,
+                name: "it".to_string(),
+                span: span.clone(),
+            });
+            params.push(ClosureParam { pattern: pat, ty: None });
+        }
 
         // Body: the CodeBlock inside the closure, or synthesize from inner statements
         let body = node
@@ -2480,4 +2493,36 @@ mod tests {
             collect_named_bodies(world, child, out);
         }
     }
+}
+
+/// Check if a closure body (the CST node for ExprClosure) references `it` as
+/// an identifier in expression position. Does NOT descend into nested closures —
+/// an `it` inside `{ list.map { it } }` belongs to the inner closure only.
+fn closure_body_references_it(node: &SyntaxNode) -> bool {
+    fn walk(node: &SyntaxNode) -> bool {
+        for child in node.children_with_tokens() {
+            match &child {
+                rowan::NodeOrToken::Token(token) => {
+                    if token.kind() == SyntaxKind::Identifier && token.text() == "it" {
+                        return true;
+                    }
+                }
+                rowan::NodeOrToken::Node(child_node) => {
+                    // Don't descend into nested closures — their `it` is their own
+                    if child_node.kind() == SyntaxKind::ExprClosure {
+                        continue;
+                    }
+                    // Skip ClosureParams (the explicit param list, not the body)
+                    if child_node.kind() == SyntaxKind::ClosureParams {
+                        continue;
+                    }
+                    if walk(child_node) {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+    walk(node)
 }
