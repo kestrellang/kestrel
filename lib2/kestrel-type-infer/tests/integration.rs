@@ -26,7 +26,7 @@ fn build_from_source(source: &str) -> (World, Entity) {
         .collect();
     let token_iter = tokens.iter().map(|t| (t.value.clone(), t.span.clone()));
     let result = kestrel_parser2::parse_source_file_from_source(source, token_iter);
-    build_declarations(&mut world, file_entity, &result.tree, root);
+    build_declarations(&mut world, file_entity, &result.tree, root, None);
 
     (world, root)
 }
@@ -244,4 +244,73 @@ fn infer_match_expression() {
     let typed = infer_func(&ctx, root, "TestMod", "foo");
 
     assert!(!typed.expr_types.is_empty());
+}
+
+// ===== Overload resolution tests =====
+
+#[test]
+fn overload_by_arity() {
+    // Two functions with same name, different param counts.
+    // Calling with 1 arg should resolve to the 1-param version.
+    // (No type annotations — avoids stdlib dependency)
+    let source = r#"
+module TestMod
+func add(x a: Bool) { }
+func add(x a: Bool, y b: Bool) { }
+func test() { add(x: true) }
+"#;
+    let (world, root) = build_from_source(source);
+    let ctx = world.query_context();
+    let typed = infer_func(&ctx, root, "TestMod", "test");
+
+    assert!(typed.errors.is_empty(), "expected no errors, got: {:?}", typed.errors);
+}
+
+#[test]
+fn overload_by_label() {
+    // Two functions with same name, different labels.
+    // Calling with label "to" should resolve to the "to" version.
+    let source = r#"
+module TestMod
+func send(to x: Bool) { }
+func send(from x: Bool) { }
+func test() { send(to: true) }
+"#;
+    let (world, root) = build_from_source(source);
+    let ctx = world.query_context();
+    let typed = infer_func(&ctx, root, "TestMod", "test");
+
+    assert!(typed.errors.is_empty(), "expected no errors, got: {:?}", typed.errors);
+}
+
+#[test]
+fn overload_no_match_errors() {
+    // Call an overloaded function with labels that don't match any candidate.
+    let source = r#"
+module TestMod
+func send(to x: Bool) { }
+func send(from x: Bool) { }
+func test() { send(via: true) }
+"#;
+    let (world, root) = build_from_source(source);
+    let ctx = world.query_context();
+    let typed = infer_func(&ctx, root, "TestMod", "test");
+
+    assert!(!typed.errors.is_empty(), "expected an error for unresolved overload");
+}
+
+#[test]
+fn overload_set_not_callable_errors() {
+    // Using an overloaded name without calling it should error.
+    let source = r#"
+module TestMod
+func foo(x a: Bool) { }
+func foo(x a: Bool, y b: Bool) { }
+func test() { let f = foo; }
+"#;
+    let (world, root) = build_from_source(source);
+    let ctx = world.query_context();
+    let typed = infer_func(&ctx, root, "TestMod", "test");
+
+    assert!(!typed.errors.is_empty(), "expected an error for bare overload reference");
 }

@@ -311,7 +311,7 @@ fn node_to_ast_type(node: &SyntaxNode, file_id: usize) -> Option<AstType> {
 }
 
 /// Check if a SyntaxKind is a type-related node.
-fn is_type_kind(kind: SyntaxKind) -> bool {
+pub fn is_type_kind(kind: SyntaxKind) -> bool {
     matches!(
         kind,
         SyntaxKind::Ty

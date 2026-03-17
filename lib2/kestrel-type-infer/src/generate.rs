@@ -4,14 +4,14 @@
 //! statement binding, and local variable, then emits constraints
 //! capturing the type relationships between them.
 
-use kestrel_ast_builder::{AstParam, Callable, Name, NodeKind, TypeParams};
+use kestrel_ast_builder::{Callable, Name, NodeKind, TypeParams};
 use kestrel_hecs::Entity;
 use kestrel_hir::body::*;
 use kestrel_hir::ty::HirTy;
 use kestrel_hir_lower::{LowerCallableTypes, LowerTypeAnnotation};
 use kestrel_span2::Span;
 
-use crate::constraint::CallArg;
+use crate::constraint::{labels_match, CallArg};
 use crate::ctx::InferCtx;
 use crate::error::InferError;
 use crate::ty::{LiteralKind, TyVar};
@@ -83,8 +83,29 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             instantiate_entity_with_args(ctx, *entity, explicit_type_args)
         }
 
+        // Overloaded function reference — can only appear as callee of Call
+        HirExpr::OverloadSet { span, .. } => {
+            let recv = ctx.fresh();
+            ctx.report_error(InferError::AmbiguousMember {
+                receiver: recv,
+                name: "<overloaded function>".into(),
+                span: span.clone(),
+            })
+        }
+
         // === Calls ===
         HirExpr::Call { callee, args, span } => {
+            // Overloaded free function call: emit OverloadedCall constraint
+            if let HirExpr::OverloadSet { candidates, type_args, .. } = &hir.exprs[*callee] {
+                let candidates = candidates.clone();
+                let type_args = type_args.clone();
+                let arg_tvs = gen_call_args(ctx, hir, args);
+                let result_tv = ctx.fresh();
+                ctx.overloaded_call(candidates, type_args, arg_tvs, result_tv, id, span.clone());
+                ctx.expr_types.insert(id, result_tv);
+                return result_tv;
+            }
+
             // Struct construction: Def(struct) used as callee
             if let HirExpr::Def(entity, _, _) = &hir.exprs[*callee] {
                 if ctx.query_ctx.get::<NodeKind>(*entity) == Some(&NodeKind::Struct) {
@@ -406,6 +427,12 @@ fn gen_pat(ctx: &mut InferCtx<'_>, hir: &HirBody, pat_id: HirPatId, scrutinee_tv
             let _ = span;
         }
 
+        HirPat::At { binding, subpattern, .. } => {
+            // Bind the whole matched value to the local, then constrain via subpattern
+            ctx.local_types.insert(*binding, scrutinee_tv);
+            gen_pat(ctx, hir, *subpattern, scrutinee_tv);
+        }
+
         HirPat::Error { .. } => { /* swallow */ }
     }
 }
@@ -496,8 +523,12 @@ fn gen_struct_init(
                 qctx.get::<Name>(struct_entity),
                 arg_labels
             );
+        } else {
+            // Multiple label matches — emit OverloadedCall for type disambiguation
+            ctx.overloaded_call(matched, vec![], args.to_vec(), result_tv, expr_id, span.clone());
+            ctx.expr_types.insert(expr_id, result_tv);
+            return result_tv;
         }
-        // else: multiple matches — skip arg constraints, solver will disambiguate
     } else {
         // Memberwise init: match args against field types (in order)
         let fields: Vec<Entity> = children
@@ -517,17 +548,6 @@ fn gen_struct_init(
     // Record this expr's type and return
     ctx.expr_types.insert(expr_id, result_tv);
     result_tv
-}
-
-/// Check if call arg labels match an init's param labels.
-fn labels_match(params: &[AstParam], arg_labels: &[Option<&str>]) -> bool {
-    if params.len() != arg_labels.len() {
-        return false;
-    }
-    params
-        .iter()
-        .zip(arg_labels.iter())
-        .all(|(param, arg_label)| param.label.as_deref() == *arg_label)
 }
 
 // ===== Helpers =====
@@ -871,6 +891,7 @@ fn expr_span(hir: &HirBody, id: HirExprId) -> Span {
         | HirExpr::Closure { span, .. }
         | HirExpr::Local(_, span)
         | HirExpr::Def(_, _, span)
+        | HirExpr::OverloadSet { span, .. }
         | HirExpr::Field { span, .. }
         | HirExpr::TupleIndex { span, .. }
         | HirExpr::ImplicitMember { span, .. }

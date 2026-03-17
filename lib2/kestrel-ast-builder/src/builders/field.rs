@@ -113,20 +113,3 @@ pub fn build_field(
     set_attributes(world, entity, node);
     set_documentation(world, entity, node);
 }
-
-fn is_type_kind(kind: SyntaxKind) -> bool {
-    matches!(
-        kind,
-        SyntaxKind::Ty
-            | SyntaxKind::TyPath
-            | SyntaxKind::TyTuple
-            | SyntaxKind::TyFunction
-            | SyntaxKind::TyArray
-            | SyntaxKind::TyDictionary
-            | SyntaxKind::TyOptional
-            | SyntaxKind::TyResult
-            | SyntaxKind::TyUnit
-            | SyntaxKind::TyNever
-            | SyntaxKind::TyInferred
-    )
-}

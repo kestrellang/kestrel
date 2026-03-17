@@ -271,6 +271,25 @@ impl<'a> InferCtx<'a> {
         });
     }
 
+    pub fn overloaded_call(
+        &mut self,
+        candidates: Vec<Entity>,
+        type_args: Vec<kestrel_hir::ty::HirTy>,
+        args: Vec<CallArg>,
+        result: TyVar,
+        expr: HirExprId,
+        span: Span,
+    ) {
+        self.constraints.push(Constraint::OverloadedCall {
+            candidates,
+            type_args,
+            args,
+            result,
+            expr,
+            span,
+        });
+    }
+
     pub fn implicit(
         &mut self,
         expected: TyVar,

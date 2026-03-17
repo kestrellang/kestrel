@@ -249,8 +249,12 @@ impl LowerCtx<'_> {
                 self.alloc_expr(HirExpr::Def(entity, explicit_type_args.clone(), span.clone()))
             },
             ValueResolution::Overloaded(entities) => {
-                // Pick first — type inference disambiguates later
-                self.alloc_expr(HirExpr::Def(entities[0], explicit_type_args.clone(), span.clone()))
+                // Preserve full overload set — type inference disambiguates at call site
+                self.alloc_expr(HirExpr::OverloadSet {
+                    candidates: entities,
+                    type_args: explicit_type_args.clone(),
+                    span: span.clone(),
+                })
             },
             ValueResolution::EnumCaseValue { entity, .. } => {
                 self.alloc_expr(HirExpr::Def(entity, explicit_type_args.clone(), span.clone()))

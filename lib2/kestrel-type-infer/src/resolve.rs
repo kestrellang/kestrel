@@ -678,17 +678,22 @@ impl WorldResolver<'_> {
     }
 
     /// Build a signature string from a callable's param labels for deduplication.
-    /// Two methods with the same label signature are considered equivalent overloads.
+    /// Two methods with the same name and label signature are considered equivalent overloads.
+    /// Includes method name to avoid collisions between different no-arg methods.
     fn label_signature(&self, entity: Entity) -> String {
+        let name = self.ctx.get::<Name>(entity)
+            .map(|n| n.0.as_str())
+            .unwrap_or("");
         let Some(callable) = self.ctx.get::<Callable>(entity) else {
-            return String::new();
+            return name.to_string();
         };
-        callable
+        let labels = callable
             .params
             .iter()
             .map(|p| p.label.as_deref().unwrap_or("_"))
             .collect::<Vec<_>>()
-            .join(",")
+            .join(",");
+        format!("{}({})", name, labels)
     }
 
     /// Check if an entity has a conformance to the given protocol.

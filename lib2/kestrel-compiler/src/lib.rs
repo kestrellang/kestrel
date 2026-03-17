@@ -29,7 +29,7 @@ use std::fmt;
 use std::panic::AssertUnwindSafe;
 use std::path::Path;
 
-use kestrel_ast_builder::Body;
+use kestrel_ast_builder::{Body, TargetConfig};
 use kestrel_hecs::{Entity, World};
 use kestrel_lexer2::SpannedToken;
 use kestrel_parser2::ParseResult;
@@ -47,6 +47,8 @@ pub struct Compiler {
     files: HashMap<String, Entity>,
     /// Root module entity — parent of all top-level modules.
     root: Entity,
+    /// Compilation target for conditional filtering (@platform, etc.)
+    target: TargetConfig,
 }
 
 impl Compiler {
@@ -58,7 +60,13 @@ impl Compiler {
         world.set(root, kestrel_ast_builder::Name("<root>".to_string()));
         // Seed the lang module so lang.* builtins (lang.i64, lang.alloc, etc.) are available
         kestrel_ast_builder::seed_lang_module(&mut world, root);
-        Self { world, files: HashMap::new(), root }
+        Self { world, files: HashMap::new(), root, target: TargetConfig::host() }
+    }
+
+    /// Set the compilation target for conditional filtering.
+    pub fn with_target(mut self, target: TargetConfig) -> Self {
+        self.target = target;
+        self
     }
 
     /// Add or update a source file. Returns the entity handle.
@@ -125,6 +133,7 @@ impl Compiler {
             file_entity,
             &result.tree,
             self.root,
+            Some(&self.target),
         );
     }
 

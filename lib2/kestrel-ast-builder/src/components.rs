@@ -226,3 +226,46 @@ pub struct ImportItem {
     pub name: String,
     pub alias: Option<String>,
 }
+
+// ===== Compilation target =====
+
+/// Compilation target for conditional filtering via `@platform`, etc.
+/// Extensible: new dimensions (arch, features) can be added as fields.
+#[derive(Clone, Debug)]
+pub struct TargetConfig {
+    pub os: Option<Os>,
+}
+
+impl TargetConfig {
+    /// Detect the target from the current host platform.
+    pub fn host() -> Self {
+        Self {
+            os: Some(Os::host()),
+        }
+    }
+}
+
+/// Target operating system for `@platform(.darwin)` / `@platform(.linux)`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Os {
+    Darwin,
+    Linux,
+}
+
+impl Os {
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "darwin" => Some(Os::Darwin),
+            "linux" => Some(Os::Linux),
+            _ => None,
+        }
+    }
+
+    pub fn host() -> Self {
+        match std::env::consts::OS {
+            "macos" => Os::Darwin,
+            "linux" => Os::Linux,
+            other => panic!("unsupported platform: {}", other),
+        }
+    }
+}

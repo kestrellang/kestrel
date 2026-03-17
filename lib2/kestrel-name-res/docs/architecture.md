@@ -1,4 +1,4 @@
-# kestrel-name-res
+# kestrel-name-res Architecture
 
 Name resolution for the Kestrel ECS-based compiler pipeline. Resolves textual names and paths to their corresponding ECS entities, sitting between AST building and HIR lowering.
 

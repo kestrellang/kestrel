@@ -11,6 +11,7 @@ use kestrel_ast::arena::Arena;
 use kestrel_ast::ast_body::*;
 use kestrel_ast::AstType;
 use crate::ast_type::ast_type_from_cst;
+use crate::builders::helpers::is_type_kind;
 
 /// Lower a CodeBlock CST node into an AstBody.
 pub fn lower_body(code_block: &SyntaxNode, file_id: usize) -> AstBody {
@@ -1805,24 +1806,6 @@ fn is_pattern_kind(kind: SyntaxKind) -> bool {
     )
 }
 
-/// Check if a SyntaxKind is a type node.
-fn is_type_kind(kind: SyntaxKind) -> bool {
-    matches!(
-        kind,
-        SyntaxKind::Ty
-            | SyntaxKind::TyPath
-            | SyntaxKind::TyTuple
-            | SyntaxKind::TyFunction
-            | SyntaxKind::TyArray
-            | SyntaxKind::TyDictionary
-            | SyntaxKind::TyOptional
-            | SyntaxKind::TyResult
-            | SyntaxKind::TyUnit
-            | SyntaxKind::TyNever
-            | SyntaxKind::TyInferred
-    )
-}
-
 /// Get the first non-trivia token text from a node.
 fn first_token_text(node: &SyntaxNode) -> Option<String> {
     node.children_with_tokens()
@@ -1962,7 +1945,7 @@ mod tests {
             source,
             tokens.iter().map(|t| (t.value.clone(), t.span.clone())),
         );
-        build_declarations(&mut world, file, &result.tree, root);
+        build_declarations(&mut world, file, &result.tree, root, None);
 
         // Find first entity with a Body component
         find_body(&world, root).expect("no Body found in declarations")
@@ -2372,7 +2355,7 @@ mod tests {
             source,
             tokens.iter().map(|t| (t.value.clone(), t.span.clone())),
         );
-        build_declarations(&mut world, file, &result.tree, root);
+        build_declarations(&mut world, file, &result.tree, root, None);
 
         let body = find_body(&world, root).expect("field should have Body");
         assert!(body.tail_expr.is_some(), "default value should be tail expr");
@@ -2403,7 +2386,7 @@ mod tests {
             source,
             tokens.iter().map(|t| (t.value.clone(), t.span.clone())),
         );
-        build_declarations(&mut world, file, &result.tree, root);
+        build_declarations(&mut world, file, &result.tree, root, None);
 
         // Count entities with Body component
         let mut body_count = 0;
@@ -2462,7 +2445,7 @@ mod tests {
             source,
             tokens.iter().map(|t| (t.value.clone(), t.span.clone())),
         );
-        build_declarations(&mut world, file, &result.tree, root);
+        build_declarations(&mut world, file, &result.tree, root, None);
 
         // Collect all (name, body) pairs
         let mut bodies = Vec::new();

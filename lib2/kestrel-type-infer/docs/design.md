@@ -155,7 +155,7 @@ Path compression can be added as an optimization but isn't required for correctn
 
 ## Constraints (`constraint.rs`)
 
-Six constraint variants cover the entire type system:
+Eight constraint variants cover the entire type system:
 
 ```rust
 enum Constraint {
@@ -217,6 +217,32 @@ enum Constraint {
     Member {
         receiver: TyVar,
         name: String,
+        args: Vec<CallArg>,
+        result: TyVar,
+        expr: HirExprId,
+        span: Span,
+    },
+
+    /// callee(args) → τ — function or subscript call.
+    ///
+    /// Deferred until callee type is concrete. If callee is a
+    /// Function type, unifies params/return directly. If callee
+    /// is a Named type, resolves subscript via member system.
+    Call {
+        callee: TyVar,
+        args: Vec<CallArg>,
+        result: TyVar,
+        expr: HirExprId,
+        span: Span,
+    },
+
+    /// Overloaded call: one of `candidates` is the correct target.
+    ///
+    /// Solver disambiguates by label/arity, then type compatibility.
+    /// Explicit type args from the call site (e.g., `foo[Int](x)`).
+    OverloadedCall {
+        candidates: Vec<Entity>,
+        type_args: Vec<HirTy>,
         args: Vec<CallArg>,
         result: TyVar,
         expr: HirExprId,
@@ -319,6 +345,10 @@ impl InferCtx<'_> {
     fn associated(&mut self, container: TyVar, name: &str, result: TyVar, span: Span);
     fn member(&mut self, receiver: TyVar, name: &str, args: Vec<CallArg>,
               result: TyVar, expr: HirExprId, span: Span);
+    fn call(&mut self, callee: TyVar, args: Vec<CallArg>,
+            result: TyVar, expr: HirExprId, span: Span);
+    fn overloaded_call(&mut self, candidates: Vec<Entity>, type_args: Vec<HirTy>,
+                       args: Vec<CallArg>, result: TyVar, expr: HirExprId, span: Span);
     fn implicit(&mut self, expected: TyVar, name: &str, args: Vec<CallArg>,
                 result: TyVar, expr: HirExprId, span: Span);
 }
@@ -773,6 +803,12 @@ fn gen_pat(ctx: &mut InferCtx, hir: &HirBody, pat_id: HirPatId, scrutinee_tv: Ty
             for &alt in alternatives {
                 gen_pat(ctx, hir, alt, scrutinee_tv);
             }
+        },
+
+        HirPat::At { binding, subpattern, .. } => {
+            // Bind whole value to local, then constrain via subpattern
+            ctx.local_types.insert(*binding, scrutinee_tv);
+            gen_pat(ctx, hir, *subpattern, scrutinee_tv);
         },
 
         HirPat::Error { .. } => { /* swallow */ },

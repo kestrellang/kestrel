@@ -82,12 +82,14 @@ impl LowerCtx<'_> {
                 subpattern,
                 span,
             } => {
-                // `name @ subpattern` — allocate binding for name, lower subpattern
-                // The binding captures the whole matched value
-                let _local = self.define_local(name, *is_mut, span.clone());
-                // Lower the subpattern (it further constrains the match)
-                // For now, just lower the subpattern — the binding is available in scope
-                self.lower_pat(body, *subpattern)
+                // `name @ subpattern` — bind the whole value to name, also match subpattern
+                let local = self.define_local(name, *is_mut, span.clone());
+                let lowered_sub = self.lower_pat(body, *subpattern);
+                self.alloc_pat(HirPat::At {
+                    binding: local,
+                    subpattern: lowered_sub,
+                    span: span.clone(),
+                })
             }
 
             AstPat::Or { alternatives, span } => {

@@ -437,12 +437,21 @@ impl LowerCtx<'_> {
             span: span.clone(),
         });
 
-        // Put the iter_let inside the loop body so we return a single expression
-        self.alloc_expr(HirExpr::Loop {
+        // Iterator created once before the loop, match runs each iteration
+        let loop_expr = self.alloc_expr(HirExpr::Loop {
             label: label.map(|l| l.to_string()),
             body: HirBlock {
-                stmts: vec![iter_let, match_stmt],
+                stmts: vec![match_stmt],
                 tail_expr: None,
+            },
+            span: span.clone(),
+        });
+
+        // Wrap in a block: { let $iter = iterable.iter(); loop { ... } }
+        self.alloc_expr(HirExpr::Block {
+            body: HirBlock {
+                stmts: vec![iter_let],
+                tail_expr: Some(loop_expr),
             },
             span: span.clone(),
         })

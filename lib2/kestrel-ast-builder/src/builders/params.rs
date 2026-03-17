@@ -16,6 +16,8 @@
 use kestrel_syntax_tree2::{SyntaxKind, SyntaxNode};
 use kestrel_syntax_tree2::utils::find_child;
 
+use super::helpers::is_type_kind;
+
 use crate::ast_type::ast_type_from_cst;
 use crate::components::AstParam;
 
@@ -89,21 +91,4 @@ fn extract_single_param(node: &SyntaxNode, file_id: usize) -> Option<AstParam> {
         ty,
         has_default,
     })
-}
-
-fn is_type_kind(kind: SyntaxKind) -> bool {
-    matches!(
-        kind,
-        SyntaxKind::Ty
-            | SyntaxKind::TyPath
-            | SyntaxKind::TyTuple
-            | SyntaxKind::TyFunction
-            | SyntaxKind::TyArray
-            | SyntaxKind::TyDictionary
-            | SyntaxKind::TyOptional
-            | SyntaxKind::TyResult
-            | SyntaxKind::TyUnit
-            | SyntaxKind::TyNever
-            | SyntaxKind::TyInferred
-    )
 }

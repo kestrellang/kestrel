@@ -71,6 +71,7 @@ impl LowerCtx<'_> {
             }
             _ => {
                 // Complex pattern: allocate temp, then destructure via match
+                // Emits: { let $let_tmp = value; match $let_tmp { pattern => () } }
                 let temp = self.define_local("$let_tmp", is_mut, span.clone());
                 let let_stmt = self.alloc_stmt(HirStmt::Let {
                     local: temp,
@@ -98,13 +99,23 @@ impl LowerCtx<'_> {
                     }],
                     span: span.clone(),
                 });
-                let _match_stmt = self.alloc_stmt(HirStmt::Expr {
+                let match_stmt = self.alloc_stmt(HirStmt::Expr {
                     expr: match_expr,
                     span: span.clone(),
                 });
 
-                // Return the let statement (the match stmt is emitted after)
-                let_stmt
+                // Wrap both in a block so we return a single statement
+                let block_expr = self.alloc_expr(HirExpr::Block {
+                    body: HirBlock {
+                        stmts: vec![let_stmt, match_stmt],
+                        tail_expr: None,
+                    },
+                    span: span.clone(),
+                });
+                self.alloc_stmt(HirStmt::Expr {
+                    expr: block_expr,
+                    span: span.clone(),
+                })
             }
         }
     }

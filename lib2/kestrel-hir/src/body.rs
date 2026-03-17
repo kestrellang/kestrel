@@ -81,6 +81,13 @@ pub enum HirExpr {
     /// Function, enum case, type, etc. — resolved by name resolution.
     /// Optional type args for explicit generic instantiation (e.g., `Pointer[UInt8]`).
     Def(Entity, Vec<crate::ty::HirTy>, Span),
+    /// Multiple overloaded function entities sharing the same name.
+    /// Resolved by type inference at the call site via OverloadedCall constraint.
+    OverloadSet {
+        candidates: Vec<Entity>,
+        type_args: Vec<crate::ty::HirTy>,
+        span: Span,
+    },
 
     // === Access (member name resolved by type inference) ===
     Field {
@@ -201,7 +208,7 @@ pub enum HirStmt {
 
 // ===== Patterns (10 variants) =====
 
-/// HIR pattern. `At` and `Rest` patterns are absorbed during lowering.
+/// HIR pattern. `Rest` patterns are absorbed during lowering.
 #[derive(Clone, Debug, Hash)]
 pub enum HirPat {
     Wildcard {
@@ -246,6 +253,12 @@ pub enum HirPat {
     },
     Or {
         alternatives: Vec<HirPatId>,
+        span: Span,
+    },
+    /// `name @ subpattern` — binds the whole matched value while also matching a subpattern.
+    At {
+        binding: LocalId,
+        subpattern: HirPatId,
         span: Span,
     },
     /// Error recovery

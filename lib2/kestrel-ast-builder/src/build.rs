@@ -7,6 +7,8 @@
 use kestrel_hecs::{Entity, World};
 use kestrel_syntax_tree2::{SyntaxKind, SyntaxNode};
 
+use crate::components::{Os, TargetConfig};
+
 use crate::builders::{
     enum_decl, extension, field, function, import, module, protocol, struct_decl, subscript,
     type_alias,
@@ -23,11 +25,14 @@ use crate::builders::{
 /// * `file_entity` - Entity handle for the source file
 /// * `tree` - Root SyntaxNode (SourceFile) from parsing
 /// * `root` - Root module entity (parent for top-level declarations)
+/// * `target` - Compilation target for conditional filtering (`@platform`, etc.).
+///   Pass `None` to include all declarations regardless of platform attributes.
 pub fn build_declarations(
     world: &mut World,
     file_entity: Entity,
     tree: &SyntaxNode,
     root: Entity,
+    target: Option<&TargetConfig>,
 ) {
     let file_id = file_entity.index();
 
@@ -54,6 +59,11 @@ pub fn build_declarations(
 
     // Process the stack
     while let Some((node, parent)) = stack.pop() {
+        // Skip declarations excluded by target-conditional attributes (@platform, etc.)
+        if is_excluded_by_target(&node, target) {
+            continue;
+        }
+
         match node.kind() {
             SyntaxKind::StructDeclaration => {
                 let (entity, body) =
@@ -139,6 +149,90 @@ fn push_body_children(
     }
 }
 
+/// Check if a CST node should be excluded based on target-conditional attributes.
+/// Scans the node's AttributeList for conditional attributes (@platform, etc.)
+/// and compares each against the corresponding TargetConfig field.
+/// Excluded if ANY conditional attribute doesn't match the target.
+fn is_excluded_by_target(node: &SyntaxNode, target: Option<&TargetConfig>) -> bool {
+    let Some(target) = target else {
+        return false;
+    };
+
+    let Some(attr_list) = node
+        .children()
+        .find(|c| c.kind() == SyntaxKind::AttributeList)
+    else {
+        return false;
+    };
+
+    for attr_node in attr_list
+        .children()
+        .filter(|c| c.kind() == SyntaxKind::Attribute)
+    {
+        let attr_name = attr_node
+            .children_with_tokens()
+            .filter_map(|c| c.into_token())
+            .find(|tok| tok.kind() == SyntaxKind::Identifier)
+            .map(|tok| tok.text().to_string());
+
+        let Some(name) = attr_name else { continue };
+
+        // Check each conditional attribute type against its target dimension
+        match name.as_str() {
+            "platform" => {
+                if is_excluded_by_platform(&attr_node, target) {
+                    return true;
+                }
+            }
+            // Future: "arch" => { if is_excluded_by_arch(...) { return true; } }
+            _ => {}
+        }
+    }
+
+    false
+}
+
+/// Check if a @platform attribute excludes this declaration for the given target.
+fn is_excluded_by_platform(attr_node: &SyntaxNode, target: &TargetConfig) -> bool {
+    let Some(target_os) = target.os else {
+        return false; // no OS target set — don't filter
+    };
+
+    let Some(args_node) = attr_node
+        .children()
+        .find(|c| c.kind() == SyntaxKind::AttributeArgs)
+    else {
+        return false; // @platform with no args — let validation report
+    };
+
+    // Extract the implicit member value from the first arg
+    for arg_node in args_node
+        .children()
+        .filter(|c| c.kind() == SyntaxKind::AttributeArg)
+    {
+        let tokens: Vec<_> = arg_node
+            .children_with_tokens()
+            .filter_map(|c| c.into_token())
+            .collect();
+
+        let mut found_dot = false;
+        for tok in &tokens {
+            if tok.kind() == SyntaxKind::Dot {
+                found_dot = true;
+            } else if found_dot && tok.kind() == SyntaxKind::Identifier {
+                return match Os::from_name(tok.text()) {
+                    Some(declared) => declared != target_os,
+                    None => false, // unknown platform — let validation report
+                };
+            }
+        }
+
+        return false; // no implicit member — don't exclude
+    }
+
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -164,7 +258,7 @@ mod tests {
         let token_iter = tokens.iter().map(|t| (t.value.clone(), t.span.clone()));
         let result = kestrel_parser2::parse_source_file_from_source(source, token_iter);
 
-        build_declarations(&mut world, file_entity, &result.tree, root);
+        build_declarations(&mut world, file_entity, &result.tree, root, None);
         (world, root, file_entity)
     }
 
@@ -220,7 +314,7 @@ mod tests {
             src1,
             tokens1.iter().map(|t| (t.value.clone(), t.span.clone())),
         );
-        build_declarations(&mut world, f1, &result1.tree, root);
+        build_declarations(&mut world, f1, &result1.tree, root, None);
 
         // File 2
         let f2 = world.spawn();
@@ -230,7 +324,7 @@ mod tests {
             src2,
             tokens2.iter().map(|t| (t.value.clone(), t.span.clone())),
         );
-        build_declarations(&mut world, f2, &result2.tree, root);
+        build_declarations(&mut world, f2, &result2.tree, root, None);
 
         // Both files should share the same module entity
         let shared = find_child_by_name(&world, root, &NodeKind::Module, "Shared").unwrap();

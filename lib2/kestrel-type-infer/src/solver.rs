@@ -6,15 +6,16 @@
 //! 3. Solve again with defaults applied
 //! 4. Default remaining unconstrained TyVars to Error
 
-use crate::constraint::{CallArg, Constraint};
+use crate::constraint::{labels_match, CallArg, Constraint};
 use crate::ctx::InferCtx;
 use crate::error::InferError;
-use kestrel_ast_builder::TypeParams;
+use kestrel_ast_builder::{Callable, Name, NodeKind, TypeParams};
+use kestrel_hecs::Entity;
 use kestrel_hir::Builtin;
+use kestrel_hir_lower::{LowerCallableTypes, LowerTypeAnnotation};
+use kestrel_span2::Span;
 use crate::ty::{LiteralKind, TyKind, TySlot, TyVar};
 use crate::unify::{self, UnifyError};
-
-use kestrel_span2::Span;
 
 /// Run the full solver: fixpoint loop, literal defaults, final fixpoint.
 pub fn solve(ctx: &mut InferCtx<'_>) {
@@ -100,6 +101,14 @@ fn try_solve(ctx: &mut InferCtx<'_>, c: Constraint) -> SolveResult {
             expr,
             span,
         } => solve_member(ctx, receiver, &name, args, result, expr, span),
+        Constraint::OverloadedCall {
+            candidates,
+            type_args,
+            args,
+            result,
+            expr,
+            span,
+        } => solve_overloaded_call(ctx, candidates, type_args, args, result, expr, span),
         Constraint::Implicit {
             expected,
             name,
@@ -363,6 +372,314 @@ fn solve_call(
     }
 }
 
+/// Resolve an overloaded call by label/arity filtering, then type disambiguation.
+fn solve_overloaded_call(
+    ctx: &mut InferCtx<'_>,
+    candidates: Vec<Entity>,
+    type_args: Vec<kestrel_hir::ty::HirTy>,
+    args: Vec<CallArg>,
+    result: TyVar,
+    expr: kestrel_hir::body::HirExprId,
+    span: Span,
+) -> SolveResult {
+    // Get a readable name for error messages from the first candidate
+    let overload_name = candidates
+        .first()
+        .and_then(|&e| ctx.query_ctx.get::<Name>(e))
+        .map(|n| n.0.clone())
+        .unwrap_or_else(|| "<overloaded>".into());
+
+    let arg_labels: Vec<Option<&str>> = args.iter().map(|a| a.label.as_deref()).collect();
+
+    // Step 1: filter candidates by label/arity
+    let matched: Vec<Entity> = candidates
+        .iter()
+        .copied()
+        .filter(|&c| {
+            let Some(callable) = ctx.query_ctx.get::<Callable>(c) else {
+                return false;
+            };
+            labels_match(&callable.params, &arg_labels)
+        })
+        .collect();
+
+    match matched.len() {
+        0 => SolveResult::Error(InferError::NoMember {
+            receiver: result,
+            name: overload_name,
+            span,
+        }),
+        1 => emit_resolved_call(ctx, matched[0], &type_args, args, result, expr, span),
+        _ => {
+            // Multiple label matches — need type-based disambiguation.
+            // Defer until all arg types are concrete.
+            let all_concrete = args
+                .iter()
+                .all(|a| ctx.is_concrete(ctx.resolve(a.ty)));
+            if !all_concrete {
+                return SolveResult::Deferred(Constraint::OverloadedCall {
+                    candidates: matched,
+                    type_args,
+                    args,
+                    result,
+                    expr,
+                    span,
+                });
+            }
+
+            // Check each candidate's param types against concrete arg types
+            let compatible: Vec<Entity> = matched
+                .iter()
+                .copied()
+                .filter(|&c| types_compatible(ctx, c, &args))
+                .collect();
+
+            match compatible.len() {
+                0 => SolveResult::Error(InferError::NoMember {
+                    receiver: result,
+                    name: overload_name,
+                    span,
+                }),
+                1 => emit_resolved_call(ctx, compatible[0], &type_args, args, result, expr, span),
+                _ => SolveResult::Error(InferError::AmbiguousMember {
+                    receiver: result,
+                    name: overload_name,
+                    span,
+                }),
+            }
+        }
+    }
+}
+
+/// Emit constraints for a resolved overloaded call: instantiate the selected
+/// function/init entity, coerce args, equate return, record resolution.
+fn emit_resolved_call(
+    ctx: &mut InferCtx<'_>,
+    entity: Entity,
+    explicit_type_args: &[kestrel_hir::ty::HirTy],
+    args: Vec<CallArg>,
+    result: TyVar,
+    expr: kestrel_hir::body::HirExprId,
+    span: Span,
+) -> SolveResult {
+    let qctx = ctx.query_ctx;
+    let root = ctx.root;
+
+    // Read type params and create fresh TyVars (or use explicit type args)
+    let type_param_entities: Vec<Entity> = qctx
+        .get::<TypeParams>(entity)
+        .map(|tp| tp.0.clone())
+        .unwrap_or_default();
+    let fresh_type_args: Vec<TyVar> = if !explicit_type_args.is_empty()
+        && explicit_type_args.len() == type_param_entities.len()
+    {
+        explicit_type_args
+            .iter()
+            .map(|t| crate::generate::lower_hir_ty(ctx, t))
+            .collect()
+    } else {
+        type_param_entities.iter().map(|_| ctx.fresh()).collect()
+    };
+
+    // Build substitution map: type param entity → fresh TyVar
+    let mut subs: Vec<(Entity, TyVar)> = type_param_entities
+        .iter()
+        .zip(fresh_type_args.iter())
+        .map(|(&e, &tv)| (e, tv))
+        .collect();
+
+    // For initializers, also add parent struct's type params
+    let kind = qctx.get::<NodeKind>(entity);
+    if matches!(kind, Some(NodeKind::Initializer)) {
+        if let Some(parent) = qctx.parent_of(entity) {
+            let parent_tps: Vec<Entity> = qctx
+                .get::<TypeParams>(parent)
+                .map(|tp| tp.0.clone())
+                .unwrap_or_default();
+            for &tp in &parent_tps {
+                if !subs.iter().any(|(e, _)| *e == tp) {
+                    subs.push((tp, ctx.fresh()));
+                }
+            }
+        }
+    }
+
+    // Record resolution
+    ctx.resolutions.insert(expr, entity);
+
+    // Store type args if any
+    if !fresh_type_args.is_empty() {
+        ctx.type_args.insert(expr, fresh_type_args);
+    }
+
+    // Emit where clause constraints
+    for clause in ctx.resolver.where_clauses(entity) {
+        match clause {
+            crate::resolve::WhereClause::Bound { param, protocol } => {
+                if let Some(&(_, tv)) = subs.iter().find(|(e, _)| *e == param) {
+                    ctx.conforms(tv, protocol, span.clone());
+                }
+            }
+            crate::resolve::WhereClause::TypeEquality {
+                param,
+                assoc_name,
+                rhs,
+            } => {
+                if let Some(&(_, tv)) = subs.iter().find(|(e, _)| *e == param) {
+                    let assoc_result = ctx.fresh();
+                    ctx.associated(tv, &assoc_name, assoc_result, span.clone());
+                    let rhs_tv = lower_hir_ty_sub(ctx, &rhs, None, TyVar(0), &subs);
+                    ctx.equal(assoc_result, rhs_tv, span.clone());
+                }
+            }
+            crate::resolve::WhereClause::DirectEquality { param, rhs } => {
+                if let Some(&(_, tv)) = subs.iter().find(|(e, _)| *e == param) {
+                    let rhs_tv = lower_hir_ty_sub(ctx, &rhs, None, TyVar(0), &subs);
+                    ctx.types[tv.0 as usize] = crate::ty::TySlot::Redirect(rhs_tv);
+                }
+            }
+        }
+    }
+
+    // Coerce args against param types
+    if let Some(param_hir_tys) = qctx.query(LowerCallableTypes {
+        entity,
+        root,
+    }) {
+        for (arg, param_ty) in args.iter().zip(param_hir_tys.iter()) {
+            if let Some(hir_ty) = param_ty {
+                let param_tv = lower_hir_ty_sub(ctx, hir_ty, None, TyVar(0), &subs);
+                ctx.coerce(arg.ty, param_tv, expr, span.clone());
+            }
+        }
+    }
+
+    // Equate result with return type
+    let ret_tv = qctx
+        .query(LowerTypeAnnotation { entity, root })
+        .map(|hir_ty| lower_hir_ty_sub(ctx, &hir_ty, None, TyVar(0), &subs))
+        .unwrap_or_else(|| ctx.fresh());
+
+    // For inits, result type is the parent struct (not the init's return annotation)
+    if matches!(kind, Some(NodeKind::Initializer)) {
+        if let Some(parent) = qctx.parent_of(entity) {
+            let parent_tps: Vec<Entity> = qctx
+                .get::<TypeParams>(parent)
+                .map(|tp| tp.0.clone())
+                .unwrap_or_default();
+            let parent_args: Vec<TyVar> = parent_tps
+                .iter()
+                .filter_map(|tp| subs.iter().find(|(e, _)| e == tp).map(|&(_, tv)| tv))
+                .collect();
+            let struct_ty = ctx.named(parent, parent_args);
+            ctx.equal(result, struct_ty, span);
+        } else {
+            ctx.equal(result, ret_tv, span);
+        }
+    } else {
+        ctx.equal(result, ret_tv, span);
+    }
+
+    SolveResult::Solved
+}
+
+/// Check if a candidate's param types are compatible with concrete arg types.
+/// Does not mutate the type table — only inspects resolved types structurally.
+fn types_compatible(
+    ctx: &InferCtx<'_>,
+    entity: Entity,
+    args: &[CallArg],
+) -> bool {
+    let qctx = ctx.query_ctx;
+    let root = ctx.root;
+
+    let Some(param_hir_tys) = qctx.query(LowerCallableTypes { entity, root }) else {
+        return false;
+    };
+
+    if param_hir_tys.len() != args.len() {
+        return false;
+    }
+
+    // Build substitution map for type params
+    let type_param_entities: Vec<Entity> = qctx
+        .get::<TypeParams>(entity)
+        .map(|tp| tp.0.clone())
+        .unwrap_or_default();
+
+    // For inits, also include parent struct type params
+    let mut all_type_params = type_param_entities;
+    let kind = qctx.get::<NodeKind>(entity);
+    if matches!(kind, Some(NodeKind::Initializer)) {
+        if let Some(parent) = qctx.parent_of(entity) {
+            let parent_tps: Vec<Entity> = qctx
+                .get::<TypeParams>(parent)
+                .map(|tp| tp.0.clone())
+                .unwrap_or_default();
+            all_type_params.extend(parent_tps);
+        }
+    }
+
+    for (arg, param_ty) in args.iter().zip(param_hir_tys.iter()) {
+        let Some(hir_ty) = param_ty else {
+            continue; // unannotated param — compatible with anything
+        };
+
+        // Get the concrete arg type
+        let arg_resolved = ctx.resolve(arg.ty);
+        let arg_kind = match &ctx.types[arg_resolved.0 as usize] {
+            crate::ty::TySlot::Resolved(k) => k,
+            _ => return false, // not concrete — shouldn't happen (caller checks)
+        };
+
+        // Check compatibility by inspecting the HirTy directly
+        match hir_ty {
+            kestrel_hir::ty::HirTy::Named { entity: param_entity, .. } => {
+                // Type parameter entity — always compatible (generic)
+                if all_type_params.contains(param_entity) {
+                    continue;
+                }
+                match arg_kind {
+                    crate::ty::TyKind::Named { entity: arg_entity, .. } => {
+                        if arg_entity != param_entity {
+                            return false;
+                        }
+                    }
+                    _ => return false,
+                }
+            }
+            kestrel_hir::ty::HirTy::Param(_, _) => {
+                // Type parameter — always compatible
+                continue;
+            }
+            kestrel_hir::ty::HirTy::Tuple(elems, _) => {
+                match arg_kind {
+                    crate::ty::TyKind::Tuple(arg_elems) => {
+                        if arg_elems.len() != elems.len() {
+                            return false;
+                        }
+                    }
+                    _ => return false,
+                }
+            }
+            kestrel_hir::ty::HirTy::Function { params: p_params, .. } => {
+                match arg_kind {
+                    crate::ty::TyKind::Function { params: a_params, .. } => {
+                        if a_params.len() != p_params.len() {
+                            return false;
+                        }
+                    }
+                    _ => return false,
+                }
+            }
+            // Never, Infer, Error — don't use for disambiguation
+            _ => continue,
+        }
+    }
+
+    true
+}
+
 fn solve_member(
     ctx: &mut InferCtx<'_>,
     receiver: TyVar,
@@ -618,6 +935,42 @@ fn solve_implicit(
     match ctx.resolver.resolve_member(&kind, name, &args) {
         Ok(resolution) => {
             ctx.resolutions.insert(expr, resolution.entity);
+
+            // Build substitution map: enum type params → expected type args
+            let mut subs: Vec<(Entity, TyVar)> = Vec::new();
+            let recv_type_args: Vec<TyVar> = match &kind {
+                TyKind::Named { args: ta, .. } => ta.clone(),
+                _ => vec![],
+            };
+            let recv_entity = match &kind {
+                TyKind::Named { entity, .. } => Some(*entity),
+                _ => None,
+            };
+            if let Some(ent) = recv_entity {
+                let struct_type_params: Vec<Entity> = ctx.query_ctx
+                    .get::<TypeParams>(ent)
+                    .map(|tp| tp.0.clone())
+                    .unwrap_or_default();
+                for (&param, &arg) in struct_type_params.iter().zip(recv_type_args.iter()) {
+                    subs.push((param, arg));
+                }
+            }
+
+            // Instantiate method's own type params as fresh vars
+            let fresh_params: Vec<TyVar> = resolution.type_params.iter().map(|_| ctx.fresh()).collect();
+            for (&param, &fresh) in resolution.type_params.iter().zip(&fresh_params) {
+                subs.push((param, fresh));
+            }
+            if !fresh_params.is_empty() {
+                ctx.type_args.insert(expr, fresh_params.clone());
+            }
+
+            // Coerce argument types against parameter types
+            let self_entity = resolution.self_type;
+            for (arg, param_info) in args.iter().zip(&resolution.param_types) {
+                let param_tv = lower_hir_ty_sub(ctx, &param_info.ty, self_entity, expected, &subs);
+                ctx.coerce(arg.ty, param_tv, expr, span.clone());
+            }
 
             // Equate result with the expected type
             ctx.equal(result, expected, span);
