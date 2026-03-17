@@ -2160,58 +2160,55 @@ mod tests {
 
     #[test]
     fn if_else() {
+        // No semicolon after if/else → promoted to tail expression
         let body = lower_func_body("func f() { if true { 1; } else { 2; } }");
-        if let AstStmt::Expr { expr, .. } = &body.stmts[body.statements[0]] {
-            match &body.exprs[*expr] {
-                AstExpr::If { conditions, then_body, else_body, .. } => {
-                    assert_eq!(conditions.len(), 1);
-                    assert!(matches!(&conditions[0], IfCondition::Expr(_)));
-                    assert!(!then_body.stmts.is_empty() || then_body.tail_expr.is_some());
-                    assert!(else_body.is_some());
-                }
-                other => panic!("expected If, got {:?}", other),
+        let tail = body.tail_expr.expect("if/else should be tail expression");
+        match &body.exprs[tail] {
+            AstExpr::If { conditions, then_body, else_body, .. } => {
+                assert_eq!(conditions.len(), 1);
+                assert!(matches!(&conditions[0], IfCondition::Expr(_)));
+                assert!(!then_body.stmts.is_empty() || then_body.tail_expr.is_some());
+                assert!(else_body.is_some());
             }
+            other => panic!("expected If, got {:?}", other),
         }
     }
 
     #[test]
     fn while_loop() {
         let body = lower_func_body("func f() { while true { break; } }");
-        if let AstStmt::Expr { expr, .. } = &body.stmts[body.statements[0]] {
-            match &body.exprs[*expr] {
-                AstExpr::While { label, .. } => assert!(label.is_none()),
-                other => panic!("expected While, got {:?}", other),
-            }
+        let tail = body.tail_expr.expect("while should be tail expression");
+        match &body.exprs[tail] {
+            AstExpr::While { label, .. } => assert!(label.is_none()),
+            other => panic!("expected While, got {:?}", other),
         }
     }
 
     #[test]
     fn for_loop() {
         let body = lower_func_body("func f() { for x in items { x; } }");
-        if let AstStmt::Expr { expr, .. } = &body.stmts[body.statements[0]] {
-            match &body.exprs[*expr] {
-                AstExpr::For { pattern, label, .. } => {
-                    assert!(label.is_none());
-                    match &body.pats[*pattern] {
-                        AstPat::Binding { name, .. } => assert_eq!(name, "x"),
-                        other => panic!("expected Binding pattern, got {:?}", other),
-                    }
+        let tail = body.tail_expr.expect("for should be tail expression");
+        match &body.exprs[tail] {
+            AstExpr::For { pattern, label, .. } => {
+                assert!(label.is_none());
+                match &body.pats[*pattern] {
+                    AstPat::Binding { name, .. } => assert_eq!(name, "x"),
+                    other => panic!("expected Binding pattern, got {:?}", other),
                 }
-                other => panic!("expected For, got {:?}", other),
             }
+            other => panic!("expected For, got {:?}", other),
         }
     }
 
     #[test]
     fn loop_with_break_continue() {
         let body = lower_func_body("func f() { loop { break; continue; } }");
-        if let AstStmt::Expr { expr, .. } = &body.stmts[body.statements[0]] {
-            match &body.exprs[*expr] {
-                AstExpr::Loop { body: loop_body, .. } => {
-                    assert_eq!(loop_body.stmts.len(), 2);
-                }
-                other => panic!("expected Loop, got {:?}", other),
+        let tail = body.tail_expr.expect("loop should be tail expression");
+        match &body.exprs[tail] {
+            AstExpr::Loop { body: loop_body, .. } => {
+                assert_eq!(loop_body.stmts.len(), 2);
             }
+            other => panic!("expected Loop, got {:?}", other),
         }
     }
 
