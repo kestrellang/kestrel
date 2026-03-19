@@ -13,7 +13,7 @@
 //!
 //! ## Diagnostics
 //!
-//! ### KS413 -- `computed_property_must_be_var` (Error, Correctness)
+//! ### E413 -- `computed_property_must_be_var` (Error, Correctness)
 //!
 //! **Message:** "computed properties must use 'var'"
 //!
@@ -24,7 +24,7 @@
 //!
 //! **Notes:** (none)
 //!
-//! ### KS415 -- `enum_stored_field` (Error, Correctness)
+//! ### E415 -- `enum_stored_field` (Error, Correctness)
 //!
 //! **Message:** "enums cannot have stored fields"
 //!
@@ -35,7 +35,7 @@
 //!
 //! **Notes:** (none)
 //!
-//! ### KS416 -- `generic_type_static_stored_property` (Error, Correctness)
+//! ### E416 -- `generic_type_static_stored_property` (Error, Correctness)
 //!
 //! **Message:** "static stored properties not supported in generic types"
 //!
@@ -54,19 +54,19 @@ use kestrel_ast_builder::{Callable, NodeKind, Settable, Static, TypeParams};
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[
     DiagnosticDescriptor {
-        id: "KS413",
+        id: "E413",
         name: "computed_property_must_be_var",
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
     DiagnosticDescriptor {
-        id: "KS415",
+        id: "E415",
         name: "enum_stored_field",
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
     DiagnosticDescriptor {
-        id: "KS416",
+        id: "E416",
         name: "generic_type_static_stored_property",
         default_severity: Severity::Error,
         category: Category::Correctness,

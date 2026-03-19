@@ -11,7 +11,7 @@
 //!
 //! ## Diagnostics
 //!
-//! ### KS426 -- `duplicate_callable` (Error, Correctness)
+//! ### E426 -- `duplicate_callable` (Error, Correctness)
 //!
 //! **Message:** "duplicate {kind} signature: {signature}"
 //!
@@ -36,7 +36,7 @@ use kestrel_name_res::ConformingProtocols;
 use kestrel_span2::Span;
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
-    id: "KS426",
+    id: "E426",
     name: "duplicate_callable",
     default_severity: Severity::Error,
     category: Category::Correctness,

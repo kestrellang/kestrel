@@ -28,11 +28,11 @@
 //! 3. Walk the resolved type graph checking for paths back to this enum entity
 //! 4. Arrays/Optional/pointers provide heap indirection (not recursive)
 //! 5. Tuples, structs, and bare enum references are inline (recursive)
-//! 6. Emit KS429 if any case has a recursive path without indirection
+//! 6. Emit E429 if any case has a recursive path without indirection
 //!
 //! ## Diagnostics
 //!
-//! ### KS429 -- `recursive_enum` (Error, Correctness)
+//! ### E429 -- `recursive_enum` (Error, Correctness)
 //!
 //! **Message:** "enum '{enum_name}' is recursive without 'indirect'"
 //!
@@ -51,7 +51,7 @@ use crate::traits::{DeclCheck, Describe};
 use kestrel_ast_builder::NodeKind;
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
-    id: "KS429",
+    id: "E429",
     name: "recursive_enum",
     default_severity: Severity::Error,
     category: Category::Correctness,

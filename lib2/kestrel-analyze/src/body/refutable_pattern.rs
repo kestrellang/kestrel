@@ -13,7 +13,7 @@
 //!
 //! ## Diagnostics
 //!
-//! ### KS300 — `refutable_pattern_in_binding` (Error, Correctness)
+//! ### E300 — `refutable_pattern_in_binding` (Error, Correctness)
 //!
 //! **Message:** "refutable pattern in let binding"
 //!
@@ -30,7 +30,7 @@ use crate::traits::{BodyCheck, Describe};
 use kestrel_hir::body::*;
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
-    id: "KS300",
+    id: "E300",
     name: "refutable_pattern_in_binding",
     default_severity: Severity::Error,
     category: Category::Correctness,

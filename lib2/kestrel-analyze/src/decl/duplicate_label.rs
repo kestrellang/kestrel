@@ -5,7 +5,7 @@
 //!
 //! ## Diagnostics
 //!
-//! ### KS428 -- `duplicate_enum_label` (Error, Correctness)
+//! ### E428 -- `duplicate_enum_label` (Error, Correctness)
 //!
 //! **Message:** "duplicate label '{label}' in case '{case_name}'"
 //!
@@ -25,7 +25,7 @@ use crate::util;
 use kestrel_ast_builder::{Callable, NodeKind};
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
-    id: "KS428",
+    id: "E428",
     name: "duplicate_enum_label",
     default_severity: Severity::Error,
     category: Category::Correctness,

@@ -9,7 +9,7 @@
 //!
 //! ## Diagnostics
 //!
-//! ### KS424 -- `duplicate_symbol_same_kind` (Error, Correctness)
+//! ### E424 -- `duplicate_symbol_same_kind` (Error, Correctness)
 //!
 //! **Message:** "duplicate definition of {kind} '{name}'"
 //!
@@ -23,7 +23,7 @@
 //!
 //! **Notes:** (none)
 //!
-//! ### KS425 -- `duplicate_symbol_different_kind` (Error, Correctness)
+//! ### E425 -- `duplicate_symbol_different_kind` (Error, Correctness)
 //!
 //! **Message:** "'{name}' is already defined as a {original_kind}"
 //!
@@ -48,13 +48,13 @@ use kestrel_span2::Span;
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[
     DiagnosticDescriptor {
-        id: "KS424",
+        id: "E424",
         name: "duplicate_symbol_same_kind",
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
     DiagnosticDescriptor {
-        id: "KS425",
+        id: "E425",
         name: "duplicate_symbol_different_kind",
         default_severity: Severity::Error,
         category: Category::Correctness,
@@ -161,7 +161,7 @@ fn check_duplicates(
 
         if let Some((first_span, first_desc)) = seen.get(&name) {
             if desc == *first_desc {
-                // Same kind duplicate (KS424)
+                // Same kind duplicate (E424)
                 diags.push(AnalyzeDiagnostic {
                     descriptor_id: DESCRIPTORS[0].id,
                     severity: DESCRIPTORS[0].default_severity,
@@ -181,7 +181,7 @@ fn check_duplicates(
                     notes: vec![],
                 });
             } else {
-                // Different kind duplicate (KS425)
+                // Different kind duplicate (E425)
                 diags.push(AnalyzeDiagnostic {
                     descriptor_id: DESCRIPTORS[1].id,
                     severity: DESCRIPTORS[1].default_severity,

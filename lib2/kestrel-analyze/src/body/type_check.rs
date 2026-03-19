@@ -6,7 +6,7 @@
 //!
 //! ## Diagnostics
 //!
-//! ### KS100 — `type_mismatch` (Error, Correctness)
+//! ### E100 — `type_mismatch` (Error, Correctness)
 //!
 //! **Message:** "type mismatch: {detail}"
 //!
@@ -23,7 +23,7 @@ use crate::traits::{BodyCheck, Describe};
 use kestrel_type_infer::error::InferError;
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
-    id: "KS100",
+    id: "E100",
     name: "type_mismatch",
     default_severity: Severity::Error,
     category: Category::Correctness,

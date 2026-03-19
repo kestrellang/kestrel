@@ -6,7 +6,7 @@
 //!
 //! ## Diagnostics
 //!
-//! ### KS002 — `unreachable_code` (Warning, Correctness)
+//! ### E002 — `unreachable_code` (Warning, Correctness)
 //!
 //! **Message:** "unreachable code"
 //!
@@ -25,7 +25,7 @@ use crate::util;
 use kestrel_hir::body::*;
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
-    id: "KS002",
+    id: "E002",
     name: "unreachable_code",
     default_severity: Severity::Warning,
     category: Category::Correctness,

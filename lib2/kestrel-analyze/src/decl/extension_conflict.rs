@@ -34,12 +34,12 @@
 //! 1. Gather all extensions, resolve each `ExtensionTarget` to a type entity
 //! 2. Group extensions by target entity
 //! 3. For each group, collect method names from all extensions + the target type
-//! 4. Detect name collisions, emitting KS411 (struct vs extension) or KS412
+//! 4. Detect name collisions, emitting E411 (struct vs extension) or E412
 //!    (extension vs extension)
 //!
 //! ## Diagnostics
 //!
-//! ### KS411 -- `struct_extension_method_conflict` (Error, Correctness)
+//! ### E411 -- `struct_extension_method_conflict` (Error, Correctness)
 //!
 //! **Message:** "duplicate method '{method_name}': extension cannot redefine struct method"
 //!
@@ -55,7 +55,7 @@
 //! - "Extensions cannot define methods that already exist on the struct"
 //! - "Consider renaming the extension method or removing it"
 //!
-//! ### KS412 -- `duplicate_extension_method` (Error, Correctness)
+//! ### E412 -- `duplicate_extension_method` (Error, Correctness)
 //!
 //! **Message:** "duplicate method '{method_name}' in overlapping extensions"
 //!
@@ -77,13 +77,13 @@ use kestrel_ast_builder::NodeKind;
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[
     DiagnosticDescriptor {
-        id: "KS411",
+        id: "E411",
         name: "struct_extension_method_conflict",
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
     DiagnosticDescriptor {
-        id: "KS412",
+        id: "E412",
         name: "duplicate_extension_method",
         default_severity: Severity::Error,
         category: Category::Correctness,

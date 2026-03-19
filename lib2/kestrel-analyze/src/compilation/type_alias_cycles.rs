@@ -22,7 +22,7 @@
 //!
 //! ## Diagnostics
 //!
-//! ### KS447 -- `circular_type_alias` (Error, Correctness)
+//! ### E447 -- `circular_type_alias` (Error, Correctness)
 //!
 //! **Message:** "circular type alias: '{origin}' references itself through {cycle}"
 //!
@@ -36,7 +36,7 @@
 //!
 //! **Notes:** (none)
 //!
-//! ### KS448 -- `type_alias_contains_infer` (Warning, Correctness)
+//! ### E448 -- `type_alias_contains_infer` (Warning, Correctness)
 //!
 //! **Message:** "type alias '{name}' contains an unresolved type"
 //!
@@ -53,13 +53,13 @@ use crate::traits::{CompilationCheck, Describe};
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[
     DiagnosticDescriptor {
-        id: "KS447",
+        id: "E447",
         name: "circular_type_alias",
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
     DiagnosticDescriptor {
-        id: "KS448",
+        id: "E448",
         name: "type_alias_contains_infer",
         default_severity: Severity::Warning,
         category: Category::Correctness,

@@ -4,7 +4,7 @@
 //!
 //! ## Diagnostics
 //!
-//! ### KS427 -- `duplicate_enum_case` (Error, Correctness)
+//! ### E427 -- `duplicate_enum_case` (Error, Correctness)
 //!
 //! **Message:** "duplicate enum case '{case_name}'"
 //!
@@ -28,7 +28,7 @@ use kestrel_ast_builder::NodeKind;
 use kestrel_span2::Span;
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
-    id: "KS427",
+    id: "E427",
     name: "duplicate_enum_case",
     default_severity: Severity::Error,
     category: Category::Correctness,

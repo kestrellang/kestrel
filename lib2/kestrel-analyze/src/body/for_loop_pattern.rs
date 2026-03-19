@@ -8,7 +8,7 @@
 //!
 //! ## Diagnostics
 //!
-//! ### KS301 -- `refutable_for_loop_pattern` (Error, Correctness)
+//! ### E301 -- `refutable_for_loop_pattern` (Error, Correctness)
 //!
 //! **Message:** "refutable pattern in for-loop binding"
 //!
@@ -27,7 +27,7 @@ use kestrel_hir::body::*;
 use kestrel_type_infer::result::ResolvedTy;
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
-    id: "KS301",
+    id: "E301",
     name: "refutable_for_loop_pattern",
     default_severity: Severity::Error,
     category: Category::Correctness,

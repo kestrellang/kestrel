@@ -9,7 +9,7 @@
 //!
 //! ## Diagnostics
 //!
-//! ### KS203 — `let_to_mutating` (Error, Correctness)
+//! ### E203 — `let_to_mutating` (Error, Correctness)
 //!
 //! **Message:** "cannot pass 'let' binding '{name}' to 'mutating' parameter"
 //!
@@ -23,7 +23,7 @@
 //!
 //! **Notes:** "help: consider declaring as 'var' instead"
 //!
-//! ### KS204 — `immutable_field_to_mutating` (Error, Correctness)
+//! ### E204 — `immutable_field_to_mutating` (Error, Correctness)
 //!
 //! **Message:** "cannot pass immutable field '{name}' to 'mutating' parameter"
 //!
@@ -34,7 +34,7 @@
 //!
 //! **Notes:** (none)
 //!
-//! ### KS205 — `rvalue_to_mutating` (Error, Correctness)
+//! ### E205 — `rvalue_to_mutating` (Error, Correctness)
 //!
 //! **Message:** "cannot pass temporary value to 'mutating' parameter"
 //!
@@ -45,7 +45,7 @@
 //!
 //! **Notes:** (none)
 //!
-//! ### KS206 — `let_to_consuming` (Error, Correctness)
+//! ### E206 — `let_to_consuming` (Error, Correctness)
 //!
 //! **Message:** "cannot pass 'let' binding to 'consuming' parameter when binding is used later"
 //!
@@ -62,25 +62,25 @@ use crate::traits::{BodyCheck, Describe};
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[
     DiagnosticDescriptor {
-        id: "KS203",
+        id: "E203",
         name: "let_to_mutating",
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
     DiagnosticDescriptor {
-        id: "KS204",
+        id: "E204",
         name: "immutable_field_to_mutating",
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
     DiagnosticDescriptor {
-        id: "KS205",
+        id: "E205",
         name: "rvalue_to_mutating",
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
     DiagnosticDescriptor {
-        id: "KS206",
+        id: "E206",
         name: "let_to_consuming",
         default_severity: Severity::Error,
         category: Category::Correctness,
@@ -112,10 +112,10 @@ impl BodyCheck for AccessModeAnalyzer {
         //    b. A field access — check if the field is Settable
         //    c. A temporary (call result, literal, etc.) — not mutable
         // 4. Report errors:
-        //    - KS203: `let` local passed to mutating param
-        //    - KS204: immutable field passed to mutating param
-        //    - KS205: temporary value passed to mutating param
-        //    - KS206: value passed to consuming param when used later (needs liveness)
+        //    - E203: `let` local passed to mutating param
+        //    - E204: immutable field passed to mutating param
+        //    - E205: temporary value passed to mutating param
+        //    - E206: value passed to consuming param when used later (needs liveness)
         vec![]
     }
 }

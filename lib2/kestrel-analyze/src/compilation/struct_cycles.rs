@@ -15,7 +15,7 @@
 //!
 //! ## Diagnostics
 //!
-//! ### KS449 -- `self_containing_struct` (Error, Correctness)
+//! ### E449 -- `self_containing_struct` (Error, Correctness)
 //!
 //! **Message:** "struct '{name}' contains itself through field '{field_name}'"
 //!
@@ -30,7 +30,7 @@
 //! **Notes:**
 //! - "use an Array or Optional to break the cycle with heap indirection"
 //!
-//! ### KS450 -- `circular_struct_containment` (Error, Correctness)
+//! ### E450 -- `circular_struct_containment` (Error, Correctness)
 //!
 //! **Message:** "circular struct containment: '{origin}' -> {cycle} -> '{origin}'"
 //!
@@ -51,13 +51,13 @@ use crate::traits::{CompilationCheck, Describe};
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[
     DiagnosticDescriptor {
-        id: "KS449",
+        id: "E449",
         name: "self_containing_struct",
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
     DiagnosticDescriptor {
-        id: "KS450",
+        id: "E450",
         name: "circular_struct_containment",
         default_severity: Severity::Error,
         category: Category::Correctness,

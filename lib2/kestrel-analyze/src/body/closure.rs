@@ -6,7 +6,7 @@
 //!
 //! ## Diagnostics
 //!
-//! ### KS600 — `it_wrong_arity` (Error, Correctness)
+//! ### E600 — `it_wrong_arity` (Error, Correctness)
 //!
 //! **Message:** "implicit 'it' parameter used in closure expecting {n} parameters"
 //!
@@ -17,7 +17,7 @@
 //!
 //! **Notes:** (none)
 //!
-//! ### KS601 — `closure_arity_mismatch` (Error, Correctness)
+//! ### E601 — `closure_arity_mismatch` (Error, Correctness)
 //!
 //! **Message:** "closure has {actual} parameters, but expected {expected}"
 //!
@@ -28,7 +28,7 @@
 //!
 //! **Notes:** (none)
 //!
-//! ### KS602 — `closure_param_type_mismatch` (Error, Correctness)
+//! ### E602 — `closure_param_type_mismatch` (Error, Correctness)
 //!
 //! **Message:** "closure parameter type mismatch at position {index}"
 //!
@@ -39,7 +39,7 @@
 //!
 //! **Notes:** (none)
 //!
-//! ### KS603 — `assign_to_captured_variable` (Error, Correctness)
+//! ### E603 — `assign_to_captured_variable` (Error, Correctness)
 //!
 //! **Message:** "cannot assign to captured variable '{name}'"
 //!
@@ -50,7 +50,7 @@
 //!
 //! **Notes:** (none)
 //!
-//! ### KS604 — `assign_to_closure_parameter` (Error, Correctness)
+//! ### E604 — `assign_to_closure_parameter` (Error, Correctness)
 //!
 //! **Message:** "cannot assign to closure parameter '{name}'"
 //!
@@ -73,31 +73,31 @@ use kestrel_type_infer::result::ResolvedTy;
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[
     DiagnosticDescriptor {
-        id: "KS600",
+        id: "E600",
         name: "it_wrong_arity",
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
     DiagnosticDescriptor {
-        id: "KS601",
+        id: "E601",
         name: "closure_arity_mismatch",
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
     DiagnosticDescriptor {
-        id: "KS602",
+        id: "E602",
         name: "closure_param_type_mismatch",
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
     DiagnosticDescriptor {
-        id: "KS603",
+        id: "E603",
         name: "assign_to_captured_variable",
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
     DiagnosticDescriptor {
-        id: "KS604",
+        id: "E604",
         name: "assign_to_closure_parameter",
         default_severity: Severity::Error,
         category: Category::Correctness,
@@ -137,7 +137,7 @@ impl BodyCheck for ClosureAnalyzer {
             // Check for assignments to closure parameters within the closure body
             check_param_assignments(cx, body, &param_locals, &mut diags);
 
-            // TODO: Check for assignments to captured variables (KS603).
+            // TODO: Check for assignments to captured variables (E603).
             // This requires knowing which locals are captures vs parameters.
             // In lib2 HIR, closures don't have an explicit capture list — we'd
             // need to compare body locals against the enclosing function's locals.
@@ -168,7 +168,7 @@ fn check_closure_type(
     let expected_count = expected_params.len();
 
     // Check if this is an implicit `it` closure (zero explicit params but
-    // the body references a local named "it"). This is the KS600 check.
+    // the body references a local named "it"). This is the E600 check.
     if actual_count == 0 && expected_count != 1 {
         // Check if any local in the body is named "it"
         let uses_it = cx.hir.locals.iter().any(|(_, local)| local.name == "it");
@@ -191,7 +191,7 @@ fn check_closure_type(
         }
     }
 
-    // Arity mismatch (KS601)
+    // Arity mismatch (E601)
     if actual_count != expected_count && actual_count > 0 {
         diags.push(AnalyzeDiagnostic {
             descriptor_id: DESCRIPTORS[1].id,
@@ -211,7 +211,7 @@ fn check_closure_type(
         return;
     }
 
-    // TODO: KS602 — per-parameter type mismatch checking.
+    // TODO: E602 — per-parameter type mismatch checking.
     // This requires comparing resolved param types against expected_params,
     // which needs the resolved type for each closure param's type annotation.
     // Type mismatch is already caught by the constraint solver, so this is

@@ -6,7 +6,7 @@
 //!
 //! ## Diagnostics
 //!
-//! ### KS001 — `missing_return` (Error, Correctness)
+//! ### E001 — `missing_return` (Error, Correctness)
 //!
 //! **Message:** "function '{name}' does not return a value on all code paths"
 //!
@@ -25,7 +25,7 @@ use kestrel_ast_builder::{NodeKind, TypeAnnotation};
 use kestrel_hir::body::*;
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
-    id: "KS001",
+    id: "E001",
     name: "missing_return",
     default_severity: Severity::Error,
     category: Category::Correctness,

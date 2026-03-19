@@ -10,7 +10,7 @@
 //!
 //! ## Diagnostics
 //!
-//! ### KS200 — `assign_to_immutable` (Error, Correctness)
+//! ### E200 — `assign_to_immutable` (Error, Correctness)
 //!
 //! **Message:** "cannot assign to immutable variable '{name}'"
 //!
@@ -21,7 +21,7 @@
 //!
 //! **Notes:** (none)
 //!
-//! ### KS201 — `assign_to_immutable_field` (Error, Correctness)
+//! ### E201 — `assign_to_immutable_field` (Error, Correctness)
 //!
 //! **Message:** "cannot assign to immutable field '{name}'"
 //!
@@ -32,7 +32,7 @@
 //!
 //! **Notes:** (none)
 //!
-//! ### KS202 — `assign_to_expression` (Error, Correctness)
+//! ### E202 — `assign_to_expression` (Error, Correctness)
 //!
 //! **Message:** "cannot assign to this expression"
 //!
@@ -52,19 +52,19 @@ use kestrel_hir::body::*;
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[
     DiagnosticDescriptor {
-        id: "KS200",
+        id: "E200",
         name: "assign_to_immutable",
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
     DiagnosticDescriptor {
-        id: "KS201",
+        id: "E201",
         name: "assign_to_immutable_field",
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
     DiagnosticDescriptor {
-        id: "KS202",
+        id: "E202",
         name: "assign_to_expression",
         default_severity: Severity::Error,
         category: Category::Correctness,

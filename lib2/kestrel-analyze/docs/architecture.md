@@ -36,7 +36,7 @@ All extend `Describe` which provides `id()` and `descriptors()`.
 ### Diagnostics (`diagnostic.rs`)
 
 - **`AnalyzeDiagnostic`** — rich diagnostic with descriptor ID, severity, message, labels (primary + secondary with spans), and notes. `Clone + Hash` for HECS accumulators.
-- **`DiagnosticDescriptor`** — static metadata per diagnostic kind: ID (e.g. "KS001"), name, default severity, category.
+- **`DiagnosticDescriptor`** — static metadata per diagnostic kind: ID (e.g. "E001"), name, default severity, category.
 
 ### Contexts (`context.rs`)
 

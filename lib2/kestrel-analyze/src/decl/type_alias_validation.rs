@@ -22,7 +22,7 @@
 //!
 //! ## Diagnostics
 //!
-//! ### KS441 -- `associated_type_bounds_in_wrong_context` (Error, Correctness)
+//! ### E441 -- `associated_type_bounds_in_wrong_context` (Error, Correctness)
 //!
 //! **Message:** "type alias '{name}' cannot have bounds outside a protocol"
 //!
@@ -34,7 +34,7 @@
 //! **Notes:**
 //! - "associated type bounds (`type T: Protocol`) are only valid inside protocol declarations"
 //!
-//! ### KS442 -- `type_alias_requires_type` (Error, Correctness)
+//! ### E442 -- `type_alias_requires_type` (Error, Correctness)
 //!
 //! **Message:** "type alias '{name}' requires a type definition"
 //!
@@ -45,7 +45,7 @@
 //!
 //! **Notes:** (none)
 //!
-//! ### KS443 -- `qualified_binding_not_conforming` (Error, Correctness)
+//! ### E443 -- `qualified_binding_not_conforming` (Error, Correctness)
 //!
 //! **Message:** "'{type_name}' does not conform to '{protocol_name}'"
 //!
@@ -56,7 +56,7 @@
 //!
 //! **Notes:** (none)
 //!
-//! ### KS444 -- `qualified_binding_wrong_protocol` (Error, Correctness)
+//! ### E444 -- `qualified_binding_wrong_protocol` (Error, Correctness)
 //!
 //! **Message:** "protocol '{protocol}' has no associated type '{type_name}'"
 //!
@@ -67,7 +67,7 @@
 //!
 //! **Notes:** (none)
 //!
-//! ### KS445 -- `ambiguous_associated_type` (Error, Correctness)
+//! ### E445 -- `ambiguous_associated_type` (Error, Correctness)
 //!
 //! **Message:** "associated type '{name}' is ambiguous between protocols: {list}"
 //!
@@ -78,7 +78,7 @@
 //!
 //! **Notes:** (none)
 //!
-//! ### KS446 -- `associated_type_constraint_not_satisfied` (Error, Correctness)
+//! ### E446 -- `associated_type_constraint_not_satisfied` (Error, Correctness)
 //!
 //! **Message:** "type '{bound_type}' does not satisfy constraint '{protocol}' on associated type '{name}'"
 //!
@@ -97,37 +97,37 @@ use kestrel_ast_builder::{Conformances, NodeKind, TypeAnnotation};
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[
     DiagnosticDescriptor {
-        id: "KS441",
+        id: "E441",
         name: "associated_type_bounds_in_wrong_context",
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
     DiagnosticDescriptor {
-        id: "KS442",
+        id: "E442",
         name: "type_alias_requires_type",
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
     DiagnosticDescriptor {
-        id: "KS443",
+        id: "E443",
         name: "qualified_binding_not_conforming",
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
     DiagnosticDescriptor {
-        id: "KS444",
+        id: "E444",
         name: "qualified_binding_wrong_protocol",
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
     DiagnosticDescriptor {
-        id: "KS445",
+        id: "E445",
         name: "ambiguous_associated_type",
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
     DiagnosticDescriptor {
-        id: "KS446",
+        id: "E446",
         name: "associated_type_constraint_not_satisfied",
         default_severity: Severity::Error,
         category: Category::Correctness,

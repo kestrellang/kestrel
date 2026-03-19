@@ -27,7 +27,7 @@ pub enum Category {
 /// Each analyzer declares one or more descriptors. Users configure
 /// severity overrides and suppressions by descriptor ID.
 pub struct DiagnosticDescriptor {
-    /// Unique ID, e.g. "KS001". Used for configuration and suppression.
+    /// Unique ID, e.g. "E001". Used for configuration and suppression.
     pub id: &'static str,
     /// Human-readable name, e.g. "missing_return".
     pub name: &'static str,
@@ -52,7 +52,7 @@ pub struct DiagLabel {
 /// conversion to display format happens in the compiler orchestration layer.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct AnalyzeDiagnostic {
-    /// Which descriptor produced this (e.g. "KS001"). Used for suppression.
+    /// Which descriptor produced this (e.g. "E001"). Used for suppression.
     pub descriptor_id: &'static str,
     /// Severity (starts as descriptor default, may be overridden by config).
     pub severity: Severity,

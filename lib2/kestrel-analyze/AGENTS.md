@@ -51,7 +51,7 @@ Examples of good span source documentation:
 ```rust
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[
     DiagnosticDescriptor {
-        id: "KS<NNN>",
+        id: "E<NNN>",
         name: "<snake_case_name>",
         default_severity: Severity::<Error|Warning|Info>,
         category: Category::<Correctness|Style|Performance|Usage>,
@@ -116,18 +116,18 @@ Use these utilities in all analyzers. **Do not create local span extraction or e
 
 ## Diagnostic ID Allocation
 
-IDs follow the pattern `KS<NNN>`:
-- **KS001–KS099**: Control flow (exhaustive return, dead code, guard-let divergence)
-- **KS100–KS199**: Type checking (branch mismatch, condition not bool, argument type)
-- **KS200–KS299**: Mutability and assignment (immutable assignment, captured variable)
-- **KS300–KS399**: Patterns (exhaustiveness, refutable in let, irrefutable in match)
-- **KS400–KS499**: Declarations (conformance, duplicates, cycles, visibility)
-- **KS500–KS599**: Memory semantics (use-after-move, cloneable fields)
-- **KS600–KS699**: Functions and closures (missing body, wrong arity, FFI safety)
+IDs follow the pattern `E<NNN>`:
+- **E001–E099**: Control flow (exhaustive return, dead code, guard-let divergence)
+- **E100–E199**: Type checking (branch mismatch, condition not bool, argument type)
+- **E200–E299**: Mutability and assignment (immutable assignment, captured variable)
+- **E300–E399**: Patterns (exhaustiveness, refutable in let, irrefutable in match)
+- **E400–E499**: Declarations (conformance, duplicates, cycles, visibility)
+- **E500–E599**: Memory semantics (use-after-move, cloneable fields)
+- **E600–E699**: Functions and closures (missing body, wrong arity, FFI safety)
 
 Current allocations:
-- KS001: `missing_return` (exhaustive_return.rs)
-- KS002: `unreachable_code` (dead_code.rs)
+- E001: `missing_return` (exhaustive_return.rs)
+- E002: `unreachable_code` (dead_code.rs)
 
 ## Key Conventions
 

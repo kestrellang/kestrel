@@ -12,7 +12,7 @@ Source → Lex → Parse → AST Build → Name Res → HIR Lower → Type Infer
 
 Two consumers depend on this crate:
 
-- **`kestrel-analyze`** — runs exhaustiveness/redundancy checks, emits KS304–KS307 diagnostics
+- **`kestrel-analyze`** — runs exhaustiveness/redundancy checks, emits E304–E307 diagnostics
 - **Execution graph lowering** — compiles patterns to decision trees for codegen
 
 ## Data Flow

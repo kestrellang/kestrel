@@ -534,7 +534,7 @@ pub struct AnalyzeSummary {
     pub errors: usize,
     pub warnings: usize,
     pub info: usize,
-    /// Count per descriptor ID (e.g., "KS001" → 3).
+    /// Count per descriptor ID (e.g., "E001" → 3).
     pub by_check: HashMap<&'static str, usize>,
     /// All diagnostics produced.
     pub diagnostics: Vec<kestrel_analyze::AnalyzeDiagnostic>,

@@ -5,7 +5,7 @@
 //!
 //! ## Diagnostics
 //!
-//! ### KS422 -- `disallowed_enum_conformance` (Error, Correctness)
+//! ### E422 -- `disallowed_enum_conformance` (Error, Correctness)
 //!
 //! **Message:** "enum '{enum_name}' cannot conform to protocol '{protocol_name}'"
 //!
@@ -26,7 +26,7 @@ use kestrel_hir::builtin::BuiltinKind;
 use kestrel_name_res::{EntityBuiltin, ResolveTypePath, TypeResolution};
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
-    id: "KS422",
+    id: "E422",
     name: "disallowed_enum_conformance",
     default_severity: Severity::Error,
     category: Category::Correctness,

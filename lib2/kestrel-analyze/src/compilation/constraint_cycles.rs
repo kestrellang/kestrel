@@ -18,7 +18,7 @@
 //!
 //! ## Diagnostics
 //!
-//! ### KS451 -- `circular_constraint` (Error, Correctness)
+//! ### E451 -- `circular_constraint` (Error, Correctness)
 //!
 //! **Message:** "circular constraint dependency: '{origin}' -> {cycle}"
 //!
@@ -37,7 +37,7 @@ use crate::diagnostic::*;
 use crate::traits::{CompilationCheck, Describe};
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
-    id: "KS451",
+    id: "E451",
     name: "circular_constraint",
     default_severity: Severity::Error,
     category: Category::Correctness,

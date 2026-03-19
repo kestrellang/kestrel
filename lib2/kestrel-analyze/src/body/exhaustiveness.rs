@@ -8,7 +8,7 @@
 //!
 //! ## Diagnostics
 //!
-//! ### KS304 — `empty_match` (Error, Correctness)
+//! ### E304 — `empty_match` (Error, Correctness)
 //!
 //! **Message:** "empty match on inhabited type"
 //!
@@ -17,7 +17,7 @@
 //!   - Span source: `util::expr_span` on the match `HirExprId`
 //!   - Message: "match has no arms"
 //!
-//! ### KS305 — `non_exhaustive_match` (Error, Correctness)
+//! ### E305 — `non_exhaustive_match` (Error, Correctness)
 //!
 //! **Message:** "non-exhaustive match: missing {witnesses}"
 //!
@@ -28,7 +28,7 @@
 //!
 //! **Notes:** "help: add a wildcard pattern '_' or cover the missing cases"
 //!
-//! ### KS306 — `unreachable_pattern` (Warning, Correctness)
+//! ### E306 — `unreachable_pattern` (Warning, Correctness)
 //!
 //! **Message:** "unreachable pattern"
 //!
@@ -37,7 +37,7 @@
 //!   - Span source: `util::pat_span` on the `HirPatId`
 //!   - Message: "this pattern is unreachable"
 //!
-//! ### KS307 — `overlapping_range` (Warning, Correctness)
+//! ### E307 — `overlapping_range` (Warning, Correctness)
 //!
 //! **Message:** "overlapping range patterns"
 //!
@@ -57,25 +57,25 @@ use kestrel_pattern_matching as pattern;
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[
     DiagnosticDescriptor {
-        id: "KS304",
+        id: "E304",
         name: "empty_match",
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
     DiagnosticDescriptor {
-        id: "KS305",
+        id: "E305",
         name: "non_exhaustive_match",
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
     DiagnosticDescriptor {
-        id: "KS306",
+        id: "E306",
         name: "unreachable_pattern",
         default_severity: Severity::Warning,
         category: Category::Correctness,
     },
     DiagnosticDescriptor {
-        id: "KS307",
+        id: "E307",
         name: "overlapping_range",
         default_severity: Severity::Warning,
         category: Category::Correctness,
@@ -115,7 +115,7 @@ impl BodyCheck for ExhaustivenessAnalyzer {
                 continue;
             };
 
-            // KS304: empty match on inhabited type
+            // E304: empty match on inhabited type
             if arms.is_empty() {
                 let is_never = matches!(scrutinee_ty, ResolvedTy::Never);
                 if !is_never {
@@ -137,7 +137,7 @@ impl BodyCheck for ExhaustivenessAnalyzer {
             // Run full exhaustiveness analysis via pattern module
             let result = pattern::check_match(cx.hir, cx.query, scrutinee_ty, arms);
 
-            // KS305: non-exhaustive match
+            // E305: non-exhaustive match
             if !result.is_exhaustive {
                 let witnesses: Vec<String> =
                     result.missing_patterns.iter().map(|w| w.to_string()).collect();
@@ -158,7 +158,7 @@ impl BodyCheck for ExhaustivenessAnalyzer {
                 });
             }
 
-            // KS306: unreachable patterns
+            // E306: unreachable patterns
             for &arm_idx in &result.redundant_arms {
                 if let Some(arm) = arms.get(arm_idx) {
                     diags.push(AnalyzeDiagnostic {
@@ -175,7 +175,7 @@ impl BodyCheck for ExhaustivenessAnalyzer {
                 }
             }
 
-            // KS307: overlapping ranges
+            // E307: overlapping ranges
             for &arm_idx in &result.overlapping_arms {
                 if let Some(arm) = arms.get(arm_idx) {
                     diags.push(AnalyzeDiagnostic {

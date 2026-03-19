@@ -7,7 +7,7 @@
 //!
 //! ## Diagnostics
 //!
-//! ### KS003 — `guard_let_else_must_diverge` (Error, Correctness)
+//! ### E003 — `guard_let_else_must_diverge` (Error, Correctness)
 //!
 //! **Message:** "guard-let else block must diverge (return, break, continue, or throw)"
 //!
@@ -25,7 +25,7 @@ use crate::util;
 use kestrel_hir::body::*;
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
-    id: "KS003",
+    id: "E003",
     name: "guard_let_else_must_diverge",
     default_severity: Severity::Error,
     category: Category::Correctness,

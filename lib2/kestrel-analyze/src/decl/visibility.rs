@@ -33,11 +33,11 @@
 //! 3. For type aliases: check the aliased type
 //! 4. For fields: check the field type
 //! 5. Recursively walk type arguments for generic types
-//! 6. Emit KS430-433 for each less-visible referenced type
+//! 6. Emit E430-433 for each less-visible referenced type
 //!
 //! ## Diagnostics
 //!
-//! ### KS430 -- `return_type_less_visible` (Error, Correctness)
+//! ### E430 -- `return_type_less_visible` (Error, Correctness)
 //!
 //! **Message:** "public function '{name}' has a {type_visibility} return type"
 //!
@@ -48,7 +48,7 @@
 //!
 //! **Notes:** (none)
 //!
-//! ### KS431 -- `parameter_type_less_visible` (Error, Correctness)
+//! ### E431 -- `parameter_type_less_visible` (Error, Correctness)
 //!
 //! **Message:** "public function '{name}' has a {type_visibility} parameter type"
 //!
@@ -59,7 +59,7 @@
 //!
 //! **Notes:** (none)
 //!
-//! ### KS432 -- `aliased_type_less_visible` (Error, Correctness)
+//! ### E432 -- `aliased_type_less_visible` (Error, Correctness)
 //!
 //! **Message:** "public type alias '{name}' aliases a {type_visibility} type"
 //!
@@ -70,7 +70,7 @@
 //!
 //! **Notes:** (none)
 //!
-//! ### KS433 -- `field_type_less_visible` (Error, Correctness)
+//! ### E433 -- `field_type_less_visible` (Error, Correctness)
 //!
 //! **Message:** "public field '{name}' has a {type_visibility} type"
 //!
@@ -88,25 +88,25 @@ use kestrel_ast_builder::NodeKind;
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[
     DiagnosticDescriptor {
-        id: "KS430",
+        id: "E430",
         name: "return_type_less_visible",
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
     DiagnosticDescriptor {
-        id: "KS431",
+        id: "E431",
         name: "parameter_type_less_visible",
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
     DiagnosticDescriptor {
-        id: "KS432",
+        id: "E432",
         name: "aliased_type_less_visible",
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
     DiagnosticDescriptor {
-        id: "KS433",
+        id: "E433",
         name: "field_type_less_visible",
         default_severity: Severity::Error,
         category: Category::Correctness,

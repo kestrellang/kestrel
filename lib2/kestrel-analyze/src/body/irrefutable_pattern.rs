@@ -7,7 +7,7 @@
 //!
 //! ## Diagnostics
 //!
-//! ### KS302 — `irrefutable_if_let` (Warning, Correctness)
+//! ### E302 — `irrefutable_if_let` (Warning, Correctness)
 //!
 //! **Message:** "irrefutable pattern in if-let condition"
 //!
@@ -18,7 +18,7 @@
 //!
 //! **Notes:** "help: use a plain 'let' binding instead"
 //!
-//! ### KS303 — `irrefutable_match_arm` (Warning, Correctness)
+//! ### E303 — `irrefutable_match_arm` (Warning, Correctness)
 //!
 //! **Message:** "irrefutable pattern in match arm makes {n} subsequent arms unreachable"
 //!
@@ -37,13 +37,13 @@ use kestrel_hir::body::*;
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[
     DiagnosticDescriptor {
-        id: "KS302",
+        id: "E302",
         name: "irrefutable_if_let",
         default_severity: Severity::Warning,
         category: Category::Correctness,
     },
     DiagnosticDescriptor {
-        id: "KS303",
+        id: "E303",
         name: "irrefutable_match_arm",
         default_severity: Severity::Warning,
         category: Category::Correctness,
@@ -75,10 +75,10 @@ impl BodyCheck for IrrefutablePatternAnalyzer {
                 continue;
             }
 
-            // TODO: KS302 (if-let) — needs a marker to distinguish desugared if-let
+            // TODO: E302 (if-let) — needs a marker to distinguish desugared if-let
             // from regular match. Skip for now.
 
-            // KS303: check match arms for irrefutable patterns before the last arm
+            // E303: check match arms for irrefutable patterns before the last arm
             if arms.len() <= 1 {
                 continue;
             }

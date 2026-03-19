@@ -11,7 +11,7 @@
 //!
 //! ## Diagnostics
 //!
-//! ### KS005 — `uninitialized_fields` (Error, Correctness)
+//! ### E005 — `uninitialized_fields` (Error, Correctness)
 //!
 //! **Message:** "initializer does not initialize all fields: {field_list}"
 //!
@@ -22,7 +22,7 @@
 //!
 //! **Notes:** (none)
 //!
-//! ### KS006 — `let_field_assigned_twice` (Error, Correctness)
+//! ### E006 — `let_field_assigned_twice` (Error, Correctness)
 //!
 //! **Message:** "cannot assign to 'let' field '{name}' more than once"
 //!
@@ -33,7 +33,7 @@
 //!
 //! **Notes:** (none)
 //!
-//! ### KS007 — `field_read_before_assigned` (Error, Correctness)
+//! ### E007 — `field_read_before_assigned` (Error, Correctness)
 //!
 //! **Message:** "cannot read field '{name}' before it is initialized"
 //!
@@ -44,7 +44,7 @@
 //!
 //! **Notes:** (none)
 //!
-//! ### KS008 — `self_used_before_initialized` (Error, Correctness)
+//! ### E008 — `self_used_before_initialized` (Error, Correctness)
 //!
 //! **Message:** "cannot use 'self' before all fields are initialized"
 //!
@@ -55,7 +55,7 @@
 //!
 //! **Notes:** "uninitialized fields: {list}"
 //!
-//! ### KS009 — `return_before_fully_initialized` (Error, Correctness)
+//! ### E009 — `return_before_fully_initialized` (Error, Correctness)
 //!
 //! **Message:** "cannot return before all fields are initialized"
 //!
@@ -78,31 +78,31 @@ use kestrel_type_infer::result::ResolvedTy;
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[
     DiagnosticDescriptor {
-        id: "KS005",
+        id: "E005",
         name: "uninitialized_fields",
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
     DiagnosticDescriptor {
-        id: "KS006",
+        id: "E006",
         name: "let_field_assigned_twice",
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
     DiagnosticDescriptor {
-        id: "KS007",
+        id: "E007",
         name: "field_read_before_assigned",
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
     DiagnosticDescriptor {
-        id: "KS008",
+        id: "E008",
         name: "self_used_before_initialized",
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
     DiagnosticDescriptor {
-        id: "KS009",
+        id: "E009",
         name: "return_before_fully_initialized",
         default_severity: Severity::Error,
         category: Category::Correctness,

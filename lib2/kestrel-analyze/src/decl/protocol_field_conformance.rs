@@ -27,11 +27,11 @@
 //! 2. For each conformed protocol, query `EntityBuiltin` to check `requires_fields_conform`
 //! 3. For each such protocol, iterate all Field children
 //! 4. Resolve each field's type and check if it conforms to the protocol
-//! 5. Emit KS420 for each non-conforming field
+//! 5. Emit E420 for each non-conforming field
 //!
 //! ## Diagnostics
 //!
-//! ### KS420 -- `fields_not_conforming_to_protocol` (Error, Correctness)
+//! ### E420 -- `fields_not_conforming_to_protocol` (Error, Correctness)
 //!
 //! **Message:** "{kind} '{type_name}' conforms to '{protocol}' but field '{field_name}' of type '{field_type}' does not"
 //!
@@ -52,7 +52,7 @@ use crate::traits::{DeclCheck, Describe};
 use kestrel_ast_builder::NodeKind;
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
-    id: "KS420",
+    id: "E420",
     name: "fields_not_conforming_to_protocol",
     default_severity: Severity::Error,
     category: Category::Correctness,

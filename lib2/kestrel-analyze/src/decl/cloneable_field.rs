@@ -6,7 +6,7 @@
 //!
 //! ## Diagnostics
 //!
-//! ### KS502 -- `cloneable_field_requires_conformance` (Error, Correctness)
+//! ### E502 -- `cloneable_field_requires_conformance` (Error, Correctness)
 //!
 //! **Message:** "{kind} '{type_name}' has Cloneable field '{field_name}' but does not conform to Cloneable"
 //!
@@ -29,7 +29,7 @@ use kestrel_hir_lower::LowerTypeAnnotation;
 use kestrel_name_res::{ConformingProtocols, ResolveBuiltin};
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
-    id: "KS502",
+    id: "E502",
     name: "cloneable_field_requires_conformance",
     default_severity: Severity::Error,
     category: Category::Correctness,

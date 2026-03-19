@@ -3,7 +3,7 @@
 //! Implements Maranget's pattern matrix algorithm for analyzing and compiling
 //! Kestrel match expressions. Used by two consumers:
 //!
-//! - **`kestrel-analyze`** — exhaustiveness diagnostics (KS304–KS307)
+//! - **`kestrel-analyze`** — exhaustiveness diagnostics (E304–E307)
 //! - **Execution graph lowering** — decision tree compilation for codegen
 //!
 //! # Capabilities

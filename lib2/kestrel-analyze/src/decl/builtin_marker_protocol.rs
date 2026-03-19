@@ -8,7 +8,7 @@
 //!
 //! ## Diagnostics
 //!
-//! ### KS419 -- `builtin_must_be_marker` (Error, Correctness)
+//! ### E419 -- `builtin_must_be_marker` (Error, Correctness)
 //!
 //! **Message:** "@builtin(.{feature}) must be a marker protocol (no required methods or types)"
 //!
@@ -28,7 +28,7 @@ use kestrel_hir::builtin::BuiltinKind;
 use kestrel_name_res::EntityBuiltin;
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
-    id: "KS419",
+    id: "E419",
     name: "builtin_must_be_marker",
     default_severity: Severity::Error,
     category: Category::Correctness,

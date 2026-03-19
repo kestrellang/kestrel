@@ -6,7 +6,7 @@
 //!
 //! ## Diagnostics
 //!
-//! ### KS004 — `uninitialized_variable_access` (Error, Correctness)
+//! ### E004 — `uninitialized_variable_access` (Error, Correctness)
 //!
 //! **Message:** "access to uninitialized variable '{name}'"
 //!
@@ -28,7 +28,7 @@ use kestrel_hir::res::LocalId;
 use kestrel_type_infer::result::ResolvedTy;
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
-    id: "KS004",
+    id: "E004",
     name: "uninitialized_variable_access",
     default_severity: Severity::Error,
     category: Category::Correctness,

@@ -6,7 +6,7 @@
 //!
 //! ## Diagnostics
 //!
-//! ### KS417 -- `protocol_method_has_body` (Error, Correctness)
+//! ### E417 -- `protocol_method_has_body` (Error, Correctness)
 //!
 //! **Message:** "protocol method '{method}' in '{protocol}' cannot have a body"
 //!
@@ -24,7 +24,7 @@ use crate::util;
 use kestrel_ast_builder::{Body, NodeKind, Valued};
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
-    id: "KS417",
+    id: "E417",
     name: "protocol_method_has_body",
     default_severity: Severity::Error,
     category: Category::Correctness,

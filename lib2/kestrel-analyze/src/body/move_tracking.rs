@@ -6,7 +6,7 @@
 //!
 //! ## Diagnostics
 //!
-//! ### KS500 — `use_after_move` (Error, Correctness)
+//! ### E500 — `use_after_move` (Error, Correctness)
 //!
 //! **Message:** "use of moved value '{name}'"
 //!
@@ -20,7 +20,7 @@
 //!
 //! **Notes:** "non-copyable values can only be used once"
 //!
-//! ### KS501 — `maybe_moved` (Error, Correctness)
+//! ### E501 — `maybe_moved` (Error, Correctness)
 //!
 //! **Message:** "value '{name}' may have been moved"
 //!
@@ -40,13 +40,13 @@ use crate::traits::{BodyCheck, Describe};
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[
     DiagnosticDescriptor {
-        id: "KS500",
+        id: "E500",
         name: "use_after_move",
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
     DiagnosticDescriptor {
-        id: "KS501",
+        id: "E501",
         name: "maybe_moved",
         default_severity: Severity::Error,
         category: Category::Correctness,
@@ -77,8 +77,8 @@ impl BodyCheck for MoveTrackingAnalyzer {
         //    - If/else: union of moves (if moved in either branch, maybe-moved)
         //    - Match: union of moves across arms
         //    - Loop: moves in body count as moved
-        // 5. Report KS500 when a definitely-moved value is used again
-        // 6. Report KS501 when a maybe-moved (conditionally moved) value is used
+        // 5. Report E500 when a definitely-moved value is used again
+        // 6. Report E501 when a maybe-moved (conditionally moved) value is used
         vec![]
     }
 }

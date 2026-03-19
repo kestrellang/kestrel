@@ -11,7 +11,7 @@
 //!
 //! ## Diagnostics
 //!
-//! ### KS434 -- `duplicate_type_parameter` (Error, Correctness)
+//! ### E434 -- `duplicate_type_parameter` (Error, Correctness)
 //!
 //! **Message:** "duplicate type parameter name '{name}'"
 //!
@@ -25,7 +25,7 @@
 //!
 //! **Notes:** (none)
 //!
-//! ### KS435 -- `type_parameter_default_ordering` (Error, Correctness)
+//! ### E435 -- `type_parameter_default_ordering` (Error, Correctness)
 //!
 //! **Message:** "type parameter '{without}' without default follows '{with_default}' which has a default"
 //!
@@ -40,7 +40,7 @@
 //! **Notes:**
 //! - "type parameters with defaults must come after those without"
 //!
-//! ### KS436 -- `non_protocol_bound` (Error, Correctness)
+//! ### E436 -- `non_protocol_bound` (Error, Correctness)
 //!
 //! **Message:** "bound '{type_name}' is a {type_kind}, not a protocol"
 //!
@@ -52,7 +52,7 @@
 //! **Notes:**
 //! - "only protocols can be used as type bounds in where clauses"
 //!
-//! ### KS437 -- `undeclared_type_parameter_in_where` (Error, Correctness)
+//! ### E437 -- `undeclared_type_parameter_in_where` (Error, Correctness)
 //!
 //! **Message:** "undeclared type parameter '{name}' in where clause"
 //!
@@ -75,25 +75,25 @@ use kestrel_span2::Span;
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[
     DiagnosticDescriptor {
-        id: "KS434",
+        id: "E434",
         name: "duplicate_type_parameter",
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
     DiagnosticDescriptor {
-        id: "KS435",
+        id: "E435",
         name: "type_parameter_default_ordering",
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
     DiagnosticDescriptor {
-        id: "KS436",
+        id: "E436",
         name: "non_protocol_bound",
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
     DiagnosticDescriptor {
-        id: "KS437",
+        id: "E437",
         name: "undeclared_type_parameter_in_where",
         default_severity: Severity::Error,
         category: Category::Correctness,
@@ -136,7 +136,7 @@ impl DeclCheck for GenericsAnalyzer {
         check_duplicate_type_params(cx, &type_params.0, &mut diags);
         check_default_ordering(cx, &type_params.0, &mut diags);
 
-        // TODO: Where clause bound validation (KS436, KS437) requires resolved types.
+        // TODO: Where clause bound validation (E436, E437) requires resolved types.
         // The WhereClause component contains AstType entries that need name resolution
         // to determine whether a bound is a protocol, struct, or type parameter.
         // Shell for now — those checks will be added once type resolution is available.
@@ -145,7 +145,7 @@ impl DeclCheck for GenericsAnalyzer {
     }
 }
 
-/// Check for duplicate type parameter names (KS434).
+/// Check for duplicate type parameter names (E434).
 fn check_duplicate_type_params(
     cx: &DeclContext<'_>,
     params: &[kestrel_hecs::Entity],
@@ -182,7 +182,7 @@ fn check_duplicate_type_params(
     }
 }
 
-/// Check that type parameters with defaults come after those without (KS435).
+/// Check that type parameters with defaults come after those without (E435).
 /// A TypeParameter has a default if it has a TypeAnnotation component.
 fn check_default_ordering(
     cx: &DeclContext<'_>,

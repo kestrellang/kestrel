@@ -12,7 +12,7 @@
 //!
 //! ## Diagnostics
 //!
-//! ### KS421 -- `missing_parent_protocol_conformance` (Error, Correctness)
+//! ### E421 -- `missing_parent_protocol_conformance` (Error, Correctness)
 //!
 //! **Message:** "'{type_name}' conforms to '{child_protocol}' but not its parent '{parent_protocol}'"
 //!
@@ -34,7 +34,7 @@ use kestrel_hecs::Entity;
 use kestrel_name_res::{ConformingProtocols, ResolveTypePath, TypeResolution};
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
-    id: "KS421",
+    id: "E421",
     name: "missing_parent_protocol_conformance",
     default_severity: Severity::Error,
     category: Category::Correctness,

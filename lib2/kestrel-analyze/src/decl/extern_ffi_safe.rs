@@ -5,7 +5,7 @@
 //!
 //! ## Diagnostics
 //!
-//! ### KS605 -- `type_not_ffi_safe` (Error, Correctness)
+//! ### E605 -- `type_not_ffi_safe` (Error, Correctness)
 //!
 //! **Message:** "{context} type '{ty}' does not conform to FFISafe"
 //!
@@ -28,7 +28,7 @@ use kestrel_hir_lower::LowerCallableTypes;
 use kestrel_name_res::{ConformingProtocols, ResolveBuiltin};
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
-    id: "KS605",
+    id: "E605",
     name: "type_not_ffi_safe",
     default_severity: Severity::Error,
     category: Category::Correctness,

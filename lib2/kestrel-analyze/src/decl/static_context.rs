@@ -6,7 +6,7 @@
 //!
 //! ## Diagnostics
 //!
-//! ### KS418 -- `static_in_wrong_context` (Error, Correctness)
+//! ### E418 -- `static_in_wrong_context` (Error, Correctness)
 //!
 //! **Message:** "'{name}' cannot be static in this context"
 //!
@@ -24,7 +24,7 @@ use crate::util;
 use kestrel_ast_builder::{NodeKind, Static};
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
-    id: "KS418",
+    id: "E418",
     name: "static_in_wrong_context",
     default_severity: Severity::Error,
     category: Category::Correctness,

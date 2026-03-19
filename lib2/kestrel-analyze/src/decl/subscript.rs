@@ -6,7 +6,7 @@
 //!
 //! ## Diagnostics
 //!
-//! ### KS607 -- `subscript_missing_parameters` (Error, Correctness)
+//! ### E607 -- `subscript_missing_parameters` (Error, Correctness)
 //!
 //! **Message:** "subscript must have at least one parameter"
 //!
@@ -19,7 +19,7 @@
 //! - "Subscripts provide indexed access and require parameters."
 //! - "Use a computed property instead if no parameters are needed."
 //!
-//! ### KS608 -- `subscript_missing_body` (Error, Correctness)
+//! ### E608 -- `subscript_missing_body` (Error, Correctness)
 //!
 //! **Message:** "subscript must have a body"
 //!
@@ -39,13 +39,13 @@ use kestrel_ast_builder::{Body, Callable, NodeKind, Valued};
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[
     DiagnosticDescriptor {
-        id: "KS607",
+        id: "E607",
         name: "subscript_missing_parameters",
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
     DiagnosticDescriptor {
-        id: "KS608",
+        id: "E608",
         name: "subscript_missing_body",
         default_severity: Severity::Error,
         category: Category::Correctness,

@@ -6,7 +6,7 @@
 //!
 //! ## Diagnostics
 //!
-//! ### KS606 -- `function_missing_body` (Error, Correctness)
+//! ### E606 -- `function_missing_body` (Error, Correctness)
 //!
 //! **Message:** "function '{name}' requires a body"
 //!
@@ -24,7 +24,7 @@ use crate::util;
 use kestrel_ast_builder::{Attributes, Body, Intrinsic, NodeKind, Valued};
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
-    id: "KS606",
+    id: "E606",
     name: "function_missing_body",
     default_severity: Severity::Error,
     category: Category::Correctness,
