@@ -222,6 +222,11 @@ impl<'a> QueryContext<'a> {
     }
 
     /// Push a value into an accumulator (e.g. diagnostics).
+    ///
+    /// Prefer `ctx.throw(error)` (via the `ThrowDiagnostic` extension trait
+    /// in kestrel-compiler2) for reporting diagnostics — it enforces that
+    /// errors go through `ToDiagnostic` for consistent formatting.
+    /// Use `accumulate` directly only for non-diagnostic side-effects.
     pub fn accumulate<T: Clone + 'static>(&self, value: T) {
         // Associate with the current active query
         let active = self.active.borrow();

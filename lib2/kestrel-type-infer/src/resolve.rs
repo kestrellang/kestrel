@@ -192,7 +192,10 @@ impl TypeResolver for WorldResolver<'_> {
         // from both extend Equatable and extend Comparable). These are equivalent
         // default implementations, so we deduplicate by label signature.
         if all_candidates.is_empty() {
-            let protocols = self.collect_conforming_protocols(*entity);
+            let protocols = self.ctx.query(kestrel_name_res::ConformingProtocols {
+                entity: *entity,
+                root: self.root,
+            });
             let mut proto_candidates = Vec::new();
             for proto in &protocols {
                 let proto_extensions = self.ctx.query(kestrel_name_res::ExtensionsFor {
@@ -304,10 +307,11 @@ impl TypeResolver for WorldResolver<'_> {
                     let bound_protocols = self.collect_assoc_type_protocol_bounds(*entity);
                     return bound_protocols.contains(&protocol);
                 }
-                // Walk the full transitive conformance chain: direct conformances,
-                // extension conformances, and conformances inherited through protocols
-                // (e.g., Int64: Comparable → extend Comparable: Less[Self] → Less).
-                let all_protocols = self.collect_conforming_protocols(*entity);
+                // Walk the full transitive conformance chain (memoized query)
+                let all_protocols = self.ctx.query(kestrel_name_res::ConformingProtocols {
+                    entity: *entity,
+                    root: self.root,
+                });
                 all_protocols.contains(&protocol)
             }
             TyKind::Param { entity } => {
@@ -733,45 +737,6 @@ impl WorldResolver<'_> {
             }
             _ => None,
         }
-    }
-
-    /// Collect all protocol entities that a type conforms to (direct + via extensions),
-    /// walking the protocol inheritance hierarchy transitively.
-    ///
-    /// Also checks extensions of discovered protocols, so transitive conformances
-    /// like `Int64: Comparable → extend Comparable: Less[Self]` correctly include `Less`.
-    fn collect_conforming_protocols(&self, entity: Entity) -> Vec<Entity> {
-        let mut protocols = Vec::new();
-        let mut visited = std::collections::HashSet::new();
-
-        // Direct conformances on the type
-        self.gather_protocol_conformances(entity, &mut protocols, &mut visited);
-
-        // Conformances declared on extensions of this type
-        let extensions = self.ctx.query(kestrel_name_res::ExtensionsFor {
-            target: entity,
-            root: self.root,
-        });
-        for ext in &extensions {
-            self.gather_protocol_conformances(*ext, &mut protocols, &mut visited);
-        }
-
-        // Iteratively check extensions of discovered protocols for additional conformances.
-        // E.g., `extend Comparable: Less[Self]` adds Less through a protocol extension.
-        let mut i = 0;
-        while i < protocols.len() {
-            let proto = protocols[i];
-            let proto_extensions = self.ctx.query(kestrel_name_res::ExtensionsFor {
-                target: proto,
-                root: self.root,
-            });
-            for ext in &proto_extensions {
-                self.gather_protocol_conformances(*ext, &mut protocols, &mut visited);
-            }
-            i += 1;
-        }
-
-        protocols
     }
 
     /// Gather protocols from an entity's Conformances, recursively walking inherited protocols.

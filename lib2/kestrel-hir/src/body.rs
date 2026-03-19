@@ -37,6 +37,9 @@ pub struct HirBody {
     pub statements: Vec<HirStmtId>,
     /// Trailing expression (the block's value), if any
     pub tail_expr: Option<HirExprId>,
+    /// Statements that originated from guard-let desugaring.
+    /// Used by the guard-let divergence analyzer to check that the else block diverges.
+    pub guard_let_stmts: Vec<HirStmtId>,
 }
 
 /// A nested code block (if/loop/match arm bodies, desugared blocks).

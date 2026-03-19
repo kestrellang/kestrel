@@ -2,7 +2,7 @@ use kestrel_hecs::{Entity, QueryContext, QueryFn};
 use kestrel_parser2::{ParseResult, parse_source_file_from_source};
 
 use crate::components::SourceText;
-use crate::diagnostic::{Diagnostic, Severity};
+use crate::diagnostic::{self, ThrowDiagnostic};
 use crate::queries::LexFile;
 
 /// Parse a source file entity into a syntax tree.
@@ -34,10 +34,9 @@ impl QueryFn for ParseFile {
         // Accumulate parse errors as diagnostics
         for error in &result.errors {
             if let Some(span) = &error.span {
-                ctx.accumulate(Diagnostic {
-                    span: span.clone(),
+                ctx.throw(diagnostic::ParseError {
                     message: error.message.clone(),
-                    severity: Severity::Error,
+                    span: span.clone(),
                 });
             }
         }

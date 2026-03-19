@@ -741,6 +741,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "kestrel-analyze"
+version = "0.15.0"
+dependencies = [
+ "kestrel-ast",
+ "kestrel-ast-builder",
+ "kestrel-hecs",
+ "kestrel-hir",
+ "kestrel-hir-lower",
+ "kestrel-lexer2",
+ "kestrel-name-res",
+ "kestrel-parser2",
+ "kestrel-pattern-matching",
+ "kestrel-span2",
+ "kestrel-type-infer",
+]
+
+[[package]]
 name = "kestrel-ast"
 version = "0.15.0"
 dependencies = [
@@ -807,6 +824,8 @@ dependencies = [
 name = "kestrel-compiler2"
 version = "0.15.0"
 dependencies = [
+ "codespan-reporting",
+ "kestrel-analyze",
  "kestrel-ast-builder",
  "kestrel-debug",
  "kestrel-hecs",
@@ -815,6 +834,7 @@ dependencies = [
  "kestrel-lexer2",
  "kestrel-name-res",
  "kestrel-parser2",
+ "kestrel-reporting2",
  "kestrel-span2",
  "kestrel-syntax-tree2",
  "kestrel-type-infer",
@@ -947,6 +967,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "kestrel-pattern-matching"
+version = "0.15.0"
+dependencies = [
+ "kestrel-ast",
+ "kestrel-ast-builder",
+ "kestrel-hecs",
+ "kestrel-hir",
+ "kestrel-span2",
+ "kestrel-type-infer",
+]
+
+[[package]]
 name = "kestrel-prelude"
 version = "0.15.0"
 
@@ -956,6 +988,13 @@ version = "0.15.0"
 dependencies = [
  "codespan-reporting",
  "kestrel-span",
+]
+
+[[package]]
+name = "kestrel-reporting2"
+version = "0.15.0"
+dependencies = [
+ "codespan-reporting",
 ]
 
 [[package]]

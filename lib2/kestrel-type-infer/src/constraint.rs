@@ -58,6 +58,10 @@ pub enum Constraint {
         args: Vec<CallArg>,
         result: TyVar,
         expr: HirExprId,
+        /// True when this came from a call site (MethodCall/ProtocolCall),
+        /// false for plain field/property access. Needed to distinguish
+        /// `self.f()` (call zero-arg function field) from `self.f` (read field).
+        is_call: bool,
         span: Span,
     },
 
@@ -93,6 +97,17 @@ pub enum Constraint {
         args: Vec<CallArg>,
         result: TyVar,
         expr: HirExprId,
+        span: Span,
+    },
+
+    /// `.Name(bindings)` in pattern position — implicit variant destructuring.
+    /// Deferred until scrutinee type is concrete, then looks up the case by name
+    /// and equates each binding TyVar with the corresponding payload type.
+    ImplicitPat {
+        scrutinee: TyVar,
+        name: String,
+        /// TyVars for each sub-pattern binding (one per payload field).
+        arg_tys: Vec<TyVar>,
         span: Span,
     },
 }

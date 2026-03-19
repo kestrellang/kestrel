@@ -1,0 +1,15 @@
+[package]
+name = "kestrel-pattern-matching"
+version.workspace = true
+edition.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+kestrel-hecs = { path = "../kestrel-hecs" }
+kestrel-ast = { path = "../kestrel-ast" }
+kestrel-ast-builder = { path = "../kestrel-ast-builder" }
+kestrel-hir = { path = "../kestrel-hir" }
+kestrel-type-infer = { path = "../kestrel-type-infer" }
+kestrel-span2 = { path = "../kestrel-span" }

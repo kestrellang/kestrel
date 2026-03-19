@@ -99,8 +99,9 @@ fn try_solve(ctx: &mut InferCtx<'_>, c: Constraint) -> SolveResult {
             args,
             result,
             expr,
+            is_call,
             span,
-        } => solve_member(ctx, receiver, &name, args, result, expr, span),
+        } => solve_member(ctx, receiver, &name, args, result, expr, is_call, span),
         Constraint::OverloadedCall {
             candidates,
             type_args,
@@ -117,6 +118,12 @@ fn try_solve(ctx: &mut InferCtx<'_>, c: Constraint) -> SolveResult {
             expr,
             span,
         } => solve_implicit(ctx, expected, &name, args, result, expr, span),
+        Constraint::ImplicitPat {
+            scrutinee,
+            name,
+            arg_tys,
+            span,
+        } => solve_implicit_pat(ctx, scrutinee, &name, arg_tys, span),
     }
 }
 
@@ -352,13 +359,13 @@ fn solve_call(
                 // solve_member will equate result with (), then we equate
                 // result with callee to fix it.
                 let init_result = ctx.fresh();
-                let res = solve_member(ctx, callee, "init", args, init_result, expr, span.clone());
+                let res = solve_member(ctx, callee, "init", args, init_result, expr, true, span.clone());
                 // The result of T() is T, not the init's return type
                 ctx.equal(result, callee, span);
                 res
             } else {
                 // Instance subscript call (e.g., dict(key))
-                solve_member(ctx, callee, "(subscript)", args, result, expr, span)
+                solve_member(ctx, callee, "(subscript)", args, result, expr, true, span)
             }
         }
         _ => {
@@ -687,6 +694,7 @@ fn solve_member(
     args: Vec<CallArg>,
     result: TyVar,
     expr: kestrel_hir::body::HirExprId,
+    is_call: bool,
     span: Span,
 ) -> SolveResult {
     let resolved = ctx.resolve(receiver);
@@ -705,6 +713,7 @@ fn solve_member(
             args,
             result,
             expr,
+            is_call,
             span,
         });
     };
@@ -745,14 +754,16 @@ fn solve_member(
         }
     };
 
-    // Field/property with call args → field access + call on the field value.
-    // Handles both function-typed fields (e.g., `self.transform(item)`) and
-    // subscriptable fields (e.g., `self.data(unchecked: i)` where data is Array[T]).
+    // Field/property used as a call → field access + call on the field value.
+    // Handles both function-typed fields (e.g., `self.transform(item)`, `self.separator()`)
+    // and subscriptable fields (e.g., `self.data(unchecked: i)` where data is Array[T]).
     // The Call constraint dispatches correctly: Function → direct call, Named → subscript.
+    // Triggers when: (a) args are provided, or (b) is_call=true (from MethodCall syntax).
+    // Case (b) handles zero-arg function fields like `separator: () -> Item`.
     if matches!(
         resolution.kind,
         crate::resolve::MemberKind::Field { .. } | crate::resolve::MemberKind::ComputedProperty { .. }
-    ) && !args.is_empty()
+    ) && (is_call || !args.is_empty())
     {
         ctx.resolutions.insert(expr, resolution.entity);
         // Get the field's type (with struct type param substitution)
@@ -982,6 +993,83 @@ fn solve_implicit(
             span,
         }),
     }
+}
+
+/// Solve an implicit variant pattern: `.CaseName(bindings)` in pattern position.
+/// Deferred until the scrutinee type is concrete, then looks up the enum case
+/// by name and equates each binding TyVar with the substituted payload type.
+fn solve_implicit_pat(
+    ctx: &mut InferCtx<'_>,
+    scrutinee: TyVar,
+    name: &str,
+    arg_tys: Vec<TyVar>,
+    span: Span,
+) -> SolveResult {
+    let resolved = ctx.resolve(scrutinee);
+    if !ctx.is_concrete(resolved) {
+        return SolveResult::Deferred(Constraint::ImplicitPat {
+            scrutinee,
+            name: name.to_string(),
+            arg_tys,
+            span,
+        });
+    }
+
+    if ctx.is_error(resolved) {
+        return SolveResult::Solved;
+    }
+
+    let kind = match ctx.slot(resolved) {
+        TySlot::Resolved(k) => k.clone(),
+        _ => unreachable!(),
+    };
+
+    // Find the enum entity and its type args from the scrutinee
+    let (enum_entity, type_args) = match &kind {
+        TyKind::Named { entity, args } => (*entity, args.clone()),
+        _ => return SolveResult::Solved,
+    };
+
+    // Search children for an enum case with the matching name
+    let children = ctx.query_ctx.children_of(enum_entity).to_vec();
+    let case_entity = children.iter().copied().find(|&child| {
+        ctx.query_ctx.get::<NodeKind>(child) == Some(&NodeKind::EnumCase)
+            && ctx.query_ctx.get::<Name>(child).is_some_and(|n| n.0 == name)
+    });
+
+    let Some(case_entity) = case_entity else {
+        // No matching case found
+        return SolveResult::Solved;
+    };
+
+    // Build substitution map: enum type params → scrutinee type args
+    let type_params: Vec<Entity> = ctx
+        .query_ctx
+        .get::<TypeParams>(enum_entity)
+        .map(|tp| tp.0.clone())
+        .unwrap_or_default();
+    let subs: Vec<(Entity, TyVar)> = type_params
+        .iter()
+        .zip(type_args.iter())
+        .map(|(&e, &tv)| (e, tv))
+        .collect();
+
+    // Get the case's payload types and substitute with the scrutinee's type args
+    let root = ctx.root;
+    if let Some(payload_hir_tys) = ctx.query_ctx.query(LowerCallableTypes {
+        entity: case_entity,
+        root,
+    }) {
+        for (arg_tv, param_ty) in arg_tys.iter().zip(payload_hir_tys.iter()) {
+            if let Some(hir_ty) = param_ty {
+                let payload_tv =
+                    crate::generate::lower_hir_ty_with_subs(ctx, hir_ty, &subs);
+                ctx.equal(*arg_tv, payload_tv, span.clone());
+            }
+        }
+    }
+
+    SolveResult::Solved
 }
 
 // ===== Literal defaults =====

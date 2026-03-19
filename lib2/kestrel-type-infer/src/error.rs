@@ -67,3 +67,20 @@ pub enum InferError {
         span: Span,
     },
 }
+
+impl InferError {
+    /// The source span where this error occurred.
+    pub fn span(&self) -> &Span {
+        match self {
+            Self::TypeMismatch { span, .. }
+            | Self::DoesNotConform { span, .. }
+            | Self::NoMember { span, .. }
+            | Self::AmbiguousMember { span, .. }
+            | Self::MemberNotVisible { span, .. }
+            | Self::NoAssociatedType { span, .. }
+            | Self::InfiniteType { span }
+            | Self::FromHir { span }
+            | Self::ImplicitMemberNotFound { span, .. } => span,
+        }
+    }
+}

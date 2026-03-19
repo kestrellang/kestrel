@@ -152,9 +152,13 @@ impl LowerCtx<'_> {
             span: span.clone(),
         });
 
-        self.alloc_stmt(HirStmt::Expr {
+        let stmt_id = self.alloc_stmt(HirStmt::Expr {
             expr: guard_expr,
             span: span.clone(),
-        })
+        });
+        // Mark this statement as originating from guard-let so the
+        // guard_let_divergence analyzer can check the else block diverges.
+        self.guard_let_stmts.push(stmt_id);
+        stmt_id
     }
 }

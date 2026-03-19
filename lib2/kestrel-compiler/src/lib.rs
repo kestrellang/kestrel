@@ -20,9 +20,10 @@ pub mod diagnostic;
 pub mod queries;
 
 pub use components::{FilePath, SourceText};
-pub use diagnostic::{Diagnostic, Severity};
+pub use diagnostic::ThrowDiagnostic;
 pub use kestrel_ast_builder;
-pub use queries::{LexFile, ParseFile};
+pub use kestrel_reporting2::{Diagnostic, Label, Severity};
+pub use queries::{InferWithDiagnostics, LexFile, ParseFile};
 
 use std::collections::HashMap;
 use std::fmt;
@@ -34,7 +35,8 @@ use kestrel_hecs::{Entity, World};
 use kestrel_lexer2::SpannedToken;
 use kestrel_parser2::ParseResult;
 use kestrel_type_infer::error::InferError;
-use kestrel_type_infer::InferBody;
+
+use crate::diagnostic::WorldFiles;
 
 /// Compiler database backed by an ECS world.
 ///
@@ -60,6 +62,9 @@ impl Compiler {
         world.set(root, kestrel_ast_builder::Name("<root>".to_string()));
         // Seed the lang module so lang.* builtins (lang.i64, lang.alloc, etc.) are available
         kestrel_ast_builder::seed_lang_module(&mut world, root);
+        // Register default analyzers on the root entity
+        let registry = kestrel_analyze::default_analyzers();
+        world.set(root, kestrel_analyze::AnalyzerRegistryRef(std::sync::Arc::new(registry)));
         Self { world, files: HashMap::new(), root, target: TargetConfig::host() }
     }
 
@@ -102,8 +107,21 @@ impl Compiler {
     }
 
     /// Collect all diagnostics from the current revision.
-    pub fn diagnostics(&self) -> Vec<Diagnostic> {
-        self.world.accumulated::<Diagnostic>()
+    ///
+    /// Returns codespan-reporting `Diagnostic`s accumulated by lex, parse,
+    /// and type inference queries. Use `emit_diagnostics()` to render them.
+    pub fn diagnostics(&self) -> Vec<codespan_reporting::diagnostic::Diagnostic<usize>> {
+        self.world.accumulated::<codespan_reporting::diagnostic::Diagnostic<usize>>()
+    }
+
+    /// Emit all accumulated diagnostics to stderr with source context.
+    pub fn emit_diagnostics(&self) -> Result<(), codespan_reporting::files::Error> {
+        let diagnostics = self.diagnostics();
+        if diagnostics.is_empty() {
+            return Ok(());
+        }
+        let files = WorldFiles::from_world(&self.world, &self.files);
+        kestrel_reporting2::emit_all(&files, &diagnostics)
     }
 
     /// Begin a new compilation cycle. Call before updating sources.
@@ -151,6 +169,9 @@ impl Compiler {
 impl Compiler {
     /// Run type inference on all entities that have bodies.
     /// Returns a summary of how many succeeded, failed, panicked, etc.
+    ///
+    /// Uses `InferWithDiagnostics` so inference errors are accumulated
+    /// alongside lex/parse diagnostics.
     pub fn infer_all(&self) -> InferSummary {
         // Collect entities with Body component (mutation-phase API)
         let entities: Vec<Entity> = self
@@ -170,7 +191,7 @@ impl Compiler {
             let entity_path = self.entity_path(entity);
 
             match std::panic::catch_unwind(AssertUnwindSafe(|| {
-                ctx.query(InferBody { entity, root })
+                ctx.query(InferWithDiagnostics { entity, root })
             })) {
                 Ok(Some(typed)) => {
                     summary.success += 1;
@@ -214,7 +235,7 @@ impl Compiler {
                         let mut details = Vec::new();
                         if typed.errors.len() >= 15 {
                             for (i, err) in typed.errors.iter().enumerate() {
-                                let span_info = error_span(err);
+                                let span_info = format!("{}", err.span().start);
                                 let detail = typed.error_details.get(i)
                                     .cloned()
                                     .unwrap_or_else(|| format_error(err));
@@ -239,6 +260,41 @@ impl Compiler {
             }
         }
 
+        summary
+    }
+
+    /// Run all registered analyzers on all applicable entities.
+    ///
+    /// Calls `Analyze(analyzer_id, entity)` sub-queries for each
+    /// (analyzer, body) pair. Results are memoized per (analyzer, entity).
+    pub fn analyze_all(&self) -> AnalyzeSummary {
+        let body_entities: Vec<Entity> = self
+            .world
+            .iter_component::<Body>()
+            .map(|(e, _)| e)
+            .collect();
+
+        let decl_entities: Vec<Entity> = self
+            .world
+            .iter_component::<kestrel_ast_builder::NodeKind>()
+            .map(|(e, _)| e)
+            .collect();
+
+        let ctx = self.world.query_context();
+        let mut diags = kestrel_analyze::analyze_bodies(&ctx, self.root, &body_entities);
+        diags.extend(kestrel_analyze::analyze_decls(&ctx, self.root, &decl_entities));
+        diags.extend(kestrel_analyze::analyze_compilation(&ctx, self.root));
+
+        let mut summary = AnalyzeSummary::default();
+        for d in &diags {
+            match d.severity {
+                kestrel_analyze::Severity::Error => summary.errors += 1,
+                kestrel_analyze::Severity::Warning => summary.warnings += 1,
+                kestrel_analyze::Severity::Info => summary.info += 1,
+            }
+            *summary.by_check.entry(d.descriptor_id).or_insert(0) += 1;
+        }
+        summary.diagnostics = diags;
         summary
     }
 
@@ -348,49 +404,34 @@ fn error_variant_name(err: &InferError) -> &'static str {
 }
 
 /// Format an InferError into a human-readable one-liner.
-/// Extract byte offset from an error span.
-fn error_span(err: &InferError) -> String {
-    let span = match err {
-        InferError::TypeMismatch { span, .. }
-        | InferError::DoesNotConform { span, .. }
-        | InferError::NoMember { span, .. }
-        | InferError::AmbiguousMember { span, .. }
-        | InferError::MemberNotVisible { span, .. }
-        | InferError::NoAssociatedType { span, .. }
-        | InferError::InfiniteType { span }
-        | InferError::FromHir { span }
-        | InferError::ImplicitMemberNotFound { span, .. } => span,
-    };
-    format!("{}", span.start)
-}
-
 fn format_error(err: &InferError) -> String {
+    let span = err.span();
     match err {
-        InferError::TypeMismatch { span, .. } => {
+        InferError::TypeMismatch { .. } => {
             format!("TypeMismatch at {}:{}", span.file_id, span.start)
         }
-        InferError::DoesNotConform { span, .. } => {
+        InferError::DoesNotConform { .. } => {
             format!("DoesNotConform at {}:{}", span.file_id, span.start)
         }
-        InferError::NoMember { name, span, .. } => {
+        InferError::NoMember { name, .. } => {
             format!("NoMember '{}' at {}:{}", name, span.file_id, span.start)
         }
-        InferError::AmbiguousMember { name, span, .. } => {
+        InferError::AmbiguousMember { name, .. } => {
             format!("AmbiguousMember '{}' at {}:{}", name, span.file_id, span.start)
         }
-        InferError::MemberNotVisible { name, span, .. } => {
+        InferError::MemberNotVisible { name, .. } => {
             format!("MemberNotVisible '{}' at {}:{}", name, span.file_id, span.start)
         }
-        InferError::NoAssociatedType { name, span, .. } => {
+        InferError::NoAssociatedType { name, .. } => {
             format!("NoAssociatedType '{}' at {}:{}", name, span.file_id, span.start)
         }
-        InferError::InfiniteType { span } => {
+        InferError::InfiniteType { .. } => {
             format!("InfiniteType at {}:{}", span.file_id, span.start)
         }
-        InferError::FromHir { span } => {
+        InferError::FromHir { .. } => {
             format!("FromHir at {}:{}", span.file_id, span.start)
         }
-        InferError::ImplicitMemberNotFound { name, span, .. } => {
+        InferError::ImplicitMemberNotFound { name, .. } => {
             format!("ImplicitMemberNotFound '{}' at {}:{}", name, span.file_id, span.start)
         }
     }
@@ -481,6 +522,38 @@ impl fmt::Display for InferSummary {
             }
             if self.panic_details.len() > 10 {
                 writeln!(f, "    ... and {} more", self.panic_details.len() - 10)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Summary of analysis results across all bodies.
+#[derive(Default)]
+pub struct AnalyzeSummary {
+    pub errors: usize,
+    pub warnings: usize,
+    pub info: usize,
+    /// Count per descriptor ID (e.g., "KS001" → 3).
+    pub by_check: HashMap<&'static str, usize>,
+    /// All diagnostics produced.
+    pub diagnostics: Vec<kestrel_analyze::AnalyzeDiagnostic>,
+}
+
+impl fmt::Display for AnalyzeSummary {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Analysis Summary:")?;
+        writeln!(f, "  Errors:   {}", self.errors)?;
+        writeln!(f, "  Warnings: {}", self.warnings)?;
+        if self.info > 0 {
+            writeln!(f, "  Info:     {}", self.info)?;
+        }
+        if !self.by_check.is_empty() {
+            writeln!(f)?;
+            let mut checks: Vec<_> = self.by_check.iter().collect();
+            checks.sort_by(|a, b| b.1.cmp(a.1));
+            for (id, count) in checks {
+                writeln!(f, "    {:20} {:>5}", id, count)?;
             }
         }
         Ok(())
@@ -610,13 +683,13 @@ mod tests {
 
     #[test]
     fn lex_error_diagnostic_has_correct_file_id() {
-        // Diagnostic spans carry the entity's file_id
+        // Diagnostic labels carry the entity's file_id
         let mut c = Compiler::new();
         let f = c.set_source("t.ks", "`".into());
         let _tokens = c.lex(f);
 
         let diag = &c.diagnostics()[0];
-        assert_eq!(diag.span.file_id, f.index());
+        assert_eq!(diag.labels[0].file_id, f.index());
     }
 
     #[test]
@@ -674,7 +747,7 @@ mod tests {
         assert!(!good_tokens.is_empty());
         // Only bad file produces diagnostics; diagnostics carry its file_id
         let diags = c.diagnostics();
-        assert!(diags.iter().all(|d| d.span.file_id == bad.index()));
+        assert!(diags.iter().all(|d| d.labels[0].file_id == bad.index()));
     }
 
     // ================================================================
@@ -768,16 +841,16 @@ mod tests {
 
     #[test]
     fn parse_error_diagnostic_has_span() {
-        // Parse error diagnostics carry meaningful span info
+        // Parse error diagnostics carry meaningful label info
         let mut c = Compiler::new();
         let f = c.set_source("t.ks", "struct 123".into());
         let _result = c.parse(f);
 
         let diags = c.diagnostics();
-        // At least one diagnostic should have a non-zero span
+        // At least one diagnostic should have a non-empty label range
         assert!(
-            diags.iter().any(|d| d.span.end > d.span.start),
-            "expected at least one diagnostic with a non-empty span"
+            diags.iter().any(|d| !d.labels.is_empty() && d.labels[0].range.end > d.labels[0].range.start),
+            "expected at least one diagnostic with a non-empty label range"
         );
     }
 
@@ -904,7 +977,7 @@ mod tests {
         assert!(good_result.errors.is_empty());
         // All diagnostics belong to the bad file
         let diags = c.diagnostics();
-        assert!(diags.iter().all(|d| d.span.file_id == bad.index()));
+        assert!(diags.iter().all(|d| d.labels[0].file_id == bad.index()));
     }
 
     // ================================================================
@@ -979,6 +1052,20 @@ mod tests {
         // Just report — don't assert hard failures since many things
         // are expected to fail at this stage
         assert!(summary.total > 0, "should have found bodies in stdlib");
+    }
+
+    #[test]
+    fn analyze_full_stdlib() {
+        let mut c = Compiler::new();
+        let path = stdlib_path();
+        c.load_dir(&path);
+
+        // Run inference first (analyzers depend on it)
+        let _infer = c.infer_all();
+
+        // Run analysis
+        let summary = c.analyze_all();
+        eprintln!("{}", summary);
     }
 
     #[test]

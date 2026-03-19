@@ -29,6 +29,10 @@ pub(crate) struct LowerCtx<'a> {
 
     /// Local scope stack (innermost last)
     scopes: Vec<HashMap<String, LocalId>>,
+
+    /// Statements that originated from guard-let desugaring.
+    /// Populated during lowering, transferred to HirBody for analysis.
+    pub guard_let_stmts: Vec<HirStmtId>,
 }
 
 impl<'a> LowerCtx<'a> {
@@ -43,6 +47,7 @@ impl<'a> LowerCtx<'a> {
             locals: Arena::new(),
             params: Vec::new(),
             scopes: vec![HashMap::new()], // start with one scope for params
+            guard_let_stmts: Vec::new(),
         }
     }
 

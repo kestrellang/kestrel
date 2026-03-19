@@ -84,6 +84,7 @@ impl QueryFn for LowerBody {
             params: lower.params,
             statements,
             tail_expr,
+            guard_let_stmts: lower.guard_let_stmts,
         })
     }
 }

@@ -136,7 +136,7 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             let result_tv = ctx.fresh();
 
             // Member constraint: receiver.method(args) -> result
-            ctx.member(recv_tv, method, arg_tvs, result_tv, id, span.clone());
+            ctx.member(recv_tv, method, arg_tvs, result_tv, id, true, span.clone());
             result_tv
         }
 
@@ -155,7 +155,7 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             // Receiver must conform to the protocol
             ctx.conforms(recv_tv, *protocol, span.clone());
             // Resolve method on the protocol
-            ctx.member(recv_tv, method, arg_tvs, result_tv, id, span.clone());
+            ctx.member(recv_tv, method, arg_tvs, result_tv, id, true, span.clone());
             result_tv
         }
 
@@ -167,7 +167,7 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             let result_tv = ctx.fresh();
 
             // Member constraint with no args (field/property access)
-            ctx.member(base_tv, name, vec![], result_tv, id, span.clone());
+            ctx.member(base_tv, name, vec![], result_tv, id, false, span.clone());
             result_tv
         }
 
@@ -186,6 +186,7 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                 vec![],
                 result_tv,
                 id,
+                false,
                 span.clone(),
             );
             result_tv
@@ -924,27 +925,34 @@ fn gen_variant_pat(
     let qctx = ctx.query_ctx;
     let root = ctx.root;
 
-    // Look up parent enum from the case entity
+    // Build substitution map: enum type params → fresh TyVars linked to scrutinee.
+    // This ensures payload types like HirTy::Param(T) resolve to the scrutinee's
+    // actual type arg, not the canonical Param TyVar.
+    let mut subs: Vec<(Entity, TyVar)> = Vec::new();
     if let Some(parent_enum) = qctx.parent_of(entity) {
-        // Create the enum type with fresh type args
         let parent_tps: Vec<Entity> = qctx
             .get::<TypeParams>(parent_enum)
             .map(|tp| tp.0.clone())
             .unwrap_or_default();
         let parent_args: Vec<TyVar> = parent_tps.iter().map(|_| ctx.fresh()).collect();
-        let enum_tv = ctx.named(parent_enum, parent_args);
+        let enum_tv = ctx.named(parent_enum, parent_args.clone());
 
         // Scrutinee must be this enum type
         ctx.equal(scrutinee_tv, enum_tv, span.clone());
+
+        // Map enum type params to the fresh args linked to scrutinee
+        for (&param, &arg) in parent_tps.iter().zip(parent_args.iter()) {
+            subs.push((param, arg));
+        }
     }
 
-    // Get case's payload types from its Callable component
+    // Get case's payload types, substituting enum type params with scrutinee args
     let payload_types: Vec<TyVar> =
         match qctx.query(LowerCallableTypes { entity, root }) {
             Some(types) => types
                 .iter()
                 .map(|t| match t {
-                    Some(hir_ty) => lower_hir_ty(ctx, hir_ty),
+                    Some(hir_ty) => lower_hir_ty_with_subs(ctx, hir_ty, &subs),
                     None => ctx.fresh(),
                 })
                 .collect(),
@@ -965,23 +973,33 @@ fn gen_variant_pat(
 }
 
 /// Generate constraints for an implicit variant pattern (.CaseName).
-/// Deferred: resolution depends on the scrutinee type being concrete.
-/// For now, recurse into sub-patterns with fresh TyVars.
+/// Creates fresh TyVars for each sub-pattern binding and emits an
+/// ImplicitPat constraint. The solver defers until the scrutinee type
+/// is concrete, then looks up the case and equates the binding TyVars
+/// with the payload types (properly substituted with scrutinee type args).
 fn gen_implicit_variant_pat(
     ctx: &mut InferCtx<'_>,
     hir: &HirBody,
-    _name: &str,
+    name: &str,
     args: &[HirPatArg],
-    _scrutinee_tv: TyVar,
-    _span: &Span,
+    scrutinee_tv: TyVar,
+    span: &Span,
 ) {
-    // Implicit variant resolution requires the scrutinee type to be known.
-    // Full implementation would check if scrutinee is concrete, then search
-    // enum children for a matching case name. For now, just recurse.
-    for arg in args {
-        let arg_tv = ctx.fresh();
-        gen_pat(ctx, hir, arg.pattern, arg_tv);
-    }
+    let arg_tys: Vec<TyVar> = args
+        .iter()
+        .map(|arg| {
+            let tv = ctx.fresh();
+            gen_pat(ctx, hir, arg.pattern, tv);
+            tv
+        })
+        .collect();
+
+    ctx.constraints.push(crate::constraint::Constraint::ImplicitPat {
+        scrutinee: scrutinee_tv,
+        name: name.to_string(),
+        arg_tys,
+        span: span.clone(),
+    });
 }
 
 /// Generate constraints for a struct pattern.

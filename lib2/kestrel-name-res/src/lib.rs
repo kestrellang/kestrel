@@ -7,6 +7,7 @@
 //! All resolution is implemented as incremental queries against the
 //! kestrel-hecs world.
 
+pub mod conformances;
 pub mod extensions;
 pub mod helpers;
 pub mod resolve_builtin;
@@ -18,6 +19,7 @@ pub mod scope;
 pub mod visibility;
 
 // Re-export primary query types
+pub use conformances::ConformingProtocols;
 pub use extensions::{ExtensionTargetEntity, ExtensionsFor, ResolvedExtensionTarget};
 pub use resolve_builtin::{BuiltinIndex, BuiltinMap, EntityBuiltin, ResolveBuiltin};
 pub use resolve_module::{ResolveModulePath, StdModules};

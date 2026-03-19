@@ -2,7 +2,7 @@ use kestrel_hecs::{Entity, QueryContext, QueryFn};
 use kestrel_lexer2::{lex, SpannedToken};
 
 use crate::components::SourceText;
-use crate::diagnostic::{Diagnostic, Severity};
+use crate::diagnostic::{LexError, ThrowDiagnostic};
 
 /// Lex a source file entity into tokens.
 ///
@@ -30,13 +30,7 @@ impl QueryFn for LexFile {
         for result in lex(&source.0, file_id) {
             match result {
                 Ok(token) => tokens.push(token),
-                Err(err) => {
-                    ctx.accumulate(Diagnostic {
-                        span: err.span,
-                        message: "unexpected character".into(),
-                        severity: Severity::Error,
-                    });
-                }
+                Err(err) => ctx.throw(LexError { span: err.span }),
             }
         }
         tokens

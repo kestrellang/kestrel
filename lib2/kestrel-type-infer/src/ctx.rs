@@ -242,6 +242,7 @@ impl<'a> InferCtx<'a> {
         args: Vec<CallArg>,
         result: TyVar,
         expr: HirExprId,
+        is_call: bool,
         span: Span,
     ) {
         self.constraints.push(Constraint::Member {
@@ -250,6 +251,7 @@ impl<'a> InferCtx<'a> {
             args,
             result,
             expr,
+            is_call,
             span,
         });
     }

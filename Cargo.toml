@@ -65,7 +65,10 @@ members = [
     "lib2/kestrel-name-res",
     "lib2/kestrel-hir-lower",
     "lib2/kestrel-type-infer",
-    "lib2/kestrel-debug"
+    "lib2/kestrel-pattern-matching",
+    "lib2/kestrel-analyze",
+    "lib2/kestrel-debug",
+    "lib2/kestrel-reporting"
 ]
 exclude = ["registry"]
 
