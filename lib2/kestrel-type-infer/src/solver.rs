@@ -299,6 +299,18 @@ fn solve_associated(
             } else {
                 lower_hir_ty_plain(ctx, &assoc.resolved)
             };
+
+            // Emit where clause constraints from the resolved TypeAlias entity.
+            // E.g., `type Iter: Iterator where Iter.Item = Item` — when we resolve
+            // `T.Iter`, emit constraints equating `T.Iter.Item` with `T.Item`.
+            if let kestrel_hir::ty::HirTy::Named { entity, .. } = &assoc.resolved {
+                if ctx.query_ctx.get::<kestrel_ast_builder::NodeKind>(*entity)
+                    == Some(&kestrel_ast_builder::NodeKind::TypeAlias)
+                {
+                    emit_type_alias_where_clauses(ctx, *entity, assoc_tv, &span);
+                }
+            }
+
             solve_equal(ctx, assoc_tv, result, span)
         }
         None => SolveResult::Error(InferError::NoAssociatedType {
@@ -1205,6 +1217,42 @@ fn resolve_kind(ctx: &InferCtx<'_>, tv: TyVar) -> TyKind {
     match &ctx.types[resolved.0 as usize] {
         TySlot::Resolved(k) => k.clone(),
         _ => TyKind::Error, // unresolved — shouldn't happen in well-formed member types
+    }
+}
+
+/// Emit constraints from a TypeAlias entity's where clauses.
+///
+/// When resolving an associated type like `T.Iter` where `Iter` has its own
+/// constraints (e.g., `type Iter: Iterator where Iter.Item = Item`), we need
+/// to propagate those constraints. This connects `T.Iter.Item` to `T.Item`
+/// through the where clause equality.
+fn emit_type_alias_where_clauses(
+    ctx: &mut InferCtx<'_>,
+    alias_entity: kestrel_hecs::Entity,
+    alias_tv: TyVar,
+    span: &Span,
+) {
+    let clauses = ctx.resolver.where_clauses(alias_entity);
+    for clause in clauses {
+        match clause {
+            crate::resolve::WhereClause::Bound { protocol, .. } => {
+                // Emit conformance: e.g., `Iter: Iterator` → Conforms(alias_tv, Iterator)
+                ctx.conforms(alias_tv, protocol, span.clone());
+            }
+            crate::resolve::WhereClause::TypeEquality { assoc_name, rhs, .. } => {
+                // Emit associated type equality: e.g., `Iter.Item = Item`
+                // → Associated(alias_tv, "Item", fresh) + Equal(fresh, rhs_tv)
+                let fresh = ctx.fresh();
+                ctx.associated(alias_tv, &assoc_name, fresh, span.clone());
+                // Lower rhs using where_clause_assoc_subs so that `Item` resolves
+                // to the existing TyVar for T.Item
+                let rhs_tv = crate::generate::lower_hir_ty(ctx, &rhs);
+                ctx.equal(fresh, rhs_tv, span.clone());
+            }
+            crate::resolve::WhereClause::DirectEquality { .. } => {
+                // Direct equality on TypeAlias — rare, skip for now
+            }
+        }
     }
 }
 

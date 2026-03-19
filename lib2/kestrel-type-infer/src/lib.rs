@@ -292,7 +292,16 @@ fn emit_extension_where_clauses(
                     ctx, &target_type_params, fresh_args,
                     &mut assoc_type_tvs, param, self_tv, query_ctx,
                 );
-                ctx.conforms(subject_tv, protocol, span);
+                ctx.conforms(subject_tv, protocol, span.clone());
+
+                // Propagate where clauses from the protocol's associated types.
+                // E.g., `type Iter: Iterator where Iter.Item = Item` on Iterable
+                // needs to emit `Associated(T.Iter, "Item", fresh) + Equal(fresh, T.Item)`.
+                emit_protocol_assoc_type_where_clauses(
+                    ctx, query_ctx, protocol, subject_tv,
+                    &target_type_params, fresh_args, &mut assoc_type_tvs,
+                    self_tv, &span,
+                );
             }
             resolve::WhereClause::TypeEquality { param, assoc_name, rhs } => {
                 let span = Span::synthetic(0);
@@ -343,6 +352,90 @@ fn emit_extension_where_clauses(
                     // Overwrite the Param slot → the param IS the RHS type in this scope
                     ctx.types[param_tv.0 as usize] = ty::TySlot::Redirect(rhs_tv);
                 }
+            }
+        }
+    }
+}
+
+/// Propagate where clauses from a protocol's associated type declarations.
+///
+/// When `T: Iterable` and `Iterable` has `type Iter: Iterator where Iter.Item = Item`,
+/// this emits constraints connecting `T.Iter.Item` to `T.Item` through the TypeAlias
+/// where clause. Without this, `T.Iter.Item` and `T.Item` would be unrelated TyVars.
+fn emit_protocol_assoc_type_where_clauses(
+    ctx: &mut InferCtx<'_>,
+    query_ctx: &QueryContext<'_>,
+    protocol: Entity,
+    subject_tv: ty::TyVar,
+    target_type_params: &[Entity],
+    fresh_args: &[ty::TyVar],
+    assoc_type_tvs: &mut HashMap<Entity, ty::TyVar>,
+    _self_tv: ty::TyVar,
+    span: &Span,
+) {
+    // Walk the protocol's children looking for TypeAlias entities with where clauses
+    for &child in query_ctx.children_of(protocol) {
+        if query_ctx.get::<kestrel_ast_builder::NodeKind>(child)
+            != Some(&kestrel_ast_builder::NodeKind::TypeAlias)
+        {
+            continue;
+        }
+
+        // Read where clauses using the protocol as resolution context (not the current method),
+        // since names like `Iter` and `Item` are in scope of the protocol, not the method.
+        let clauses = {
+            let temp_resolver = crate::resolve::WorldResolver {
+                ctx: query_ctx,
+                root: ctx.root,
+                owner: protocol, // resolve names in protocol scope
+            };
+            use crate::resolve::TypeResolver;
+            temp_resolver.where_clauses(child)
+        };
+        if clauses.is_empty() {
+            continue;
+        }
+
+        // Get the TyVar for this associated type (e.g., T.Iter)
+        let assoc_name = query_ctx
+            .get::<kestrel_ast_builder::Name>(child)
+            .map(|n| n.0.clone())
+            .unwrap_or_default();
+        let alias_tv = *assoc_type_tvs.entry(child).or_insert_with(|| {
+            let tv = ctx.fresh();
+            ctx.associated(subject_tv, &assoc_name, tv, span.clone());
+            ctx.where_clause_assoc_subs.push((child, tv));
+            tv
+        });
+
+        // Emit the TypeAlias's own where clauses
+        for clause in clauses {
+            match clause {
+                resolve::WhereClause::Bound { protocol: bound_proto, .. } => {
+                    ctx.conforms(alias_tv, bound_proto, span.clone());
+                }
+                resolve::WhereClause::TypeEquality { assoc_name: inner_assoc, rhs, .. } => {
+                    let fresh = ctx.fresh();
+                    ctx.associated(alias_tv, &inner_assoc, fresh, span.clone());
+
+                    // Build subs so RHS references resolve correctly
+                    let mut rhs_subs: Vec<(Entity, ty::TyVar)> = target_type_params
+                        .iter()
+                        .zip(fresh_args.iter())
+                        .map(|(&e, &tv)| (e, tv))
+                        .collect();
+                    for (&e, &tv) in assoc_type_tvs.iter() {
+                        rhs_subs.push((e, tv));
+                    }
+                    let rhs_tv = generate::lower_hir_ty_with_subs(ctx, &rhs, &rhs_subs);
+                    ctx.equal(fresh, rhs_tv, span.clone());
+
+                    // Register so solve_associated can reuse
+                    if let Some(inner_entity) = find_assoc_type_in_bounds(ctx, child, &inner_assoc) {
+                        ctx.where_clause_assoc_subs.push((inner_entity, rhs_tv));
+                    }
+                }
+                resolve::WhereClause::DirectEquality { .. } => {}
             }
         }
     }

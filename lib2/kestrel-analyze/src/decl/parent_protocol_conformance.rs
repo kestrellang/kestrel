@@ -31,7 +31,7 @@ use crate::util;
 use kestrel_ast::ast_type::AstType;
 use kestrel_ast_builder::{Conformances, ConformanceItem, NodeKind};
 use kestrel_hecs::Entity;
-use kestrel_name_res::{ResolveTypePath, TypeResolution};
+use kestrel_name_res::{ConformingProtocols, ResolveTypePath, TypeResolution};
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
     id: "KS421",
@@ -96,17 +96,11 @@ impl DeclCheck for ParentProtocolConformanceAnalyzer {
             return vec![];
         };
 
-        // Resolve all positive conformances of this struct/enum to entities
-        let type_conformed: Vec<Entity> = conformances
-            .0
-            .iter()
-            .filter_map(|item| {
-                let ConformanceItem::Positive(ast_type, _) = item else {
-                    return None;
-                };
-                resolve_conformance_type(cx, ast_type)
-            })
-            .collect();
+        // Use transitive conformance query — includes direct, extension, and inherited protocols
+        let type_conformed = cx.query.query(ConformingProtocols {
+            entity: cx.entity,
+            root: cx.root,
+        });
 
         if type_conformed.is_empty() {
             return vec![];

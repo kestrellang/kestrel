@@ -129,7 +129,8 @@ impl DeclCheck for FieldAnalyzer {
         }
 
         // Check 3: static stored properties not supported in generic types
-        if is_static && !is_computed {
+        // Skip protocol fields — they're abstract declarations, not stored properties
+        if is_static && !is_computed && !matches!(parent_kind, Some(NodeKind::Protocol)) {
             let parent_is_generic = cx
                 .query
                 .get::<TypeParams>(parent)
