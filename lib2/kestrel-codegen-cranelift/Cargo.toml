@@ -1,0 +1,24 @@
+[package]
+name = "kestrel-codegen2-cranelift"
+version.workspace = true
+edition.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+kestrel-mir = { path = "../kestrel-mir" }
+kestrel-codegen2 = { path = "../kestrel-codegen" }
+kestrel-hecs = { path = "../kestrel-hecs" }
+kestrel-debug = { path = "../kestrel-debug" }
+cranelift-codegen = "0.129"
+cranelift-frontend = "0.129"
+cranelift-module = "0.129"
+cranelift-object = "0.129"
+cranelift-native = "0.129"
+target-lexicon = "0.12"
+indexmap = { workspace = true }
+
+[dev-dependencies]
+kestrel-compiler2 = { path = "../kestrel-compiler" }
+kestrel-mir-lower = { path = "../kestrel-mir-lower" }

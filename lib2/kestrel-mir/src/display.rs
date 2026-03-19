@@ -415,6 +415,18 @@ impl fmt::Display for RvalueDisplay<'_> {
                 }
                 Ok(())
             },
+            Rvalue::ArrayLiteral { element_ty, values } => {
+                write!(f, "array[{}] [", element_ty.display(self.module))?;
+                for (i, val) in values.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", val.display(self.module))?;
+                }
+                write!(f, "]")
+            },
+            // DictLiteral was removed — dict literals are lowered to
+            // ArrayLiteral { element_ty: Tuple(K, V), values } in MIR lowering.
         }
     }
 }

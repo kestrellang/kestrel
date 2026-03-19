@@ -94,4 +94,26 @@ impl MirTy {
     pub fn is_pointer(&self) -> bool {
         matches!(self, MirTy::Pointer(_))
     }
+
+    /// Check if this type is trivially copyable (passed by value, no ownership transfer).
+    /// Includes primitives, refs, pointers, and thin function pointers.
+    pub fn is_trivially_copyable(&self) -> bool {
+        matches!(
+            self,
+            MirTy::I8
+                | MirTy::I16
+                | MirTy::I32
+                | MirTy::I64
+                | MirTy::F16
+                | MirTy::F32
+                | MirTy::F64
+                | MirTy::Bool
+                | MirTy::Unit
+                | MirTy::Never
+                | MirTy::Ref(_)
+                | MirTy::RefMut(_)
+                | MirTy::Pointer(_)
+                | MirTy::FuncThin { .. }
+        )
+    }
 }

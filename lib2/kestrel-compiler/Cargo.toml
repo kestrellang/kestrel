@@ -20,4 +20,8 @@ kestrel-type-infer = { path = "../kestrel-type-infer" }
 kestrel-analyze = { path = "../kestrel-analyze" }
 kestrel-debug = { path = "../kestrel-debug" }
 kestrel-reporting2 = { path = "../kestrel-reporting" }
+kestrel-mir = { path = "../kestrel-mir" }
+kestrel-mir-lower = { path = "../kestrel-mir-lower" }
+kestrel-codegen2 = { path = "../kestrel-codegen" }
+kestrel-codegen2-cranelift = { path = "../kestrel-codegen-cranelift" }
 codespan-reporting = { workspace = true }

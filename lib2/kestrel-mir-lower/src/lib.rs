@@ -25,18 +25,14 @@ pub mod ty;
 
 pub use context::LowerCtx;
 
-use kestrel_compiler2::Compiler;
+use kestrel_hecs::{Entity, World};
 use kestrel_mir::MirModule;
 
 /// Lower the entire compiled program to MIR.
 ///
-/// Call after `compiler.infer_all()` to ensure type inference has run.
-/// Returns a `MirModule` containing all declarations. Function bodies
-/// are not yet populated (Phase 2).
-pub fn lower_module(compiler: &Compiler) -> MirModule {
-    let world = compiler.world();
-    let root = compiler.root();
-
+/// Takes the ECS world and root module entity directly (no compiler dependency).
+/// Call after type inference has run.
+pub fn lower_module(world: &World, root: Entity) -> MirModule {
     let mut ctx = LowerCtx::new(world, root, "main");
     item::lower_items(&mut ctx);
     witness_lower::lower_witnesses(&mut ctx);
@@ -46,6 +42,7 @@ pub fn lower_module(compiler: &Compiler) -> MirModule {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use kestrel_compiler2::Compiler;
     use std::path::PathBuf;
 
     fn stdlib_path() -> PathBuf {
@@ -66,7 +63,7 @@ mod tests {
         let mut c = Compiler::new();
         set_and_build(&mut c, "test.ks", "module Test\nstruct Point { var x: Int64; var y: Int64 }");
 
-        let mir = lower_module(&c);
+        let mir = lower_module(c.world(), c.root());
         let output = mir.display().to_string();
 
         // Should contain the struct (types are <error> without stdlib for Int64)
@@ -78,7 +75,7 @@ mod tests {
         let mut c = Compiler::new();
         set_and_build(&mut c, "test.ks", "module Test\nenum Color { case Red\ncase Green\ncase Blue }");
 
-        let mir = lower_module(&c);
+        let mir = lower_module(c.world(), c.root());
         let output = mir.display().to_string();
 
         assert!(output.contains("Color"), "MIR should contain enum Color:\n{}", output);
@@ -91,7 +88,7 @@ mod tests {
         let path = stdlib_path();
         c.load_dir(&path);
 
-        let mir = lower_module(&c);
+        let mir = lower_module(c.world(), c.root());
 
         // Should have lowered many items
         assert!(!mir.structs.is_empty(), "should have lowered some structs");
@@ -114,7 +111,7 @@ mod tests {
         let path = stdlib_path();
         c.load_dir(&path);
 
-        let mir = lower_module(&c);
+        let mir = lower_module(c.world(), c.root());
         let output = mir.display().to_string();
 
         // Count <error> types vs total fields across all structs
@@ -161,7 +158,7 @@ mod tests {
         // Run inference so TypedBody is available
         c.infer_all();
 
-        let mir = lower_module(&c);
+        let mir = lower_module(c.world(), c.root());
 
         // Count functions with bodies
         let bodies = mir.functions.iter().filter(|f| f.body.is_some()).count();
@@ -190,7 +187,7 @@ mod tests {
         c.load_dir(&path);
         c.infer_all();
 
-        let mir = lower_module(&c);
+        let mir = lower_module(c.world(), c.root());
         let output = mir.display().to_string();
 
         // Count "call " occurrences in the output
@@ -213,7 +210,7 @@ mod tests {
         let path = stdlib_path();
         c.load_dir(&path);
 
-        let mir = lower_module(&c);
+        let mir = lower_module(c.world(), c.root());
 
         eprintln!("Witnesses: {}", mir.witnesses.len());
 
@@ -243,7 +240,7 @@ mod tests {
         let path = stdlib_path();
         c.load_dir(&path);
 
-        let mir = lower_module(&c).with_all_passes();
+        let mir = lower_module(c.world(), c.root()).with_all_passes();
 
         // Layout pass should have computed some struct layouts
         let layouts_computed = mir.structs.iter()

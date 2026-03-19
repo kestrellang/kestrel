@@ -39,8 +39,12 @@ pub fn lower_protocol(ctx: &mut LowerCtx, entity: Entity) -> ProtocolId {
                     .get::<kestrel_ast_builder::Name>(child)
                     .map(|n| n.0.clone())
                     .unwrap_or_default();
-                // TODO: check for default type via TypeAnnotation
-                def.add_associated_type(AssociatedTypeDef::new(assoc_name));
+                let mut assoc_def = AssociatedTypeDef::new(assoc_name);
+                let default_ty = resolve_type_annotation(ctx, child);
+                if default_ty != kestrel_mir::MirTy::Unit {
+                    assoc_def = assoc_def.with_default(default_ty);
+                }
+                def.add_associated_type(assoc_def);
             },
             NodeKind::Function => {
                 let method_name = ctx

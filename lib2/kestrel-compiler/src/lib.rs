@@ -319,6 +319,39 @@ impl Compiler {
         }
     }
 
+    /// Lower to MIR and run all post-lowering passes.
+    ///
+    /// Call after `infer_all()`.
+    pub fn lower_to_mir(&self) -> kestrel_mir::MirModule {
+        kestrel_mir_lower::lower_module(self.world(), self.root()).with_all_passes()
+    }
+
+    /// Lower to MIR, run all passes, and compile to native object code.
+    ///
+    /// Call after `infer_all()`. Returns the raw object file bytes.
+    pub fn compile_to_object(
+        &self,
+    ) -> Result<Vec<u8>, kestrel_codegen2_cranelift::error::CodegenError> {
+        let mir = self.lower_to_mir();
+        let target = kestrel_codegen2::TargetConfig::host();
+        let options = kestrel_codegen2_cranelift::CodegenOptions::default();
+        let result = kestrel_codegen2_cranelift::compile(&mir, &target, &options)?;
+        Ok(result.object_bytes)
+    }
+
+    /// Lower to MIR, run all passes, compile, and link to an executable.
+    ///
+    /// Call after `infer_all()`.
+    pub fn compile_and_link(
+        &self,
+        output_path: &Path,
+        options: &kestrel_codegen2_cranelift::CodegenOptions,
+    ) -> Result<(), kestrel_codegen2_cranelift::error::CodegenError> {
+        let mir = self.lower_to_mir();
+        let target = kestrel_codegen2::TargetConfig::host();
+        kestrel_codegen2_cranelift::compile_and_link(&mir, &target, options, output_path)
+    }
+
     /// Load all .ks files from a directory, parse and build declarations.
     pub fn load_dir(&mut self, path: &Path) {
         let mut files: Vec<_> = Self::collect_ks_files(path);

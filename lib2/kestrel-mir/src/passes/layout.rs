@@ -22,49 +22,60 @@ const PTR_ALIGN: u64 = 8;
 /// Fills in `StructDef.layout` for structs whose field types have known sizes.
 /// Structs with generic fields or unknown types are skipped.
 pub fn run_layout_pass(module: &mut MirModule) {
-    // Iterate by index to avoid borrow issues
-    for i in 0..module.structs.len() {
-        if module.structs[i].layout.is_some() {
-            continue; // already computed
+    // Multi-pass fixed-point: keep iterating until no more layouts can be computed.
+    // Each pass may resolve structs whose dependencies were laid out in a prior pass.
+    // Cycles naturally terminate (a struct can't contain itself by value).
+    loop {
+        let mut progress = false;
+
+        for i in 0..module.structs.len() {
+            if module.structs[i].layout.is_some() {
+                continue;
+            }
+
+            // Try to compute layout from field types
+            let field_sizes: Vec<Option<(u64, u64)>> = module.structs[i]
+                .fields
+                .iter()
+                .map(|f| size_and_align_of(&f.ty, module))
+                .collect();
+
+            // Skip if any field has unknown size
+            if field_sizes.iter().any(|s| s.is_none()) {
+                continue;
+            }
+
+            let field_sizes: Vec<(u64, u64)> = field_sizes.into_iter().flatten().collect();
+
+            // Compute layout: sequential with alignment padding
+            let mut offset: u64 = 0;
+            let mut max_align: u64 = 1;
+            let mut field_offsets = Vec::with_capacity(field_sizes.len());
+
+            for (size, align) in &field_sizes {
+                let padding = (align - (offset % align)) % align;
+                offset += padding;
+                field_offsets.push(offset);
+                offset += size;
+                max_align = max_align.max(*align);
+            }
+
+            // Final padding to align the struct size
+            let total_padding = (max_align - (offset % max_align)) % max_align;
+            let total_size = offset + total_padding;
+
+            module.structs[i].layout = Some(StructLayout {
+                size: total_size,
+                align: max_align,
+                field_offsets,
+            });
+
+            progress = true;
         }
 
-        // Try to compute layout from field types
-        let field_sizes: Vec<Option<(u64, u64)>> = module.structs[i]
-            .fields
-            .iter()
-            .map(|f| size_and_align_of(&f.ty, module))
-            .collect();
-
-        // Skip if any field has unknown size
-        if field_sizes.iter().any(|s| s.is_none()) {
-            continue;
+        if !progress {
+            break;
         }
-
-        let field_sizes: Vec<(u64, u64)> = field_sizes.into_iter().flatten().collect();
-
-        // Compute layout: sequential with alignment padding
-        let mut offset: u64 = 0;
-        let mut max_align: u64 = 1;
-        let mut field_offsets = Vec::with_capacity(field_sizes.len());
-
-        for (size, align) in &field_sizes {
-            // Align the offset
-            let padding = (align - (offset % align)) % align;
-            offset += padding;
-            field_offsets.push(offset);
-            offset += size;
-            max_align = max_align.max(*align);
-        }
-
-        // Final padding to align the struct size
-        let total_padding = (max_align - (offset % max_align)) % max_align;
-        let total_size = offset + total_padding;
-
-        module.structs[i].layout = Some(StructLayout {
-            size: total_size,
-            align: max_align,
-            field_offsets,
-        });
     }
 }
 

@@ -105,6 +105,15 @@ pub enum Rvalue {
         variant: String,
         payload: Vec<Value>,
     },
+
+    /// `array[T] [v0, v1, ...]` — array literal with homogeneous element type.
+    ///
+    /// Also used for dictionary literals: `[k: v, ...]` lowers to
+    /// `ArrayLiteral { element_ty: Tuple(K, V), values: [tuple0, tuple1, ...] }`.
+    ArrayLiteral {
+        element_ty: MirTy,
+        values: Vec<Value>,
+    },
 }
 
 /// What's being called. Self-type is always explicit — no inference at codegen time.

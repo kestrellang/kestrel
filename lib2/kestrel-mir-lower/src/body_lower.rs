@@ -416,40 +416,62 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
             HirExpr::Array { elements, .. } => {
                 let result_ty = self.resolve_expr_type(expr_id);
                 let values: Vec<Value> = elements.iter().map(|&e| self.lower_expr(e)).collect();
-                // Emit as a construct with indexed fields (0, 1, 2, ...)
-                let fields: Vec<(String, Value)> = values
-                    .into_iter()
-                    .enumerate()
-                    .map(|(i, v)| (format!("{}", i), v))
-                    .collect();
-                let dest = self.fresh_temp(result_ty.clone());
+
+                // Extract element type from Array[T] type args
+                let element_ty = match &result_ty {
+                    MirTy::Named { type_args, .. } if !type_args.is_empty() => {
+                        type_args[0].clone()
+                    },
+                    _ => MirTy::Error,
+                };
+
+                let dest = self.fresh_temp(result_ty);
                 self.emit_stmt(Statement::new(StatementKind::Assign {
                     dest: Place::local(dest),
-                    rvalue: Rvalue::Construct {
-                        ty: result_ty,
-                        fields,
+                    rvalue: Rvalue::ArrayLiteral {
+                        element_ty,
+                        values,
                     },
                 }));
                 Value::Place(Place::local(dest))
             },
 
-            // === Dict literal ===
+            // === Dict literal — lowered as ArrayLiteral of (K, V) tuples ===
             HirExpr::Dict { entries, .. } => {
                 let result_ty = self.resolve_expr_type(expr_id);
-                // Lower each key-value pair as indexed fields
-                let mut fields = Vec::new();
-                for (i, entry) in entries.iter().enumerate() {
-                    let key = self.lower_expr(entry.key);
-                    let val = self.lower_expr(entry.value);
-                    fields.push((format!("{}.key", i), key));
-                    fields.push((format!("{}.value", i), val));
-                }
-                let dest = self.fresh_temp(result_ty.clone());
+
+                // Extract key/value types from Dictionary[K, V, H] type args
+                let (key_ty, value_ty) = match &result_ty {
+                    MirTy::Named { type_args, .. } if type_args.len() >= 2 => {
+                        (type_args[0].clone(), type_args[1].clone())
+                    },
+                    _ => (MirTy::Error, MirTy::Error),
+                };
+
+                let pair_ty = MirTy::Tuple(vec![key_ty.clone(), value_ty.clone()]);
+
+                // Lower each entry to a (K, V) tuple
+                let values: Vec<Value> = entries
+                    .iter()
+                    .map(|entry| {
+                        let key = self.lower_expr(entry.key);
+                        let val = self.lower_expr(entry.value);
+                        // Emit a Tuple rvalue for each pair
+                        let pair_dest = self.fresh_temp(pair_ty.clone());
+                        self.emit_stmt(Statement::new(StatementKind::Assign {
+                            dest: Place::local(pair_dest),
+                            rvalue: Rvalue::Tuple(vec![key, val]),
+                        }));
+                        Value::Place(Place::local(pair_dest))
+                    })
+                    .collect();
+
+                let dest = self.fresh_temp(result_ty);
                 self.emit_stmt(Statement::new(StatementKind::Assign {
                     dest: Place::local(dest),
-                    rvalue: Rvalue::Construct {
-                        ty: result_ty,
-                        fields,
+                    rvalue: Rvalue::ArrayLiteral {
+                        element_ty: pair_ty,
+                        values,
                     },
                 }));
                 Value::Place(Place::local(dest))
@@ -471,13 +493,18 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
     }
 
     /// Lower call arguments from HIR to MIR.
-    /// Default passing mode is Ref (borrow). Proper move/copy semantics
-    /// will be handled by the deinit pass later.
+    /// Trivially copyable types (primitives, refs, pointers, thin func ptrs)
+    /// are passed by copy. Everything else is passed by borrow.
     fn lower_call_args(&mut self, args: &[HirCallArg]) -> Vec<CallArg> {
         args.iter()
             .map(|arg| {
                 let value = self.lower_expr(arg.value);
-                CallArg::borrow(value)
+                let arg_ty = self.resolve_expr_type(arg.value);
+                if arg_ty.is_trivially_copyable() {
+                    CallArg::copy(value)
+                } else {
+                    CallArg::borrow(value)
+                }
             })
             .collect()
     }
@@ -519,11 +546,15 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
             },
             // Indirect call through a variable/expression
             _ => {
+                let callee_ty = self.resolve_expr_type(callee_expr);
                 let callee_val = self.lower_expr(callee_expr);
                 match callee_val {
                     Value::Place(p) => {
-                        // Could be thin or thick — default to thick for now
-                        let callee = Callee::Thick(p);
+                        // Dispatch thin vs thick based on the callee's function type
+                        let callee = match &callee_ty {
+                            MirTy::FuncThin { .. } => Callee::Thin(p),
+                            _ => Callee::Thick(p),
+                        };
                         self.emit_call(callee, call_args, result_ty)
                     },
                     Value::Immediate(Immediate { kind: ImmediateKind::FunctionRef { func, type_args }, .. }) => {
@@ -544,18 +575,23 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         _method_name: &str,
         args: &[HirCallArg],
     ) -> Value {
+        let receiver_ty = self.resolve_expr_type(receiver_expr);
         let receiver_val = self.lower_expr(receiver_expr);
         let result_ty = self.resolve_expr_type(expr_id);
 
-        // Build args: receiver first, then explicit args
-        let mut call_args = vec![CallArg::borrow(receiver_val)];
+        // Build args: receiver first (copy if trivially copyable), then explicit args
+        let receiver_arg = if receiver_ty.is_trivially_copyable() {
+            CallArg::copy(receiver_val)
+        } else {
+            CallArg::borrow(receiver_val)
+        };
+        let mut call_args = vec![receiver_arg];
         call_args.extend(self.lower_call_args(args));
 
         // Type inference tells us which function entity this resolves to
         if let Some(&resolved_entity) = self.typed.and_then(|t| t.resolutions.get(&expr_id)) {
             self.ctx.register_name(resolved_entity);
             let type_args = self.resolve_type_args(expr_id);
-            let receiver_ty = self.resolve_expr_type(receiver_expr);
             let callee = Callee::method(resolved_entity, type_args, receiver_ty);
             self.emit_call(callee, call_args, result_ty)
         } else {
@@ -574,12 +610,17 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         method_name: &str,
         args: &[HirCallArg],
     ) -> Value {
+        let receiver_ty = self.resolve_expr_type(receiver_expr);
         let receiver_val = self.lower_expr(receiver_expr);
         let result_ty = self.resolve_expr_type(expr_id);
-        let receiver_ty = self.resolve_expr_type(receiver_expr);
 
-        // Build args: receiver first, then explicit args
-        let mut call_args = vec![CallArg::borrow(receiver_val)];
+        // Build args: receiver first (copy if trivially copyable), then explicit args
+        let receiver_arg = if receiver_ty.is_trivially_copyable() {
+            CallArg::copy(receiver_val)
+        } else {
+            CallArg::borrow(receiver_val)
+        };
+        let mut call_args = vec![receiver_arg];
         call_args.extend(self.lower_call_args(args));
 
         // Check if inference resolved this to a concrete function
@@ -638,19 +679,24 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
     }
 
     /// Lower an if expression.
-    /// Creates: current_block → branch → then_block / else_block → merge_block
+    /// Creates: current_block → branch → then_block / else_block → merge_block.
+    /// Both branches assign their result to a shared temp before jumping to merge.
     fn lower_if(
         &mut self,
-        _expr_id: HirExprId,
+        expr_id: HirExprId,
         condition: HirExprId,
         then_body: &HirBlock,
         else_body: Option<&HirBlock>,
     ) -> Value {
         let cond_val = self.lower_expr(condition);
+        let result_ty = self.resolve_expr_type(expr_id);
 
         let then_block = self.new_block();
         let else_block = self.new_block();
         let merge_block = self.new_block();
+
+        // Result temp — both branches assign to this before jumping to merge
+        let result_local = self.fresh_temp(result_ty);
 
         // Branch on condition
         self.set_terminator(Terminator::branch(cond_val, then_block, else_block));
@@ -659,24 +705,36 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         self.switch_to_block(then_block);
         let then_val = self.lower_hir_block(then_body);
         if !self.is_terminated() {
+            self.emit_stmt(Statement::new(StatementKind::Assign {
+                dest: Place::local(result_local),
+                rvalue: value_to_rvalue(then_val),
+            }));
             self.set_terminator(Terminator::jump(merge_block));
         }
 
         // Lower else branch
         self.switch_to_block(else_block);
         if let Some(else_body) = else_body {
-            let _else_val = self.lower_hir_block(else_body);
-        }
-        if !self.is_terminated() {
+            let else_val = self.lower_hir_block(else_body);
+            if !self.is_terminated() {
+                self.emit_stmt(Statement::new(StatementKind::Assign {
+                    dest: Place::local(result_local),
+                    rvalue: value_to_rvalue(else_val),
+                }));
+                self.set_terminator(Terminator::jump(merge_block));
+            }
+        } else {
+            // No else branch — result is unit
+            self.emit_stmt(Statement::new(StatementKind::Assign {
+                dest: Place::local(result_local),
+                rvalue: Rvalue::Const(Immediate::unit()),
+            }));
             self.set_terminator(Terminator::jump(merge_block));
         }
 
         // Continue in merge block
         self.switch_to_block(merge_block);
-
-        // TODO: if/else as an expression should merge the then/else values
-        // into a phi-like construct. For now, return the then value.
-        then_val
+        Value::Place(Place::local(result_local))
     }
 
     /// Lower a loop expression.
@@ -748,9 +806,10 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
     ///
     /// Strategy:
     /// 1. Identify captures (locals from parent scope referenced in closure body)
-    /// 2. Create env struct if capturing
-    /// 3. Create a synthetic call function
-    /// 4. Emit ApplyPartial to create the thick callable value
+    /// 2. Create env struct for captures (if any)
+    /// 3. Create a synthetic call function with env loads at the top
+    /// 4. Register ClosureInfo for codegen
+    /// 5. Emit ApplyPartial to create the thick callable value
     fn lower_closure(
         &mut self,
         expr_id: HirExprId,
@@ -785,15 +844,34 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
             },
         };
 
+        // Create env struct for captures (if any)
+        let env_struct_id = if !captured_locals.is_empty() {
+            let env_struct_name = format!("{}.env", closure_name);
+            let env_struct_entity =
+                kestrel_hecs::Entity::from_raw(u32::MAX / 2 - closure_idx);
+            self.ctx
+                .module
+                .register_name(env_struct_entity, &env_struct_name);
+
+            let mut env_def = StructDef::new(env_struct_entity, &env_struct_name);
+            for &captured in &captured_locals {
+                let cap_ty = self.resolve_local_type(captured);
+                let cap_name = self.hir.locals[captured].name.clone();
+                env_def.add_field(FieldDef::new(&cap_name, cap_ty));
+            }
+            Some(self.ctx.module.add_struct(env_def))
+        } else {
+            None
+        };
+
         // Create the synthetic call function
         let closure_entity = kestrel_hecs::Entity::from_raw(u32::MAX - closure_idx);
         self.ctx.module.register_name(closure_entity, &closure_name);
 
         let mut func_def = FunctionDef::new(closure_entity, &closure_name, ret_ty.clone());
-        func_def.kind = if captured_locals.is_empty() {
-            FunctionKind::Free
+        func_def.kind = if let Some(env_id) = env_struct_id {
+            FunctionKind::ClosureCall { env_struct: env_id }
         } else {
-            // Will be set properly when we have an env struct
             FunctionKind::Free
         };
 
@@ -802,8 +880,16 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         // Create the closure's MIR body
         let mut closure_body = MirBody::new();
 
-        // Add env parameter (first param, even for non-capturing — ABI consistency)
-        let env_ty = MirTy::Pointer(Box::new(MirTy::Unit));
+        // Add env parameter — typed to the actual env struct pointer if capturing
+        let env_ty = if let Some(env_id) = env_struct_id {
+            let env_entity = self.ctx.module.structs[env_id.index()].entity;
+            MirTy::Pointer(Box::new(MirTy::Named {
+                entity: env_entity,
+                type_args: vec![],
+            }))
+        } else {
+            MirTy::Pointer(Box::new(MirTy::Unit))
+        };
         let env_local = closure_body.add_local(LocalDef::new("env", env_ty.clone()));
         let env_param = ParamDef::new("env", env_local, env_ty);
         func_def.params.push(env_param);
@@ -820,18 +906,17 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
             let param = ParamDef::new(&self.hir.locals[cp.local].name, local, ty);
             func_def.params.push(param);
             closure_body.param_count += 1;
-            // Map the HIR local to the closure's MIR local
             closure_local_map.insert(cp.local, local);
         }
 
-        // Map captured locals: create locals in the closure body that mirror
-        // the captured parent locals. For now, these are just copies — a full
-        // implementation would load them from the env struct.
+        // Create locals for captures (will be loaded from env struct in entry block)
+        let mut capture_local_ids = Vec::new();
         for &captured in &captured_locals {
             let cap_ty = self.resolve_local_type(captured);
             let cap_name = self.hir.locals[captured].name.clone();
-            let closure_local = closure_body.add_local(LocalDef::new(cap_name, cap_ty));
+            let closure_local = closure_body.add_local(LocalDef::new(&cap_name, cap_ty));
             closure_local_map.insert(captured, closure_local);
+            capture_local_ids.push(closure_local);
         }
 
         // Create entry block
@@ -848,7 +933,20 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
 
         // Switch to closure context
         self.current_block = Some(entry_block);
-        // func_id will be set after we add the function
+
+        // Emit loads from env struct for captured locals
+        if env_struct_id.is_some() {
+            for (i, &captured) in captured_locals.iter().enumerate() {
+                let closure_local = capture_local_ids[i];
+                let cap_name = self.hir.locals[captured].name.clone();
+                // Deref the env pointer and access the field by name
+                let field_place = Place::local(env_local).deref().field(&cap_name);
+                self.emit_stmt(Statement::new(StatementKind::Assign {
+                    dest: Place::local(closure_local),
+                    rvalue: Rvalue::Copy(field_place),
+                }));
+            }
+        }
 
         // Lower the closure body
         let body_val = self.lower_hir_block(body);
@@ -870,6 +968,24 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         func_def.body = Some(completed_closure_body);
         let closure_func_id = self.ctx.module.add_function(func_def);
 
+        // Register ClosureInfo for codegen
+        if let Some(env_id) = env_struct_id {
+            let captures: Vec<CaptureInfo> = captured_locals
+                .iter()
+                .map(|&hir_local| {
+                    let cap_ty = self.resolve_local_type(hir_local);
+                    let cap_name = self.hir.locals[hir_local].name.clone();
+                    CaptureInfo::new(cap_name, cap_ty, CaptureMode::ByRef)
+                })
+                .collect();
+
+            self.ctx.module.add_closure(ClosureInfo {
+                env_struct: env_id,
+                call_function: closure_func_id,
+                captures,
+            });
+        }
+
         // Collect capture values from the parent scope
         let capture_values: Vec<Value> = captured_locals
             .iter()
@@ -890,7 +1006,6 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
             },
         }));
 
-        let _ = closure_func_id;
         Value::Place(Place::local(dest))
     }
 
@@ -1150,14 +1265,12 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 }
 
                 // General switch: create a block for each case + optional default
-                let case_blocks: Vec<(String, BlockId)> = cases
-                    .iter()
-                    .map(|(ctor, _)| {
-                        let name = constructor_name(ctor);
-                        let block = self.new_block();
-                        (name, block)
-                    })
-                    .collect();
+                let mut case_blocks: Vec<(String, BlockId)> = Vec::with_capacity(cases.len());
+                for (ctor, _) in cases.iter() {
+                    let name = constructor_name(ctor, self.ctx);
+                    let block = self.new_block();
+                    case_blocks.push((name, block));
+                }
 
                 let default_block = if default.is_some() {
                     Some(self.new_block())
@@ -1326,13 +1439,19 @@ fn apply_access_path(mut place: Place, path: &[PathElement]) -> Place {
 }
 
 /// Get a display name for a constructor (used in switch case labels).
-fn constructor_name(ctor: &Constructor) -> String {
+fn constructor_name(ctor: &Constructor, ctx: &mut LowerCtx) -> String {
     match ctor {
         Constructor::True => "true".to_string(),
         Constructor::False => "false".to_string(),
-        Constructor::Variant { entity, .. } => format!("{:?}", entity),
+        Constructor::Variant { entity, .. } => {
+            ctx.register_name(*entity);
+            ctx.module.resolve_name(*entity).to_string()
+        },
         Constructor::Tuple { arity } => format!("tuple_{}", arity),
-        Constructor::Struct { entity, .. } => format!("{:?}", entity),
+        Constructor::Struct { entity, .. } => {
+            ctx.register_name(*entity);
+            ctx.module.resolve_name(*entity).to_string()
+        },
         Constructor::IntLiteral(v) => format!("{}", v),
         Constructor::IntRange { start, end } => {
             let s = start.map(|v| v.to_string()).unwrap_or_default();
