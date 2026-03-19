@@ -236,4 +236,41 @@ mod tests {
             eprintln!("  {}", line);
         }
     }
+
+    #[test]
+    fn run_all_passes() {
+        let mut c = Compiler::new();
+        let path = stdlib_path();
+        c.load_dir(&path);
+
+        let mir = lower_module(&c).with_all_passes();
+
+        // Layout pass should have computed some struct layouts
+        let layouts_computed = mir.structs.iter()
+            .filter(|s| s.layout.is_some())
+            .count();
+        eprintln!(
+            "Layouts: {}/{} structs have computed layouts",
+            layouts_computed,
+            mir.structs.len(),
+        );
+
+        // Thunk pass should have generated thunk functions
+        let thunk_count = mir.functions.iter()
+            .filter(|f| matches!(f.kind, kestrel_mir::FunctionKind::Thunk { .. }))
+            .count();
+        eprintln!("Thunks: {}", thunk_count);
+
+        // Deinit pass should have inserted deinit statements
+        let deinit_count: usize = mir.functions.iter()
+            .filter_map(|f| f.body.as_ref())
+            .flat_map(|b| &b.blocks)
+            .flat_map(|b| &b.stmts)
+            .filter(|s| matches!(s.kind, kestrel_mir::StatementKind::Deinit { .. }))
+            .count();
+        eprintln!("Deinit statements: {}", deinit_count);
+
+        // All passes should complete without panic
+        assert!(layouts_computed > 0, "layout pass should compute some layouts");
+    }
 }

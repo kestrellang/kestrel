@@ -1,0 +1,134 @@
+//! Thunk pass — generate and deduplicate thunk wrappers for ApplyPartial.
+//!
+//! When a function is used as a thick callable (via ApplyPartial), codegen
+//! needs a thunk that bridges the calling convention: it accepts an env_ptr
+//! parameter (which it ignores) and forwards the remaining args to the
+//! original function.
+//!
+//! This pass:
+//! 1. Scans all function bodies for `Rvalue::ApplyPartial` references
+//! 2. For each unique function reference, generates a thunk if one doesn't exist
+//! 3. Deduplicates — the same function referenced multiple times gets one thunk
+
+use std::collections::HashMap;
+
+use kestrel_hecs::Entity;
+
+use crate::body::{BasicBlock, LocalDef, MirBody};
+use crate::id::FunctionId;
+use crate::immediate::Immediate;
+use crate::item::{FunctionDef, FunctionKind, ParamDef};
+use crate::statement::{CallArg, Callee, Rvalue, Statement, StatementKind};
+use crate::terminator::Terminator;
+use crate::ty::MirTy;
+use crate::value::Value;
+use crate::MirModule;
+
+/// Scan for ApplyPartial references and generate thunk wrappers.
+///
+/// Each unique function entity referenced by ApplyPartial gets a thunk
+/// function that wraps it with a thick-callable ABI (env_ptr + params).
+pub fn run_thunk_pass(module: &mut MirModule) {
+    // Collect all function entities referenced by ApplyPartial
+    let mut thunk_targets: Vec<Entity> = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+
+    for func in &module.functions {
+        let Some(body) = &func.body else { continue };
+        for block in &body.blocks {
+            for stmt in &block.stmts {
+                if let StatementKind::Assign {
+                    rvalue: Rvalue::ApplyPartial { func: target, .. },
+                    ..
+                } = &stmt.kind
+                {
+                    if seen.insert(*target) {
+                        thunk_targets.push(*target);
+                    }
+                }
+            }
+        }
+    }
+
+    // Generate a thunk for each target that doesn't already have one
+    let mut thunk_map: HashMap<Entity, FunctionId> = HashMap::new();
+
+    for target in &thunk_targets {
+        // Check if the target function already has a thunk
+        let already_has_thunk = module.functions.iter().any(|f| {
+            matches!(&f.kind, FunctionKind::Thunk { original } if *original == *target)
+        });
+        if already_has_thunk {
+            continue;
+        }
+
+        // Find the target function and extract its signature data
+        let target_info = module.functions.iter().find(|f| f.entity == *target).map(|f| {
+            let name = f.name.clone();
+            let ret = f.ret.clone();
+            let params: Vec<_> = f.params.iter()
+                .filter(|p| p.name != "self" && p.name != "env" && p.name != "_env")
+                .cloned()
+                .collect();
+            (name, ret, params)
+        });
+        let Some((target_name, ret_ty, target_params)) = target_info else {
+            continue;
+        };
+
+        // Build thunk
+        let thunk_name = format!("{}.thunk", target_name);
+        let thunk_entity = Entity::from_raw(
+            u32::MAX / 2 + module.functions.len() as u32,
+        );
+        module.register_name(thunk_entity, &thunk_name);
+
+        let mut thunk_def = FunctionDef::new(thunk_entity, &thunk_name, ret_ty.clone());
+        thunk_def.kind = FunctionKind::Thunk { original: *target };
+
+        // Create body
+        let mut body = MirBody::new();
+
+        // Env parameter (ignored)
+        let env_local = body.add_local(LocalDef::new("_env", MirTy::Pointer(Box::new(MirTy::Unit))));
+        thunk_def.params.push(ParamDef::new("_env", env_local, MirTy::Pointer(Box::new(MirTy::Unit))));
+        body.param_count += 1;
+
+        let mut forward_args = Vec::new();
+        for param in &target_params {
+            let local = body.add_local(LocalDef::new(&param.name, param.ty.clone()));
+            thunk_def.params.push(ParamDef::new(&param.name, local, param.ty.clone()));
+            body.param_count += 1;
+            forward_args.push(CallArg::borrow(Value::Place(crate::place::Place::local(local))));
+        }
+
+        // Create entry block: call target and return result
+        let mut entry = BasicBlock::new();
+
+        if ret_ty == MirTy::Unit || ret_ty == MirTy::Never {
+            // Void call + return unit
+            entry.stmts.push(Statement::new(StatementKind::Call {
+                dest: None,
+                callee: Callee::direct(*target),
+                args: forward_args,
+            }));
+            entry.terminator = Terminator::ret(Immediate::unit());
+        } else {
+            // Call with return value
+            let result = body.add_local(LocalDef::new("_result", ret_ty));
+            entry.stmts.push(Statement::new(StatementKind::Call {
+                dest: Some(crate::place::Place::local(result)),
+                callee: Callee::direct(*target),
+                args: forward_args,
+            }));
+            entry.terminator = Terminator::ret(Value::Place(crate::place::Place::local(result)));
+        }
+
+        let entry_id = body.add_block(entry);
+        body.entry = entry_id;
+
+        thunk_def.body = Some(body);
+        let thunk_id = module.add_function(thunk_def);
+        thunk_map.insert(*target, thunk_id);
+    }
+}

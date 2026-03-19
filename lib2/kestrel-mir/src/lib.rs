@@ -18,6 +18,7 @@ pub mod builder;
 pub mod display;
 pub mod id;
 pub mod immediate;
+pub mod passes;
 pub mod item;
 pub mod op;
 pub mod place;
@@ -183,6 +184,33 @@ impl MirModule {
     /// Get a builder for a function.
     pub fn function_builder(&mut self, id: FunctionId) -> FunctionBuilder<'_> {
         FunctionBuilder::new(self, id)
+    }
+
+    // === Passes (chainable) ===
+
+    /// Run the layout pass: compute struct sizes, field offsets, alignment.
+    pub fn with_layouts(mut self) -> Self {
+        passes::run_layout_pass(&mut self);
+        self
+    }
+
+    /// Run the thunk pass: generate/deduplicate thunk wrappers for ApplyPartial.
+    pub fn with_thunks(mut self) -> Self {
+        passes::run_thunk_pass(&mut self);
+        self
+    }
+
+    /// Run the deinit pass: insert destructor calls for non-copyable locals.
+    pub fn with_deinits(mut self) -> Self {
+        passes::run_deinit_pass(&mut self);
+        self
+    }
+
+    /// Run all post-lowering passes in the recommended order.
+    pub fn with_all_passes(self) -> Self {
+        self.with_deinits()
+            .with_thunks()
+            .with_layouts()
     }
 }
 
