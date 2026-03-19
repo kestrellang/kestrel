@@ -386,6 +386,17 @@ impl fmt::Display for RvalueDisplay<'_> {
                 }
                 write!(f, ")")
             },
+            Rvalue::ApplyPartial { func, captures } => {
+                write!(f, "apply partial {}", self.module.resolve_name(*func))?;
+                write!(f, "(")?;
+                for (i, cap) in captures.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", cap.display(self.module))?;
+                }
+                write!(f, ")")
+            },
             Rvalue::EnumVariant {
                 enum_ty,
                 variant,
@@ -982,7 +993,6 @@ impl fmt::Display for crate::op::Op {
             },
             Op::FloatFma(b) => write!(f, "{}.fma", b),
             Op::FloatCopysign(b) => write!(f, "{}.copysign", b),
-            Op::ApplyPartial(_) => write!(f, "apply_partial"),
         }
     }
 }

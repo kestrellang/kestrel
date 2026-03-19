@@ -70,7 +70,8 @@ members = [
     "lib2/kestrel-analyze",
     "lib2/kestrel-debug",
     "lib2/kestrel-reporting",
-    "lib2/kestrel-mir"
+    "lib2/kestrel-mir",
+    "lib2/kestrel-mir-lower"
 ]
 exclude = ["registry"]
 

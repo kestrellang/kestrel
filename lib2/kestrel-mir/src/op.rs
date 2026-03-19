@@ -4,7 +4,6 @@
 //! `Rvalue` level via `Op1`/`Op2`/`Op3`.
 
 use crate::ty::MirTy;
-use kestrel_hecs::Entity;
 use std::fmt;
 
 /// Integer bit widths.
@@ -227,7 +226,4 @@ pub enum Op {
     /// Op2: (magnitude, sign_source) -> value
     FloatCopysign(FloatBits),
 
-    // === Callable ===
-    /// OpN: captures... -> thick_callable
-    ApplyPartial(Entity),
 }

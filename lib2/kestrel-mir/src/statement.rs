@@ -93,6 +93,12 @@ pub enum Rvalue {
     },
     /// `tuple (v0, v1, ...)`
     Tuple(Vec<Value>),
+    /// `apply partial func(captures...)` — create a thick callable from a function + captures
+    ApplyPartial {
+        func: Entity,
+        captures: Vec<Value>,
+    },
+
     /// `enum Enum.Variant` or `enum Enum.Variant(payload...)`
     EnumVariant {
         enum_ty: MirTy,
