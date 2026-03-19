@@ -33,6 +33,9 @@ pub(crate) struct LowerCtx<'a> {
     /// Statements that originated from guard-let desugaring.
     /// Populated during lowering, transferred to HirBody for analysis.
     pub guard_let_stmts: Vec<HirStmtId>,
+    /// Match expressions that originated from for-loop desugaring.
+    /// Populated during lowering, transferred to HirBody for analysis.
+    pub for_loop_matches: Vec<HirExprId>,
 }
 
 impl<'a> LowerCtx<'a> {
@@ -48,6 +51,7 @@ impl<'a> LowerCtx<'a> {
             params: Vec::new(),
             scopes: vec![HashMap::new()], // start with one scope for params
             guard_let_stmts: Vec::new(),
+            for_loop_matches: Vec::new(),
         }
     }
 

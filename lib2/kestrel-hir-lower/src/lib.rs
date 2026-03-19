@@ -51,9 +51,14 @@ impl QueryFn for LowerBody {
         // Create locals for function parameters
         if let Some(callable) = ctx.get::<Callable>(self.entity) {
             // If method has a receiver, create `self` local
-            if callable.receiver.is_some() {
+            if let Some(receiver) = &callable.receiver {
+                let is_mut = matches!(
+                    receiver,
+                    kestrel_ast_builder::ReceiverKind::Mutating
+                        | kestrel_ast_builder::ReceiverKind::Consuming
+                );
                 let self_local =
-                    lower.define_local("self", false, Span::synthetic(0));
+                    lower.define_local("self", is_mut, Span::synthetic(0));
                 lower.params.push(self_local);
             }
 
@@ -85,6 +90,7 @@ impl QueryFn for LowerBody {
             statements,
             tail_expr,
             guard_let_stmts: lower.guard_let_stmts,
+            for_loop_matches: lower.for_loop_matches,
         })
     }
 }

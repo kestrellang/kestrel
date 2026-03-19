@@ -21,7 +21,7 @@ use crate::context::DeclContext;
 use crate::diagnostic::*;
 use crate::traits::{DeclCheck, Describe};
 use crate::util;
-use kestrel_ast_builder::{Attributes, Body, NodeKind, Valued};
+use kestrel_ast_builder::{Attributes, Body, Intrinsic, NodeKind, Valued};
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
     id: "KS606",
@@ -54,9 +54,14 @@ impl DeclCheck for FunctionBodyAnalyzer {
             }
         }
 
-        // Skip extern functions -- check for @extern attribute
+        // Skip intrinsic functions (lang module builtins with no implementation)
+        if cx.query.has::<Intrinsic>(cx.entity) {
+            return vec![];
+        }
+
+        // Skip extern and builtin functions
         if let Some(attrs) = cx.query.get::<Attributes>(cx.entity) {
-            if attrs.0.iter().any(|a| a.name == "extern") {
+            if attrs.0.iter().any(|a| a.name == "extern" || a.name == "builtin") {
                 return vec![];
             }
         }

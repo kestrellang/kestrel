@@ -1,19 +1,14 @@
-//! # For-Loop Pattern Analyzer (Shell)
+//! # For-Loop Pattern Analyzer
 //!
 //! Checks that for-loop bindings use irrefutable patterns. In lib2 HIR,
-//! for-loops are desugared to loop + match on iterator.next(), so the
-//! user's pattern is embedded inside the desugared match. This analyzer
-//! would need to recognize the desugaring pattern to extract and validate
-//! the user's original pattern.
-//!
-//! Currently a shell — the desugaring produces irrefutable bindings
-//! by construction, so this check may not fire in practice. If the HIR
-//! adds a `from_for_loop` marker (like lib1's `WhileLet::from_for_loop`),
-//! this can be properly implemented.
+//! for-loops are desugared to `loop { match iter.next() { .Some(pat) => body, .None => break } }`.
+//! The user's pattern is embedded inside the `.Some` variant. This analyzer
+//! uses the `for_loop_matches` marker on HirBody to find these desugared
+//! matches and extracts the user's pattern to check irrefutability.
 //!
 //! ## Diagnostics
 //!
-//! ### KS301 — `refutable_for_loop_pattern` (Error, Correctness)
+//! ### KS301 -- `refutable_for_loop_pattern` (Error, Correctness)
 //!
 //! **Message:** "refutable pattern in for-loop binding"
 //!
@@ -27,6 +22,9 @@
 use crate::context::BodyContext;
 use crate::diagnostic::*;
 use crate::traits::{BodyCheck, Describe};
+use crate::util;
+use kestrel_hir::body::*;
+use kestrel_type_infer::result::ResolvedTy;
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
     id: "KS301",
@@ -47,26 +45,76 @@ impl Describe for ForLoopPatternAnalyzer {
 }
 
 impl BodyCheck for ForLoopPatternAnalyzer {
-    fn check(&self, _cx: &BodyContext<'_>) -> Vec<AnalyzeDiagnostic> {
-        // TODO: Implement for-loop pattern checking.
-        //
-        // In lib2 HIR, for-loops are desugared to:
-        //   var iter = iterable.iter()
-        //   loop {
-        //     match iter.next() {
-        //       .Some(user_pattern) => { body }
-        //       .None => break
-        //     }
-        //   }
-        //
-        // To check the user's pattern, we'd need to:
-        // 1. Identify desugared for-loops (possibly via a marker on HirBody)
-        // 2. Extract the user_pattern from inside the .Some variant pattern
-        // 3. Check if that pattern is irrefutable using
-        //    `refutable_pattern::is_pattern_irrefutable`
-        //
-        // Since the desugaring currently always produces irrefutable bindings
-        // (the user's pattern is used directly), this check is a no-op for now.
-        vec![]
+    fn check(&self, cx: &BodyContext<'_>) -> Vec<AnalyzeDiagnostic> {
+        let mut diags = Vec::new();
+
+        for &match_id in &cx.hir.for_loop_matches {
+            let HirExpr::Match { scrutinee, arms, .. } = &cx.hir.exprs[match_id] else {
+                continue;
+            };
+
+            // First arm is .Some(user_pattern)
+            let Some(some_arm) = arms.first() else { continue };
+
+            // Extract the user's pattern from .Some(user_pattern)
+            let Some(user_pat) = extract_user_pattern(cx.hir, some_arm.pattern) else {
+                continue;
+            };
+
+            // Get the element type T from the scrutinee type Optional[T]
+            let Some(element_ty) = extract_element_type(cx, *scrutinee) else {
+                // Fall back to syntactic check if we can't resolve the type
+                if !crate::body::refutable_pattern::is_pattern_irrefutable(cx.hir, user_pat) {
+                    diags.push(make_diagnostic(cx, user_pat));
+                }
+                continue;
+            };
+
+            // Type-aware irrefutability check
+            if !kestrel_pattern_matching::is_irrefutable(cx.hir, cx.query, user_pat, &element_ty) {
+                diags.push(make_diagnostic(cx, user_pat));
+            }
+        }
+
+        diags
+    }
+}
+
+/// Extract the user's pattern from inside `.Some(user_pattern)`.
+/// The desugared for-loop creates `ImplicitVariant { name: "Some", args: [{ pattern }] }`.
+fn extract_user_pattern(hir: &HirBody, pat_id: HirPatId) -> Option<HirPatId> {
+    let HirPat::ImplicitVariant { name, args, .. } = &hir.pats[pat_id] else {
+        return None;
+    };
+    if name != "Some" || args.len() != 1 {
+        return None;
+    }
+    Some(args[0].pattern)
+}
+
+/// Extract the element type T from the scrutinee type Optional[T].
+/// The scrutinee of the desugared match is `iter.next()` which returns `Optional[T]`.
+fn extract_element_type(cx: &BodyContext<'_>, scrutinee: HirExprId) -> Option<ResolvedTy> {
+    let scrutinee_ty = cx.typed.expr_types.get(&scrutinee)?;
+    let ResolvedTy::Named { args, .. } = scrutinee_ty else {
+        return None;
+    };
+    // Optional[T] has one type arg
+    args.first().cloned()
+}
+
+fn make_diagnostic(cx: &BodyContext<'_>, user_pat: HirPatId) -> AnalyzeDiagnostic {
+    AnalyzeDiagnostic {
+        descriptor_id: DESCRIPTORS[0].id,
+        severity: DESCRIPTORS[0].default_severity,
+        message: "refutable pattern in for-loop binding".into(),
+        labels: vec![DiagLabel {
+            span: util::pat_span(cx.hir, user_pat),
+            message: "this pattern may not match all iterator elements".into(),
+            is_primary: true,
+        }],
+        notes: vec![
+            "help: for-loop patterns must match every element from the iterator".into(),
+        ],
     }
 }

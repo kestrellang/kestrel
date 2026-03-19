@@ -898,6 +898,12 @@ fn solve_member(
     // with the actual receiver type.
     let self_entity = resolution.self_type;
 
+    // When resolved through a protocol conformance, emit a Conforms constraint
+    // to verify the receiver conforms to this protocol with the inferred type args.
+    if let Some(protocol) = resolution.via_protocol {
+        ctx.conforms(receiver, protocol, span.clone());
+    }
+
     // Equate argument types with parameter types
     for (arg, param_info) in args.iter().zip(&resolution.param_types) {
         let param_tv = lower_hir_ty_sub(ctx, &param_info.ty, self_entity, receiver, &subs);

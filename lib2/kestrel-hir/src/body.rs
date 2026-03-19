@@ -40,6 +40,9 @@ pub struct HirBody {
     /// Statements that originated from guard-let desugaring.
     /// Used by the guard-let divergence analyzer to check that the else block diverges.
     pub guard_let_stmts: Vec<HirStmtId>,
+    /// Match expressions that originated from for-loop desugaring.
+    /// Used by the for-loop pattern analyzer to extract and check the user's pattern.
+    pub for_loop_matches: Vec<HirExprId>,
 }
 
 /// A nested code block (if/loop/match arm bodies, desugared blocks).

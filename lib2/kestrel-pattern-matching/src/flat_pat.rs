@@ -1,10 +1,27 @@
-//! Flattened pattern representation for matrix operations.
+//! # Flattened Pattern Representation
 //!
 //! `FlatPat` is a normalized pattern stripped of spans, locals, and type
-//! annotations. It's built once from `HirPat` and then used throughout the
-//! algorithm. All pattern decomposition logic lives in `FlatPat::decompose`,
-//! which is the SINGLE function used by both matrix specialization and
-//! decision tree compilation.
+//! annotations. It's built once from `HirPat` via `flatten()`, then used
+//! throughout the matrix algorithm and decision tree compilation.
+//!
+//! ## Why flatten?
+//!
+//! `HirPat` lives in an arena (`HirBody.pats`) and carries spans, local IDs,
+//! and unresolved implicit variants. The matrix algorithm only cares about
+//! constructor structure. `FlatPat` provides that:
+//!
+//! ```text
+//! HirPat::ImplicitVariant { name: "Some", args: [Binding { local: x }] }
+//!   ──flatten()──►  FlatPat::Ctor { ctor: Variant(some_entity, 1), children: [Wildcard] }
+//! ```
+//!
+//! ## Key Functions
+//!
+//! - `flatten(hir, query, pat_id, scrutinee_ty)` — convert HirPat → FlatPat
+//! - `FlatPat::decompose(ctor, arity)` — extract sub-patterns for specialization
+//!   (the SINGLE decomposition function used by both matrix and decision tree)
+//! - `FlatPat::is_wildcard_like()` — does this pattern match anything?
+//! - `FlatPat::head_constructor()` — extract the constructor head
 
 use kestrel_ast_builder::{Callable, Name, NodeKind};
 use kestrel_hecs::{Entity, QueryContext};

@@ -384,24 +384,11 @@ impl LowerCtx<'_> {
         let lowered_for_body = self.lower_block(body, for_body);
         self.pop_scope();
 
-        // Body expression wrapping the block
-        let body_expr = if let Some(tail) = lowered_for_body.tail_expr {
-            if lowered_for_body.stmts.is_empty() {
-                tail
-            } else {
-                // Wrap in a block-like expression using tuple as unit return
-                let unit = self.alloc_expr(HirExpr::Tuple {
-                    elements: Vec::new(),
-                    span: span.clone(),
-                });
-                unit
-            }
-        } else {
-            self.alloc_expr(HirExpr::Tuple {
-                elements: Vec::new(),
-                span: span.clone(),
-            })
-        };
+        // Wrap the for-body as a block expression so all statements are reachable
+        let body_expr = self.alloc_expr(HirExpr::Block {
+            body: lowered_for_body,
+            span: span.clone(),
+        });
 
         // .None => break
         let none_pat = self.alloc_pat(HirPat::ImplicitVariant {
@@ -431,6 +418,10 @@ impl LowerCtx<'_> {
             ],
             span: span.clone(),
         });
+
+        // Track this match as originating from a for-loop so the
+        // for_loop_pattern analyzer can extract and check the user's pattern.
+        self.for_loop_matches.push(match_expr);
 
         let match_stmt = self.alloc_stmt(HirStmt::Expr {
             expr: match_expr,

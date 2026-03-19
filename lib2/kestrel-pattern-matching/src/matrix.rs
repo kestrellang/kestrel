@@ -1,15 +1,32 @@
-//! Pattern matrix for exhaustiveness checking.
+//! # Pattern Matrix
 //!
 //! The matrix is the core data structure in Maranget's algorithm. Each row
 //! is a match arm and each column corresponds to a scrutinee component.
 //!
-//! Two key operations:
-//! - `specialize(col, ctor)` — S(c, P): keep rows matching `ctor` at column `col`,
-//!   expanding sub-patterns into new columns
-//! - `default_matrix(col)` — D(P): keep only wildcard rows, removing column `col`
+//! ## Example
 //!
-//! Multi-column support is built in from the start (unlike lib1 where it was
-//! bolted on via an external impl block).
+//! Matching on `(Bool, Int)` with patterns `(true, 1)`, `(false, _)`, `(_, 2)`:
+//!
+//! ```text
+//! col_types: [Bool, Int]
+//! ┌───────┬───┐
+//! │ true  │ 1 │  arm 0
+//! │ false │ _ │  arm 1
+//! │ _     │ 2 │  arm 2
+//! └───────┴───┘
+//! ```
+//!
+//! ## Operations
+//!
+//! - `specialize(ctx, col, ctor)` — S(c, P): keep rows matching `ctor` at
+//!   column `col`, expanding sub-patterns into new columns. Or-patterns in
+//!   the column are expanded into multiple rows.
+//!
+//! - `default_matrix(col)` — D(P): keep only wildcard rows, removing column `col`.
+//!
+//! - `head_constructors(col)` — unique constructors appearing in a column.
+//!
+//! Multi-column support is built in (works on any column, not just column 0).
 
 use kestrel_hecs::QueryContext;
 use kestrel_type_infer::result::ResolvedTy;

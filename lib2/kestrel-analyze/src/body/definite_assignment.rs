@@ -25,6 +25,7 @@ use crate::traits::{BodyCheck, Describe};
 use crate::util;
 use kestrel_hir::body::*;
 use kestrel_hir::res::LocalId;
+use kestrel_type_infer::result::ResolvedTy;
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
     id: "KS004",
@@ -50,8 +51,27 @@ impl BodyCheck for DefiniteAssignmentAnalyzer {
         let mut assigned: HashSet<LocalId> = cx.hir.params.iter().copied().collect();
         let mut diags = Vec::new();
 
-        analyze_block(cx, &cx.hir.statements, cx.hir.tail_expr, &mut assigned, &mut diags);
+        // Collect all locals introduced by pattern bindings — these are always
+        // assigned by the pattern match and don't need tracking. This avoids
+        // false positives for locals bound by match/for/while-let patterns
+        // inside loops, where the conservative loop analysis can't propagate
+        // the pattern assignment outward.
+        let mut pattern_bound = HashSet::new();
+        collect_pattern_bound_locals(cx.hir, &mut pattern_bound);
+
+        analyze_block(cx, &cx.hir.statements, cx.hir.tail_expr, &mut assigned, &pattern_bound, &mut diags);
         diags
+    }
+}
+
+/// Collect all locals that are introduced by pattern bindings anywhere in the body.
+fn collect_pattern_bound_locals(hir: &HirBody, out: &mut HashSet<LocalId>) {
+    for (_, pat) in hir.pats.iter() {
+        match pat {
+            HirPat::Binding { local, .. } => { out.insert(*local); }
+            HirPat::At { binding, .. } => { out.insert(*binding); }
+            _ => {}
+        }
     }
 }
 
@@ -72,6 +92,7 @@ fn analyze_block(
     stmts: &[HirStmtId],
     tail: Option<HirExprId>,
     assigned: &mut HashSet<LocalId>,
+    pattern_bound: &HashSet<LocalId>,
     diags: &mut Vec<AnalyzeDiagnostic>,
 ) -> State {
     let mut state = State {
@@ -83,12 +104,12 @@ fn analyze_block(
         if state.diverged {
             break;
         }
-        state = analyze_stmt(cx, stmt_id, state, diags);
+        state = analyze_stmt(cx, stmt_id, state, pattern_bound, diags);
     }
 
     if !state.diverged {
         if let Some(tail) = tail {
-            state = analyze_expr(cx, tail, state, false, diags);
+            state = analyze_expr(cx, tail, state, false, pattern_bound, diags);
         }
     }
 
@@ -101,13 +122,14 @@ fn analyze_stmt(
     cx: &BodyContext<'_>,
     id: HirStmtId,
     mut state: State,
+    pattern_bound: &HashSet<LocalId>,
     diags: &mut Vec<AnalyzeDiagnostic>,
 ) -> State {
     match &cx.hir.stmts[id] {
         HirStmt::Let { local, value, .. } => {
             // Analyze the value expression first (before marking the local as assigned)
             if let Some(val) = value {
-                state = analyze_expr(cx, *val, state, false, diags);
+                state = analyze_expr(cx, *val, state, false, pattern_bound, diags);
                 // Mark the local as assigned after the value is evaluated
                 state.assigned.insert(*local);
                 // Also mark any pattern bindings if this is a destructuring let
@@ -116,7 +138,7 @@ fn analyze_stmt(
             // If no value, the local stays unassigned (e.g. `let x: Int`)
         }
         HirStmt::Expr { expr, .. } => {
-            state = analyze_expr(cx, *expr, state, false, diags);
+            state = analyze_expr(cx, *expr, state, false, pattern_bound, diags);
         }
         HirStmt::Deinit { .. } => {
             // Deinit doesn't affect assignment state
@@ -130,12 +152,19 @@ fn analyze_expr(
     id: HirExprId,
     mut state: State,
     is_assign_target: bool,
+    pattern_bound: &HashSet<LocalId>,
     diags: &mut Vec<AnalyzeDiagnostic>,
 ) -> State {
     match &cx.hir.exprs[id] {
         // Reading a local: check it's assigned (unless this is an assignment target)
         HirExpr::Local(local_id, _) => {
             if !is_assign_target && !state.assigned.contains(local_id) {
+                // Skip pattern-bound locals — they're always assigned by the
+                // match that creates them. We can't track this through loops,
+                // but the binding is guaranteed to be assigned in any reachable code.
+                if pattern_bound.contains(local_id) {
+                    return state;
+                }
                 let name = cx.hir.locals[*local_id].name.clone();
                 diags.push(AnalyzeDiagnostic {
                     descriptor_id: DESCRIPTORS[0].id,
@@ -153,12 +182,12 @@ fn analyze_expr(
 
         // Assignment: analyze value first, then mark target local as assigned
         HirExpr::Assign { target, value, .. } => {
-            state = analyze_expr(cx, *value, state, false, diags);
+            state = analyze_expr(cx, *value, state, false, pattern_bound, diags);
             // If target is a local, mark it assigned
             if let HirExpr::Local(local_id, _) = &cx.hir.exprs[*target] {
                 state.assigned.insert(*local_id);
             }
-            state = analyze_expr(cx, *target, state, true, diags);
+            state = analyze_expr(cx, *target, state, true, pattern_bound, diags);
         }
 
         // If/else: merge assigned sets from both branches (intersection)
@@ -168,7 +197,7 @@ fn analyze_expr(
             else_body,
             ..
         } => {
-            state = analyze_expr(cx, *condition, state, false, diags);
+            state = analyze_expr(cx, *condition, state, false, pattern_bound, diags);
             let pre_if = state.assigned.clone();
 
             // Then branch
@@ -178,6 +207,7 @@ fn analyze_expr(
                 &then_body.stmts,
                 then_body.tail_expr,
                 &mut then_assigned,
+                pattern_bound,
                 diags,
             );
 
@@ -189,6 +219,7 @@ fn analyze_expr(
                     &else_block.stmts,
                     else_block.tail_expr,
                     &mut else_assigned,
+                    pattern_bound,
                     diags,
                 );
                 (es, else_assigned)
@@ -227,7 +258,7 @@ fn analyze_expr(
 
         // Match: intersection of all arm states
         HirExpr::Match { scrutinee, arms, .. } => {
-            state = analyze_expr(cx, *scrutinee, state, false, diags);
+            state = analyze_expr(cx, *scrutinee, state, false, pattern_bound, diags);
 
             if arms.is_empty() {
                 return state;
@@ -239,9 +270,9 @@ fn analyze_expr(
                 // Pattern bindings are assigned within the arm
                 mark_pattern_assigned(cx.hir, arm.pattern, &mut arm_state.assigned);
                 if let Some(guard) = arm.guard {
-                    arm_state = analyze_expr(cx, guard, arm_state, false, diags);
+                    arm_state = analyze_expr(cx, guard, arm_state, false, pattern_bound, diags);
                 }
-                arm_state = analyze_expr(cx, arm.body, arm_state, false, diags);
+                arm_state = analyze_expr(cx, arm.body, arm_state, false, pattern_bound, diags);
                 arm_states.push(arm_state);
             }
 
@@ -273,6 +304,7 @@ fn analyze_expr(
                 &body.stmts,
                 body.tail_expr,
                 &mut body_assigned,
+                pattern_bound,
                 diags,
             );
 
@@ -291,43 +323,45 @@ fn analyze_expr(
                 &body.stmts,
                 body.tail_expr,
                 &mut block_assigned,
+                pattern_bound,
                 diags,
             );
             state.assigned = block_assigned;
             state.diverged = block_state.diverged;
         }
 
-        // Return / break / continue: diverges
+        // Return: analyze value expression (divergence handled by Never check below)
         HirExpr::Return { value, .. } => {
             if let Some(val) = value {
-                state = analyze_expr(cx, *val, state, false, diags);
+                state = analyze_expr(cx, *val, state, false, pattern_bound, diags);
             }
-            state.diverged = true;
         }
-        HirExpr::Break { .. } | HirExpr::Continue { .. } => {
-            state.diverged = true;
-        }
+        // Break/Continue divergence handled by Never check below
+        HirExpr::Break { .. } | HirExpr::Continue { .. } => {}
 
         // Closures: analyze body separately (captures are already assigned from outer scope).
         // Closure body doesn't affect outer assignment state.
-        HirExpr::Closure { body, .. } => {
+        HirExpr::Closure { params, body, .. } => {
             let mut closure_assigned = state.assigned.clone();
             // Mark closure params as assigned
-            // (params are part of the body's locals, referenced by index)
+            for param in params {
+                closure_assigned.insert(param.local);
+            }
             let _ = analyze_block(
                 cx,
                 &body.stmts,
                 body.tail_expr,
                 &mut closure_assigned,
+                pattern_bound,
                 diags,
             );
         }
 
         // Expressions that recurse into sub-expressions
         HirExpr::Call { callee, args, .. } => {
-            state = analyze_expr(cx, *callee, state, false, diags);
+            state = analyze_expr(cx, *callee, state, false, pattern_bound, diags);
             for arg in args {
-                state = analyze_expr(cx, arg.value, state, false, diags);
+                state = analyze_expr(cx, arg.value, state, false, pattern_bound, diags);
             }
         }
         HirExpr::MethodCall {
@@ -336,32 +370,32 @@ fn analyze_expr(
         | HirExpr::ProtocolCall {
             receiver, args, ..
         } => {
-            state = analyze_expr(cx, *receiver, state, false, diags);
+            state = analyze_expr(cx, *receiver, state, false, pattern_bound, diags);
             for arg in args {
-                state = analyze_expr(cx, arg.value, state, false, diags);
+                state = analyze_expr(cx, arg.value, state, false, pattern_bound, diags);
             }
         }
         HirExpr::Field { base, .. } => {
-            state = analyze_expr(cx, *base, state, false, diags);
+            state = analyze_expr(cx, *base, state, false, pattern_bound, diags);
         }
         HirExpr::TupleIndex { base, .. } => {
-            state = analyze_expr(cx, *base, state, false, diags);
+            state = analyze_expr(cx, *base, state, false, pattern_bound, diags);
         }
         HirExpr::Tuple { elements, .. } | HirExpr::Array { elements, .. } => {
             for &elem in elements {
-                state = analyze_expr(cx, elem, state, false, diags);
+                state = analyze_expr(cx, elem, state, false, pattern_bound, diags);
             }
         }
         HirExpr::Dict { entries, .. } => {
             for entry in entries {
-                state = analyze_expr(cx, entry.key, state, false, diags);
-                state = analyze_expr(cx, entry.value, state, false, diags);
+                state = analyze_expr(cx, entry.key, state, false, pattern_bound, diags);
+                state = analyze_expr(cx, entry.value, state, false, pattern_bound, diags);
             }
         }
         HirExpr::ImplicitMember { args, .. } => {
             if let Some(args) = args {
                 for arg in args {
-                    state = analyze_expr(cx, arg.value, state, false, diags);
+                    state = analyze_expr(cx, arg.value, state, false, pattern_bound, diags);
                 }
             }
         }
@@ -371,6 +405,12 @@ fn analyze_expr(
         | HirExpr::Def(..)
         | HirExpr::OverloadSet { .. }
         | HirExpr::Error { .. } => {}
+    }
+
+    // Unified divergence detection: any expression with Never type diverges.
+    // Covers return, break, continue, lang.panic(), and any user function → Never.
+    if let Some(ResolvedTy::Never) = cx.typed.expr_types.get(&id) {
+        state.diverged = true;
     }
 
     state

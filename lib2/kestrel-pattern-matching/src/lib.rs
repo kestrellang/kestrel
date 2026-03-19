@@ -1,26 +1,65 @@
-//! Pattern matching analysis for Kestrel (lib2).
+//! # Pattern Matching Analysis
 //!
-//! Implements Maranget's pattern matrix algorithm for:
-//! - **Exhaustiveness**: does a match cover all possible values?
-//! - **Redundancy**: is a pattern arm unreachable?
-//! - **Overlap**: do range patterns overlap?
-//! - **Decision tree compilation**: efficient codegen IR for pattern matching
+//! Implements Maranget's pattern matrix algorithm for analyzing and compiling
+//! Kestrel match expressions. Used by two consumers:
 //!
-//! Used by both the analyzer crate (diagnostics) and execution graph
-//! lowering (codegen).
+//! - **`kestrel-analyze`** — exhaustiveness diagnostics (KS304–KS307)
+//! - **Execution graph lowering** — decision tree compilation for codegen
+//!
+//! # Capabilities
+//!
+//! - **Exhaustiveness** — does a match cover all possible values?
+//! - **Redundancy** — is a pattern arm unreachable?
+//! - **Overlap detection** — do range patterns overlap?
+//! - **Decision tree compilation** — optimal control-flow IR for codegen
+//!
+//! # Entry Points
+//!
+//! ```ignore
+//! // Diagnostics: check a match expression
+//! let result = kestrel_pattern_matching::check_match(hir, query, scrutinee_ty, arms);
+//! // result.is_exhaustive, result.redundant_arms, result.missing_patterns
+//!
+//! // Irrefutability: check a let/for pattern
+//! let ok = kestrel_pattern_matching::is_irrefutable(hir, query, pat_id, ty);
+//!
+//! // Codegen: compile to decision tree
+//! let tree = kestrel_pattern_matching::compile_decision_tree(hir, query, scrutinee_ty, arms);
+//! ```
 //!
 //! # Architecture
 //!
-//! - `constructor` — Constructor enum and TypeShape for type classification
-//! - `flat_pat` — Normalized pattern representation with single decompose function
-//! - `matrix` — Pattern matrix with specialize/default operations
-//! - `usefulness` — Core Maranget algorithm
-//! - `witness` — Example values for error messages
-//! - `decision_tree` — Compilation to decision trees for codegen
+//! ```text
+//! HirPat ──► flatten() ──► FlatPat ──► PatternMatrix ──► is_useful() ──► ExhaustivenessResult
+//!                             │                              │
+//!                             │                              ▼
+//!                             └──────────────────────► compile() ──► DecisionTree
+//! ```
 //!
-//! All pattern decomposition happens in `FlatPat::decompose` (one function),
-//! all type classification in `TypeShape::classify` (one function), and
-//! all constructor matching in `Constructor::matches` (one function).
+//! Six modules, each with a single responsibility:
+//!
+//! | Module | Role |
+//! |--------|------|
+//! | `constructor` | Constructor enum, TypeShape (type → constructor space) |
+//! | `flat_pat` | Normalized pattern, HirPat→FlatPat conversion, decompose() |
+//! | `matrix` | Pattern matrix, specialize (S(c,P)), default (D(P)) |
+//! | `usefulness` | Core Maranget algorithm, ExhaustivenessResult |
+//! | `witness` | Example values for "missing pattern: `.None`" messages |
+//! | `decision_tree` | Decision tree compilation, binding extraction |
+//!
+//! # Deduplication Invariants
+//!
+//! Each piece of logic exists in exactly one place:
+//!
+//! - **Pattern decomposition** — `FlatPat::decompose()` (used by matrix + decision tree)
+//! - **Constructor field types** — `Constructor::field_types()` (used by matrix + decision tree)
+//! - **Constructor matching** — `Constructor::matches()` (used by decompose + matrix)
+//! - **Type classification** — `TypeShape::classify()` (used by usefulness + irrefutability)
+//!
+//! # References
+//!
+//! - Luc Maranget, "Warnings for pattern matching" (JFP 2007)
+//! - Luc Maranget, "Compiling Pattern Matching to Good Decision Trees" (2008)
 
 pub mod constructor;
 pub mod decision_tree;

@@ -1,10 +1,29 @@
-//! Usefulness analysis using Maranget's algorithm (JFP 2007).
+//! # Usefulness Analysis (Maranget 2007)
 //!
 //! A pattern row `q` is **useful** w.r.t. a matrix `P` if there exists a
 //! value that matches `q` but not any row in `P`.
 //!
-//! - **Exhaustiveness**: match is exhaustive iff wildcard is NOT useful
+//! - **Exhaustiveness**: match is exhaustive iff wildcard `_` is NOT useful
 //! - **Redundancy**: arm is redundant iff it is NOT useful against prior arms
+//!
+//! ## Algorithm
+//!
+//! 1. **Empty matrix** — `q` is useful (no patterns to block it)
+//! 2. **Zero-width matrix** — useful iff no unguarded row exists
+//! 3. **Constructor head** — specialize matrix and `q` for that constructor, recurse
+//! 4. **Wildcard head** — check each constructor of the column type:
+//!    - Finite type: check uncovered constructors, then recurse into each
+//!    - Infinite type: fall back to default matrix
+//!
+//! ## Entry Point
+//!
+//! `check_match()` builds the matrix, checks each arm for redundancy,
+//! detects overlapping ranges, then checks if wildcard is useful (exhaustiveness).
+//!
+//! ## Guards
+//!
+//! Guarded arms are excluded from the exhaustiveness matrix — the guard
+//! might fail at runtime, so the arm doesn't truly cover its pattern.
 
 use std::collections::HashSet;
 

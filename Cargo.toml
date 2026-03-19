@@ -24,6 +24,7 @@ downcast-rs = "2.0.2"
 logos = "0.16.0"
 parking_lot = "0.12.5"
 rowan = "0.16.1"
+indexmap = "2"
 stacker = "0.1"
 tokio = { version = "1", features = ["full"] }
 tower-lsp = "0.20"
@@ -68,7 +69,8 @@ members = [
     "lib2/kestrel-pattern-matching",
     "lib2/kestrel-analyze",
     "lib2/kestrel-debug",
-    "lib2/kestrel-reporting"
+    "lib2/kestrel-reporting",
+    "lib2/kestrel-mir"
 ]
 exclude = ["registry"]
 

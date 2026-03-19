@@ -754,6 +754,7 @@ dependencies = [
  "kestrel-parser2",
  "kestrel-pattern-matching",
  "kestrel-span2",
+ "kestrel-syntax-tree2",
  "kestrel-type-infer",
 ]
 
@@ -929,6 +930,15 @@ dependencies = [
  "semantic-tree",
  "tokio",
  "tower-lsp",
+]
+
+[[package]]
+name = "kestrel-mir"
+version = "0.15.0"
+dependencies = [
+ "indexmap",
+ "kestrel-hecs",
+ "kestrel-span2",
 ]
 
 [[package]]

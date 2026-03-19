@@ -1,14 +1,44 @@
-//! Decision tree compilation for pattern matching (Maranget 2008).
+//! # Decision Tree Compilation (Maranget 2008)
 //!
-//! Compiles pattern matrices into decision trees for codegen. Uses the
-//! shared `PatternMatrix::specialize` and `FlatPat::decompose` — no
-//! duplicated specialization logic.
+//! Compiles pattern matrices into decision trees — an IR between patterns
+//! and control flow that codegen (execution graph lowering) can consume.
 //!
-//! The decision tree is an IR between patterns and MIR:
-//! - `Switch`: test a value, branch by constructor
-//! - `Success`: matched an arm, bind variables
-//! - `Guard`: test a guard condition, branch on result
-//! - `Failure`: unreachable if exhaustiveness passed
+//! Uses the shared `PatternMatrix::specialize` and `FlatPat::decompose`,
+//! so there is no duplicated specialization logic.
+//!
+//! ## Tree Structure
+//!
+//! ```text
+//! match x {
+//!     .None => 0
+//!     .Some(0) => 1
+//!     .Some(n) => n
+//! }
+//! ```
+//!
+//! Compiles to:
+//!
+//! ```text
+//! Switch(x, [
+//!     None => Success(arm 0),
+//!     Some => Switch(x.Some.0, [
+//!         0 => Success(arm 1),
+//!         _ => Success(arm 2, [n = x.Some.0])
+//!     ])
+//! ])
+//! ```
+//!
+//! ## Variants
+//!
+//! - `Switch` — test a value, branch by constructor
+//! - `Success` — matched an arm, extract bindings
+//! - `Guard` — test a guard condition, branch on pass/fail
+//! - `Failure` — unreachable if exhaustiveness passed
+//!
+//! ## Column Selection
+//!
+//! Uses the "necessity" heuristic: prefer the column with the most distinct
+//! constructors, minimizing the total number of tests.
 
 use kestrel_hecs::QueryContext;
 use kestrel_hir::body::*;

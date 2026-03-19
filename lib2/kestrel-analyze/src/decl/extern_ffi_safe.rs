@@ -21,7 +21,7 @@ use crate::context::DeclContext;
 use crate::diagnostic::*;
 use crate::traits::{DeclCheck, Describe};
 use crate::util;
-use kestrel_ast_builder::{Attributes, NodeKind};
+use kestrel_ast_builder::{Attributes, Intrinsic, NodeKind};
 use kestrel_hir::builtin::Builtin;
 use kestrel_hir::ty::HirTy;
 use kestrel_hir_lower::LowerCallableTypes;
@@ -139,6 +139,11 @@ impl ExternFfiSafeAnalyzer {
             // Non-named types (tuples, functions, etc.) are not FFI-safe
             return false;
         };
+
+        // Lang intrinsic types (lang.i64, lang.ptr, etc.) are FFI-safe by definition
+        if cx.query.has::<Intrinsic>(*entity) {
+            return true;
+        }
 
         let conforming = cx.query.query(ConformingProtocols {
             entity: *entity,

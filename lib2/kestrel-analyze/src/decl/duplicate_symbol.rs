@@ -43,7 +43,7 @@ use crate::context::DeclContext;
 use crate::diagnostic::*;
 use crate::traits::{DeclCheck, Describe};
 use crate::util;
-use kestrel_ast_builder::NodeKind;
+use kestrel_ast_builder::{Name, NodeKind};
 use kestrel_span2::Span;
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[
@@ -152,7 +152,11 @@ fn check_duplicates(
             continue;
         };
 
-        let name = util::entity_name(cx.query, child);
+        // Skip anonymous entities (e.g. associated type bindings like `type Iterator.Item = T`)
+        let Some(name_comp) = cx.query.get::<Name>(child) else {
+            continue;
+        };
+        let name = name_comp.0.clone();
         let span = util::entity_span(cx.query, child);
 
         if let Some((first_span, first_desc)) = seen.get(&name) {
@@ -221,7 +225,11 @@ fn check_member_duplicates(cx: &DeclContext<'_>, diags: &mut Vec<AnalyzeDiagnost
             continue;
         };
 
-        let name = util::entity_name(cx.query, child);
+        // Skip anonymous entities (e.g. associated type bindings like `type Iterator.Item = T`)
+        let Some(name_comp) = cx.query.get::<Name>(child) else {
+            continue;
+        };
+        let name = name_comp.0.clone();
         let span = util::entity_span(cx.query, child);
 
         if let Some((first_kind, first_span, first_desc)) = seen.get(&name) {

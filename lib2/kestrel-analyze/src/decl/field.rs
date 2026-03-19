@@ -99,20 +99,12 @@ impl DeclCheck for FieldAnalyzer {
         let is_var = cx.query.get::<Settable>(cx.entity).is_some();
 
         // Check 1: computed properties must use 'var' (not 'let')
-        // A computed property that is NOT Settable is declared with 'let'
-        if is_computed && !is_var {
-            diags.push(AnalyzeDiagnostic {
-                descriptor_id: DESCRIPTORS[0].id,
-                severity: DESCRIPTORS[0].default_severity,
-                message: "computed properties must use 'var'".into(),
-                labels: vec![DiagLabel {
-                    span: span.clone(),
-                    message: "computed property declared with 'let'".into(),
-                    is_primary: true,
-                }],
-                notes: vec![],
-            });
-        }
+        // Currently disabled: Settable only indicates a `set` accessor exists,
+        // NOT whether the `var` keyword was used. Read-only computed properties
+        // (get-only) are valid but don't have Settable. To detect `let` vs `var`
+        // on computed properties, we'd need to check the CstNode or add a new
+        // component. Skip for now to avoid false positives.
+        // TODO: add a VarKeyword component or check CstNode for the var/let token
 
         // Get parent for context-dependent checks
         let Some(parent) = cx.query.parent_of(cx.entity) else {

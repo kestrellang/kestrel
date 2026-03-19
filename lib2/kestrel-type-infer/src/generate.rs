@@ -118,7 +118,20 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             // Function → unify params/return, Named → subscript resolution
             let callee_tv = gen_expr(ctx, hir, *callee);
             let arg_tvs = gen_call_args(ctx, hir, args);
-            let result_tv = ctx.fresh();
+
+            // If the callee is a known function returning Never (e.g., lang.panic),
+            // use Never directly so divergence propagates through control flow.
+            let result_tv = if let HirExpr::Def(entity, _, _) = &hir.exprs[*callee] {
+                if let Some(HirTy::Never(_)) = ctx.query_ctx.query(
+                    kestrel_hir_lower::LowerTypeAnnotation { entity: *entity, root: ctx.root }
+                ) {
+                    ctx.never()
+                } else {
+                    ctx.fresh()
+                }
+            } else {
+                ctx.fresh()
+            };
 
             ctx.call(callee_tv, arg_tvs, result_tv, id, span.clone());
             result_tv
@@ -525,8 +538,12 @@ fn gen_struct_init(
                 arg_labels
             );
         } else {
-            // Multiple label matches — emit OverloadedCall for type disambiguation
-            ctx.overloaded_call(matched, vec![], args.to_vec(), result_tv, expr_id, span.clone());
+            // Multiple label matches — emit Member constraint.
+            // resolve_member will detect the ambiguity and try protocol-based
+            // resolution, letting the solver disambiguate via type inference.
+            let recv_tv = ctx.named(struct_entity, fresh_args.clone());
+            let init_result = ctx.fresh(); // init return type (discarded — result is struct type)
+            ctx.member(recv_tv, "init", args.to_vec(), init_result, expr_id, true, span.clone());
             ctx.expr_types.insert(expr_id, result_tv);
             return result_tv;
         }

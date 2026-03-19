@@ -1,0 +1,12 @@
+[package]
+name = "kestrel-mir"
+version.workspace = true
+edition.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+kestrel-hecs = { path = "../kestrel-hecs" }
+kestrel-span2 = { path = "../kestrel-span" }
+indexmap = { workspace = true }

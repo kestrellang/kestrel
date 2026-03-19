@@ -1,7 +1,18 @@
-//! Witness values for pattern matching error messages.
+//! # Witness Values
 //!
 //! A witness is an example value demonstrating a gap in pattern coverage.
-//! Used to generate helpful diagnostics like "missing pattern: `.None`".
+//! Used to generate helpful error messages:
+//!
+//! ```text
+//! error: non-exhaustive match: missing .None
+//!  --> file.ks:10:5
+//!   | match opt {
+//!   |     .Some(x) => x
+//!   | }
+//! ```
+//!
+//! Each `Constructor` can produce a witness via `Constructor::to_witness()`.
+//! The exhaustiveness checker collects witnesses for all uncovered constructors.
 
 use std::fmt;
 

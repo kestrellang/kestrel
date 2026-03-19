@@ -105,6 +105,11 @@ impl BodyCheck for ExhaustivenessAnalyzer {
                 continue;
             };
 
+            // Skip for-loop desugared matches — always exhaustive by construction
+            if cx.hir.for_loop_matches.contains(&expr_id) {
+                continue;
+            }
+
             // Get scrutinee type from inference results
             let Some(scrutinee_ty) = cx.typed.expr_types.get(scrutinee) else {
                 continue;

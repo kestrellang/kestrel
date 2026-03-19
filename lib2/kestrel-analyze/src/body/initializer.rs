@@ -72,8 +72,9 @@ use crate::context::BodyContext;
 use crate::diagnostic::*;
 use crate::traits::{BodyCheck, Describe};
 use crate::util;
-use kestrel_ast_builder::{NodeKind, Settable};
+use kestrel_ast_builder::{Callable, CstNode, NodeKind, Settable};
 use kestrel_hir::body::*;
+use kestrel_type_infer::result::ResolvedTy;
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[
     DiagnosticDescriptor {
@@ -149,7 +150,23 @@ impl BodyCheck for InitializerAnalyzer {
                 continue;
             }
             let name = util::entity_name(cx.query, child);
-            // Skip computed properties (they have a Body component)
+            // Skip computed properties — they have a Callable component (getter with receiver)
+            if cx.query.get::<Callable>(child).is_some() {
+                continue;
+            }
+            // Skip shorthand computed properties (e.g. `var x: T { expr }`) —
+            // these have a CodeBlock/PropertyAccessors in the CST but no Callable
+            // because the builder doesn't recognize the shorthand form yet.
+            if let Some(cst) = cx.query.get::<CstNode>(child) {
+                use kestrel_syntax_tree2::SyntaxKind;
+                let has_body_node = cst.0.children().any(|c| {
+                    matches!(c.kind(), SyntaxKind::CodeBlock | SyntaxKind::PropertyAccessors)
+                });
+                if has_body_node {
+                    continue;
+                }
+            }
+            // Skip fields with default values — they don't need explicit init
             if cx.query.get::<kestrel_ast_builder::Body>(child).is_some() {
                 continue;
             }
@@ -370,34 +387,55 @@ fn analyze_expr(
             state = analyze_expr(cx, *target, state, true, vctx);
         }
 
-        // Method call on self: check all fields are initialized first
+        // Method call on self: check all fields are initialized first.
+        // Special case: self.init(...) is a delegating init call that
+        // initializes all fields — mark everything as assigned.
         HirExpr::MethodCall {
-            receiver, args, ..
+            receiver, method, args, ..
         } => {
             if is_self_local(cx, *receiver) {
-                let uninitialized: Vec<String> = vctx
-                    .all_fields
-                    .iter()
-                    .filter(|f| !state.assigned.contains(*f))
-                    .cloned()
-                    .collect();
-                if !uninitialized.is_empty() {
-                    vctx.diags.push(AnalyzeDiagnostic {
-                        descriptor_id: DESCRIPTORS[3].id,
-                        severity: DESCRIPTORS[3].default_severity,
-                        message: "cannot use 'self' before all fields are initialized".into(),
-                        labels: vec![DiagLabel {
-                            span: util::expr_span(cx.hir, id),
-                            message: "self used here".into(),
-                            is_primary: true,
-                        }],
-                        notes: vec![format!("uninitialized fields: {}", uninitialized.join(", "))],
-                    });
+                if method == "init" {
+                    // Delegating init — all fields are initialized by the delegate
+                    for arg in args {
+                        state = analyze_expr(cx, arg.value, state, false, vctx);
+                    }
+                    for field in &vctx.all_fields {
+                        state.assigned.insert(field.clone());
+                    }
+                } else {
+                    let uninitialized: Vec<String> = vctx
+                        .all_fields
+                        .iter()
+                        .filter(|f| !state.assigned.contains(*f))
+                        .cloned()
+                        .collect();
+                    if !uninitialized.is_empty() {
+                        vctx.diags.push(AnalyzeDiagnostic {
+                            descriptor_id: DESCRIPTORS[3].id,
+                            severity: DESCRIPTORS[3].default_severity,
+                            message: "cannot use 'self' before all fields are initialized"
+                                .into(),
+                            labels: vec![DiagLabel {
+                                span: util::expr_span(cx.hir, id),
+                                message: "self used here".into(),
+                                is_primary: true,
+                            }],
+                            notes: vec![format!(
+                                "uninitialized fields: {}",
+                                uninitialized.join(", ")
+                            )],
+                        });
+                    }
+                    state = analyze_expr(cx, *receiver, state, false, vctx);
+                    for arg in args {
+                        state = analyze_expr(cx, arg.value, state, false, vctx);
+                    }
                 }
-            }
-            state = analyze_expr(cx, *receiver, state, false, vctx);
-            for arg in args {
-                state = analyze_expr(cx, arg.value, state, false, vctx);
+            } else {
+                state = analyze_expr(cx, *receiver, state, false, vctx);
+                for arg in args {
+                    state = analyze_expr(cx, arg.value, state, false, vctx);
+                }
             }
         }
 
@@ -425,7 +463,7 @@ fn analyze_expr(
                     notes: vec![format!("uninitialized fields: {}", uninitialized.join(", "))],
                 });
             }
-            state.diverged = true;
+            // diverged is set by the Never-type check at the end of analyze_expr
         }
 
         // If/else: merge branches
@@ -508,9 +546,8 @@ fn analyze_expr(
             // Conservative: don't propagate loop body state
         }
 
-        HirExpr::Break { .. } | HirExpr::Continue { .. } => {
-            state.diverged = true;
-        }
+        // Break/Continue divergence is handled by the Never-type check below
+        HirExpr::Break { .. } | HirExpr::Continue { .. } => {}
 
         // Block expression
         HirExpr::Block { body, .. } => {
@@ -578,6 +615,12 @@ fn analyze_expr(
         | HirExpr::Def(..)
         | HirExpr::OverloadSet { .. }
         | HirExpr::Error { .. } => {}
+    }
+
+    // Unified divergence detection: any expression with Never type diverges.
+    // Covers return, break, continue, lang.panic(), and any user function → Never.
+    if let Some(ResolvedTy::Never) = cx.typed.expr_types.get(&id) {
+        state.diverged = true;
     }
 
     state

@@ -6,13 +6,13 @@
 
 use kestrel_ast_builder::{
     Callable, Conformances, ConformanceItem, Gettable, Name, NodeKind, Settable, Static,
-    WhereClause as AstWhereClause, WhereConstraint,
+    TypeParams, WhereClause as AstWhereClause, WhereConstraint,
 };
 use kestrel_hecs::{Entity, QueryContext};
 use kestrel_hir::Builtin;
 use kestrel_hir::ty::HirTy;
 use kestrel_hir_lower::{LowerCallableTypes, LowerTypeAnnotation};
-use kestrel_name_res::{ResolveBuiltin, ResolveTypePath, TypeResolution};
+use kestrel_name_res::{ConformingProtocols, ResolveBuiltin, ResolveTypePath, TypeResolution};
 use kestrel_span2::Span;
 
 use crate::ty::TyKind;
@@ -36,6 +36,10 @@ pub struct MemberResolution {
     /// For protocol extension methods, this is the protocol entity.
     /// The solver substitutes this with the actual receiver type.
     pub self_type: Option<Entity>,
+    /// Set when resolved through a protocol conformance rather than directly.
+    /// The solver emits a Conforms constraint to validate the receiver
+    /// conforms to this protocol with the inferred type args.
+    pub via_protocol: Option<Entity>,
 }
 
 /// Info about a member's parameter, for overload resolution.
@@ -286,7 +290,16 @@ impl TypeResolver for WorldResolver<'_> {
                 }
             }
             1 => matches[0],
-            _ => return Err(MemberError::Ambiguous(matches)),
+            _ => {
+                // Multiple candidates with same labels — try protocol-based resolution.
+                // If the ambiguous members implement a single protocol requirement,
+                // return the protocol's abstract method and let the solver
+                // disambiguate via type inference.
+                if let Some(proto_res) = self.try_resolve_through_protocol(*entity, name, _args) {
+                    return Ok(proto_res);
+                }
+                return Err(MemberError::Ambiguous(matches));
+            }
         };
 
         self.build_member_resolution(member)
@@ -630,6 +643,7 @@ impl WorldResolver<'_> {
             where_clauses,
             kind: member_kind,
             self_type,
+            via_protocol: None,
         })
     }
 
@@ -649,6 +663,141 @@ impl WorldResolver<'_> {
             }
             _ => None, // Struct/Enum — Self matches receiver, no substitution needed
         }
+    }
+
+    /// Try to resolve an ambiguous member through protocol conformances.
+    ///
+    /// When multiple candidates match the same name+labels, check if a single
+    /// protocol declares a matching method. If found, return the protocol's
+    /// abstract method signature with protocol type params as generics.
+    /// The solver creates fresh TyVars and infers them from arguments.
+    fn try_resolve_through_protocol(
+        &self,
+        type_entity: Entity,
+        name: &str,
+        args: &[crate::constraint::CallArg],
+    ) -> Option<MemberResolution> {
+        let protocols = self.ctx.query(ConformingProtocols {
+            entity: type_entity,
+            root: self.root,
+        });
+
+        let arg_labels: Vec<Option<&str>> = args.iter().map(|a| a.label.as_deref()).collect();
+        let mut found: Option<(Entity, Entity)> = None; // (protocol, method)
+
+        for &proto in &protocols {
+            // Search protocol's direct children for a matching member
+            let candidates = if name == "init" {
+                // Inits have no Name — search by NodeKind
+                self.ctx
+                    .children_of(proto)
+                    .iter()
+                    .filter(|&&c| self.ctx.get::<NodeKind>(c) == Some(&NodeKind::Initializer))
+                    .copied()
+                    .collect::<Vec<_>>()
+            } else if name == "(subscript)" {
+                self.ctx
+                    .children_of(proto)
+                    .iter()
+                    .filter(|&&c| self.ctx.get::<NodeKind>(c) == Some(&NodeKind::Subscript))
+                    .copied()
+                    .collect::<Vec<_>>()
+            } else {
+                self.ctx.query(kestrel_name_res::VisibleChildrenByName {
+                    parent: proto,
+                    name: name.to_string(),
+                    context: self.owner,
+                })
+            };
+
+            // Filter by label match
+            let matched: Vec<Entity> = candidates
+                .into_iter()
+                .filter(|&c| self.matches_labels(c, &arg_labels))
+                .collect();
+
+            if matched.len() == 1 {
+                if found.is_some() {
+                    // Multiple protocols match — can't disambiguate
+                    return None;
+                }
+                found = Some((proto, matched[0]));
+            }
+        }
+
+        let (protocol, method) = found?;
+
+        // Build MemberResolution from the protocol's abstract method
+        // Use the protocol's type params (not the method's) for generic resolution
+        let proto_type_params: Vec<Entity> = self
+            .ctx
+            .get::<TypeParams>(protocol)
+            .map(|tp| tp.0.clone())
+            .unwrap_or_default();
+
+        // Also include the method's own type params (if any)
+        let method_type_params: Vec<Entity> = self
+            .ctx
+            .get::<TypeParams>(method)
+            .map(|tp| tp.0.clone())
+            .unwrap_or_default();
+
+        let mut all_type_params = proto_type_params;
+        all_type_params.extend(method_type_params);
+
+        // Lower param types and return type from the protocol method
+        let param_types = self.build_param_types(method);
+        let return_type = self
+            .ctx
+            .query(LowerTypeAnnotation {
+                entity: method,
+                root: self.root,
+            })
+            .unwrap_or(HirTy::Tuple(Vec::new(), Span::synthetic(0)));
+
+        let where_clauses = self.where_clauses(method);
+
+        // Determine member kind
+        let kind = match self.ctx.get::<NodeKind>(method) {
+            Some(NodeKind::Initializer) => MemberKind::Init,
+            Some(NodeKind::Subscript) => MemberKind::Subscript,
+            _ => MemberKind::Method,
+        };
+
+        Some(MemberResolution {
+            entity: method,
+            type_params: all_type_params,
+            param_types,
+            return_type,
+            where_clauses,
+            kind,
+            self_type: Some(protocol),
+            via_protocol: Some(protocol),
+        })
+    }
+
+    /// Build parameter info list from a callable entity.
+    fn build_param_types(&self, entity: Entity) -> Vec<ParamInfo> {
+        let Some(callable) = self.ctx.get::<Callable>(entity) else {
+            return Vec::new();
+        };
+        let lowered = self.ctx.query(LowerCallableTypes {
+            entity,
+            root: self.root,
+        });
+        callable
+            .params
+            .iter()
+            .enumerate()
+            .map(|(i, p)| ParamInfo {
+                label: p.label.clone(),
+                ty: lowered
+                    .as_ref()
+                    .and_then(|tys| tys.get(i))
+                    .and_then(|t| t.clone())
+                    .unwrap_or(HirTy::Error(Span::synthetic(0))),
+            })
+            .collect()
     }
 
     /// Check if a callable's parameter labels match the given argument labels.

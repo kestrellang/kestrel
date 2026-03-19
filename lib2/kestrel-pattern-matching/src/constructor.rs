@@ -1,12 +1,32 @@
-//! Constructor representation and type classification for pattern matching.
+//! # Constructor and Type Classification
 //!
 //! A "constructor" is the head of a pattern — the way to build a value of a type.
-//! For exhaustiveness checking we need to know all constructors of a type.
+//! For exhaustiveness, we need to enumerate all constructors of a type.
 //!
-//! `TypeShape` classifies a `ResolvedTy` into its constructor space. This is
-//! the single point where exhaustiveness rules are defined — adding support
-//! for new exhaustive types (e.g., single-variant enums) means adding one
-//! match arm in `TypeShape::classify`.
+//! ## Constructors by Type
+//!
+//! | Type | Constructors | Exhaustive? |
+//! |------|-------------|-------------|
+//! | `Bool` | `True`, `False` | Yes (2) |
+//! | `enum E { A, B(T) }` | `Variant(A, 0)`, `Variant(B, 1)` | Yes (N cases) |
+//! | `(T, U)` | `Tuple(2)` | Yes (1) |
+//! | `struct S { x, y }` | `Struct(S, 2)` | Yes (1) |
+//! | `()` | `Unit` | Yes (1) |
+//! | `Never` | (none) | Yes (0) |
+//! | `Int64`, `String`, `Float` | infinite | No — needs `_` |
+//! | `Array[T]` | variable length | No — needs `[..]` |
+//!
+//! ## TypeShape — Extensibility Point
+//!
+//! `TypeShape::classify` is the single place where type → constructor-space
+//! mapping is defined. To make a new type exhaustively matchable (e.g.,
+//! single-variant enums), add a match arm there.
+//!
+//! ## Key Methods (each exists once, no duplicates)
+//!
+//! - `Constructor::matches()` — compatibility check for specialization
+//! - `Constructor::field_types()` — sub-pattern types for a constructor
+//! - `Constructor::all_for_type()` — enumerate all constructors (via TypeShape)
 
 use std::collections::HashSet;
 
