@@ -20,6 +20,7 @@ mod name;
 mod protocol_lower;
 mod resolved_ty;
 mod struct_lower;
+mod witness_lower;
 pub mod ty;
 
 pub use context::LowerCtx;
@@ -38,6 +39,7 @@ pub fn lower_module(compiler: &Compiler) -> MirModule {
 
     let mut ctx = LowerCtx::new(world, root, "main");
     item::lower_items(&mut ctx);
+    witness_lower::lower_witnesses(&mut ctx);
     ctx.finish()
 }
 
@@ -203,5 +205,35 @@ mod tests {
         // Should have apply_partial from closure lowering
         let partial_count = output.matches("apply partial").count();
         eprintln!("Apply partial (closures): {}", partial_count);
+    }
+
+    #[test]
+    fn lower_witnesses() {
+        let mut c = Compiler::new();
+        let path = stdlib_path();
+        c.load_dir(&path);
+
+        let mir = lower_module(&c);
+
+        eprintln!("Witnesses: {}", mir.witnesses.len());
+
+        // Should have generated witnesses for stdlib conformances
+        assert!(!mir.witnesses.is_empty(), "should have generated witnesses");
+
+        // Count method bindings across all witnesses
+        let total_bindings: usize = mir.witnesses.iter()
+            .map(|w| w.method_bindings.len())
+            .sum();
+        eprintln!("Total method bindings: {}", total_bindings);
+
+        // Print a few witness samples
+        let output = mir.display().to_string();
+        let witness_lines: Vec<&str> = output.lines()
+            .filter(|l| l.starts_with("witness "))
+            .take(10)
+            .collect();
+        for line in &witness_lines {
+            eprintln!("  {}", line);
+        }
     }
 }

@@ -1,0 +1,252 @@
+//! Witness generation — creates WitnessDef entries from conformance data.
+//!
+//! For each type that conforms to a protocol, generates a witness table
+//! mapping protocol method names to implementing function entities.
+
+use kestrel_ast_builder::{NodeKind, Name, TypeParams};
+use kestrel_hecs::Entity;
+use kestrel_mir::{MethodBinding, MirTy, TypeParamDef, WitnessDef};
+use kestrel_name_res::conformances::ConformingProtocols;
+use kestrel_name_res::extensions::ExtensionsFor;
+
+use crate::context::LowerCtx;
+use crate::ty::resolve_type_annotation;
+
+/// Generate witness tables for all struct and enum entities.
+pub fn lower_witnesses(ctx: &mut LowerCtx) {
+    // Collect all struct/enum entities
+    let type_entities: Vec<(Entity, MirTy)> = ctx
+        .module
+        .structs
+        .iter()
+        .map(|s| {
+            let type_args: Vec<MirTy> = s
+                .type_params
+                .iter()
+                .map(|tp| MirTy::TypeParam(tp.entity))
+                .collect();
+            let ty = if type_args.is_empty() {
+                MirTy::Named {
+                    entity: s.entity,
+                    type_args: vec![],
+                }
+            } else {
+                MirTy::Named {
+                    entity: s.entity,
+                    type_args,
+                }
+            };
+            (s.entity, ty)
+        })
+        .collect();
+
+    let enum_entities: Vec<(Entity, MirTy)> = ctx
+        .module
+        .enums
+        .iter()
+        .map(|e| {
+            let type_args: Vec<MirTy> = e
+                .type_params
+                .iter()
+                .map(|tp| MirTy::TypeParam(tp.entity))
+                .collect();
+            let ty = MirTy::Named {
+                entity: e.entity,
+                type_args,
+            };
+            (e.entity, ty)
+        })
+        .collect();
+
+    // Generate witnesses for each type
+    for (entity, impl_ty) in type_entities.into_iter().chain(enum_entities) {
+        lower_witnesses_for_type(ctx, entity, impl_ty);
+    }
+}
+
+/// Generate witnesses for a single type entity.
+fn lower_witnesses_for_type(ctx: &mut LowerCtx, type_entity: Entity, impl_ty: MirTy) {
+    // Query all protocols this type conforms to
+    let protocols = ctx.query.query(ConformingProtocols {
+        entity: type_entity,
+        root: ctx.root,
+    });
+
+    // Get extensions on this type (for finding method implementations)
+    let extensions = ctx.query.query(ExtensionsFor {
+        target: type_entity,
+        root: ctx.root,
+    });
+
+    for protocol in &protocols {
+        let mut witness = WitnessDef::new(impl_ty.clone(), *protocol);
+        ctx.register_name(*protocol);
+
+        // Collect type params from the implementing type
+        if let Some(tp) = ctx.world.get::<TypeParams>(type_entity) {
+            for &tp_entity in &tp.0 {
+                ctx.register_name(tp_entity);
+                let tp_name = ctx
+                    .world
+                    .get::<Name>(tp_entity)
+                    .map(|n| n.0.clone())
+                    .unwrap_or_default();
+                witness.type_params.push(TypeParamDef::new(tp_entity, tp_name));
+            }
+        }
+
+        // Get protocol's required methods
+        let proto_methods = collect_protocol_methods(ctx, *protocol);
+
+        // Try to bind each protocol method
+        for (method_name, _method_entity) in &proto_methods {
+            // Search the type's own children first
+            if let Some(impl_func) =
+                find_method_by_name(ctx, type_entity, method_name)
+            {
+                ctx.register_name(impl_func);
+                witness.bind_method(
+                    method_name,
+                    MethodBinding::direct(impl_func, vec![]),
+                );
+                continue;
+            }
+
+            // Search extensions on the type
+            let mut found = false;
+            for &ext in &extensions {
+                if let Some(impl_func) = find_method_by_name(ctx, ext, method_name) {
+                    ctx.register_name(impl_func);
+                    witness.bind_method(
+                        method_name,
+                        MethodBinding::direct(impl_func, vec![]),
+                    );
+                    found = true;
+                    break;
+                }
+            }
+            if found {
+                continue;
+            }
+
+            // Search protocol extensions for default implementations
+            let proto_extensions = ctx.query.query(ExtensionsFor {
+                target: *protocol,
+                root: ctx.root,
+            });
+            for &proto_ext in &proto_extensions {
+                if let Some(impl_func) = find_method_by_name(ctx, proto_ext, method_name) {
+                    ctx.register_name(impl_func);
+                    witness.bind_method(
+                        method_name,
+                        MethodBinding::extension(impl_func, vec![], *protocol),
+                    );
+                    break;
+                }
+            }
+        }
+
+        // Bind associated types
+        bind_associated_types(ctx, &mut witness, type_entity, &extensions, *protocol);
+
+        ctx.module.add_witness(witness);
+    }
+}
+
+/// Collect all method names from a protocol's children.
+fn collect_protocol_methods(ctx: &mut LowerCtx, protocol: Entity) -> Vec<(String, Entity)> {
+    let mut methods = Vec::new();
+    for &child in ctx.world.children_of(protocol) {
+        let Some(kind) = ctx.world.get::<NodeKind>(child) else {
+            continue;
+        };
+        if *kind == NodeKind::Function || *kind == NodeKind::Subscript {
+            let name = ctx
+                .world
+                .get::<Name>(child)
+                .map(|n| n.0.clone())
+                .unwrap_or_default();
+            methods.push((name, child));
+        }
+    }
+    methods
+}
+
+/// Find a method by name among an entity's children.
+fn find_method_by_name(ctx: &LowerCtx, parent: Entity, method_name: &str) -> Option<Entity> {
+    for &child in ctx.world.children_of(parent) {
+        let Some(kind) = ctx.world.get::<NodeKind>(child) else {
+            continue;
+        };
+        if *kind != NodeKind::Function && *kind != NodeKind::Subscript {
+            continue;
+        }
+        let name = ctx
+            .world
+            .get::<Name>(child)
+            .map(|n| n.0.as_str())
+            .unwrap_or_default();
+        if name == method_name {
+            return Some(child);
+        }
+    }
+    None
+}
+
+/// Bind associated types from the implementing type or its extensions.
+fn bind_associated_types(
+    ctx: &mut LowerCtx,
+    witness: &mut WitnessDef,
+    type_entity: Entity,
+    extensions: &[Entity],
+    protocol: Entity,
+) {
+    // Collect associated type names from the protocol
+    let assoc_types: Vec<String> = ctx
+        .world
+        .children_of(protocol)
+        .iter()
+        .filter(|&&child| {
+            ctx.world.get::<NodeKind>(child) == Some(&NodeKind::TypeAlias)
+        })
+        .filter_map(|&child| {
+            ctx.world.get::<Name>(child).map(|n| n.0.clone())
+        })
+        .collect();
+
+    for assoc_name in &assoc_types {
+        // Look for a type alias child with this name on the type or its extensions
+        if let Some(ty) = find_associated_type(ctx, type_entity, assoc_name) {
+            witness.bind_type(assoc_name, ty);
+            continue;
+        }
+        for &ext in extensions {
+            if let Some(ty) = find_associated_type(ctx, ext, assoc_name) {
+                witness.bind_type(assoc_name, ty);
+                break;
+            }
+        }
+    }
+}
+
+/// Find an associated type binding on an entity (type alias with TypeAnnotation).
+fn find_associated_type(ctx: &mut LowerCtx, parent: Entity, name: &str) -> Option<MirTy> {
+    for &child in ctx.world.children_of(parent) {
+        let Some(kind) = ctx.world.get::<NodeKind>(child) else {
+            continue;
+        };
+        if *kind != NodeKind::TypeAlias {
+            continue;
+        }
+        let child_name = ctx.world.get::<Name>(child)?.0.as_str();
+        if child_name != name {
+            continue;
+        }
+        // Resolve the type alias's TypeAnnotation
+        let ty = resolve_type_annotation(ctx, child);
+        if ty != MirTy::Unit {
+            return Some(ty);
+        }
+    }
+    None
+}
