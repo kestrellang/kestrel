@@ -8,6 +8,7 @@ use crate::error::CodegenError;
 use crate::function::FunctionState;
 use crate::place;
 use crate::rvalue;
+use crate::types;
 use cranelift_codegen::ir::condcodes::IntCC;
 use cranelift_codegen::ir::immediates::Offset32;
 use cranelift_codegen::ir::{self, InstBuilder, MemFlags, TrapCode, Value as CrValue};
@@ -84,6 +85,28 @@ fn compile_return(
                 Offset32::new(0),
             );
             builder.ins().return_(&[loaded]);
+        } else {
+            builder.ins().return_(&[val]);
+        }
+    } else if is_aggregate_type(&ret_ty) {
+        // Non-sret aggregate return: if the value is a scalar (e.g., Bool literal
+        // compiled as i8 but return type is Named{Bool} which is a pointer),
+        // we need to check the value's Cranelift type vs the signature's return type.
+        let val_type = builder.func.dfg.value_type(val);
+        let sig_ret_type = builder.func.signature.returns.first().map(|r| r.value_type);
+        if Some(val_type) != sig_ret_type && sig_ret_type.is_some() {
+            // Value type mismatch — store scalar to stack, return pointer
+            let ptr_ty = common::ptr_type(ctx.target);
+            let layout = ctx.layouts.layout_of(&ret_ty);
+            let size = if layout.size == 0 { 1 } else { layout.size };
+            let slot = builder.create_sized_stack_slot(ir::StackSlotData::new(
+                ir::StackSlotKind::ExplicitSlot,
+                size as u32,
+                common::align_to_shift(layout.align),
+            ));
+            let addr = builder.ins().stack_addr(ptr_ty, slot, Offset32::new(0));
+            builder.ins().store(MemFlags::new(), val, addr, Offset32::new(0));
+            builder.ins().return_(&[addr]);
         } else {
             builder.ins().return_(&[val]);
         }

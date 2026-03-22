@@ -3,7 +3,7 @@
 //! Uses `common::get_place_type`, `common::get_field_info`, and
 //! `common::copy_aggregate` as shared helpers (eliminating lib1's duplication).
 
-use crate::common::{self, get_enum_payload_offset, get_field_info, is_aggregate_with_layout};
+use crate::common::{self, get_enum_payload_offset, get_field_info, is_aggregate_type};
 use crate::context::CodegenContext;
 use crate::error::CodegenError;
 use crate::function::FunctionState;
@@ -72,10 +72,10 @@ fn compile_place_read_inner(
             let gv = ctx.cl_module.declare_data_in_func(data_id, builder.func);
             let addr = builder.ins().global_value(ptr_ty, gv);
 
-            if is_aggregate_with_layout(&ty, &mut ctx.layouts) {
+            if is_aggregate_type(&ty) {
                 Ok(addr) // Return pointer for aggregates
             } else {
-                let cl_ty = types::translate_type_with_layout(&ty, ctx.target, &mut ctx.layouts);
+                let cl_ty = types::translate_type(&ty, ctx.target);
                 Ok(builder.ins().load(cl_ty, MemFlags::new(), addr, Offset32::new(0)))
             }
         }
@@ -99,10 +99,10 @@ fn compile_place_read_inner(
                             )?;
                             let field_ptr = builder.ins().iadd_imm(parent_val, offset as i64);
 
-                            if is_aggregate_with_layout(&field_ty, &mut ctx.layouts) {
+                            if is_aggregate_type(&field_ty) {
                                 Ok(field_ptr)
                             } else {
-                                let cl_ty = types::translate_type_with_layout(&field_ty, ctx.target, &mut ctx.layouts);
+                                let cl_ty = types::translate_type(&field_ty, ctx.target);
                                 Ok(builder.ins().load(cl_ty, MemFlags::new(), field_ptr, Offset32::new(0)))
                             }
                         }
@@ -140,10 +140,10 @@ fn compile_place_read_inner(
                     let field_ptr = builder.ins().iadd_imm(parent_val, offset as i64);
                     let elem_ty = &elems[*index];
 
-                    if is_aggregate_with_layout(elem_ty, &mut ctx.layouts) {
+                    if is_aggregate_type(elem_ty) {
                         Ok(field_ptr)
                     } else {
-                        let cl_ty = types::translate_type_with_layout(elem_ty, ctx.target, &mut ctx.layouts);
+                        let cl_ty = types::translate_type(elem_ty, ctx.target);
                         Ok(builder.ins().load(cl_ty, MemFlags::new(), field_ptr, Offset32::new(0)))
                     }
                 }
@@ -159,10 +159,10 @@ fn compile_place_read_inner(
                             )?;
                             let field_ptr = builder.ins().iadd_imm(parent_val, offset as i64);
 
-                            if is_aggregate_with_layout(&field_ty, &mut ctx.layouts) {
+                            if is_aggregate_type(&field_ty) {
                                 Ok(field_ptr)
                             } else {
-                                let cl_ty = types::translate_type_with_layout(&field_ty, ctx.target, &mut ctx.layouts);
+                                let cl_ty = types::translate_type(&field_ty, ctx.target);
                                 Ok(builder.ins().load(cl_ty, MemFlags::new(), field_ptr, Offset32::new(0)))
                             }
                         }
@@ -211,10 +211,10 @@ fn compile_place_read_inner(
         Place::Deref(inner) => {
             let ptr_val = compile_place_read(ctx, state, builder, inner)?;
 
-            if is_aggregate_with_layout(&ty, &mut ctx.layouts) {
+            if is_aggregate_type(&ty) {
                 Ok(ptr_val) // Return the pointer directly for aggregates
             } else {
-                let cl_ty = types::translate_type_with_layout(&ty, ctx.target, &mut ctx.layouts);
+                let cl_ty = types::translate_type(&ty, ctx.target);
                 Ok(builder.ins().load(cl_ty, MemFlags::new(), ptr_val, Offset32::new(0)))
             }
         }
@@ -240,10 +240,10 @@ pub fn compile_place_write(
 
     match place {
         Place::Local(id) => {
-            if is_aggregate_with_layout(&ty, &mut ctx.layouts) || state.stack_locals.contains(id) {
+            if is_aggregate_type(&ty) || state.stack_locals.contains(id) {
                 // Write to the stack slot pointed to by the variable
                 let dest_ptr = builder.use_var(state.local_vars[id.index()]);
-                if is_aggregate_with_layout(&ty, &mut ctx.layouts) {
+                if is_aggregate_type(&ty) {
                     common::copy_aggregate(builder, &mut ctx.layouts, &ty, dest_ptr, value);
                 } else {
                     builder.ins().store(MemFlags::new(), value, dest_ptr, Offset32::new(0));
@@ -273,7 +273,7 @@ pub fn compile_place_write(
                             )?;
                             let field_ptr = builder.ins().iadd_imm(parent_ptr, offset as i64);
 
-                            if is_aggregate_with_layout(&field_ty, &mut ctx.layouts) {
+                            if is_aggregate_type(&field_ty) {
                                 common::copy_aggregate(builder, &mut ctx.layouts, &field_ty, field_ptr, value);
                             } else {
                                 builder.ins().store(MemFlags::new(), value, field_ptr, Offset32::new(0));
@@ -293,7 +293,7 @@ pub fn compile_place_write(
 
         Place::Deref(inner) => {
             let ptr_val = compile_place_read(ctx, state, builder, inner)?;
-            if is_aggregate_with_layout(&ty, &mut ctx.layouts) {
+            if is_aggregate_type(&ty) {
                 common::copy_aggregate(builder, &mut ctx.layouts, &ty, ptr_val, value);
             } else {
                 builder.ins().store(MemFlags::new(), value, ptr_val, Offset32::new(0));
@@ -304,7 +304,7 @@ pub fn compile_place_write(
         // Index, Downcast, Global writes follow the same pattern
         _ => {
             let dest_ptr = compile_place_addr(ctx, state, builder, place)?;
-            if is_aggregate_with_layout(&ty, &mut ctx.layouts) {
+            if is_aggregate_type(&ty) {
                 common::copy_aggregate(builder, &mut ctx.layouts, &ty, dest_ptr, value);
             } else {
                 builder.ins().store(MemFlags::new(), value, dest_ptr, Offset32::new(0));

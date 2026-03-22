@@ -5,7 +5,7 @@
 //! the 10+ parameter lists in lib1.
 
 use crate::block;
-use crate::common::{self, is_aggregate_type, is_aggregate_with_layout};
+use crate::common::{self, is_aggregate_type};
 use crate::context::CodegenContext;
 use crate::error::CodegenError;
 use crate::types;
@@ -101,10 +101,10 @@ pub fn compile_function(
     let mut local_vars = Vec::with_capacity(body.locals.len());
     for (i, local) in body.locals.iter().enumerate() {
         let ty = substitute_type(&local.ty, subst);
-        let cl_ty = if is_aggregate_with_layout(&ty, &mut ctx.layouts) || stack_locals.contains(&LocalId::new(i)) {
+        let cl_ty = if is_aggregate_type(&ty) || stack_locals.contains(&LocalId::new(i)) {
             ptr_ty // Aggregates and address-taken locals store pointers to stack slots
         } else {
-            types::translate_type_with_layout(&ty, ctx.target, &mut ctx.layouts)
+            types::translate_type(&ty, ctx.target)
         };
         let var = builder.declare_var(cl_ty);
         local_vars.push(var);
@@ -124,7 +124,7 @@ pub fn compile_function(
         let cl_param = builder.block_params(entry_cl)[param_idx + param_offset];
         let ty = substitute_type(&param.ty, subst);
 
-        if is_aggregate_with_layout(&ty, &mut ctx.layouts) || stack_locals.contains(&local_id) {
+        if is_aggregate_type(&ty) || stack_locals.contains(&local_id) {
             // Aggregate or address-taken: allocate a stack slot, copy the value
             let layout = ctx.layouts.layout_of(&ty);
             let slot = builder.create_sized_stack_slot(StackSlotData::new(
@@ -134,8 +134,8 @@ pub fn compile_function(
             ));
             let addr = builder.ins().stack_addr(ptr_ty, slot, Offset32::new(0));
 
-            if is_aggregate_with_layout(&ty, &mut ctx.layouts) {
-                // Parameter is already a pointer; copy the data
+            if is_aggregate_type(&ty) {
+                // Large aggregate: parameter is a pointer; copy the data
                 common::copy_aggregate(&mut builder, &mut ctx.layouts, &ty, addr, cl_param);
             } else {
                 // Scalar that's address-taken: store the value in the slot
@@ -157,7 +157,7 @@ pub fn compile_function(
         }
 
         let ty = substitute_type(&local.ty, subst);
-        if is_aggregate_with_layout(&ty, &mut ctx.layouts) || stack_locals.contains(&local_id) {
+        if is_aggregate_type(&ty) || stack_locals.contains(&local_id) {
             let layout = ctx.layouts.layout_of(&ty);
             let slot = builder.create_sized_stack_slot(StackSlotData::new(
                 StackSlotKind::ExplicitSlot,
