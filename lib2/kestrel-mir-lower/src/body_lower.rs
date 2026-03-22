@@ -593,17 +593,30 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         false
     }
 
-    /// If a method entity is an abstract protocol method (no body, defined on the protocol),
-    /// return the protocol entity. Returns None for concrete methods, protocol extension
-    /// methods (which have bodies and can be called directly), and methods on concrete types.
+    /// If a method entity belongs to a protocol (abstract or extension), return the
+    /// protocol entity. Both abstract protocol methods and protocol extension methods
+    /// need Witness dispatch so the witness table can route to the correct implementation.
     fn find_protocol_for_method(&self, method: Entity) -> Option<Entity> {
         use kestrel_ast_builder::NodeKind;
         let parent = self.ctx.world.parent_of(method)?;
         let parent_kind = self.ctx.world.get::<NodeKind>(parent)?;
         match parent_kind {
-            // Method directly on a protocol (abstract method) — needs Witness dispatch
+            // Abstract protocol method (no body) — always needs Witness
             NodeKind::Protocol => Some(parent),
-            // Protocol extension methods have bodies and can be called directly — no Witness
+            // Protocol extension method (has default body) — also needs Witness
+            // so the witness table can route to overrides or the default impl
+            NodeKind::Extension => {
+                use kestrel_name_res::extensions::ExtensionTargetEntity;
+                let target = self.ctx.query.query(ExtensionTargetEntity {
+                    extension: parent,
+                    root: self.ctx.root,
+                })?;
+                let target_kind = self.ctx.world.get::<NodeKind>(target)?;
+                match target_kind {
+                    NodeKind::Protocol => Some(target),
+                    _ => None, // Struct/Enum extension — Direct dispatch is fine
+                }
+            }
             _ => None,
         }
     }
@@ -1378,7 +1391,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         func_def.kind = if let Some(env_id) = env_struct_id {
             FunctionKind::ClosureCall { env_struct: env_id }
         } else {
-            FunctionKind::Free
+            FunctionKind::Closure
         };
 
         // === Build closure body by swapping BodyLowerCtx state ===

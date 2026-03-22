@@ -63,9 +63,18 @@ impl<'a> CollectionContext<'a> {
     }
 
     fn collect(&mut self) {
-        // Seed: all non-generic functions
+        // Seed: all non-generic, non-closure entry points
         for (i, func) in self.module.functions.iter().enumerate() {
             if !func.type_params.is_empty() {
+                continue;
+            }
+
+            // Closures and thunks are always discovered through their parent
+            // (ApplyPartial or FunctionRef), never seeded directly
+            if matches!(
+                func.kind,
+                FunctionKind::ClosureCall { .. } | FunctionKind::Closure | FunctionKind::Thunk { .. }
+            ) {
                 continue;
             }
 
@@ -86,6 +95,15 @@ impl<'a> CollectionContext<'a> {
                     _ => None,
                 };
                 if let Some(parent_entity) = parent {
+                    // Only seed if parent is a concrete type (struct/enum).
+                    // Protocol extension methods have parent = Extension entity
+                    // (not a type) — they're discovered through witness calls
+                    // with concrete self_types at call sites.
+                    let is_concrete_type = self.module.structs.iter().any(|s| s.entity == parent_entity)
+                        || self.module.enums.iter().any(|e| e.entity == parent_entity);
+                    if !is_concrete_type {
+                        continue;
+                    }
                     let self_ty = MirTy::Named {
                         entity: parent_entity,
                         type_args: Vec::new(),
@@ -110,7 +128,6 @@ impl<'a> CollectionContext<'a> {
 
     fn process_instantiation(&mut self, inst: &FunctionInstantiation) {
         let func = &self.module.functions[inst.func_id.index()];
-
         // Build substitution map for this instantiation
         let subst = build_subst(func, &inst.type_args);
 

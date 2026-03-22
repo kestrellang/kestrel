@@ -78,8 +78,10 @@ pub enum FunctionKind {
     Initializer { parent: Entity },
     /// Deinitializer (destructor) for a type.
     Deinit { parent: Entity },
-    /// Closure's call method — the actual code of a closure.
+    /// Closure's call method (with captures, has env struct).
     ClosureCall { env_struct: StructId },
+    /// Non-capturing closure (no env struct, but still only discovered via ApplyPartial).
+    Closure,
     /// Thunk wrapping a function for thick-callable ABI compatibility.
     Thunk { original: Entity },
     /// Module initialization function (runs static initializers).
