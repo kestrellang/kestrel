@@ -5,7 +5,7 @@
 //! the 10+ parameter lists in lib1.
 
 use crate::block;
-use crate::common::{self, is_aggregate_type};
+use crate::common::{self, is_aggregate_type, is_aggregate_with_layout};
 use crate::context::CodegenContext;
 use crate::error::CodegenError;
 use crate::types;
@@ -71,7 +71,7 @@ pub fn compile_function(
     // Compute these before creating the builder (avoids borrow conflicts)
     let ret_ty = substitute_type(&func_def.ret, subst);
     let is_main = ctx.is_main_function(func_def);
-    let use_sret = !is_main && common::needs_sret(&ret_ty);
+    let use_sret = !is_main && common::needs_sret(&ret_ty, &mut ctx.layouts);
 
     let mut cl_func = ir::Function::with_name_signature(
         ir::UserFuncName::user(0, 0),
@@ -101,10 +101,10 @@ pub fn compile_function(
     let mut local_vars = Vec::with_capacity(body.locals.len());
     for (i, local) in body.locals.iter().enumerate() {
         let ty = substitute_type(&local.ty, subst);
-        let cl_ty = if is_aggregate_type(&ty) || stack_locals.contains(&LocalId::new(i)) {
+        let cl_ty = if is_aggregate_with_layout(&ty, &mut ctx.layouts) || stack_locals.contains(&LocalId::new(i)) {
             ptr_ty // Aggregates and address-taken locals store pointers to stack slots
         } else {
-            types::translate_type(&ty, ctx.target)
+            types::translate_type_with_layout(&ty, ctx.target, &mut ctx.layouts)
         };
         let var = builder.declare_var(cl_ty);
         local_vars.push(var);
@@ -124,7 +124,7 @@ pub fn compile_function(
         let cl_param = builder.block_params(entry_cl)[param_idx + param_offset];
         let ty = substitute_type(&param.ty, subst);
 
-        if is_aggregate_type(&ty) || stack_locals.contains(&local_id) {
+        if is_aggregate_with_layout(&ty, &mut ctx.layouts) || stack_locals.contains(&local_id) {
             // Aggregate or address-taken: allocate a stack slot, copy the value
             let layout = ctx.layouts.layout_of(&ty);
             let slot = builder.create_sized_stack_slot(StackSlotData::new(
@@ -134,7 +134,7 @@ pub fn compile_function(
             ));
             let addr = builder.ins().stack_addr(ptr_ty, slot, Offset32::new(0));
 
-            if is_aggregate_type(&ty) {
+            if is_aggregate_with_layout(&ty, &mut ctx.layouts) {
                 // Parameter is already a pointer; copy the data
                 common::copy_aggregate(&mut builder, &mut ctx.layouts, &ty, addr, cl_param);
             } else {
@@ -157,7 +157,7 @@ pub fn compile_function(
         }
 
         let ty = substitute_type(&local.ty, subst);
-        if is_aggregate_type(&ty) || stack_locals.contains(&local_id) {
+        if is_aggregate_with_layout(&ty, &mut ctx.layouts) || stack_locals.contains(&local_id) {
             let layout = ctx.layouts.layout_of(&ty);
             let slot = builder.create_sized_stack_slot(StackSlotData::new(
                 StackSlotKind::ExplicitSlot,
@@ -204,6 +204,7 @@ pub fn compile_function(
     // Verify only in debug builds.
     #[cfg(debug_assertions)]
     if let Err(errors) = verify_function(&cl_func, ctx.isa.as_ref()) {
+        eprintln!("CRANELIFT VERIFY FAILED: {mangled_name}\n{errors}");
         return Err(CodegenError::FunctionCompilation {
             name: mangled_name.to_string(),
             source: Box::new(std::io::Error::new(

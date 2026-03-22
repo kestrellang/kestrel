@@ -12,7 +12,8 @@ use kestrel_mir::MirTy;
 /// Translate a MirTy to its Cranelift type representation.
 ///
 /// Aggregate types translate to the pointer type (they're always
-/// passed by pointer, not by value in registers).
+/// passed by pointer, not by value in registers). Small Named types
+/// (like Bool, Int64 wrappers) are translated by their layout size.
 pub fn translate_type(ty: &MirTy, target: &TargetConfig) -> ir::Type {
     let ptr = common::ptr_type(target);
 
@@ -25,8 +26,9 @@ pub fn translate_type(ty: &MirTy, target: &TargetConfig) -> ir::Type {
         MirTy::F32 => ir::types::F32,
         MirTy::F64 => ir::types::F64,
 
-        // Zero-size types still need a register representation
-        MirTy::Unit | MirTy::Never => ir::types::I8,
+        // Zero-size types use pointer type to avoid type mismatches
+        // in phi nodes when Unit merges with aggregate pointers
+        MirTy::Unit | MirTy::Never => ptr,
 
         // All pointer-like types use the pointer type
         MirTy::Pointer(_) | MirTy::Ref(_) | MirTy::RefMut(_) => ptr,
@@ -35,7 +37,11 @@ pub fn translate_type(ty: &MirTy, target: &TargetConfig) -> ir::Type {
         MirTy::FuncThin { .. } => ptr,
 
         // Aggregate types: passed by pointer
-        MirTy::Named { .. } | MirTy::Tuple(_) | MirTy::Str | MirTy::FuncThick { .. } => ptr,
+        MirTy::Tuple(_) | MirTy::Str | MirTy::FuncThick { .. } => ptr,
+
+        // Named types: large ones are aggregate (by pointer),
+        // small ones are passed by value in a register
+        MirTy::Named { .. } => ptr,
 
         // Type params should be resolved by monomorphization
         MirTy::TypeParam(_) | MirTy::SelfType => ptr,
@@ -44,6 +50,30 @@ pub fn translate_type(ty: &MirTy, target: &TargetConfig) -> ir::Type {
         MirTy::AssociatedProjection { .. } => ptr,
 
         MirTy::Error => ir::types::I8,
+    }
+}
+
+/// Layout-aware type translation for Named types. Uses the layout to determine
+/// if a Named type should be passed by value (small) or by pointer (large).
+pub fn translate_type_with_layout(ty: &MirTy, target: &TargetConfig, layouts: &mut kestrel_codegen2::LayoutCache) -> ir::Type {
+    match ty {
+        MirTy::Named { .. } => {
+            let layout = layouts.layout_of(ty);
+            if layout.size <= 8 {
+                // Small Named type — pick a register type matching the size
+                match layout.size {
+                    0 => common::ptr_type(target), // Unit-like
+                    1 => ir::types::I8,
+                    2 => ir::types::I16,
+                    3..=4 => ir::types::I32,
+                    5..=8 => ir::types::I64,
+                    _ => common::ptr_type(target),
+                }
+            } else {
+                common::ptr_type(target) // Large → by pointer
+            }
+        }
+        _ => translate_type(ty, target),
     }
 }
 

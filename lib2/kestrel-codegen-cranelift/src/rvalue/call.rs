@@ -18,7 +18,9 @@ use cranelift_codegen::isa::CallConv;
 use cranelift_frontend::FunctionBuilder;
 use cranelift_module::Module;
 use kestrel_codegen2::{mangle_function_with_self, substitute_type, substitute_type_with_self};
+use kestrel_hecs::Entity;
 use kestrel_mir::{Callee, CallArg, MirTy, PassingMode, Place, Value};
+use std::collections::HashMap;
 
 /// Compile a function call statement.
 pub fn compile_call(
@@ -134,15 +136,33 @@ fn compile_resolved_call(
     })?;
     let func_ref = ctx.cl_module.declare_func_in_func(*func_id, builder.func);
 
-    // Determine if the callee uses sret
-    let ret_ty = substitute_type(&func_def.ret, &state.subst);
-    let callee_sret = !ctx.is_main_function(func_def) && needs_sret(&ret_ty);
+    // Look up the callee's declared signature to determine sret and return handling.
+    // We use the signature rather than substituting func_def.ret with the caller's
+    // subst, because the caller's subst may not contain the callee's type params.
+    let (callee_sret, callee_has_return, callee_param_count) = {
+        let callee_sig = builder.func.dfg.ext_funcs[func_ref].signature;
+        let sig_data = &builder.func.stencil.dfg.signatures[callee_sig];
+        let sret = sig_data.params.first().map_or(false, |p| {
+            p.purpose == ir::ArgumentPurpose::StructReturn
+        });
+        let has_return = !sig_data.returns.is_empty();
+        (sret, has_return, sig_data.params.len())
+    };
 
     // Build argument list
     let mut cl_args: Vec<CrValue> = Vec::new();
 
-    // If sret, allocate a stack slot and pass as first arg
+    // If sret, allocate a stack slot and pass as first arg.
+    // Compute the callee's concrete return type using its own type_params
+    // (not the caller's subst, which may lack the callee's type params).
     let sret_addr = if callee_sret {
+        let callee_subst: HashMap<Entity, MirTy> = func_def
+            .type_params
+            .iter()
+            .zip(state.subst.values()) // best-effort: use available bindings
+            .map(|(tp, arg)| (tp.entity, arg.clone()))
+            .collect();
+        let ret_ty = substitute_type(&func_def.ret, &callee_subst);
         let layout = ctx.layouts.layout_of(&ret_ty);
         let slot = builder.create_sized_stack_slot(StackSlotData::new(
             StackSlotKind::ExplicitSlot,
@@ -165,12 +185,13 @@ fn compile_resolved_call(
 
     let inst = builder.ins().call(func_ref, &cl_args);
 
-    // Handle return value
+    // Handle return value — use the Cranelift signature to determine if there's
+    // a return value, rather than the MIR type which may have unresolved type params
     if let Some(dest_place) = dest {
         if callee_sret {
             // Result is in the sret slot
             place::compile_place_write(ctx, state, builder, dest_place, sret_addr.unwrap())?;
-        } else if !matches!(ret_ty, MirTy::Unit | MirTy::Never) {
+        } else if callee_has_return {
             let result = builder.inst_results(inst)[0];
             place::compile_place_write(ctx, state, builder, dest_place, result)?;
         }

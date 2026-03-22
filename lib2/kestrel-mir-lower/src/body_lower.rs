@@ -767,7 +767,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 };
                 self.ctx.register_name(protocol);
                 let callee = Callee::witness(protocol, &method_name, self_type, type_args);
-                return self.emit_call(callee, call_args, result_ty);
+                return self.emit_call_maybe_init(callee, call_args, result_ty);
             }
 
             // If the resolved function has a receiver (subscript/computed property call),
@@ -818,7 +818,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                         self.resolve_expr_type(callee_expr)
                     };
                     let callee = Callee::witness(protocol, &method_name, self_type, type_args);
-                    return self.emit_call(callee, call_args, result_ty);
+                    return self.emit_call_maybe_init(callee, call_args, result_ty);
                 }
                 let callee = Callee::direct_generic(func_entity, type_args);
                 self.emit_call_maybe_init(callee, call_args, result_ty)
@@ -842,12 +842,14 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                     // Protocol method → Witness dispatch
                     if let Some(protocol) = self.find_protocol_for_method(func_entity) {
                         self.ctx.register_name(protocol);
-                        let method_name = self.ctx.world.get::<kestrel_ast_builder::Name>(func_entity)
-                            .map(|n| n.0.clone())
-                            .unwrap_or_default();
-                        let receiver_ty = self.resolve_expr_type(callee_expr);
-                        let callee = Callee::witness(protocol, &method_name, receiver_ty, type_args);
-                        return self.emit_call(callee, call_args, result_ty);
+                        let method_name = self.method_name_of(func_entity);
+                        let self_type = if method_name == "init" {
+                            result_ty.clone()
+                        } else {
+                            self.resolve_expr_type(callee_expr)
+                        };
+                        let callee = Callee::witness(protocol, &method_name, self_type, type_args);
+                        return self.emit_call_maybe_init(callee, call_args, result_ty);
                     }
                     let callee = Callee::direct_generic(func_entity, type_args);
                     self.emit_call_maybe_init(callee, call_args, result_ty)
@@ -1036,13 +1038,14 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         mut call_args: Vec<CallArg>,
         result_ty: MirTy,
     ) -> Value {
-        // Check if this is a direct call to an init function
-        let init_parent = match &callee {
-            Callee::Direct { func, .. } => self.is_init_function(*func),
-            _ => None,
+        // Check if this is an init function (Direct or Witness)
+        let is_init = match &callee {
+            Callee::Direct { func, .. } => self.is_init_function(*func).is_some(),
+            Callee::Witness { method, .. } => method == "init",
+            _ => false,
         };
 
-        if let Some(_parent_entity) = init_parent {
+        if is_init {
             // Init call: allocate self, prepend as first arg, call, return self
             let self_local = self.fresh_temp(result_ty.clone());
             let self_ref = CallArg::mutating(Value::Place(Place::local(self_local)));

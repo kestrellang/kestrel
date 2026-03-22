@@ -71,7 +71,11 @@ pub fn compile_immediate(
             Ok(builder.ins().global_value(ptr_ty, gv))
         }
 
-        ImmediateKind::Unit => Ok(builder.ins().iconst(ir::types::I8, 0)),
+        ImmediateKind::Unit => {
+            // Unit is zero-sized — use pointer-type zero for phi node compatibility
+            let ptr_ty = common::ptr_type(ctx.target);
+            Ok(builder.ins().iconst(ptr_ty, 0))
+        }
 
         ImmediateKind::FunctionRef { func, type_args } => {
             // Look up the function's mangled name and get its address

@@ -378,7 +378,7 @@ impl<'a> CodegenContext<'a> {
         }
 
         // sret: aggregate returns (except main) pass via hidden first pointer param
-        let use_sret = !is_main && needs_sret(&ret_ty);
+        let use_sret = !is_main && needs_sret(&ret_ty, &mut self.layouts);
         if use_sret {
             sig.params
                 .push(AbiParam::special(ptr_ty, ir::ArgumentPurpose::StructReturn));
@@ -388,7 +388,7 @@ impl<'a> CodegenContext<'a> {
         for param in &func_def.params {
             let ty = substitute_type(&param.ty, &subst);
             sig.params
-                .push(AbiParam::new(types::translate_type(&ty, self.target)));
+                .push(AbiParam::new(types::translate_type_with_layout(&ty, self.target, &mut self.layouts)));
         }
 
         // Return type
@@ -396,7 +396,7 @@ impl<'a> CodegenContext<'a> {
             sig.returns.push(AbiParam::new(ir::types::I64));
         } else if !use_sret && !matches!(ret_ty, MirTy::Unit | MirTy::Never) {
             sig.returns
-                .push(AbiParam::new(types::translate_type(&ret_ty, self.target)));
+                .push(AbiParam::new(types::translate_type_with_layout(&ret_ty, self.target, &mut self.layouts)));
         }
 
         Ok(sig)

@@ -17,6 +17,8 @@ use kestrel_mir::{
 use std::collections::HashMap;
 
 /// Check if a MirTy is an aggregate type (passed by pointer, not in registers).
+/// Conservative: treats all Named types as aggregate. Use `is_aggregate_with_layout`
+/// when a LayoutCache is available for accurate classification.
 pub fn is_aggregate_type(ty: &MirTy) -> bool {
     matches!(
         ty,
@@ -24,9 +26,22 @@ pub fn is_aggregate_type(ty: &MirTy) -> bool {
     )
 }
 
+/// Layout-aware aggregate check. Named types that fit in a register (≤ pointer size)
+/// are passed by value, not by pointer. This correctly handles wrapper structs like
+/// Bool, Int64, etc. that are Named in MIR but small enough for registers.
+pub fn is_aggregate_with_layout(ty: &MirTy, layouts: &mut LayoutCache) -> bool {
+    match ty {
+        MirTy::Named { .. } => {
+            let layout = layouts.layout_of(ty);
+            layout.size > 8
+        }
+        _ => is_aggregate_type(ty),
+    }
+}
+
 /// Check if a function return type requires sret (struct-return) ABI.
-pub fn needs_sret(ret: &MirTy) -> bool {
-    !matches!(ret, MirTy::Unit | MirTy::Never) && is_aggregate_type(ret)
+pub fn needs_sret(ret: &MirTy, layouts: &mut LayoutCache) -> bool {
+    !matches!(ret, MirTy::Unit | MirTy::Never) && is_aggregate_with_layout(ret, layouts)
 }
 
 /// Get the Cranelift pointer type for the target.
@@ -45,6 +60,9 @@ pub fn align_to_shift(align: u64) -> u8 {
 
 /// Zero-initialize memory using multi-byte stores for efficiency.
 pub fn zero_memory(builder: &mut FunctionBuilder, ptr: CrValue, size: u64, ptr_ty: ir::Type) {
+    if size == 0 {
+        return;
+    }
     let mut offset = 0u64;
     let remaining = size;
 
