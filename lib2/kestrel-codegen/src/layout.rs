@@ -341,9 +341,18 @@ pub enum NamedKind {
 ///
 /// Exhaustive match — every variant is handled explicitly (no catch-all).
 pub fn substitute_type(ty: &MirTy, subst: &HashMap<Entity, MirTy>) -> MirTy {
-    if subst.is_empty() {
-        return ty.clone();
-    }
+    substitute_type_with_self(ty, subst, None)
+}
+
+/// Substitute type parameters and SelfType in a type.
+/// `self_type` provides the concrete type for `MirTy::SelfType` (used in protocol
+/// extension methods where Self is abstract until monomorphization).
+pub fn substitute_type_with_self(
+    ty: &MirTy,
+    subst: &HashMap<Entity, MirTy>,
+    self_type: Option<&MirTy>,
+) -> MirTy {
+    let sub = |t: &MirTy| substitute_type_with_self(t, subst, self_type);
 
     match ty {
         // Primitives — no substitution needed
@@ -365,22 +374,17 @@ pub fn substitute_type(ty: &MirTy, subst: &HashMap<Entity, MirTy>) -> MirTy {
             None => ty.clone(),
         },
 
-        MirTy::SelfType => ty.clone(),
+        MirTy::SelfType => self_type.cloned().unwrap_or_else(|| ty.clone()),
 
-        MirTy::Pointer(inner) => MirTy::Pointer(Box::new(substitute_type(inner, subst))),
-        MirTy::Ref(inner) => MirTy::Ref(Box::new(substitute_type(inner, subst))),
-        MirTy::RefMut(inner) => MirTy::RefMut(Box::new(substitute_type(inner, subst))),
+        MirTy::Pointer(inner) => MirTy::Pointer(Box::new(sub(inner))),
+        MirTy::Ref(inner) => MirTy::Ref(Box::new(sub(inner))),
+        MirTy::RefMut(inner) => MirTy::RefMut(Box::new(sub(inner))),
 
-        MirTy::Tuple(elems) => {
-            MirTy::Tuple(elems.iter().map(|e| substitute_type(e, subst)).collect())
-        }
+        MirTy::Tuple(elems) => MirTy::Tuple(elems.iter().map(|e| sub(e)).collect()),
 
         MirTy::Named { entity, type_args } => MirTy::Named {
             entity: *entity,
-            type_args: type_args
-                .iter()
-                .map(|a| substitute_type(a, subst))
-                .collect(),
+            type_args: type_args.iter().map(|a| sub(a)).collect(),
         },
 
         MirTy::AssociatedProjection {
@@ -388,19 +392,19 @@ pub fn substitute_type(ty: &MirTy, subst: &HashMap<Entity, MirTy>) -> MirTy {
             protocol,
             name,
         } => MirTy::AssociatedProjection {
-            base: Box::new(substitute_type(base, subst)),
+            base: Box::new(sub(base)),
             protocol: *protocol,
             name: name.clone(),
         },
 
         MirTy::FuncThin { params, ret } => MirTy::FuncThin {
-            params: params.iter().map(|p| substitute_type(p, subst)).collect(),
-            ret: Box::new(substitute_type(ret, subst)),
+            params: params.iter().map(|p| sub(p)).collect(),
+            ret: Box::new(sub(ret)),
         },
 
         MirTy::FuncThick { params, ret } => MirTy::FuncThick {
-            params: params.iter().map(|p| substitute_type(p, subst)).collect(),
-            ret: Box::new(substitute_type(ret, subst)),
+            params: params.iter().map(|p| sub(p)).collect(),
+            ret: Box::new(sub(ret)),
         },
     }
 }

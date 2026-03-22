@@ -130,7 +130,7 @@ fn seed_fn(world: &mut World, lang: Entity, name: &str, params: &[(&str, AstType
     world.set(e, Intrinsic);
     world.set(e, Callable {
         params: params.iter().map(|(n, ty)| AstParam {
-            label: None, name: n.to_string(), ty: Some(ty.clone()), has_default: false,
+            label: None, name: n.to_string(), ty: Some(ty.clone()), default_entity: None,
         }).collect(),
         receiver: None,
     });
@@ -161,7 +161,7 @@ fn seed_generic_fn(
 
     world.set(e, Callable {
         params: params.iter().map(|(n, ty)| AstParam {
-            label: None, name: n.to_string(), ty: Some(ty.clone()), has_default: false,
+            label: None, name: n.to_string(), ty: Some(ty.clone()), default_entity: None,
         }).collect(),
         receiver: None,
     });

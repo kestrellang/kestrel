@@ -13,16 +13,25 @@
 //! For two-name params like `with x: Int`, there may be an additional
 //! label identifier before the Pattern node.
 
+use kestrel_hecs::{Entity, World};
 use kestrel_syntax_tree2::{SyntaxKind, SyntaxNode};
 use kestrel_syntax_tree2::utils::find_child;
 
 use super::helpers::is_type_kind;
 
 use crate::ast_type::ast_type_from_cst;
-use crate::components::AstParam;
+use crate::components::{AstParam, Body, FileId, NodeKind, TypeAnnotation};
+use crate::lower;
 
 /// Extract parameters from a node containing a ParameterList child.
-pub fn extract_params(node: &SyntaxNode, file_id: usize) -> Vec<AstParam> {
+/// Creates child entities for default value expressions.
+pub fn extract_params(
+    world: &mut World,
+    node: &SyntaxNode,
+    parent: Entity,
+    file_entity: Entity,
+    file_id: usize,
+) -> Vec<AstParam> {
     let param_list = match find_child(node, SyntaxKind::ParameterList) {
         Some(list) => list,
         None => return Vec::new(),
@@ -31,7 +40,7 @@ pub fn extract_params(node: &SyntaxNode, file_id: usize) -> Vec<AstParam> {
     param_list
         .children()
         .filter(|c| c.kind() == SyntaxKind::Parameter)
-        .filter_map(|param_node| extract_single_param(&param_node, file_id))
+        .filter_map(|param_node| extract_single_param(world, &param_node, parent, file_entity, file_id))
         .collect()
 }
 
@@ -40,7 +49,13 @@ pub fn extract_params(node: &SyntaxNode, file_id: usize) -> Vec<AstParam> {
 /// The bind name comes from Pattern > BindingPattern > Identifier.
 /// A label (if any) is a bare Identifier token at the top level before
 /// the Pattern node.
-fn extract_single_param(node: &SyntaxNode, file_id: usize) -> Option<AstParam> {
+fn extract_single_param(
+    world: &mut World,
+    node: &SyntaxNode,
+    parent: Entity,
+    file_entity: Entity,
+    file_id: usize,
+) -> Option<AstParam> {
     // Extract bind name from Pattern > BindingPattern > Identifier
     let name = find_child(node, SyntaxKind::Pattern)
         .and_then(|p| find_child(&p, SyntaxKind::BindingPattern))
@@ -82,13 +97,24 @@ fn extract_single_param(node: &SyntaxNode, file_id: usize) -> Option<AstParam> {
         .find(|c| is_type_kind(c.kind()))
         .and_then(|c| ast_type_from_cst(&c, file_id));
 
-    // Check for default value
-    let has_default = find_child(node, SyntaxKind::DefaultValue).is_some();
+    // Create child entity for default value expression
+    let default_entity = find_child(node, SyntaxKind::DefaultValue).map(|default_node| {
+        let entity = world.spawn();
+        world.set(entity, NodeKind::ParamDefault);
+        world.set(entity, FileId(file_entity));
+        world.set(entity, Body(lower::lower_default_value(&default_node, file_id)));
+        // Store the param's type annotation so inference checks the default against it
+        if let Some(ref param_ty) = ty {
+            world.set(entity, TypeAnnotation(param_ty.clone()));
+        }
+        world.set_parent(entity, parent);
+        entity
+    });
 
     Some(AstParam {
         label,
         name,
         ty,
-        has_default,
+        default_entity,
     })
 }

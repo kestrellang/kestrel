@@ -12,6 +12,6 @@ pub mod layout;
 pub mod mangle;
 pub mod target;
 
-pub use layout::{substitute_type, DetailedStructLayout, Layout, LayoutCache, NamedKind};
+pub use layout::{substitute_type, substitute_type_with_self, DetailedStructLayout, Layout, LayoutCache, NamedKind};
 pub use mangle::{mangle_function, mangle_function_with_self, mangle_name, Mangler};
 pub use target::TargetConfig;

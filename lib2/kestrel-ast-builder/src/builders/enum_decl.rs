@@ -94,7 +94,7 @@ pub fn build_enum_case(
                     label,
                     name,
                     ty,
-                    has_default: false,
+                    default_entity: None,
                 })
             })
             .collect();

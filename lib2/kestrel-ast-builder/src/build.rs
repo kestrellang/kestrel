@@ -782,7 +782,7 @@ mod tests {
         let format_fn = find_child_by_name(&world, ordering, &NodeKind::Function, "format").unwrap();
         let callable = world.get::<Callable>(format_fn).unwrap();
         assert_eq!(callable.params.len(), 1);
-        assert!(callable.params[0].has_default, "format options has default value");
+        assert!(callable.params[0].default_entity.is_some(), "format options has default value");
 
         // Total entity count
         let children = world.children_of(ordering);
@@ -828,7 +828,7 @@ mod tests {
             let params: Vec<_> = callable.params.iter().map(|p| {
                 let ty_str = p.ty.as_ref().map(|t| format!(": {}", type_name(t))).unwrap_or_default();
                 let label = p.label.as_ref().map(|l| format!("{} ", l)).unwrap_or_default();
-                let dflt = if p.has_default { " = ..." } else { "" };
+                let dflt = if p.default_entity.is_some() { " = ..." } else { "" };
                 format!("{label}{}{ty_str}{dflt}", p.name)
             }).collect();
             let recv = callable.receiver.as_ref().map(|r| format!("{:?} ", r)).unwrap_or_default();

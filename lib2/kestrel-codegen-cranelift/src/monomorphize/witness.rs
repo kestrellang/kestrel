@@ -137,10 +137,18 @@ fn find_witness_with_method<'a>(
         }
     }
 
+    // Include entity name and debug info for debugging
+    let type_name = match self_type {
+        MirTy::Named { entity, type_args } => {
+            let name = module.resolve_name(*entity);
+            format!("{} (entity {:?}, {} type_args)", name, entity, type_args.len())
+        },
+        other => format!("{other:?}"),
+    };
     Err(MonomorphizeError::MethodNotFound {
         protocol_name: module.resolve_name(protocol).to_string(),
         method: method.to_string(),
-        type_description: format!("{self_type:?}"),
+        type_description: type_name,
     })
 }
 

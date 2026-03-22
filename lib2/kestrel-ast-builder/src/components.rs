@@ -30,6 +30,8 @@ pub enum NodeKind {
     TypeAlias,
     Import,
     TypeParameter,
+    /// Default value expression for a parameter.
+    ParamDefault,
 }
 
 /// Source span excluding leading trivia.
@@ -84,7 +86,8 @@ pub struct AstParam {
     pub label: Option<String>,
     pub name: String,
     pub ty: Option<AstType>,
-    pub has_default: bool,
+    /// Entity for the default value expression (child entity with Body + TypeAnnotation).
+    pub default_entity: Option<Entity>,
 }
 
 /// How a method receives its self argument.

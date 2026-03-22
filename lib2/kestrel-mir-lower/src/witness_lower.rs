@@ -178,12 +178,16 @@ fn collect_protocol_methods_recursive(
         let Some(kind) = ctx.world.get::<NodeKind>(child) else {
             continue;
         };
-        if *kind == NodeKind::Function || *kind == NodeKind::Subscript {
+        if *kind == NodeKind::Function || *kind == NodeKind::Subscript || *kind == NodeKind::Initializer {
             let name = ctx
                 .world
                 .get::<Name>(child)
                 .map(|n| n.0.clone())
-                .unwrap_or_default();
+                .unwrap_or_else(|| match kind {
+                    NodeKind::Initializer => "init".to_string(),
+                    NodeKind::Subscript => "subscript".to_string(),
+                    _ => String::new(),
+                });
             methods.push((name, child));
         }
     }
@@ -204,16 +208,17 @@ fn find_method_by_name(ctx: &LowerCtx, parent: Entity, method_name: &str) -> Opt
         let Some(kind) = ctx.world.get::<NodeKind>(child) else {
             continue;
         };
-        if *kind != NodeKind::Function && *kind != NodeKind::Subscript {
-            continue;
-        }
-        let name = ctx
-            .world
-            .get::<Name>(child)
-            .map(|n| n.0.as_str())
-            .unwrap_or_default();
-        if name == method_name {
-            return Some(child);
+        match kind {
+            NodeKind::Function | NodeKind::Subscript => {
+                let name = ctx.world.get::<Name>(child).map(|n| n.0.as_str()).unwrap_or_default();
+                if name == method_name {
+                    return Some(child);
+                }
+            }
+            NodeKind::Initializer if method_name == "init" => {
+                return Some(child);
+            }
+            _ => {}
         }
     }
     None

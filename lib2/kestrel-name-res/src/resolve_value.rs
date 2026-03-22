@@ -526,7 +526,7 @@ mod tests {
                     label: None,
                     name: "x".into(),
                     ty: None,
-                    has_default: false,
+                    default_entity: None,
                 }],
                 receiver: None,
             },

@@ -17,7 +17,7 @@ use cranelift_codegen::ir::{self, AbiParam, InstBuilder, MemFlags, Signature, St
 use cranelift_codegen::isa::CallConv;
 use cranelift_frontend::FunctionBuilder;
 use cranelift_module::Module;
-use kestrel_codegen2::{mangle_function_with_self, substitute_type};
+use kestrel_codegen2::{mangle_function_with_self, substitute_type, substitute_type_with_self};
 use kestrel_mir::{Callee, CallArg, MirTy, PassingMode, Place, Value};
 
 /// Compile a function call statement.
@@ -67,10 +67,15 @@ pub fn compile_call(
             self_type,
             method_type_args,
         } => {
-            let concrete_self = substitute_type(self_type, &state.subst);
+            // Substitute type params AND SelfType using the function's self_type
+            let mut concrete_self = substitute_type_with_self(
+                self_type, &state.subst, state.self_type.as_ref(),
+            );
+            // Resolve associated types (e.g., Iterator.Item → Int64) via witness table
+            concrete_self = resolve_associated_self_type(ctx, &state, &concrete_self);
             let concrete_method_args: Vec<MirTy> = method_type_args
                 .iter()
-                .map(|a| substitute_type(a, &state.subst))
+                .map(|a| substitute_type_with_self(a, &state.subst, state.self_type.as_ref()))
                 .collect();
 
             let resolved = witness::resolve_witness_call(
@@ -274,5 +279,54 @@ fn compile_call_arg(
         PassingMode::Copy | PassingMode::Move => {
             rvalue::compile_value(ctx, state, builder, &arg.value)
         }
+    }
+}
+
+/// Resolve a self_type that might be an associated type (e.g., Iterator.Item).
+/// Checks if the type is a Named entity that's a TypeAlias on a protocol,
+/// and if so, resolves it through the witness table using the current
+/// function's self_type as the implementing type.
+fn resolve_associated_self_type(
+    ctx: &CodegenContext,
+    state: &FunctionState,
+    self_type: &MirTy,
+) -> MirTy {
+    // Check if self_type is Named with a TypeAlias entity (associated type)
+    let entity = match self_type {
+        MirTy::Named { entity, type_args } if type_args.is_empty() => *entity,
+        MirTy::Named { .. } => return self_type.clone(),
+        _ => return self_type.clone(),
+    };
+
+    // Check if this entity is a TypeAlias by looking at its parent
+    // (TypeAliases on protocols are associated types)
+    let parent_protocol = ctx.module.protocols.iter().find(|p| {
+        p.associated_types.iter().any(|at| {
+            // Match by name since we don't have the entity ID in ProtocolDef
+            let assoc_name = ctx.module.resolve_name(entity);
+            // The last component of the name is the associated type name
+            let short_name = assoc_name.rsplit('.').next().unwrap_or(&assoc_name);
+            at.name == short_name
+        })
+    });
+
+    let Some(proto_def) = parent_protocol else {
+        return self_type.clone();
+    };
+
+    // Get the associated type short name
+    let assoc_name = ctx.module.resolve_name(entity);
+    let short_name = assoc_name.rsplit('.').next().unwrap_or(&assoc_name).to_string();
+
+    // Use the current function's self_type to find the concrete associated type
+    let base_self = state.self_type.as_ref();
+    let Some(base) = base_self else {
+        return self_type.clone();
+    };
+
+    // Look up in witness table
+    match witness::resolve_associated_type(ctx.module, proto_def.entity, base, &short_name) {
+        Ok(resolved) => resolved,
+        Err(_) => self_type.clone(),
     }
 }

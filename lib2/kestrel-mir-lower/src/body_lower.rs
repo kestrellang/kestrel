@@ -582,28 +582,28 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
             })
     }
 
-    /// If a method entity belongs to a protocol (directly or via a protocol extension),
-    /// return the protocol entity. Returns None for methods on concrete types.
+    /// Check if a MirTy is a protocol type (Named whose entity is a protocol).
+    fn is_protocol_type(&self, ty: &MirTy) -> bool {
+        if let MirTy::Named { entity, type_args } = ty {
+            if type_args.is_empty() {
+                return self.ctx.world.get::<kestrel_ast_builder::NodeKind>(*entity)
+                    == Some(&kestrel_ast_builder::NodeKind::Protocol);
+            }
+        }
+        false
+    }
+
+    /// If a method entity is an abstract protocol method (no body, defined on the protocol),
+    /// return the protocol entity. Returns None for concrete methods, protocol extension
+    /// methods (which have bodies and can be called directly), and methods on concrete types.
     fn find_protocol_for_method(&self, method: Entity) -> Option<Entity> {
         use kestrel_ast_builder::NodeKind;
         let parent = self.ctx.world.parent_of(method)?;
         let parent_kind = self.ctx.world.get::<NodeKind>(parent)?;
         match parent_kind {
-            // Method directly on a protocol (abstract method)
+            // Method directly on a protocol (abstract method) — needs Witness dispatch
             NodeKind::Protocol => Some(parent),
-            // Method in an extension — check if the extension targets a protocol
-            NodeKind::Extension => {
-                let target = self.ctx.query.query(kestrel_name_res::ExtensionTargetEntity {
-                    extension: parent,
-                    root: self.ctx.root,
-                })?;
-                let target_kind = self.ctx.world.get::<NodeKind>(target)?;
-                if *target_kind == NodeKind::Protocol {
-                    Some(target)
-                } else {
-                    None
-                }
-            }
+            // Protocol extension methods have bodies and can be called directly — no Witness
             _ => None,
         }
     }
@@ -724,6 +724,11 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         if let Some(&resolved) = self.typed.and_then(|t| t.resolutions.get(&expr_id)) {
             let func_entity = self.resolve_callee_entity(resolved, args);
             self.ctx.register_name(func_entity);
+
+            // Expand default arguments for missing params
+            let explicit_count = args.len();
+            let call_args = self.expand_default_args(call_args, func_entity, explicit_count);
+
             let mut type_args = self.resolve_type_args(expr_id);
             if type_args.is_empty() {
                 type_args = self.resolve_type_args(callee_expr);
@@ -741,15 +746,13 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
 
             // Protocol method → Witness dispatch
             if let Some(protocol) = self.find_protocol_for_method(func_entity) {
-                self.ctx.register_name(protocol);
                 let method_name = self.method_name_of(func_entity);
-                // For protocol init calls, self_type is the result type (what's constructed);
-                // for regular methods, self_type is the receiver expression type
                 let self_type = if method_name == "init" {
                     result_ty.clone()
                 } else {
                     self.resolve_expr_type(callee_expr)
                 };
+                self.ctx.register_name(protocol);
                 let callee = Callee::witness(protocol, &method_name, self_type, type_args);
                 return self.emit_call(callee, call_args, result_ty);
             }
@@ -871,8 +874,21 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         method_name: &str,
         args: &[HirCallArg],
     ) -> Value {
-        let receiver_ty = self.resolve_expr_type(receiver_expr);
+        let mut receiver_ty = self.resolve_expr_type(receiver_expr);
         let result_ty = self.resolve_expr_type(expr_id);
+
+        // If the receiver type resolves to a protocol entity (happens inside protocol
+        // extensions where self is abstract), replace with SelfType so monomorphization
+        // can substitute the concrete type
+        if let MirTy::Named { entity, type_args } = &receiver_ty {
+            if type_args.is_empty() {
+                if self.ctx.world.get::<kestrel_ast_builder::NodeKind>(*entity)
+                    == Some(&kestrel_ast_builder::NodeKind::Protocol)
+                {
+                    receiver_ty = MirTy::SelfType;
+                }
+            }
+        }
 
         // Check for function-typed field calls BEFORE lowering receiver into call_args,
         // since field calls use the receiver differently (to access the field, not as self)
@@ -917,13 +933,17 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
 
         // Type inference tells us which function entity this resolves to
         if let Some(&resolved_entity) = self.typed.and_then(|t| t.resolutions.get(&expr_id)) {
+            // Expand default arguments for missing params
+            let explicit_count = args.len();
+            let call_args = self.expand_default_args(call_args, resolved_entity, explicit_count);
+
             // Check if the method is from a protocol (needs Witness dispatch).
-            // Protocol methods (abstract, no body) and default impls in protocol
-            // extensions must go through the witness table.
+            // SelfType and protocol-typed receivers are fine — monomorphization
+            // resolves them via substitute_type_with_self using the parent's self_type.
             if let Some(protocol) = self.find_protocol_for_method(resolved_entity) {
                 self.ctx.register_name(protocol);
                 let method_type_args = self.resolve_type_args(expr_id);
-                let callee = Callee::witness(protocol, method_name, receiver_ty, method_type_args);
+                let callee = Callee::witness(protocol, method_name, receiver_ty.clone(), method_type_args);
                 return self.emit_call(callee, call_args, result_ty);
             }
 
@@ -1042,6 +1062,78 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         } else {
             self.emit_call(callee, call_args, result_ty)
         }
+    }
+
+    /// Expand missing call arguments with default parameter values.
+    /// For each missing param that has a default_entity, creates a synthetic thunk
+    /// function, lowers it, and calls it to produce the default value.
+    fn expand_default_args(
+        &mut self,
+        mut call_args: Vec<CallArg>,
+        callee_entity: Entity,
+        explicit_arg_count: usize,
+    ) -> Vec<CallArg> {
+        let Some(callable) = self.ctx.world.get::<kestrel_ast_builder::Callable>(callee_entity) else {
+            return call_args;
+        };
+        if explicit_arg_count >= callable.params.len() {
+            return call_args;
+        }
+
+        // Collect default entities for missing params (avoid borrow of callable across mut self)
+        let defaults: Vec<(Entity, usize)> = callable.params[explicit_arg_count..]
+            .iter()
+            .enumerate()
+            .filter_map(|(i, p)| p.default_entity.map(|e| (e, explicit_arg_count + i)))
+            .collect();
+
+        for (default_entity, _param_idx) in defaults {
+            // Get the param type from the default entity's TypeAnnotation
+            let param_ty = crate::ty::resolve_type_annotation(self.ctx, default_entity);
+
+            let default_val = self.lower_default_arg(default_entity, param_ty.clone());
+            let arg = if param_ty.is_trivially_copyable() {
+                CallArg::copy(default_val)
+            } else {
+                CallArg::borrow(default_val)
+            };
+            call_args.push(arg);
+        }
+
+        call_args
+    }
+
+    /// Lower a default parameter expression by creating a synthetic thunk function
+    /// and calling it. The thunk evaluates the default expression and returns its value.
+    fn lower_default_arg(&mut self, default_entity: Entity, param_ty: MirTy) -> Value {
+        // Create a synthetic thunk function for this default expression
+        let thunk_entity = self.ctx.next_synthetic_entity();
+        let parent_name = &self.ctx.module.functions[self.func_id.index()].name;
+        let thunk_name = format!("{parent_name}.default_arg.{}", self.ctx.synthetic_entity_counter);
+        self.ctx.module.register_name(thunk_entity, &thunk_name);
+
+        let mut def = FunctionDef::new(thunk_entity, &thunk_name, param_ty.clone());
+        def.kind = FunctionKind::Free;
+        // Inherit caller's type_params so generic defaults work
+        def.type_params = self.ctx.module.functions[self.func_id.index()]
+            .type_params
+            .clone();
+
+        let thunk_func_id = self.ctx.module.add_function(def);
+
+        // Lower the default expression's body into the thunk function.
+        // This reborrows self.ctx — safe because lower_function_body creates
+        // its own BodyLowerCtx with the default's HirBody/TypedBody.
+        lower_function_body(self.ctx, default_entity, thunk_func_id);
+
+        // Emit a call to the thunk at the current call site
+        let type_args: Vec<MirTy> = self.ctx.module.functions[self.func_id.index()]
+            .type_params
+            .iter()
+            .map(|tp| MirTy::TypeParam(tp.entity))
+            .collect();
+        let callee = Callee::direct_generic(thunk_entity, type_args);
+        self.emit_call(callee, vec![], param_ty)
     }
 
     /// Emit a call statement and return the result value.

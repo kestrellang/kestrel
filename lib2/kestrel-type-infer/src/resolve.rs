@@ -809,7 +809,7 @@ impl WorldResolver<'_> {
         };
 
         let params = &callable.params;
-        let required_count = params.iter().filter(|p| !p.has_default).count();
+        let required_count = params.iter().filter(|p| p.default_entity.is_none()).count();
 
         // Arity check: args must be >= required and <= total params
         if arg_labels.len() < required_count || arg_labels.len() > params.len() {

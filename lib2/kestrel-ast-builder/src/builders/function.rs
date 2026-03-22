@@ -48,8 +48,8 @@ pub fn build_function(
         Some(extract_receiver_kind(node))
     };
 
-    // Parameters
-    let params = extract_params(node, file_id);
+    // Parameters (creates child entities for default value expressions)
+    let params = extract_params(world, node, entity, file_entity, file_id);
     world.set(entity, Callable { params, receiver });
 
     // Return type from ReturnType child
@@ -101,7 +101,7 @@ pub fn build_initializer(
     world.set(entity, CstNode(node.clone()));
     world.set_parent(entity, parent);
 
-    let params = extract_params(node, file_id);
+    let params = extract_params(world, node, entity, file_entity, file_id);
     // Inits always have a `self` receiver (mutating — they're building the instance)
     world.set(entity, Callable { params, receiver: Some(ReceiverKind::Mutating) });
 

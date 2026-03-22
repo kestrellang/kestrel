@@ -11,7 +11,7 @@
 use super::error::MonomorphizeError;
 use super::instantiation::{FunctionInstantiation, MonomorphizationSet};
 use super::witness;
-use kestrel_codegen2::substitute_type;
+use kestrel_codegen2::{substitute_type, substitute_type_with_self};
 use kestrel_debug::ktrace;
 use kestrel_hecs::Entity;
 use kestrel_mir::{
@@ -182,12 +182,34 @@ impl<'a> CollectionContext<'a> {
                 self_type,
                 method_type_args,
             } => {
-                let concrete_self = substitute_type(self_type, subst);
+                // Substitute type params AND SelfType using parent's self_type
+                let mut concrete_self = substitute_type_with_self(
+                    self_type, subst, parent_self.as_ref(),
+                );
+                // Resolve associated types (e.g., Iterator.Item → concrete type)
+                // via witness table using the parent's self_type
+                if let MirTy::Named { entity, ref type_args } = concrete_self {
+                    if type_args.is_empty() {
+                        if let Some(ps) = parent_self {
+                            let assoc_name = self.module.resolve_name(entity);
+                            let short_name = assoc_name.rsplit('.').next().unwrap_or(&assoc_name);
+                            for proto_def in &self.module.protocols {
+                                if proto_def.associated_types.iter().any(|at| at.name == short_name) {
+                                    if let Ok(resolved) = witness::resolve_associated_type(
+                                        self.module, proto_def.entity, ps, short_name,
+                                    ) {
+                                        concrete_self = resolved;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
                 let concrete_method_args: Vec<MirTy> = method_type_args
                     .iter()
-                    .map(|a| substitute_type(a, subst))
+                    .map(|a| substitute_type_with_self(a, subst, parent_self.as_ref()))
                     .collect();
-
 
                 match witness::resolve_witness_call(
                     self.module,
