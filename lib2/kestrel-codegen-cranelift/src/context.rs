@@ -58,7 +58,7 @@ impl<'a> CodegenContext<'a> {
     ) -> Result<Self, CodegenError> {
         // Configure Cranelift
         let mut flag_builder = settings::builder();
-        flag_builder.set("is_pic", "false").unwrap();
+        flag_builder.set("is_pic", "true").unwrap();
 
         match options.opt_level {
             0 => flag_builder.set("opt_level", "none").unwrap(),
