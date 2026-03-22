@@ -3,7 +3,7 @@
 //! Lowers function entities into MIR FunctionDefs with params and return types.
 //! Function bodies are not lowered in this phase.
 
-use kestrel_ast_builder::{Callable, Intrinsic, NodeKind, Static, TypeParams};
+use kestrel_ast_builder::{Attributes, Callable, Intrinsic, NodeKind, Static, TypeParams};
 use kestrel_hecs::Entity;
 use kestrel_mir::{
     FunctionDef, FunctionId, FunctionKind, ReceiverConvention, TypeParamDef,
@@ -77,6 +77,26 @@ pub fn lower_function_sig(ctx: &mut LowerCtx, entity: Entity) -> FunctionId {
                 ast_param.label.clone(),
             );
             def.params.push(param);
+        }
+    }
+
+    // Check for @extern attribute → set extern_info
+    if let Some(attrs) = ctx.world.get::<Attributes>(entity) {
+        for attr in &attrs.0 {
+            if attr.name == "extern" {
+                let symbol_name = attr.args.iter()
+                    .find(|a| a.label.as_deref() == Some("mangleName"))
+                    .map(|a| a.value.trim_matches('"').to_string())
+                    .unwrap_or_else(|| {
+                        // Fall back to the last segment of the qualified name
+                        def.name.rsplit('.').next().unwrap_or(&def.name).to_string()
+                    });
+                def.extern_info = Some(kestrel_mir::ExternInfo {
+                    calling_convention: kestrel_mir::CallingConvention::C,
+                    symbol_name,
+                });
+                break;
+            }
         }
     }
 
