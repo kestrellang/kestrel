@@ -18,6 +18,7 @@ cranelift-object = "0.129"
 cranelift-native = "0.129"
 target-lexicon = "0.12"
 indexmap = { workspace = true }
+stacker = { workspace = true }
 
 [dev-dependencies]
 kestrel-compiler2 = { path = "../kestrel-compiler" }

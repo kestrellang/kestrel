@@ -23,6 +23,18 @@ pub fn compile_place_read(
     builder: &mut FunctionBuilder,
     place: &Place,
 ) -> Result<CrValue, CodegenError> {
+    // Guard against deep recursion from nested place projections
+    stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || {
+        compile_place_read_inner(ctx, state, builder, place)
+    })
+}
+
+fn compile_place_read_inner(
+    ctx: &mut CodegenContext,
+    state: &FunctionState,
+    builder: &mut FunctionBuilder,
+    place: &Place,
+) -> Result<CrValue, CodegenError> {
     let ptr_ty = common::ptr_type(ctx.target);
     let ty = common::get_place_type(
         ctx.module,

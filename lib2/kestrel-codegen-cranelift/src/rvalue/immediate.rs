@@ -10,7 +10,7 @@ use cranelift_codegen::ir::{self, InstBuilder, MemFlags, StackSlotData, StackSlo
 use cranelift_frontend::FunctionBuilder;
 use cranelift_module::Module;
 use kestrel_codegen2::mangle_function_with_self;
-use kestrel_mir::{Immediate, ImmediateKind, IntBits, FloatBits, MirTy};
+use kestrel_mir::{FunctionKind, Immediate, ImmediateKind, IntBits, FloatBits, MirTy};
 
 /// Compile an immediate value to a Cranelift value.
 pub fn compile_immediate(
@@ -77,7 +77,17 @@ pub fn compile_immediate(
             // Look up the function's mangled name and get its address
             let func_def = ctx.entity_to_func.get(func).map(|id| &ctx.module.functions[id.index()]);
             let mangled = if let Some(fd) = func_def {
-                mangle_function_with_self(ctx.module, fd, type_args, None)
+                // For init/deinit/method of non-generic types, compute self_type
+                // from the parent so mangling matches the declared signature
+                let self_type = match &fd.kind {
+                    FunctionKind::Initializer { parent }
+                    | FunctionKind::Deinit { parent }
+                    | FunctionKind::Method { parent, .. } => {
+                        Some(MirTy::Named { entity: *parent, type_args: type_args.to_vec() })
+                    }
+                    _ => None,
+                };
+                mangle_function_with_self(ctx.module, fd, type_args, self_type.as_ref())
             } else {
                 return Err(CodegenError::Unsupported(format!(
                     "FunctionRef: unknown entity {:?}",

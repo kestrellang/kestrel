@@ -31,17 +31,12 @@ pub fn resolve_witness_call(
     self_type: &MirTy,
     method_type_args: &[MirTy],
 ) -> Result<ResolvedWitnessCall, MonomorphizeError> {
-    // Find a witness that matches the self type and protocol
-    let (witness, bindings) = find_witness(module, protocol, self_type)?;
+    // Find a witness that matches the self type and protocol, and has the method.
+    // First try exact protocol, then any witness for this type that has the method
+    // (handles protocol inheritance: Comparable witness contains Less.lessThan).
+    let (witness, bindings) = find_witness_with_method(module, protocol, method, self_type)?;
 
-    // Look up the method binding
-    let method_binding = witness.method_bindings.get(method).ok_or_else(|| {
-        MonomorphizeError::MethodNotFound {
-            protocol_name: module.resolve_name(protocol).to_string(),
-            method: method.to_string(),
-            type_description: format!("{self_type:?}"),
-        }
-    })?;
+    let method_binding = witness.method_bindings.get(method).unwrap();
 
     // Build the type args for the concrete function
     let mut type_args = Vec::new();
@@ -104,9 +99,52 @@ pub fn resolve_associated_type(
     Ok(substitute_type(bound_ty, &bindings))
 }
 
+/// Find a witness for `self_type` that has the given method.
+/// First tries exact protocol match, then falls back to any witness that
+/// has the method (handles protocol inheritance — e.g., Comparable witness
+/// contains Less.lessThan because witness generation collects inherited methods).
+fn find_witness_with_method<'a>(
+    module: &'a MirModule,
+    protocol: Entity,
+    method: &str,
+    self_type: &MirTy,
+) -> Result<(&'a WitnessDef, HashMap<Entity, MirTy>), MonomorphizeError> {
+    // Pass 1: exact protocol match
+    for witness in &module.witnesses {
+        if witness.protocol != protocol {
+            continue;
+        }
+        let mut bindings = HashMap::new();
+        if match_pattern(&witness.implementing_type, self_type, &mut bindings) {
+            if witness.method_bindings.contains_key(method) {
+                return Ok((witness, bindings));
+            }
+        }
+    }
+
+    // Pass 2: any witness for this type that has the method
+    // (covers protocol inheritance: Comparable witness has Less.lessThan)
+    for witness in &module.witnesses {
+        if witness.protocol == protocol {
+            continue;
+        }
+        if !witness.method_bindings.contains_key(method) {
+            continue;
+        }
+        let mut bindings = HashMap::new();
+        if match_pattern(&witness.implementing_type, self_type, &mut bindings) {
+            return Ok((witness, bindings));
+        }
+    }
+
+    Err(MonomorphizeError::MethodNotFound {
+        protocol_name: module.resolve_name(protocol).to_string(),
+        method: method.to_string(),
+        type_description: format!("{self_type:?}"),
+    })
+}
+
 /// Find a witness that proves `self_type` implements `protocol`.
-/// Returns the witness and a map of type parameter bindings extracted
-/// from pattern matching.
 fn find_witness<'a>(
     module: &'a MirModule,
     protocol: Entity,
@@ -116,8 +154,6 @@ fn find_witness<'a>(
         if witness.protocol != protocol {
             continue;
         }
-
-        // Try to match the implementing type pattern against the concrete self type
         let mut bindings = HashMap::new();
         if match_pattern(&witness.implementing_type, self_type, &mut bindings) {
             return Ok((witness, bindings));

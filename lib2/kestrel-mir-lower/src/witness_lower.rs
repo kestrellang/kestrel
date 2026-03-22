@@ -153,9 +153,27 @@ fn lower_witnesses_for_type(ctx: &mut LowerCtx, type_entity: Entity, impl_ty: Mi
     }
 }
 
-/// Collect all method names from a protocol's children.
+/// Collect all method names from a protocol and its parent protocols (recursively).
+/// This ensures witnesses include bindings for inherited methods (e.g., Comparable
+/// witnesses include Less.lessThan, Greater.greaterThan, etc.).
 fn collect_protocol_methods(ctx: &mut LowerCtx, protocol: Entity) -> Vec<(String, Entity)> {
     let mut methods = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    collect_protocol_methods_recursive(ctx, protocol, &mut methods, &mut seen);
+    methods
+}
+
+fn collect_protocol_methods_recursive(
+    ctx: &mut LowerCtx,
+    protocol: Entity,
+    methods: &mut Vec<(String, Entity)>,
+    seen: &mut std::collections::HashSet<Entity>,
+) {
+    if !seen.insert(protocol) {
+        return; // avoid cycles
+    }
+
+    // Collect this protocol's own methods
     for &child in ctx.world.children_of(protocol) {
         let Some(kind) = ctx.world.get::<NodeKind>(child) else {
             continue;
@@ -169,7 +187,15 @@ fn collect_protocol_methods(ctx: &mut LowerCtx, protocol: Entity) -> Vec<(String
             methods.push((name, child));
         }
     }
-    methods
+
+    // Recurse into parent protocols
+    let conformances = ctx.query.query(ConformingProtocols {
+        entity: protocol,
+        root: ctx.root,
+    });
+    for parent in conformances {
+        collect_protocol_methods_recursive(ctx, parent, methods, seen);
+    }
 }
 
 /// Find a method by name among an entity's children.

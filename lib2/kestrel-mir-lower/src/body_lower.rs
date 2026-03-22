@@ -22,6 +22,7 @@ use kestrel_mir::*;
 
 use crate::context::LowerCtx;
 use crate::resolved_ty::lower_resolved_ty;
+use crate::ty::lower_type;
 
 /// Lower a function entity's body into MIR basic blocks.
 ///
@@ -250,19 +251,43 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 Value::Place(Place::local(dest))
             },
             HirExpr::Field { base, name, .. } => {
-                let base_val = self.lower_expr(*base);
-                match base_val {
-                    Value::Place(p) => Value::Place(p.field(name.clone())),
-                    _ => {
-                        // Need to materialize the value into a temp first
-                        let ty = self.resolve_expr_type(*base);
-                        let temp = self.fresh_temp(ty);
-                        self.emit_stmt(Statement::new(StatementKind::Assign {
-                            dest: Place::local(temp),
-                            rvalue: value_to_rvalue(base_val),
-                        }));
-                        Value::Place(Place::local(temp).field(name.clone()))
-                    },
+                // Check if this is a computed property (resolved entity has Callable)
+                let resolved = self.typed.and_then(|t| t.resolutions.get(&expr_id)).copied();
+                let is_computed = resolved.map_or(false, |e| {
+                    self.ctx.world.get::<kestrel_ast_builder::Callable>(e).is_some()
+                });
+
+                if is_computed {
+                    // Computed property: emit a getter call
+                    let getter_entity = resolved.unwrap();
+                    self.ctx.register_name(getter_entity);
+                    let receiver_ty = self.resolve_expr_type(*base);
+                    let base_val = self.lower_expr(*base);
+                    let result_ty = self.resolve_expr_type(expr_id);
+
+                    // Pass receiver as Ref (borrowing getter)
+                    let receiver_arg = CallArg::borrow(base_val);
+                    let type_args = self.resolve_type_args(expr_id);
+                    let type_args = self.prepend_receiver_type_args(&receiver_ty, type_args);
+
+                    let callee = Callee::direct_generic(getter_entity, type_args);
+                    self.emit_call(callee, vec![receiver_arg], result_ty)
+                } else {
+                    // Stored field: direct place access
+                    let base_val = self.lower_expr(*base);
+                    match base_val {
+                        Value::Place(p) => Value::Place(p.field(name.clone())),
+                        _ => {
+                            // Need to materialize the value into a temp first
+                            let ty = self.resolve_expr_type(*base);
+                            let temp = self.fresh_temp(ty);
+                            self.emit_stmt(Statement::new(StatementKind::Assign {
+                                dest: Place::local(temp),
+                                rvalue: value_to_rvalue(base_val),
+                            }));
+                            Value::Place(Place::local(temp).field(name.clone()))
+                        },
+                    }
                 }
             },
             HirExpr::TupleIndex { base, index, .. } => {
@@ -341,9 +366,35 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                         }));
                         Value::Place(Place::local(dest))
                     },
+                    Some(kestrel_ast_builder::NodeKind::Struct) => {
+                        // Struct used as value — likely an init reference.
+                        // Try to find the default init and use that.
+                        if let Some(init) = self.resolve_init_function(*entity, &[]) {
+                            Value::Immediate(Immediate::function_ref(init))
+                        } else {
+                            Value::Immediate(Immediate::function_ref(*entity))
+                        }
+                    },
+                    Some(kestrel_ast_builder::NodeKind::Field) => {
+                        // Field used as value — could be a static constant (Float32.nan)
+                        // or a computed property. Load it as a global if static.
+                        if self.ctx.world.get::<kestrel_ast_builder::Static>(*entity).is_some() {
+                            Value::Place(Place::Global(*entity))
+                        } else {
+                            // Non-static field used as bare value — shouldn't happen in
+                            // well-typed code but handle gracefully
+                            Value::Immediate(Immediate::error())
+                        }
+                    },
+                    Some(kestrel_ast_builder::NodeKind::TypeParameter)
+                    | Some(kestrel_ast_builder::NodeKind::TypeAlias) => {
+                        // Type entities used as values — usually metatype references
+                        // that don't have runtime representation
+                        Value::Immediate(Immediate::unit())
+                    },
                     _ => {
-                        // Type reference or unknown — return as entity reference
-                        Value::Immediate(Immediate::function_ref(*entity))
+                        // Unknown entity — return error to avoid bad FunctionRef
+                        Value::Immediate(Immediate::error())
                     },
                 }
             },
@@ -492,6 +543,144 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         Vec::new()
     }
 
+    /// Prepend the receiver's struct type_args to method-level type_args.
+    /// Method FunctionDefs have inherited type_params first (from struct/enum/extension),
+    /// followed by method-own type_params. The type_args must match this order.
+    fn prepend_receiver_type_args(&self, receiver_ty: &MirTy, method_args: Vec<MirTy>) -> Vec<MirTy> {
+        if let MirTy::Named { type_args, .. } = receiver_ty {
+            if !type_args.is_empty() {
+                let mut full_args = type_args.clone();
+                full_args.extend(method_args);
+                return full_args;
+            }
+        }
+        method_args
+    }
+
+    /// Check if an entity is lang.panic or lang.panic_unwind.
+    fn is_panic_intrinsic(&self, entity: Entity) -> bool {
+        use kestrel_ast_builder::{Intrinsic, Name};
+        if self.ctx.world.get::<Intrinsic>(entity).is_none() {
+            return false;
+        }
+        let name = self.ctx.world.get::<Name>(entity).map(|n| n.0.as_str());
+        matches!(name, Some("panic" | "panic_unwind"))
+    }
+
+    /// Get the method name for an entity, handling init/subscript/deinit which lack Name.
+    fn method_name_of(&self, entity: Entity) -> String {
+        use kestrel_ast_builder::NodeKind;
+        self.ctx.world.get::<kestrel_ast_builder::Name>(entity)
+            .map(|n| n.0.clone())
+            .unwrap_or_else(|| {
+                match self.ctx.world.get::<NodeKind>(entity) {
+                    Some(NodeKind::Initializer) => "init".to_string(),
+                    Some(NodeKind::Subscript) => "subscript".to_string(),
+                    Some(NodeKind::Deinit) => "deinit".to_string(),
+                    _ => String::new(),
+                }
+            })
+    }
+
+    /// If a method entity belongs to a protocol (directly or via a protocol extension),
+    /// return the protocol entity. Returns None for methods on concrete types.
+    fn find_protocol_for_method(&self, method: Entity) -> Option<Entity> {
+        use kestrel_ast_builder::NodeKind;
+        let parent = self.ctx.world.parent_of(method)?;
+        let parent_kind = self.ctx.world.get::<NodeKind>(parent)?;
+        match parent_kind {
+            // Method directly on a protocol (abstract method)
+            NodeKind::Protocol => Some(parent),
+            // Method in an extension — check if the extension targets a protocol
+            NodeKind::Extension => {
+                let target = self.ctx.query.query(kestrel_name_res::ExtensionTargetEntity {
+                    extension: parent,
+                    root: self.ctx.root,
+                })?;
+                let target_kind = self.ctx.world.get::<NodeKind>(target)?;
+                if *target_kind == NodeKind::Protocol {
+                    Some(target)
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
+
+    /// Check if an entity is a struct (via ECS NodeKind, not just MIR module).
+    fn is_struct_entity(&self, entity: Entity) -> bool {
+        self.ctx.world.get::<kestrel_ast_builder::NodeKind>(entity)
+            == Some(&kestrel_ast_builder::NodeKind::Struct)
+    }
+
+    /// If entity is a struct, resolve its init function. Otherwise return entity as-is.
+    fn resolve_callee_entity(&mut self, entity: Entity, args: &[HirCallArg]) -> Entity {
+        if self.is_struct_entity(entity) {
+            self.resolve_init_function(entity, args).unwrap_or(entity)
+        } else {
+            entity
+        }
+    }
+
+    /// Resolve the init function for a struct entity by finding its Initializer children.
+    /// Falls back to the first init if multiple match or returns None.
+    fn resolve_init_function(&mut self, struct_entity: Entity, args: &[HirCallArg]) -> Option<Entity> {
+        use kestrel_ast_builder::{Callable, NodeKind};
+
+        let arg_count = args.len();
+        let arg_labels: Vec<Option<&str>> = args.iter().map(|a| a.label.as_deref()).collect();
+
+        // Search for initializer children of the struct
+        let children = self.ctx.world.children_of(struct_entity).to_vec();
+        let mut best: Option<Entity> = None;
+
+        for &child in &children {
+            let Some(kind) = self.ctx.world.get::<NodeKind>(child) else { continue };
+            if *kind != NodeKind::Initializer { continue }
+
+            // Keep first init as fallback regardless of param matching
+            if best.is_none() {
+                best = Some(child);
+            }
+
+            let Some(callable) = self.ctx.world.get::<Callable>(child) else { continue };
+
+            // Match by param count and labels
+            if callable.params.len() != arg_count { continue }
+            let labels_ok = callable.params.iter().zip(arg_labels.iter()).all(|(p, arg_label)| {
+                match (p.label.as_deref(), arg_label) {
+                    (Some(pl), Some(al)) => pl == *al,
+                    (None, None) => true,
+                    _ => false,
+                }
+            });
+            if labels_ok {
+                best = Some(child);
+                break;
+            }
+        }
+
+        // Also search extensions for init
+        if best.is_none() {
+            let extensions = self.ctx.query.query(kestrel_name_res::ExtensionsFor {
+                target: struct_entity,
+                root: self.ctx.root,
+            });
+            for ext in &extensions {
+                for &child in self.ctx.world.children_of(*ext) {
+                    let Some(kind) = self.ctx.world.get::<NodeKind>(child) else { continue };
+                    if *kind != NodeKind::Initializer { continue }
+                    best = Some(child);
+                    break;
+                }
+                if best.is_some() { break }
+            }
+        }
+
+        best
+    }
+
     /// Lower call arguments from HIR to MIR.
     /// Trivially copyable types (primitives, refs, pointers, thin func ptrs)
     /// are passed by copy. Everything else is passed by borrow.
@@ -516,30 +705,136 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         callee_expr: HirExprId,
         args: &[HirCallArg],
     ) -> Value {
+        // Intercept lang.panic / lang.panic_unwind — emit as Panic terminator, not a call
+        if let HirExpr::Def(entity, _, _) = &self.hir.exprs[callee_expr] {
+            if self.is_panic_intrinsic(*entity) {
+                // Extract message from first arg (if string literal) or use a default
+                let msg = "panic".to_string();
+                self.set_terminator(Terminator::panic(msg));
+                return Value::Immediate(Immediate::unit());
+            }
+        }
+
         let call_args = self.lower_call_args(args);
         let result_ty = self.resolve_expr_type(expr_id);
+
+        // Check if inference resolved the call expression itself (e.g., init calls
+        // where Int64(intLiteral: 0) resolves to the specific init function entity,
+        // or subscript calls where arr(index) resolves to the subscript function)
+        if let Some(&resolved) = self.typed.and_then(|t| t.resolutions.get(&expr_id)) {
+            let func_entity = self.resolve_callee_entity(resolved, args);
+            self.ctx.register_name(func_entity);
+            let mut type_args = self.resolve_type_args(expr_id);
+            if type_args.is_empty() {
+                type_args = self.resolve_type_args(callee_expr);
+            }
+            // Use explicit type args from the path (e.g., Array[Int64](...))
+            let callee_hir = self.hir.exprs[callee_expr].clone();
+            if let HirExpr::Def(_, explicit_hir_args, _) = &callee_hir {
+                if type_args.is_empty() && !explicit_hir_args.is_empty() {
+                    type_args = explicit_hir_args
+                        .iter()
+                        .map(|hir_ty| lower_type(self.ctx, hir_ty))
+                        .collect();
+                }
+            }
+
+            // Protocol method → Witness dispatch
+            if let Some(protocol) = self.find_protocol_for_method(func_entity) {
+                self.ctx.register_name(protocol);
+                let method_name = self.method_name_of(func_entity);
+                // For protocol init calls, self_type is the result type (what's constructed);
+                // for regular methods, self_type is the receiver expression type
+                let self_type = if method_name == "init" {
+                    result_ty.clone()
+                } else {
+                    self.resolve_expr_type(callee_expr)
+                };
+                let callee = Callee::witness(protocol, &method_name, self_type, type_args);
+                return self.emit_call(callee, call_args, result_ty);
+            }
+
+            // If the resolved function has a receiver (subscript/computed property call),
+            // the callee expression is the receiver — add it as the first arg
+            let mut call_args = call_args;
+            let has_receiver = self.ctx.world.get::<kestrel_ast_builder::Callable>(func_entity)
+                .map_or(false, |c| c.receiver.is_some());
+            if has_receiver {
+                let receiver_ty = self.resolve_expr_type(callee_expr);
+                let receiver_val = self.lower_expr(callee_expr);
+                let receiver_arg = if receiver_ty.is_trivially_copyable() {
+                    CallArg::copy(receiver_val)
+                } else {
+                    CallArg::borrow(receiver_val)
+                };
+                let type_args = self.prepend_receiver_type_args(&receiver_ty, type_args);
+                let callee = Callee::direct_generic(func_entity, type_args);
+                call_args.insert(0, receiver_arg);
+                return self.emit_call(callee, call_args, result_ty);
+            }
+
+            let callee = Callee::direct_generic(func_entity, type_args);
+            return self.emit_call_maybe_init(callee, call_args, result_ty);
+        }
 
         // Check what the callee is
         let callee_hir = self.hir.exprs[callee_expr].clone();
         match &callee_hir {
-            // Direct function call: foo(args)
-            HirExpr::Def(entity, _, _) => {
-                self.ctx.register_name(*entity);
-                let type_args = self.resolve_type_args(callee_expr);
-                let callee = Callee::direct_generic(*entity, type_args);
-                self.emit_call(callee, call_args, result_ty)
+            // Direct function call: foo(args) or foo[T](args)
+            HirExpr::Def(entity, explicit_hir_args, _) => {
+                let func_entity = self.resolve_callee_entity(*entity, args);
+                self.ctx.register_name(func_entity);
+                let mut type_args = self.resolve_type_args(callee_expr);
+                // Fall back to explicit HIR type args if inference didn't record any
+                if type_args.is_empty() && !explicit_hir_args.is_empty() {
+                    type_args = explicit_hir_args
+                        .iter()
+                        .map(|hir_ty| lower_type(self.ctx, hir_ty))
+                        .collect();
+                }
+                // Protocol method → Witness dispatch
+                if let Some(protocol) = self.find_protocol_for_method(func_entity) {
+                    self.ctx.register_name(protocol);
+                    let method_name = self.method_name_of(func_entity);
+                    let self_type = if method_name == "init" {
+                        result_ty.clone()
+                    } else {
+                        self.resolve_expr_type(callee_expr)
+                    };
+                    let callee = Callee::witness(protocol, &method_name, self_type, type_args);
+                    return self.emit_call(callee, call_args, result_ty);
+                }
+                let callee = Callee::direct_generic(func_entity, type_args);
+                self.emit_call_maybe_init(callee, call_args, result_ty)
             },
             // Overloaded function call: resolved by inference
-            HirExpr::OverloadSet { candidates, .. } => {
+            HirExpr::OverloadSet { candidates, type_args: explicit_hir_args, .. } => {
                 let resolved = self.typed
                     .and_then(|t| t.resolutions.get(&callee_expr))
                     .copied()
                     .or_else(|| candidates.first().copied());
                 if let Some(entity) = resolved {
-                    self.ctx.register_name(entity);
-                    let type_args = self.resolve_type_args(callee_expr);
-                    let callee = Callee::direct_generic(entity, type_args);
-                    self.emit_call(callee, call_args, result_ty)
+                    let func_entity = self.resolve_callee_entity(entity, args);
+                    self.ctx.register_name(func_entity);
+                    let mut type_args = self.resolve_type_args(callee_expr);
+                    if type_args.is_empty() && !explicit_hir_args.is_empty() {
+                        type_args = explicit_hir_args
+                            .iter()
+                            .map(|hir_ty| lower_type(self.ctx, hir_ty))
+                            .collect();
+                    }
+                    // Protocol method → Witness dispatch
+                    if let Some(protocol) = self.find_protocol_for_method(func_entity) {
+                        self.ctx.register_name(protocol);
+                        let method_name = self.ctx.world.get::<kestrel_ast_builder::Name>(func_entity)
+                            .map(|n| n.0.clone())
+                            .unwrap_or_default();
+                        let receiver_ty = self.resolve_expr_type(callee_expr);
+                        let callee = Callee::witness(protocol, &method_name, receiver_ty, type_args);
+                        return self.emit_call(callee, call_args, result_ty);
+                    }
+                    let callee = Callee::direct_generic(func_entity, type_args);
+                    self.emit_call_maybe_init(callee, call_args, result_ty)
                 } else {
                     Value::Immediate(Immediate::error())
                 }
@@ -558,8 +853,9 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                         self.emit_call(callee, call_args, result_ty)
                     },
                     Value::Immediate(Immediate { kind: ImmediateKind::FunctionRef { func, type_args }, .. }) => {
-                        let callee = Callee::direct_generic(func, type_args);
-                        self.emit_call(callee, call_args, result_ty)
+                        let func_entity = self.resolve_callee_entity(func, args);
+                        let callee = Callee::direct_generic(func_entity, type_args);
+                        self.emit_call_maybe_init(callee, call_args, result_ty)
                     },
                     _ => Value::Immediate(Immediate::error()),
                 }
@@ -572,12 +868,43 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         &mut self,
         expr_id: HirExprId,
         receiver_expr: HirExprId,
-        _method_name: &str,
+        method_name: &str,
         args: &[HirCallArg],
     ) -> Value {
         let receiver_ty = self.resolve_expr_type(receiver_expr);
-        let receiver_val = self.lower_expr(receiver_expr);
         let result_ty = self.resolve_expr_type(expr_id);
+
+        // Check for function-typed field calls BEFORE lowering receiver into call_args,
+        // since field calls use the receiver differently (to access the field, not as self)
+        if let Some(&resolved_entity) = self.typed.and_then(|t| t.resolutions.get(&expr_id)) {
+            if self.ctx.world.get::<kestrel_ast_builder::NodeKind>(resolved_entity)
+                == Some(&kestrel_ast_builder::NodeKind::Field)
+            {
+                let field_name = self.ctx.world.get::<kestrel_ast_builder::Name>(resolved_entity)
+                    .map(|n| n.0.clone())
+                    .unwrap_or_default();
+                let receiver_val = self.lower_expr(receiver_expr);
+                // Build field place from receiver
+                let field_place = match receiver_val {
+                    Value::Place(p) => p.field(field_name),
+                    _ => {
+                        let temp = self.fresh_temp(receiver_ty.clone());
+                        self.emit_stmt(Statement::new(StatementKind::Assign {
+                            dest: Place::local(temp),
+                            rvalue: value_to_rvalue(receiver_val),
+                        }));
+                        Place::local(temp).field(field_name)
+                    }
+                };
+                // Don't include receiver as arg — it's used to access the field
+                let field_args = self.lower_call_args(args);
+                // Function-typed fields are thick callables (closures)
+                let callee = Callee::Thick(field_place);
+                return self.emit_call(callee, field_args, result_ty);
+            }
+        }
+
+        let receiver_val = self.lower_expr(receiver_expr);
 
         // Build args: receiver first (copy if trivially copyable), then explicit args
         let receiver_arg = if receiver_ty.is_trivially_copyable() {
@@ -590,8 +917,21 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
 
         // Type inference tells us which function entity this resolves to
         if let Some(&resolved_entity) = self.typed.and_then(|t| t.resolutions.get(&expr_id)) {
+            // Check if the method is from a protocol (needs Witness dispatch).
+            // Protocol methods (abstract, no body) and default impls in protocol
+            // extensions must go through the witness table.
+            if let Some(protocol) = self.find_protocol_for_method(resolved_entity) {
+                self.ctx.register_name(protocol);
+                let method_type_args = self.resolve_type_args(expr_id);
+                let callee = Callee::witness(protocol, method_name, receiver_ty, method_type_args);
+                return self.emit_call(callee, call_args, result_ty);
+            }
+
             self.ctx.register_name(resolved_entity);
-            let type_args = self.resolve_type_args(expr_id);
+            let method_type_args = self.resolve_type_args(expr_id);
+            // Prepend receiver's struct type_args — inherited type_params come first
+            // in the function's type_params list (from collect_inherited_type_params)
+            let type_args = self.prepend_receiver_type_args(&receiver_ty, method_type_args);
             let callee = Callee::method(resolved_entity, type_args, receiver_ty);
             self.emit_call(callee, call_args, result_ty)
         } else {
@@ -623,18 +963,83 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         let mut call_args = vec![receiver_arg];
         call_args.extend(self.lower_call_args(args));
 
-        // Check if inference resolved this to a concrete function
-        if let Some(&resolved_entity) = self.typed.and_then(|t| t.resolutions.get(&expr_id)) {
-            // Resolved to a concrete method — direct call
-            self.ctx.register_name(resolved_entity);
-            let type_args = self.resolve_type_args(expr_id);
-            let callee = Callee::method(resolved_entity, type_args, receiver_ty);
-            self.emit_call(callee, call_args, result_ty)
+        // Always use witness dispatch for protocol calls. The witness resolver
+        // handles both concrete and generic receivers. Using Direct calls for
+        // protocol methods is wrong — inference resolves to the abstract protocol
+        // method entity (which has no body), not the concrete implementation.
+
+        // Witness call — resolved at monomorphization time
+        self.ctx.register_name(protocol);
+        let method_type_args = self.resolve_type_args(expr_id);
+        let callee = Callee::witness(protocol, method_name, receiver_ty, method_type_args);
+        self.emit_call(callee, call_args, result_ty)
+    }
+
+    /// Check if an entity is an Initializer in the MIR and return its parent struct entity.
+    fn is_init_function(&self, entity: Entity) -> Option<Entity> {
+        let func = self.ctx.module.functions.iter().find(|f| f.entity == entity);
+        if let Some(f) = func {
+            match f.kind {
+                FunctionKind::Initializer { parent } => Some(parent),
+                _ => None,
+            }
         } else {
-            // Emit as witness call — resolved at monomorphization time
-            self.ctx.register_name(protocol);
-            let method_type_args = self.resolve_type_args(expr_id);
-            let callee = Callee::witness(protocol, method_name, receiver_ty, method_type_args);
+            // Entity not yet in functions list — check ECS directly
+            use kestrel_ast_builder::NodeKind;
+            if self.ctx.world.get::<NodeKind>(entity) == Some(&NodeKind::Initializer) {
+                self.ctx.world.parent_of(entity)
+            } else {
+                None
+            }
+        }
+    }
+
+    /// Emit a call, handling init calls by allocating self and prepending it as first arg.
+    /// For init calls: allocates a temp of the struct type, passes &mut temp as self,
+    /// calls the init, and returns the temp as the result.
+    fn emit_call_maybe_init(
+        &mut self,
+        callee: Callee,
+        mut call_args: Vec<CallArg>,
+        result_ty: MirTy,
+    ) -> Value {
+        // Check if this is a direct call to an init function
+        let init_parent = match &callee {
+            Callee::Direct { func, .. } => self.is_init_function(*func),
+            _ => None,
+        };
+
+        if let Some(_parent_entity) = init_parent {
+            // Init call: allocate self, prepend as first arg, call, return self
+            let self_local = self.fresh_temp(result_ty.clone());
+            let self_ref = CallArg::mutating(Value::Place(Place::local(self_local)));
+            call_args.insert(0, self_ref);
+
+            // Init returns Unit — no dest needed
+            self.emit_stmt(Statement::new(StatementKind::Call {
+                dest: None,
+                callee,
+                args: call_args,
+            }));
+            Value::Place(Place::local(self_local))
+        } else if let Callee::Direct { func, .. } = &callee {
+            // Check if the callee is a struct entity (memberwise init with no explicit init)
+            if self.is_struct_entity(*func) {
+                // Memberwise construct: build Rvalue::Construct from call args
+                let fields: Vec<(String, Value)> = call_args.into_iter()
+                    .enumerate()
+                    .map(|(i, arg)| (format!("_{i}"), arg.value))
+                    .collect();
+                let dest = self.fresh_temp(result_ty.clone());
+                self.emit_stmt(Statement::new(StatementKind::Assign {
+                    dest: Place::local(dest),
+                    rvalue: Rvalue::Construct { ty: result_ty, fields },
+                }));
+                Value::Place(Place::local(dest))
+            } else {
+                self.emit_call(callee, call_args, result_ty)
+            }
+        } else {
             self.emit_call(callee, call_args, result_ty)
         }
     }
@@ -825,9 +1230,9 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
             params.iter().map(|p| p.local).collect();
         let captured_locals = self.find_captures(body, &closure_param_locals);
 
-        // Generate unique closure name
-        let closure_idx = self.temp_counter;
-        self.temp_counter += 1;
+        // Generate unique closure name using global counter to avoid collisions
+        let closure_idx = self.ctx.closure_counter;
+        self.ctx.closure_counter += 1;
         let parent_name = &self.ctx.module.functions[self.func_id.index()].name;
         let closure_name = format!("{}.closure.{}", parent_name, closure_idx);
 
@@ -847,13 +1252,18 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         // Create env struct for captures (if any)
         let env_struct_id = if !captured_locals.is_empty() {
             let env_struct_name = format!("{}.env", closure_name);
-            let env_struct_entity =
-                kestrel_hecs::Entity::from_raw(u32::MAX / 2 - closure_idx);
+            let env_struct_entity = self.ctx.next_synthetic_entity();
             self.ctx
                 .module
                 .register_name(env_struct_entity, &env_struct_name);
 
             let mut env_def = StructDef::new(env_struct_entity, &env_struct_name);
+            // Inherit parent's type_params so struct_layout can substitute TypeParam field types
+            env_def.type_params = self.ctx.module.functions[self.func_id.index()]
+                .type_params
+                .iter()
+                .map(|tp| kestrel_mir::TypeParamDef::new(tp.entity, &tp.name))
+                .collect();
             for &captured in &captured_locals {
                 let cap_ty = self.resolve_local_type(captured);
                 let cap_name = self.hir.locals[captured].name.clone();
@@ -865,10 +1275,14 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         };
 
         // Create the synthetic call function
-        let closure_entity = kestrel_hecs::Entity::from_raw(u32::MAX - closure_idx);
+        let closure_entity = self.ctx.next_synthetic_entity();
         self.ctx.module.register_name(closure_entity, &closure_name);
 
         let mut func_def = FunctionDef::new(closure_entity, &closure_name, ret_ty.clone());
+        // Inherit parent's type_params so monomorphization propagates concrete type_args
+        func_def.type_params = self.ctx.module.functions[self.func_id.index()]
+            .type_params
+            .clone();
         func_def.kind = if let Some(env_id) = env_struct_id {
             FunctionKind::ClosureCall { env_struct: env_id }
         } else {
@@ -883,9 +1297,16 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         // Add env parameter — typed to the actual env struct pointer if capturing
         let env_ty = if let Some(env_id) = env_struct_id {
             let env_entity = self.ctx.module.structs[env_id.index()].entity;
+            // Build type_args matching the parent's type_params so substitute_type
+            // propagates concrete types through the env struct pointer
+            let env_type_args: Vec<MirTy> = self.ctx.module.functions[self.func_id.index()]
+                .type_params
+                .iter()
+                .map(|tp| MirTy::TypeParam(tp.entity))
+                .collect();
             MirTy::Pointer(Box::new(MirTy::Named {
                 entity: env_entity,
-                type_args: vec![],
+                type_args: env_type_args,
             }))
         } else {
             MirTy::Pointer(Box::new(MirTy::Unit))

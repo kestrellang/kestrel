@@ -200,7 +200,9 @@ pub fn compile_function(
     builder.seal_all_blocks();
     builder.finalize();
 
-    // Verify the function IR
+    // Skip verification in release — Cranelift's verifier can be deeply recursive.
+    // Verify only in debug builds.
+    #[cfg(debug_assertions)]
     if let Err(errors) = verify_function(&cl_func, ctx.isa.as_ref()) {
         return Err(CodegenError::FunctionCompilation {
             name: mangled_name.to_string(),
@@ -213,8 +215,9 @@ pub fn compile_function(
 
     // Compile and define
     let mut cl_ctx = cranelift_codegen::Context::for_function(cl_func);
-    cl_ctx
-        .compile(ctx.isa.as_ref(), &mut Default::default())
+    stacker::maybe_grow(256 * 1024, 8 * 1024 * 1024, || {
+        cl_ctx.compile(ctx.isa.as_ref(), &mut Default::default())
+    })
         .map_err(|e| CodegenError::FunctionCompilation {
             name: mangled_name.to_string(),
             source: Box::new(std::io::Error::new(

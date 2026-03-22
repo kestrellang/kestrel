@@ -1004,6 +1004,7 @@ dependencies = [
  "kestrel-hecs",
  "kestrel-mir",
  "kestrel-mir-lower",
+ "stacker",
  "target-lexicon 0.12.16",
 ]
 

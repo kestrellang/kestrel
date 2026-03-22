@@ -206,6 +206,11 @@ impl MirModule {
         self
     }
 
+    /// Run MIR verification and print diagnostics. Does not abort — reports all issues.
+    pub fn verify(&self) -> passes::VerifyResult {
+        passes::verify(self)
+    }
+
     /// Run all post-lowering passes in the recommended order.
     pub fn with_all_passes(self) -> Self {
         self.with_deinits()

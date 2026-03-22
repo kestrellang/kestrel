@@ -66,13 +66,18 @@ pub fn run_thunk_pass(module: &mut MirModule) {
         let target_info = module.functions.iter().find(|f| f.entity == *target).map(|f| {
             let name = f.name.clone();
             let ret = f.ret.clone();
+            let type_params = f.type_params.clone();
+            // Check if target expects an env parameter (closures do)
+            let needs_env = f.params.first().map_or(false, |p| {
+                p.name == "env" || p.name == "_env"
+            });
             let params: Vec<_> = f.params.iter()
                 .filter(|p| p.name != "self" && p.name != "env" && p.name != "_env")
                 .cloned()
                 .collect();
-            (name, ret, params)
+            (name, ret, params, type_params, needs_env)
         });
-        let Some((target_name, ret_ty, target_params)) = target_info else {
+        let Some((target_name, ret_ty, target_params, target_type_params, target_needs_env)) = target_info else {
             continue;
         };
 
@@ -84,6 +89,7 @@ pub fn run_thunk_pass(module: &mut MirModule) {
         module.register_name(thunk_entity, &thunk_name);
 
         let mut thunk_def = FunctionDef::new(thunk_entity, &thunk_name, ret_ty.clone());
+        thunk_def.type_params = target_type_params;
         thunk_def.kind = FunctionKind::Thunk { original: *target };
 
         // Create body
@@ -94,7 +100,11 @@ pub fn run_thunk_pass(module: &mut MirModule) {
         thunk_def.params.push(ParamDef::new("_env", env_local, MirTy::Pointer(Box::new(MirTy::Unit))));
         body.param_count += 1;
 
+        // If the target closure expects an env pointer, forward it
         let mut forward_args = Vec::new();
+        if target_needs_env {
+            forward_args.push(CallArg::borrow(Value::Place(crate::place::Place::local(env_local))));
+        }
         for param in &target_params {
             let local = body.add_local(LocalDef::new(&param.name, param.ty.clone()));
             thunk_def.params.push(ParamDef::new(&param.name, local, param.ty.clone()));

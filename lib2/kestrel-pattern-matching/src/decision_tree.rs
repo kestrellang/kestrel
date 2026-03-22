@@ -40,6 +40,7 @@
 //! Uses the "necessity" heuristic: prefer the column with the most distinct
 //! constructors, minimizing the total number of tests.
 
+use kestrel_ast_builder::Name;
 use kestrel_hecs::QueryContext;
 use kestrel_hir::body::*;
 use kestrel_hir::res::LocalId;
@@ -279,8 +280,11 @@ fn build_specialized_paths(
     for i in 0..arity {
         let mut field_path = col_path.clone();
         match ctor {
-            Constructor::Variant { .. } => {
-                let name = ctor.display_name(query).trim_start_matches('.').to_string();
+            Constructor::Variant { entity, .. } => {
+                // Use the raw entity name, not display_name which adds "(_)" for payloads
+                let name = query.get::<Name>(*entity)
+                    .map(|n| n.0.clone())
+                    .unwrap_or_else(|| format!("{:?}", entity));
                 field_path.push(PathElement::Downcast(name));
                 field_path.push(PathElement::Index(i));
             }

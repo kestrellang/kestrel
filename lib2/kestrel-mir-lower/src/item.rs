@@ -1,6 +1,6 @@
 //! Item dispatch — walk entity tree, route by NodeKind.
 
-use kestrel_ast_builder::NodeKind;
+use kestrel_ast_builder::{Callable, NodeKind};
 use kestrel_hecs::Entity;
 
 use crate::context::LowerCtx;
@@ -73,6 +73,10 @@ fn lower_member_functions(ctx: &mut LowerCtx, parent: Entity) {
         };
         match kind {
             NodeKind::Function | NodeKind::Initializer | NodeKind::Deinit | NodeKind::Subscript => {
+                lower_function_sig(ctx, child);
+            },
+            // Computed properties (fields with a getter body) are lowered as methods
+            NodeKind::Field if ctx.world.get::<Callable>(child).is_some() => {
                 lower_function_sig(ctx, child);
             },
             _ => {},

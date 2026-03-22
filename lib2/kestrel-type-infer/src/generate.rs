@@ -80,7 +80,12 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             // For generic entities, this will instantiate fresh TyVars.
             // If explicit type args are provided (e.g., Pointer[UInt8]),
             // use them instead of fresh inference variables.
-            instantiate_entity_with_args(ctx, *entity, explicit_type_args)
+            let (tv, type_arg_vars) = instantiate_entity_with_args(ctx, *entity, explicit_type_args);
+            // Record type arg vars so MIR lowering can retrieve the resolved types
+            if !type_arg_vars.is_empty() {
+                ctx.type_args.insert(id, type_arg_vars);
+            }
+            tv
         }
 
         // Overloaded function reference — can only appear as callee of Call
@@ -484,13 +489,26 @@ fn gen_struct_init(
     // Collect arg labels for init matching
     let arg_labels: Vec<Option<&str>> = args.iter().map(|a| a.label.as_deref()).collect();
 
-    // Find initializer children
+    // Find initializer children (direct + from extensions)
     let children = qctx.children_of(struct_entity).to_vec();
-    let inits: Vec<Entity> = children
+    let mut inits: Vec<Entity> = children
         .iter()
         .filter(|&&c| qctx.get::<NodeKind>(c) == Some(&NodeKind::Initializer))
         .copied()
         .collect();
+
+    // Also search extensions for init functions
+    let extensions = qctx.query(kestrel_name_res::ExtensionsFor {
+        target: struct_entity,
+        root,
+    });
+    for ext in &extensions {
+        for &child in qctx.children_of(*ext) {
+            if qctx.get::<NodeKind>(child) == Some(&NodeKind::Initializer) {
+                inits.push(child);
+            }
+        }
+    }
 
     if !inits.is_empty() {
         // Collect all inits matching by arity + label pattern
@@ -510,6 +528,8 @@ fn gen_struct_init(
         // type-directed disambiguation which happens during solving.
         if let [init] = matched.as_slice() {
             let init = *init;
+            // Record which init was selected so MIR lowering can use the init entity
+            ctx.resolutions.insert(expr_id, init);
             // Build subs that includes both struct type params AND init's own type params
             let init_type_params: Vec<Entity> = qctx
                 .get::<TypeParams>(init)
@@ -646,11 +666,13 @@ fn gen_closure(
 /// entity it is, creates fresh TyVars for type params, and returns the
 /// appropriate type (Function for callables, Named for types, etc.).
 /// Instantiate an entity, using explicit type args if provided.
+/// Instantiate a generic entity, returning (entity_type, fresh_type_arg_vars).
+/// The type arg vars can be recorded in ctx.type_args for later retrieval.
 fn instantiate_entity_with_args(
     ctx: &mut InferCtx<'_>,
     entity: Entity,
     explicit_type_args: &[HirTy],
-) -> TyVar {
+) -> (TyVar, Vec<TyVar>) {
     instantiate_entity_inner(ctx, entity, explicit_type_args)
 }
 
@@ -658,7 +680,7 @@ fn instantiate_entity_inner(
     ctx: &mut InferCtx<'_>,
     entity: Entity,
     explicit_type_args: &[HirTy],
-) -> TyVar {
+) -> (TyVar, Vec<TyVar>) {
     let qctx = ctx.query_ctx;
     let root = ctx.root;
 
@@ -741,8 +763,9 @@ fn instantiate_entity_inner(
     }
 
     // Determine entity kind and build appropriate type
+    let type_arg_vars = fresh_type_args.clone();
     let kind = qctx.get::<NodeKind>(entity);
-    match kind {
+    let entity_tv = match kind {
         // Functions and initializers: build Function type from Callable + return type
         Some(NodeKind::Function | NodeKind::Initializer) => {
             if let Some(param_hir_tys) = qctx.query(LowerCallableTypes { entity, root }) {
@@ -830,7 +853,8 @@ fn instantiate_entity_inner(
 
         // Default: Named type wrapping the entity
         _ => ctx.named(entity, fresh_type_args),
-    }
+    };
+    (entity_tv, type_arg_vars)
 }
 
 /// Convert an HirTy (already resolved during HIR lowering) to a TyVar.

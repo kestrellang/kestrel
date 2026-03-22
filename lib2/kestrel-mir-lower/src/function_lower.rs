@@ -24,12 +24,6 @@ pub fn lower_function_sig(ctx: &mut LowerCtx, entity: Entity) -> FunctionId {
     // Determine FunctionKind based on NodeKind + parent context
     def.kind = determine_function_kind(ctx, entity);
 
-    // Skip intrinsic functions — they have no user-visible body
-    if ctx.world.get::<Intrinsic>(entity).is_some() {
-        // Still register but mark as extern-like (no body)
-        return ctx.module.add_function(def);
-    }
-
     // Type parameters: parent's first (for methods), then function's own
     collect_inherited_type_params(ctx, entity, &mut def);
 
@@ -46,8 +40,6 @@ pub fn lower_function_sig(ctx: &mut LowerCtx, entity: Entity) -> FunctionId {
     }
 
     // Parameters from Callable component
-    // Body and actual param lowering will happen in Phase 2
-    // For now, just record param count from the Callable
     if let Some(callable) = ctx.world.get::<Callable>(entity) {
         // Self parameter for methods
         if let Some(receiver) = &callable.receiver {
@@ -86,6 +78,11 @@ pub fn lower_function_sig(ctx: &mut LowerCtx, entity: Entity) -> FunctionId {
             );
             def.params.push(param);
         }
+    }
+
+    // Intrinsic functions have params but no body — register and stop
+    if ctx.world.get::<Intrinsic>(entity).is_some() {
+        return ctx.module.add_function(def);
     }
 
     let func_id = ctx.module.add_function(def);
@@ -155,6 +152,24 @@ fn determine_function_kind(ctx: &LowerCtx, entity: Entity) -> FunctionKind {
                 _ => FunctionKind::Free,
             }
         },
+        // Computed property getters — treated as methods
+        NodeKind::Field => {
+            let parent = ctx.world.parent_of(entity).unwrap_or(ctx.root);
+            if let Some(callable) = ctx.world.get::<Callable>(entity) {
+                if let Some(receiver) = &callable.receiver {
+                    let conv = match receiver {
+                        kestrel_ast_builder::ReceiverKind::Borrowing => ReceiverConvention::Ref,
+                        kestrel_ast_builder::ReceiverKind::Mutating => ReceiverConvention::RefMut,
+                        kestrel_ast_builder::ReceiverKind::Consuming => ReceiverConvention::Consuming,
+                    };
+                    FunctionKind::Method { parent, receiver: conv }
+                } else {
+                    FunctionKind::StaticMethod { parent }
+                }
+            } else {
+                FunctionKind::Free
+            }
+        },
         _ => FunctionKind::Free,
     }
 }
@@ -175,9 +190,25 @@ fn collect_inherited_type_params(ctx: &mut LowerCtx, entity: Entity, def: &mut F
         return;
     }
 
-    // For extensions, the parent type params might be on the extension's target type.
-    // For now, collect from the parent entity's TypeParams component.
-    if let Some(type_params) = ctx.world.get::<TypeParams>(parent) {
+    // Determine which entity holds the TypeParams.
+    // For structs/enums, it's the parent directly.
+    // For extensions, the extension itself has no TypeParams — they're on the
+    // target type (e.g., `extend Array[T]` → Array has TypeParams [T]).
+    let type_params_source = if matches!(parent_kind, Some(NodeKind::Extension)) {
+        // Resolve the extension's target entity and use its TypeParams
+        ctx.query.query(kestrel_name_res::ExtensionTargetEntity {
+            extension: parent,
+            root: ctx.root,
+        })
+    } else {
+        Some(parent)
+    };
+
+    let Some(source) = type_params_source else {
+        return;
+    };
+
+    if let Some(type_params) = ctx.world.get::<TypeParams>(source) {
         for &tp_entity in &type_params.0 {
             ctx.register_name(tp_entity);
             let tp_name = ctx

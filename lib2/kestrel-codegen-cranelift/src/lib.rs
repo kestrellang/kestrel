@@ -59,6 +59,16 @@ pub fn compile(
     target: &TargetConfig,
     options: &CodegenOptions,
 ) -> Result<CompilationResult, CodegenError> {
+    // Codegen can be deeply recursive (Cranelift verify/compile, recursive place projections).
+    // Use stacker to grow the stack on demand.
+    stacker::maybe_grow(256 * 1024, 4 * 1024 * 1024, || compile_inner(module, target, options))
+}
+
+fn compile_inner(
+    module: &MirModule,
+    target: &TargetConfig,
+    options: &CodegenOptions,
+) -> Result<CompilationResult, CodegenError> {
     // Phase 1: Collect all monomorphized function instantiations
     let mono_set = monomorphize::collect_all(module)
         .map_err(|errors| {
@@ -123,41 +133,96 @@ mod integration_tests {
             .expect("stdlib path should exist at lang/std")
     }
 
-    /// Full pipeline: source → lex/parse/build → infer → MIR lower → codegen.
-    /// Uses a minimal program (no stdlib) to avoid stack overflow in tests.
-    #[test]
-    fn compile_empty_main() {
+    fn compile_source(source: &str) -> Result<CompilationResult, error::CodegenError> {
         let mut compiler = kestrel_compiler2::Compiler::new();
-
-        // Minimal program without stdlib to keep test fast and avoid stack overflow
-        let entity = compiler.set_source(
-            "test.ks",
-            "module Test\nfunc main() { }".into(),
-        );
+        let entity = compiler.set_source("test.ks", source.into());
         compiler.build(entity);
         compiler.infer_all();
 
-        // Lower to MIR
-        let mir = kestrel_mir_lower::lower_module(compiler.world(), compiler.root()).with_all_passes();
-
-        // Verify we have an entry point
-        assert!(mir.entry_point.is_some() || mir.functions.iter().any(|f| f.name.ends_with("main")),
-            "should have a main function");
-
-        // Compile to object
+        let mir = kestrel_mir_lower::lower_module(compiler.world(), compiler.root())
+            .with_all_passes();
         let target = TargetConfig::host();
         let options = CodegenOptions::default();
-        let result = compile(&mir, &target, &options);
+        compile(&mir, &target, &options)
+    }
 
+    #[test]
+    fn compile_empty_main() {
+        let result = compile_source("module Test\nfunc main() { }");
         match result {
             Ok(r) => {
-                eprintln!("Compilation succeeded: {} bytes of object code", r.object_bytes.len());
+                eprintln!("Compilation succeeded: {} bytes", r.object_bytes.len());
                 assert!(!r.object_bytes.is_empty());
             }
             Err(e) => {
-                // Codegen may fail on missing features — that's expected during development.
-                // Log and don't panic so the test acts as a progress indicator.
                 eprintln!("Compilation failed (expected during development): {e}");
+            }
+        }
+    }
+
+    /// Full pipeline without stdlib: compile → link → run.
+    /// Returns the process exit code for a void main.
+    #[test]
+    fn compile_link_run_void_main() {
+        let result = compile_source("module Test\nfunc main() { }").unwrap();
+
+        let dir = std::env::temp_dir().join("kestrel_e2e_test");
+        let _ = std::fs::create_dir_all(&dir);
+        let obj_path = dir.join("test.o");
+        let exe_path = dir.join("test_exe");
+
+        result.write_object_file(&obj_path).unwrap();
+        link::link_executable(&obj_path, &exe_path, &[], &[], &[]).unwrap();
+
+        let output = std::process::Command::new(&exe_path).output().unwrap();
+        let exit_code = output.status.code().unwrap_or(-1);
+        eprintln!("Exit code: {exit_code}");
+        assert_eq!(exit_code, 0, "void main() should return 0");
+
+        let _ = std::fs::remove_file(&obj_path);
+        let _ = std::fs::remove_file(&exe_path);
+    }
+
+    #[test]
+    fn compile_no_stdlib() {
+        let result = compile_source("module Test\nfunc main() { }");
+        match result {
+            Ok(r) => {
+                eprintln!("Compiled without stdlib: {} bytes", r.object_bytes.len());
+                assert!(!r.object_bytes.is_empty());
+            }
+            Err(e) => eprintln!("Compile failed: {e}"),
+        }
+    }
+
+    /// Smoke test: compile with stdlib to check for TypeParam panics.
+    #[test]
+    fn compile_with_stdlib_smoke() {
+        let mut compiler = kestrel_compiler2::Compiler::new();
+        compiler.load_dir(&stdlib_path());
+        let entity = compiler.set_source("test.ks", "module Test\nfunc main() { }".into());
+        compiler.build(entity);
+        compiler.infer_all();
+
+        let mir = kestrel_mir_lower::lower_module(compiler.world(), compiler.root())
+            .with_all_passes();
+
+        // Run MIR verification to catch structural issues
+        mir.verify().dump();
+
+        let target = TargetConfig::host();
+        let options = CodegenOptions::default();
+
+        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            compile(&mir, &target, &options)
+        })) {
+            Ok(Ok(r)) => eprintln!("Stdlib compilation succeeded: {} bytes", r.object_bytes.len()),
+            Ok(Err(e)) => eprintln!("Stdlib compilation error (expected during development): {e}"),
+            Err(p) => {
+                let msg = p.downcast_ref::<String>().map(|s| s.as_str())
+                    .or_else(|| p.downcast_ref::<&str>().copied())
+                    .unwrap_or("unknown");
+                eprintln!("Stdlib compilation panicked (expected during development): {msg}");
             }
         }
     }

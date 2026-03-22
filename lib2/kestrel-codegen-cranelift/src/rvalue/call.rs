@@ -44,9 +44,11 @@ pub fn compile_call(
                 .as_ref()
                 .map(|st| substitute_type(st, &state.subst));
 
-            // Look up function and mangle
             let func_id_mir = ctx.entity_to_func.get(func).ok_or_else(|| {
-                CodegenError::Unsupported(format!("call to unknown function entity {:?}", func))
+                let name = ctx.module.resolve_name(*func);
+                CodegenError::Unsupported(format!(
+                    "call to unknown function entity {:?} ({})", func, name
+                ))
             })?;
             let func_def = &ctx.module.functions[func_id_mir.index()];
             let mangled = mangle_function_with_self(

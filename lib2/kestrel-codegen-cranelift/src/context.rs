@@ -212,20 +212,42 @@ impl<'a> CodegenContext<'a> {
             let mangled = self.mangle_instantiation(inst);
             let sig = self.create_signature(func_def, &inst.type_args, inst.self_type.as_ref())?;
 
-            let linkage = if func_def.is_extern() {
-                Linkage::Import
+            let is_main = self.is_main_function(func_def);
+
+            // Skip bodyless non-extern functions (lang builtins, abstract methods).
+            // They can't be compiled and would cause "declared but not defined" errors.
+            if !func_def.is_extern() && func_def.body.is_none() && !is_main {
+                continue;
+            }
+
+            let (symbol_name, linkage) = if is_main {
+                // Main entry point: export as "main" — Cranelift adds the platform
+                // underscore prefix (e.g. _main on macOS) automatically
+                ("main".to_string(), Linkage::Export)
+            } else if func_def.is_extern() {
+                // Extern functions: import by their C symbol name
+                let sym = func_def
+                    .extern_info
+                    .as_ref()
+                    .map(|e| e.symbol_name.clone())
+                    .unwrap_or(mangled.clone());
+                (sym, Linkage::Import)
             } else {
-                Linkage::Local
+                (mangled.clone(), Linkage::Local)
             };
 
             let func_id = self
                 .cl_module
-                .declare_function(&mangled, linkage, &sig)
+                .declare_function(&symbol_name, linkage, &sig)
                 .map_err(|e| CodegenError::FunctionDefinition {
-                    name: mangled.clone(),
+                    name: symbol_name.clone(),
                     source: e,
                 })?;
-            self.func_ids_by_name.insert(mangled, func_id);
+            // Store under both the mangled name and the symbol name for lookup
+            self.func_ids_by_name.insert(mangled.clone(), func_id);
+            if symbol_name != mangled {
+                self.func_ids_by_name.insert(symbol_name, func_id);
+            }
         }
 
         // Declare runtime helpers (e.g., memcmp)
@@ -263,7 +285,7 @@ impl<'a> CodegenContext<'a> {
 
     fn define_all_functions(&mut self) -> Result<(), CodegenError> {
         let insts: Vec<FunctionInstantiation> = self.mono_set.functions.iter().cloned().collect();
-        for inst in insts {
+        for (idx, inst) in insts.into_iter().enumerate() {
             let func_def = &self.module.functions[inst.func_id.index()];
 
             // Skip extern functions (no body to compile)
@@ -276,9 +298,8 @@ impl<'a> CodegenContext<'a> {
                 continue;
             };
 
-            let mangled = self.mangle_instantiation(&inst);
-            ktrace!("codegen", "compiling: {}", mangled);
 
+            let mangled = self.mangle_instantiation(&inst);
             let Some(&func_id) = self.func_ids_by_name.get(&mangled) else {
                 return Err(CodegenError::FunctionCompilation {
                     name: mangled,

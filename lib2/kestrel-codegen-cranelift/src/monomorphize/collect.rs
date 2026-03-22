@@ -63,12 +63,41 @@ impl<'a> CollectionContext<'a> {
     }
 
     fn collect(&mut self) {
-        // Seed: all non-generic functions that don't use SelfType
+        // Seed: all non-generic functions
         for (i, func) in self.module.functions.iter().enumerate() {
-            if func.type_params.is_empty() && !self.func_uses_self_type(func) {
+            if !func.type_params.is_empty() {
+                continue;
+            }
+
+            if !self.func_uses_self_type(func) {
+                // No SelfType — seed as concrete
                 let inst = FunctionInstantiation::concrete(FunctionId::new(i));
                 if self.result.functions.insert(inst.clone()) {
                     self.queue.push_back(inst);
+                }
+            } else {
+                // Uses SelfType — for init/deinit/method of non-generic types,
+                // resolve SelfType to the parent struct/enum type
+                let parent = match &func.kind {
+                    FunctionKind::Initializer { parent } |
+                    FunctionKind::Deinit { parent } |
+                    FunctionKind::Method { parent, .. } |
+                    FunctionKind::StaticMethod { parent } => Some(*parent),
+                    _ => None,
+                };
+                if let Some(parent_entity) = parent {
+                    let self_ty = MirTy::Named {
+                        entity: parent_entity,
+                        type_args: Vec::new(),
+                    };
+                    let inst = FunctionInstantiation {
+                        func_id: FunctionId::new(i),
+                        type_args: Vec::new(),
+                        self_type: Some(self_ty),
+                    };
+                    if self.result.functions.insert(inst.clone()) {
+                        self.queue.push_back(inst);
+                    }
                 }
             }
         }
@@ -106,6 +135,8 @@ impl<'a> CollectionContext<'a> {
             // Scan terminator for values that might contain function refs
             // (Return and Branch contain Values that could be immediate function refs)
         }
+
+
     }
 
     fn scan_callee(
@@ -121,11 +152,6 @@ impl<'a> CollectionContext<'a> {
                 self_type,
             } => {
                 let Some(&func_id) = self.entity_to_func.get(func) else {
-                    ktrace!(
-                        "codegen",
-                        "monomorphize: function entity {:?} not found",
-                        func
-                    );
                     return;
                 };
 
@@ -161,6 +187,7 @@ impl<'a> CollectionContext<'a> {
                     .iter()
                     .map(|a| substitute_type(a, subst))
                     .collect();
+
 
                 match witness::resolve_witness_call(
                     self.module,
