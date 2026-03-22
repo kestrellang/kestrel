@@ -886,6 +886,27 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 emit_op1(self, Op::PtrRead(pointee))
             }
             "ptr_write" => emit_op2(self, Op::PtrWrite),
+            "cast_ptr" => {
+                // cast_ptr[T](ptr) → pointer cast to Pointer[T]
+                let target_ty = self.resolve_expr_type(expr_id);
+                emit_op1(self, Op::PtrCast(target_ty))
+            }
+            "ptr_to" => {
+                // ptr_to[T](value) → take address of value, returns Pointer[T]
+                // This is like RefToPtr — takes a reference and returns a raw pointer
+                emit_op1(self, Op::RefToPtr)
+            }
+            "ptr_from_address" => {
+                // ptr_from_address[T](address) → create Pointer[T] from integer address
+                let target_ty = self.resolve_expr_type(expr_id);
+                emit_op1(self, Op::PtrFromAddress(target_ty))
+            }
+            "stack_alloc" => {
+                // stack_alloc[T](count) → allocate count*sizeof(T) bytes on stack
+                let target_ty = self.resolve_expr_type(expr_id);
+                let inner = match &target_ty { MirTy::Pointer(inner) => *inner.clone(), _ => MirTy::I8 };
+                emit_op1(self, Op::StackAlloc(inner))
+            }
 
             // String operations
             "str_ptr" => emit_op1(self, Op::StrPtr),
