@@ -236,7 +236,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
     fn lower_expr(&mut self, expr_id: HirExprId) -> Value {
         let expr = self.hir.exprs[expr_id].clone();
         match &expr {
-            HirExpr::Literal { value, .. } => self.lower_literal(value),
+            HirExpr::Literal { value, .. } => self.lower_literal_expr(expr_id, value),
             HirExpr::Local(hir_local, _) => {
                 Value::Place(Place::local(self.map_local(*hir_local)))
             },
@@ -1551,7 +1551,41 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
     }
 
     /// Lower a literal value to an immediate.
-    fn lower_literal(&self, lit: &HirLiteral) -> Value {
+    /// Lower a literal expression. If the target type is a Named struct (e.g., Bool, Int64),
+    /// emit an init call to the struct's literal protocol init (boolLiteral:, intLiteral:, etc.)
+    /// so the primitive gets properly wrapped in the struct. If the target type is a MIR
+    /// primitive (inside init bodies), return the bare immediate.
+    fn lower_literal_expr(&mut self, expr_id: HirExprId, lit: &HirLiteral) -> Value {
+        let result_ty = self.resolve_expr_type(expr_id);
+
+        // If the type is a Named struct, wrap the primitive via init call
+        if let MirTy::Named { entity, .. } = &result_ty {
+            let primitive = self.lower_literal_primitive(lit);
+            let label = match lit {
+                HirLiteral::Bool(_) => "boolLiteral",
+                HirLiteral::Integer(_) => "intLiteral",
+                HirLiteral::Float(_) => "floatLiteral",
+                HirLiteral::String(_) | HirLiteral::Char(_) | HirLiteral::Null => {
+                    // Strings, chars, null: return primitive directly for now
+                    return primitive;
+                }
+            };
+
+            // Find the init(label:) on the struct
+            if let Some(init_entity) = self.find_literal_init(*entity, label) {
+                self.ctx.register_name(init_entity);
+                let call_args = vec![CallArg::copy(primitive)];
+                let callee = Callee::direct_generic(init_entity, vec![]);
+                return self.emit_call_maybe_init(callee, call_args, result_ty);
+            }
+        }
+
+        // Primitive type or no init found — return bare immediate
+        self.lower_literal_primitive(lit)
+    }
+
+    /// Lower a literal to its primitive MIR immediate value.
+    fn lower_literal_primitive(&self, lit: &HirLiteral) -> Value {
         match lit {
             HirLiteral::Integer(v) => Value::Immediate(Immediate::i64(*v)),
             HirLiteral::Float(v) => Value::Immediate(Immediate::f64(*v)),
@@ -1560,6 +1594,24 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
             HirLiteral::Char(c) => Value::Immediate(Immediate::i32(*c as i32)),
             HirLiteral::Null => Value::Immediate(Immediate::unit()),
         }
+    }
+
+    /// Find a literal protocol init (e.g., init(boolLiteral:)) on a struct entity.
+    fn find_literal_init(&self, struct_entity: Entity, label: &str) -> Option<Entity> {
+        use kestrel_ast_builder::{Callable, NodeKind};
+
+        for &child in self.ctx.world.children_of(struct_entity) {
+            let Some(kind) = self.ctx.world.get::<NodeKind>(child) else { continue };
+            if *kind != NodeKind::Initializer { continue }
+            let Some(callable) = self.ctx.world.get::<Callable>(child) else { continue };
+            // Match init with exactly 1 param whose label matches
+            if callable.params.len() == 1 {
+                if callable.params[0].label.as_deref() == Some(label) {
+                    return Some(child);
+                }
+            }
+        }
+        None
     }
 
     /// Lower an if expression.
