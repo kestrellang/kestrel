@@ -567,6 +567,363 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         matches!(name, Some("panic" | "panic_unwind"))
     }
 
+    /// Try to lower a call to a lang intrinsic as a MIR Op instead of a function call.
+    /// Returns Some(value) if the callee is an intrinsic, None otherwise.
+    fn try_lower_intrinsic_call(
+        &mut self,
+        expr_id: HirExprId,
+        callee_expr: HirExprId,
+        args: &[HirCallArg],
+    ) -> Option<Value> {
+        use kestrel_ast_builder::{Intrinsic, Name};
+        use kestrel_mir::{Op, IntBits, Signedness, FloatBits};
+        use kestrel_mir::FloatConstantKind;
+        use kestrel_mir::FloatPredicateKind;
+        use kestrel_mir::FloatMathKind;
+
+        // Get the callee entity — check both resolution paths
+        let entity = if let Some(&resolved) = self.typed.and_then(|t| t.resolutions.get(&expr_id)) {
+            resolved
+        } else if let Some(&resolved) = self.typed.and_then(|t| t.resolutions.get(&callee_expr)) {
+            resolved
+        } else if let HirExpr::Def(e, _, _) = &self.hir.exprs[callee_expr] {
+            *e
+        } else {
+            return None;
+        };
+
+        // Must have Intrinsic marker
+        if self.ctx.world.get::<Intrinsic>(entity).is_none() {
+            return None;
+        }
+
+        let name = self.ctx.world.get::<Name>(entity)?.0.clone();
+        let result_ty = self.resolve_expr_type(expr_id);
+
+        // Helper: lower arg at index
+        let lower_arg = |this: &mut Self, idx: usize| -> Value {
+            if idx < args.len() {
+                this.lower_expr(args[idx].value)
+            } else {
+                Value::Immediate(Immediate::unit())
+            }
+        };
+
+        // Helper: emit Op2 and return result
+        let emit_op2 = |this: &mut Self, op: Op| -> Value {
+            let lhs = this.lower_expr(args[0].value);
+            let rhs = this.lower_expr(args[1].value);
+            let dest = this.fresh_temp(result_ty.clone());
+            this.emit_stmt(Statement::new(StatementKind::Assign {
+                dest: Place::local(dest),
+                rvalue: Rvalue::Op2 { op, lhs, rhs },
+            }));
+            Value::Place(Place::local(dest))
+        };
+
+        // Helper: emit Op1 and return result
+        let emit_op1 = |this: &mut Self, op: Op| -> Value {
+            let arg = this.lower_expr(args[0].value);
+            let dest = this.fresh_temp(result_ty.clone());
+            this.emit_stmt(Statement::new(StatementKind::Assign {
+                dest: Place::local(dest),
+                rvalue: Rvalue::Op1 { op, arg },
+            }));
+            Value::Place(Place::local(dest))
+        };
+
+        // Match intrinsic name to Op
+        let val = match name.as_str() {
+            // Boolean (i1) operations
+            "i1_eq" => emit_op2(self, Op::BoolEq),
+            "i1_and" => emit_op2(self, Op::BoolAnd),
+            "i1_or" => emit_op2(self, Op::BoolOr),
+            "i1_not" => emit_op1(self, Op::BoolNot),
+
+            // Integer arithmetic — signed
+            "i8_add" => emit_op2(self, Op::Add(IntBits::I8, Signedness::Signed)),
+            "i8_sub" => emit_op2(self, Op::Sub(IntBits::I8, Signedness::Signed)),
+            "i8_mul" => emit_op2(self, Op::Mul(IntBits::I8, Signedness::Signed)),
+            "i8_signed_div" => emit_op2(self, Op::Div(IntBits::I8, Signedness::Signed)),
+            "i8_signed_rem" => emit_op2(self, Op::Rem(IntBits::I8, Signedness::Signed)),
+            "i16_add" => emit_op2(self, Op::Add(IntBits::I16, Signedness::Signed)),
+            "i16_sub" => emit_op2(self, Op::Sub(IntBits::I16, Signedness::Signed)),
+            "i16_mul" => emit_op2(self, Op::Mul(IntBits::I16, Signedness::Signed)),
+            "i16_signed_div" => emit_op2(self, Op::Div(IntBits::I16, Signedness::Signed)),
+            "i16_signed_rem" => emit_op2(self, Op::Rem(IntBits::I16, Signedness::Signed)),
+            "i32_add" => emit_op2(self, Op::Add(IntBits::I32, Signedness::Signed)),
+            "i32_sub" => emit_op2(self, Op::Sub(IntBits::I32, Signedness::Signed)),
+            "i32_mul" => emit_op2(self, Op::Mul(IntBits::I32, Signedness::Signed)),
+            "i32_signed_div" => emit_op2(self, Op::Div(IntBits::I32, Signedness::Signed)),
+            "i32_signed_rem" => emit_op2(self, Op::Rem(IntBits::I32, Signedness::Signed)),
+            "i64_add" => emit_op2(self, Op::Add(IntBits::I64, Signedness::Signed)),
+            "i64_sub" => emit_op2(self, Op::Sub(IntBits::I64, Signedness::Signed)),
+            "i64_mul" => emit_op2(self, Op::Mul(IntBits::I64, Signedness::Signed)),
+            "i64_signed_div" => emit_op2(self, Op::Div(IntBits::I64, Signedness::Signed)),
+            "i64_signed_rem" => emit_op2(self, Op::Rem(IntBits::I64, Signedness::Signed)),
+
+            // Integer arithmetic — unsigned
+            "i8_unsigned_div" => emit_op2(self, Op::Div(IntBits::I8, Signedness::Unsigned)),
+            "i8_unsigned_rem" => emit_op2(self, Op::Rem(IntBits::I8, Signedness::Unsigned)),
+            "i16_unsigned_div" => emit_op2(self, Op::Div(IntBits::I16, Signedness::Unsigned)),
+            "i16_unsigned_rem" => emit_op2(self, Op::Rem(IntBits::I16, Signedness::Unsigned)),
+            "i32_unsigned_div" => emit_op2(self, Op::Div(IntBits::I32, Signedness::Unsigned)),
+            "i32_unsigned_rem" => emit_op2(self, Op::Rem(IntBits::I32, Signedness::Unsigned)),
+            "i64_unsigned_div" => emit_op2(self, Op::Div(IntBits::I64, Signedness::Unsigned)),
+            "i64_unsigned_rem" => emit_op2(self, Op::Rem(IntBits::I64, Signedness::Unsigned)),
+
+            // Integer unary
+            "i8_neg" => emit_op1(self, Op::Neg(IntBits::I8)),
+            "i16_neg" => emit_op1(self, Op::Neg(IntBits::I16)),
+            "i32_neg" => emit_op1(self, Op::Neg(IntBits::I32)),
+            "i64_neg" => emit_op1(self, Op::Neg(IntBits::I64)),
+            "i8_not" => emit_op1(self, Op::Not(IntBits::I8)),
+            "i16_not" => emit_op1(self, Op::Not(IntBits::I16)),
+            "i32_not" => emit_op1(self, Op::Not(IntBits::I32)),
+            "i64_not" => emit_op1(self, Op::Not(IntBits::I64)),
+            "i8_popcount" => emit_op1(self, Op::Popcount(IntBits::I8)),
+            "i16_popcount" => emit_op1(self, Op::Popcount(IntBits::I16)),
+            "i32_popcount" => emit_op1(self, Op::Popcount(IntBits::I32)),
+            "i64_popcount" => emit_op1(self, Op::Popcount(IntBits::I64)),
+            "i8_clz" => emit_op1(self, Op::Clz(IntBits::I8)),
+            "i16_clz" => emit_op1(self, Op::Clz(IntBits::I16)),
+            "i32_clz" => emit_op1(self, Op::Clz(IntBits::I32)),
+            "i64_clz" => emit_op1(self, Op::Clz(IntBits::I64)),
+            "i8_ctz" => emit_op1(self, Op::Ctz(IntBits::I8)),
+            "i16_ctz" => emit_op1(self, Op::Ctz(IntBits::I16)),
+            "i32_ctz" => emit_op1(self, Op::Ctz(IntBits::I32)),
+            "i64_ctz" => emit_op1(self, Op::Ctz(IntBits::I64)),
+            "i16_bswap" => emit_op1(self, Op::Bswap(IntBits::I16)),
+            "i32_bswap" => emit_op1(self, Op::Bswap(IntBits::I32)),
+            "i64_bswap" => emit_op1(self, Op::Bswap(IntBits::I64)),
+
+            // Integer comparison — signed
+            "i8_eq" => emit_op2(self, Op::Eq(IntBits::I8)),
+            "i16_eq" => emit_op2(self, Op::Eq(IntBits::I16)),
+            "i32_eq" => emit_op2(self, Op::Eq(IntBits::I32)),
+            "i64_eq" => emit_op2(self, Op::Eq(IntBits::I64)),
+            "i8_ne" => emit_op2(self, Op::Ne(IntBits::I8)),
+            "i16_ne" => emit_op2(self, Op::Ne(IntBits::I16)),
+            "i32_ne" => emit_op2(self, Op::Ne(IntBits::I32)),
+            "i64_ne" => emit_op2(self, Op::Ne(IntBits::I64)),
+            "i8_signed_lt" => emit_op2(self, Op::Lt(IntBits::I8, Signedness::Signed)),
+            "i16_signed_lt" => emit_op2(self, Op::Lt(IntBits::I16, Signedness::Signed)),
+            "i32_signed_lt" => emit_op2(self, Op::Lt(IntBits::I32, Signedness::Signed)),
+            "i64_signed_lt" => emit_op2(self, Op::Lt(IntBits::I64, Signedness::Signed)),
+            "i8_signed_le" => emit_op2(self, Op::Le(IntBits::I8, Signedness::Signed)),
+            "i16_signed_le" => emit_op2(self, Op::Le(IntBits::I16, Signedness::Signed)),
+            "i32_signed_le" => emit_op2(self, Op::Le(IntBits::I32, Signedness::Signed)),
+            "i64_signed_le" => emit_op2(self, Op::Le(IntBits::I64, Signedness::Signed)),
+            "i8_signed_gt" => emit_op2(self, Op::Gt(IntBits::I8, Signedness::Signed)),
+            "i16_signed_gt" => emit_op2(self, Op::Gt(IntBits::I16, Signedness::Signed)),
+            "i32_signed_gt" => emit_op2(self, Op::Gt(IntBits::I32, Signedness::Signed)),
+            "i64_signed_gt" => emit_op2(self, Op::Gt(IntBits::I64, Signedness::Signed)),
+            "i8_signed_ge" => emit_op2(self, Op::Ge(IntBits::I8, Signedness::Signed)),
+            "i16_signed_ge" => emit_op2(self, Op::Ge(IntBits::I16, Signedness::Signed)),
+            "i32_signed_ge" => emit_op2(self, Op::Ge(IntBits::I32, Signedness::Signed)),
+            "i64_signed_ge" => emit_op2(self, Op::Ge(IntBits::I64, Signedness::Signed)),
+
+            // Integer comparison — unsigned
+            "i8_unsigned_lt" => emit_op2(self, Op::Lt(IntBits::I8, Signedness::Unsigned)),
+            "i16_unsigned_lt" => emit_op2(self, Op::Lt(IntBits::I16, Signedness::Unsigned)),
+            "i32_unsigned_lt" => emit_op2(self, Op::Lt(IntBits::I32, Signedness::Unsigned)),
+            "i64_unsigned_lt" => emit_op2(self, Op::Lt(IntBits::I64, Signedness::Unsigned)),
+            "i8_unsigned_le" => emit_op2(self, Op::Le(IntBits::I8, Signedness::Unsigned)),
+            "i16_unsigned_le" => emit_op2(self, Op::Le(IntBits::I16, Signedness::Unsigned)),
+            "i32_unsigned_le" => emit_op2(self, Op::Le(IntBits::I32, Signedness::Unsigned)),
+            "i64_unsigned_le" => emit_op2(self, Op::Le(IntBits::I64, Signedness::Unsigned)),
+            "i8_unsigned_gt" => emit_op2(self, Op::Gt(IntBits::I8, Signedness::Unsigned)),
+            "i16_unsigned_gt" => emit_op2(self, Op::Gt(IntBits::I16, Signedness::Unsigned)),
+            "i32_unsigned_gt" => emit_op2(self, Op::Gt(IntBits::I32, Signedness::Unsigned)),
+            "i64_unsigned_gt" => emit_op2(self, Op::Gt(IntBits::I64, Signedness::Unsigned)),
+            "i8_unsigned_ge" => emit_op2(self, Op::Ge(IntBits::I8, Signedness::Unsigned)),
+            "i16_unsigned_ge" => emit_op2(self, Op::Ge(IntBits::I16, Signedness::Unsigned)),
+            "i32_unsigned_ge" => emit_op2(self, Op::Ge(IntBits::I32, Signedness::Unsigned)),
+            "i64_unsigned_ge" => emit_op2(self, Op::Ge(IntBits::I64, Signedness::Unsigned)),
+
+            // Bitwise operations
+            "i8_and" => emit_op2(self, Op::And(IntBits::I8)),
+            "i16_and" => emit_op2(self, Op::And(IntBits::I16)),
+            "i32_and" => emit_op2(self, Op::And(IntBits::I32)),
+            "i64_and" => emit_op2(self, Op::And(IntBits::I64)),
+            "i8_or" => emit_op2(self, Op::Or(IntBits::I8)),
+            "i16_or" => emit_op2(self, Op::Or(IntBits::I16)),
+            "i32_or" => emit_op2(self, Op::Or(IntBits::I32)),
+            "i64_or" => emit_op2(self, Op::Or(IntBits::I64)),
+            "i8_xor" => emit_op2(self, Op::Xor(IntBits::I8)),
+            "i16_xor" => emit_op2(self, Op::Xor(IntBits::I16)),
+            "i32_xor" => emit_op2(self, Op::Xor(IntBits::I32)),
+            "i64_xor" => emit_op2(self, Op::Xor(IntBits::I64)),
+            "i8_shl" => emit_op2(self, Op::Shl(IntBits::I8)),
+            "i16_shl" => emit_op2(self, Op::Shl(IntBits::I16)),
+            "i32_shl" => emit_op2(self, Op::Shl(IntBits::I32)),
+            "i64_shl" => emit_op2(self, Op::Shl(IntBits::I64)),
+            "i8_signed_shr" => emit_op2(self, Op::Shr(IntBits::I8, Signedness::Signed)),
+            "i16_signed_shr" => emit_op2(self, Op::Shr(IntBits::I16, Signedness::Signed)),
+            "i32_signed_shr" => emit_op2(self, Op::Shr(IntBits::I32, Signedness::Signed)),
+            "i64_signed_shr" => emit_op2(self, Op::Shr(IntBits::I64, Signedness::Signed)),
+            "i8_unsigned_shr" => emit_op2(self, Op::Shr(IntBits::I8, Signedness::Unsigned)),
+            "i16_unsigned_shr" => emit_op2(self, Op::Shr(IntBits::I16, Signedness::Unsigned)),
+            "i32_unsigned_shr" => emit_op2(self, Op::Shr(IntBits::I32, Signedness::Unsigned)),
+            "i64_unsigned_shr" => emit_op2(self, Op::Shr(IntBits::I64, Signedness::Unsigned)),
+
+            // Integer casts
+            "cast_i8_i16" => emit_op1(self, Op::IntWiden(IntBits::I8, IntBits::I16)),
+            "cast_i8_i32" => emit_op1(self, Op::IntWiden(IntBits::I8, IntBits::I32)),
+            "cast_i8_i64" => emit_op1(self, Op::IntWiden(IntBits::I8, IntBits::I64)),
+            "cast_i16_i32" => emit_op1(self, Op::IntWiden(IntBits::I16, IntBits::I32)),
+            "cast_i16_i64" => emit_op1(self, Op::IntWiden(IntBits::I16, IntBits::I64)),
+            "cast_i32_i64" => emit_op1(self, Op::IntWiden(IntBits::I32, IntBits::I64)),
+            "cast_i64_i32" => emit_op1(self, Op::IntTruncate(IntBits::I64, IntBits::I32)),
+            "cast_i64_i16" => emit_op1(self, Op::IntTruncate(IntBits::I64, IntBits::I16)),
+            "cast_i64_i8" => emit_op1(self, Op::IntTruncate(IntBits::I64, IntBits::I8)),
+            "cast_i32_i16" => emit_op1(self, Op::IntTruncate(IntBits::I32, IntBits::I16)),
+            "cast_i32_i8" => emit_op1(self, Op::IntTruncate(IntBits::I32, IntBits::I8)),
+            "cast_i16_i8" => emit_op1(self, Op::IntTruncate(IntBits::I16, IntBits::I8)),
+
+            // Float arithmetic
+            "f32_add" => emit_op2(self, Op::FAdd(FloatBits::F32)),
+            "f32_sub" => emit_op2(self, Op::FSub(FloatBits::F32)),
+            "f32_mul" => emit_op2(self, Op::FMul(FloatBits::F32)),
+            "f32_div" => emit_op2(self, Op::FDiv(FloatBits::F32)),
+            "f32_neg" => emit_op1(self, Op::FNeg(FloatBits::F32)),
+            "f64_add" => emit_op2(self, Op::FAdd(FloatBits::F64)),
+            "f64_sub" => emit_op2(self, Op::FSub(FloatBits::F64)),
+            "f64_mul" => emit_op2(self, Op::FMul(FloatBits::F64)),
+            "f64_div" => emit_op2(self, Op::FDiv(FloatBits::F64)),
+            "f64_neg" => emit_op1(self, Op::FNeg(FloatBits::F64)),
+
+            // Float comparison
+            "f32_eq" => emit_op2(self, Op::FEq(FloatBits::F32)),
+            "f32_ne" => emit_op2(self, Op::FNe(FloatBits::F32)),
+            "f32_lt" => emit_op2(self, Op::FLt(FloatBits::F32)),
+            "f32_le" => emit_op2(self, Op::FLe(FloatBits::F32)),
+            "f32_gt" => emit_op2(self, Op::FGt(FloatBits::F32)),
+            "f32_ge" => emit_op2(self, Op::FGe(FloatBits::F32)),
+            "f64_eq" => emit_op2(self, Op::FEq(FloatBits::F64)),
+            "f64_ne" => emit_op2(self, Op::FNe(FloatBits::F64)),
+            "f64_lt" => emit_op2(self, Op::FLt(FloatBits::F64)),
+            "f64_le" => emit_op2(self, Op::FLe(FloatBits::F64)),
+            "f64_gt" => emit_op2(self, Op::FGt(FloatBits::F64)),
+            "f64_ge" => emit_op2(self, Op::FGe(FloatBits::F64)),
+
+            // Float casts
+            "cast_i64_f64" => emit_op1(self, Op::IntToFloat(IntBits::I64, FloatBits::F64)),
+            "cast_i64_f32" => emit_op1(self, Op::IntToFloat(IntBits::I64, FloatBits::F32)),
+            "cast_i32_f64" => emit_op1(self, Op::IntToFloat(IntBits::I32, FloatBits::F64)),
+            "cast_i32_f32" => emit_op1(self, Op::IntToFloat(IntBits::I32, FloatBits::F32)),
+            "cast_f64_i64" => emit_op1(self, Op::FloatToInt(FloatBits::F64, IntBits::I64)),
+            "cast_f32_i64" => emit_op1(self, Op::FloatToInt(FloatBits::F32, IntBits::I64)),
+            "cast_f64_i32" => emit_op1(self, Op::FloatToInt(FloatBits::F64, IntBits::I32)),
+            "cast_f32_i32" => emit_op1(self, Op::FloatToInt(FloatBits::F32, IntBits::I32)),
+            "cast_f32_f64" => emit_op1(self, Op::FloatWiden(FloatBits::F32, FloatBits::F64)),
+            "cast_f64_f32" => emit_op1(self, Op::FloatTruncate(FloatBits::F64, FloatBits::F32)),
+
+            // Float intrinsics
+            "f32_floor" => emit_op1(self, Op::FloatMath(FloatBits::F32, FloatMathKind::Floor)),
+            "f32_ceil" => emit_op1(self, Op::FloatMath(FloatBits::F32, FloatMathKind::Ceil)),
+            "f32_round" => emit_op1(self, Op::FloatMath(FloatBits::F32, FloatMathKind::Round)),
+            "f32_trunc" => emit_op1(self, Op::FloatMath(FloatBits::F32, FloatMathKind::Trunc)),
+            "f32_sqrt" => emit_op1(self, Op::FloatMath(FloatBits::F32, FloatMathKind::Sqrt)),
+            "f64_floor" => emit_op1(self, Op::FloatMath(FloatBits::F64, FloatMathKind::Floor)),
+            "f64_ceil" => emit_op1(self, Op::FloatMath(FloatBits::F64, FloatMathKind::Ceil)),
+            "f64_round" => emit_op1(self, Op::FloatMath(FloatBits::F64, FloatMathKind::Round)),
+            "f64_trunc" => emit_op1(self, Op::FloatMath(FloatBits::F64, FloatMathKind::Trunc)),
+            "f64_sqrt" => emit_op1(self, Op::FloatMath(FloatBits::F64, FloatMathKind::Sqrt)),
+            "f32_is_nan" => emit_op1(self, Op::FloatPred(FloatBits::F32, FloatPredicateKind::IsNan)),
+            "f32_is_infinite" => emit_op1(self, Op::FloatPred(FloatBits::F32, FloatPredicateKind::IsInfinite)),
+            "f64_is_nan" => emit_op1(self, Op::FloatPred(FloatBits::F64, FloatPredicateKind::IsNan)),
+            "f64_is_infinite" => emit_op1(self, Op::FloatPred(FloatBits::F64, FloatPredicateKind::IsInfinite)),
+            "f32_infinity" => {
+                let dest = self.fresh_temp(result_ty);
+                self.emit_stmt(Statement::new(StatementKind::Assign {
+                    dest: Place::local(dest),
+                    rvalue: Rvalue::Op1 { op: Op::FloatConst(FloatBits::F32, FloatConstantKind::Infinity), arg: Value::Immediate(Immediate::unit()) },
+                }));
+                Value::Place(Place::local(dest))
+            }
+            "f64_infinity" => {
+                let dest = self.fresh_temp(result_ty);
+                self.emit_stmt(Statement::new(StatementKind::Assign {
+                    dest: Place::local(dest),
+                    rvalue: Rvalue::Op1 { op: Op::FloatConst(FloatBits::F64, FloatConstantKind::Infinity), arg: Value::Immediate(Immediate::unit()) },
+                }));
+                Value::Place(Place::local(dest))
+            }
+            "f32_nan" => {
+                let dest = self.fresh_temp(result_ty);
+                self.emit_stmt(Statement::new(StatementKind::Assign {
+                    dest: Place::local(dest),
+                    rvalue: Rvalue::Op1 { op: Op::FloatConst(FloatBits::F32, FloatConstantKind::Nan), arg: Value::Immediate(Immediate::unit()) },
+                }));
+                Value::Place(Place::local(dest))
+            }
+            "f64_nan" => {
+                let dest = self.fresh_temp(result_ty);
+                self.emit_stmt(Statement::new(StatementKind::Assign {
+                    dest: Place::local(dest),
+                    rvalue: Rvalue::Op1 { op: Op::FloatConst(FloatBits::F64, FloatConstantKind::Nan), arg: Value::Immediate(Immediate::unit()) },
+                }));
+                Value::Place(Place::local(dest))
+            }
+
+            // Pointer operations
+            "ptr_null" => {
+                let pointee = self.resolve_expr_type(expr_id);
+                let inner = match &pointee { MirTy::Pointer(inner) => *inner.clone(), _ => MirTy::I8 };
+                let dest = self.fresh_temp(result_ty);
+                self.emit_stmt(Statement::new(StatementKind::Assign {
+                    dest: Place::local(dest),
+                    rvalue: Rvalue::Op1 { op: Op::PtrNull(inner), arg: Value::Immediate(Immediate::unit()) },
+                }));
+                Value::Place(Place::local(dest))
+            }
+            "ptr_offset" => emit_op2(self, Op::PtrOffset),
+            "ptr_to_address" => emit_op1(self, Op::PtrToAddress),
+            "ptr_is_null" => emit_op1(self, Op::PtrIsNull),
+            "ptr_read" => {
+                let pointee = self.resolve_expr_type(expr_id);
+                emit_op1(self, Op::PtrRead(pointee))
+            }
+            "ptr_write" => emit_op2(self, Op::PtrWrite),
+
+            // String operations
+            "str_ptr" => emit_op1(self, Op::StrPtr),
+            "str_len" => emit_op1(self, Op::StrLen),
+            "str_eq" => emit_op2(self, Op::StrEq),
+
+            // Memory
+            "sizeof" | "size_of" => {
+                // sizeof takes a type arg, not a value arg
+                let ty = self.resolve_expr_type(expr_id);
+                let dest = self.fresh_temp(result_ty);
+                self.emit_stmt(Statement::new(StatementKind::Assign {
+                    dest: Place::local(dest),
+                    rvalue: Rvalue::Op1 { op: Op::SizeOf(ty), arg: Value::Immediate(Immediate::unit()) },
+                }));
+                Value::Place(Place::local(dest))
+            }
+            "alignof" | "align_of" => {
+                let ty = self.resolve_expr_type(expr_id);
+                let dest = self.fresh_temp(result_ty);
+                self.emit_stmt(Statement::new(StatementKind::Assign {
+                    dest: Place::local(dest),
+                    rvalue: Rvalue::Op1 { op: Op::AlignOf(ty), arg: Value::Immediate(Immediate::unit()) },
+                }));
+                Value::Place(Place::local(dest))
+            }
+
+            // Atomic
+            "atomic_add" => emit_op2(self, Op::AtomicAdd),
+            "atomic_sub" => emit_op2(self, Op::AtomicSub),
+
+            // Not a recognized intrinsic — fall through to regular call
+            _ => return None,
+        };
+
+        Some(val)
+    }
+
     /// Get the method name for an entity, handling init/subscript/deinit which lack Name.
     fn method_name_of(&self, entity: Entity) -> String {
         use kestrel_ast_builder::NodeKind;
@@ -721,11 +1078,15 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         // Intercept lang.panic / lang.panic_unwind — emit as Panic terminator, not a call
         if let HirExpr::Def(entity, _, _) = &self.hir.exprs[callee_expr] {
             if self.is_panic_intrinsic(*entity) {
-                // Extract message from first arg (if string literal) or use a default
                 let msg = "panic".to_string();
                 self.set_terminator(Terminator::panic(msg));
                 return Value::Immediate(Immediate::unit());
             }
+        }
+
+        // Intercept lang intrinsics — emit as MIR Ops, not function calls
+        if let Some(val) = self.try_lower_intrinsic_call(expr_id, callee_expr, args) {
+            return val;
         }
 
         let call_args = self.lower_call_args(args);
