@@ -775,7 +775,9 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
             let mut call_args = call_args;
             let has_receiver = self.ctx.world.get::<kestrel_ast_builder::Callable>(func_entity)
                 .map_or(false, |c| c.receiver.is_some());
-            if has_receiver {
+            // Init functions handle their own self-allocation via emit_call_maybe_init
+            let is_init = self.is_init_function(func_entity).is_some();
+            if has_receiver && !is_init {
                 let receiver_ty = self.resolve_expr_type(callee_expr);
                 let receiver_val = self.lower_expr(callee_expr);
                 let receiver_arg = if receiver_ty.is_trivially_copyable() {
@@ -1050,6 +1052,14 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
             let self_local = self.fresh_temp(result_ty.clone());
             let self_ref = CallArg::mutating(Value::Place(Place::local(self_local)));
             call_args.insert(0, self_ref);
+
+            // Ensure Direct init callees have self_type set for correct mangling
+            let callee = match callee {
+                Callee::Direct { func, type_args, self_type: None } => {
+                    Callee::Direct { func, type_args, self_type: Some(result_ty.clone()) }
+                }
+                other => other,
+            };
 
             // Init returns Unit — no dest needed
             self.emit_stmt(Statement::new(StatementKind::Call {
