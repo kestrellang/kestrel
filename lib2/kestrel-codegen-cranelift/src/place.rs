@@ -365,8 +365,86 @@ pub fn compile_place_addr(
             compile_place_read(ctx, state, builder, inner)
         }
 
-        _ => Err(CodegenError::Unsupported(
-            "compile_place_addr: unsupported place variant".into(),
-        )),
+        Place::Index { parent, index } => {
+            let parent_ptr = compile_place_addr(ctx, state, builder, parent)?;
+            let parent_ty = common::get_place_type(
+                ctx.module, state.body, parent, &state.subst, &ctx.layouts,
+            )?;
+
+            match &parent_ty {
+                MirTy::Tuple(elems) => {
+                    let mut offset = 0u64;
+                    let mut layout = kestrel_codegen2::Layout::zero(1);
+                    for (i, elem) in elems.iter().enumerate() {
+                        let elem_layout = ctx.layouts.layout_of(elem);
+                        let (field_offset, new_layout) = layout.append(elem_layout);
+                        if i == *index {
+                            offset = field_offset;
+                            break;
+                        }
+                        layout = new_layout;
+                    }
+                    Ok(builder.ins().iadd_imm(parent_ptr, offset as i64))
+                }
+                MirTy::Named { entity, type_args } => {
+                    let type_args: Vec<MirTy> = type_args.iter()
+                        .map(|a| substitute_type(a, &state.subst))
+                        .collect();
+                    match ctx.layouts.resolve_named(*entity) {
+                        NamedKind::Struct(struct_id) => {
+                            let (offset, _) = common::get_field_by_index(
+                                ctx.module, &mut ctx.layouts, struct_id, &type_args, *index,
+                            )?;
+                            Ok(builder.ins().iadd_imm(parent_ptr, offset as i64))
+                        }
+                        _ => Err(CodegenError::Unsupported(
+                            format!("index addr on non-struct: {index}")
+                        )),
+                    }
+                }
+                _ => Err(CodegenError::Unsupported(
+                    format!("index addr on unsupported type: {index}")
+                )),
+            }
+        }
+
+        Place::Downcast { parent, .. } => {
+            // Address of a downcast is the payload address
+            let parent_ptr = compile_place_addr(ctx, state, builder, parent)?;
+            let parent_ty = common::get_place_type(
+                ctx.module, state.body, parent, &state.subst, &ctx.layouts,
+            )?;
+            match &parent_ty {
+                MirTy::Named { entity, type_args } => {
+                    let type_args: Vec<MirTy> = type_args.iter()
+                        .map(|a| substitute_type(a, &state.subst))
+                        .collect();
+                    match ctx.layouts.resolve_named(*entity) {
+                        NamedKind::Enum(enum_id) => {
+                            let payload_offset = common::get_enum_payload_offset(
+                                ctx.module, &mut ctx.layouts, enum_id, &type_args,
+                            );
+                            Ok(builder.ins().iadd_imm(parent_ptr, payload_offset as i64))
+                        }
+                        _ => Err(CodegenError::Unsupported("downcast addr on non-enum".into())),
+                    }
+                }
+                _ => Err(CodegenError::Unsupported("downcast addr on non-Named".into())),
+            }
+        }
+
+        Place::Global(entity) => {
+            let static_def = ctx.module.statics.iter().find(|s| s.entity == *entity)
+                .ok_or_else(|| CodegenError::Unsupported(format!("unknown global {:?}", entity)))?;
+            let mut mangler = kestrel_codegen2::Mangler::new(ctx.module);
+            mangler.push_prefix();
+            mangler.mangle_name_path(&static_def.name);
+            let mangled = mangler.finish();
+            let data_id = ctx.cl_module
+                .declare_data(&mangled, cranelift_module::Linkage::Import, false, false)
+                .map_err(|e| CodegenError::DataSection(format!("declare global: {e}")))?;
+            let gv = ctx.cl_module.declare_data_in_func(data_id, builder.func);
+            Ok(builder.ins().global_value(ptr_ty, gv))
+        }
     }
 }
