@@ -38,7 +38,19 @@ pub fn resolve_witness_call(
 
     let method_binding = witness.method_bindings.get(method).unwrap();
 
-    // Build the type args for the concrete function
+
+    // Build the type args for the concrete function.
+    //
+    // The incoming `method_type_args` may contain BOTH protocol-level type params
+    // (e.g., Convertible[From] → From=Int64) and method-level type params.
+    // Only the method-level ones should be passed through — protocol-level params
+    // are already resolved through the witness bindings.
+    let concrete_func = module.functions.iter()
+        .find(|f| f.entity == method_binding.implementation);
+    let concrete_param_count = concrete_func
+        .map(|f| f.type_params.len())
+        .unwrap_or(0);
+
     let mut type_args = Vec::new();
 
     match &method_binding.source {
@@ -64,6 +76,11 @@ pub fn resolve_witness_call(
         let substituted = substitute_type(ta, &bindings);
         type_args.push(substituted);
     }
+
+    // Cap to the concrete function's actual type param count — protocol-level
+    // type params (e.g., Convertible[From]) get resolved through bindings and
+    // shouldn't leak into the concrete function's instantiation
+    type_args.truncate(concrete_param_count);
 
     let needs_self = matches!(method_binding.source, MethodSource::Extension { .. });
 

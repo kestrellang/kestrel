@@ -104,6 +104,7 @@ pub fn compile_call(
                 resolved.self_type.as_ref(),
             );
 
+
             compile_resolved_call(ctx, state, builder, &mangled, func_def, args, dest)?;
         }
 

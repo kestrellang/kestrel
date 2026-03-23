@@ -3,7 +3,7 @@
 //! For each type that conforms to a protocol, generates a witness table
 //! mapping protocol method names to implementing function entities.
 
-use kestrel_ast_builder::{NodeKind, Name, TypeParams};
+use kestrel_ast_builder::{Callable, NodeKind, Name, TypeParams};
 use kestrel_hecs::Entity;
 use kestrel_mir::{MethodBinding, MirTy, TypeParamDef, WitnessDef};
 use kestrel_name_res::conformances::ConformingProtocols;
@@ -99,10 +99,13 @@ fn lower_witnesses_for_type(ctx: &mut LowerCtx, type_entity: Entity, impl_ty: Mi
         let proto_methods = collect_protocol_methods(ctx, *protocol);
 
         // Try to bind each protocol method
-        for (method_name, _method_entity) in &proto_methods {
+        for (method_name, method_entity) in &proto_methods {
+            // Get protocol method's parameter labels for init disambiguation
+            let proto_labels = get_init_labels(ctx, *method_entity);
+
             // Search the type's own children first
             if let Some(impl_func) =
-                find_method_by_name(ctx, type_entity, method_name)
+                find_method_by_name(ctx, type_entity, method_name, proto_labels.as_deref())
             {
                 ctx.register_name(impl_func);
                 witness.bind_method(
@@ -115,7 +118,7 @@ fn lower_witnesses_for_type(ctx: &mut LowerCtx, type_entity: Entity, impl_ty: Mi
             // Search extensions on the type
             let mut found = false;
             for &ext in &extensions {
-                if let Some(impl_func) = find_method_by_name(ctx, ext, method_name) {
+                if let Some(impl_func) = find_method_by_name(ctx, ext, method_name, proto_labels.as_deref()) {
                     ctx.register_name(impl_func);
                     witness.bind_method(
                         method_name,
@@ -135,7 +138,7 @@ fn lower_witnesses_for_type(ctx: &mut LowerCtx, type_entity: Entity, impl_ty: Mi
                 root: ctx.root,
             });
             for &proto_ext in &proto_extensions {
-                if let Some(impl_func) = find_method_by_name(ctx, proto_ext, method_name) {
+                if let Some(impl_func) = find_method_by_name(ctx, proto_ext, method_name, proto_labels.as_deref()) {
                     ctx.register_name(impl_func);
                     witness.bind_method(
                         method_name,
@@ -203,7 +206,15 @@ fn collect_protocol_methods_recursive(
 }
 
 /// Find a method by name among an entity's children.
-fn find_method_by_name(ctx: &LowerCtx, parent: Entity, method_name: &str) -> Option<Entity> {
+/// Find a method implementation by name. For initializers, also match by
+/// parameter labels to disambiguate between multiple inits (e.g.,
+/// init(from:) vs init(floatLiteral:) vs init(intLiteral:)).
+fn find_method_by_name(
+    ctx: &LowerCtx,
+    parent: Entity,
+    method_name: &str,
+    required_labels: Option<&[Option<String>]>,
+) -> Option<Entity> {
     for &child in ctx.world.children_of(parent) {
         let Some(kind) = ctx.world.get::<NodeKind>(child) else {
             continue;
@@ -216,12 +227,29 @@ fn find_method_by_name(ctx: &LowerCtx, parent: Entity, method_name: &str) -> Opt
                 }
             }
             NodeKind::Initializer if method_name == "init" => {
-                return Some(child);
+                // Match by parameter labels if provided
+                if let Some(labels) = required_labels {
+                    if let Some(callable) = ctx.world.get::<Callable>(child) {
+                        if callable.params.len() == labels.len()
+                            && callable.params.iter().zip(labels).all(|(p, l)| p.label.as_ref() == l.as_ref())
+                        {
+                            return Some(child);
+                        }
+                    }
+                } else {
+                    return Some(child);
+                }
             }
             _ => {}
         }
     }
     None
+}
+
+/// Get the parameter labels for a protocol method (used to disambiguate inits).
+fn get_init_labels(ctx: &LowerCtx, method_entity: Entity) -> Option<Vec<Option<String>>> {
+    let callable = ctx.world.get::<Callable>(method_entity)?;
+    Some(callable.params.iter().map(|p| p.label.clone()).collect())
 }
 
 /// Bind associated types from the implementing type or its extensions.
