@@ -548,12 +548,30 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                     .collect();
                 if args.iter().any(|a| matches!(a, MirTy::Error)) {
                     let func_name = &self.ctx.module.functions[self.func_id.index()].name;
-                    eprintln!("[DIAG] resolve_type_args: Error in type args in {} — resolved: {:?}", func_name, args);
+                    eprintln!("[DIAG] resolve_type_args(expr={:?}): Error in type args in {} — resolved: {:?}", expr_id, func_name, args);
                 }
                 return args;
             }
         }
         Vec::new()
+    }
+
+    /// Extract explicit type args from a HIR expression (Def, OverloadSet, MethodCall).
+    /// Used as fallback when inference returns Error for type args.
+    fn extract_explicit_type_args(&mut self, expr_id: HirExprId) -> Option<Vec<MirTy>> {
+        let hir = self.hir.exprs[expr_id].clone();
+        match &hir {
+            HirExpr::Def(_, args, _) if !args.is_empty() => {
+                Some(args.iter().map(|ty| lower_type(self.ctx, ty)).collect())
+            }
+            HirExpr::OverloadSet { type_args, .. } if !type_args.is_empty() => {
+                Some(type_args.iter().map(|ty| lower_type(self.ctx, ty)).collect())
+            }
+            HirExpr::MethodCall { type_args: Some(args), .. } if !args.is_empty() => {
+                Some(args.iter().map(|ty| lower_type(self.ctx, ty)).collect())
+            }
+            _ => None,
+        }
     }
 
     /// Prepend the receiver's struct type_args to method-level type_args.
@@ -1324,13 +1342,13 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 type_args = self.resolve_type_args(callee_expr);
             }
             // Use explicit type args from the path (e.g., Array[Int64](...))
-            let callee_hir = self.hir.exprs[callee_expr].clone();
-            if let HirExpr::Def(_, explicit_hir_args, _) = &callee_hir {
-                if type_args.is_empty() && !explicit_hir_args.is_empty() {
-                    type_args = explicit_hir_args
-                        .iter()
-                        .map(|hir_ty| lower_type(self.ctx, hir_ty))
-                        .collect();
+            // Also fall back when inference returned Error (unresolved types)
+            let has_error = type_args.iter().any(|a| matches!(a, MirTy::Error));
+            if has_error || type_args.is_empty() {
+                if let Some(fallback) = self.extract_explicit_type_args(callee_expr) {
+                    type_args = fallback;
+                } else if has_error {
+                    // Couldn't find explicit HIR type args to replace Error
                 }
             }
 
@@ -1386,8 +1404,9 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 let func_entity = self.resolve_callee_entity(*entity, args);
                 self.ctx.register_name(func_entity);
                 let mut type_args = self.resolve_type_args(callee_expr);
-                // Fall back to explicit HIR type args if inference didn't record any
-                if type_args.is_empty() && !explicit_hir_args.is_empty() {
+                // Fall back to explicit HIR type args if inference didn't resolve them
+                let has_error = type_args.iter().any(|a| matches!(a, MirTy::Error));
+                if (type_args.is_empty() || has_error) && !explicit_hir_args.is_empty() {
                     type_args = explicit_hir_args
                         .iter()
                         .map(|hir_ty| lower_type(self.ctx, hir_ty))
@@ -1418,7 +1437,8 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                     let func_entity = self.resolve_callee_entity(entity, args);
                     self.ctx.register_name(func_entity);
                     let mut type_args = self.resolve_type_args(callee_expr);
-                    if type_args.is_empty() && !explicit_hir_args.is_empty() {
+                    let has_error = type_args.iter().any(|a| matches!(a, MirTy::Error));
+                    if (type_args.is_empty() || has_error) && !explicit_hir_args.is_empty() {
                         type_args = explicit_hir_args
                             .iter()
                             .map(|hir_ty| lower_type(self.ctx, hir_ty))
