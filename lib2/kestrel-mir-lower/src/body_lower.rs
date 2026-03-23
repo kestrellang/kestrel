@@ -923,7 +923,11 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 let pointee = self.resolve_expr_type(expr_id);
                 emit_op1(self, Op::PtrRead(pointee))
             }
-            "ptr_write" => emit_op2(self, Op::PtrWrite),
+            "ptr_write" => {
+                // Carry the value type so codegen can copy aggregates
+                let value_ty = self.resolve_expr_type(args[1].value);
+                emit_op2(self, Op::PtrWrite(value_ty))
+            }
             "cast_ptr" => {
                 // cast_ptr[T](ptr) → pointer cast to Pointer[T]
                 let target_ty = self.resolve_expr_type(expr_id);
@@ -953,8 +957,9 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
 
             // Memory
             "sizeof" | "size_of" => {
-                // sizeof takes a type arg, not a value arg
-                let ty = self.resolve_expr_type(expr_id);
+                // sizeof[T]() — the type arg T is what we measure, not the return type
+                let type_args = self.resolve_type_args(callee_expr);
+                let ty = type_args.into_iter().next().unwrap_or(self.resolve_expr_type(expr_id));
                 let dest = self.fresh_temp(result_ty);
                 self.emit_stmt(Statement::new(StatementKind::Assign {
                     dest: Place::local(dest),
@@ -963,7 +968,9 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 Value::Place(Place::local(dest))
             }
             "alignof" | "align_of" => {
-                let ty = self.resolve_expr_type(expr_id);
+                // alignof[T]() — same as sizeof, extract the type arg
+                let type_args = self.resolve_type_args(callee_expr);
+                let ty = type_args.into_iter().next().unwrap_or(self.resolve_expr_type(expr_id));
                 let dest = self.fresh_temp(result_ty);
                 self.emit_stmt(Statement::new(StatementKind::Assign {
                     dest: Place::local(dest),
@@ -1710,7 +1717,24 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 HirLiteral::Integer(_) => "intLiteral",
                 HirLiteral::Float(_) => "floatLiteral",
                 HirLiteral::Char(_) => "charLiteral",
-                HirLiteral::String(_) | HirLiteral::Null => {
+                HirLiteral::String(s) => {
+                    // String literals need a 2-arg init: init(stringLiteral: ptr, length: i64)
+                    if let Some(init_entity) = self.find_string_literal_init(*entity) {
+                        // Strip surrounding quotes from the HIR literal string
+                        let content = s.trim_matches('"');
+                        let ptr_val = Value::Immediate(Immediate::string_ptr(content.to_string()));
+                        let len_val = Value::Immediate(Immediate::i64(content.len() as i64));
+                        self.ctx.register_name(init_entity);
+                        let call_args = vec![
+                            CallArg::copy(ptr_val),
+                            CallArg::copy(len_val),
+                        ];
+                        let callee = Callee::method(init_entity, vec![], result_ty.clone());
+                        return self.emit_call_maybe_init(callee, call_args, result_ty);
+                    }
+                    return self.lower_literal_primitive(lit, &result_ty);
+                }
+                HirLiteral::Null => {
                     return self.lower_literal_primitive(lit, &result_ty);
                 }
             };
@@ -1777,6 +1801,26 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 if callable.params[0].label.as_deref() == Some(label) {
                     return Some(child);
                 }
+            }
+        }
+        None
+    }
+
+    /// Find the string literal init: init(stringLiteral: ptr, length: i64).
+    /// This is a 2-param init unlike other literal inits.
+    fn find_string_literal_init(&self, struct_entity: Entity) -> Option<Entity> {
+        use kestrel_ast_builder::{Callable, NodeKind};
+
+        // Search direct children first
+        for &child in self.ctx.world.children_of(struct_entity) {
+            let Some(kind) = self.ctx.world.get::<NodeKind>(child) else { continue };
+            if *kind != NodeKind::Initializer { continue }
+            let Some(callable) = self.ctx.world.get::<Callable>(child) else { continue };
+            // Second param has no external label (single-name param: "length: lang.i64")
+            if callable.params.len() == 2
+                && callable.params[0].label.as_deref() == Some("stringLiteral")
+            {
+                return Some(child);
             }
         }
         None

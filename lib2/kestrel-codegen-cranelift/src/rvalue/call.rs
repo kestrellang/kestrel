@@ -60,7 +60,7 @@ pub fn compile_call(
                 concrete_self.as_ref(),
             );
 
-            compile_resolved_call(ctx, state, builder, &mangled, func_def, args, dest)?;
+            compile_resolved_call(ctx, state, builder, &mangled, func_def, &concrete_type_args, args, dest)?;
         }
 
         Callee::Witness {
@@ -105,7 +105,7 @@ pub fn compile_call(
             );
 
 
-            compile_resolved_call(ctx, state, builder, &mangled, func_def, args, dest)?;
+            compile_resolved_call(ctx, state, builder, &mangled, func_def, &resolved.type_args, args, dest)?;
         }
 
         Callee::Thin(place) => {
@@ -128,6 +128,7 @@ fn compile_resolved_call(
     builder: &mut FunctionBuilder,
     mangled: &str,
     func_def: &kestrel_mir::FunctionDef,
+    callee_type_args: &[MirTy],
     args: &[CallArg],
     dest: Option<&Place>,
 ) -> Result<(), CodegenError> {
@@ -154,14 +155,14 @@ fn compile_resolved_call(
     // Build argument list
     let mut cl_args: Vec<CrValue> = Vec::new();
 
-    // If sret, allocate a stack slot and pass as first arg.
-    // Compute the callee's concrete return type using its own type_params
-    // (not the caller's subst, which may lack the callee's type params).
+    // If sret, allocate a stack slot for the return value.
+    // Build the callee's substitution from the concrete type args used
+    // to monomorphize this call (not the caller's subst).
     let sret_addr = if callee_sret {
         let callee_subst: HashMap<Entity, MirTy> = func_def
             .type_params
             .iter()
-            .zip(state.subst.values()) // best-effort: use available bindings
+            .zip(callee_type_args.iter())
             .map(|(tp, arg)| (tp.entity, arg.clone()))
             .collect();
         let ret_ty = substitute_type(&func_def.ret, &callee_subst);
@@ -195,6 +196,21 @@ fn compile_resolved_call(
             place::compile_place_write(ctx, state, builder, dest_place, sret_addr.unwrap())?;
         } else if callee_has_return {
             let result = builder.inst_results(inst)[0];
+            // Non-sret return of an aggregate type: the result is a scalar in
+            // a register but the dest expects a pointer to aggregate data.
+            // Store the scalar value directly into the dest's stack slot.
+            if let kestrel_mir::Place::Local(id) = dest_place {
+                let dest_ty = common::get_place_type(
+                    ctx.module, state.body, dest_place, &state.subst, &ctx.layouts,
+                )?;
+                if common::is_aggregate_type(&dest_ty) {
+                    let dest_ptr = builder.use_var(state.local_vars[id.index()]);
+                    place::store_scalar_to_aggregate(
+                        builder, &mut ctx.layouts, &dest_ty, dest_ptr, result,
+                    );
+                    return Ok(());
+                }
+            }
             place::compile_place_write(ctx, state, builder, dest_place, result)?;
         }
     }

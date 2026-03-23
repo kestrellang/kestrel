@@ -232,8 +232,10 @@ mod integration_tests {
         }
         eprintln!("Executable at: {}", exe_path.display());
 
-        let _ = std::fs::remove_file(&obj_path);
-        let _ = std::fs::remove_file(&exe_path);
+        // Keep files for debugging
+        eprintln!("Object at: {}", obj_path.display());
+        // let _ = std::fs::remove_file(&obj_path);
+        // let _ = std::fs::remove_file(&exe_path);
 
         (exit_code, stdout, stderr)
     }
@@ -267,6 +269,31 @@ func main() {
         eprintln!("exit={code} stdout={stdout:?}");
         assert_eq!(code, 0);
         assert!(stdout.contains("42"), "stdout: {stdout:?}");
+    }
+
+    /// Minimal test: just allocate on the heap and return.
+    #[test]
+    fn e2e_minimal_return() {
+        let (code, _, _) = compile_and_run_with_stdlib(r#"
+module Test
+
+func main() { }
+"#);
+        assert_eq!(code, 0, "void main should exit 0");
+    }
+
+    #[test]
+    fn e2e_int_return() {
+        let (code, stdout, _) = compile_and_run_with_stdlib(r#"
+module Test
+
+func main() {
+    let x: Int64 = 42;
+    lang.print_i64(x.raw)
+}
+"#);
+        eprintln!("exit={code} stdout={stdout:?}");
+        assert_eq!(code, 0);
     }
 
     /// Smoke test: compile with stdlib to check for TypeParam panics.

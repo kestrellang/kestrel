@@ -12,9 +12,28 @@ use cranelift_codegen::ir::immediates::Offset32;
 use cranelift_codegen::ir::{self, InstBuilder, MemFlags, Value as CrValue};
 use cranelift_frontend::FunctionBuilder;
 use cranelift_module::Module;
-use kestrel_codegen2::{substitute_type, NamedKind};
+use kestrel_codegen2::{substitute_type, LayoutCache, NamedKind};
 use kestrel_mir::{MirTy, Place};
 use std::collections::HashMap;
+
+/// Store a scalar value directly to an aggregate destination.
+/// Used when a function returns a small value that fits in a register
+/// but the destination type is aggregate (Named struct).
+pub fn store_scalar_to_aggregate(
+    builder: &mut FunctionBuilder,
+    layouts: &mut LayoutCache,
+    ty: &MirTy,
+    dest: CrValue,
+    value: CrValue,
+) {
+    let layout = layouts.layout_of(ty);
+    if layout.size <= 8 && layout.size > 0 {
+        builder.ins().store(MemFlags::new(), value, dest, Offset32::new(0));
+    } else {
+        // Shouldn't happen for non-sret returns, but fall back to copy
+        common::copy_aggregate(builder, layouts, ty, dest, value);
+    }
+}
 
 /// Read a value from a place expression.
 pub fn compile_place_read(

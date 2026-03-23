@@ -182,7 +182,8 @@ pub enum Op {
     /// Op1: ptr -> value (load through pointer)
     PtrRead(MirTy),
     /// Op2: (ptr, value) -> () (store through pointer)
-    PtrWrite,
+    /// Carries the pointee type for aggregate copy.
+    PtrWrite(MirTy),
     /// Op1: ptr -> bool
     PtrIsNull,
     /// Op1: ptr -> ptr (different pointee type)

@@ -40,8 +40,11 @@ pub fn is_aggregate_with_layout(ty: &MirTy, layouts: &mut LayoutCache) -> bool {
 }
 
 /// Check if a function return type requires sret (struct-return) ABI.
-pub fn needs_sret(ret: &MirTy, layouts: &mut LayoutCache) -> bool {
-    !matches!(ret, MirTy::Unit | MirTy::Never) && is_aggregate_with_layout(ret, layouts)
+/// Uses conservative `is_aggregate_type` to match lib1: ALL Named types
+/// use sret, ensuring consistency with the aggregate pointer convention
+/// used throughout the codegen.
+pub fn needs_sret(ret: &MirTy, _layouts: &mut LayoutCache) -> bool {
+    !matches!(ret, MirTy::Unit | MirTy::Never) && is_aggregate_type(ret)
 }
 
 /// Get the Cranelift pointer type for the target.

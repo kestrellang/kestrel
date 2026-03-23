@@ -966,7 +966,7 @@ impl fmt::Display for crate::op::Op {
             Op::PtrFromAddress(_) => write!(f, "ptr.from_address"),
             Op::PtrToAddress => write!(f, "ptr.to_address"),
             Op::PtrRead(_) => write!(f, "ptr.read"),
-            Op::PtrWrite => write!(f, "ptr.write"),
+            Op::PtrWrite(_) => write!(f, "ptr.write"),
             Op::PtrIsNull => write!(f, "ptr.is_null"),
             Op::PtrCast(_) => write!(f, "ptr.cast"),
             Op::PtrBitcast(_) => write!(f, "ptr.bitcast"),

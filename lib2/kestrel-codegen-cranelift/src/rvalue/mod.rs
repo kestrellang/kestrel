@@ -141,7 +141,7 @@ fn dispatch_op2(
 ) -> Result<CrValue, CodegenError> {
     match op {
         // Pointer ops
-        Op::PtrOffset | Op::PtrWrite => {
+        Op::PtrOffset | Op::PtrWrite(_) => {
             pointer::compile_pointer_op2(ctx, state, builder, op, lhs, rhs)
         }
 
