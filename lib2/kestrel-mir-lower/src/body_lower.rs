@@ -270,7 +270,9 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                     let type_args = self.resolve_type_args(expr_id);
                     let type_args = self.prepend_receiver_type_args(&receiver_ty, type_args);
 
-                    let callee = Callee::direct_generic(getter_entity, type_args);
+                    // Use method callee so self_type is set — monomorphization
+                    // needs self_type to mangle the name correctly
+                    let callee = Callee::method(getter_entity, type_args, receiver_ty);
                     self.emit_call(callee, vec![receiver_arg], result_ty)
                 } else {
                     // Stored field: direct place access
@@ -376,9 +378,15 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                         }
                     },
                     Some(kestrel_ast_builder::NodeKind::Field) => {
-                        // Field used as value — could be a static constant (Float32.nan)
-                        // or a computed property. Load it as a global if static.
-                        if self.ctx.world.get::<kestrel_ast_builder::Static>(*entity).is_some() {
+                        // Static computed property (has Callable) → call the getter
+                        if self.ctx.world.get::<kestrel_ast_builder::Callable>(*entity).is_some() {
+                            self.ctx.register_name(*entity);
+                            let result_ty = self.resolve_expr_type(expr_id);
+                            // Static getter: no receiver, no type args
+                            let callee = Callee::direct_generic(*entity, Vec::new());
+                            self.emit_call(callee, Vec::new(), result_ty)
+                        } else if self.ctx.world.get::<kestrel_ast_builder::Static>(*entity).is_some() {
+                            // Static stored field → global access
                             Value::Place(Place::Global(*entity))
                         } else {
                             // Non-static field used as bare value — shouldn't happen in

@@ -156,9 +156,10 @@ pub fn get_place_type(
                     return Ok(substitute_type(&s.ty, subst));
                 }
             }
+            let name = module.resolve_name(*entity);
             Err(CodegenError::Unsupported(format!(
-                "unknown global entity {:?}",
-                entity
+                "unknown global entity {:?} ({})",
+                entity, name
             )))
         }
 

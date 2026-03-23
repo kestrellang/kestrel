@@ -69,16 +69,35 @@ pub fn build_field(
         }
 
         // Store getter body as Valued + Body if present.
-        // Computed properties access `self` via a borrowing receiver.
+        // Instance computed properties access `self` via a borrowing receiver.
+        // Static computed properties have no receiver.
+        let is_static_field = has_static_modifier(node);
+        let receiver = if is_static_field {
+            None
+        } else {
+            Some(ReceiverKind::Borrowing)
+        };
+
         if let Some(getter) = find_child(&accessors, SyntaxKind::GetterClause) {
             if let Some(body) = find_child(&getter, SyntaxKind::CodeBlock) {
                 world.set(entity, Body(lower::lower_body(&body, file_id)));
                 world.set(entity, Valued(body));
                 world.set(entity, Callable {
                     params: Vec::new(),
-                    receiver: Some(ReceiverKind::Borrowing),
+                    receiver: receiver.clone(),
                 });
             }
+        } else if let Some(body) = find_child(&accessors, SyntaxKind::CodeBlock) {
+            // Shorthand computed property: `var foo: Type { expr }`
+            // The parser emits PropertyAccessors > CodeBlock without GetterClause.
+            // Treat as an implicit getter.
+            world.set(entity, Gettable);
+            world.set(entity, Body(lower::lower_body(&body, file_id)));
+            world.set(entity, Valued(body));
+            world.set(entity, Callable {
+                params: Vec::new(),
+                receiver,
+            });
         }
     } else {
         // Stored property: always Gettable

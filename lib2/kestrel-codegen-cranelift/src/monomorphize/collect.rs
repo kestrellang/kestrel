@@ -176,11 +176,21 @@ impl<'a> CollectionContext<'a> {
                 let concrete_type_args: Vec<MirTy> =
                     type_args.iter().map(|a| substitute_type(a, subst)).collect();
 
-                // Resolve self type
+                // Resolve self type: only inherit parent's self_type if the callee
+                // actually uses SelfType in its signature. Static methods on other types
+                // (e.g., Pointer[T].nullPointer() called from a TcpListener method)
+                // should NOT inherit the caller's self_type.
+                let callee_func = &self.module.functions[func_id.index()];
                 let concrete_self = self_type
                     .as_ref()
                     .map(|st| substitute_type(st, subst))
-                    .or_else(|| parent_self.clone());
+                    .or_else(|| {
+                        if self.func_uses_self_type(callee_func) {
+                            parent_self.clone()
+                        } else {
+                            None
+                        }
+                    });
 
                 let inst = FunctionInstantiation {
                     func_id,
