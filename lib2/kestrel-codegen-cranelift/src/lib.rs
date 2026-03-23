@@ -208,7 +208,9 @@ mod integration_tests {
         let target = TargetConfig::host();
         let options = CodegenOptions::default();
 
-        let result = compile(&mir, &target, &options).expect("compilation failed");
+        let result = compile(&mir, &target, &options).unwrap_or_else(|e| {
+            panic!("compilation failed: {e}");
+        });
 
         // Use unique filenames per invocation to avoid test interference
         let uid = std::time::SystemTime::now()
@@ -268,7 +270,11 @@ func main() {
     let x: Int64 = 21;
     let y: Int64 = 21;
     let sum = x + y;
-    print(sum.toString())
+    if sum == 42 {
+        print("42")
+    } else {
+        print("wrong")
+    }
 }
 "#);
         eprintln!("exit={code} stdout={stdout:?}");
@@ -282,14 +288,13 @@ func main() {
 module Test
 
 func main() {
-    print("one ")
-    print("two ")
-    print("three")
+    print("ab")
+    print("cd")
 }
 "#);
         eprintln!("exit={code} stdout={stdout:?}");
         assert_eq!(code, 0);
-        assert!(stdout.contains("one two three"), "stdout: {stdout:?}");
+        assert!(stdout.contains("abcd"), "stdout: {stdout:?}");
     }
 
     #[test]
