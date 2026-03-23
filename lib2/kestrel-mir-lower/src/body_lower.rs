@@ -640,6 +640,19 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
             Value::Place(Place::local(dest))
         };
 
+        // Helper: emit Op3 (ternary, e.g. fma) and return result
+        let emit_op3 = |this: &mut Self, op: Op| -> Value {
+            let a = this.lower_expr(args[0].value);
+            let b = this.lower_expr(args[1].value);
+            let c = this.lower_expr(args[2].value);
+            let dest = this.fresh_temp(result_ty.clone());
+            this.emit_stmt(Statement::new(StatementKind::Assign {
+                dest: Place::local(dest),
+                rvalue: Rvalue::Op3 { op, a, b, c },
+            }));
+            Value::Place(Place::local(dest))
+        };
+
         // Match intrinsic name to Op
         let val = match name.as_str() {
             // Boolean (i1) operations
@@ -842,6 +855,10 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
             "f32_is_infinite" => emit_op1(self, Op::FloatPred(FloatBits::F32, FloatPredicateKind::IsInfinite)),
             "f64_is_nan" => emit_op1(self, Op::FloatPred(FloatBits::F64, FloatPredicateKind::IsNan)),
             "f64_is_infinite" => emit_op1(self, Op::FloatPred(FloatBits::F64, FloatPredicateKind::IsInfinite)),
+            "f32_fma" => emit_op3(self, Op::FloatFma(FloatBits::F32)),
+            "f64_fma" => emit_op3(self, Op::FloatFma(FloatBits::F64)),
+            "f32_copysign" => emit_op2(self, Op::FloatCopysign(FloatBits::F32)),
+            "f64_copysign" => emit_op2(self, Op::FloatCopysign(FloatBits::F64)),
             "f32_infinity" => {
                 let dest = self.fresh_temp(result_ty);
                 self.emit_stmt(Statement::new(StatementKind::Assign {
