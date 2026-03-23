@@ -146,6 +146,14 @@ fn compile_switch(
     discriminant: &kestrel_mir::Place,
     cases: &[(String, kestrel_mir::BlockId)],
 ) -> Result<(), CodegenError> {
+    // Fast path: single wildcard or single case → unconditional jump
+    if cases.len() == 1 {
+        let (_, target_block) = &cases[0];
+        let target_cl = state.block_map[target_block];
+        builder.ins().jump(target_cl, &[]);
+        return Ok(());
+    }
+
     // Load the i32 discriminant from offset 0 of the enum pointer
     let enum_ptr = place::compile_place_read(ctx, state, builder, discriminant)?;
     let discr_val = builder.ins().load(
