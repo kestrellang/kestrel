@@ -1569,10 +1569,17 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         } else if let Callee::Direct { func, .. } = &callee {
             // Check if the callee is a struct entity (memberwise init with no explicit init)
             if self.is_struct_entity(*func) {
-                // Memberwise construct: build Rvalue::Construct from call args
+                // Memberwise construct: use actual field names from the struct
+                let struct_def = self.ctx.module.structs.iter().find(|s| s.entity == *func);
                 let fields: Vec<(String, Value)> = call_args.into_iter()
                     .enumerate()
-                    .map(|(i, arg)| (format!("_{i}"), arg.value))
+                    .map(|(i, arg)| {
+                        let name = struct_def
+                            .and_then(|s| s.fields.get(i))
+                            .map(|f| f.name.clone())
+                            .unwrap_or_else(|| format!("_{i}"));
+                        (name, arg.value)
+                    })
                     .collect();
                 let dest = self.fresh_temp(result_ty.clone());
                 self.emit_stmt(Statement::new(StatementKind::Assign {
