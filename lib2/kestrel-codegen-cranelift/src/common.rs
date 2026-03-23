@@ -26,6 +26,24 @@ pub fn is_aggregate_type(ty: &MirTy) -> bool {
     )
 }
 
+/// Check if a type contains any unresolved TypeParam references.
+/// Used to detect cases where type substitution was incomplete, which
+/// can cause wrong layout computations.
+pub fn type_has_unresolved_params(ty: &MirTy) -> bool {
+    match ty {
+        MirTy::TypeParam(_) => true,
+        MirTy::Pointer(inner) | MirTy::Ref(inner) | MirTy::RefMut(inner) => {
+            type_has_unresolved_params(inner)
+        }
+        MirTy::Tuple(elems) => elems.iter().any(type_has_unresolved_params),
+        MirTy::Named { type_args, .. } => type_args.iter().any(type_has_unresolved_params),
+        MirTy::FuncThin { params, ret } | MirTy::FuncThick { params, ret } => {
+            params.iter().any(type_has_unresolved_params) || type_has_unresolved_params(ret)
+        }
+        _ => false,
+    }
+}
+
 /// Layout-aware aggregate check. Named types that fit in a register (≤ pointer size)
 /// are passed by value, not by pointer. This correctly handles wrapper structs like
 /// Bool, Int64, etc. that are Named in MIR but small enough for registers.

@@ -990,6 +990,80 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         Some(val)
     }
 
+    /// Resolve the type of a field on a struct type.
+    /// Resolve the type of a field on a struct type, substituting type params.
+    fn resolve_field_type(&self, struct_ty: &MirTy, field_name: &str) -> MirTy {
+        if let MirTy::Named { entity, type_args } = struct_ty {
+            for s in &self.ctx.module.structs {
+                if s.entity == *entity {
+                    for field in &s.fields {
+                        if field.name == field_name {
+                            if s.type_params.is_empty() || type_args.is_empty() {
+                                return field.ty.clone();
+                            }
+                            // Build subst and apply manually
+                            let subst: std::collections::HashMap<Entity, MirTy> = s.type_params
+                                .iter()
+                                .zip(type_args.iter())
+                                .map(|(tp, arg)| (tp.entity, arg.clone()))
+                                .collect();
+                            return self.substitute_mir_type(&field.ty, &subst);
+                        }
+                    }
+                }
+            }
+        }
+        MirTy::Unit
+    }
+
+    /// Simple recursive type substitution (replaces TypeParam entities in the subst map).
+    fn substitute_mir_type(&self, ty: &MirTy, subst: &std::collections::HashMap<Entity, MirTy>) -> MirTy {
+        match ty {
+            MirTy::TypeParam(e) => subst.get(e).cloned().unwrap_or_else(|| ty.clone()),
+            MirTy::Named { entity, type_args } => {
+                if let Some(replacement) = subst.get(entity) {
+                    return replacement.clone();
+                }
+                MirTy::Named {
+                    entity: *entity,
+                    type_args: type_args.iter().map(|a| self.substitute_mir_type(a, subst)).collect(),
+                }
+            }
+            MirTy::Pointer(inner) => MirTy::Pointer(Box::new(self.substitute_mir_type(inner, subst))),
+            MirTy::Ref(inner) => MirTy::Ref(Box::new(self.substitute_mir_type(inner, subst))),
+            MirTy::Tuple(elems) => MirTy::Tuple(elems.iter().map(|e| self.substitute_mir_type(e, subst)).collect()),
+            _ => ty.clone(),
+        }
+    }
+
+    /// Find the subscript getter entity for a struct/enum type.
+    /// Searches through children and extensions for a Subscript with a Callable.
+    fn find_subscript_getter(&self, type_entity: Entity) -> Option<Entity> {
+        use kestrel_ast_builder::NodeKind;
+        // Search direct children of the type
+        for &child in self.ctx.world.children_of(type_entity) {
+            if self.ctx.world.get::<NodeKind>(child) == Some(&NodeKind::Subscript) {
+                // The subscript entity itself has the Callable component
+                if self.ctx.world.get::<kestrel_ast_builder::Callable>(child).is_some() {
+                    return Some(child);
+                }
+            }
+        }
+        // Also check extensions
+        for &child in self.ctx.world.children_of(type_entity) {
+            if self.ctx.world.get::<NodeKind>(child) == Some(&NodeKind::Extension) {
+                for &ext_child in self.ctx.world.children_of(child) {
+                    if self.ctx.world.get::<NodeKind>(ext_child) == Some(&NodeKind::Subscript) {
+                        if self.ctx.world.get::<kestrel_ast_builder::Callable>(ext_child).is_some() {
+                            return Some(ext_child);
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
+
     /// Get the method name for an entity, handling init/subscript/deinit which lack Name.
     fn method_name_of(&self, entity: Entity) -> String {
         use kestrel_ast_builder::NodeKind;
@@ -1439,6 +1513,48 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 let callee = Callee::Thick(field_place);
                 return self.emit_call(callee, field_args, result_ty);
             }
+
+            // Subscript on a field: `self.data(index)` where `data` is a field with
+            // a subscriptable type (e.g., Array[UInt8]). The inference resolves to the
+            // subscript entity on the field's type, not a method on the receiver.
+            // Decompose into field access + subscript call on the field's type.
+            if self.ctx.world.get::<kestrel_ast_builder::NodeKind>(resolved_entity)
+                == Some(&kestrel_ast_builder::NodeKind::Subscript)
+            {
+                let subscript_parent = self.ctx.world.parent_of(resolved_entity);
+                let receiver_entity = match &receiver_ty {
+                    MirTy::Named { entity, .. } => Some(*entity),
+                    _ => None,
+                };
+                // Only decompose if subscript belongs to a different type than the receiver
+                if subscript_parent != receiver_entity && subscript_parent.is_some() {
+                    let field_ty = self.resolve_field_type(&receiver_ty, method_name);
+                    let receiver_val = self.lower_expr(receiver_expr);
+                    let field_place = match receiver_val {
+                        Value::Place(p) => p.field(method_name.to_string()),
+                        _ => {
+                            let temp = self.fresh_temp(receiver_ty.clone());
+                            self.emit_stmt(Statement::new(StatementKind::Assign {
+                                dest: Place::local(temp),
+                                rvalue: value_to_rvalue(receiver_val),
+                            }));
+                            Place::local(temp).field(method_name.to_string())
+                        }
+                    };
+                    // Call the subscript with the field as receiver
+                    let receiver_arg = if field_ty.is_trivially_copyable() {
+                        CallArg::copy(Value::Place(field_place))
+                    } else {
+                        CallArg::borrow(Value::Place(field_place))
+                    };
+                    let mut call_args = vec![receiver_arg];
+                    call_args.extend(self.lower_call_args(args));
+                    self.ctx.register_name(resolved_entity);
+                    let type_args = self.prepend_receiver_type_args(&field_ty, vec![]);
+                    let callee = Callee::method(resolved_entity, type_args, field_ty);
+                    return self.emit_call(callee, call_args, result_ty);
+                }
+            }
         }
 
         let receiver_val = self.lower_expr(receiver_expr);
@@ -1459,8 +1575,6 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
             let call_args = self.expand_default_args(call_args, resolved_entity, explicit_count);
 
             // Check if the method is from a protocol (needs Witness dispatch).
-            // SelfType and protocol-typed receivers are fine — monomorphization
-            // resolves them via substitute_type_with_self using the parent's self_type.
             if let Some(protocol) = self.find_protocol_for_method(resolved_entity) {
                 self.ctx.register_name(protocol);
                 let method_type_args = self.resolve_type_args(expr_id);
@@ -1471,7 +1585,6 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
             self.ctx.register_name(resolved_entity);
             let method_type_args = self.resolve_type_args(expr_id);
             // Prepend receiver's struct type_args — inherited type_params come first
-            // in the function's type_params list (from collect_inherited_type_params)
             let type_args = self.prepend_receiver_type_args(&receiver_ty, method_type_args);
 
             let callee = Callee::method(resolved_entity, type_args, receiver_ty);
@@ -1558,9 +1671,16 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
             let self_ref = CallArg::mutating(Value::Place(Place::local(self_local)));
             call_args.insert(0, self_ref);
 
-            // Ensure Direct init callees have self_type set for correct mangling
+            // Ensure Direct init callees have self_type and struct type_args set.
+            // Init functions inherit type_params from their parent struct, so the
+            // struct's type_args must be prepended for correct mangling/substitution.
             let callee = match callee {
-                Callee::Direct { func, type_args, self_type: None } => {
+                Callee::Direct { func, mut type_args, self_type: None } => {
+                    if let MirTy::Named { type_args: struct_args, .. } = &result_ty {
+                        if !struct_args.is_empty() && type_args.is_empty() {
+                            type_args = struct_args.clone();
+                        }
+                    }
                     Callee::Direct { func, type_args, self_type: Some(result_ty.clone()) }
                 }
                 other => other,

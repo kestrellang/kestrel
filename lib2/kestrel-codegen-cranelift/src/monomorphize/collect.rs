@@ -42,6 +42,8 @@ struct CollectionContext<'a> {
     result: MonomorphizationSet,
     /// Collected errors
     errors: Vec<MonomorphizeError>,
+    /// Currently processing function (for debug)
+    processing_func_id: Option<FunctionId>,
 }
 
 impl<'a> CollectionContext<'a> {
@@ -59,6 +61,7 @@ impl<'a> CollectionContext<'a> {
             queue: VecDeque::new(),
             result: MonomorphizationSet::new(),
             errors: Vec::new(),
+            processing_func_id: None,
         }
     }
 
@@ -68,6 +71,11 @@ impl<'a> CollectionContext<'a> {
             if !func.type_params.is_empty() {
                 continue;
             }
+
+            // Check if function body references unresolved type params.
+            // This happens for functions that should have inherited parent type
+            // params but didn't (e.g., extension methods on generic types).
+            // These are discovered through properly-resolved call sites.
 
             // Closures and thunks are always discovered through their parent
             // (ApplyPartial or FunctionRef), never seeded directly
@@ -99,9 +107,9 @@ impl<'a> CollectionContext<'a> {
                     // Protocol extension methods have parent = Extension entity
                     // (not a type) — they're discovered through witness calls
                     // with concrete self_types at call sites.
-                    let is_concrete_type = self.module.structs.iter().any(|s| s.entity == parent_entity)
+                    let is_concrete_nongeneric_type = self.module.structs.iter().any(|s| s.entity == parent_entity)
                         || self.module.enums.iter().any(|e| e.entity == parent_entity);
-                    if !is_concrete_type {
+                    if !is_concrete_nongeneric_type {
                         continue;
                     }
                     let self_ty = MirTy::Named {
@@ -127,7 +135,9 @@ impl<'a> CollectionContext<'a> {
     }
 
     fn process_instantiation(&mut self, inst: &FunctionInstantiation) {
+        self.processing_func_id = Some(inst.func_id);
         let func = &self.module.functions[inst.func_id.index()];
+
         // Build substitution map for this instantiation
         let subst = build_subst(func, &inst.type_args);
 
@@ -192,9 +202,26 @@ impl<'a> CollectionContext<'a> {
                         }
                     });
 
+                // Skip phantom instantiations:
+                // 1. Unresolved TypeParams in type_args or self_type
+                // 2. Insufficient type_args for the callee's type_params (missing
+                //    inherited struct type_args — correctly-resolved versions are
+                //    discovered through call paths that propagate full type info)
+                if concrete_type_args.iter().any(|a| has_type_param(a)) {
+                    return;
+                }
+                if let Some(ref st) = concrete_self {
+                    if has_type_param(st) {
+                        return;
+                    }
+                }
+                if concrete_type_args.len() < callee_func.type_params.len() {
+                    return;
+                }
+
                 let inst = FunctionInstantiation {
                     func_id,
-                    type_args: concrete_type_args,
+                    type_args: concrete_type_args.clone(),
                     self_type: concrete_self,
                 };
 
@@ -254,6 +281,10 @@ impl<'a> CollectionContext<'a> {
                             );
                             return;
                         };
+
+                        if resolved.type_args.iter().any(|a| has_type_param(a)) {
+                            return;
+                        }
 
                         let inst = FunctionInstantiation {
                             func_id,
@@ -366,6 +397,52 @@ fn type_uses_self(ty: &MirTy) -> bool {
             params.iter().any(type_uses_self) || type_uses_self(ret)
         }
         MirTy::AssociatedProjection { base, .. } => type_uses_self(base),
+        _ => false,
+    }
+}
+
+/// Check if a function's body references any TypeParam types that aren't
+/// covered by the function's own type_params. This detects functions that
+/// should be generic but aren't (missing inherited type params).
+fn func_body_has_type_params(func: &kestrel_mir::FunctionDef) -> bool {
+    let Some(body) = &func.body else { return false };
+    // Check locals for TypeParam references
+    for local in &body.locals {
+        if has_type_param(&local.ty) {
+            return true;
+        }
+    }
+    // Check call type_args for TypeParam references
+    for block in &body.blocks {
+        for stmt in &block.stmts {
+            if let kestrel_mir::StatementKind::Call { callee, .. } = &stmt.kind {
+                match callee {
+                    kestrel_mir::Callee::Direct { type_args, .. } => {
+                        if type_args.iter().any(has_type_param) {
+                            return true;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+    false
+}
+
+/// Check if a type contains any unresolved TypeParam.
+fn has_type_param(ty: &MirTy) -> bool {
+    match ty {
+        MirTy::TypeParam(_) => true,
+        MirTy::Pointer(inner) | MirTy::Ref(inner) | MirTy::RefMut(inner) => {
+            has_type_param(inner)
+        }
+        MirTy::Tuple(elems) => elems.iter().any(has_type_param),
+        MirTy::Named { type_args, .. } => type_args.iter().any(has_type_param),
+        MirTy::FuncThin { params, ret } | MirTy::FuncThick { params, ret } => {
+            params.iter().any(has_type_param) || has_type_param(ret)
+        }
+        MirTy::AssociatedProjection { base, .. } => has_type_param(base),
         _ => false,
     }
 }

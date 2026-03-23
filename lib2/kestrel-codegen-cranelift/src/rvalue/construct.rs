@@ -167,6 +167,17 @@ pub fn compile_enum_variant(
                     let payload_struct = &ctx.module.structs[payload_struct_id.index()];
                     let payload_sl = ctx.layouts.struct_layout(payload_struct_id, &type_args);
 
+                    // Build substitution from the enum's type params to the concrete
+                    // type args. The payload struct's field types reference the enum's
+                    // type params (e.g., T in Result[T, E]), so we need this mapping
+                    // to resolve them — state.subst only has the function's type params.
+                    let enum_subst: HashMap<kestrel_hecs::Entity, MirTy> = enum_def
+                        .type_params
+                        .iter()
+                        .zip(type_args.iter())
+                        .map(|(tp, arg)| (tp.entity, arg.clone()))
+                        .collect();
+
                     for (i, value) in payload.iter().enumerate() {
                         if i < payload_sl.field_offsets.len() {
                             let field_offset = payload_sl.field_offsets[i];
@@ -174,7 +185,7 @@ pub fn compile_enum_variant(
                             let field_ptr = builder.ins().iadd_imm(payload_ptr, field_offset as i64);
 
                             let field_ty = &payload_struct.fields[i].ty;
-                            let concrete_field = substitute_type(field_ty, &state.subst);
+                            let concrete_field = substitute_type(field_ty, &enum_subst);
 
                             if is_aggregate_type(&concrete_field) {
                                 common::copy_aggregate(

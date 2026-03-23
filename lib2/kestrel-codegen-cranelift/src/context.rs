@@ -209,6 +209,7 @@ impl<'a> CodegenContext<'a> {
         let insts: Vec<FunctionInstantiation> = self.mono_set.functions.iter().cloned().collect();
         for inst in &insts {
             let func_def = &self.module.functions[inst.func_id.index()];
+
             let mangled = self.mangle_instantiation(inst);
             let sig = self.create_signature(func_def, &inst.type_args, inst.self_type.as_ref())?;
 
@@ -298,7 +299,6 @@ impl<'a> CodegenContext<'a> {
                 continue;
             };
 
-
             let mangled = self.mangle_instantiation(&inst);
             let Some(&func_id) = self.func_ids_by_name.get(&mangled) else {
                 return Err(CodegenError::FunctionCompilation {
@@ -309,6 +309,13 @@ impl<'a> CodegenContext<'a> {
                     )),
                 });
             };
+
+            // Skip phantom instantiations where type_args don't cover all type_params.
+            // These arise when call sites don't fully propagate struct type_args;
+            // the correctly-resolved versions exist elsewhere in the mono_set.
+            if inst.type_args.len() < func_def.type_params.len() {
+                continue;
+            }
 
             // Build substitution map
             let subst = function::build_subst(func_def, &inst.type_args);

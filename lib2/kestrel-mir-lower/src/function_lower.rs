@@ -172,8 +172,8 @@ fn determine_function_kind(ctx: &LowerCtx, entity: Entity) -> FunctionKind {
                 _ => FunctionKind::Free,
             }
         },
-        // Computed property getters — treated as methods
-        NodeKind::Field => {
+        // Computed property getters and subscripts — treated as methods
+        NodeKind::Field | NodeKind::Subscript => {
             let parent = ctx.world.parent_of(entity).unwrap_or(ctx.root);
             if let Some(callable) = ctx.world.get::<Callable>(entity) {
                 if let Some(receiver) = &callable.receiver {

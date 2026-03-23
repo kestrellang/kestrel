@@ -209,11 +209,14 @@ fn compile_switch(
             return Ok(());
         }
 
-        // Look up the discriminant value for this case
+        // Look up the discriminant value for this case.
+        // case_name may be fully-qualified (e.g., "std.core.Ordering.Less")
+        // but case_by_name keys on short names ("Less"), so strip the prefix.
         let expected = if let Some(eid) = enum_id {
             let enum_def = &ctx.module.enums[eid.index()];
+            let short_name = case_name.rsplit('.').next().unwrap_or(case_name);
             enum_def
-                .case_by_name(case_name)
+                .case_by_name(short_name)
                 .map(|c| c.discriminant as i64)
                 .unwrap_or(i as i64)
         } else {
