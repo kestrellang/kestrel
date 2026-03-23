@@ -1665,23 +1665,24 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
     fn lower_literal_expr(&mut self, expr_id: HirExprId, lit: &HirLiteral) -> Value {
         let result_ty = self.resolve_expr_type(expr_id);
 
-        // If the type is a Named struct, wrap the primitive via init call
+        // If the type is a Named struct, wrap the primitive via init call.
+        // e.g. `42` with result type Int64 → Int64(intLiteral: 42)
         if let MirTy::Named { entity, .. } = &result_ty {
             let label = match lit {
                 HirLiteral::Bool(_) => "boolLiteral",
                 HirLiteral::Integer(_) => "intLiteral",
                 HirLiteral::Float(_) => "floatLiteral",
                 HirLiteral::String(_) | HirLiteral::Char(_) | HirLiteral::Null => {
-                    // Strings, chars, null: return primitive directly for now
-                    return self.lower_literal_primitive(lit, None);
+                    return self.lower_literal_primitive(lit, &result_ty);
                 }
             };
 
-            // Find the init(label:) on the struct
             if let Some(init_entity) = self.find_literal_init(*entity, label) {
-                // Determine the init parameter type to match float/int width
-                let param_ty = self.resolve_init_param_type(init_entity);
-                let primitive = self.lower_literal_primitive(lit, param_ty.as_ref());
+                // Use the init's parameter type for the primitive width.
+                // e.g. Float32.init(floatLiteral: lang.f64) → f64 literal
+                let param_ty = self.resolve_init_param_type(init_entity)
+                    .unwrap_or_else(|| result_ty.clone());
+                let primitive = self.lower_literal_primitive(lit, &param_ty);
                 self.ctx.register_name(init_entity);
                 let call_args = vec![CallArg::copy(primitive)];
                 let callee = Callee::direct_generic(init_entity, vec![]);
@@ -1689,30 +1690,25 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
             }
         }
 
-        // Primitive type or no init found — use result type for width
-        self.lower_literal_primitive(lit, Some(&result_ty))
+        // Primitive type or no init found — type inference already resolved
+        // the correct width (e.g. F32 for a literal in lang.f32 context)
+        self.lower_literal_primitive(lit, &result_ty)
     }
 
-    /// Lower a literal to its primitive MIR immediate value.
-    /// `target_ty` is the init parameter type — used to select float/int width.
-    fn lower_literal_primitive(&self, lit: &HirLiteral, target_ty: Option<&MirTy>) -> Value {
+    /// Lower a literal to its primitive MIR immediate, using `target_ty`
+    /// (from type inference) to select the correct bit width.
+    fn lower_literal_primitive(&self, lit: &HirLiteral, target_ty: &MirTy) -> Value {
         match lit {
-            HirLiteral::Integer(v) => {
-                // Match int width to the init parameter type
-                match target_ty {
-                    Some(MirTy::I8) => Value::Immediate(Immediate::i8(*v as i8)),
-                    Some(MirTy::I16) => Value::Immediate(Immediate::i16(*v as i16)),
-                    Some(MirTy::I32) => Value::Immediate(Immediate::i32(*v as i32)),
-                    _ => Value::Immediate(Immediate::i64(*v)),
-                }
-            }
-            HirLiteral::Float(v) => {
-                // Match float width to the init parameter type
-                match target_ty {
-                    Some(MirTy::F32) => Value::Immediate(Immediate::f32(*v as f32)),
-                    _ => Value::Immediate(Immediate::f64(*v)),
-                }
-            }
+            HirLiteral::Integer(v) => match target_ty {
+                MirTy::I8 => Value::Immediate(Immediate::i8(*v as i8)),
+                MirTy::I16 => Value::Immediate(Immediate::i16(*v as i16)),
+                MirTy::I32 => Value::Immediate(Immediate::i32(*v as i32)),
+                _ => Value::Immediate(Immediate::i64(*v)),
+            },
+            HirLiteral::Float(v) => match target_ty {
+                MirTy::F32 => Value::Immediate(Immediate::f32(*v as f32)),
+                _ => Value::Immediate(Immediate::f64(*v)),
+            },
             HirLiteral::Bool(v) => Value::Immediate(Immediate::bool(*v)),
             HirLiteral::String(s) => Value::Immediate(Immediate::string(s.clone())),
             HirLiteral::Char(c) => Value::Immediate(Immediate::i32(*c as i32)),
