@@ -195,6 +195,80 @@ mod integration_tests {
         }
     }
 
+    /// Compile and run a program with stdlib.
+    fn compile_and_run_with_stdlib(source: &str) -> (i32, String, String) {
+        let mut compiler = kestrel_compiler2::Compiler::new();
+        compiler.load_dir(&stdlib_path());
+        let entity = compiler.set_source("test.ks", source.into());
+        compiler.build(entity);
+        compiler.infer_all();
+
+        let mir = kestrel_mir_lower::lower_module(compiler.world(), compiler.root())
+            .with_all_passes();
+        let target = TargetConfig::host();
+        let options = CodegenOptions::default();
+
+        let result = compile(&mir, &target, &options).expect("compilation failed");
+
+        let dir = std::env::temp_dir().join("kestrel_e2e_stdlib");
+        let _ = std::fs::create_dir_all(&dir);
+        let obj_path = dir.join("test_stdlib.o");
+        let exe_path = dir.join("test_stdlib_exe");
+
+        result.write_object_file(&obj_path).unwrap();
+        link::link_executable(&obj_path, &exe_path, &[], &[], &[]).unwrap();
+
+        let output = std::process::Command::new(&exe_path).output().unwrap();
+        let exit_code = output.status.code().unwrap_or(-1);
+        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+        #[cfg(unix)]
+        if exit_code == -1 {
+            use std::os::unix::process::ExitStatusExt;
+            if let Some(sig) = output.status.signal() {
+                eprintln!("Process killed by signal {sig}");
+            }
+        }
+        eprintln!("Executable at: {}", exe_path.display());
+
+        let _ = std::fs::remove_file(&obj_path);
+        let _ = std::fs::remove_file(&exe_path);
+
+        (exit_code, stdout, stderr)
+    }
+
+    #[test]
+    fn e2e_hello_world() {
+        let (code, stdout, stderr) = compile_and_run_with_stdlib(r#"
+module Test
+
+func main() {
+    print("Hello from lib2!")
+}
+"#);
+        eprintln!("exit={code} stdout={stdout:?} stderr={stderr:?}");
+        assert_eq!(code, 0);
+        assert!(stdout.contains("Hello from lib2!"), "stdout: {stdout:?}");
+    }
+
+    #[test]
+    fn e2e_arithmetic() {
+        let (code, stdout, _) = compile_and_run_with_stdlib(r#"
+module Test
+
+func main() {
+    let x: Int64 = 21;
+    let y: Int64 = 21;
+    let sum = x + y;
+    print(sum.toString())
+}
+"#);
+        eprintln!("exit={code} stdout={stdout:?}");
+        assert_eq!(code, 0);
+        assert!(stdout.contains("42"), "stdout: {stdout:?}");
+    }
+
     /// Smoke test: compile with stdlib to check for TypeParam panics.
     #[test]
     fn compile_with_stdlib_smoke() {
