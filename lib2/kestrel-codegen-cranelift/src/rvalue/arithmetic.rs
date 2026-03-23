@@ -23,7 +23,10 @@ pub fn compile_op1(
 ) -> Result<CrValue, CodegenError> {
     match op {
         Op::Neg(bits) => Ok(builder.ins().ineg(arg)),
-        Op::FNeg(_) => Ok(builder.ins().fneg(arg)),
+        Op::FNeg(bits) => {
+            let arg = coerce_float(builder, arg, *bits);
+            Ok(builder.ins().fneg(arg))
+        }
 
         Op::Not(bits) => Ok(builder.ins().bnot(arg)),
 
