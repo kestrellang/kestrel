@@ -89,6 +89,7 @@ pub fn compile_call(
             )
             .map_err(|e| CodegenError::Monomorphization(format!("{e}")))?;
 
+
             let func_id_mir = ctx.entity_to_func.get(&resolved.func_entity).ok_or_else(|| {
                 CodegenError::Unsupported(format!(
                     "witness resolved to unknown entity {:?}",

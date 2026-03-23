@@ -1702,7 +1702,9 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 let primitive = self.lower_literal_primitive(lit, &param_ty);
                 self.ctx.register_name(init_entity);
                 let call_args = vec![CallArg::copy(primitive)];
-                let callee = Callee::direct_generic(init_entity, vec![]);
+                // Set self_type to the target struct so monomorphization
+                // mangles correctly (not the caller's self_type)
+                let callee = Callee::method(init_entity, vec![], result_ty.clone());
                 return self.emit_call_maybe_init(callee, call_args, result_ty);
             }
         }
