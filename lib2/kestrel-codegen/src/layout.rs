@@ -156,6 +156,17 @@ impl<'a> LayoutCache<'a> {
         layout
     }
 
+    /// Get the byte offset of the enum payload area.
+    ///
+    /// This must stay in lockstep with `compute_enum_layout` so enum construction,
+    /// downcasts, and stack slot sizing all agree on where the payload begins.
+    pub fn enum_payload_offset(&mut self, enum_id: EnumId, type_args: &[MirTy]) -> u64 {
+        let payload = self.max_enum_payload_layout(enum_id, type_args);
+        let discriminant = Layout::new(4, 4);
+        let (offset, _) = discriminant.append(payload);
+        offset
+    }
+
     /// Resolve a Named entity to its struct or enum ID.
     pub fn resolve_named(&self, entity: Entity) -> NamedKind {
         if let Some(&id) = self.entity_to_struct.get(&entity) {
@@ -299,10 +310,16 @@ impl<'a> LayoutCache<'a> {
     }
 
     fn compute_enum_layout(&mut self, enum_id: EnumId, type_args: &[MirTy]) -> Layout {
-        let enum_def = &self.module.enums[enum_id.index()];
+        let payload = self.max_enum_payload_layout(enum_id, type_args);
 
-        // Discriminant is i32 (4 bytes, 4-aligned)
+        // Enum = discriminant + max(payload), padded to alignment
         let discriminant = Layout::new(4, 4);
+        let (_, layout) = discriminant.append(payload);
+        layout.pad_to_align()
+    }
+
+    fn max_enum_payload_layout(&mut self, enum_id: EnumId, type_args: &[MirTy]) -> Layout {
+        let enum_def = &self.module.enums[enum_id.index()];
 
         // Find the largest payload across all cases
         let case_payload_structs: Vec<StructId> =
@@ -319,9 +336,7 @@ impl<'a> LayoutCache<'a> {
             }
         }
 
-        // Enum = discriminant + max(payload), padded to alignment
-        let (_, layout) = discriminant.append(max_payload);
-        layout.pad_to_align()
+        max_payload
     }
 }
 
@@ -624,6 +639,40 @@ mod tests {
         // discriminant (4 bytes) + padding (4 bytes) + i64 payload (8 bytes) = 16, align=8
         let layout = cache.enum_layout(EnumId::new(0), &[]);
         assert_eq!(layout, Layout::new(16, 8));
+        assert_eq!(cache.enum_payload_offset(EnumId::new(0), &[]), 8);
+    }
+
+    #[test]
+    fn enum_payload_offset_matches_layout_with_misaligned_cases() {
+        let target = host_target();
+        let mut module = MirModule::new("test");
+
+        // Large but low-alignment payload: size 12, align 4
+        let large_entity = dummy_entity(10);
+        let mut large_def = StructDef::new(large_entity, "Weird.Large");
+        large_def.add_field(FieldDef::new("a", MirTy::I32));
+        large_def.add_field(FieldDef::new("b", MirTy::I32));
+        large_def.add_field(FieldDef::new("c", MirTy::I32));
+        let large_struct = module.add_struct(large_def);
+
+        // Smaller but higher-alignment payload: size 8, align 8
+        let aligned_entity = dummy_entity(11);
+        let mut aligned_def = StructDef::new(aligned_entity, "Weird.Aligned");
+        aligned_def.add_field(FieldDef::new("a", MirTy::I64));
+        let aligned_struct = module.add_struct(aligned_def);
+
+        let enum_entity = dummy_entity(1);
+        let mut enum_def = EnumDef::new(enum_entity, "Weird");
+        enum_def.add_case(EnumCaseDef::new("Large", 0, large_struct));
+        enum_def.add_case(EnumCaseDef::new("Aligned", 1, aligned_struct));
+        module.add_enum(enum_def);
+
+        let mut cache = LayoutCache::new(&module, &target);
+        let layout = cache.enum_layout(EnumId::new(0), &[]);
+        let payload_offset = cache.enum_payload_offset(EnumId::new(0), &[]);
+
+        assert_eq!(layout, Layout::new(16, 4));
+        assert_eq!(payload_offset, 4);
     }
 
     // --- Substitution ---

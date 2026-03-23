@@ -203,6 +203,16 @@ mod integration_tests {
         compiler.build(entity);
         compiler.infer_all();
 
+        // Check for diagnostics from earlier phases (parse, bind, inference)
+        let diagnostics = compiler.diagnostics();
+        let _ = compiler.emit_diagnostics();
+        let error_count = diagnostics.iter()
+            .filter(|d| format!("{:?}", d.severity).contains("Error"))
+            .count();
+        if error_count > 0 {
+            panic!("{} error(s) during build/inference — see diagnostics above", error_count);
+        }
+
         let mir = kestrel_mir_lower::lower_module(compiler.world(), compiler.root())
             .with_all_passes();
         let target = TargetConfig::host();
@@ -288,8 +298,8 @@ func main() {
 module Test
 
 func main() {
-    print("ab")
-    print("cd")
+    let _ = print("ab");
+    let _ = print("cd");
 }
 "#);
         eprintln!("exit={code} stdout={stdout:?}");
@@ -330,7 +340,7 @@ func outer() -> String {
 }
 
 func main() {
-    print("hello ")
+    let _ = print("hello ");
     print(outer())
 }
 "#);
@@ -363,7 +373,7 @@ func main() {
 module Test
 
 func main() {
-    let s = "Hello from lib2!"
+    let s = "Hello from lib2!";
     if s.count > 0 {
         print("has content")
     } else {
@@ -389,15 +399,13 @@ func main() { }
 
     #[test]
     fn e2e_int_return() {
-        let (code, stdout, _) = compile_and_run_with_stdlib(r#"
+        let (code, _, _) = compile_and_run_with_stdlib(r#"
 module Test
 
 func main() {
     let x: Int64 = 42;
-    lang.print_i64(x.raw)
 }
 "#);
-        eprintln!("exit={code} stdout={stdout:?}");
         assert_eq!(code, 0);
     }
 

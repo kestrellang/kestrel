@@ -386,19 +386,8 @@ pub fn get_enum_payload_offset(
     enum_id: EnumId,
     type_args: &[MirTy],
 ) -> u64 {
-    let enum_def = &module.enums[enum_id.index()];
-
-    // Find maximum alignment across all case payloads
-    let mut max_payload_align = 1u64;
-    for case in &enum_def.cases {
-        let payload_layout = layouts.struct_layout(case.payload_struct, type_args);
-        max_payload_align = max_payload_align.max(payload_layout.layout.align);
-    }
-
-    // Discriminant is 4 bytes; payload starts at next aligned offset
-    let discriminant_end = 4u64;
-    let payload_offset = (discriminant_end + max_payload_align - 1) & !(max_payload_align - 1);
-    payload_offset
+    let _ = module;
+    layouts.enum_payload_offset(enum_id, type_args)
 }
 
 /// Translate a MirTy to its Cranelift type representation.

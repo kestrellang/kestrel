@@ -67,6 +67,7 @@ pub fn run_thunk_pass(module: &mut MirModule) {
             let name = f.name.clone();
             let ret = f.ret.clone();
             let type_params = f.type_params.clone();
+            let kind = f.kind.clone();
             // Check if target expects an env parameter (closures do)
             let needs_env = f.params.first().map_or(false, |p| {
                 p.name == "env" || p.name == "_env"
@@ -75,9 +76,16 @@ pub fn run_thunk_pass(module: &mut MirModule) {
                 .filter(|p| p.name != "self" && p.name != "env" && p.name != "_env")
                 .cloned()
                 .collect();
-            (name, ret, params, type_params, needs_env)
+            (name, ret, params, type_params, kind, needs_env)
         });
-        let Some((target_name, ret_ty, target_params, target_type_params, target_needs_env)) = target_info else {
+        let Some((
+            target_name,
+            ret_ty,
+            target_params,
+            target_type_params,
+            target_kind,
+            target_needs_env,
+        )) = target_info else {
             continue;
         };
 
@@ -91,6 +99,11 @@ pub fn run_thunk_pass(module: &mut MirModule) {
         let mut thunk_def = FunctionDef::new(thunk_entity, &thunk_name, ret_ty.clone());
         thunk_def.type_params = target_type_params;
         thunk_def.kind = FunctionKind::Thunk { original: *target };
+        let forward_type_args: Vec<MirTy> = thunk_def
+            .type_params
+            .iter()
+            .map(|tp| MirTy::TypeParam(tp.entity))
+            .collect();
 
         // Create body
         let mut body = MirBody::new();
@@ -114,12 +127,25 @@ pub fn run_thunk_pass(module: &mut MirModule) {
 
         // Create entry block: call target and return result
         let mut entry = BasicBlock::new();
+        let callee = match target_kind {
+            FunctionKind::Method { parent, .. }
+            | FunctionKind::Initializer { parent }
+            | FunctionKind::Deinit { parent } => Callee::method(
+                *target,
+                forward_type_args.clone(),
+                MirTy::Named {
+                    entity: parent,
+                    type_args: forward_type_args.clone(),
+                },
+            ),
+            _ => Callee::direct_generic(*target, forward_type_args.clone()),
+        };
 
         if ret_ty == MirTy::Unit || ret_ty == MirTy::Never {
             // Void call + return unit
             entry.stmts.push(Statement::new(StatementKind::Call {
                 dest: None,
-                callee: Callee::direct(*target),
+                callee: callee.clone(),
                 args: forward_args,
             }));
             entry.terminator = Terminator::ret(Immediate::unit());
@@ -128,7 +154,7 @@ pub fn run_thunk_pass(module: &mut MirModule) {
             let result = body.add_local(LocalDef::new("_result", ret_ty));
             entry.stmts.push(Statement::new(StatementKind::Call {
                 dest: Some(crate::place::Place::local(result)),
-                callee: Callee::direct(*target),
+                callee,
                 args: forward_args,
             }));
             entry.terminator = Terminator::ret(Value::Place(crate::place::Place::local(result)));
