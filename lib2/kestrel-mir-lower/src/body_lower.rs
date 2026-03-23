@@ -1005,6 +1005,77 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
             == Some(&kestrel_ast_builder::NodeKind::Struct)
     }
 
+    /// For static methods on generic structs (e.g., Pointer[Int32].nullPointer()),
+    /// the struct's type args aren't on the method entity — they're on the parent.
+    /// Look up the MIR FunctionDef, find its parent struct, and extract the parent's
+    /// concrete type args from inference or the result type.
+    fn infer_parent_type_args(
+        &mut self,
+        func_entity: Entity,
+        expr_id: HirExprId,
+        callee_expr: HirExprId,
+    ) -> Vec<MirTy> {
+        // Find the MIR function def
+        let func_def = self.ctx.module.functions.iter().find(|f| f.entity == func_entity);
+        let Some(func_def) = func_def else { return Vec::new() };
+
+        // Must have inherited type params (from parent struct)
+        if func_def.type_params.is_empty() {
+            return Vec::new();
+        }
+
+        // Get the parent entity from the function kind
+        let parent_entity = match &func_def.kind {
+            FunctionKind::StaticMethod { parent } |
+            FunctionKind::Method { parent, .. } |
+            FunctionKind::Initializer { parent } => Some(*parent),
+            _ => None,
+        };
+        let Some(parent) = parent_entity else { return Vec::new() };
+
+        // Check if parent is a generic struct/enum
+        let parent_type_params = self.ctx.world.get::<kestrel_ast_builder::TypeParams>(parent);
+        let Some(parent_tps) = parent_type_params else { return Vec::new() };
+        if parent_tps.0.is_empty() {
+            return Vec::new();
+        }
+        let parent_tp_count = parent_tps.0.len();
+
+        // Strategy 1: Check inference type_args for callee_expr and expr_id
+        if let Some(typed) = self.typed {
+            for &eid in &[callee_expr, expr_id] {
+                if let Some(resolved_args) = typed.type_args.get(&eid) {
+                    if resolved_args.len() >= parent_tp_count {
+                        return resolved_args.iter()
+                            .map(|ty| lower_resolved_ty(self.ctx, ty))
+                            .collect();
+                    }
+                }
+            }
+        }
+
+        // Strategy 2: Extract from the result type if it's a Named type
+        // containing the parent (e.g., nullPointer() -> Pointer[Int32])
+        let result_ty = self.resolve_expr_type(expr_id);
+        if let MirTy::Named { entity, type_args } = &result_ty {
+            if *entity == parent && type_args.len() == parent_tp_count {
+                return type_args.clone();
+            }
+        }
+
+        // Strategy 3: Check explicit HIR type args on the Def expression
+        // For paths like Pointer[Int32].nullPointer, the Def might carry [Int32]
+        if let HirExpr::Def(_, hir_args, _) = &self.hir.exprs[callee_expr] {
+            if hir_args.len() == parent_tp_count {
+                return hir_args.iter()
+                    .map(|hir_ty| crate::ty::lower_type(self.ctx, hir_ty))
+                    .collect();
+            }
+        }
+
+        Vec::new()
+    }
+
     /// If entity is a struct, resolve its init function. Otherwise return entity as-is.
     fn resolve_callee_entity(&mut self, entity: Entity, args: &[HirCallArg]) -> Entity {
         if self.is_struct_entity(entity) {
@@ -1137,6 +1208,12 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                         .map(|hir_ty| lower_type(self.ctx, hir_ty))
                         .collect();
                 }
+            }
+
+            // For static methods on generic structs, type_args may be empty because
+            // the struct's type args aren't on the method entity. Extract from parent.
+            if type_args.is_empty() {
+                type_args = self.infer_parent_type_args(func_entity, expr_id, callee_expr);
             }
 
             // Protocol method → Witness dispatch
@@ -1351,6 +1428,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
             // Prepend receiver's struct type_args — inherited type_params come first
             // in the function's type_params list (from collect_inherited_type_params)
             let type_args = self.prepend_receiver_type_args(&receiver_ty, method_type_args);
+
             let callee = Callee::method(resolved_entity, type_args, receiver_ty);
             self.emit_call(callee, call_args, result_ty)
         } else {

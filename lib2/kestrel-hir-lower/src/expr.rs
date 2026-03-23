@@ -315,6 +315,24 @@ impl LowerCtx<'_> {
                 let base = *base;
                 let member = member.clone();
                 let type_args = type_args.clone();
+
+                // Check if this is a static method call on a type: Type[Args].staticMethod()
+                // Resolve directly as Call(Def) instead of MethodCall so type inference
+                // doesn't filter out the static method during member resolution.
+                if let Some((static_entity, base_type_args)) =
+                    self.try_resolve_static_call(body, base, &member)
+                {
+                    let callee = self.alloc_expr(
+                        HirExpr::Def(static_entity, base_type_args, span.clone()),
+                    );
+                    return self.alloc_expr(HirExpr::Call {
+                        callee,
+                        args: lowered_args,
+                        span: span.clone(),
+                    });
+                }
+
+                // Instance method call
                 let lowered_base = self.lower_expr(body, base);
                 let lowered_type_args =
                     type_args.map(|args| args.iter().map(|t| self.lower_type(t)).collect());
@@ -355,7 +373,27 @@ impl LowerCtx<'_> {
                     }
                 }
 
-                // Not a local-based path — direct call
+                // Not a local-based path — check for static method call.
+                // For Type[Args].staticMethod() or mod.Type[Args].staticMethod(),
+                // resolve the static method directly so type inference doesn't need
+                // to handle it as a member constraint.
+                {
+                    let last = &segments[segments.len() - 1];
+                    if let Some((static_entity, base_type_args)) =
+                        self.try_resolve_static_call_from_segments(segments, &last.name)
+                    {
+                        let callee = self.alloc_expr(
+                            HirExpr::Def(static_entity, base_type_args, span.clone()),
+                        );
+                        return self.alloc_expr(HirExpr::Call {
+                            callee,
+                            args: lowered_args,
+                            span: span.clone(),
+                        });
+                    }
+                }
+
+                // Regular direct call (lowered as-is)
                 let lowered_callee = self.lower_expr(body, callee);
                 self.alloc_expr(HirExpr::Call {
                     callee: lowered_callee,
@@ -374,6 +412,124 @@ impl LowerCtx<'_> {
                 })
             },
         }
+    }
+
+    /// Check if a multi-segment path ending in `member` is a static method call.
+    /// Resolves all segments except the last as a type, then searches for a static
+    /// method named `member` on that type.
+    fn try_resolve_static_call_from_segments(
+        &mut self,
+        segments: &[ExprPathSegment],
+        member: &str,
+    ) -> Option<(kestrel_hecs::Entity, Vec<kestrel_hir::ty::HirTy>)> {
+        use kestrel_ast_builder::{Name, NodeKind, Static};
+
+        if segments.len() < 2 {
+            return None;
+        }
+
+        // Resolve all segments except the last as a type path
+        let type_segments: Vec<String> = segments[..segments.len() - 1]
+            .iter()
+            .map(|s| s.name.clone())
+            .collect();
+
+        let result = self.ctx.query(ResolveValuePath {
+            segments: type_segments,
+            context: self.owner,
+            root: self.root,
+        });
+
+        let type_entity = match result {
+            ValueResolution::Def(entity) => entity,
+            _ => return None,
+        };
+
+        // Must be a struct or enum
+        let kind = self.ctx.get::<NodeKind>(type_entity)?;
+        if !matches!(kind, NodeKind::Struct | NodeKind::Enum) {
+            return None;
+        }
+
+        // Search children for a static function matching the member name
+        let children: Vec<_> = self.ctx.children_of(type_entity).to_vec();
+        for &child in &children {
+            if self.ctx.get::<NodeKind>(child) != Some(&NodeKind::Function) {
+                continue;
+            }
+            if self.ctx.get::<Static>(child).is_none() {
+                continue;
+            }
+            let Some(child_name) = self.ctx.get::<Name>(child) else { continue };
+            if child_name.0 == member {
+                let type_args: Vec<kestrel_hir::ty::HirTy> = segments[..segments.len() - 1]
+                    .iter()
+                    .flat_map(|s| s.type_args.iter().flatten())
+                    .map(|t| self.lower_type(t))
+                    .collect();
+                return Some((child, type_args));
+            }
+        }
+
+        None
+    }
+
+    /// Check if `base_expr.member` is a static method call on a type.
+    /// Returns `Some((static_method_entity, type_args))` if the base resolves to
+    /// a struct/enum and the member is a static method on it.
+    fn try_resolve_static_call(
+        &mut self,
+        body: &AstBody,
+        base_expr: ExprId,
+        member: &str,
+    ) -> Option<(kestrel_hecs::Entity, Vec<kestrel_hir::ty::HirTy>)> {
+        use kestrel_ast_builder::{Name, NodeKind, Static};
+
+        // Base must be a Path expression (type reference)
+        let AstExpr::Path { segments, .. } = &body.exprs[base_expr] else {
+            return None;
+        };
+
+        // Resolve the base path to an entity
+        let seg_names: Vec<String> = segments.iter().map(|s| s.name.clone()).collect();
+        let result = self.ctx.query(ResolveValuePath {
+            segments: seg_names,
+            context: self.owner,
+            root: self.root,
+        });
+
+        let base_entity = match result {
+            ValueResolution::Def(entity) => entity,
+            _ => return None,
+        };
+
+        // Must be a struct or enum
+        let kind = self.ctx.get::<NodeKind>(base_entity)?;
+        if !matches!(kind, NodeKind::Struct | NodeKind::Enum) {
+            return None;
+        }
+
+        // Search children for a static function matching the member name
+        for &child in self.ctx.children_of(base_entity) {
+            if self.ctx.get::<NodeKind>(child) != Some(&NodeKind::Function) {
+                continue;
+            }
+            if self.ctx.get::<Static>(child).is_none() {
+                continue;
+            }
+            let child_name = self.ctx.get::<Name>(child)?;
+            if child_name.0 == member {
+                // Collect type args from the base path segments
+                let type_args: Vec<kestrel_hir::ty::HirTy> = segments
+                    .iter()
+                    .flat_map(|s| s.type_args.iter().flatten())
+                    .map(|t| self.lower_type(t))
+                    .collect();
+                return Some((child, type_args));
+            }
+        }
+
+        None
     }
 
     /// Lower Path segments except the last one as receiver.
