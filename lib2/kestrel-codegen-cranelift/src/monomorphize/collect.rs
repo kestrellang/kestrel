@@ -15,8 +15,7 @@ use kestrel_codegen2::{substitute_type, substitute_type_with_self};
 use kestrel_debug::ktrace;
 use kestrel_hecs::Entity;
 use kestrel_mir::{
-    Callee, FunctionId, FunctionKind, MirModule, MirTy, Place, Rvalue, StatementKind,
-    TerminatorKind, Value,
+    Callee, FunctionId, FunctionKind, MirModule, MirTy, Rvalue, StatementKind,
 };
 use std::collections::{HashMap, VecDeque};
 
@@ -247,15 +246,21 @@ impl<'a> CollectionContext<'a> {
                         if let Some(ps) = parent_self {
                             let assoc_name = self.module.resolve_name(entity);
                             let short_name = assoc_name.rsplit('.').next().unwrap_or(&assoc_name);
-                            for proto_def in &self.module.protocols {
-                                if proto_def.associated_types.iter().any(|at| at.name == short_name) {
-                                    if let Ok(resolved) = witness::resolve_associated_type(
-                                        self.module, proto_def.entity, ps, short_name,
-                                    ) {
-                                        concrete_self = resolved;
-                                        break;
-                                    }
-                                }
+                            if self
+                                .module
+                                .protocols
+                                .iter()
+                                .find(|p| p.entity == *protocol)
+                                .and_then(|p| p.associated_type_by_name(short_name))
+                                .is_some()
+                                && let Ok(resolved) = witness::resolve_associated_type(
+                                    self.module,
+                                    *protocol,
+                                    ps,
+                                    short_name,
+                                )
+                            {
+                                concrete_self = resolved;
                             }
                         }
                     }
@@ -316,9 +321,14 @@ impl<'a> CollectionContext<'a> {
         match rvalue {
             // ApplyPartial introduces the target function as an instantiation
             Rvalue::ApplyPartial { func, captures: _ } => {
-                if let Some(&func_id) = self.entity_to_func.get(func) {
+                if let Some((original_func_id, callable_func_id)) = self
+                    .entity_to_func
+                    .get(func)
+                    .map(|id| (*id, self.apply_partial_callable_for(*func)))
+                {
                     // Infer type args from the parent's substitution
-                    let target = &self.module.functions[func_id.index()];
+                    let target = &self.module.functions[original_func_id.index()];
+                    let callable = &self.module.functions[callable_func_id.index()];
                     let type_args: Vec<MirTy> = target
                         .type_params
                         .iter()
@@ -326,9 +336,13 @@ impl<'a> CollectionContext<'a> {
                         .collect();
 
                     let inst = FunctionInstantiation {
-                        func_id,
+                        func_id: callable_func_id,
                         type_args,
-                        self_type: parent_self.clone(),
+                        self_type: if self.func_uses_self_type(callable) {
+                            parent_self.clone()
+                        } else {
+                            None
+                        },
                     };
 
                     if self.result.functions.insert(inst.clone()) {
@@ -369,6 +383,21 @@ impl<'a> CollectionContext<'a> {
             }
         }
         type_uses_self(&func.ret)
+    }
+
+    fn apply_partial_callable_for(&self, original: Entity) -> FunctionId {
+        self.module
+            .functions
+            .iter()
+            .enumerate()
+            .find_map(|(i, func)| match &func.kind {
+                FunctionKind::Thunk { original: thunk_target } if *thunk_target == original => {
+                    Some(FunctionId::new(i))
+                }
+                _ => None,
+            })
+            .or_else(|| self.entity_to_func.get(&original).copied())
+            .expect("ApplyPartial target must resolve to a function")
     }
 }
 

@@ -386,6 +386,102 @@ func main() {
         assert!(stdout.contains("has content"), "stdout: {stdout:?}");
     }
 
+    #[test]
+    fn e2e_struct_methods() {
+        let (code, stdout, _) = compile_and_run_with_stdlib(r#"
+module Test
+
+struct Counter {
+    var value: Int64
+
+    init(start: Int64) {
+        self.value = start
+    }
+
+    mutating func increment() {
+        self.value = self.value + 1
+    }
+
+    func isAbove(threshold: Int64) -> Bool {
+        self.value > threshold
+    }
+}
+
+func main() {
+    var c = Counter(start: 0);
+    c.increment();
+    c.increment();
+    c.increment();
+    if c.isAbove(threshold: 2) {
+        print("passed")
+    } else {
+        print("failed")
+    }
+}
+"#);
+        eprintln!("exit={code} stdout={stdout:?}");
+        assert_eq!(code, 0);
+        assert!(stdout.contains("passed"), "stdout: {stdout:?}");
+    }
+
+    #[test]
+    fn e2e_enum_match() {
+        let (code, stdout, _) = compile_and_run_with_stdlib(r#"
+module Test
+
+enum Direction {
+    case Left
+    case Right
+    case Up
+    case Down
+}
+
+func describe(dir: Direction) -> String {
+    match dir {
+        .Left => "left",
+        .Right => "right",
+        .Up => "up",
+        .Down => "down"
+    }
+}
+
+func main() {
+    let d = Direction.Right;
+    print(describe(d))
+}
+"#);
+        eprintln!("exit={code} stdout={stdout:?}");
+        assert_eq!(code, 0);
+        assert!(stdout.contains("right"), "stdout: {stdout:?}");
+    }
+
+    #[test]
+    fn e2e_optional() {
+        let (code, stdout, _) = compile_and_run_with_stdlib(r#"
+module Test
+
+func findChar(s: String, target: String) -> Optional[Int64] {
+    if s.count > 0 {
+        .Some(s.count)
+    } else {
+        .None
+    }
+}
+
+func main() {
+    let result = findChar("hello", "h");
+    if let .Some(idx) = result {
+        print("found")
+    } else {
+        print("not found")
+    }
+}
+"#);
+        eprintln!("exit={code} stdout={stdout:?}");
+        assert_eq!(code, 0);
+        assert!(stdout.contains("found"), "stdout: {stdout:?}");
+    }
+
     /// Minimal test: just allocate on the heap and return.
     #[test]
     fn e2e_minimal_return() {

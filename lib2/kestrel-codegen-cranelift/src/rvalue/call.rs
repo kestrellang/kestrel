@@ -4,7 +4,7 @@
 //! Key improvement: Direct and Witness share `compile_resolved_call` after
 //! resolution, eliminating ~150 lines of duplication from lib1.
 
-use crate::common::{self, is_aggregate_type, needs_sret};
+use crate::common;
 use crate::context::CodegenContext;
 use crate::error::CodegenError;
 use crate::function::FunctionState;
@@ -14,7 +14,6 @@ use crate::rvalue;
 use crate::types;
 use cranelift_codegen::ir::immediates::Offset32;
 use cranelift_codegen::ir::{self, AbiParam, InstBuilder, MemFlags, Signature, StackSlotData, StackSlotKind, Value as CrValue};
-use cranelift_codegen::isa::CallConv;
 use cranelift_frontend::FunctionBuilder;
 use cranelift_module::Module;
 use kestrel_codegen2::{mangle_function_with_self, substitute_type, substitute_type_with_self};
@@ -74,7 +73,7 @@ pub fn compile_call(
                 self_type, &state.subst, state.self_type.as_ref(),
             );
             // Resolve associated types (e.g., Iterator.Item → Int64) via witness table
-            concrete_self = resolve_associated_self_type(ctx, &state, &concrete_self);
+            concrete_self = resolve_associated_self_type(ctx, &state, *protocol, &concrete_self);
             let concrete_method_args: Vec<MirTy> = method_type_args
                 .iter()
                 .map(|a| substitute_type_with_self(a, &state.subst, state.self_type.as_ref()))
@@ -142,7 +141,7 @@ fn compile_resolved_call(
     // Look up the callee's declared signature to determine sret and return handling.
     // We use the signature rather than substituting func_def.ret with the caller's
     // subst, because the caller's subst may not contain the callee's type params.
-    let (callee_sret, callee_has_return, callee_param_count) = {
+    let (callee_sret, callee_has_return, _callee_param_count) = {
         let callee_sig = builder.func.dfg.ext_funcs[func_ref].signature;
         let sig_data = &builder.func.stencil.dfg.signatures[callee_sig];
         let sret = sig_data.params.first().map_or(false, |p| {
@@ -230,56 +229,112 @@ fn compile_indirect_call(
 ) -> Result<(), CodegenError> {
     let ptr_ty = common::ptr_type(ctx.target);
     let callee_val = place::compile_place_read(ctx, state, builder, callee_place)?;
-
-    if is_thick {
-        // Thick callable: (func_ptr, env_ptr)
-        let func_ptr = builder.ins().load(ptr_ty, MemFlags::new(), callee_val, Offset32::new(0));
-        let env_ptr = builder.ins().load(
-            ptr_ty,
-            MemFlags::new(),
-            callee_val,
-            Offset32::new(ctx.target.pointer_size() as i32),
-        );
-
-        // Build signature: env_ptr as first arg, then regular args
-        let mut sig = Signature::new(CallConv::Fast);
-        sig.params.push(AbiParam::new(ptr_ty)); // env ptr
-        for _arg in args {
-            sig.params.push(AbiParam::new(ptr_ty)); // Simplified: all args as ptr
+    let callee_ty = common::get_place_type(
+        ctx.module,
+        state.body,
+        callee_place,
+        &state.subst,
+        &ctx.layouts,
+    )?;
+    let (param_tys, ret_ty) = match (&callee_ty, is_thick) {
+        (MirTy::FuncThin { params, ret }, false) | (MirTy::FuncThick { params, ret }, true) => {
+            (params.as_slice(), ret.as_ref().clone())
         }
-        // TODO: determine return type properly
-        sig.returns.push(AbiParam::new(ptr_ty));
-
-        let sig_ref = builder.import_signature(sig);
-        let mut cl_args = vec![env_ptr];
-        for arg in args {
-            cl_args.push(compile_call_arg(ctx, state, builder, arg)?);
+        (MirTy::FuncThin { .. }, true) | (MirTy::FuncThick { .. }, false) => {
+            return Err(CodegenError::Unsupported(format!(
+                "indirect call kind/type mismatch for {:?}",
+                callee_ty
+            )))
         }
-
-        let inst = builder.ins().call_indirect(sig_ref, func_ptr, &cl_args);
-
-        if let Some(dest_place) = dest {
-            let result = builder.inst_results(inst)[0];
-            place::compile_place_write(ctx, state, builder, dest_place, result)?;
+        _ => {
+            return Err(CodegenError::Unsupported(format!(
+                "indirect call on non-function type: {:?}",
+                callee_ty
+            )))
         }
+    };
+
+    let (func_ptr, env_ptr) = if is_thick {
+        (
+            builder
+                .ins()
+                .load(ptr_ty, MemFlags::new(), callee_val, Offset32::new(0)),
+            Some(builder.ins().load(
+                ptr_ty,
+                MemFlags::new(),
+                callee_val,
+                Offset32::new(ctx.target.pointer_size() as i32),
+            )),
+        )
     } else {
-        // Thin function pointer: just the function address
-        let mut sig = Signature::new(CallConv::Fast);
-        for _arg in args {
-            sig.params.push(AbiParam::new(ptr_ty));
-        }
-        sig.returns.push(AbiParam::new(ptr_ty));
+        (callee_val, None)
+    };
 
-        let sig_ref = builder.import_signature(sig);
-        let mut cl_args = Vec::new();
-        for arg in args {
-            cl_args.push(compile_call_arg(ctx, state, builder, arg)?);
-        }
+    let callee_sret = !matches!(ret_ty, MirTy::Unit | MirTy::Never)
+        && common::needs_sret(&ret_ty, &mut ctx.layouts);
+    let mut sig = Signature::new(ctx.c_call_conv());
+    if callee_sret {
+        sig.params
+            .push(AbiParam::special(ptr_ty, ir::ArgumentPurpose::StructReturn));
+    }
+    if env_ptr.is_some() {
+        sig.params.push(AbiParam::new(ptr_ty));
+    }
+    for param_ty in param_tys {
+        sig.params
+            .push(AbiParam::new(types::translate_type(param_ty, ctx.target)));
+    }
+    if !callee_sret && !matches!(ret_ty, MirTy::Unit | MirTy::Never) {
+        sig.returns
+            .push(AbiParam::new(types::translate_type(&ret_ty, ctx.target)));
+    }
 
-        let inst = builder.ins().call_indirect(sig_ref, callee_val, &cl_args);
+    let sig_ref = builder.import_signature(sig);
+    let mut cl_args = Vec::new();
+    let sret_addr = if callee_sret {
+        let layout = ctx.layouts.layout_of(&ret_ty);
+        let slot = builder.create_sized_stack_slot(StackSlotData::new(
+            StackSlotKind::ExplicitSlot,
+            layout.size as u32,
+            common::align_to_shift(layout.align),
+        ));
+        let addr = builder.ins().stack_addr(ptr_ty, slot, Offset32::new(0));
+        common::zero_memory(builder, addr, layout.size, ptr_ty);
+        cl_args.push(addr);
+        Some(addr)
+    } else {
+        None
+    };
+    if let Some(env_ptr) = env_ptr {
+        cl_args.push(env_ptr);
+    }
+    for arg in args {
+        cl_args.push(compile_call_arg(ctx, state, builder, arg)?);
+    }
 
-        if let Some(dest_place) = dest {
+    let inst = builder.ins().call_indirect(sig_ref, func_ptr, &cl_args);
+
+    if let Some(dest_place) = dest {
+        if callee_sret {
+            place::compile_place_write(ctx, state, builder, dest_place, sret_addr.unwrap())?;
+        } else if !matches!(ret_ty, MirTy::Unit | MirTy::Never) {
             let result = builder.inst_results(inst)[0];
+            if let kestrel_mir::Place::Local(id) = dest_place {
+                let dest_ty = common::get_place_type(
+                    ctx.module,
+                    state.body,
+                    dest_place,
+                    &state.subst,
+                    &ctx.layouts,
+                )?;
+                if common::is_aggregate_type(&dest_ty) {
+                    let dest_ptr = builder.use_var(state.local_vars[id.index()]);
+                    place::store_scalar_to_aggregate(
+                        builder, &mut ctx.layouts, &dest_ty, dest_ptr, result,
+                    );
+                    return Ok(());
+                }
+            }
             place::compile_place_write(ctx, state, builder, dest_place, result)?;
         }
     }
@@ -328,6 +383,7 @@ fn compile_call_arg(
 fn resolve_associated_self_type(
     ctx: &CodegenContext,
     state: &FunctionState,
+    protocol: Entity,
     self_type: &MirTy,
 ) -> MirTy {
     // Check if self_type is Named with a TypeAlias entity (associated type)
@@ -337,25 +393,16 @@ fn resolve_associated_self_type(
         _ => return self_type.clone(),
     };
 
-    // Check if this entity is a TypeAlias by looking at its parent
-    // (TypeAliases on protocols are associated types)
-    let parent_protocol = ctx.module.protocols.iter().find(|p| {
-        p.associated_types.iter().any(|at| {
-            // Match by name since we don't have the entity ID in ProtocolDef
-            let assoc_name = ctx.module.resolve_name(entity);
-            // The last component of the name is the associated type name
-            let short_name = assoc_name.rsplit('.').next().unwrap_or(&assoc_name);
-            at.name == short_name
-        })
-    });
-
-    let Some(proto_def) = parent_protocol else {
+    let Some(proto_def) = ctx.module.protocols.iter().find(|p| p.entity == protocol) else {
         return self_type.clone();
     };
 
     // Get the associated type short name
     let assoc_name = ctx.module.resolve_name(entity);
     let short_name = assoc_name.rsplit('.').next().unwrap_or(&assoc_name).to_string();
+    if proto_def.associated_type_by_name(&short_name).is_none() {
+        return self_type.clone();
+    }
 
     // Use the current function's self_type to find the concrete associated type
     let base_self = state.self_type.as_ref();

@@ -139,10 +139,13 @@ fn find_witness_with_method<'a>(
         }
     }
 
-    // Pass 2: any witness for this type that has the method
-    // (covers protocol inheritance: Comparable witness has Less.lessThan)
+    // Pass 2: a witness for a descendant protocol on the same type that has
+    // the method (e.g. Comparable witness contains Less.lessThan).
     for witness in &module.witnesses {
         if witness.protocol == protocol {
+            continue;
+        }
+        if !protocol_inherits(module, witness.protocol, protocol) {
             continue;
         }
         if !witness.method_bindings.contains_key(method) {
@@ -189,6 +192,31 @@ fn find_witness<'a>(
         protocol_name: module.resolve_name(protocol).to_string(),
         type_description: format!("{self_type:?}"),
     })
+}
+
+fn protocol_inherits(module: &MirModule, candidate: Entity, target: Entity) -> bool {
+    if candidate == target {
+        return true;
+    }
+
+    let mut stack = vec![candidate];
+    let mut seen = std::collections::HashSet::new();
+    while let Some(protocol) = stack.pop() {
+        if !seen.insert(protocol) {
+            continue;
+        }
+        let Some(def) = module.protocols.iter().find(|p| p.entity == protocol) else {
+            continue;
+        };
+        for parent in &def.parent_protocols {
+            if *parent == target {
+                return true;
+            }
+            stack.push(*parent);
+        }
+    }
+
+    false
 }
 
 /// Structural pattern matching for witness type resolution.

@@ -3,6 +3,7 @@
 use kestrel_ast_builder::{Callable, NodeKind, TypeParams};
 use kestrel_hecs::Entity;
 use kestrel_mir::{AssociatedTypeDef, ProtocolDef, ProtocolId, ProtocolMethodDef, TypeParamDef};
+use kestrel_name_res::conformances::ConformingProtocols;
 
 use crate::context::LowerCtx;
 use crate::ty::{resolve_callable_types, resolve_type_annotation};
@@ -11,6 +12,18 @@ use crate::ty::{resolve_callable_types, resolve_type_annotation};
 pub fn lower_protocol(ctx: &mut LowerCtx, entity: Entity) -> ProtocolId {
     let name = ctx.register_name(entity);
     let mut def = ProtocolDef::new(entity, name);
+
+    // Parent protocols from protocol inheritance / extension-added conformances.
+    let parents = ctx.query.query(ConformingProtocols {
+        entity,
+        root: ctx.root,
+    });
+    for parent in parents {
+        if parent != entity {
+            ctx.register_name(parent);
+            def.add_parent(parent);
+        }
+    }
 
     // Type parameters
     if let Some(type_params) = ctx.world.get::<TypeParams>(entity) {
