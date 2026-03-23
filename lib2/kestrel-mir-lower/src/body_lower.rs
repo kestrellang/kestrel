@@ -1702,7 +1702,8 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 HirLiteral::Bool(_) => "boolLiteral",
                 HirLiteral::Integer(_) => "intLiteral",
                 HirLiteral::Float(_) => "floatLiteral",
-                HirLiteral::String(_) | HirLiteral::Char(_) | HirLiteral::Null => {
+                HirLiteral::Char(_) => "charLiteral",
+                HirLiteral::String(_) | HirLiteral::Null => {
                     return self.lower_literal_primitive(lit, &result_ty);
                 }
             };

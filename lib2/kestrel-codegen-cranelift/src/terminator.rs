@@ -154,16 +154,7 @@ fn compile_switch(
         return Ok(());
     }
 
-    // Load the i32 discriminant from offset 0 of the enum pointer
-    let enum_ptr = place::compile_place_read(ctx, state, builder, discriminant)?;
-    let discr_val = builder.ins().load(
-        ir::types::I32,
-        MemFlags::new(),
-        enum_ptr,
-        Offset32::new(0),
-    );
-
-    // Find the enum definition to resolve case name → discriminant value
+    // Resolve the discriminant type to determine how to read it
     let enum_ty = common::get_place_type(
         ctx.module,
         state.body,
@@ -177,6 +168,21 @@ fn compile_switch(
             _ => None,
         },
         _ => None,
+    };
+
+    let disc_val_raw = place::compile_place_read(ctx, state, builder, discriminant)?;
+
+    // For enums: the discriminant is at offset 0 of the enum pointer.
+    // For primitives (I32, I8, etc.): the value IS the discriminant.
+    let discr_val = if enum_id.is_some() {
+        builder.ins().load(
+            ir::types::I32,
+            MemFlags::new(),
+            disc_val_raw,
+            Offset32::new(0),
+        )
+    } else {
+        disc_val_raw
     };
 
     for (i, (case_name, target_block)) in cases.iter().enumerate() {
