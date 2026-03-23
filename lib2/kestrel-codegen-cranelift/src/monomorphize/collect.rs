@@ -430,10 +430,10 @@ fn func_body_has_type_params(func: &kestrel_mir::FunctionDef) -> bool {
     false
 }
 
-/// Check if a type contains any unresolved TypeParam.
+/// Check if a type contains any unresolved TypeParam or Error.
 fn has_type_param(ty: &MirTy) -> bool {
     match ty {
-        MirTy::TypeParam(_) => true,
+        MirTy::TypeParam(_) | MirTy::Error => true,
         MirTy::Pointer(inner) | MirTy::Ref(inner) | MirTy::RefMut(inner) => {
             has_type_param(inner)
         }

@@ -26,12 +26,12 @@ pub fn is_aggregate_type(ty: &MirTy) -> bool {
     )
 }
 
-/// Check if a type contains any unresolved TypeParam references.
+/// Check if a type contains any unresolved TypeParam or Error references.
 /// Used to detect cases where type substitution was incomplete, which
 /// can cause wrong layout computations.
 pub fn type_has_unresolved_params(ty: &MirTy) -> bool {
     match ty {
-        MirTy::TypeParam(_) => true,
+        MirTy::TypeParam(_) | MirTy::Error => true,
         MirTy::Pointer(inner) | MirTy::Ref(inner) | MirTy::RefMut(inner) => {
             type_has_unresolved_params(inner)
         }

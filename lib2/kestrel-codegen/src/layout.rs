@@ -208,11 +208,10 @@ impl<'a> LayoutCache<'a> {
                     NamedKind::Struct(id) => self.struct_layout(id, &type_args).layout,
                     NamedKind::Enum(id) => self.enum_layout(id, &type_args),
                     NamedKind::Unknown => {
-                        ktrace!(
-                            "codegen",
-                            "layout_of: unknown Named entity {:?}, using pointer-size fallback",
-                            entity
-                        );
+                        let name = self.module.resolve_name(entity);
+                        if !name.contains("Equatable") && !name.contains("Comparable") && !name.contains("Iterator") {
+                            eprintln!("[DIAG] layout_of: unknown Named entity {:?} ({}), using pointer-size fallback", entity, name);
+                        }
                         Layout::new(ptr, ptr)
                     }
                 }
@@ -220,17 +219,11 @@ impl<'a> LayoutCache<'a> {
 
             // These must be substituted before layout computation
             MirTy::TypeParam(entity) => {
-                ktrace!(
-                    "codegen",
-                    "TypeParam {:?} reached layout computation without substitution",
-                    entity
-                );
-                // Fallback: treat as pointer-sized. This shouldn't happen if monomorphization
-                // correctly propagates type args, but some edge cases remain during development.
+                eprintln!("[DIAG] layout_of: TypeParam({:?}) reached layout computation without substitution", entity);
                 Layout::new(ptr, ptr)
             }
             MirTy::SelfType => {
-                ktrace!("codegen", "SelfType reached layout computation without substitution");
+                eprintln!("[DIAG] layout_of: SelfType reached layout computation without substitution");
                 Layout::new(ptr, ptr)
             }
             MirTy::AssociatedProjection {
@@ -248,7 +241,10 @@ impl<'a> LayoutCache<'a> {
                 Layout::new(ptr, ptr)
             }
 
-            MirTy::Error => Layout::zero(1),
+            MirTy::Error => {
+                eprintln!("[DIAG] layout_of: MirTy::Error reached layout computation — unresolved type leaked into codegen");
+                Layout::zero(1)
+            }
         }
     }
 

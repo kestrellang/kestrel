@@ -74,14 +74,18 @@ pub fn compile_memory_op1(
     match op {
         Op::SizeOf(ty) => {
             let concrete_ty = kestrel_codegen2::substitute_type(ty, &state.subst);
+            if matches!(concrete_ty, kestrel_mir::MirTy::Error) {
+                eprintln!("[DIAG] SizeOf(Error) in {} (raw type: {:?})", state.func_def.name, ty);
+            }
             let layout = ctx.layouts.layout_of(&concrete_ty);
-
-
             Ok(builder.ins().iconst(ptr_ty, layout.size as i64))
         }
 
         Op::AlignOf(ty) => {
             let concrete_ty = kestrel_codegen2::substitute_type(ty, &state.subst);
+            if matches!(concrete_ty, kestrel_mir::MirTy::Error) {
+                eprintln!("[DIAG] AlignOf(Error) in {} (raw type: {:?})", state.func_def.name, ty);
+            }
             let layout = ctx.layouts.layout_of(&concrete_ty);
             Ok(builder.ins().iconst(ptr_ty, layout.align as i64))
         }
