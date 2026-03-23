@@ -158,8 +158,10 @@ pub enum Op {
     // === Casts ===
     IntToFloat(IntBits, FloatBits),
     FloatToInt(FloatBits, IntBits),
-    /// (from, to)
+    /// Signed sign-extend: (from, to)
     IntWiden(IntBits, IntBits),
+    /// Unsigned zero-extend: (from, to)
+    IntUnsignedWiden(IntBits, IntBits),
     /// (from, to)
     IntTruncate(IntBits, IntBits),
     /// (from, to)

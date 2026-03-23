@@ -801,6 +801,19 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
             "cast_i32_i16" => emit_op1(self, Op::IntTruncate(IntBits::I32, IntBits::I16)),
             "cast_i32_i8" => emit_op1(self, Op::IntTruncate(IntBits::I32, IntBits::I8)),
             "cast_i16_i8" => emit_op1(self, Op::IntTruncate(IntBits::I16, IntBits::I8)),
+            // Unsigned → signed widenings (zero-extend)
+            "cast_u8_i16" => emit_op1(self, Op::IntUnsignedWiden(IntBits::I8, IntBits::I16)),
+            "cast_u8_i32" => emit_op1(self, Op::IntUnsignedWiden(IntBits::I8, IntBits::I32)),
+            "cast_u8_i64" => emit_op1(self, Op::IntUnsignedWiden(IntBits::I8, IntBits::I64)),
+            "cast_u16_i32" => emit_op1(self, Op::IntUnsignedWiden(IntBits::I16, IntBits::I32)),
+            "cast_u16_i64" => emit_op1(self, Op::IntUnsignedWiden(IntBits::I16, IntBits::I64)),
+            "cast_u16_i8" => emit_op1(self, Op::IntTruncate(IntBits::I16, IntBits::I8)),
+            "cast_u32_i64" => emit_op1(self, Op::IntUnsignedWiden(IntBits::I32, IntBits::I64)),
+            "cast_u32_i16" => emit_op1(self, Op::IntTruncate(IntBits::I32, IntBits::I16)),
+            "cast_u32_i8" => emit_op1(self, Op::IntTruncate(IntBits::I32, IntBits::I8)),
+            "cast_u64_i32" => emit_op1(self, Op::IntTruncate(IntBits::I64, IntBits::I32)),
+            "cast_u64_i16" => emit_op1(self, Op::IntTruncate(IntBits::I64, IntBits::I16)),
+            "cast_u64_i8" => emit_op1(self, Op::IntTruncate(IntBits::I64, IntBits::I8)),
 
             // Float arithmetic
             "f32_add" => emit_op2(self, Op::FAdd(FloatBits::F32)),

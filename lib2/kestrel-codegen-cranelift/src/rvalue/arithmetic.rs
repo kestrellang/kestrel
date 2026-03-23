@@ -59,6 +59,14 @@ pub fn compile_op1(
         Op::FloatWiden(_, _) => Ok(builder.ins().fpromote(ir::types::F64, arg)),
 
         // Int width conversions
+        Op::IntWiden(_, target_bits) => {
+            let target = int_bits_to_type(*target_bits);
+            Ok(builder.ins().sextend(target, arg))
+        }
+        Op::IntUnsignedWiden(_, target_bits) => {
+            let target = int_bits_to_type(*target_bits);
+            Ok(builder.ins().uextend(target, arg))
+        }
         Op::IntTruncate(_, target_bits) => {
             let target = int_bits_to_type(*target_bits);
             Ok(builder.ins().ireduce(target, arg))
