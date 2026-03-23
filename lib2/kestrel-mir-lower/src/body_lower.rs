@@ -542,10 +542,15 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
     fn resolve_type_args(&mut self, expr_id: HirExprId) -> Vec<MirTy> {
         if let Some(typed) = self.typed {
             if let Some(resolved_args) = typed.type_args.get(&expr_id) {
-                return resolved_args
+                let args: Vec<MirTy> = resolved_args
                     .iter()
                     .map(|ty| lower_resolved_ty(self.ctx, ty))
                     .collect();
+                if args.iter().any(|a| matches!(a, MirTy::Error)) {
+                    let func_name = &self.ctx.module.functions[self.func_id.index()].name;
+                    eprintln!("[DIAG] resolve_type_args: Error in type args in {} — resolved: {:?}", func_name, args);
+                }
+                return args;
             }
         }
         Vec::new()
