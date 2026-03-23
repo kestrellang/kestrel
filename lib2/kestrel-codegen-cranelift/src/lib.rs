@@ -210,10 +210,15 @@ mod integration_tests {
 
         let result = compile(&mir, &target, &options).expect("compilation failed");
 
+        // Use unique filenames per invocation to avoid test interference
+        let uid = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
         let dir = std::env::temp_dir().join("kestrel_e2e_stdlib");
         let _ = std::fs::create_dir_all(&dir);
-        let obj_path = dir.join("test_stdlib.o");
-        let exe_path = dir.join("test_stdlib_exe");
+        let obj_path = dir.join(format!("test_{}.o", uid));
+        let exe_path = dir.join(format!("test_{}_exe", uid));
 
         result.write_object_file(&obj_path).unwrap();
         link::link_executable(&obj_path, &exe_path, &[], &[], &[]).unwrap();
@@ -269,6 +274,101 @@ func main() {
         eprintln!("exit={code} stdout={stdout:?}");
         assert_eq!(code, 0);
         assert!(stdout.contains("42"), "stdout: {stdout:?}");
+    }
+
+    #[test]
+    fn e2e_multiple_prints() {
+        let (code, stdout, _) = compile_and_run_with_stdlib(r#"
+module Test
+
+func main() {
+    print("one ")
+    print("two ")
+    print("three")
+}
+"#);
+        eprintln!("exit={code} stdout={stdout:?}");
+        assert_eq!(code, 0);
+        assert!(stdout.contains("one two three"), "stdout: {stdout:?}");
+    }
+
+    #[test]
+    fn e2e_if_else() {
+        let (code, stdout, _) = compile_and_run_with_stdlib(r#"
+module Test
+
+func main() {
+    let x: Int64 = 10;
+    if x > 5 {
+        print("big")
+    } else {
+        print("small")
+    }
+}
+"#);
+        eprintln!("exit={code} stdout={stdout:?}");
+        assert_eq!(code, 0);
+        assert!(stdout.contains("big"), "stdout: {stdout:?}");
+    }
+
+    #[test]
+    fn e2e_nested_calls() {
+        let (code, stdout, _) = compile_and_run_with_stdlib(r#"
+module Test
+
+func inner() -> String {
+    "world"
+}
+
+func outer() -> String {
+    inner()
+}
+
+func main() {
+    print("hello ")
+    print(outer())
+}
+"#);
+        eprintln!("exit={code} stdout={stdout:?}");
+        assert_eq!(code, 0);
+        assert!(stdout.contains("hello world"), "stdout: {stdout:?}");
+    }
+
+    #[test]
+    fn e2e_function_call() {
+        let (code, stdout, _) = compile_and_run_with_stdlib(r#"
+module Test
+
+func greet(name: String) -> String {
+    "Hello, " + name + "!"
+}
+
+func main() {
+    print(greet("lib2"))
+}
+"#);
+        eprintln!("exit={code} stdout={stdout:?}");
+        assert_eq!(code, 0);
+        assert!(stdout.contains("Hello, lib2!"), "stdout: {stdout:?}");
+    }
+
+    #[test]
+    fn e2e_string_length() {
+        let (code, stdout, _) = compile_and_run_with_stdlib(r#"
+module Test
+
+func main() {
+    let s = "Hello from lib2!"
+    if s.count > 0 {
+        print("has content")
+    } else {
+        print("empty")
+    }
+}
+"#);
+        eprintln!("exit={code} stdout={stdout:?}");
+        assert_eq!(code, 0);
+        assert!(stdout.contains("has content"), "stdout: {stdout:?}");
     }
 
     /// Minimal test: just allocate on the heap and return.
