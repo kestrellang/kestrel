@@ -1689,8 +1689,8 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
             }
         }
 
-        // Primitive type or no init found — return bare immediate
-        self.lower_literal_primitive(lit, None)
+        // Primitive type or no init found — use result type for width
+        self.lower_literal_primitive(lit, Some(&result_ty))
     }
 
     /// Lower a literal to its primitive MIR immediate value.
