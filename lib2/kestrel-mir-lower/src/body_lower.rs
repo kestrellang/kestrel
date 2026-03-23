@@ -1667,19 +1667,21 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
 
         // If the type is a Named struct, wrap the primitive via init call
         if let MirTy::Named { entity, .. } = &result_ty {
-            let primitive = self.lower_literal_primitive(lit);
             let label = match lit {
                 HirLiteral::Bool(_) => "boolLiteral",
                 HirLiteral::Integer(_) => "intLiteral",
                 HirLiteral::Float(_) => "floatLiteral",
                 HirLiteral::String(_) | HirLiteral::Char(_) | HirLiteral::Null => {
                     // Strings, chars, null: return primitive directly for now
-                    return primitive;
+                    return self.lower_literal_primitive(lit, None);
                 }
             };
 
             // Find the init(label:) on the struct
             if let Some(init_entity) = self.find_literal_init(*entity, label) {
+                // Determine the init parameter type to match float/int width
+                let param_ty = self.resolve_init_param_type(init_entity);
+                let primitive = self.lower_literal_primitive(lit, param_ty.as_ref());
                 self.ctx.register_name(init_entity);
                 let call_args = vec![CallArg::copy(primitive)];
                 let callee = Callee::direct_generic(init_entity, vec![]);
@@ -1688,19 +1690,42 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         }
 
         // Primitive type or no init found — return bare immediate
-        self.lower_literal_primitive(lit)
+        self.lower_literal_primitive(lit, None)
     }
 
     /// Lower a literal to its primitive MIR immediate value.
-    fn lower_literal_primitive(&self, lit: &HirLiteral) -> Value {
+    /// `target_ty` is the init parameter type — used to select float/int width.
+    fn lower_literal_primitive(&self, lit: &HirLiteral, target_ty: Option<&MirTy>) -> Value {
         match lit {
-            HirLiteral::Integer(v) => Value::Immediate(Immediate::i64(*v)),
-            HirLiteral::Float(v) => Value::Immediate(Immediate::f64(*v)),
+            HirLiteral::Integer(v) => {
+                // Match int width to the init parameter type
+                match target_ty {
+                    Some(MirTy::I8) => Value::Immediate(Immediate::i8(*v as i8)),
+                    Some(MirTy::I16) => Value::Immediate(Immediate::i16(*v as i16)),
+                    Some(MirTy::I32) => Value::Immediate(Immediate::i32(*v as i32)),
+                    _ => Value::Immediate(Immediate::i64(*v)),
+                }
+            }
+            HirLiteral::Float(v) => {
+                // Match float width to the init parameter type
+                match target_ty {
+                    Some(MirTy::F32) => Value::Immediate(Immediate::f32(*v as f32)),
+                    _ => Value::Immediate(Immediate::f64(*v)),
+                }
+            }
             HirLiteral::Bool(v) => Value::Immediate(Immediate::bool(*v)),
             HirLiteral::String(s) => Value::Immediate(Immediate::string(s.clone())),
             HirLiteral::Char(c) => Value::Immediate(Immediate::i32(*c as i32)),
             HirLiteral::Null => Value::Immediate(Immediate::unit()),
         }
+    }
+
+    /// Get the type of the first non-self parameter of an init function.
+    fn resolve_init_param_type(&mut self, init_entity: Entity) -> Option<MirTy> {
+        use crate::ty::resolve_callable_types;
+        let types = resolve_callable_types(self.ctx, init_entity);
+        // First param type (init literals have exactly one param)
+        types.into_iter().next().flatten()
     }
 
     /// Find a literal protocol init (e.g., init(boolLiteral:)) on a struct entity.
