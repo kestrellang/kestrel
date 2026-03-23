@@ -427,9 +427,10 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
             HirExpr::MethodCall {
                 receiver,
                 method,
+                type_args: hir_type_args,
                 args,
                 ..
-            } => self.lower_method_call(expr_id, *receiver, method, args),
+            } => self.lower_method_call(expr_id, *receiver, method, hir_type_args.as_deref(), args),
             HirExpr::ProtocolCall {
                 receiver,
                 protocol,
@@ -546,10 +547,6 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                     .iter()
                     .map(|ty| lower_resolved_ty(self.ctx, ty))
                     .collect();
-                if args.iter().any(|a| matches!(a, MirTy::Error)) {
-                    let func_name = &self.ctx.module.functions[self.func_id.index()].name;
-                    eprintln!("[DIAG] resolve_type_args(expr={:?}): Error in type args in {} — resolved: {:?}", expr_id, func_name, args);
-                }
                 return args;
             }
         }
@@ -1348,7 +1345,17 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 if let Some(fallback) = self.extract_explicit_type_args(callee_expr) {
                     type_args = fallback;
                 } else if has_error {
-                    // Couldn't find explicit HIR type args to replace Error
+                    let callee_hir = &self.hir.exprs[callee_expr];
+                    let func_name = &self.ctx.module.functions[self.func_id.index()].name;
+                    eprintln!("[DIAG] No fallback for Error in {} — callee variant: {}", func_name, match callee_hir {
+                        HirExpr::Def(..) => "Def",
+                        HirExpr::OverloadSet { .. } => "OverloadSet",
+                        HirExpr::MethodCall { .. } => "MethodCall",
+                        HirExpr::Call { .. } => "Call",
+                        HirExpr::Local(..) => "Local",
+                        HirExpr::Field { .. } => "Field",
+                        _ => "Other",
+                    });
                 }
             }
 
@@ -1492,6 +1499,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         expr_id: HirExprId,
         receiver_expr: HirExprId,
         method_name: &str,
+        hir_type_args: Option<&[kestrel_hir::ty::HirTy]>,
         args: &[HirCallArg],
     ) -> Value {
         let mut receiver_ty = self.resolve_expr_type(receiver_expr);
@@ -1608,7 +1616,15 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
             }
 
             self.ctx.register_name(resolved_entity);
-            let method_type_args = self.resolve_type_args(expr_id);
+            let mut method_type_args = self.resolve_type_args(expr_id);
+            // Fall back to explicit HIR type args when inference returns Error
+            if method_type_args.iter().any(|a| matches!(a, MirTy::Error)) {
+                if let Some(hir_args) = hir_type_args {
+                    if !hir_args.is_empty() {
+                        method_type_args = hir_args.iter().map(|ty| lower_type(self.ctx, ty)).collect();
+                    }
+                }
+            }
             // Prepend receiver's struct type_args — inherited type_params come first
             let type_args = self.prepend_receiver_type_args(&receiver_ty, method_type_args);
 
@@ -1827,7 +1843,6 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         result_ty: MirTy,
     ) -> Value {
         if result_ty == MirTy::Unit || result_ty == MirTy::Never {
-            // Void call — no destination
             self.emit_stmt(Statement::new(StatementKind::Call {
                 dest: None,
                 callee,
@@ -1835,7 +1850,6 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
             }));
             Value::Immediate(Immediate::unit())
         } else {
-            // Call with return value — create temp for result
             let dest = self.fresh_temp(result_ty);
             self.emit_stmt(Statement::new(StatementKind::Call {
                 dest: Some(Place::local(dest)),

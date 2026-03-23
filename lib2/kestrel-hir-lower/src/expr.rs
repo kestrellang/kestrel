@@ -322,8 +322,13 @@ impl LowerCtx<'_> {
                 if let Some((static_entity, base_type_args)) =
                     self.try_resolve_static_call(body, base, &member)
                 {
+                    // Include both struct type_args and method's own type_args
+                    let mut all_type_args = base_type_args;
+                    if let Some(ref method_args) = type_args {
+                        all_type_args.extend(method_args.iter().map(|t| self.lower_type(t)));
+                    }
                     let callee = self.alloc_expr(
-                        HirExpr::Def(static_entity, base_type_args, span.clone()),
+                        HirExpr::Def(static_entity, all_type_args, span.clone()),
                     );
                     return self.alloc_expr(HirExpr::Call {
                         callee,
@@ -462,11 +467,17 @@ impl LowerCtx<'_> {
             }
             let Some(child_name) = self.ctx.get::<Name>(child) else { continue };
             if child_name.0 == member {
-                let type_args: Vec<kestrel_hir::ty::HirTy> = segments[..segments.len() - 1]
+                // Collect struct type_args from base segments + method type_args from last segment
+                let mut type_args: Vec<kestrel_hir::ty::HirTy> = segments[..segments.len() - 1]
                     .iter()
                     .flat_map(|s| s.type_args.iter().flatten())
                     .map(|t| self.lower_type(t))
                     .collect();
+                // Append the method's own type_args (e.g., [T] in Layout.array[T])
+                let last = &segments[segments.len() - 1];
+                if let Some(ref method_args) = last.type_args {
+                    type_args.extend(method_args.iter().map(|t| self.lower_type(t)));
+                }
                 return Some((child, type_args));
             }
         }
