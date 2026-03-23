@@ -125,9 +125,18 @@ fn compile_branch(
     then_block: kestrel_mir::BlockId,
     else_block: kestrel_mir::BlockId,
 ) -> Result<(), CodegenError> {
-    let cond_val = rvalue::compile_value(ctx, state, builder, condition)?;
+    let cond_raw = rvalue::compile_value(ctx, state, builder, condition)?;
 
-    // Bool is i8; convert to branch condition
+    // Bool is Named (aggregate) — the value is a pointer to a 1-byte stack slot.
+    // Load the actual byte before comparing.
+    let cond_val = if builder.func.dfg.value_type(cond_raw) == ir::types::I8 {
+        cond_raw // Already a scalar i8
+    } else {
+        // Aggregate pointer — load the i8 bool value
+        builder.ins().load(ir::types::I8, MemFlags::new(), cond_raw, Offset32::new(0))
+    };
+
+    // Convert i8 bool to branch condition
     let cmp = builder
         .ins()
         .icmp_imm(IntCC::NotEqual, cond_val, 0);
