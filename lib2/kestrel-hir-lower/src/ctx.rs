@@ -36,6 +36,9 @@ pub(crate) struct LowerCtx<'a> {
     /// Match expressions that originated from for-loop desugaring.
     /// Populated during lowering, transferred to HirBody for analysis.
     pub for_loop_matches: Vec<HirExprId>,
+    /// Original condition expressions from while-loop desugaring.
+    /// Populated during lowering, used by condition type analyzer.
+    pub while_conditions: Vec<HirExprId>,
 }
 
 impl<'a> LowerCtx<'a> {
@@ -52,6 +55,7 @@ impl<'a> LowerCtx<'a> {
             scopes: vec![HashMap::new()], // start with one scope for params
             guard_let_stmts: Vec::new(),
             for_loop_matches: Vec::new(),
+            while_conditions: Vec::new(),
         }
     }
 

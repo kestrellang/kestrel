@@ -88,10 +88,17 @@ impl TestCompiler {
         let codespan_diags = self.compiler.diagnostics();
         result.extend(from_codespan_diagnostics(&codespan_diags, &sources));
 
-        // Analyzer diagnostics
+        // Analyzer diagnostics (skip E100 — those duplicate inference errors
+        // already collected via the codespan path above)
         let analyze_summary = self.analyze();
+        let non_duplicate_diags: Vec<_> = analyze_summary
+            .diagnostics
+            .iter()
+            .filter(|d| d.descriptor_id != "E100")
+            .cloned()
+            .collect();
         result.extend(from_analyze_diagnostics_with_source(
-            &analyze_summary.diagnostics,
+            &non_duplicate_diags,
             &sources,
         ));
 
@@ -151,14 +158,16 @@ impl TestCompiler {
 
     // === Assertion helpers ===
 
-    /// Assert no errors from any stage. Panics with details on failure.
-    pub fn expect_no_errors(&self) {
+    /// Check that no errors occurred. Returns Err with details on failure.
+    pub fn check_no_errors(&self) -> Result<(), String> {
         let diags = self.all_diagnostics();
         let errors: Vec<&TestDiagnostic> = diags
             .iter()
             .filter(|d| d.severity == TestSeverity::Error)
             .collect();
-        if !errors.is_empty() {
+        if errors.is_empty() {
+            Ok(())
+        } else {
             let details: Vec<String> = errors
                 .iter()
                 .map(|d| {
@@ -173,12 +182,17 @@ impl TestCompiler {
                     )
                 })
                 .collect();
-            panic!(
+            Err(format!(
                 "Expected no errors, but found {}:\n{}",
                 errors.len(),
                 details.join("\n")
-            );
+            ))
         }
+    }
+
+    /// Assert no errors from any stage. Panics with details on failure.
+    pub fn expect_no_errors(&self) {
+        self.check_no_errors().unwrap_or_else(|e| panic!("{}", e));
     }
 
     /// Assert that at least one error contains the given message substring.

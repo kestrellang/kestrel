@@ -91,6 +91,7 @@ impl QueryFn for LowerBody {
             tail_expr,
             guard_let_stmts: lower.guard_let_stmts,
             for_loop_matches: lower.for_loop_matches,
+            while_conditions: lower.while_conditions,
         })
     }
 }

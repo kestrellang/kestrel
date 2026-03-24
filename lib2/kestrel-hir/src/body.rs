@@ -43,6 +43,9 @@ pub struct HirBody {
     /// Match expressions that originated from for-loop desugaring.
     /// Used by the for-loop pattern analyzer to extract and check the user's pattern.
     pub for_loop_matches: Vec<HirExprId>,
+    /// Original condition expressions from while-loop desugaring.
+    /// Used by the condition type analyzer to check that while conditions are Bool.
+    pub while_conditions: Vec<HirExprId>,
 }
 
 /// A nested code block (if/loop/match arm bodies, desugared blocks).

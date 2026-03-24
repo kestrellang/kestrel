@@ -48,10 +48,17 @@ pub fn unify(ctx: &mut InferCtx<'_>, a: TyVar, b: TyVar) -> Result<(), UnifyErro
         (TySlot::Resolved(TyKind::Never), _) | (_, TySlot::Resolved(TyKind::Never)) => Ok(()),
 
         // Both unresolved: link them, merge literal markers.
+        // If both have different literal kinds, that's a mismatch
+        // (e.g., integer literal vs string literal in if/else branches).
         (
             TySlot::Unresolved { literal: lit_a },
             TySlot::Unresolved { literal: lit_b },
         ) => {
+            if let (Some(a_kind), Some(b_kind)) = (lit_a, lit_b) {
+                if a_kind != b_kind {
+                    return Err(UnifyError::Mismatch);
+                }
+            }
             let merged = lit_a.or(*lit_b);
             ctx.types[a.0 as usize] = TySlot::Redirect(b);
             if merged.is_some() {
@@ -245,7 +252,7 @@ fn is_intrinsic_literal_compatible(ctx: &InferCtx<'_>, ty: &TyKind, lit: Literal
     match lit {
         LiteralKind::Integer => matches!(
             name.0.as_str(),
-            "i1" | "i8" | "i16" | "i32" | "i64"
+            "i8" | "i16" | "i32" | "i64"
         ),
         LiteralKind::Float => matches!(name.0.as_str(), "f32" | "f64"),
         LiteralKind::Bool => matches!(name.0.as_str(), "i1"),

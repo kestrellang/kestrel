@@ -17,7 +17,8 @@ use kestrel_span2::Span;
 use crate::ty::{LiteralKind, TyKind, TySlot, TyVar};
 use crate::unify::{self, UnifyError};
 
-/// Run the full solver: fixpoint loop, literal defaults, final fixpoint.
+/// Run the full solver: fixpoint loop, literal defaults, final fixpoint,
+/// then report any remaining unsolved constraints as errors.
 pub fn solve(ctx: &mut InferCtx<'_>) {
     // Phase 1: main solving
     fixpoint(ctx);
@@ -28,6 +29,8 @@ pub fn solve(ctx: &mut InferCtx<'_>) {
     // Phase 3: solve again with defaults
     fixpoint(ctx);
 
+    // Phase 4: report remaining unsolved constraints as errors
+    report_unsolved(ctx);
 }
 
 /// Run rounds until no progress.
@@ -58,6 +61,84 @@ fn solve_round(ctx: &mut InferCtx<'_>) -> bool {
     }
 
     progress
+}
+
+/// Report remaining unsolved constraints as errors.
+///
+/// After the fixpoint loop completes, any constraints still in `ctx.constraints`
+/// could never be solved (typically because one side stayed unresolved — e.g.,
+/// a literal without stdlib to provide a default type). Each constraint maps to
+/// an appropriate InferError variant.
+///
+/// To prevent cascading errors, we skip constraints where a key TyVar is already
+/// poisoned with `TyKind::Error` (meaning an earlier error already covers it).
+fn report_unsolved(ctx: &mut InferCtx<'_>) {
+    let constraints = std::mem::take(&mut ctx.constraints);
+
+    for constraint in constraints {
+        let err = match constraint {
+            Constraint::Equal { a, b, span } => {
+                if ctx.is_error(ctx.resolve(a)) || ctx.is_error(ctx.resolve(b)) {
+                    continue;
+                }
+                InferError::TypeMismatch { expected: a, got: b, span }
+            }
+            Constraint::Coerce { from, to, span, .. } => {
+                if ctx.is_error(ctx.resolve(from)) || ctx.is_error(ctx.resolve(to)) {
+                    continue;
+                }
+                InferError::TypeMismatch { expected: to, got: from, span }
+            }
+            Constraint::Conforms { ty, protocol, span } => {
+                if ctx.is_error(ctx.resolve(ty)) {
+                    continue;
+                }
+                InferError::DoesNotConform { ty, protocol, span }
+            }
+            Constraint::Associated { container, name, span, .. } => {
+                if ctx.is_error(ctx.resolve(container)) {
+                    continue;
+                }
+                InferError::NoAssociatedType { container, name, span }
+            }
+            Constraint::Member { receiver, name, span, .. } => {
+                if ctx.is_error(ctx.resolve(receiver)) {
+                    continue;
+                }
+                InferError::NoMember { receiver, name, span }
+            }
+            Constraint::Call { callee, span, .. } => {
+                if ctx.is_error(ctx.resolve(callee)) {
+                    continue;
+                }
+                InferError::NoMember {
+                    receiver: callee,
+                    name: "(subscript)".into(),
+                    span,
+                }
+            }
+            Constraint::OverloadedCall { candidates, result, span, .. } => {
+                if ctx.is_error(ctx.resolve(result)) {
+                    continue;
+                }
+                let name = candidates
+                    .first()
+                    .and_then(|&e| ctx.query_ctx.get::<Name>(e))
+                    .map(|n| n.0.clone())
+                    .unwrap_or_else(|| "<overloaded>".into());
+                InferError::NoMember { receiver: result, name, span }
+            }
+            Constraint::Implicit { expected, name, span, .. } => {
+                if ctx.is_error(ctx.resolve(expected)) {
+                    continue;
+                }
+                InferError::ImplicitMemberNotFound { expected, name, span }
+            }
+            // Pattern matching handles unresolved patterns at a higher level
+            Constraint::ImplicitPat { .. } => continue,
+        };
+        ctx.report_error(err);
+    }
 }
 
 /// Result of attempting to solve a single constraint.

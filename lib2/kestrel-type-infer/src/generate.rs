@@ -241,9 +241,12 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             if let Some(else_block) = else_body {
                 let else_tv = gen_block(ctx, hir, else_block);
                 let result_tv = ctx.fresh();
-                // Both branches must agree
-                ctx.equal(then_tv, result_tv, span.clone());
-                ctx.equal(else_tv, result_tv, span.clone());
+                // Both branches must agree — use block value spans so
+                // errors point at the mismatched expression, not the if keyword
+                let then_span = block_value_span(hir, then_body).unwrap_or_else(|| span.clone());
+                let else_span = block_value_span(hir, else_block).unwrap_or_else(|| span.clone());
+                ctx.equal(then_tv, result_tv, then_span);
+                ctx.equal(else_tv, result_tv, else_span);
                 result_tv
             } else {
                 // No else: expression has unit type
@@ -288,6 +291,11 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             if let Some(val) = value {
                 let val_tv = gen_expr(ctx, hir, *val);
                 ctx.coerce(val_tv, ctx.return_ty, id, span.clone());
+            } else {
+                // Bare return — coerce unit against return type so
+                // `return` in a non-void function is a type mismatch
+                let unit_tv = ctx.tuple(vec![]);
+                ctx.coerce(unit_tv, ctx.return_ty, id, span.clone());
             }
             ctx.never()
         }
@@ -924,6 +932,21 @@ fn literal_to_tyvar(ctx: &mut InferCtx<'_>, value: &HirLiteral) -> TyVar {
 }
 
 /// Extract the span from an expression.
+/// Get the span of a block's value expression (tail expr or last statement expr).
+/// Returns None if the block has no value expression.
+fn block_value_span(hir: &HirBody, block: &HirBlock) -> Option<Span> {
+    if let Some(tail) = block.tail_expr {
+        return Some(expr_span(hir, tail));
+    }
+    // Check if last statement is an expression
+    if let Some(&last_id) = block.stmts.last() {
+        if let HirStmt::Expr { expr, .. } = &hir.stmts[last_id] {
+            return Some(expr_span(hir, *expr));
+        }
+    }
+    None
+}
+
 fn expr_span(hir: &HirBody, id: HirExprId) -> Span {
     match &hir.exprs[id] {
         HirExpr::Literal { span, .. }

@@ -4,9 +4,9 @@
 module Main
 
 func test(cond: lang.i1) -> lang.i64 {
-    if cond {
-        (1, 2) // ERROR
+    if cond { // ERROR
+        (1, 2)
     } else {
-        42
+        42 // ERROR
     }
 }

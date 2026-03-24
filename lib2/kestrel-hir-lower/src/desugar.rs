@@ -198,6 +198,7 @@ impl LowerCtx<'_> {
         span: &Span,
     ) -> HirExprId {
         let lowered_cond = self.lower_expr(body, condition);
+        self.while_conditions.push(lowered_cond);
 
         // Negate condition: !condition
         let negated = if let Some(protocol) = self.resolve_builtin(Builtin::LogicalNotOperatorProtocol) {

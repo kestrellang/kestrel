@@ -25,6 +25,33 @@ fn run_ks_test(path: &Path) -> datatest_stable::Result<()> {
         return Ok(());
     }
 
+    // Wrap in catch_unwind so internal compiler panics become test failures
+    // instead of crashing the entire harness with SIGABRT
+    let path_owned = path.to_owned();
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        run_ks_test_inner(&path_owned, &source, &config)
+    }));
+
+    match result {
+        Ok(inner) => inner,
+        Err(panic_info) => {
+            let msg = if let Some(s) = panic_info.downcast_ref::<String>() {
+                s.clone()
+            } else if let Some(s) = panic_info.downcast_ref::<&str>() {
+                s.to_string()
+            } else {
+                "unknown panic".to_string()
+            };
+            Err(format!("PANIC: {}", msg).into())
+        }
+    }
+}
+
+fn run_ks_test_inner(
+    path: &Path,
+    source: &str,
+    config: &annotation::TestConfig,
+) -> datatest_stable::Result<()> {
     let mut tc = if config.stdlib {
         TestCompiler::with_stdlib()
     } else {
@@ -32,18 +59,18 @@ fn run_ks_test(path: &Path) -> datatest_stable::Result<()> {
     };
 
     let file_path = path.to_string_lossy();
-    let entity = tc.add_source(&file_path, &source);
+    let entity = tc.add_source(&file_path, source);
     let file_id = entity.index();
 
     match config.test_mode {
         TestMode::Diagnostics => {
-            let annotations = annotation::parse_annotations(&source);
+            let annotations = annotation::parse_annotations(source);
             tc.check_annotations(&annotations, file_id)?;
         }
 
         TestMode::Mir => {
             // Expect clean compilation before checking MIR
-            tc.expect_no_errors();
+            tc.check_no_errors()?;
             let mir = tc.mir();
             mir_snapshot::check_mir_snapshot(
                 path,
@@ -55,7 +82,7 @@ fn run_ks_test(path: &Path) -> datatest_stable::Result<()> {
 
         TestMode::Execution => {
             // Expect clean compilation before running
-            tc.expect_no_errors();
+            tc.check_no_errors()?;
             let result = tc
                 .run()
                 .map_err(|e| Into::<Box<dyn std::error::Error>>::into(e))?;
