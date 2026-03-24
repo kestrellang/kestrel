@@ -18,7 +18,7 @@ pub mod ty;
 
 use kestrel_ast_builder::{Body, Callable};
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
-use kestrel_hir::body::HirBody;
+use kestrel_hir::body::{HirBody, HirExpr, HirMatchArm, HirStmt};
 use kestrel_span2::Span;
 
 pub use ty::{lower_ast_type, LowerCallableTypes, LowerTypeAnnotation};
@@ -49,6 +49,7 @@ impl QueryFn for LowerBody {
         let mut lower = LowerCtx::new(ctx, self.root, self.entity);
 
         // Create locals for function parameters
+        let mut param_desugar_stmts = Vec::new();
         if let Some(callable) = ctx.get::<Callable>(self.entity) {
             // If method has a receiver, create `self` local
             if let Some(receiver) = &callable.receiver {
@@ -62,19 +63,48 @@ impl QueryFn for LowerBody {
                 lower.params.push(self_local);
             }
 
-            // Create locals for each parameter
+            // Create locals for each parameter. For destructured params,
+            // create a synthetic local and prepend a match-based destructure
+            // that binds the pattern's variables in the body scope.
             for param in &callable.params {
                 let local = lower.define_local(&param.name, false, Span::synthetic(0));
                 lower.params.push(local);
+
+                // Desugar destructured params: match _param_0 { (a, b) => () }
+                if let Some(ref pattern) = param.pattern {
+                    let span = Span::synthetic(0);
+                    let hir_pat = lower.lower_param_pattern(pattern, &span, param.is_mut);
+                    let param_ref = lower.alloc_expr(HirExpr::Local(local, span.clone()));
+                    let unit = lower.alloc_expr(HirExpr::Tuple {
+                        elements: Vec::new(),
+                        span: span.clone(),
+                    });
+                    let match_expr = lower.alloc_expr(HirExpr::Match {
+                        scrutinee: param_ref,
+                        arms: vec![HirMatchArm {
+                            pattern: hir_pat,
+                            guard: None,
+                            body: unit,
+                        }],
+                        span: span.clone(),
+                    });
+                    let stmt = lower.alloc_stmt(HirStmt::Expr {
+                        expr: match_expr,
+                        span: span.clone(),
+                    });
+                    param_desugar_stmts.push(stmt);
+                }
             }
         }
 
-        // Lower all top-level statements
-        let statements: Vec<_> = ast_body
-            .statements
-            .iter()
-            .map(|&id| lower.lower_stmt(ast_body, id))
-            .collect();
+        // Lower all top-level statements, prepending param destructure stmts
+        let mut statements: Vec<_> = param_desugar_stmts;
+        statements.extend(
+            ast_body
+                .statements
+                .iter()
+                .map(|&id| lower.lower_stmt(ast_body, id)),
+        );
 
         // Lower tail expression
         let tail_expr = ast_body
@@ -264,12 +294,16 @@ mod tests {
                         name: "a".into(),
                         ty: None,
                         default_entity: None,
+                        pattern: None,
+                        is_mut: false,
                     },
                     kestrel_ast_builder::AstParam {
                         label: None,
                         name: "b".into(),
                         ty: None,
                         default_entity: None,
+                        pattern: None,
+                        is_mut: false,
                     },
                 ],
                 receiver: None,

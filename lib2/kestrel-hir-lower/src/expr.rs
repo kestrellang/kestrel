@@ -780,23 +780,64 @@ impl LowerCtx<'_> {
     ) -> HirExprId {
         self.push_scope();
 
+        // For complex patterns (tuple, struct), create a synthetic local
+        // and prepend a match-based destructure to the closure body.
+        let mut desugar_stmts = Vec::new();
+        let mut param_counter = 0u32;
+
         let hir_params: Vec<HirClosureParam> = params
             .iter()
             .map(|p| {
-                // Get binding name from pattern
-                let name = match &body.pats[p.pattern] {
-                    AstPat::Binding { name, .. } => name.clone(),
-                    AstPat::Wildcard { .. } => "_".to_string(),
-                    _ => "$closure_param".to_string(),
+                let pat = &body.pats[p.pattern];
+                let (name, is_mut, needs_desugar) = match pat {
+                    AstPat::Binding { name, is_mut, .. } => (name.clone(), *is_mut, false),
+                    AstPat::Wildcard { .. } => ("_".to_string(), false, false),
+                    _ => {
+                        // Complex pattern — use synthetic name, desugar later
+                        let name = format!("_cparam_{}", param_counter);
+                        param_counter += 1;
+                        (name, false, true)
+                    }
                 };
-                let is_mut = matches!(&body.pats[p.pattern], AstPat::Binding { is_mut: true, .. });
                 let local = self.define_local(&name, is_mut, span.clone());
                 let ty = p.ty.as_ref().map(|t| self.lower_type(t));
+
+                if needs_desugar {
+                    // Lower the pattern (creates locals for bindings)
+                    let hir_pat = self.lower_pat(body, p.pattern);
+                    let param_ref = self.alloc_expr(HirExpr::Local(local, span.clone()));
+                    let unit = self.alloc_expr(HirExpr::Tuple {
+                        elements: Vec::new(),
+                        span: span.clone(),
+                    });
+                    let match_expr = self.alloc_expr(HirExpr::Match {
+                        scrutinee: param_ref,
+                        arms: vec![HirMatchArm {
+                            pattern: hir_pat,
+                            guard: None,
+                            body: unit,
+                        }],
+                        span: span.clone(),
+                    });
+                    let stmt = self.alloc_stmt(HirStmt::Expr {
+                        expr: match_expr,
+                        span: span.clone(),
+                    });
+                    desugar_stmts.push(stmt);
+                }
+
                 HirClosureParam { local, ty }
             })
             .collect();
 
-        let lowered_body = self.lower_block(body, closure_body);
+        let mut lowered_body = self.lower_block(body, closure_body);
+
+        // Prepend destructure statements to closure body
+        if !desugar_stmts.is_empty() {
+            desugar_stmts.extend(lowered_body.stmts);
+            lowered_body.stmts = desugar_stmts;
+        }
+
         self.pop_scope();
 
         self.alloc_expr(HirExpr::Closure {

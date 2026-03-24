@@ -5,6 +5,7 @@ pub mod condition_check;
 pub mod dead_code;
 pub mod exhaustive_return;
 pub mod guard_let;
+pub mod param_pattern;
 pub mod type_check;
 
 // Wave 5: Complex body checks

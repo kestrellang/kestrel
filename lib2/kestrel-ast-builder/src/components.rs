@@ -88,6 +88,33 @@ pub struct AstParam {
     pub ty: Option<AstType>,
     /// Entity for the default value expression (child entity with Body + TypeAnnotation).
     pub default_entity: Option<Entity>,
+    /// Destructuring pattern for this parameter, if any.
+    /// None for simple binding parameters (`x: Int`).
+    /// Some for destructured parameters (`(a, b): (Int, Int)`).
+    pub pattern: Option<ParamPattern>,
+    /// Whether this parameter has mutating access mode.
+    pub is_mut: bool,
+}
+
+/// A parameter destructuring pattern — lightweight tree that doesn't need arena allocation.
+/// Used to bridge build phase (AstParam) to query phase (HIR lowering).
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum ParamPattern {
+    Binding { name: String, is_mut: bool },
+    Tuple { elements: Vec<ParamPattern> },
+    Struct {
+        type_name: String,
+        fields: Vec<StructPatternField>,
+        has_rest: bool,
+    },
+    Wildcard,
+}
+
+/// A field in a struct destructuring pattern.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct StructPatternField {
+    pub field_name: String,
+    pub pattern: ParamPattern,
 }
 
 /// How a method receives its self argument.

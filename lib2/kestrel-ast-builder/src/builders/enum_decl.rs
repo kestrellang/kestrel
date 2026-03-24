@@ -95,6 +95,8 @@ pub fn build_enum_case(
                     name,
                     ty,
                     default_entity: None,
+                    pattern: None,
+                    is_mut: false,
                 })
             })
             .collect();

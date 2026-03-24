@@ -527,6 +527,8 @@ mod tests {
                     name: "x".into(),
                     ty: None,
                     default_entity: None,
+                    pattern: None,
+                    is_mut: false,
                 }],
                 receiver: None,
             },

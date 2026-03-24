@@ -182,9 +182,18 @@ impl LowerCtx<'_> {
     ) -> HirPatId {
         let lowered_fields: Vec<HirStructPatField> = fields
             .iter()
-            .map(|f| HirStructPatField {
-                field_name: f.field_name.clone(),
-                pattern: f.pattern.map(|id| self.lower_pat(body, id)),
+            .map(|f| {
+                // Shorthand fields (Point { x }) have pattern: None — create a binding
+                let pattern = if let Some(id) = f.pattern {
+                    Some(self.lower_pat(body, id))
+                } else {
+                    let local = self.define_local(&f.field_name, false, span.clone());
+                    Some(self.alloc_pat(HirPat::Binding { local, span: span.clone() }))
+                };
+                HirStructPatField {
+                    field_name: f.field_name.clone(),
+                    pattern,
+                }
             })
             .collect();
 
@@ -204,7 +213,62 @@ impl LowerCtx<'_> {
             }),
             _ => self.alloc_pat(HirPat::Error {
                 span: span.clone(),
-            }),
+            })
+        }
+    }
+
+    /// Lower a ParamPattern (from parameter destructuring) to an HirPat.
+    /// `force_mut` makes all bindings mutable (for `mutating` access mode).
+    pub fn lower_param_pattern(
+        &mut self,
+        pattern: &kestrel_ast_builder::ParamPattern,
+        span: &Span,
+        force_mut: bool,
+    ) -> HirPatId {
+        match pattern {
+            kestrel_ast_builder::ParamPattern::Wildcard => {
+                self.alloc_pat(HirPat::Wildcard { span: span.clone() })
+            }
+
+            kestrel_ast_builder::ParamPattern::Binding { name, is_mut } => {
+                let local = self.define_local(name, *is_mut || force_mut, span.clone());
+                self.alloc_pat(HirPat::Binding { local, span: span.clone() })
+            }
+
+            kestrel_ast_builder::ParamPattern::Tuple { elements } => {
+                let lowered: Vec<HirPatId> = elements
+                    .iter()
+                    .map(|elem| self.lower_param_pattern(elem, span, force_mut))
+                    .collect();
+                self.alloc_pat(HirPat::Tuple { elements: lowered, span: span.clone() })
+            }
+
+            kestrel_ast_builder::ParamPattern::Struct { type_name, fields, has_rest } => {
+                let lowered_fields: Vec<HirStructPatField> = fields
+                    .iter()
+                    .map(|f| HirStructPatField {
+                        field_name: f.field_name.clone(),
+                        pattern: Some(self.lower_param_pattern(&f.pattern, span, force_mut)),
+                    })
+                    .collect();
+
+                // Resolve struct name
+                let result = self.ctx.query(ResolveTypePath {
+                    segments: vec![type_name.to_string()],
+                    context: self.owner,
+                    root: self.root,
+                });
+
+                match result {
+                    TypeResolution::Found(entity) => self.alloc_pat(HirPat::Struct {
+                        entity,
+                        fields: lowered_fields,
+                        has_rest: *has_rest,
+                        span: span.clone(),
+                    }),
+                    _ => self.alloc_pat(HirPat::Error { span: span.clone() }),
+                }
+            }
         }
     }
 }

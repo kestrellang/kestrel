@@ -43,6 +43,7 @@ pub fn default_analyzers() -> AnalyzerRegistry {
     r.add_body_check(body::guard_let::GuardLetDivergenceAnalyzer);
     r.add_body_check(body::type_check::TypeCheckAnalyzer);
     r.add_body_check(body::condition_check::ConditionCheckAnalyzer);
+    r.add_body_check(body::param_pattern::ParamPatternAnalyzer);
     r.add_body_check(body::assignment::AssignmentAnalyzer);
 
     // Wave 5: Complex body checks
