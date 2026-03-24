@@ -3,4 +3,4 @@
 
 module Test
 
-struct Bad[T, T] {} // ERROR: duplicate type parameter 'T'
+struct Bad[T, T] {} // ERROR: duplicate type parameter name 'T'

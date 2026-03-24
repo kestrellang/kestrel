@@ -722,6 +722,24 @@ fn instantiate_entity_inner(
         .get::<TypeParams>(entity)
         .map(|tp| tp.0.clone())
         .unwrap_or_default();
+
+    // Validate explicit type arg arity
+    if !explicit_type_args.is_empty() && explicit_type_args.len() != type_param_entities.len() {
+        // Check parent entity fallback first (e.g., Pointer[UInt8].nullPointer)
+        let parent_matches = qctx.parent_of(entity)
+            .and_then(|p| qctx.get::<TypeParams>(p))
+            .is_some_and(|tp| tp.0.len() == explicit_type_args.len());
+        if !parent_matches {
+            let total = type_param_entities.len();
+            let span = hir_ty_span(&explicit_type_args[0]);
+            ctx.report_error(InferError::TypeArgCountMismatch {
+                expected: total,
+                got: explicit_type_args.len(),
+                span,
+            });
+        }
+    }
+
     let fresh_type_args: Vec<TyVar> = if !explicit_type_args.is_empty()
         && explicit_type_args.len() == type_param_entities.len()
     {
@@ -996,6 +1014,19 @@ fn expr_span(hir: &HirBody, id: HirExprId) -> Span {
         | HirExpr::Assign { span, .. }
         | HirExpr::Block { span, .. }
         | HirExpr::Error { span } => span.clone(),
+    }
+}
+
+/// Extract a span from a HirTy.
+fn hir_ty_span(ty: &HirTy) -> Span {
+    match ty {
+        HirTy::Named { span, .. }
+        | HirTy::Tuple(_, span)
+        | HirTy::Function { span, .. }
+        | HirTy::Param(_, span)
+        | HirTy::Never(span)
+        | HirTy::Infer(span)
+        | HirTy::Error(span) => span.clone(),
     }
 }
 

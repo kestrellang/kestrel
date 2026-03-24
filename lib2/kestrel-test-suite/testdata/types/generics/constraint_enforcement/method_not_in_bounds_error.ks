@@ -7,5 +7,5 @@ protocol Add {
     func add(other: Self) -> Self
 }
 func bad[T](a: T, b: T) -> T where T: Add {
-    return a.subtract(b) // ERROR: no method 'subtract' found for type 'T'
+    return a.subtract(b) // ERROR: no member 'subtract'
 }

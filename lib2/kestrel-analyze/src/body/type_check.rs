@@ -129,6 +129,19 @@ fn format_error(err: &InferError, detail: &str) -> (String, String) {
             "type parameter cannot be used as a value".into(),
             "not a value".into(),
         ),
+        InferError::TypeArgCountMismatch { expected, got, .. } => {
+            if *got < *expected {
+                (
+                    format!("too few type arguments: expected {expected}, got {got}"),
+                    format!("expected {expected} type argument(s)"),
+                )
+            } else {
+                (
+                    format!("too many type arguments: expected {expected}, got {got}"),
+                    format!("expected {expected} type argument(s)"),
+                )
+            }
+        }
         InferError::FromHir { .. } => unreachable!("filtered above"),
     }
 }

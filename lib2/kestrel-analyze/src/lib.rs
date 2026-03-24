@@ -79,6 +79,7 @@ pub fn default_analyzers() -> AnalyzerRegistry {
     r.add_decl_check(decl::parent_protocol_conformance::ParentProtocolConformanceAnalyzer);
     r.add_decl_check(decl::protocol_field_conformance::ProtocolFieldConformanceAnalyzer);
     r.add_decl_check(decl::generics::GenericsAnalyzer);
+    r.add_decl_check(decl::generics::TypeArgArityAnalyzer);
     r.add_decl_check(decl::visibility::VisibilityAnalyzer);
     r.add_decl_check(decl::type_alias_validation::TypeAliasValidationAnalyzer);
 

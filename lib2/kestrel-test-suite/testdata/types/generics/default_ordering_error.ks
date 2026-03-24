@@ -3,4 +3,4 @@
 
 module Test
 
-struct Bad[T = lang.i64, U] {} // ERROR: with default must come after
+struct Bad[T = lang.i64, U] {} // ERROR: without default follows

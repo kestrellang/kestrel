@@ -229,6 +229,17 @@ impl LowerCtx<'_> {
                 }
                 return current;
             }
+        } else if self.lookup_local(&first.name).is_some() {
+            // Local variable with type args (e.g., `x[Int]`) — variables don't accept type args
+            self.ctx.accumulate(
+                kestrel_reporting2::Diagnostic::error()
+                    .with_message(format!("variable '{}' does not accept type arguments", first.name))
+                    .with_labels(vec![
+                        kestrel_reporting2::Label::primary(first.span.file_id, first.span.range())
+                            .with_message("type arguments not allowed on variables"),
+                    ])
+            );
+            return self.alloc_expr(HirExpr::Error { span: span.clone() });
         }
 
         // For multi-segment paths, check if the first segment is a type parameter.
@@ -264,6 +275,23 @@ impl LowerCtx<'_> {
             context: self.owner,
             root: self.root,
         });
+
+        // Check for empty type argument brackets (e.g., `identity[]`)
+        for seg in segments {
+            if let Some(args) = &seg.type_args {
+                if args.is_empty() {
+                    self.ctx.accumulate(
+                        kestrel_reporting2::Diagnostic::error()
+                            .with_message("empty type argument list")
+                            .with_labels(vec![
+                                kestrel_reporting2::Label::primary(seg.span.file_id, seg.span.range())
+                                    .with_message("expected at least one type argument"),
+                            ])
+                    );
+                    return self.alloc_expr(HirExpr::Error { span: span.clone() });
+                }
+            }
+        }
 
         // Collect explicit type args from all path segments (e.g., Pointer[UInt8])
         let explicit_type_args: Vec<kestrel_hir::ty::HirTy> = segments

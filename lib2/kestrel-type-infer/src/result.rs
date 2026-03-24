@@ -282,5 +282,12 @@ fn describe_error(ctx: &InferCtx<'_>, err: &InferError) -> String {
         InferError::TypeParamAsValue { .. } => {
             "type parameter cannot be used as a value".into()
         }
+        InferError::TypeArgCountMismatch { expected, got, .. } => {
+            if *got < *expected {
+                format!("too few type arguments: expected {}, got {}", expected, got)
+            } else {
+                format!("too many type arguments: expected {}, got {}", expected, got)
+            }
+        }
     }
 }

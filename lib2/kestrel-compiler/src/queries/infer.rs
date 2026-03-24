@@ -1,5 +1,6 @@
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
 use kestrel_type_infer::InferBody;
+use kestrel_type_infer::error::InferError;
 use kestrel_type_infer::result::TypedBody;
 
 use crate::diagnostic::{ResolvedInferError, ThrowDiagnostic};
@@ -25,8 +26,13 @@ impl QueryFn for InferWithDiagnostics {
             root: self.root,
         })?;
 
-        // Convert inference errors to rich diagnostics and accumulate
+        // Convert inference errors to rich diagnostics and accumulate.
+        // Skip FromHir errors — they duplicate diagnostics already emitted
+        // during HIR lowering (e.g., unresolved names, empty type arg lists).
         for (i, err) in typed.errors.iter().enumerate() {
+            if matches!(err, InferError::FromHir { .. }) {
+                continue;
+            }
             let detail = typed
                 .error_details
                 .get(i)

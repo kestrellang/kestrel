@@ -451,6 +451,7 @@ fn error_variant_name(err: &InferError) -> &'static str {
         InferError::LabelMismatch { .. } => "LabelMismatch",
         InferError::InstanceMethodAsStatic { .. } => "InstanceMethodAsStatic",
         InferError::TypeParamAsValue { .. } => "TypeParamAsValue",
+        InferError::TypeArgCountMismatch { .. } => "TypeArgCountMismatch",
     }
 }
 
@@ -496,6 +497,9 @@ fn format_error(err: &InferError) -> String {
         }
         InferError::TypeParamAsValue { .. } => {
             format!("TypeParamAsValue at {}:{}", span.file_id, span.start)
+        }
+        InferError::TypeArgCountMismatch { expected, got, .. } => {
+            format!("TypeArgCountMismatch expected={} got={} at {}:{}", expected, got, span.file_id, span.start)
         }
     }
 }

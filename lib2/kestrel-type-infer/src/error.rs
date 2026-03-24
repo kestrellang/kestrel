@@ -91,6 +91,13 @@ pub enum InferError {
     TypeParamAsValue {
         span: Span,
     },
+
+    /// Wrong number of type arguments (e.g., `identity[Int, String](42)` on a 1-param generic).
+    TypeArgCountMismatch {
+        expected: usize,
+        got: usize,
+        span: Span,
+    },
 }
 
 impl InferError {
@@ -109,7 +116,8 @@ impl InferError {
             | Self::ArgCountMismatch { span, .. }
             | Self::LabelMismatch { span, .. }
             | Self::InstanceMethodAsStatic { span, .. }
-            | Self::TypeParamAsValue { span } => span,
+            | Self::TypeParamAsValue { span }
+            | Self::TypeArgCountMismatch { span, .. } => span,
         }
     }
 }

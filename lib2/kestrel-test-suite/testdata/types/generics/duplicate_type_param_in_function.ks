@@ -3,4 +3,4 @@
 
 module Test
 
-func bad[A, A]() { } // ERROR: duplicate type parameter 'A'
+func bad[A, A]() { } // ERROR: duplicate type parameter name 'A'

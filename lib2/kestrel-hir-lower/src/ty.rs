@@ -8,7 +8,7 @@
 //! for declaration-level types (Callable params, TypeAnnotation, etc.).
 
 use kestrel_ast::AstType;
-use kestrel_ast_builder::{Callable, DeclSpan, NodeKind, TypeAnnotation};
+use kestrel_ast_builder::{Callable, DeclSpan, NodeKind, TypeAnnotation, TypeParams};
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
 use kestrel_hir::ty::HirTy;
 use kestrel_name_res::{ResolveTypePath, TypeResolution};
@@ -64,6 +64,35 @@ pub fn lower_ast_type(
                         .flat_map(|s| s.type_args.iter())
                         .map(|a| lower_ast_type(ctx, owner, root, a))
                         .collect();
+
+                    // Validate type argument arity when explicit args are provided
+                    if !args.is_empty() {
+                        if let Some(tp) = ctx.get::<TypeParams>(entity) {
+                            let total = tp.0.len();
+                            let required = tp.0.iter()
+                                .filter(|&&p| ctx.get::<TypeAnnotation>(p).is_none())
+                                .count();
+                            if args.len() < required {
+                                let type_name = segments.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join(".");
+                                ctx.accumulate(Diagnostic::error()
+                                    .with_message(format!("too few type arguments for '{type_name}'"))
+                                    .with_labels(vec![
+                                        Label::primary(span.file_id, span.range())
+                                            .with_message(format!("expected at least {required}, got {}", args.len())),
+                                    ]));
+                                return HirTy::Error(span.clone());
+                            } else if args.len() > total {
+                                let type_name = segments.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join(".");
+                                ctx.accumulate(Diagnostic::error()
+                                    .with_message(format!("too many type arguments for '{type_name}'"))
+                                    .with_labels(vec![
+                                        Label::primary(span.file_id, span.range())
+                                            .with_message(format!("expected at most {total}, got {}", args.len())),
+                                    ]));
+                                return HirTy::Error(span.clone());
+                            }
+                        }
+                    }
 
                     HirTy::Named {
                         entity,

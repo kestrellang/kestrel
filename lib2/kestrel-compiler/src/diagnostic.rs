@@ -134,6 +134,17 @@ impl ToDiagnostic for ResolvedInferError<'_> {
             InferError::TypeParamAsValue { .. } => Diagnostic::error()
                 .with_message("type parameter cannot be used as a value")
                 .with_labels(vec![Label::primary(file_id, range).with_message("not a value")]),
+
+            InferError::TypeArgCountMismatch { expected, got, .. } => {
+                let msg = if *got < *expected {
+                    format!("too few type arguments: expected {expected}, got {got}")
+                } else {
+                    format!("too many type arguments: expected {expected}, got {got}")
+                };
+                Diagnostic::error()
+                    .with_message(&msg)
+                    .with_labels(vec![Label::primary(file_id, range).with_message(detail)])
+            }
         }
     }
 }
