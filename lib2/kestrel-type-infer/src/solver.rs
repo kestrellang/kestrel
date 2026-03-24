@@ -634,7 +634,7 @@ fn emit_resolved_call(
     // Emit where clause constraints
     for clause in ctx.resolver.where_clauses(entity) {
         match clause {
-            crate::resolve::WhereClause::Bound { param, protocol } => {
+            crate::resolve::WhereClause::Bound { param, protocol, .. } => {
                 if let Some(&(_, tv)) = subs.iter().find(|(e, _)| *e == param) {
                     ctx.conforms(tv, protocol, span.clone());
                 }
@@ -949,16 +949,23 @@ fn solve_member(
         subs.push((param, fresh));
     }
 
-    // Map protocol type params to receiver when member comes from a protocol.
-    // E.g., Addable[Rhs = Self] — Rhs defaults to Self, so map Rhs → receiver.
+    // Map protocol type params when member comes from a protocol.
+    // If protocol_type_args are provided (from where clause, e.g., F: Factory[i64]),
+    // use those. Otherwise default to receiver (e.g., Addable[Rhs = Self]).
     if let Some(self_entity) = resolution.self_type {
         let proto_type_params: Vec<kestrel_hecs::Entity> = ctx.query_ctx
             .get::<TypeParams>(self_entity)
             .map(|tp| tp.0.clone())
             .unwrap_or_default();
-        for &param in &proto_type_params {
+        for (i, &param) in proto_type_params.iter().enumerate() {
             if !subs.iter().any(|(e, _)| *e == param) {
-                subs.push((param, receiver));
+                if let Some(hir_ty) = resolution.protocol_type_args.get(i) {
+                    // Use the explicit type arg from the where clause bound
+                    let tv = lower_hir_ty_sub(ctx, hir_ty, None, TyVar(0), &subs);
+                    subs.push((param, tv));
+                } else {
+                    subs.push((param, receiver));
+                }
             }
         }
     }
@@ -966,7 +973,7 @@ fn solve_member(
     // Emit where clause constraints
     for clause in &resolution.where_clauses {
         match clause {
-            crate::resolve::WhereClause::Bound { param, protocol } => {
+            crate::resolve::WhereClause::Bound { param, protocol, .. } => {
                 if let Some(idx) = resolution
                     .type_params
                     .iter()

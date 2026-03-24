@@ -231,6 +231,32 @@ impl LowerCtx<'_> {
             }
         }
 
+        // For multi-segment paths, check if the first segment is a type parameter.
+        // Type parameters can't be resolved as multi-segment paths (T.create),
+        // so emit Def(T) + Field/MethodCall chain for the solver to resolve via bounds.
+        if segments.len() > 1 {
+            let first_result = self.ctx.query(ResolveValuePath {
+                segments: vec![segments[0].name.clone()],
+                context: self.owner,
+                root: self.root,
+            });
+            if let ValueResolution::TypeParameter(entity) = first_result {
+                let first_type_args: Vec<kestrel_hir::ty::HirTy> = segments[0]
+                    .type_args.iter().flatten()
+                    .map(|t| self.lower_type(t))
+                    .collect();
+                let mut current = self.alloc_expr(HirExpr::Def(entity, first_type_args, segments[0].span.clone()));
+                for seg in &segments[1..] {
+                    current = self.alloc_expr(HirExpr::Field {
+                        base: current,
+                        name: seg.name.clone(),
+                        span: seg.span.clone(),
+                    });
+                }
+                return current;
+            }
+        }
+
         // Fall back to name resolution
         let seg_names: Vec<String> = segments.iter().map(|s| s.name.clone()).collect();
         let result = self.ctx.query(ResolveValuePath {
@@ -419,6 +445,35 @@ impl LowerCtx<'_> {
                         );
                         return self.alloc_expr(HirExpr::Call {
                             callee,
+                            args: lowered_args,
+                            span: span.clone(),
+                        });
+                    }
+                }
+
+                // Type parameter static call: T.method(args) → MethodCall
+                // The solver resolves the method via protocol bounds.
+                {
+                    let first_result = self.ctx.query(ResolveValuePath {
+                        segments: vec![segments[0].name.clone()],
+                        context: self.owner,
+                        root: self.root,
+                    });
+                    if let ValueResolution::TypeParameter(entity) = first_result {
+                        let first_type_args: Vec<kestrel_hir::ty::HirTy> = segments[0]
+                            .type_args.iter().flatten()
+                            .map(|t| self.lower_type(t))
+                            .collect();
+                        let receiver = self.alloc_expr(
+                            HirExpr::Def(entity, first_type_args, segments[0].span.clone()),
+                        );
+                        let last = &segments[segments.len() - 1];
+                        let lowered_type_args = last.type_args.as_ref()
+                            .map(|args| args.iter().map(|t| self.lower_type(t)).collect());
+                        return self.alloc_expr(HirExpr::MethodCall {
+                            receiver,
+                            method: last.name.clone(),
+                            type_args: lowered_type_args,
                             args: lowered_args,
                             span: span.clone(),
                         });

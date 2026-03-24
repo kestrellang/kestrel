@@ -186,7 +186,7 @@ fn emit_method_where_clauses(
 
     for clause in clauses {
         match clause {
-            resolve::WhereClause::Bound { param, protocol } => {
+            resolve::WhereClause::Bound { param, protocol, .. } => {
                 // Find or create a TyVar for this param
                 let tv = ctx.param(param);
                 ctx.conforms(tv, protocol, span.clone());
@@ -286,7 +286,7 @@ fn emit_extension_where_clauses(
     let clauses = ctx.resolver.where_clauses(extension);
     for clause in clauses {
         match clause {
-            resolve::WhereClause::Bound { param, protocol } => {
+            resolve::WhereClause::Bound { param, protocol, .. } => {
                 let span = Span::synthetic(0);
                 let subject_tv = get_or_create_subject_tv(
                     ctx, &target_type_params, fresh_args,

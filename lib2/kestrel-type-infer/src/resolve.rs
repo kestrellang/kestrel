@@ -5,7 +5,7 @@
 //! is the real implementation; tests can provide mocks.
 
 use kestrel_ast_builder::{
-    Callable, Conformances, ConformanceItem, Gettable, Name, NodeKind, Settable, Static,
+    AstType, Callable, Conformances, ConformanceItem, Gettable, Name, NodeKind, Settable, Static,
     TypeParams, WhereClause as AstWhereClause, WhereConstraint,
 };
 use kestrel_hecs::{Entity, QueryContext};
@@ -40,6 +40,10 @@ pub struct MemberResolution {
     /// The solver emits a Conforms constraint to validate the receiver
     /// conforms to this protocol with the inferred type args.
     pub via_protocol: Option<Entity>,
+    /// Type arguments applied to the protocol in the where clause (e.g., `[lang.i64]`
+    /// for `F: Factory[lang.i64]`). Used to substitute protocol type params
+    /// in the method's return type and parameter types.
+    pub protocol_type_args: Vec<HirTy>,
 }
 
 /// Info about a member's parameter, for overload resolution.
@@ -77,8 +81,14 @@ pub struct AssociatedTypeResolution {
 /// Where clause on a declaration.
 #[derive(Clone, Debug)]
 pub enum WhereClause {
-    /// `T: Protocol`
-    Bound { param: Entity, protocol: Entity },
+    /// `T: Protocol` or `T: Protocol[Args]`
+    Bound {
+        param: Entity,
+        protocol: Entity,
+        /// Type arguments applied to the protocol (e.g., `[lang.i64]` in `Factory[lang.i64]`).
+        /// Empty for non-generic protocols.
+        protocol_type_args: Vec<HirTy>,
+    },
     /// `T.Item = SomeType` (associated type equality)
     TypeEquality {
         param: Entity,
@@ -456,10 +466,14 @@ impl TypeResolver for WorldResolver<'_> {
                         continue;
                     };
 
-                    // Resolve each protocol
+                    // Resolve each protocol, including type arguments
                     for protocol_ty in protocols {
                         if let Some(protocol) = self.resolve_type_entity(protocol_ty) {
-                            result.push(WhereClause::Bound { param, protocol });
+                            // Extract type args from the protocol type (e.g., Factory[lang.i64])
+                            let protocol_type_args = extract_protocol_type_args(
+                                self.ctx, self.owner, self.root, protocol_ty,
+                            );
+                            result.push(WhereClause::Bound { param, protocol, protocol_type_args });
                         }
                     }
                 }
@@ -493,6 +507,29 @@ impl TypeResolver for WorldResolver<'_> {
         }
 
         result
+    }
+}
+
+/// Extract type arguments from a protocol type in a where clause.
+/// E.g., for `Factory[lang.i64]`, returns `[HirTy for lang.i64]`.
+fn extract_protocol_type_args(
+    ctx: &QueryContext<'_>,
+    owner: Entity,
+    root: Entity,
+    protocol_ty: &AstType,
+) -> Vec<HirTy> {
+    match protocol_ty {
+        AstType::Named { segments, .. } => {
+            let result: Vec<HirTy> = segments.last()
+                .map(|seg| {
+                    seg.type_args.iter()
+                        .map(|a| kestrel_hir_lower::lower_ast_type(ctx, owner, root, a))
+                        .collect()
+                })
+                .unwrap_or_default();
+            result
+        }
+        _ => Vec::new(),
     }
 }
 
@@ -644,6 +681,7 @@ impl WorldResolver<'_> {
             kind: member_kind,
             self_type,
             via_protocol: None,
+            protocol_type_args: vec![],
         })
     }
 
@@ -773,6 +811,7 @@ impl WorldResolver<'_> {
             kind,
             self_type: Some(protocol),
             via_protocol: Some(protocol),
+            protocol_type_args: vec![],
         })
     }
 
@@ -933,9 +972,64 @@ impl WorldResolver<'_> {
         }
 
         let all_candidates = self.search_protocols_for_member(&bound_protocols, name);
-        let (instance_candidates, member) = self.select_member_candidate(all_candidates, args)?;
-        let _ = instance_candidates; // used only by select_member_candidate
-        self.build_member_resolution(member)
+
+        // For type parameters, include both instance and static methods.
+        if all_candidates.is_empty() {
+            return Err(MemberError::NotFound);
+        }
+
+        // Filter by label/arity if args provided
+        let arg_labels: Vec<Option<&str>> = args.iter().map(|a| a.label.as_deref()).collect();
+        let matches: Vec<Entity> = all_candidates
+            .iter()
+            .copied()
+            .filter(|&c| self.matches_labels(c, &arg_labels))
+            .collect();
+
+        let member = match matches.len() {
+            0 => {
+                if all_candidates.len() == 1 {
+                    all_candidates[0]
+                } else {
+                    return Err(MemberError::NotFound);
+                }
+            }
+            1 => matches[0],
+            _ => return Err(MemberError::Ambiguous(matches)),
+        };
+        let mut resolution = self.build_member_resolution(member)?;
+
+        // Attach protocol type args from the where clause bound.
+        // E.g., for `F: Factory[lang.i64]`, the method's protocol is Factory,
+        // and its type args are [lang.i64]. These substitute the protocol's
+        // type params (T → i64) in the method's return/param types.
+        if let Some(self_entity) = resolution.self_type {
+            resolution.protocol_type_args = self.find_protocol_type_args_from_bounds(
+                param_entity, self_entity,
+            );
+        }
+
+        Ok(resolution)
+    }
+
+    /// Find the type arguments for a protocol bound on a type parameter.
+    /// Searches the owner's where clauses for `param: Protocol[Args]`.
+    fn find_protocol_type_args_from_bounds(
+        &self,
+        param_entity: Entity,
+        protocol_entity: Entity,
+    ) -> Vec<HirTy> {
+        // Walk up from the param to find the owner (function/init that declares the where clause)
+        let owner = self.ctx.parent_of(param_entity).unwrap_or(self.owner);
+        let clauses = self.where_clauses(owner);
+        for clause in &clauses {
+            if let WhereClause::Bound { param, protocol, protocol_type_args, .. } = clause {
+                if *param == param_entity && *protocol == protocol_entity {
+                    return protocol_type_args.clone();
+                }
+            }
+        }
+        Vec::new()
     }
 
     /// Search a set of protocols (and their extensions) for a member by name.
@@ -947,9 +1041,12 @@ impl WorldResolver<'_> {
         name: &str,
     ) -> Vec<Entity> {
         let mut all_candidates = Vec::new();
-        let mut seen_signatures = std::collections::HashSet::new();
+        // Dedup within a protocol (inherited methods) but not across protocols
+        // so that same-signature methods from different protocols trigger ambiguity.
 
         for proto in protocols {
+            let mut seen_in_proto = std::collections::HashSet::new();
+
             // Named members inside the protocol
             let children = self.ctx.query(kestrel_name_res::VisibleChildrenByName {
                 parent: *proto,
@@ -958,7 +1055,7 @@ impl WorldResolver<'_> {
             });
             for &child in &children {
                 let sig = self.label_signature(child);
-                if seen_signatures.insert(sig) {
+                if seen_in_proto.insert(sig) {
                     all_candidates.push(child);
                 }
             }
@@ -976,7 +1073,7 @@ impl WorldResolver<'_> {
                 });
                 for &child in &ext_children {
                     let sig = self.label_signature(child);
-                    if seen_signatures.insert(sig) {
+                    if seen_in_proto.insert(sig) {
                         all_candidates.push(child);
                     }
                 }

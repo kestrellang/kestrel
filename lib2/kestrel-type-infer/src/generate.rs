@@ -734,7 +734,7 @@ fn instantiate_entity_inner(
     // Emit where clause constraints for the type params
     for clause in ctx.resolver.where_clauses(entity) {
         match clause {
-            crate::resolve::WhereClause::Bound { param, protocol } => {
+            crate::resolve::WhereClause::Bound { param, protocol, .. } => {
                 if let Some(idx) = type_param_entities.iter().position(|&p| p == param) {
                     let span = Span::synthetic(0);
                     ctx.conforms(fresh_type_args[idx], protocol, span);

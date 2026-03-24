@@ -193,12 +193,40 @@ pub fn set_where_clause(world: &mut World, entity: Entity, node: &SyntaxNode, fi
                     // Subject is a Name (simple: T) or AssociatedTypeTarget (dotted: T.Item)
                     let subject = bound_subject_to_ast_type(&child, file_id)?;
 
-                    // Protocol conformances come from Path children
-                    let protocols: Vec<_> = child
-                        .children()
-                        .filter(|c| c.kind() == SyntaxKind::Path)
-                        .filter_map(|path| path_to_ast_type(&path, file_id))
-                        .collect();
+                    // Protocol conformances come from Path children.
+                    // Type arguments (e.g., Factory[lang.i64]) appear as
+                    // TypeArgumentList siblings after the Path node.
+                    let protocols: Vec<_> = {
+                        let children: Vec<_> = child.children().collect();
+                        let mut protos = Vec::new();
+                        let mut i = 0;
+                        while i < children.len() {
+                            if children[i].kind() == SyntaxKind::Path {
+                                let mut ty = path_to_ast_type(&children[i], file_id);
+                                // Check for TypeArgumentList following the Path
+                                if i + 1 < children.len()
+                                    && children[i + 1].kind() == SyntaxKind::TypeArgumentList
+                                {
+                                    if let Some(AstType::Named { ref mut segments, .. }) = ty {
+                                        let type_args: Vec<AstType> = children[i + 1]
+                                            .children()
+                                            .filter(|c| crate::ast_type::is_type_node(c.kind()))
+                                            .filter_map(|c| crate::ast_type::ast_type_from_cst(&c, file_id))
+                                            .collect();
+                                        if let Some(last) = segments.last_mut() {
+                                            last.type_args = type_args;
+                                        }
+                                    }
+                                    i += 1; // skip the TypeArgumentList
+                                }
+                                if let Some(t) = ty {
+                                    protos.push(t);
+                                }
+                            }
+                            i += 1;
+                        }
+                        protos
+                    };
 
                     if protocols.is_empty() {
                         return None;
@@ -282,9 +310,39 @@ fn path_to_ast_type(path_node: &SyntaxNode, file_id: usize) -> Option<AstType> {
     }
     let range = path_node.text_range();
     let span = Span::new(file_id, (range.start().into())..(range.end().into()));
+
+    // Extract type arguments (e.g., Factory[lang.i64] → [lang.i64])
+    // Type args appear as a TypeArgumentList child of the path node
+    let type_args: Vec<AstType> = find_child(path_node, SyntaxKind::TypeArgumentList)
+        .map(|args_node| {
+            args_node
+                .children()
+                .filter(|c| crate::ast_type::is_type_node(c.kind()))
+                .filter_map(|c| crate::ast_type::ast_type_from_cst(&c, file_id))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    // Type args go on the last segment
     let segments = names.into_iter()
-        .map(|name| PathSegment { name, type_args: vec![], span: span.clone() })
-        .collect();
+        .enumerate()
+        .map(|(i, name)| {
+            let seg_args = if i == 0 && !type_args.is_empty() {
+                // For single-segment paths, args go on the only segment
+                type_args.clone()
+            } else {
+                vec![]
+            };
+            PathSegment { name, type_args: seg_args, span: span.clone() }
+        })
+        .collect::<Vec<_>>();
+    // If multi-segment, put type args on last segment
+    let mut segments = segments;
+    if segments.len() > 1 && !type_args.is_empty() {
+        if let Some(last) = segments.last_mut() {
+            last.type_args = type_args;
+        }
+    }
     Some(AstType::Named { segments, span })
 }
 

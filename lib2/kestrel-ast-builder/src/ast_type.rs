@@ -144,7 +144,7 @@ pub fn ast_type_from_cst(node: &SyntaxNode, file_id: usize) -> Option<AstType> {
 }
 
 /// Check if a SyntaxKind is a type node.
-fn is_type_node(kind: SyntaxKind) -> bool {
+pub(crate) fn is_type_node(kind: SyntaxKind) -> bool {
     matches!(
         kind,
         SyntaxKind::Ty
