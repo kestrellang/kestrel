@@ -73,7 +73,8 @@ members = [
     "lib2/kestrel-mir",
     "lib2/kestrel-mir-lower",
     "lib2/kestrel-codegen",
-    "lib2/kestrel-codegen-cranelift"
+    "lib2/kestrel-codegen-cranelift",
+    "lib2/kestrel-test-suite"
 ]
 exclude = ["registry"]
 

@@ -1,0 +1,13 @@
+// test: diagnostics
+// stdlib: false
+
+module Test
+
+enum Color {
+    case Red
+    case Green
+}
+
+func test() -> Color {
+    Color.Red()
+}

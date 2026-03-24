@@ -1,0 +1,28 @@
+[package]
+name = "kestrel-test-suite2"
+version.workspace = true
+edition.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+kestrel-compiler2 = { path = "../kestrel-compiler" }
+kestrel-hecs = { path = "../kestrel-hecs" }
+kestrel-mir = { path = "../kestrel-mir" }
+kestrel-mir-lower = { path = "../kestrel-mir-lower" }
+kestrel-codegen2 = { path = "../kestrel-codegen" }
+kestrel-codegen2-cranelift = { path = "../kestrel-codegen-cranelift" }
+kestrel-analyze = { path = "../kestrel-analyze" }
+kestrel-span2 = { path = "../kestrel-span" }
+kestrel-reporting2 = { path = "../kestrel-reporting" }
+kestrel-type-infer = { path = "../kestrel-type-infer" }
+kestrel-ast-builder = { path = "../kestrel-ast-builder" }
+codespan-reporting = { workspace = true }
+
+[dev-dependencies]
+datatest-stable = "0.2"
+
+[[test]]
+name = "file_tests"
+harness = false

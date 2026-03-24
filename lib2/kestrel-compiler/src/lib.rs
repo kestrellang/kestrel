@@ -68,6 +68,20 @@ impl Compiler {
         Self { world, files: HashMap::new(), root, target: TargetConfig::host() }
     }
 
+    /// Create a Compiler from a pre-built World snapshot.
+    ///
+    /// Used by the test suite to clone a cached stdlib world per test.
+    /// The snapshot must already have a root module with lang module
+    /// seeded and analyzers registered.
+    pub fn from_snapshot(world: World, root: Entity, files: HashMap<String, Entity>) -> Self {
+        Self { world, files, root, target: TargetConfig::host() }
+    }
+
+    /// Access the file path → entity mapping.
+    pub fn files(&self) -> &HashMap<String, Entity> {
+        &self.files
+    }
+
     /// Set the compilation target for conditional filtering.
     pub fn with_target(mut self, target: TargetConfig) -> Self {
         self.target = target;
