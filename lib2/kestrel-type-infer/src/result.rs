@@ -268,5 +268,19 @@ fn describe_error(ctx: &InferCtx<'_>, err: &InferError) -> String {
         }
         InferError::InfiniteType { .. } => "infinite type".into(),
         InferError::FromHir { .. } => "from-hir".into(),
+        InferError::ArgCountMismatch { expected, got, .. } => {
+            format!("expected {} argument(s), got {}", expected, got)
+        }
+        InferError::LabelMismatch { expected, got, .. } => {
+            let exp = expected.as_deref().unwrap_or("_");
+            let g = got.as_deref().unwrap_or("_");
+            format!("wrong label: expected '{}', got '{}'", exp, g)
+        }
+        InferError::InstanceMethodAsStatic { name, .. } => {
+            format!("instance method '{}' cannot be called on a type", name)
+        }
+        InferError::TypeParamAsValue { .. } => {
+            "type parameter cannot be used as a value".into()
+        }
     }
 }

@@ -1013,7 +1013,8 @@ impl WorldResolver<'_> {
     }
 
     /// Find the type arguments for a protocol bound on a type parameter.
-    /// Searches the owner's where clauses for `param: Protocol[Args]`.
+    /// Searches the owner's where clauses for `param: Protocol[Args]`,
+    /// and also checks inherited protocol conformances (e.g., IntConverter: Converter[i64]).
     fn find_protocol_type_args_from_bounds(
         &self,
         param_entity: Entity,
@@ -1022,6 +1023,8 @@ impl WorldResolver<'_> {
         // Walk up from the param to find the owner (function/init that declares the where clause)
         let owner = self.ctx.parent_of(param_entity).unwrap_or(self.owner);
         let clauses = self.where_clauses(owner);
+
+        // Direct match: where clause says T: Protocol[Args]
         for clause in &clauses {
             if let WhereClause::Bound { param, protocol, protocol_type_args, .. } = clause {
                 if *param == param_entity && *protocol == protocol_entity {
@@ -1029,7 +1032,46 @@ impl WorldResolver<'_> {
                 }
             }
         }
+
+        // Inherited match: where clause says T: ParentProtocol, and
+        // ParentProtocol: Protocol[Args] in its conformance list.
+        // E.g., T: IntConverter, IntConverter: Converter[i64] → find [i64] for Converter.
+        for clause in &clauses {
+            if let WhereClause::Bound { param, protocol, .. } = clause {
+                if *param == param_entity {
+                    if let Some(args) = self.find_inherited_protocol_type_args(*protocol, protocol_entity) {
+                        return args;
+                    }
+                }
+            }
+        }
+
         Vec::new()
+    }
+
+    /// Search a protocol's conformance chain for inherited type args.
+    /// E.g., IntConverter: Converter[i64] → returns [i64] when searching for Converter.
+    fn find_inherited_protocol_type_args(
+        &self,
+        from_protocol: Entity,
+        target_protocol: Entity,
+    ) -> Option<Vec<HirTy>> {
+        let conformances = self.ctx.get::<Conformances>(from_protocol)?;
+        for item in &conformances.0 {
+            let ConformanceItem::Positive(ast_ty, _) = item else { continue };
+            let Some(resolved) = self.resolve_type_entity(ast_ty) else { continue };
+            if resolved == target_protocol {
+                // Extract type args from the conformance path
+                return Some(extract_protocol_type_args(self.ctx, self.owner, self.root, ast_ty));
+            }
+            // Recurse into inherited protocols
+            if self.ctx.get::<NodeKind>(resolved) == Some(&NodeKind::Protocol) {
+                if let Some(args) = self.find_inherited_protocol_type_args(resolved, target_protocol) {
+                    return Some(args);
+                }
+            }
+        }
+        None
     }
 
     /// Search a set of protocols (and their extensions) for a member by name.
@@ -1079,8 +1121,11 @@ impl WorldResolver<'_> {
                 }
             }
 
-            // Subscripts and initializers have no Name — search by NodeKind
-            if all_candidates.is_empty() && (name == "(subscript)" || name == "init") {
+            // Subscripts and initializers have no Name — search by NodeKind.
+            // Check per-protocol: only search by NodeKind if no named members
+            // were found for this protocol (to avoid mixing named + NodeKind results).
+            let found_named_in_proto = !seen_in_proto.is_empty();
+            if !found_named_in_proto && (name == "(subscript)" || name == "init") {
                 let target_kind = if name == "(subscript)" {
                     NodeKind::Subscript
                 } else {

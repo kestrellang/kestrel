@@ -118,6 +118,22 @@ impl ToDiagnostic for ResolvedInferError<'_> {
             InferError::ImplicitMemberNotFound { name, .. } => Diagnostic::error()
                 .with_message(format!("implicit member '.{name}' not found"))
                 .with_labels(vec![Label::primary(file_id, range).with_message(detail)]),
+
+            InferError::ArgCountMismatch { expected, got, .. } => Diagnostic::error()
+                .with_message(format!("wrong number of arguments: expected {expected}, got {got}"))
+                .with_labels(vec![Label::primary(file_id, range).with_message(detail)]),
+
+            InferError::LabelMismatch { .. } => Diagnostic::error()
+                .with_message("wrong argument label")
+                .with_labels(vec![Label::primary(file_id, range).with_message(detail)]),
+
+            InferError::InstanceMethodAsStatic { name, .. } => Diagnostic::error()
+                .with_message(format!("instance method '{name}' cannot be called on a type"))
+                .with_labels(vec![Label::primary(file_id, range).with_message(detail)]),
+
+            InferError::TypeParamAsValue { .. } => Diagnostic::error()
+                .with_message("type parameter cannot be used as a value")
+                .with_labels(vec![Label::primary(file_id, range).with_message("not a value")]),
         }
     }
 }

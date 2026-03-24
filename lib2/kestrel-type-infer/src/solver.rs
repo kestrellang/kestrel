@@ -182,8 +182,9 @@ fn try_solve(ctx: &mut InferCtx<'_>, c: Constraint) -> SolveResult {
             result,
             expr,
             is_call,
+            is_static_context,
             span,
-        } => solve_member(ctx, receiver, &name, args, result, expr, is_call, span),
+        } => solve_member(ctx, receiver, &name, args, result, expr, is_call, is_static_context, span),
         Constraint::OverloadedCall {
             candidates,
             type_args,
@@ -471,13 +472,13 @@ fn solve_call(
                 // solve_member will equate result with (), then we equate
                 // result with callee to fix it.
                 let init_result = ctx.fresh();
-                let res = solve_member(ctx, callee, "init", args, init_result, expr, true, span.clone());
+                let res = solve_member(ctx, callee, "init", args, init_result, expr, true, true, span.clone());
                 // The result of T() is T, not the init's return type
                 ctx.equal(result, callee, span);
                 res
             } else {
                 // Instance subscript call (e.g., dict(key))
-                solve_member(ctx, callee, "(subscript)", args, result, expr, true, span)
+                solve_member(ctx, callee, "(subscript)", args, result, expr, true, false, span)
             }
         }
         _ => {
@@ -807,6 +808,7 @@ fn solve_member(
     result: TyVar,
     expr: kestrel_hir::body::HirExprId,
     is_call: bool,
+    is_static_context: bool,
     span: Span,
 ) -> SolveResult {
     let resolved = ctx.resolve(receiver);
@@ -826,6 +828,7 @@ fn solve_member(
             result,
             expr,
             is_call,
+            is_static_context,
             span,
         });
     };
@@ -1021,6 +1024,40 @@ fn solve_member(
     // to verify the receiver conforms to this protocol with the inferred type args.
     if let Some(protocol) = resolution.via_protocol {
         ctx.conforms(receiver, protocol, span.clone());
+    }
+
+    // Validate argument count matches parameter count
+    let required_count = resolution.param_types.len();
+    if args.len() != required_count {
+        return SolveResult::Error(InferError::ArgCountMismatch {
+            expected: required_count,
+            got: args.len(),
+            span,
+        });
+    }
+
+    // Validate argument labels match parameter labels
+    for (arg, param_info) in args.iter().zip(&resolution.param_types) {
+        if arg.label.as_deref() != param_info.label.as_deref() {
+            return SolveResult::Error(InferError::LabelMismatch {
+                expected: param_info.label.clone(),
+                got: arg.label.clone(),
+                span,
+            });
+        }
+    }
+
+    // Check static/instance mismatch: instance methods can't be called in static context
+    if is_static_context && !ctx.query_ctx.has::<kestrel_ast_builder::Static>(resolution.entity) {
+        // Allow inits (they don't have Static marker but are valid in static context)
+        let is_init = ctx.query_ctx.get::<kestrel_ast_builder::NodeKind>(resolution.entity)
+            == Some(&kestrel_ast_builder::NodeKind::Initializer);
+        if !is_init {
+            return SolveResult::Error(InferError::InstanceMethodAsStatic {
+                name: name.to_string(),
+                span,
+            });
+        }
     }
 
     // Equate argument types with parameter types

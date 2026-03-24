@@ -109,6 +109,26 @@ fn format_error(err: &InferError, detail: &str) -> (String, String) {
             format!("implicit member '.{}' not found: {}", name, detail),
             format!("'.{}' not found", name),
         ),
+        InferError::ArgCountMismatch { expected, got, .. } => (
+            format!("wrong number of arguments: expected {}, got {}", expected, got),
+            format!("expected {} argument(s)", expected),
+        ),
+        InferError::LabelMismatch { expected, got, .. } => {
+            let exp = expected.as_deref().unwrap_or("_");
+            let g = got.as_deref().unwrap_or("_");
+            (
+                format!("wrong argument label: expected '{}', got '{}'", exp, g),
+                format!("expected '{}'", exp),
+            )
+        }
+        InferError::InstanceMethodAsStatic { name, .. } => (
+            format!("instance method '{}' cannot be called on a type", name),
+            "not a static method".into(),
+        ),
+        InferError::TypeParamAsValue { .. } => (
+            "type parameter cannot be used as a value".into(),
+            "not a value".into(),
+        ),
         InferError::FromHir { .. } => unreachable!("filtered above"),
     }
 }

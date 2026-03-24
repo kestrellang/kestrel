@@ -62,6 +62,9 @@ pub enum Constraint {
         /// false for plain field/property access. Needed to distinguish
         /// `self.f()` (call zero-arg function field) from `self.f` (read field).
         is_call: bool,
+        /// True when this is a static context call (e.g., `T.method()` where
+        /// T is a type parameter). Only static and init members are valid.
+        is_static_context: bool,
         span: Span,
     },
 

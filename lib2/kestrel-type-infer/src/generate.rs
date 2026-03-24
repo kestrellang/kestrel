@@ -45,6 +45,12 @@ pub fn generate(
         let span = expr_span(hir, tail);
         ctx.coerce(tail_tv, ctx.return_ty, tail, span);
     }
+
+    // Report type parameters used as standalone values (not consumed by MethodCall/Call)
+    let stale_defs: Vec<Span> = ctx.type_param_defs.drain().map(|(_, s)| s).collect();
+    for span in stale_defs {
+        ctx.report_error(InferError::TypeParamAsValue { span });
+    }
 }
 
 // ===== Expression generation =====
@@ -75,7 +81,7 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             })
         }
 
-        HirExpr::Def(entity, explicit_type_args, _) => {
+        HirExpr::Def(entity, explicit_type_args, span) => {
             // Read the entity's type from the world via the resolver.
             // For generic entities, this will instantiate fresh TyVars.
             // If explicit type args are provided (e.g., Pointer[UInt8]),
@@ -84,6 +90,10 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             // Record type arg vars so MIR lowering can retrieve the resolved types
             if !type_arg_vars.is_empty() {
                 ctx.type_args.insert(id, type_arg_vars);
+            }
+            // Track type parameter references — invalid unless consumed by MethodCall/Call
+            if ctx.query_ctx.get::<NodeKind>(*entity) == Some(&NodeKind::TypeParameter) {
+                ctx.type_param_defs.insert(id, span.clone());
             }
             tv
         }
@@ -122,6 +132,8 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             // Emit Call constraint — solver dispatches based on callee type:
             // Function → unify params/return, Named → subscript resolution
             let callee_tv = gen_expr(ctx, hir, *callee);
+            // Consuming a Def(TypeParameter) as a Call callee is valid (T() = init)
+            ctx.type_param_defs.remove(callee);
             let arg_tvs = gen_call_args(ctx, hir, args);
 
             // If the callee is a known function returning Never (e.g., lang.panic),
@@ -153,8 +165,20 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             let arg_tvs = gen_call_args(ctx, hir, args);
             let result_tv = ctx.fresh();
 
-            // Member constraint: receiver.method(args) -> result
-            ctx.member(recv_tv, method, arg_tvs, result_tv, id, true, span.clone());
+            // Check if receiver is a type parameter reference (T.method() = static context)
+            let is_static_ctx = matches!(
+                &hir.exprs[*receiver],
+                HirExpr::Def(entity, _, _) if ctx.query_ctx.get::<NodeKind>(*entity)
+                    == Some(&NodeKind::TypeParameter)
+            );
+
+            // Consuming a Def(TypeParameter) as a MethodCall receiver is valid
+            if is_static_ctx {
+                ctx.type_param_defs.remove(receiver);
+                ctx.member_static(recv_tv, method, arg_tvs, result_tv, id, true, span.clone());
+            } else {
+                ctx.member(recv_tv, method, arg_tvs, result_tv, id, true, span.clone());
+            }
             result_tv
         }
 

@@ -447,6 +447,10 @@ fn error_variant_name(err: &InferError) -> &'static str {
         InferError::InfiniteType { .. } => "InfiniteType",
         InferError::FromHir { .. } => "FromHir",
         InferError::ImplicitMemberNotFound { .. } => "ImplicitMemberNotFound",
+        InferError::ArgCountMismatch { .. } => "ArgCountMismatch",
+        InferError::LabelMismatch { .. } => "LabelMismatch",
+        InferError::InstanceMethodAsStatic { .. } => "InstanceMethodAsStatic",
+        InferError::TypeParamAsValue { .. } => "TypeParamAsValue",
     }
 }
 
@@ -480,6 +484,18 @@ fn format_error(err: &InferError) -> String {
         }
         InferError::ImplicitMemberNotFound { name, .. } => {
             format!("ImplicitMemberNotFound '{}' at {}:{}", name, span.file_id, span.start)
+        }
+        InferError::ArgCountMismatch { expected, got, .. } => {
+            format!("ArgCountMismatch expected={} got={} at {}:{}", expected, got, span.file_id, span.start)
+        }
+        InferError::LabelMismatch { expected, got, .. } => {
+            format!("LabelMismatch expected={:?} got={:?} at {}:{}", expected, got, span.file_id, span.start)
+        }
+        InferError::InstanceMethodAsStatic { name, .. } => {
+            format!("InstanceMethodAsStatic '{}' at {}:{}", name, span.file_id, span.start)
+        }
+        InferError::TypeParamAsValue { .. } => {
+            format!("TypeParamAsValue at {}:{}", span.file_id, span.start)
         }
     }
 }

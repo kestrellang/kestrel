@@ -66,6 +66,31 @@ pub enum InferError {
         name: String,
         span: Span,
     },
+
+    /// Wrong number of arguments in a call.
+    ArgCountMismatch {
+        expected: usize,
+        got: usize,
+        span: Span,
+    },
+
+    /// Wrong argument label in a call.
+    LabelMismatch {
+        expected: Option<String>,
+        got: Option<String>,
+        span: Span,
+    },
+
+    /// Instance method called in static context (e.g., `T.instanceMethod()`).
+    InstanceMethodAsStatic {
+        name: String,
+        span: Span,
+    },
+
+    /// Type parameter used as a standalone value (e.g., `let x = T`).
+    TypeParamAsValue {
+        span: Span,
+    },
 }
 
 impl InferError {
@@ -80,7 +105,11 @@ impl InferError {
             | Self::NoAssociatedType { span, .. }
             | Self::InfiniteType { span }
             | Self::FromHir { span }
-            | Self::ImplicitMemberNotFound { span, .. } => span,
+            | Self::ImplicitMemberNotFound { span, .. }
+            | Self::ArgCountMismatch { span, .. }
+            | Self::LabelMismatch { span, .. }
+            | Self::InstanceMethodAsStatic { span, .. }
+            | Self::TypeParamAsValue { span } => span,
         }
     }
 }

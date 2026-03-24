@@ -66,6 +66,11 @@ pub struct InferCtx<'a> {
     /// Ensures all references to the same type param share one TyVar,
     /// even after the TyVar is redirected by DirectEquality.
     pub(crate) param_tyvars: HashMap<Entity, TyVar>,
+
+    /// Tracks Def(TypeParameter) expressions that haven't been consumed
+    /// by a MethodCall or Call. After constraint generation, remaining
+    /// entries are reported as "type parameter used as value" errors.
+    pub(crate) type_param_defs: HashMap<HirExprId, Span>,
 }
 
 /// Info about a promotion inserted at a Coerce site.
@@ -104,6 +109,7 @@ impl<'a> InferCtx<'a> {
             root,
             where_clause_assoc_subs: Vec::new(),
             param_tyvars: HashMap::new(),
+            type_param_defs: HashMap::new(),
         }
     }
 
@@ -252,6 +258,31 @@ impl<'a> InferCtx<'a> {
             result,
             expr,
             is_call,
+            is_static_context: false,
+            span,
+        });
+    }
+
+    /// Like `member` but marks the constraint as a static context call
+    /// (e.g., `T.method()` where T is a type parameter).
+    pub fn member_static(
+        &mut self,
+        receiver: TyVar,
+        name: &str,
+        args: Vec<CallArg>,
+        result: TyVar,
+        expr: HirExprId,
+        is_call: bool,
+        span: Span,
+    ) {
+        self.constraints.push(Constraint::Member {
+            receiver,
+            name: name.to_string(),
+            args,
+            result,
+            expr,
+            is_call,
+            is_static_context: true,
             span,
         });
     }
