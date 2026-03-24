@@ -14,6 +14,7 @@ kestrel-hir = { path = "../kestrel-hir" }
 kestrel-name-res = { path = "../kestrel-name-res" }
 kestrel-span2 = { path = "../kestrel-span" }
 kestrel-debug = { path = "../kestrel-debug" }
+kestrel-reporting2 = { path = "../kestrel-reporting" }
 
 [dev-dependencies]
 kestrel-lexer2 = { path = "../kestrel-lexer" }

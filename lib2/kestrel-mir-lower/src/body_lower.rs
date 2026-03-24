@@ -475,6 +475,9 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
             // === Array literal ===
             HirExpr::Array { elements, .. } => {
                 let result_ty = self.resolve_expr_type(expr_id);
+                if let Some(value) = self.lower_array_literal_via_init(elements, &result_ty) {
+                    return value;
+                }
                 let values: Vec<Value> = elements.iter().map(|&e| self.lower_expr(e)).collect();
 
                 // Extract element type from Array[T] type args
@@ -1394,7 +1397,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                     CallArg::borrow(receiver_val)
                 };
                 let type_args = self.prepend_receiver_type_args(&receiver_ty, type_args);
-                let callee = Callee::direct_generic(func_entity, type_args);
+                let callee = Callee::method(func_entity, type_args, receiver_ty);
                 call_args.insert(0, receiver_arg);
                 return self.emit_call(callee, call_args, result_ty);
             }
@@ -1583,7 +1586,18 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                     let mut call_args = vec![receiver_arg];
                     call_args.extend(self.lower_call_args(args));
                     self.ctx.register_name(resolved_entity);
-                    let type_args = self.prepend_receiver_type_args(&field_ty, vec![]);
+                    let mut method_type_args = self.resolve_type_args(expr_id);
+                    if method_type_args.iter().any(|a| matches!(a, MirTy::Error)) {
+                        if let Some(hir_args) = hir_type_args {
+                            if !hir_args.is_empty() {
+                                method_type_args = hir_args
+                                    .iter()
+                                    .map(|ty| lower_type(self.ctx, ty))
+                                    .collect();
+                            }
+                        }
+                    }
+                    let type_args = self.prepend_receiver_type_args(&field_ty, method_type_args);
                     let callee = Callee::method(resolved_entity, type_args, field_ty);
                     return self.emit_call(callee, call_args, result_ty);
                 }
@@ -1879,8 +1893,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 HirLiteral::String(s) => {
                     // String literals need a 2-arg init: init(stringLiteral: ptr, length: i64)
                     if let Some(init_entity) = self.find_string_literal_init(*entity) {
-                        // Strip surrounding quotes from the HIR literal string
-                        let content = s.trim_matches('"');
+                        let content = decode_string_literal(s);
                         let ptr_val = Value::Immediate(Immediate::string_ptr(content.to_string()));
                         let len_val = Value::Immediate(Immediate::i64(content.len() as i64));
                         self.ctx.register_name(init_entity);
@@ -1933,9 +1946,135 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 _ => Value::Immediate(Immediate::f64(*v)),
             },
             HirLiteral::Bool(v) => Value::Immediate(Immediate::bool(*v)),
-            HirLiteral::String(s) => Value::Immediate(Immediate::string(s.clone())),
+            HirLiteral::String(s) => Value::Immediate(Immediate::string(decode_string_literal(s))),
             HirLiteral::Char(c) => Value::Immediate(Immediate::i32(*c as i32)),
             HirLiteral::Null => Value::Immediate(Immediate::unit()),
+        }
+    }
+
+    /// Lower an array literal via the target type's internal array-literal initializer
+    /// when the contextual result type is not a raw `Array[T]`.
+    fn lower_array_literal_via_init(
+        &mut self,
+        elements: &[HirExprId],
+        result_ty: &MirTy,
+    ) -> Option<Value> {
+        let (init_entity, element_ty, type_args) = self.resolve_array_literal_init(result_ty)?;
+
+        let ptr_ty = MirTy::Pointer(Box::new(element_ty.clone()));
+        let ptr_local = self.fresh_temp(ptr_ty);
+        let ptr_place = Place::local(ptr_local);
+        let count_value = Value::Immediate(Immediate::i64(elements.len() as i64));
+
+        self.emit_stmt(Statement::new(StatementKind::Assign {
+            dest: ptr_place.clone(),
+            rvalue: Rvalue::Op1 {
+                op: Op::StackAlloc(element_ty.clone()),
+                arg: count_value.clone(),
+            },
+        }));
+
+        let size_local = self.fresh_temp(MirTy::I64);
+        self.emit_stmt(Statement::new(StatementKind::Assign {
+            dest: Place::local(size_local),
+            rvalue: Rvalue::Op1 {
+                op: Op::SizeOf(element_ty.clone()),
+                arg: Value::Immediate(Immediate::unit()),
+            },
+        }));
+
+        for (i, &element_expr) in elements.iter().enumerate() {
+            let element_value = self.lower_expr_with_hint(element_expr, &element_ty);
+            let element_ptr = if i == 0 {
+                Value::Place(ptr_place.clone())
+            } else {
+                let offset_local = self.fresh_temp(MirTy::I64);
+                self.emit_stmt(Statement::new(StatementKind::Assign {
+                    dest: Place::local(offset_local),
+                    rvalue: Rvalue::Op2 {
+                        op: Op::Mul(IntBits::I64, Signedness::Signed),
+                        lhs: Value::Immediate(Immediate::i64(i as i64)),
+                        rhs: Value::Place(Place::local(size_local)),
+                    },
+                }));
+
+                let offset_ptr_local =
+                    self.fresh_temp(MirTy::Pointer(Box::new(element_ty.clone())));
+                self.emit_stmt(Statement::new(StatementKind::Assign {
+                    dest: Place::local(offset_ptr_local),
+                    rvalue: Rvalue::Op2 {
+                        op: Op::PtrOffset,
+                        lhs: Value::Place(ptr_place.clone()),
+                        rhs: Value::Place(Place::local(offset_local)),
+                    },
+                }));
+                Value::Place(Place::local(offset_ptr_local))
+            };
+
+            let write_local = self.fresh_temp(MirTy::Unit);
+            self.emit_stmt(Statement::new(StatementKind::Assign {
+                dest: Place::local(write_local),
+                rvalue: Rvalue::Op2 {
+                    op: Op::PtrWrite(element_ty.clone()),
+                    lhs: element_ptr,
+                    rhs: element_value,
+                },
+            }));
+        }
+
+        self.ctx.register_name(init_entity);
+        let callee = Callee::method(init_entity, type_args, result_ty.clone());
+        let call_args = vec![CallArg::copy(Value::Place(ptr_place)), CallArg::copy(count_value)];
+        Some(self.emit_call_maybe_init(callee, call_args, result_ty.clone()))
+    }
+
+    /// Lower an expression with a contextual type hint for cases the type checker
+    /// leaves as `Error`, such as implicit enum members inside array literals.
+    fn lower_expr_with_hint(&mut self, expr_id: HirExprId, expected_ty: &MirTy) -> Value {
+        if !matches!(self.resolve_expr_type(expr_id), MirTy::Error) {
+            return self.lower_expr(expr_id);
+        }
+
+        match &self.hir.exprs[expr_id] {
+            HirExpr::ImplicitMember { name, args, .. } => {
+                let payload: Vec<Value> = args
+                    .as_ref()
+                    .map(|a| a.iter().map(|arg| self.lower_expr(arg.value)).collect())
+                    .unwrap_or_default();
+                let dest = self.fresh_temp(expected_ty.clone());
+                self.emit_stmt(Statement::new(StatementKind::Assign {
+                    dest: Place::local(dest),
+                    rvalue: Rvalue::EnumVariant {
+                        enum_ty: expected_ty.clone(),
+                        variant: name.clone(),
+                        payload,
+                    },
+                }));
+                Value::Place(Place::local(dest))
+            }
+            HirExpr::Def(entity, _, _) => {
+                if self.ctx.world.get::<kestrel_ast_builder::NodeKind>(*entity)
+                    == Some(&kestrel_ast_builder::NodeKind::EnumCase)
+                {
+                    let variant = self.ctx.world
+                        .get::<kestrel_ast_builder::Name>(*entity)
+                        .map(|n| n.0.clone())
+                        .unwrap_or_default();
+                    let dest = self.fresh_temp(expected_ty.clone());
+                    self.emit_stmt(Statement::new(StatementKind::Assign {
+                        dest: Place::local(dest),
+                        rvalue: Rvalue::EnumVariant {
+                            enum_ty: expected_ty.clone(),
+                            variant,
+                            payload: vec![],
+                        },
+                    }));
+                    Value::Place(Place::local(dest))
+                } else {
+                    self.lower_expr(expr_id)
+                }
+            }
+            _ => self.lower_expr(expr_id),
         }
     }
 
@@ -1983,6 +2122,34 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
             }
         }
         None
+    }
+
+    /// Resolve the internal array-literal initializer and its concrete element type.
+    fn resolve_array_literal_init(&self, result_ty: &MirTy) -> Option<(Entity, MirTy, Vec<MirTy>)> {
+        let MirTy::Named { entity, .. } = result_ty else {
+            return None;
+        };
+
+        let init_func = self.ctx.module.functions.iter().find(|f| {
+            matches!(f.kind, FunctionKind::Initializer { parent } if parent == *entity)
+                && f.params.len() == 3
+                && matches!(f.params[0].ty, MirTy::RefMut(_))
+                && matches!(f.params[1].ty, MirTy::Pointer(_))
+                && matches!(f.params[2].ty, MirTy::I64)
+        })?;
+        let type_args = self.prepend_receiver_type_args(result_ty, vec![]);
+        let subst: HashMap<Entity, MirTy> = init_func
+            .type_params
+            .iter()
+            .zip(type_args.iter())
+            .map(|(tp, ty)| (tp.entity, ty.clone()))
+            .collect();
+        let ptr_ty = self.substitute_mir_type(&init_func.params.get(1)?.ty, &subst);
+        let MirTy::Pointer(element_ty) = ptr_ty else {
+            return None;
+        };
+
+        Some((init_func.entity, *element_ty, type_args))
     }
 
     /// Lower an if expression.
@@ -2748,6 +2915,144 @@ fn value_to_rvalue(value: Value) -> Rvalue {
     }
 }
 
+/// Decode a HIR string literal using lib1-compatible escape handling.
+///
+/// HIR currently stores both regular and raw strings in `HirLiteral::String`,
+/// preserving the original quotes. Normal quoted strings are unescaped; raw
+/// triple-quoted strings have only their surrounding quotes stripped.
+fn decode_string_literal(raw: &str) -> String {
+    let quote_count = raw.chars().take_while(|&c| c == '"').count();
+    if quote_count >= 3
+        && raw.len() >= quote_count * 2
+        && raw.ends_with(&"\"".repeat(quote_count))
+    {
+        return raw[quote_count..raw.len() - quote_count].to_string();
+    }
+
+    if raw.len() >= 2 && raw.starts_with('"') && raw.ends_with('"') {
+        return unescape_string_literal(&raw[1..raw.len() - 1]);
+    }
+
+    unescape_string_literal(raw)
+}
+
+/// Decode string escapes with the same semantics as lib1's binder helper.
+fn unescape_string_literal(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let mut chars = s.char_indices().peekable();
+
+    while let Some((_, c)) = chars.next() {
+        if c != '\\' {
+            result.push(c);
+            continue;
+        }
+
+        match chars.next() {
+            None => result.push('\\'),
+            Some((_, next_char)) => match next_char {
+                'n' => result.push('\n'),
+                'r' => result.push('\r'),
+                't' => result.push('\t'),
+                '\\' => result.push('\\'),
+                '"' => result.push('"'),
+                '\'' => result.push('\''),
+                '0' => result.push('\0'),
+                '\n' => {
+                    while let Some(&(_, ch)) = chars.peek() {
+                        if ch == ' ' || ch == '\t' {
+                            chars.next();
+                        } else {
+                            break;
+                        }
+                    }
+                }
+                '\r' => {
+                    if let Some(&(_, '\n')) = chars.peek() {
+                        chars.next();
+                    }
+                    while let Some(&(_, ch)) = chars.peek() {
+                        if ch == ' ' || ch == '\t' {
+                            chars.next();
+                        } else {
+                            break;
+                        }
+                    }
+                }
+                'x' => {
+                    let mut hex_str = String::new();
+                    for _ in 0..2 {
+                        if let Some(&(_, ch)) = chars.peek() {
+                            if ch.is_ascii_hexdigit() {
+                                hex_str.push(ch);
+                                chars.next();
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+                    if hex_str.len() != 2 {
+                        result.push_str(&format!("\\x{}", hex_str));
+                    } else {
+                        let value = u8::from_str_radix(&hex_str, 16).unwrap();
+                        if value > 0x7F {
+                            result.push_str(&format!("\\x{:02X}", value));
+                        } else {
+                            result.push(value as char);
+                        }
+                    }
+                }
+                'u' => {
+                    if chars.peek().map(|&(_, c)| c) != Some('{') {
+                        result.push_str("\\u");
+                        continue;
+                    }
+                    chars.next();
+
+                    let mut hex_str = String::new();
+                    let mut found_close = false;
+                    while let Some(&(_, ch)) = chars.peek() {
+                        if ch == '}' {
+                            chars.next();
+                            found_close = true;
+                            break;
+                        } else if ch.is_ascii_hexdigit() && hex_str.len() < 6 {
+                            hex_str.push(ch);
+                            chars.next();
+                        } else if ch.is_ascii_hexdigit() {
+                            hex_str.push(ch);
+                            chars.next();
+                        } else {
+                            break;
+                        }
+                    }
+
+                    let escape_seq = format!("\\u{{{}}}", hex_str);
+                    if !found_close || hex_str.is_empty() || hex_str.len() > 6 {
+                        result.push_str(&escape_seq);
+                    } else {
+                        match u32::from_str_radix(&hex_str, 16) {
+                            Ok(code_point) if code_point <= 0x10FFFF => {
+                                if let Some(ch) = char::from_u32(code_point) {
+                                    result.push(ch);
+                                } else {
+                                    result.push_str(&escape_seq);
+                                }
+                            }
+                            _ => result.push_str(&escape_seq),
+                        }
+                    }
+                }
+                other => {
+                    result.push('\\');
+                    result.push(other);
+                }
+            },
+        }
+    }
+
+    result
+}
+
 /// Apply an access path to a place to reach a sub-value.
 /// e.g., scrutinee + [Downcast("Some"), Index(0)] → scrutinee.Some.0
 fn apply_access_path(mut place: Place, path: &[PathElement]) -> Place {
@@ -2793,6 +3098,27 @@ fn constructor_name(ctor: &Constructor, ctx: &mut LowerCtx) -> String {
         Constructor::Array { prefix_len, .. } => format!("array_{}", prefix_len),
         Constructor::NonExhaustive => "non_exhaustive".to_string(),
         Constructor::Missing => "missing".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::decode_string_literal;
+
+    #[test]
+    fn decode_string_literal_unescapes_like_lib1() {
+        assert_eq!(
+            decode_string_literal("\"\\x1b[31mhello\\n\\u{41}\""),
+            "\x1b[31mhello\nA"
+        );
+    }
+
+    #[test]
+    fn decode_string_literal_preserves_raw_strings() {
+        assert_eq!(
+            decode_string_literal("\"\"\"\\x1b[31mhello\\n\"\"\""),
+            "\\x1b[31mhello\\n"
+        );
     }
 }
 

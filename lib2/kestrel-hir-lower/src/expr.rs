@@ -4,8 +4,10 @@
 //! dispatches operator desugaring, and handles control flow.
 
 use kestrel_ast::ast_body::*;
+use kestrel_ast_builder::{DeclSpan, Name};
 use kestrel_hir::body::*;
 use kestrel_name_res::{ResolveValuePath, ValueResolution};
+use kestrel_reporting2::{Diagnostic, Label};
 use kestrel_span2::Span;
 
 use crate::ctx::LowerCtx;
@@ -277,13 +279,38 @@ impl LowerCtx<'_> {
                 })
             },
             ValueResolution::Ambiguous(entities) => {
-                kestrel_debug::ktrace!("hir-lower", "path ambiguous: {:?} → {} candidates",
-                    segments.iter().map(|s| &s.name).collect::<Vec<_>>(), entities.len());
+                let path_name = segments.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join(".");
+                // Primary label on the use site
+                let mut labels = vec![
+                    Label::primary(span.file_id, span.range())
+                        .with_message(format!("{} symbols with this name in scope", entities.len())),
+                ];
+                // Secondary labels on each candidate's declaration
+                for &entity in &entities {
+                    if let Some(decl) = self.ctx.get::<DeclSpan>(entity) {
+                        let name = self.ctx.get::<Name>(entity)
+                            .map(|n| format!("declared here as '{}'", n.0))
+                            .unwrap_or_else(|| "declared here".to_string());
+                        labels.push(
+                            Label::secondary(decl.0.file_id, decl.0.range()).with_message(name),
+                        );
+                    }
+                }
+                let diag = Diagnostic::error()
+                    .with_message(format!("ambiguous name '{path_name}'"))
+                    .with_labels(labels)
+                    .with_notes(vec!["use a fully qualified path to disambiguate".to_string()]);
+                self.ctx.accumulate(diag);
                 self.alloc_expr(HirExpr::Error { span: span.clone() })
             },
-            ValueResolution::NotFound(seg) => {
-                kestrel_debug::ktrace!("hir-lower", "path not found: {:?} (failed at {:?})",
-                    segments.iter().map(|s| &s.name).collect::<Vec<_>>(), seg);
+            ValueResolution::NotFound(ref seg) => {
+                let path_name = segments.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join(".");
+                self.ctx.accumulate(Diagnostic::error()
+                    .with_message(format!("undefined name '{path_name}'"))
+                    .with_labels(vec![
+                        Label::primary(span.file_id, span.range())
+                            .with_message(format!("not found (failed at '{seg}')")),
+                    ]));
                 self.alloc_expr(HirExpr::Error { span: span.clone() })
             },
         }

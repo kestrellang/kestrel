@@ -8,6 +8,7 @@ use kestrel_ast::ast_body::*;
 use kestrel_hir::body::*;
 use kestrel_hir::Builtin;
 use kestrel_name_res::ResolveBuiltin;
+use kestrel_reporting2::{Diagnostic, Label};
 use kestrel_span2::Span;
 
 use crate::ctx::LowerCtx;
@@ -47,6 +48,7 @@ impl LowerCtx<'_> {
                     span: span.clone(),
                 });
             }
+            self.emit_missing_operator_diagnostic(&op, span);
             return self.alloc_expr(HirExpr::Error { span: span.clone() });
         }
 
@@ -67,6 +69,7 @@ impl LowerCtx<'_> {
             }
         }
 
+        self.emit_missing_operator_diagnostic(&op, span);
         self.alloc_expr(HirExpr::Error { span: span.clone() })
     }
 
@@ -135,6 +138,12 @@ impl LowerCtx<'_> {
             });
         }
 
+        self.ctx.accumulate(Diagnostic::error()
+            .with_message(format!("unsupported unary operator '{}'", unary_op_symbol(op)))
+            .with_labels(vec![
+                Label::primary(span.file_id, span.range()),
+            ])
+            .with_notes(vec!["is the standard library imported?".to_string()]));
         self.alloc_expr(HirExpr::Error { span: span.clone() })
     }
 
@@ -168,6 +177,12 @@ impl LowerCtx<'_> {
             }
         }
 
+        self.ctx.accumulate(Diagnostic::error()
+            .with_message(format!("unsupported compound assignment operator '{}'", compound_assign_op_symbol(op)))
+            .with_labels(vec![
+                Label::primary(span.file_id, span.range()),
+            ])
+            .with_notes(vec!["is the standard library imported?".to_string()]));
         self.alloc_expr(HirExpr::Error { span: span.clone() })
     }
 
@@ -697,6 +712,16 @@ impl LowerCtx<'_> {
         }
         result
     }
+
+    /// Emit a diagnostic for a binary operator whose protocol couldn't be resolved.
+    fn emit_missing_operator_diagnostic(&self, op: &BinaryOp, span: &Span) {
+        self.ctx.accumulate(Diagnostic::error()
+            .with_message(format!("unsupported binary operator '{}'", binary_op_symbol(op)))
+            .with_labels(vec![
+                Label::primary(span.file_id, span.range()),
+            ])
+            .with_notes(vec!["is the standard library imported?".to_string()]));
+    }
 }
 
 // ===== Operator table lookups =====
@@ -723,4 +748,57 @@ fn lookup_compound_assign_op(
     op: &CompoundAssignOp,
 ) -> Option<(Builtin, &'static str, Option<&'static str>)> {
     kestrel_hir::body::lookup_compound_assign_op(op)
+}
+
+/// Human-readable symbol for a binary operator.
+fn binary_op_symbol(op: &BinaryOp) -> &'static str {
+    match op {
+        BinaryOp::Add => "+",
+        BinaryOp::Sub => "-",
+        BinaryOp::Mul => "*",
+        BinaryOp::Div => "/",
+        BinaryOp::Rem => "%",
+        BinaryOp::BitAnd => "&",
+        BinaryOp::BitOr => "|",
+        BinaryOp::BitXor => "^",
+        BinaryOp::Shl => "<<",
+        BinaryOp::Shr => ">>",
+        BinaryOp::Eq => "==",
+        BinaryOp::Ne => "!=",
+        BinaryOp::Lt => "<",
+        BinaryOp::Gt => ">",
+        BinaryOp::Le => "<=",
+        BinaryOp::Ge => ">=",
+        BinaryOp::And => "&&",
+        BinaryOp::Or => "||",
+        BinaryOp::Coalesce => "??",
+        BinaryOp::RangeInclusive => "...",
+        BinaryOp::RangeExclusive => "..<",
+    }
+}
+
+/// Human-readable symbol for a unary operator.
+fn unary_op_symbol(op: &UnaryOp) -> &'static str {
+    match op {
+        UnaryOp::Neg => "-",
+        UnaryOp::BitNot => "~",
+        UnaryOp::LogicalNot => "!",
+        UnaryOp::Pos => "+",
+    }
+}
+
+/// Human-readable symbol for a compound assignment operator.
+fn compound_assign_op_symbol(op: &CompoundAssignOp) -> &'static str {
+    match op {
+        CompoundAssignOp::AddAssign => "+=",
+        CompoundAssignOp::SubAssign => "-=",
+        CompoundAssignOp::MulAssign => "*=",
+        CompoundAssignOp::DivAssign => "/=",
+        CompoundAssignOp::RemAssign => "%=",
+        CompoundAssignOp::BitAndAssign => "&=",
+        CompoundAssignOp::BitOrAssign => "|=",
+        CompoundAssignOp::BitXorAssign => "^=",
+        CompoundAssignOp::ShlAssign => "<<=",
+        CompoundAssignOp::ShrAssign => ">>=",
+    }
 }

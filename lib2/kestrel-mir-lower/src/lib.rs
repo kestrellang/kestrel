@@ -205,6 +205,28 @@ mod tests {
     }
 
     #[test]
+    fn string_literals_decode_escapes_like_lib1() {
+        let mut c = Compiler::new();
+        let path = stdlib_path();
+        c.load_dir(&path);
+        set_and_build(
+            &mut c,
+            "test.ks",
+            "module Test\nfunc banner() -> String {\n  \"\\x1b[31mhello\\n\"\n}",
+        );
+        c.infer_all();
+
+        let mir = lower_module(c.world(), c.root());
+        let output = mir.display().to_string();
+
+        assert!(
+            output.contains("str.ptr \"\\u{1b}[31mhello\\n\""),
+            "expected decoded escape sequences in MIR:\n{}",
+            output
+        );
+    }
+
+    #[test]
     fn lower_witnesses() {
         let mut c = Compiler::new();
         let path = stdlib_path();

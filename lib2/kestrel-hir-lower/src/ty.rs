@@ -8,10 +8,11 @@
 //! for declaration-level types (Callable params, TypeAnnotation, etc.).
 
 use kestrel_ast::AstType;
-use kestrel_ast_builder::{Callable, NodeKind, TypeAnnotation};
+use kestrel_ast_builder::{Callable, DeclSpan, NodeKind, TypeAnnotation};
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
 use kestrel_hir::ty::HirTy;
 use kestrel_name_res::{ResolveTypePath, TypeResolution};
+use kestrel_reporting2::{Diagnostic, Label};
 use kestrel_span2::Span;
 
 use crate::ctx::LowerCtx;
@@ -78,18 +79,42 @@ pub fn lower_ast_type(
                             span: span.clone(),
                         }
                     } else {
-                        kestrel_debug::ktrace!("hir-lower", "Self type not found in scope");
+                        ctx.accumulate(Diagnostic::error()
+                            .with_message("'Self' is not valid in this scope")
+                            .with_labels(vec![
+                                Label::primary(span.file_id, span.range()),
+                            ]));
                         HirTy::Error(span.clone())
                     }
                 }
                 TypeResolution::NotFound(ref seg) => {
-                    kestrel_debug::ktrace!("hir-lower", "type not found: {:?} (failed at {:?})",
-                        segments.iter().map(|s| &s.name).collect::<Vec<_>>(), seg);
+                    let type_name = segments.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join(".");
+                    ctx.accumulate(Diagnostic::error()
+                        .with_message(format!("cannot find type '{type_name}' in this scope"))
+                        .with_labels(vec![
+                            Label::primary(span.file_id, span.range())
+                                .with_message(format!("not found (failed at '{seg}')")),
+                        ]));
                     HirTy::Error(span.clone())
                 }
-                TypeResolution::NotAType(_) => {
-                    kestrel_debug::ktrace!("hir-lower", "type not a type: {:?}",
-                        segments.iter().map(|s| &s.name).collect::<Vec<_>>());
+                TypeResolution::NotAType(entity) => {
+                    let type_name = segments.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join(".");
+                    let mut labels = vec![
+                        Label::primary(span.file_id, span.range())
+                            .with_message("expected a type"),
+                    ];
+                    if let Some(decl) = ctx.get::<DeclSpan>(entity) {
+                        let kind = ctx.get::<NodeKind>(entity)
+                            .map(|k| format!("{k:?}"))
+                            .unwrap_or_else(|| "symbol".to_string());
+                        labels.push(
+                            Label::secondary(decl.0.file_id, decl.0.range())
+                                .with_message(format!("'{type_name}' is a {kind}, not a type")),
+                        );
+                    }
+                    ctx.accumulate(Diagnostic::error()
+                        .with_message(format!("'{type_name}' is not a type"))
+                        .with_labels(labels));
                     HirTy::Error(span.clone())
                 }
             }
@@ -158,7 +183,12 @@ fn lower_sugar_type(
             span: span.clone(),
         }
     } else {
-        kestrel_debug::ktrace!("hir-lower", "sugar type not found: {}", name);
+        ctx.accumulate(Diagnostic::error()
+            .with_message(format!("{name} is not defined"))
+            .with_labels(vec![
+                Label::primary(span.file_id, span.range()),
+            ])
+            .with_notes(vec!["is the standard library imported?".to_string()]));
         HirTy::Error(span.clone())
     }
 }
