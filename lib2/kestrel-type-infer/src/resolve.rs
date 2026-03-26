@@ -109,6 +109,18 @@ pub trait TypeResolver {
         args: &[crate::constraint::CallArg],
     ) -> Result<MemberResolution, MemberError>;
 
+    /// Resolve a static member on a type (e.g., Result.fromResidual).
+    /// Like resolve_member but searches static methods instead of instance ones.
+    fn resolve_static_member(
+        &self,
+        receiver_ty: &TyKind,
+        name: &str,
+        args: &[crate::constraint::CallArg],
+    ) -> Result<MemberResolution, MemberError> {
+        let _ = (receiver_ty, name, args);
+        Err(MemberError::NotFound)
+    }
+
     /// Check if a concrete type conforms to a protocol.
     fn conforms_to(&self, ty: &TyKind, protocol: Entity) -> bool;
 
@@ -507,6 +519,71 @@ impl TypeResolver for WorldResolver<'_> {
         }
 
         result
+    }
+
+    fn resolve_static_member(
+        &self,
+        receiver_ty: &TyKind,
+        name: &str,
+        args: &[crate::constraint::CallArg],
+    ) -> Result<MemberResolution, MemberError> {
+        let TyKind::Named { entity, .. } = receiver_ty else {
+            return Err(MemberError::NotFound);
+        };
+
+        // Search direct children and extensions for static members
+        let mut all_candidates: Vec<kestrel_hecs::Entity> = Vec::new();
+
+        let children = self.ctx.query(kestrel_name_res::VisibleChildrenByName {
+            parent: *entity,
+            name: name.to_string(),
+            context: self.owner,
+        });
+        all_candidates.extend(children.iter());
+
+        let extensions = self.ctx.query(kestrel_name_res::ExtensionsFor {
+            target: *entity,
+            root: self.root,
+        });
+        for ext in &extensions {
+            let ext_children = self.ctx.query(kestrel_name_res::VisibleChildrenByName {
+                parent: *ext,
+                name: name.to_string(),
+                context: self.owner,
+            });
+            all_candidates.extend(ext_children.iter());
+        }
+
+        // Filter to static members only
+        let static_candidates: Vec<kestrel_hecs::Entity> = all_candidates
+            .into_iter()
+            .filter(|&c| self.ctx.has::<Static>(c))
+            .collect();
+
+        if static_candidates.is_empty() {
+            return Err(MemberError::NotFound);
+        }
+
+        let arg_labels: Vec<Option<&str>> = args.iter().map(|a| a.label.as_deref()).collect();
+        let matches: Vec<kestrel_hecs::Entity> = static_candidates
+            .iter()
+            .copied()
+            .filter(|&c| self.matches_labels(c, &arg_labels))
+            .collect();
+
+        let member = match matches.len() {
+            0 => {
+                if static_candidates.len() == 1 {
+                    static_candidates[0]
+                } else {
+                    return Err(MemberError::NotFound);
+                }
+            }
+            1 => matches[0],
+            _ => return Err(MemberError::Ambiguous(matches)),
+        };
+
+        self.build_member_resolution(member)
     }
 }
 

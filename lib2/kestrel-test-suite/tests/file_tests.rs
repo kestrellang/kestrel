@@ -9,6 +9,7 @@ use kestrel_test_suite2::annotation::{self, TestMode};
 use kestrel_test_suite2::mir_snapshot;
 use kestrel_test_suite2::TestCompiler;
 
+
 fn run_ks_test(path: &Path) -> datatest_stable::Result<()> {
     let source = std::fs::read_to_string(path)?;
     let config = annotation::parse_test_config(&source);
@@ -57,6 +58,14 @@ fn run_ks_test_inner(
     } else {
         TestCompiler::new()
     };
+
+    // Include extra source files relative to the test file's directory
+    for include_path in &config.include {
+        let include_file = path.parent().unwrap().join(include_path);
+        let include_source = std::fs::read_to_string(&include_file)
+            .unwrap_or_else(|e| panic!("failed to read include '{}': {}", include_file.display(), e));
+        tc.add_source(&include_file.to_string_lossy(), &include_source);
+    }
 
     let file_path = path.to_string_lossy();
     let entity = tc.add_source(&file_path, source);

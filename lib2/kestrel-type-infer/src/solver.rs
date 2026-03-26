@@ -1105,57 +1105,68 @@ fn solve_implicit(
         _ => unreachable!(),
     };
 
-    // Resolve the member on the expected type
-    match ctx.resolver.resolve_member(&kind, name, &args) {
-        Ok(resolution) => {
-            ctx.resolutions.insert(expr, resolution.entity);
-
-            // Build substitution map: enum type params → expected type args
-            let mut subs: Vec<(Entity, TyVar)> = Vec::new();
-            let recv_type_args: Vec<TyVar> = match &kind {
-                TyKind::Named { args: ta, .. } => ta.clone(),
-                _ => vec![],
-            };
-            let recv_entity = match &kind {
-                TyKind::Named { entity, .. } => Some(*entity),
-                _ => None,
-            };
-            if let Some(ent) = recv_entity {
-                let struct_type_params: Vec<Entity> = ctx.query_ctx
-                    .get::<TypeParams>(ent)
-                    .map(|tp| tp.0.clone())
-                    .unwrap_or_default();
-                for (&param, &arg) in struct_type_params.iter().zip(recv_type_args.iter()) {
-                    subs.push((param, arg));
+    // Resolve the member on the expected type.
+    // First try instance members (enum cases, etc.), then fall back to static
+    // members (e.g., .fromResidual for try operator desugaring).
+    let resolution = match ctx.resolver.resolve_member(&kind, name, &args) {
+        Ok(res) => res,
+        Err(_) => {
+            // Fall back to static member search (e.g., Result.fromResidual
+            // is a static method defined in a FromResidual extension)
+            match ctx.resolver.resolve_static_member(&kind, name, &args) {
+                Ok(res) => res,
+                Err(_) => {
+                    return SolveResult::Error(InferError::ImplicitMemberNotFound {
+                        expected,
+                        name: name.to_string(),
+                        span,
+                    });
                 }
             }
-
-            // Instantiate method's own type params as fresh vars
-            let fresh_params: Vec<TyVar> = resolution.type_params.iter().map(|_| ctx.fresh()).collect();
-            for (&param, &fresh) in resolution.type_params.iter().zip(&fresh_params) {
-                subs.push((param, fresh));
-            }
-            if !fresh_params.is_empty() {
-                ctx.type_args.insert(expr, fresh_params.clone());
-            }
-
-            // Coerce argument types against parameter types
-            let self_entity = resolution.self_type;
-            for (arg, param_info) in args.iter().zip(&resolution.param_types) {
-                let param_tv = lower_hir_ty_sub(ctx, &param_info.ty, self_entity, expected, &subs);
-                ctx.coerce(arg.ty, param_tv, expr, span.clone());
-            }
-
-            // Equate result with the expected type
-            ctx.equal(result, expected, span);
-            SolveResult::Solved
         }
-        Err(_) => SolveResult::Error(InferError::ImplicitMemberNotFound {
-            expected,
-            name: name.to_string(),
-            span,
-        }),
+    };
+
+    ctx.resolutions.insert(expr, resolution.entity);
+
+    // Build substitution map: enum type params → expected type args
+    let mut subs: Vec<(Entity, TyVar)> = Vec::new();
+    let recv_type_args: Vec<TyVar> = match &kind {
+        TyKind::Named { args: ta, .. } => ta.clone(),
+        _ => vec![],
+    };
+    let recv_entity = match &kind {
+        TyKind::Named { entity, .. } => Some(*entity),
+        _ => None,
+    };
+    if let Some(ent) = recv_entity {
+        let struct_type_params: Vec<Entity> = ctx.query_ctx
+            .get::<TypeParams>(ent)
+            .map(|tp| tp.0.clone())
+            .unwrap_or_default();
+        for (&param, &arg) in struct_type_params.iter().zip(recv_type_args.iter()) {
+            subs.push((param, arg));
+        }
     }
+
+    // Instantiate method's own type params as fresh vars
+    let fresh_params: Vec<TyVar> = resolution.type_params.iter().map(|_| ctx.fresh()).collect();
+    for (&param, &fresh) in resolution.type_params.iter().zip(&fresh_params) {
+        subs.push((param, fresh));
+    }
+    if !fresh_params.is_empty() {
+        ctx.type_args.insert(expr, fresh_params.clone());
+    }
+
+    // Coerce argument types against parameter types
+    let self_entity = resolution.self_type;
+    for (arg, param_info) in args.iter().zip(&resolution.param_types) {
+        let param_tv = lower_hir_ty_sub(ctx, &param_info.ty, self_entity, expected, &subs);
+        ctx.coerce(arg.ty, param_tv, expr, span.clone());
+    }
+
+    // Equate result with the expected type
+    ctx.equal(result, expected, span);
+    SolveResult::Solved
 }
 
 /// Solve an implicit variant pattern: `.CaseName(bindings)` in pattern position.

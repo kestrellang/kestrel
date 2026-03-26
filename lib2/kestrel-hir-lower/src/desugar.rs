@@ -473,6 +473,19 @@ impl LowerCtx<'_> {
     ///     .Err($e) => return .Err($e)
     /// }
     /// ```
+    /// Desugar `try operand` using the Tryable protocol:
+    ///
+    /// ```text
+    /// match operand.tryExtract() {
+    ///     .Continue($value) => $value,
+    ///     .Break($early) => return .fromResidual($early)
+    /// }
+    /// ```
+    ///
+    /// `tryExtract()` is a ProtocolCall on Tryable, returning ControlFlow[Output, Early].
+    /// `.fromResidual($early)` is an ImplicitMember resolved against the function's
+    /// return type (which must conform to FromResidual[Early]).
+    /// Falls back to hardcoded .Ok/.Err if Tryable protocol is not available.
     pub(crate) fn desugar_try(
         &mut self,
         body: &AstBody,
@@ -481,62 +494,101 @@ impl LowerCtx<'_> {
     ) -> HirExprId {
         let lowered_operand = self.lower_expr(body, operand);
 
-        // .Ok($v) => $v
-        let ok_local = self.define_local("$try_ok", false, span.clone());
-        let ok_binding = self.alloc_pat(HirPat::Binding {
-            local: ok_local,
-            span: span.clone(),
-        });
-        let ok_pat = self.alloc_pat(HirPat::ImplicitVariant {
-            name: "Ok".to_string(),
-            args: vec![HirPatArg {
-                label: None,
-                pattern: ok_binding,
-            }],
-            span: span.clone(),
-        });
-        let ok_body = self.alloc_expr(HirExpr::Local(ok_local, span.clone()));
+        // Try protocol-based desugaring: operand.tryExtract()
+        let scrutinee = if let Some(protocol) = self.resolve_builtin(Builtin::TryableProtocol) {
+            self.alloc_expr(HirExpr::ProtocolCall {
+                receiver: lowered_operand,
+                protocol,
+                method: "tryExtract".to_string(),
+                type_args: None,
+                args: vec![],
+                span: span.clone(),
+            })
+        } else {
+            // Fallback: match directly on operand (assumes .Ok/.Err)
+            lowered_operand
+        };
 
-        // .Err($e) => return .Err($e)
-        let err_local = self.define_local("$try_err", false, span.clone());
-        let err_binding = self.alloc_pat(HirPat::Binding {
-            local: err_local,
+        // Determine match arm variant names based on whether we have the protocol
+        let has_tryable = self.resolve_builtin(Builtin::TryableProtocol).is_some();
+        let (success_name, failure_name) = if has_tryable {
+            ("Continue", "Break")
+        } else {
+            ("Ok", "Err")
+        };
+
+        // .Continue($value) => $value  (or .Ok($value) => $value)
+        let value_local = self.define_local("$try_value", false, span.clone());
+        let value_binding = self.alloc_pat(HirPat::Binding {
+            local: value_local,
             span: span.clone(),
         });
-        let err_pat = self.alloc_pat(HirPat::ImplicitVariant {
-            name: "Err".to_string(),
+        let continue_pat = self.alloc_pat(HirPat::ImplicitVariant {
+            name: success_name.to_string(),
             args: vec![HirPatArg {
                 label: None,
-                pattern: err_binding,
+                pattern: value_binding,
             }],
             span: span.clone(),
         });
-        let err_ref = self.alloc_expr(HirExpr::Local(err_local, span.clone()));
-        let err_wrap = self.alloc_expr(HirExpr::ImplicitMember {
-            name: "Err".to_string(),
-            args: Some(vec![HirCallArg {
-                label: None,
-                value: err_ref,
-            }]),
+        let continue_body = self.alloc_expr(HirExpr::Local(value_local, span.clone()));
+
+        // .Break($early) => return .fromResidual($early)
+        // (or .Err($e) => return .Err($e) for fallback)
+        let early_local = self.define_local("$try_early", false, span.clone());
+        let early_binding = self.alloc_pat(HirPat::Binding {
+            local: early_local,
             span: span.clone(),
         });
-        let return_err = self.alloc_expr(HirExpr::Return {
-            value: Some(err_wrap),
+        let break_pat = self.alloc_pat(HirPat::ImplicitVariant {
+            name: failure_name.to_string(),
+            args: vec![HirPatArg {
+                label: None,
+                pattern: early_binding,
+            }],
+            span: span.clone(),
+        });
+        let early_ref = self.alloc_expr(HirExpr::Local(early_local, span.clone()));
+
+        // Build the early return value
+        let return_value = if has_tryable {
+            // .fromResidual($early) — resolved against the function's return type
+            self.alloc_expr(HirExpr::ImplicitMember {
+                name: "fromResidual".to_string(),
+                args: Some(vec![HirCallArg {
+                    label: Some("residual".to_string()),
+                    value: early_ref,
+                }]),
+                span: span.clone(),
+            })
+        } else {
+            // .Err($early) fallback
+            self.alloc_expr(HirExpr::ImplicitMember {
+                name: "Err".to_string(),
+                args: Some(vec![HirCallArg {
+                    label: None,
+                    value: early_ref,
+                }]),
+                span: span.clone(),
+            })
+        };
+        let return_early = self.alloc_expr(HirExpr::Return {
+            value: Some(return_value),
             span: span.clone(),
         });
 
         self.alloc_expr(HirExpr::Match {
-            scrutinee: lowered_operand,
+            scrutinee,
             arms: vec![
                 HirMatchArm {
-                    pattern: ok_pat,
+                    pattern: continue_pat,
                     guard: None,
-                    body: ok_body,
+                    body: continue_body,
                 },
                 HirMatchArm {
-                    pattern: err_pat,
+                    pattern: break_pat,
                     guard: None,
-                    body: return_err,
+                    body: return_early,
                 },
             ],
             span: span.clone(),

@@ -21,6 +21,8 @@ pub enum TestMode {
 pub struct TestConfig {
     pub test_mode: TestMode,
     pub stdlib: bool,
+    /// Extra .ks files to include (relative to the test file's directory).
+    pub include: Vec<String>,
     pub skip: Option<String>,
     pub expect_exit: Option<i32>,
     pub expect_stdout: Option<String>,
@@ -34,6 +36,7 @@ impl Default for TestConfig {
         Self {
             test_mode: TestMode::Diagnostics,
             stdlib: true,
+            include: Vec::new(),
             skip: None,
             expect_exit: None,
             expect_stdout: None,
@@ -98,6 +101,9 @@ pub fn parse_test_config(source: &str) -> TestConfig {
             }
             "stdlib" => {
                 config.stdlib = value.to_lowercase() != "false";
+            }
+            "include" => {
+                config.include.push(value.trim().to_string());
             }
             "skip" => {
                 config.skip = Some(value.to_string());

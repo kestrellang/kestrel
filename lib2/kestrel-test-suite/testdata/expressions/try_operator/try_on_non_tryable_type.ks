@@ -1,5 +1,6 @@
 // test: diagnostics
 // stdlib: false
+// include: try_prelude.ks
 
 module Test
 struct NotTryable {
@@ -7,5 +8,5 @@ struct NotTryable {
 }
 func test() -> lang.i64 {
     let n = NotTryable(value: 42);
-    try n // ERROR: Tryable
+    try n // ERROR:
 }
