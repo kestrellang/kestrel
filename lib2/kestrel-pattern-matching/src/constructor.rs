@@ -30,7 +30,9 @@
 
 use std::collections::HashSet;
 
-use kestrel_ast_builder::{Callable, Name, NodeKind, TypeAnnotation, TypeParams};
+use kestrel_ast_builder::{
+    Callable, ConformanceItem, Conformances, Intrinsic, Name, NodeKind, TypeAnnotation, TypeParams,
+};
 use kestrel_hecs::{Entity, QueryContext};
 use kestrel_type_infer::result::ResolvedTy;
 
@@ -457,17 +459,17 @@ impl TypeShape {
                     }
 
                     NodeKind::Struct => {
-                        // Bool is a struct that conforms to ExpressibleByBoolLiteral.
-                        // We detect it by name — it's a builtin.
-                        if is_bool_struct(query, *entity) {
-                            return TypeShape::Bool;
+                        // Layer 1: lang.* intrinsic types (identified by Intrinsic marker)
+                        if query.has::<Intrinsic>(*entity) {
+                            return classify_intrinsic(query, *entity);
                         }
 
-                        // Array is infinite (variable length)
-                        if is_array_struct(query, *entity) {
-                            return TypeShape::Infinite;
+                        // Layer 2: stdlib types (identified by declared conformances)
+                        if let Some(shape) = classify_by_conformances(query, *entity) {
+                            return shape;
                         }
 
+                        // Default: regular struct with single constructor
                         let field_count = collect_fields(query, *entity).len();
                         TypeShape::Struct {
                             entity: *entity,
@@ -526,24 +528,77 @@ fn entity_name(query: &QueryContext<'_>, entity: Entity) -> String {
         .unwrap_or_else(|| format!("{:?}", entity))
 }
 
-/// Check if an entity is the Bool struct.
-fn is_bool_struct(query: &QueryContext<'_>, entity: Entity) -> bool {
-    query
-        .get::<Name>(entity)
-        .is_some_and(|n| n.0 == "Bool")
+/// Classify a lang.* intrinsic type by its compiler-controlled name.
+fn classify_intrinsic(query: &QueryContext<'_>, entity: Entity) -> TypeShape {
+    let Some(name) = query.get::<Name>(entity) else {
+        return TypeShape::Unknown;
+    };
+    match name.0.as_str() {
+        "i1" => TypeShape::Bool,
+        "i8" | "i16" | "i32" | "i64" => TypeShape::Infinite,
+        "f16" | "f32" | "f64" => TypeShape::Infinite,
+        "str" => TypeShape::Infinite,
+        _ => TypeShape::Unknown,
+    }
 }
 
-/// Check if an entity is the Array struct (has name "Array" and 1 type param).
-fn is_array_struct(query: &QueryContext<'_>, entity: Entity) -> bool {
-    query.get::<Name>(entity).is_some_and(|n| n.0 == "Array")
-        && query
-            .get::<TypeParams>(entity)
-            .is_some_and(|tp| tp.0.len() == 1)
+/// Classify a non-intrinsic struct by its declared protocol conformances.
+/// Returns None for regular user structs with no special classification.
+fn classify_by_conformances(query: &QueryContext<'_>, entity: Entity) -> Option<TypeShape> {
+    let conformances = query.get::<Conformances>(entity)?;
+
+    let conforms_to = |name: &str| -> bool {
+        conformances.0.iter().any(|item| match item {
+            ConformanceItem::Positive(ast_ty, _) => conformance_name_matches(ast_ty, name),
+            _ => false,
+        })
+    };
+
+    // Bool-like: two constructors (True/False)
+    if conforms_to("ExpressibleByBoolLiteral") {
+        return Some(TypeShape::Bool);
+    }
+
+    // Literal types have infinite value spaces
+    if conforms_to("ExpressibleByIntLiteral")
+        || conforms_to("ExpressibleByFloatLiteral")
+        || conforms_to("ExpressibleByCharLiteral")
+        || conforms_to("ExpressibleByStringLiteral")
+        || conforms_to("ExpressibleByArrayLiteral")
+    {
+        return Some(TypeShape::Infinite);
+    }
+
+    None
 }
 
-/// Check if a ResolvedTy is an Array[T] struct.
+/// Check if an AstType's last path segment matches the given protocol name.
+fn conformance_name_matches(ast_ty: &kestrel_ast::AstType, name: &str) -> bool {
+    if let kestrel_ast::AstType::Named { segments, .. } = ast_ty {
+        segments.last().is_some_and(|seg| seg.name == name)
+    } else {
+        false
+    }
+}
+
+/// Check if a ResolvedTy is an array-like type (supports variable-length array patterns).
 fn is_array_type(query: &QueryContext<'_>, ty: &ResolvedTy) -> bool {
-    matches!(ty, ResolvedTy::Named { entity, .. } if is_array_struct(query, *entity))
+    let ResolvedTy::Named { entity, .. } = ty else {
+        return false;
+    };
+    // Intrinsic types are never arrays
+    if query.has::<Intrinsic>(*entity) {
+        return false;
+    }
+    // Check for ExpressibleByArrayLiteral conformance
+    query.get::<Conformances>(*entity).is_some_and(|conformances| {
+        conformances.0.iter().any(|item| match item {
+            ConformanceItem::Positive(ast_ty, _) => {
+                conformance_name_matches(ast_ty, "ExpressibleByArrayLiteral")
+            }
+            _ => false,
+        })
+    })
 }
 
 /// Collect Field children of an entity, in declaration order.
@@ -569,7 +624,7 @@ fn resolve_case_param_type(
     param: &kestrel_ast_builder::AstParam,
 ) -> ResolvedTy {
     let subs = build_type_param_subs(query, enum_entity, type_args);
-    resolve_ast_type_with_subs(query, param.ty.as_ref(), &subs)
+    resolve_ast_type_with_subs(query, param.ty.as_ref(), &subs, enum_entity)
 }
 
 /// Resolve a field's type with the parent struct's type arguments.
@@ -583,7 +638,7 @@ fn resolve_field_type(
     let ast_ty = query
         .get::<TypeAnnotation>(field_entity)
         .map(|ta| &ta.0);
-    resolve_ast_type_with_subs(query, ast_ty, &subs)
+    resolve_ast_type_with_subs(query, ast_ty, &subs, parent_entity)
 }
 
 /// Build a mapping from type parameter names to their concrete types.
@@ -610,13 +665,14 @@ fn build_type_param_subs(
 
 /// Resolve an AstType using a name→type substitution map.
 ///
-/// Handles the common cases: simple named types that reference type params
-/// (e.g., `T` in `case Some(T)`), tuples, optionals, arrays. Falls back
-/// to Error for complex types that can't be resolved without full name resolution.
+/// Handles type parameter substitution (e.g., `T` → `Int`), and falls back
+/// to scope-based lookup for concrete named types (e.g., `Point` → entity).
+/// `scope_entity` is used to walk up the parent chain for name resolution.
 fn resolve_ast_type_with_subs(
     query: &QueryContext<'_>,
     ast_ty: Option<&kestrel_ast::AstType>,
     subs: &[(String, ResolvedTy)],
+    scope_entity: Entity,
 ) -> ResolvedTy {
     use kestrel_ast::AstType;
 
@@ -625,24 +681,27 @@ fn resolve_ast_type_with_subs(
     };
 
     match ty {
-        // Simple named type — check if it's a type parameter
         AstType::Named { segments, .. } => {
             if segments.len() == 1 && segments[0].type_args.is_empty() {
-                // Single-segment, no type args → might be a type parameter
                 let name = &segments[0].name;
+                // Try type parameter substitution first
                 if let Some((_, resolved)) = subs.iter().find(|(n, _)| n == name) {
                     return resolved.clone();
                 }
+                // Try resolving as a sibling type in the parent scope
+                if let Some(entity) = resolve_name_in_scope(query, name, scope_entity) {
+                    // Recurse to resolve type args on the segments
+                    return ResolvedTy::Named { entity, args: vec![] };
+                }
             }
-            // Not a type parameter — can't fully resolve without name resolution.
-            // Return Error as a conservative fallback.
+            // Multi-segment or unresolved — conservative fallback
             ResolvedTy::Error
         }
 
         AstType::Tuple(elems, _) => {
             let resolved: Vec<_> = elems
                 .iter()
-                .map(|e| resolve_ast_type_with_subs(query, Some(e), subs))
+                .map(|e| resolve_ast_type_with_subs(query, Some(e), subs, scope_entity))
                 .collect();
             ResolvedTy::Tuple(resolved)
         }
@@ -656,6 +715,29 @@ fn resolve_ast_type_with_subs(
         // params or struct fields in practice.
         _ => ResolvedTy::Error,
     }
+}
+
+/// Resolve a single-segment name by searching up the parent chain.
+/// Looks for structs/enums with the given name among siblings of scope_entity's ancestors.
+fn resolve_name_in_scope(
+    query: &QueryContext<'_>,
+    name: &str,
+    scope_entity: Entity,
+) -> Option<Entity> {
+    // Walk up the parent chain looking for a child with this name
+    let mut current = Some(scope_entity);
+    while let Some(parent) = current {
+        for &child in query.children_of(parent) {
+            if query.get::<Name>(child).is_some_and(|n| n.0 == name) {
+                let kind = query.get::<NodeKind>(child);
+                if matches!(kind, Some(NodeKind::Struct | NodeKind::Enum)) {
+                    return Some(child);
+                }
+            }
+        }
+        current = query.parent_of(parent);
+    }
+    None
 }
 
 /// Check if two optional i64 ranges overlap.

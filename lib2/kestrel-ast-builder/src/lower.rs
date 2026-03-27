@@ -1351,31 +1351,82 @@ impl LowerCtx {
     fn lower_tuple_pattern(&mut self, node: &SyntaxNode) -> PatId {
         let span = self.span(node);
 
-        let elements: Vec<PatId> = node
+        // Collect child nodes, detecting rest patterns
+        let child_nodes: Vec<_> = node
             .children()
             .filter(|c| {
                 c.kind() == SyntaxKind::TuplePatternElement
                     || c.kind() == SyntaxKind::Pattern
                     || is_pattern_kind(c.kind())
             })
-            .map(|c| {
-                // TuplePatternElement wraps a Pattern
-                if c.kind() == SyntaxKind::TuplePatternElement {
-                    c.children()
-                        .find(|p| p.kind() == SyntaxKind::Pattern || is_pattern_kind(p.kind()))
-                        .map(|p| self.lower_pat(&p))
-                        .unwrap_or_else(|| {
-                            self.alloc_pat(AstPat::Error {
-                                span: self.span(&c),
-                            })
-                        })
-                } else {
-                    self.lower_pat(&c)
-                }
-            })
             .collect();
 
-        self.alloc_pat(AstPat::Tuple { elements, span })
+        // Find rest pattern indices
+        let mut rest_indices = Vec::new();
+        for (i, c) in child_nodes.iter().enumerate() {
+            let is_rest = if c.kind() == SyntaxKind::TuplePatternElement {
+                c.children().any(|p| p.kind() == SyntaxKind::RestPattern)
+            } else {
+                c.kind() == SyntaxKind::RestPattern
+            };
+            if is_rest {
+                rest_indices.push(i);
+            }
+        }
+
+        // Multiple rest patterns validated later at HIR lowering (where diagnostics are available)
+
+        // Helper to lower a child node to a PatId
+        let lower_child = |s: &mut Self, c: &SyntaxNode| -> PatId {
+            if c.kind() == SyntaxKind::TuplePatternElement {
+                c.children()
+                    .find(|p| p.kind() == SyntaxKind::Pattern || is_pattern_kind(p.kind()))
+                    .map(|p| s.lower_pat(&p))
+                    .unwrap_or_else(|| s.alloc_pat(AstPat::Error { span: s.span(c) }))
+            } else {
+                s.lower_pat(c)
+            }
+        };
+
+        let rest_index = rest_indices.first().copied();
+
+        if let Some(rest_idx) = rest_index {
+            // Split into prefix (before rest) and suffix (after rest)
+            let prefix: Vec<PatId> = child_nodes[..rest_idx]
+                .iter()
+                .map(|c| lower_child(self, c))
+                .collect();
+            let suffix: Vec<PatId> = child_nodes[rest_idx + 1..]
+                .iter()
+                .map(|c| lower_child(self, c))
+                .collect();
+
+            self.alloc_pat(AstPat::Tuple {
+                prefix,
+                has_rest: true,
+                multiple_rests: rest_indices.len() > 1,
+                suffix,
+                span,
+            })
+        } else {
+            let prefix: Vec<PatId> = child_nodes
+                .iter()
+                .map(|c| lower_child(self, c))
+                .collect();
+
+            // Single-element tuple pattern is grouping, not a 1-tuple: (pat) vs (pat,)
+            if prefix.len() == 1 {
+                return prefix[0];
+            }
+
+            self.alloc_pat(AstPat::Tuple {
+                prefix,
+                has_rest: false,
+                multiple_rests: false,
+                suffix: vec![],
+                span,
+            })
+        }
     }
 
     fn lower_literal_pattern(&mut self, node: &SyntaxNode) -> PatId {

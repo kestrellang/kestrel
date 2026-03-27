@@ -221,14 +221,16 @@ pub fn flatten(
             ..
         } => flatten_range(start, end, *inclusive),
 
-        HirPat::Tuple { elements, .. } => {
+        HirPat::Tuple { prefix, has_rest, suffix, .. } => {
             // Get element types from scrutinee
             let elem_types = match scrutinee_ty {
                 ResolvedTy::Tuple(tys) => tys.clone(),
-                _ => vec![ResolvedTy::Error; elements.len()],
+                _ => vec![ResolvedTy::Error; prefix.len() + suffix.len()],
             };
+            let actual_arity = elem_types.len();
 
-            let children: Vec<_> = elements
+            // Flatten prefix elements
+            let mut children: Vec<_> = prefix
                 .iter()
                 .enumerate()
                 .map(|(i, &elem_id)| {
@@ -237,9 +239,24 @@ pub fn flatten(
                 })
                 .collect();
 
+            if *has_rest {
+                // Fill middle positions with wildcards
+                let rest_count = actual_arity.saturating_sub(prefix.len() + suffix.len());
+                for _ in 0..rest_count {
+                    children.push(FlatPat::Wildcard);
+                }
+            }
+
+            // Flatten suffix elements (from the end of the tuple)
+            let suffix_start = actual_arity.saturating_sub(suffix.len());
+            for (j, &elem_id) in suffix.iter().enumerate() {
+                let elem_ty = elem_types.get(suffix_start + j).unwrap_or(&ResolvedTy::Error);
+                children.push(flatten(hir, query, elem_id, elem_ty));
+            }
+
             FlatPat::Ctor {
                 ctor: Constructor::Tuple {
-                    arity: elements.len(),
+                    arity: actual_arity,
                 },
                 children,
             }
@@ -293,17 +310,26 @@ pub fn flatten(
         } => {
             // Expand struct pattern to cover ALL fields (missing = wildcard)
             let all_fields = collect_fields(query, *entity);
+            // Resolve field types from the scrutinee type so nested patterns get correct types
+            let struct_ctor = Constructor::Struct {
+                entity: *entity,
+                arity: all_fields.len(),
+            };
+            let field_types = struct_ctor.field_types(query, scrutinee_ty);
+
             let children: Vec<_> = all_fields
                 .iter()
-                .map(|&field_entity| {
+                .enumerate()
+                .map(|(i, &field_entity)| {
                     let field_name = query
                         .get::<Name>(field_entity)
                         .map(|n| n.0.as_str())
                         .unwrap_or("");
+                    let field_ty = field_types.get(i).unwrap_or(&ResolvedTy::Error);
                     // Find matching pattern field
                     let matched = fields.iter().find(|f| f.field_name == field_name);
                     match matched.and_then(|f| f.pattern) {
-                        Some(pat_id) => flatten(hir, query, pat_id, &ResolvedTy::Error),
+                        Some(pat_id) => flatten(hir, query, pat_id, field_ty),
                         None => FlatPat::Wildcard,
                     }
                 })
@@ -313,6 +339,32 @@ pub fn flatten(
                 ctor: Constructor::Struct {
                     entity: *entity,
                     arity: all_fields.len(),
+                },
+                children,
+            }
+        }
+
+        HirPat::Array { prefix, has_rest, suffix, .. } => {
+            // Extract element type from scrutinee (Array[T] → T)
+            let elem_ty = match scrutinee_ty {
+                ResolvedTy::Named { args, .. } => args.first().cloned().unwrap_or(ResolvedTy::Error),
+                _ => ResolvedTy::Error,
+            };
+
+            let mut children: Vec<_> = prefix
+                .iter()
+                .map(|&id| flatten(hir, query, id, &elem_ty))
+                .collect();
+            if *has_rest {
+                children.push(FlatPat::Wildcard); // rest slot
+            }
+            children.extend(suffix.iter().map(|&id| flatten(hir, query, id, &elem_ty)));
+
+            FlatPat::Ctor {
+                ctor: Constructor::Array {
+                    prefix_len: prefix.len(),
+                    suffix_len: suffix.len(),
+                    has_rest: *has_rest,
                 },
                 children,
             }

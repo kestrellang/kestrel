@@ -60,6 +60,7 @@ pub fn pat_span(hir: &HirBody, id: HirPatId) -> Span {
         | HirPat::Variant { span, .. }
         | HirPat::ImplicitVariant { span, .. }
         | HirPat::Struct { span, .. }
+        | HirPat::Array { span, .. }
         | HirPat::Or { span, .. }
         | HirPat::At { span, .. }
         | HirPat::Error { span, .. } => span.clone(),

@@ -136,6 +136,7 @@ fn report_unsolved(ctx: &mut InferCtx<'_>) {
             }
             // Pattern matching handles unresolved patterns at a higher level
             Constraint::ImplicitPat { .. } => continue,
+            Constraint::TupleRestPat { .. } => continue,
         };
         ctx.report_error(err);
     }
@@ -207,6 +208,12 @@ fn try_solve(ctx: &mut InferCtx<'_>, c: Constraint) -> SolveResult {
             arg_tys,
             span,
         } => solve_implicit_pat(ctx, scrutinee, &name, arg_tys, span),
+        Constraint::TupleRestPat {
+            scrutinee,
+            prefix_tys,
+            suffix_tys,
+            span,
+        } => solve_tuple_rest_pat(ctx, scrutinee, prefix_tys, suffix_tys, span),
     }
 }
 
@@ -1241,6 +1248,64 @@ fn solve_implicit_pat(
                 ctx.equal(*arg_tv, payload_tv, span.clone());
             }
         }
+    }
+
+    SolveResult::Solved
+}
+
+/// Solve a tuple rest pattern: `(prefix.., suffix..)`.
+/// Deferred until scrutinee resolves to a concrete tuple, then equates
+/// prefix TyVars against the first N elements, suffix against the last M.
+fn solve_tuple_rest_pat(
+    ctx: &mut InferCtx<'_>,
+    scrutinee: TyVar,
+    prefix_tys: Vec<TyVar>,
+    suffix_tys: Vec<TyVar>,
+    span: Span,
+) -> SolveResult {
+    let resolved = ctx.resolve(scrutinee);
+    if !ctx.is_concrete(resolved) {
+        return SolveResult::Deferred(Constraint::TupleRestPat {
+            scrutinee,
+            prefix_tys,
+            suffix_tys,
+            span,
+        });
+    }
+
+    if ctx.is_error(resolved) {
+        return SolveResult::Solved;
+    }
+
+    let kind = match ctx.slot(resolved) {
+        TySlot::Resolved(k) => k.clone(),
+        _ => return SolveResult::Solved,
+    };
+
+    let elems = match &kind {
+        TyKind::Tuple(elems) => elems.clone(),
+        _ => return SolveResult::Solved,
+    };
+
+    let min_needed = prefix_tys.len() + suffix_tys.len();
+    if elems.len() < min_needed {
+        // Pattern has more fixed elements than the tuple — type mismatch
+        return SolveResult::Error(InferError::TypeMismatch {
+            expected: scrutinee,
+            got: scrutinee,
+            span,
+        });
+    }
+
+    // Equate prefix elements against the first N tuple elements
+    for (pat_tv, &elem_tv) in prefix_tys.iter().zip(elems.iter()) {
+        ctx.equal(*pat_tv, elem_tv, span.clone());
+    }
+
+    // Equate suffix elements against the last M tuple elements
+    let suffix_start = elems.len() - suffix_tys.len();
+    for (pat_tv, &elem_tv) in suffix_tys.iter().zip(elems[suffix_start..].iter()) {
+        ctx.equal(*pat_tv, elem_tv, span.clone());
     }
 
     SolveResult::Solved

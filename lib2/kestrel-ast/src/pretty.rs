@@ -389,13 +389,23 @@ impl PrettyCtx<'_> {
                 }
                 self.buf.push_str(name);
             }
-            AstPat::Tuple { elements, .. } => {
+            AstPat::Tuple { prefix, has_rest, suffix, .. } => {
                 self.buf.push('(');
-                for (i, &e) in elements.iter().enumerate() {
+                for (i, &e) in prefix.iter().enumerate() {
                     if i > 0 {
                         self.buf.push_str(", ");
                     }
                     self.print_pat(e);
+                }
+                if *has_rest {
+                    if !prefix.is_empty() {
+                        self.buf.push_str(", ");
+                    }
+                    self.buf.push_str("..");
+                    for &e in suffix {
+                        self.buf.push_str(", ");
+                        self.print_pat(e);
+                    }
                 }
                 self.buf.push(')');
             }

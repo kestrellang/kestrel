@@ -187,8 +187,8 @@ fn check_duplicate_bindings_ast(
                 });
             }
         }
-        AstPat::Tuple { elements, .. } => {
-            for &elem_id in elements {
+        AstPat::Tuple { prefix, suffix, .. } => {
+            for &elem_id in prefix.iter().chain(suffix.iter()) {
                 check_duplicate_bindings_ast(&body.pats[elem_id], body, seen, span, diags);
             }
         }
@@ -226,11 +226,17 @@ fn check_pattern_type_ast(
     span: &kestrel_span2::Span,
     diags: &mut Vec<AnalyzeDiagnostic>,
 ) {
-    if let AstPat::Tuple { elements, .. } = pat {
+    if let AstPat::Tuple { prefix, has_rest, suffix, .. } = pat {
         match ty {
             AstType::Tuple(type_elems, _) => {
-                if elements.len() != type_elems.len() {
-                    emit_arity_mismatch(elements.len(), type_elems.len(), span, diags);
+                let pat_count = prefix.len() + suffix.len();
+                if *has_rest {
+                    // Rest absorbs middle elements — just check min arity
+                    if pat_count > type_elems.len() {
+                        emit_arity_mismatch(pat_count, type_elems.len(), span, diags);
+                    }
+                } else if pat_count != type_elems.len() {
+                    emit_arity_mismatch(pat_count, type_elems.len(), span, diags);
                 }
             }
             _ => emit_tuple_on_non_tuple(span, diags),

@@ -113,6 +113,16 @@ pub enum Constraint {
         arg_tys: Vec<TyVar>,
         span: Span,
     },
+
+    /// `(prefix.., suffix..)` — tuple pattern with rest.
+    /// Deferred until scrutinee resolves to a concrete tuple type, then equates
+    /// prefix TyVars against the first N elements and suffix TyVars against the last M.
+    TupleRestPat {
+        scrutinee: TyVar,
+        prefix_tys: Vec<TyVar>,
+        suffix_tys: Vec<TyVar>,
+        span: Span,
+    },
 }
 
 /// Argument in a call: optional label + type variable.

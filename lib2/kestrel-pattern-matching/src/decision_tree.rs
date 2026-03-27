@@ -349,10 +349,18 @@ fn collect_bindings(hir: &HirBody, pat_id: HirPatId, path: &AccessPath, bindings
             collect_bindings(hir, *subpattern, path, bindings);
         }
 
-        HirPat::Tuple { elements, .. } => {
-            for (i, &elem) in elements.iter().enumerate() {
+        HirPat::Tuple { prefix, suffix, .. } => {
+            // Prefix elements: index from start
+            for (i, &elem) in prefix.iter().enumerate() {
                 let mut elem_path = path.clone();
                 elem_path.push(PathElement::Index(i));
+                collect_bindings(hir, elem, &elem_path, bindings);
+            }
+            // Suffix elements: actual indices depend on tuple arity (set during flattening)
+            // For now, use placeholder indices — codegen will resolve from the decision tree
+            for (j, &elem) in suffix.iter().enumerate() {
+                let mut elem_path = path.clone();
+                elem_path.push(PathElement::Index(prefix.len() + j));
                 collect_bindings(hir, elem, &elem_path, bindings);
             }
         }
@@ -367,6 +375,19 @@ fn collect_bindings(hir: &HirBody, pat_id: HirPatId, path: &AccessPath, bindings
                 arg_path.push(PathElement::Downcast(case_name.clone()));
                 arg_path.push(PathElement::Index(i));
                 collect_bindings(hir, arg.pattern, &arg_path, bindings);
+            }
+        }
+
+        HirPat::Array { prefix, suffix, .. } => {
+            for (i, &elem) in prefix.iter().enumerate() {
+                let mut elem_path = path.clone();
+                elem_path.push(PathElement::Index(i));
+                collect_bindings(hir, elem, &elem_path, bindings);
+            }
+            for (j, &elem) in suffix.iter().enumerate() {
+                let mut elem_path = path.clone();
+                elem_path.push(PathElement::Index(prefix.len() + j));
+                collect_bindings(hir, elem, &elem_path, bindings);
             }
         }
 

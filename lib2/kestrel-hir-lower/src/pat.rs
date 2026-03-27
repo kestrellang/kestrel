@@ -27,11 +27,25 @@ impl LowerCtx<'_> {
                 })
             }
 
-            AstPat::Tuple { elements, span } => {
-                let lowered: Vec<HirPatId> =
-                    elements.iter().map(|&id| self.lower_pat(body, id)).collect();
+            AstPat::Tuple { prefix, has_rest, multiple_rests, suffix, span } => {
+                if *multiple_rests {
+                    self.ctx.accumulate(
+                        kestrel_reporting2::Diagnostic::error()
+                            .with_message("only one rest pattern (`..`) is allowed per tuple pattern")
+                            .with_labels(vec![
+                                kestrel_reporting2::Label::primary(span.file_id, span.range())
+                                    .with_message("multiple rest patterns found"),
+                            ])
+                    );
+                }
+                let lowered_prefix: Vec<HirPatId> =
+                    prefix.iter().map(|&id| self.lower_pat(body, id)).collect();
+                let lowered_suffix: Vec<HirPatId> =
+                    suffix.iter().map(|&id| self.lower_pat(body, id)).collect();
                 self.alloc_pat(HirPat::Tuple {
-                    elements: lowered,
+                    prefix: lowered_prefix,
+                    has_rest: *has_rest,
+                    suffix: lowered_suffix,
                     span: span.clone(),
                 })
             }
@@ -49,12 +63,40 @@ impl LowerCtx<'_> {
                 end,
                 inclusive,
                 span,
-            } => self.alloc_pat(HirPat::Range {
-                start: start.as_ref().map(lower_lit_pat),
-                end: end.as_ref().map(lower_lit_pat),
-                inclusive: *inclusive,
-                span: span.clone(),
-            }),
+            } => {
+                let hir_start = start.as_ref().map(lower_lit_pat);
+                let hir_end = end.as_ref().map(lower_lit_pat);
+
+                // Validate: start must be <= end (inclusive) or < end (exclusive)
+                if let (Some(s), Some(e)) = (&hir_start, &hir_end) {
+                    let invalid = match (s, e) {
+                        (HirLiteral::Integer(s), HirLiteral::Integer(e)) => {
+                            if *inclusive { s > e } else { s >= e }
+                        }
+                        (HirLiteral::Char(s), HirLiteral::Char(e)) => {
+                            if *inclusive { s > e } else { s >= e }
+                        }
+                        _ => false,
+                    };
+                    if invalid {
+                        self.ctx.accumulate(
+                            kestrel_reporting2::Diagnostic::error()
+                                .with_message("invalid range bounds: start must be less than or equal to end")
+                                .with_labels(vec![
+                                    kestrel_reporting2::Label::primary(span.file_id, span.range())
+                                        .with_message("range bounds are reversed"),
+                                ])
+                        );
+                    }
+                }
+
+                self.alloc_pat(HirPat::Range {
+                    start: hir_start,
+                    end: hir_end,
+                    inclusive: *inclusive,
+                    span: span.clone(),
+                })
+            }
 
             AstPat::Enum {
                 case_name,
@@ -69,9 +111,15 @@ impl LowerCtx<'_> {
                 span,
             } => self.lower_struct_pat(body, name, fields, *has_rest, span),
 
-            AstPat::Array { span, .. } => {
-                // Array patterns not yet supported in HirPat
-                self.alloc_pat(HirPat::Error {
+            AstPat::Array { prefix, rest, suffix, span } => {
+                let lowered_prefix: Vec<HirPatId> =
+                    prefix.iter().map(|&id| self.lower_pat(body, id)).collect();
+                let lowered_suffix: Vec<HirPatId> =
+                    suffix.iter().map(|&id| self.lower_pat(body, id)).collect();
+                self.alloc_pat(HirPat::Array {
+                    prefix: lowered_prefix,
+                    has_rest: rest.is_some(),
+                    suffix: lowered_suffix,
                     span: span.clone(),
                 })
             }
@@ -82,7 +130,18 @@ impl LowerCtx<'_> {
                 subpattern,
                 span,
             } => {
-                // `name @ subpattern` — bind the whole value to name, also match subpattern
+                // Check for nested @ patterns
+                if matches!(&body.pats[*subpattern], AstPat::At { .. }) {
+                    self.ctx.accumulate(
+                        kestrel_reporting2::Diagnostic::error()
+                            .with_message("nested @ patterns are not allowed")
+                            .with_labels(vec![
+                                kestrel_reporting2::Label::primary(span.file_id, span.range())
+                                    .with_message("use a single @ pattern with the outermost binding"),
+                            ])
+                    );
+                }
+
                 let local = self.define_local(name, *is_mut, span.clone());
                 let lowered_sub = self.lower_pat(body, *subpattern);
                 self.alloc_pat(HirPat::At {
@@ -205,12 +264,68 @@ impl LowerCtx<'_> {
         });
 
         match result {
-            TypeResolution::Found(entity) => self.alloc_pat(HirPat::Struct {
-                entity,
-                fields: lowered_fields,
-                has_rest,
-                span: span.clone(),
-            }),
+            TypeResolution::Found(entity) => {
+                // Validate pattern fields against struct's actual fields
+                use kestrel_ast_builder::{NodeKind, Name};
+                let struct_field_names: Vec<String> = self.ctx
+                    .children_of(entity)
+                    .iter()
+                    .filter(|&&c| self.ctx.get::<NodeKind>(c) == Some(&NodeKind::Field))
+                    .filter_map(|&c| self.ctx.get::<Name>(c).map(|n| n.0.clone()))
+                    .collect();
+
+                // Check for unknown fields
+                let mut has_unknown = false;
+                for field in &lowered_fields {
+                    if !struct_field_names.contains(&field.field_name) {
+                        has_unknown = true;
+                        self.ctx.accumulate(
+                            kestrel_reporting2::Diagnostic::error()
+                                .with_message(format!(
+                                    "struct `{}` has no field `{}`", name, field.field_name
+                                ))
+                                .with_labels(vec![
+                                    kestrel_reporting2::Label::primary(span.file_id, span.range())
+                                        .with_message(format!("unknown field `{}`", field.field_name)),
+                                ])
+                        );
+                    }
+                }
+
+                // Check for missing fields (unless has_rest `..` or unknown fields present)
+                if !has_rest && !has_unknown {
+                    let matched: std::collections::HashSet<&str> = lowered_fields
+                        .iter()
+                        .map(|f| f.field_name.as_str())
+                        .collect();
+                    let missing: Vec<&str> = struct_field_names
+                        .iter()
+                        .filter(|f| !matched.contains(f.as_str()))
+                        .map(|f| f.as_str())
+                        .collect();
+                    if !missing.is_empty() {
+                        self.ctx.accumulate(
+                            kestrel_reporting2::Diagnostic::error()
+                                .with_message(format!(
+                                    "pattern does not cover field{} `{}`",
+                                    if missing.len() > 1 { "s" } else { "" },
+                                    missing.join("`, `"),
+                                ))
+                                .with_labels(vec![
+                                    kestrel_reporting2::Label::primary(span.file_id, span.range())
+                                        .with_message("use `..` to ignore remaining fields"),
+                                ])
+                        );
+                    }
+                }
+
+                self.alloc_pat(HirPat::Struct {
+                    entity,
+                    fields: lowered_fields,
+                    has_rest,
+                    span: span.clone(),
+                })
+            }
             _ => self.alloc_pat(HirPat::Error {
                 span: span.clone(),
             })
@@ -240,7 +355,12 @@ impl LowerCtx<'_> {
                     .iter()
                     .map(|elem| self.lower_param_pattern(elem, span, force_mut))
                     .collect();
-                self.alloc_pat(HirPat::Tuple { elements: lowered, span: span.clone() })
+                self.alloc_pat(HirPat::Tuple {
+                    prefix: lowered,
+                    has_rest: false,
+                    suffix: vec![],
+                    span: span.clone(),
+                })
             }
 
             kestrel_ast_builder::ParamPattern::Struct { type_name, fields, has_rest } => {
@@ -306,7 +426,10 @@ pub(crate) fn parse_float(s: &str) -> f64 {
 /// Parse a char literal string to a unicode scalar value (no validation).
 /// Used for pattern literals where we don't have diagnostic context.
 pub(crate) fn parse_char(s: &str) -> u32 {
-    let inner = s.trim_matches('\'');
+    // Strip exactly one quote from each end (trim_matches strips ALL matching chars,
+    // which breaks '\'' by also stripping the escaped quote content)
+    let inner = s.strip_prefix('\'').unwrap_or(s);
+    let inner = inner.strip_suffix('\'').unwrap_or(inner);
     let codepoints = unescape_char_content(inner, &Span::synthetic(0), None);
     codepoints.first().copied().unwrap_or(0)
 }
@@ -318,7 +441,10 @@ pub(crate) fn parse_char_validated(
     span: &Span,
     ctx: &kestrel_hecs::QueryContext<'_>,
 ) -> u32 {
-    let inner = s.trim_matches('\'');
+    // Strip exactly one quote from each end (trim_matches strips ALL matching chars,
+    // which breaks '\'' by also stripping the escaped quote content)
+    let inner = s.strip_prefix('\'').unwrap_or(s);
+    let inner = inner.strip_suffix('\'').unwrap_or(inner);
 
     // Empty char literal
     if inner.is_empty() {

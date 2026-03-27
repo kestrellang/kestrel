@@ -11,7 +11,7 @@ use kestrel_hir::ty::HirTy;
 use kestrel_hir_lower::{LowerCallableTypes, LowerTypeAnnotation};
 use kestrel_span2::Span;
 
-use crate::constraint::{labels_match, CallArg};
+use crate::constraint::{labels_match, CallArg, Constraint};
 use crate::ctx::InferCtx;
 use crate::error::InferError;
 use crate::ty::{LiteralKind, TyVar};
@@ -434,13 +434,28 @@ fn gen_pat(ctx: &mut InferCtx<'_>, hir: &HirBody, pat_id: HirPatId, scrutinee_tv
             ctx.equal(lit_tv, scrutinee_tv, span.clone());
         }
 
-        HirPat::Tuple { elements, span, .. } => {
-            // Scrutinee must be a tuple with matching arity
-            let elem_tvs: Vec<TyVar> = elements.iter().map(|_| ctx.fresh()).collect();
-            let tuple_tv = ctx.tuple(elem_tvs.clone());
-            ctx.equal(scrutinee_tv, tuple_tv, span.clone());
+        HirPat::Tuple { prefix, has_rest, suffix, span } => {
+            let prefix_tvs: Vec<TyVar> = prefix.iter().map(|_| ctx.fresh()).collect();
+            let suffix_tvs: Vec<TyVar> = suffix.iter().map(|_| ctx.fresh()).collect();
 
-            for (&elem_pat, elem_tv) in elements.iter().zip(elem_tvs) {
+            if *has_rest {
+                // Defer until scrutinee resolves — we need the actual tuple arity
+                ctx.constraints.push(Constraint::TupleRestPat {
+                    scrutinee: scrutinee_tv,
+                    prefix_tys: prefix_tvs.clone(),
+                    suffix_tys: suffix_tvs.clone(),
+                    span: span.clone(),
+                });
+            } else {
+                // Fixed arity: equate scrutinee against tuple of exactly these elements
+                let tuple_tv = ctx.tuple(prefix_tvs.clone());
+                ctx.equal(scrutinee_tv, tuple_tv, span.clone());
+            }
+
+            for (&elem_pat, elem_tv) in prefix.iter().zip(prefix_tvs) {
+                gen_pat(ctx, hir, elem_pat, elem_tv);
+            }
+            for (&elem_pat, elem_tv) in suffix.iter().zip(suffix_tvs) {
                 gen_pat(ctx, hir, elem_pat, elem_tv);
             }
         }
@@ -482,6 +497,24 @@ fn gen_pat(ctx: &mut InferCtx<'_>, hir: &HirBody, pat_id: HirPatId, scrutinee_tv
             // Bind the whole matched value to the local, then constrain via subpattern
             ctx.local_types.insert(*binding, scrutinee_tv);
             gen_pat(ctx, hir, *subpattern, scrutinee_tv);
+        }
+
+        HirPat::Array { prefix, has_rest: _, suffix, span } => {
+            // Each element has the same type (Array[T] → T)
+            let elem_tv = ctx.fresh();
+
+            // Build Array[elem_tv] and equate with scrutinee
+            if let Some(array_entity) = ctx.resolver.builtin(kestrel_hir::Builtin::DefaultArrayLiteralType) {
+                let array_tv = ctx.named(array_entity, vec![elem_tv]);
+                ctx.equal(scrutinee_tv, array_tv, span.clone());
+            }
+
+            // Equate each prefix/suffix element pattern against elem_tv
+            for &elem_pat in prefix.iter().chain(suffix.iter()) {
+                let pat_tv = ctx.fresh();
+                ctx.equal(pat_tv, elem_tv, span.clone());
+                gen_pat(ctx, hir, elem_pat, pat_tv);
+            }
         }
 
         HirPat::Error { .. } => { /* swallow */ }

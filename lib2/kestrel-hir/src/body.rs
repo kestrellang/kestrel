@@ -229,7 +229,9 @@ pub enum HirPat {
         span: Span,
     },
     Tuple {
-        elements: Vec<HirPatId>,
+        prefix: Vec<HirPatId>,
+        has_rest: bool,
+        suffix: Vec<HirPatId>,
         span: Span,
     },
     Literal {
@@ -258,6 +260,12 @@ pub enum HirPat {
         entity: Entity,
         fields: Vec<HirStructPatField>,
         has_rest: bool,
+        span: Span,
+    },
+    Array {
+        prefix: Vec<HirPatId>,
+        has_rest: bool,
+        suffix: Vec<HirPatId>,
         span: Span,
     },
     Or {

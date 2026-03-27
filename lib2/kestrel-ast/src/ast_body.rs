@@ -227,7 +227,11 @@ pub enum AstPat {
         span: Span,
     },
     Tuple {
-        elements: Vec<PatId>,
+        prefix: Vec<PatId>,
+        has_rest: bool,
+        /// True if >1 rest pattern found (error case)
+        multiple_rests: bool,
+        suffix: Vec<PatId>,
         span: Span,
     },
     Literal {

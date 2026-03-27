@@ -424,8 +424,8 @@ fn mark_pattern_assigned(hir: &HirBody, pat_id: HirPatId, assigned: &mut HashSet
         HirPat::Binding { local, .. } => {
             assigned.insert(*local);
         }
-        HirPat::Tuple { elements, .. } => {
-            for &elem in elements {
+        HirPat::Tuple { prefix, suffix, .. } | HirPat::Array { prefix, suffix, .. } => {
+            for &elem in prefix.iter().chain(suffix.iter()) {
                 mark_pattern_assigned(hir, elem, assigned);
             }
         }

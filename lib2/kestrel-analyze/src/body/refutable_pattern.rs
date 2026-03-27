@@ -135,9 +135,10 @@ pub(crate) fn is_pattern_irrefutable(hir: &HirBody, pat_id: HirPatId) -> bool {
     match &hir.pats[pat_id] {
         HirPat::Wildcard { .. } => true,
         HirPat::Binding { .. } => true,
-        HirPat::Tuple { elements, .. } => {
-            elements.iter().all(|&e| is_pattern_irrefutable(hir, e))
+        HirPat::Tuple { prefix, suffix, .. } => {
+            prefix.iter().chain(suffix.iter()).all(|&e| is_pattern_irrefutable(hir, e))
         }
+        HirPat::Array { .. } => false, // Array patterns are always refutable (unknown length)
         HirPat::Literal { .. } => false,
         HirPat::Range { .. } => false,
         HirPat::Variant { .. } => false,
@@ -164,8 +165,12 @@ pub(crate) fn describe_pattern(hir: &HirBody, pat_id: HirPatId) -> String {
     match &hir.pats[pat_id] {
         HirPat::Wildcard { .. } => "_".into(),
         HirPat::Binding { local, .. } => hir.locals[*local].name.clone(),
-        HirPat::Tuple { elements, .. } => {
-            let parts: Vec<String> = elements.iter().map(|&e| describe_pattern(hir, e)).collect();
+        HirPat::Tuple { prefix, has_rest, suffix, .. } => {
+            let mut parts: Vec<String> = prefix.iter().map(|&e| describe_pattern(hir, e)).collect();
+            if *has_rest {
+                parts.push("..".into());
+                parts.extend(suffix.iter().map(|&e| describe_pattern(hir, e)));
+            }
             format!("({})", parts.join(", "))
         }
         HirPat::Literal { value, .. } => match value {
@@ -230,6 +235,14 @@ pub(crate) fn describe_pattern(hir: &HirBody, pat_id: HirPatId) -> String {
                 })
                 .collect();
             format!("{{ {} }}", inner.join(", "))
+        }
+        HirPat::Array { prefix, has_rest, suffix, .. } => {
+            let mut parts: Vec<String> = prefix.iter().map(|&e| describe_pattern(hir, e)).collect();
+            if *has_rest {
+                parts.push("..".into());
+                parts.extend(suffix.iter().map(|&e| describe_pattern(hir, e)));
+            }
+            format!("[{}]", parts.join(", "))
         }
         HirPat::Or { alternatives, .. } => {
             let parts: Vec<String> =
