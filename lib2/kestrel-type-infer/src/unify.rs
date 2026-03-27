@@ -257,6 +257,7 @@ fn is_intrinsic_literal_compatible(ctx: &InferCtx<'_>, ty: &TyKind, lit: Literal
         LiteralKind::Float => matches!(name.0.as_str(), "f32" | "f64"),
         LiteralKind::Bool => matches!(name.0.as_str(), "i1"),
         LiteralKind::String => matches!(name.0.as_str(), "str"),
+        LiteralKind::Char => matches!(name.0.as_str(), "i32"),
         _ => false,
     }
 }
