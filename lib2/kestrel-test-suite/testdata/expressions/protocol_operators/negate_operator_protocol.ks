@@ -1,5 +1,6 @@
 // test: diagnostics
 // stdlib: false
+// include: operator_prelude.ks
 
 module Test
 struct Number: Prelude.NegateOperatorProtocol {
