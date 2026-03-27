@@ -194,8 +194,9 @@ fn resolve_protocol_extension_assoc(
         return None;
     }
 
-    // Search the protocol's children for a matching TypeAlias (associated type)
+    // Search the protocol's direct children, then inherited protocols
     find_assoc_type(ctx, target_entity, name)
+        .or_else(|| resolve_inherited_protocol_member(ctx, target_entity, name, root))
 }
 
 /// Walk a protocol's conformance hierarchy to find an associated type by name.

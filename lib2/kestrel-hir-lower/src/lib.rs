@@ -21,7 +21,7 @@ use kestrel_hecs::{Entity, QueryContext, QueryFn};
 use kestrel_hir::body::{HirBody, HirExpr, HirMatchArm, HirStmt};
 use kestrel_span2::Span;
 
-pub use ty::{lower_ast_type, LowerCallableTypes, LowerTypeAnnotation};
+pub use ty::{lower_ast_type, LowerCallableTypes, LowerExtensionTargetTypeArgs, LowerTypeAnnotation};
 
 use ctx::LowerCtx;
 

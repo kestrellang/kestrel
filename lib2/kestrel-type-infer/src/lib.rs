@@ -21,9 +21,9 @@ pub mod unify;
 
 use std::collections::HashMap;
 
-use kestrel_ast_builder::{Callable, NodeKind};
+use kestrel_ast_builder::{Callable, NodeKind, TypeParams};
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
-use kestrel_hir_lower::{LowerBody, LowerCallableTypes, LowerTypeAnnotation};
+use kestrel_hir_lower::{LowerBody, LowerCallableTypes, LowerExtensionTargetTypeArgs, LowerTypeAnnotation};
 use kestrel_span2::Span;
 
 use ctx::InferCtx;
@@ -108,13 +108,41 @@ fn create_param_types(
                     root: ctx.root,
                 }) {
                     Some(target) => {
-                        let fresh_args = fresh_type_args(ctx, query_ctx, target);
-                        let self_tv = ctx.named(target, fresh_args.clone());
+                        // Get explicit type args from the extension target (e.g., [lang.i64] in extend Box[lang.i64])
+                        let ext_type_args = query_ctx.query(LowerExtensionTargetTypeArgs {
+                            extension: parent,
+                            root: ctx.root,
+                        });
+
+                        // Build args: use concrete type args where provided, fresh TyVars elsewhere
+                        let type_params: Vec<Entity> = query_ctx
+                            .get::<TypeParams>(target)
+                            .map(|tp| tp.0.clone())
+                            .unwrap_or_default();
+
+                        let args: Vec<ty::TyVar> = if let Some(ref hir_args) = ext_type_args {
+                            if !hir_args.is_empty() {
+                                // Extension has explicit type args — use them
+                                type_params.iter().enumerate().map(|(i, &param_entity)| {
+                                    if let Some(hir_ty) = hir_args.get(i) {
+                                        generate::lower_hir_ty(ctx, hir_ty)
+                                    } else {
+                                        ctx.param(param_entity)
+                                    }
+                                }).collect()
+                            } else {
+                                fresh_type_args(ctx, query_ctx, target)
+                            }
+                        } else {
+                            fresh_type_args(ctx, query_ctx, target)
+                        };
+
+                        let self_tv = ctx.named(target, args.clone());
 
                         // Emit extension where clause constraints so the solver
                         // knows about bounds like Item: Addable, Item.Output = Item
                         emit_extension_where_clauses(
-                            ctx, query_ctx, parent, target, &fresh_args, self_tv,
+                            ctx, query_ctx, parent, target, &args, self_tv,
                         );
 
                         self_tv

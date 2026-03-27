@@ -8,7 +8,7 @@
 //! for declaration-level types (Callable params, TypeAnnotation, etc.).
 
 use kestrel_ast::AstType;
-use kestrel_ast_builder::{Callable, DeclSpan, NodeKind, TypeAnnotation, TypeParams};
+use kestrel_ast_builder::{Callable, DeclSpan, ExtensionTarget, NodeKind, TypeAnnotation, TypeParams};
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
 use kestrel_hir::ty::HirTy;
 use kestrel_name_res::{ResolveTypePath, TypeResolution};
@@ -324,5 +324,49 @@ impl QueryFn for LowerCallableTypes {
                 })
                 .collect(),
         )
+    }
+}
+
+/// Query: lower an extension target's type arguments to HirTy.
+///
+/// For `extend Box[lang.i64]`, returns `Some(vec![HirTy for i64])`.
+/// For `extend Box` (no type args), returns `Some(vec![])`.
+/// Returns None if the entity has no ExtensionTarget component.
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub struct LowerExtensionTargetTypeArgs {
+    pub extension: Entity,
+    pub root: Entity,
+}
+
+impl QueryFn for LowerExtensionTargetTypeArgs {
+    type Output = Option<Vec<HirTy>>;
+
+    fn describe(&self) -> String {
+        format!("LowerExtensionTargetTypeArgs(ext={:?})", self.extension)
+    }
+
+    fn execute(&self, ctx: &QueryContext<'_>) -> Option<Vec<HirTy>> {
+        let target = ctx.get::<ExtensionTarget>(self.extension)?;
+        let AstType::Named { segments, .. } = &target.0 else {
+            return Some(vec![]);
+        };
+
+        // Type args are on the last path segment (the type name)
+        let Some(last_seg) = segments.last() else {
+            return Some(vec![]);
+        };
+
+        if last_seg.type_args.is_empty() {
+            return Some(vec![]);
+        }
+
+        // Lower each type arg in the extension's own scope (so type params like T are visible)
+        let context = self.extension;
+        let args = last_seg
+            .type_args
+            .iter()
+            .map(|ast_ty| lower_ast_type(ctx, context, self.root, ast_ty))
+            .collect();
+        Some(args)
     }
 }
