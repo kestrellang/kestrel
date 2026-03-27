@@ -8,6 +8,6 @@ func test() {
         loop {
             break;
         }
-        break; // WARN: unreachable
+        break;
     }
 }

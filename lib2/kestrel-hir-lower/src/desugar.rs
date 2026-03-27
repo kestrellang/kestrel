@@ -234,8 +234,10 @@ impl LowerCtx<'_> {
             span: span.clone(),
         });
 
-        // Lower while body
+        // Lower while body (push loop label so break/continue can validate)
+        self.push_loop(label);
         let lowered_body = self.lower_block(body, while_body);
+        self.pop_loop();
 
         // Build loop body: if_break + body statements
         let mut loop_stmts = vec![if_break_stmt];
@@ -297,7 +299,9 @@ impl LowerCtx<'_> {
             span: span.clone(),
         });
 
+        self.push_loop(label);
         let lowered_body = self.lower_block(body, while_body);
+        self.pop_loop();
 
         let mut loop_stmts = vec![if_break_stmt];
         loop_stmts.extend(lowered_body.stmts);
@@ -396,8 +400,10 @@ impl LowerCtx<'_> {
             span: span.clone(),
         });
 
-        // Lower for body
+        // Lower for body (push loop label so break/continue can validate)
+        self.push_loop(label);
         let lowered_for_body = self.lower_block(body, for_body);
+        self.pop_loop();
         self.pop_scope();
 
         // Wrap the for-body as a block expression so all statements are reachable

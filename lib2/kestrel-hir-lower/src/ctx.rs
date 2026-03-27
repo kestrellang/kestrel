@@ -39,6 +39,10 @@ pub(crate) struct LowerCtx<'a> {
     /// Original condition expressions from while-loop desugaring.
     /// Populated during lowering, used by condition type analyzer.
     pub while_conditions: Vec<HirExprId>,
+
+    /// Stack of active loop labels (innermost last). `None` = unlabeled loop.
+    /// Used to validate break/continue labels during lowering.
+    pub loop_labels: Vec<Option<String>>,
 }
 
 impl<'a> LowerCtx<'a> {
@@ -56,6 +60,7 @@ impl<'a> LowerCtx<'a> {
             guard_let_stmts: Vec::new(),
             for_loop_matches: Vec::new(),
             while_conditions: Vec::new(),
+            loop_labels: Vec::new(),
         }
     }
 
@@ -106,4 +111,25 @@ impl<'a> LowerCtx<'a> {
         self.stmts.alloc(stmt)
     }
 
+    // ===== Loop label tracking =====
+
+    /// Push a loop label onto the stack when entering a loop.
+    pub fn push_loop(&mut self, label: Option<&str>) {
+        self.loop_labels.push(label.map(|l| l.to_string()));
+    }
+
+    /// Pop a loop label from the stack when exiting a loop.
+    pub fn pop_loop(&mut self) {
+        self.loop_labels.pop();
+    }
+
+    /// Check if we're inside any loop.
+    pub fn in_loop(&self) -> bool {
+        !self.loop_labels.is_empty()
+    }
+
+    /// Check if a label is in the active loop stack.
+    pub fn has_loop_label(&self, label: &str) -> bool {
+        self.loop_labels.iter().any(|l| l.as_deref() == Some(label))
+    }
 }

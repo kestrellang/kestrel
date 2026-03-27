@@ -134,7 +134,9 @@ impl LowerCtx<'_> {
                 body: loop_body,
                 span,
             } => {
+                self.push_loop(label.as_deref());
                 let lowered = self.lower_block(body, &loop_body);
+                self.pop_loop();
                 self.alloc_expr(HirExpr::Loop {
                     label,
                     body: lowered,
@@ -148,8 +150,14 @@ impl LowerCtx<'_> {
                 body: for_body,
                 span,
             } => self.desugar_for_loop(body, label.as_deref(), pattern, iterable, &for_body, &span),
-            AstExpr::Break { label, span } => self.alloc_expr(HirExpr::Break { label, span }),
-            AstExpr::Continue { label, span } => self.alloc_expr(HirExpr::Continue { label, span }),
+            AstExpr::Break { label, span } => {
+                self.validate_break_continue("break", &label, &span);
+                self.alloc_expr(HirExpr::Break { label, span })
+            },
+            AstExpr::Continue { label, span } => {
+                self.validate_break_continue("continue", &label, &span);
+                self.alloc_expr(HirExpr::Continue { label, span })
+            },
             AstExpr::Return { value, span } => {
                 let lowered = value.map(|v| self.lower_expr(body, v));
                 self.alloc_expr(HirExpr::Return {
@@ -979,5 +987,32 @@ impl LowerCtx<'_> {
         self.pop_scope();
 
         HirBlock { stmts, tail_expr }
+    }
+
+    /// Validate break/continue: must be inside a loop, and label (if any) must be in scope.
+    fn validate_break_continue(&self, keyword: &str, label: &Option<String>, span: &Span) {
+        if !self.in_loop() {
+            self.ctx.accumulate(
+                kestrel_reporting2::Diagnostic::error()
+                    .with_message(format!("'{}' outside of loop", keyword))
+                    .with_labels(vec![
+                        kestrel_reporting2::Label::primary(span.file_id, span.range())
+                            .with_message(format!("'{}' can only be used inside a loop", keyword)),
+                    ])
+            );
+            return;
+        }
+        if let Some(lbl) = label {
+            if !self.has_loop_label(lbl) {
+                self.ctx.accumulate(
+                    kestrel_reporting2::Diagnostic::error()
+                        .with_message(format!("undeclared label '{}'", lbl))
+                        .with_labels(vec![
+                            kestrel_reporting2::Label::primary(span.file_id, span.range())
+                                .with_message(format!("label '{}' not found in enclosing loops", lbl)),
+                        ])
+                );
+            }
+        }
     }
 }
