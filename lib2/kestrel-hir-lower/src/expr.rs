@@ -194,7 +194,7 @@ impl LowerCtx<'_> {
             AstLiteral::Integer(s) => HirLiteral::Integer(crate::pat::parse_int(s)),
             AstLiteral::Float(s) => HirLiteral::Float(crate::pat::parse_float(s)),
             AstLiteral::String(s) | AstLiteral::RawString(s) => HirLiteral::String(s.clone()),
-            AstLiteral::Char(s) => HirLiteral::Char(crate::pat::parse_char(s)),
+            AstLiteral::Char(s) => HirLiteral::Char(crate::pat::parse_char_validated(s, span, self.ctx)),
             AstLiteral::Bool(b) => HirLiteral::Bool(*b),
             AstLiteral::Null => HirLiteral::Null,
             AstLiteral::Unit => {
