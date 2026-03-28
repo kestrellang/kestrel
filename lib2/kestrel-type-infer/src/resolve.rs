@@ -257,6 +257,39 @@ impl TypeResolver for WorldResolver<'_> {
             }
         }
 
+        // If receiver is a protocol and we're inside a protocol extension with
+        // where clauses like `Self: Sortable`, also search those constraint protocols.
+        if all_candidates.is_empty()
+            && self.ctx.get::<NodeKind>(*entity) == Some(&NodeKind::Protocol)
+        {
+            let extra_protocols = self.collect_extension_where_clause_protocols(*entity);
+            for proto in &extra_protocols {
+                // Search the protocol's own children
+                let proto_children = self.ctx.query(kestrel_name_res::VisibleChildrenByName {
+                    parent: *proto,
+                    name: name.to_string(),
+                    context: self.owner,
+                });
+                all_candidates.extend(proto_children);
+
+                // Also search extensions of the constraint protocol
+                if all_candidates.is_empty() {
+                    let proto_extensions = self.ctx.query(kestrel_name_res::ExtensionsFor {
+                        target: *proto,
+                        root: self.root,
+                    });
+                    for ext in &proto_extensions {
+                        let ext_children = self.ctx.query(kestrel_name_res::VisibleChildrenByName {
+                            parent: *ext,
+                            name: name.to_string(),
+                            context: self.owner,
+                        });
+                        all_candidates.extend(ext_children);
+                    }
+                }
+            }
+        }
+
         // Initializers have no Name component, so VisibleChildrenByName won't
         // find them. Search by NodeKind::Initializer when looking for "init".
         if all_candidates.is_empty() && name == "init" {
@@ -1012,11 +1045,35 @@ impl WorldResolver<'_> {
                     root: self.root,
                 }) {
                     TypeResolution::Found(entity) => Some(entity),
+                    // Self resolves to the enclosing type — find it via parent walk
+                    TypeResolution::SelfType => self.resolve_self_entity(),
                     _ => None,
                 }
             }
             _ => None,
         }
+    }
+
+    /// Resolve `Self` to the enclosing type entity.
+    /// For extension methods, this is the extension target.
+    /// For struct/enum methods, this is the parent struct/enum.
+    fn resolve_self_entity(&self) -> Option<Entity> {
+        let mut current = Some(self.owner);
+        while let Some(entity) = current {
+            match self.ctx.get::<NodeKind>(entity) {
+                Some(NodeKind::Extension) => {
+                    return self.ctx.query(kestrel_name_res::ExtensionTargetEntity {
+                        extension: entity,
+                        root: self.root,
+                    });
+                }
+                Some(NodeKind::Struct | NodeKind::Enum | NodeKind::Protocol) => {
+                    return Some(entity);
+                }
+                _ => current = self.ctx.parent_of(entity),
+            }
+        }
+        None
     }
 
     /// Gather protocols from an entity's Conformances, recursively walking inherited protocols.
@@ -1410,6 +1467,40 @@ impl WorldResolver<'_> {
     /// from where clauses on the param's parent AND ancestor entities of
     /// the current owner (including transitive protocol inheritance).
     ///
+    /// Collect additional protocols from enclosing extension where clauses.
+    /// For `extend Filterable where Self: Sortable`, returns `[Sortable]` when
+    /// called with `target_protocol = Filterable`.
+    fn collect_extension_where_clause_protocols(&self, target_protocol: Entity) -> Vec<Entity> {
+        let mut protocols = Vec::new();
+
+        // Walk from owner up to find the enclosing extension
+        let mut current = Some(self.owner);
+        while let Some(entity) = current {
+            if self.ctx.get::<NodeKind>(entity) == Some(&NodeKind::Extension) {
+                // Check if this extension targets our protocol
+                let ext_target = self.ctx.query(kestrel_name_res::ExtensionTargetEntity {
+                    extension: entity,
+                    root: self.root,
+                });
+                if ext_target == Some(target_protocol) {
+                    // Get where clause bounds where the subject is the target protocol (Self)
+                    for clause in self.where_clauses(entity) {
+                        if let WhereClause::Bound { param, protocol, .. } = clause {
+                            // `Self: Protocol` — param is the target protocol entity
+                            if param == target_protocol {
+                                protocols.push(protocol);
+                            }
+                        }
+                    }
+                }
+                break; // Found the extension, stop walking
+            }
+            current = self.ctx.parent_of(entity);
+        }
+
+        protocols
+    }
+
     /// Where clauses can live on the param's direct parent (function/method),
     /// on an extension (`extend Array[T] where T: Comparable`), or on any
     /// ancestor entity of the owner being compiled.
