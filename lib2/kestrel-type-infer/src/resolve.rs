@@ -44,6 +44,9 @@ pub struct MemberResolution {
     /// for `F: Factory[lang.i64]`). Used to substitute protocol type params
     /// in the method's return type and parameter types.
     pub protocol_type_args: Vec<HirTy>,
+    /// The extension entity this member was resolved from (if any).
+    /// Used by the solver to check type arg compatibility and where clause satisfaction.
+    pub from_extension: Option<Entity>,
 }
 
 /// Info about a member's parameter, for overload resolution.
@@ -200,12 +203,17 @@ impl TypeResolver for WorldResolver<'_> {
             root: self.root,
         });
         let mut all_candidates = candidates;
+        // Track which extension each candidate came from (for solver-side filtering)
+        let mut candidate_extensions: Vec<(Entity, Entity)> = Vec::new(); // (candidate, extension)
         for ext in &extensions {
             let ext_children = self.ctx.query(kestrel_name_res::VisibleChildrenByName {
                 parent: *ext,
                 name: name.to_string(),
                 context: self.owner,
             });
+            for &child in &ext_children {
+                candidate_extensions.push((child, *ext));
+            }
             all_candidates.extend(ext_children);
         }
 
@@ -324,7 +332,12 @@ impl TypeResolver for WorldResolver<'_> {
             }
         };
 
-        self.build_member_resolution(member)
+        let mut resolution = self.build_member_resolution(member)?;
+        // Track which extension the member came from (for solver-side type arg filtering)
+        if let Some(&(_, ext)) = candidate_extensions.iter().find(|(c, _)| *c == member) {
+            resolution.from_extension = Some(ext);
+        }
+        Ok(resolution)
     }
 
     fn conforms_to(&self, ty: &TyKind, protocol: Entity) -> bool {
@@ -759,6 +772,7 @@ impl WorldResolver<'_> {
             self_type,
             via_protocol: None,
             protocol_type_args: vec![],
+            from_extension: None,
         })
     }
 
@@ -889,6 +903,7 @@ impl WorldResolver<'_> {
             self_type: Some(protocol),
             via_protocol: Some(protocol),
             protocol_type_args: vec![],
+            from_extension: None,
         })
     }
 

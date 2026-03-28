@@ -876,6 +876,18 @@ fn solve_member(
         }
     };
 
+    // Check extension type arg compatibility: if the member came from a specialized
+    // extension (e.g., extend Box[lang.i64]), verify the receiver's type args match.
+    if let Some(ext) = resolution.from_extension {
+        if !extension_type_args_compatible(ctx, ext, &recv_kind) {
+            return SolveResult::Error(InferError::NoMember {
+                receiver,
+                name: name.to_string(),
+                span,
+            });
+        }
+    }
+
     // Field/property used as a call → field access + call on the field value.
     // Handles both function-typed fields (e.g., `self.transform(item)`, `self.separator()`)
     // and subscriptable fields (e.g., `self.data(unchecked: i)` where data is Array[T]).
@@ -1309,6 +1321,72 @@ fn solve_tuple_rest_pat(
     }
 
     SolveResult::Solved
+}
+
+/// Check if an extension's explicit type args are compatible with the receiver's type args.
+/// Returns false only when we can definitively prove incompatibility.
+fn extension_type_args_compatible(
+    ctx: &InferCtx<'_>,
+    extension: Entity,
+    recv_kind: &TyKind,
+) -> bool {
+    use crate::ty::TySlot;
+    use kestrel_hir::ty::HirTy;
+    use kestrel_hir_lower::LowerExtensionTargetTypeArgs;
+
+    let Some(ext_args) = ctx.query_ctx.query(LowerExtensionTargetTypeArgs {
+        extension,
+        root: ctx.root,
+    }) else {
+        return true;
+    };
+
+    if ext_args.is_empty() {
+        return true; // Generic extension
+    }
+
+    let TyKind::Named { args: recv_args, .. } = recv_kind else {
+        return true;
+    };
+
+    for (i, ext_arg) in ext_args.iter().enumerate() {
+        let Some(&recv_tv) = recv_args.get(i) else {
+            continue;
+        };
+
+        // Skip generic (type parameter) positions — they match anything
+        if let HirTy::Named { entity: ext_entity, .. } = ext_arg {
+            if ctx.query_ctx.get::<NodeKind>(*ext_entity) == Some(&NodeKind::TypeParameter) {
+                continue;
+            }
+
+            // Concrete extension arg — resolve receiver arg and compare entities
+            let resolved_recv = ctx.resolve(recv_tv);
+            match ctx.slot(resolved_recv) {
+                TySlot::Resolved(TyKind::Named { entity: recv_entity, .. }) => {
+                    if ext_entity != recv_entity {
+                        return false;
+                    }
+                }
+                TySlot::Resolved(_) => {
+                    return false;
+                }
+                TySlot::Unresolved { literal: Some(lit) } => {
+                    // Unresolved literal — check if the expected type is compatible
+                    let ext_ty = TyKind::Named { entity: *ext_entity, args: vec![] };
+                    if !crate::unify::conforms_to_literal_protocol(ctx, &ext_ty, *lit) {
+                        return false;
+                    }
+                }
+                _ => {
+                    // Truly unresolved — allow
+                    continue;
+                }
+            }
+        }
+    }
+
+    true
 }
 
 // ===== Literal defaults =====
