@@ -303,6 +303,16 @@ fn solve_coerce(
         return SolveResult::Solved;
     }
 
+    // Check protocol conformance: if the target is a protocol and the source conforms,
+    // the coercion is valid (protocol existential boxing handled at codegen)
+    if let TyKind::Named { entity: to_entity, .. } = &to_kind {
+        if ctx.query_ctx.get::<NodeKind>(*to_entity) == Some(&NodeKind::Protocol) {
+            if ctx.resolver.conforms_to(&from_kind, *to_entity) {
+                return SolveResult::Solved;
+            }
+        }
+    }
+
     SolveResult::Error(InferError::TypeMismatch {
         expected: to,
         got: from,
