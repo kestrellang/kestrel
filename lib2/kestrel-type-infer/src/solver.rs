@@ -1425,9 +1425,24 @@ fn extension_where_clauses_satisfied(
         .map(|(&param, &tv)| (param, tv))
         .collect();
 
+    // Get the extension's target entity for Self comparison
+    let ext_target = ctx.query_ctx.query(kestrel_name_res::ExtensionTargetEntity {
+        extension,
+        root: ctx.root,
+    });
+
     for clause in &clauses {
         if let WhereClause::Bound { param, protocol, .. } = clause {
-            // Find the receiver's type arg for this param
+            // Case 1: `Self: Protocol` — param is the extension target entity
+            if ext_target == Some(*param) {
+                // Check if the receiver type conforms to the protocol
+                if !ctx.resolver.conforms_to(recv_kind, *protocol) {
+                    return false;
+                }
+                continue;
+            }
+
+            // Case 2: `T: Protocol` — param is a type parameter
             if let Some(&(_, recv_tv)) = param_to_recv.iter().find(|(p, _)| p == param) {
                 let resolved = ctx.resolve(recv_tv);
                 if let crate::ty::TySlot::Resolved(kind) = ctx.slot(resolved) {
@@ -1435,9 +1450,7 @@ fn extension_where_clauses_satisfied(
                         return false;
                     }
                 }
-                // If not resolved, assume OK (will be checked later)
             }
-            // If param not in the type params (e.g., Self), skip — handled by type arg check
         }
     }
 

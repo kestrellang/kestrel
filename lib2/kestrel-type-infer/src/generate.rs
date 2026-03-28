@@ -758,11 +758,21 @@ fn instantiate_entity_inner(
 
     // Validate explicit type arg arity
     if !explicit_type_args.is_empty() && explicit_type_args.len() != type_param_entities.len() {
-        // Check parent entity fallback first (e.g., Pointer[UInt8].nullPointer)
-        let parent_matches = qctx.parent_of(entity)
+        // Check parent entity fallback (e.g., Pointer[UInt8].nullPointer)
+        // Also check extension target for extension methods (e.g., Box[i64].zero)
+        let parent = qctx.parent_of(entity);
+        let parent_matches = parent
             .and_then(|p| qctx.get::<TypeParams>(p))
             .is_some_and(|tp| tp.0.len() == explicit_type_args.len());
-        if !parent_matches {
+        let ext_target_matches = parent
+            .filter(|p| qctx.get::<NodeKind>(*p) == Some(&NodeKind::Extension))
+            .and_then(|ext| qctx.query(kestrel_name_res::ExtensionTargetEntity {
+                extension: ext,
+                root: ctx.root,
+            }))
+            .and_then(|target| qctx.get::<TypeParams>(target))
+            .is_some_and(|tp| tp.0.len() == explicit_type_args.len());
+        if !parent_matches && !ext_target_matches {
             let total = type_param_entities.len();
             let span = hir_ty_span(&explicit_type_args[0]);
             ctx.report_error(InferError::TypeArgCountMismatch {

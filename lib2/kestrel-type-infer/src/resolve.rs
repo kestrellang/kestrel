@@ -233,7 +233,7 @@ impl TypeResolver for WorldResolver<'_> {
                 entity: *entity,
                 root: self.root,
             });
-            let mut proto_candidates = Vec::new();
+            let mut proto_candidates: Vec<(Entity, Entity)> = Vec::new(); // (candidate, extension)
             for proto in &protocols {
                 let proto_extensions = self.ctx.query(kestrel_name_res::ExtensionsFor {
                     target: *proto,
@@ -245,17 +245,20 @@ impl TypeResolver for WorldResolver<'_> {
                         name: name.to_string(),
                         context: self.owner,
                     });
-                    proto_candidates.extend(ext_children);
+                    for &child in &ext_children {
+                        proto_candidates.push((child, *ext));
+                    }
                 }
             }
 
             // Deduplicate protocol extension candidates by label signature.
             // Same method from different protocol extensions = equivalent default impl.
             let mut seen_signatures = std::collections::HashSet::new();
-            for &cand in &proto_candidates {
+            for &(cand, ext) in &proto_candidates {
                 let sig = self.label_signature(cand);
                 if seen_signatures.insert(sig) {
                     all_candidates.push(cand);
+                    candidate_extensions.push((cand, ext));
                 }
             }
         }
@@ -1057,7 +1060,7 @@ impl WorldResolver<'_> {
                     root: self.root,
                 }) {
                     TypeResolution::Found(entity) => Some(entity),
-                    TypeResolution::SelfType => self.resolve_self_entity(),
+                    TypeResolution::SelfType => self.resolve_self_entity_from(context),
                     _ => None,
                 }
             }
@@ -1065,11 +1068,9 @@ impl WorldResolver<'_> {
         }
     }
 
-    /// Resolve `Self` to the enclosing type entity.
-    /// For extension methods, this is the extension target.
-    /// For struct/enum methods, this is the parent struct/enum.
-    fn resolve_self_entity(&self) -> Option<Entity> {
-        let mut current = Some(self.owner);
+    /// Resolve `Self` to the enclosing type entity, starting from `start`.
+    fn resolve_self_entity_from(&self, start: Entity) -> Option<Entity> {
+        let mut current = Some(start);
         while let Some(entity) = current {
             match self.ctx.get::<NodeKind>(entity) {
                 Some(NodeKind::Extension) => {
