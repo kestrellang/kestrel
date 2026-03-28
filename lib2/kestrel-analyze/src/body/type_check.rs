@@ -142,6 +142,10 @@ fn format_error(err: &InferError, detail: &str) -> (String, String) {
                 )
             }
         }
+        InferError::NoMatchingOverload { name, .. } => (
+            format!("no matching overload for '{name}'"),
+            format!("no matching overload for '{name}'"),
+        ),
         InferError::FromHir { .. } => unreachable!("filtered above"),
     }
 }

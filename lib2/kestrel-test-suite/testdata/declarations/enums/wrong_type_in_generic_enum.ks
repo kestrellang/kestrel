@@ -9,5 +9,5 @@ enum Option[T] {
 }
 
 func test() -> Option[lang.i64] {
-    Option.Some(value: "hello") // ERROR: does not conform to protocol
+    Option.Some(value: "hello") // ERROR: type mismatch
 }

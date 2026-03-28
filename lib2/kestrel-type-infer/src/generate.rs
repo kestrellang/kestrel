@@ -129,6 +129,25 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                 }
             }
 
+            // Enum case construction: route through OverloadedCall for label checking
+            if let HirExpr::Def(entity, _, _) = &hir.exprs[*callee] {
+                if ctx.query_ctx.get::<NodeKind>(*entity) == Some(&NodeKind::EnumCase)
+                    && ctx.query_ctx.get::<Callable>(*entity).is_some()
+                {
+                    let arg_tvs = gen_call_args(ctx, hir, args);
+                    let result_tv = ctx.fresh();
+                    ctx.overloaded_call(
+                        vec![*entity],
+                        vec![],
+                        arg_tvs,
+                        result_tv,
+                        id,
+                        span.clone(),
+                    );
+                    return result_tv;
+                }
+            }
+
             // Emit Call constraint — solver dispatches based on callee type:
             // Function → unify params/return, Named → subscript resolution
             let callee_tv = gen_expr(ctx, hir, *callee);

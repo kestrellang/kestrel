@@ -98,6 +98,12 @@ pub enum InferError {
         got: usize,
         span: Span,
     },
+
+    /// No overload matches the call's labels/arity (e.g., enum case with wrong labels).
+    NoMatchingOverload {
+        name: String,
+        span: Span,
+    },
 }
 
 impl InferError {
@@ -117,7 +123,8 @@ impl InferError {
             | Self::LabelMismatch { span, .. }
             | Self::InstanceMethodAsStatic { span, .. }
             | Self::TypeParamAsValue { span }
-            | Self::TypeArgCountMismatch { span, .. } => span,
+            | Self::TypeArgCountMismatch { span, .. }
+            | Self::NoMatchingOverload { span, .. } => span,
         }
     }
 }

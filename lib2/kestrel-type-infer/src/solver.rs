@@ -493,6 +493,13 @@ fn solve_call(
                 // The result of T() is T, not the init's return type
                 ctx.equal(result, callee, span);
                 res
+            } else if args.is_empty()
+                && ctx.query_ctx.get::<kestrel_ast_builder::NodeKind>(*entity)
+                    == Some(&kestrel_ast_builder::NodeKind::Enum)
+            {
+                // Zero-arg call on an enum value is a no-op (e.g., Color.Red())
+                ctx.equal(result, callee, span);
+                SolveResult::Solved
             } else {
                 // Instance subscript call (e.g., dict(key))
                 solve_member(ctx, callee, "(subscript)", args, result, expr, true, false, span)
@@ -541,8 +548,7 @@ fn solve_overloaded_call(
         .collect();
 
     match matched.len() {
-        0 => SolveResult::Error(InferError::NoMember {
-            receiver: result,
+        0 => SolveResult::Error(InferError::NoMatchingOverload {
             name: overload_name,
             span,
         }),
@@ -625,9 +631,9 @@ fn emit_resolved_call(
         .map(|(&e, &tv)| (e, tv))
         .collect();
 
-    // For initializers, also add parent struct's type params
+    // For initializers and enum cases, also add parent type params
     let kind = qctx.get::<NodeKind>(entity);
-    if matches!(kind, Some(NodeKind::Initializer)) {
+    if matches!(kind, Some(NodeKind::Initializer | NodeKind::EnumCase)) {
         if let Some(parent) = qctx.parent_of(entity) {
             let parent_tps: Vec<Entity> = qctx
                 .get::<TypeParams>(parent)
@@ -697,8 +703,8 @@ fn emit_resolved_call(
         .map(|hir_ty| lower_hir_ty_sub(ctx, &hir_ty, None, TyVar(0), &subs))
         .unwrap_or_else(|| ctx.fresh());
 
-    // For inits, result type is the parent struct (not the init's return annotation)
-    if matches!(kind, Some(NodeKind::Initializer)) {
+    // For inits and enum cases, result type is the parent type
+    if matches!(kind, Some(NodeKind::Initializer | NodeKind::EnumCase)) {
         if let Some(parent) = qctx.parent_of(entity) {
             let parent_tps: Vec<Entity> = qctx
                 .get::<TypeParams>(parent)
@@ -708,8 +714,8 @@ fn emit_resolved_call(
                 .iter()
                 .filter_map(|tp| subs.iter().find(|(e, _)| e == tp).map(|&(_, tv)| tv))
                 .collect();
-            let struct_ty = ctx.named(parent, parent_args);
-            ctx.equal(result, struct_ty, span);
+            let parent_ty = ctx.named(parent, parent_args);
+            ctx.equal(result, parent_ty, span);
         } else {
             ctx.equal(result, ret_tv, span);
         }
@@ -1186,6 +1192,22 @@ fn solve_implicit(
             }
         }
     };
+
+    // Check labels match for enum case calls (e.g., .Circle(radius: 5.0))
+    if ctx.query_ctx.get::<NodeKind>(resolution.entity) == Some(&NodeKind::EnumCase) {
+        if let Some(callable) = ctx.query_ctx.get::<Callable>(resolution.entity) {
+            let arg_labels: Vec<Option<&str>> = args.iter().map(|a| a.label.as_deref()).collect();
+            if !crate::constraint::labels_match(&callable.params, &arg_labels) {
+                let case_name = ctx.query_ctx.get::<Name>(resolution.entity)
+                    .map(|n| n.0.clone())
+                    .unwrap_or_else(|| name.to_string());
+                return SolveResult::Error(InferError::NoMatchingOverload {
+                    name: case_name,
+                    span,
+                });
+            }
+        }
+    }
 
     ctx.resolutions.insert(expr, resolution.entity);
 

@@ -145,6 +145,10 @@ impl ToDiagnostic for ResolvedInferError<'_> {
                     .with_message(&msg)
                     .with_labels(vec![Label::primary(file_id, range).with_message(detail)])
             }
+
+            InferError::NoMatchingOverload { name, .. } => Diagnostic::error()
+                .with_message(format!("no matching overload for '{name}'"))
+                .with_labels(vec![Label::primary(file_id, range).with_message(detail)]),
         }
     }
 }

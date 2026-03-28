@@ -10,5 +10,5 @@ enum TrafficLight {
 }
 
 func test() {
-    let x = .Red; // ERROR: cannot infer enum type for shorthand
+    let x = .Red; // ERROR: implicit member '.Red' not found
 }

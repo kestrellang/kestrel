@@ -8,5 +8,5 @@ enum Shape {
 }
 
 func test() -> Shape {
-    Shape.Circle(radius: "big") // ERROR: does not conform to protocol
+    Shape.Circle(radius: "big") // ERROR: type mismatch
 }

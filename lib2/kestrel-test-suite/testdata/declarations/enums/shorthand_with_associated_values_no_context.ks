@@ -6,5 +6,5 @@ enum Shape {
 }
 
 func test() {
-    let x = .Circle(radius: 5.0); // ERROR: cannot infer enum type for shorthand
+    let x = .Circle(radius: 5.0); // ERROR: implicit member '.Circle' not found
 }

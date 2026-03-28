@@ -452,6 +452,7 @@ fn error_variant_name(err: &InferError) -> &'static str {
         InferError::InstanceMethodAsStatic { .. } => "InstanceMethodAsStatic",
         InferError::TypeParamAsValue { .. } => "TypeParamAsValue",
         InferError::TypeArgCountMismatch { .. } => "TypeArgCountMismatch",
+        InferError::NoMatchingOverload { .. } => "NoMatchingOverload",
     }
 }
 
@@ -500,6 +501,9 @@ fn format_error(err: &InferError) -> String {
         }
         InferError::TypeArgCountMismatch { expected, got, .. } => {
             format!("TypeArgCountMismatch expected={} got={} at {}:{}", expected, got, span.file_id, span.start)
+        }
+        InferError::NoMatchingOverload { name, .. } => {
+            format!("NoMatchingOverload '{}' at {}:{}", name, span.file_id, span.start)
         }
     }
 }

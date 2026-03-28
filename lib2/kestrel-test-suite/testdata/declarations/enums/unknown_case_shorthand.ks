@@ -8,5 +8,5 @@ enum Color {
 }
 
 func test() {
-    let color: Color = .Purple; // ERROR: member not found
+    let color: Color = .Purple; // ERROR: implicit member '.Purple' not found
 }

@@ -8,5 +8,5 @@ enum Event {
 }
 
 func test() -> Event {
-    Event.Click(x: 10, y: "twenty") // ERROR: does not conform to protocol
+    Event.Click(x: 10, y: "twenty") // ERROR: type mismatch
 }

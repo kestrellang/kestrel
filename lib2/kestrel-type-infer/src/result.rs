@@ -289,5 +289,8 @@ fn describe_error(ctx: &InferCtx<'_>, err: &InferError) -> String {
                 format!("too many type arguments: expected {}, got {}", expected, got)
             }
         }
+        InferError::NoMatchingOverload { name, .. } => {
+            format!("no matching overload for '{}'", name)
+        }
     }
 }
