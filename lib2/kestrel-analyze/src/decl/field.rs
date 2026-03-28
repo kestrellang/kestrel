@@ -50,7 +50,7 @@ use crate::context::DeclContext;
 use crate::diagnostic::*;
 use crate::traits::{DeclCheck, Describe};
 use crate::util;
-use kestrel_ast_builder::{Callable, NodeKind, Settable, Static, TypeParams};
+use kestrel_ast_builder::{Callable, CstNode, NodeKind, Settable, Static, TypeParams};
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[
     DiagnosticDescriptor {
@@ -68,6 +68,12 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
     DiagnosticDescriptor {
         id: "E416",
         name: "generic_type_static_stored_property",
+        default_severity: Severity::Error,
+        category: Category::Correctness,
+    },
+    DiagnosticDescriptor {
+        id: "E417",
+        name: "global_property_already_static",
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
@@ -93,24 +99,63 @@ impl DeclCheck for FieldAnalyzer {
         let mut diags = Vec::new();
         let span = util::entity_span(cx.query, cx.entity);
 
-        // A computed property has a Callable component (getter with borrowing receiver)
-        let is_computed = cx.query.get::<Callable>(cx.entity).is_some();
         let is_static = cx.query.get::<Static>(cx.entity).is_some();
-        let is_var = cx.query.get::<Settable>(cx.entity).is_some();
+
+        // Check the CST node for computed property and var keyword
+        let (is_computed, has_var_keyword) = cx
+            .query
+            .get::<CstNode>(cx.entity)
+            .map(|cst| {
+                use kestrel_syntax_tree2::SyntaxKind;
+                let computed = cst.0.children().any(|c| c.kind() == SyntaxKind::PropertyAccessors);
+                let var_kw = cst.0.children_with_tokens()
+                    .any(|e| e.as_token().is_some_and(|t| t.kind() == SyntaxKind::Var));
+                (computed, var_kw)
+            })
+            .unwrap_or((false, false));
 
         // Check 1: computed properties must use 'var' (not 'let')
-        // Currently disabled: Settable only indicates a `set` accessor exists,
-        // NOT whether the `var` keyword was used. Read-only computed properties
-        // (get-only) are valid but don't have Settable. To detect `let` vs `var`
-        // on computed properties, we'd need to check the CstNode or add a new
-        // component. Skip for now to avoid false positives.
-        // TODO: add a VarKeyword component or check CstNode for the var/let token
+        if is_computed && !has_var_keyword {
+            diags.push(AnalyzeDiagnostic {
+                descriptor_id: DESCRIPTORS[0].id,
+                severity: DESCRIPTORS[0].default_severity,
+                message: "computed properties must use 'var'".into(),
+                labels: vec![DiagLabel {
+                    span: span.clone(),
+                    message: "computed property declared with 'let'".into(),
+                    is_primary: true,
+                }],
+                notes: vec![],
+            });
+            return diags;
+        }
 
         // Get parent for context-dependent checks
         let Some(parent) = cx.query.parent_of(cx.entity) else {
             return diags;
         };
         let parent_kind = cx.query.get::<NodeKind>(parent);
+
+        // Check: global-scope properties are already static
+        if is_static && matches!(parent_kind, Some(NodeKind::Module)) {
+            let msg = if is_computed {
+                "computed properties in global context are already static"
+            } else {
+                "properties in global context are already static"
+            };
+            diags.push(AnalyzeDiagnostic {
+                descriptor_id: DESCRIPTORS[3].id,
+                severity: DESCRIPTORS[3].default_severity,
+                message: msg.into(),
+                labels: vec![DiagLabel {
+                    span: span.clone(),
+                    message: "'static' is redundant here".into(),
+                    is_primary: true,
+                }],
+                notes: vec![],
+            });
+            return diags;
+        }
 
         // Check 2: enums cannot have non-static stored fields
         if matches!(parent_kind, Some(NodeKind::Enum)) && !is_static && !is_computed {

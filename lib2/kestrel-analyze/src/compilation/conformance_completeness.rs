@@ -12,7 +12,7 @@
 //! ### E455 -- `missing_associated_type` (Error, Correctness)
 //! **Message:** "type '{type}' does not provide associated type '{name}' from protocol '{proto}'"
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::context::CompilationContext;
 use crate::diagnostic::*;
@@ -32,6 +32,12 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
     DiagnosticDescriptor {
         id: "E455",
         name: "missing_associated_type",
+        default_severity: Severity::Error,
+        category: Category::Correctness,
+    },
+    DiagnosticDescriptor {
+        id: "E456",
+        name: "protocol_property_type_mismatch",
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
@@ -197,23 +203,77 @@ fn check_protocol_requirements(
                     });
                 }
             }
+            Some(NodeKind::Field) => {
+                // Required property — check if provided with matching type
+                if let Some(&field_entity) = provided.fields.get(name.as_str()) {
+                    // Compare types by resolving TypeAnnotation on both
+                    let proto_ty = cx.query.get::<TypeAnnotation>(child);
+                    let impl_ty = cx.query.get::<TypeAnnotation>(field_entity);
+                    if let (Some(proto_ann), Some(impl_ann)) = (proto_ty, impl_ty) {
+                        let proto_resolved = resolve_type_entity(cx, &proto_ann.0, protocol);
+                        let impl_resolved = resolve_type_entity(cx, &impl_ann.0, type_entity);
+                        if proto_resolved != impl_resolved || proto_resolved.is_none() {
+                            let field_span = util::entity_span(cx.query, field_entity);
+                            diags.push(AnalyzeDiagnostic {
+                                descriptor_id: DESCRIPTORS[2].id,
+                                severity: DESCRIPTORS[2].default_severity,
+                                message: format!(
+                                    "property '{}' has wrong type for protocol '{}'",
+                                    name, proto_name,
+                                ),
+                                labels: vec![DiagLabel {
+                                    span: field_span,
+                                    message: format!(
+                                        "type does not match protocol requirement",
+                                    ),
+                                    is_primary: true,
+                                }],
+                                notes: vec![],
+                            });
+                        }
+                    }
+                }
+            }
             _ => {}
         }
+    }
+}
+
+/// Resolve an AstType to an entity for type comparison.
+fn resolve_type_entity(
+    cx: &CompilationContext<'_>,
+    ast_ty: &kestrel_ast::AstType,
+    context: Entity,
+) -> Option<Entity> {
+    let kestrel_ast::AstType::Named { segments, .. } = ast_ty else {
+        return None;
+    };
+    let seg_names: Vec<String> = segments.iter().map(|s| s.name.clone()).collect();
+    match cx.query.query(ResolveTypePath {
+        segments: seg_names,
+        context,
+        root: cx.root,
+    }) {
+        TypeResolution::Found(entity) => Some(entity),
+        _ => None,
     }
 }
 
 struct ProvidedMembers {
     methods: HashSet<String>,
     type_aliases: HashSet<String>,
+    /// field name → field entity (for type comparison)
+    fields: HashMap<String, Entity>,
 }
 
 /// Collect all method names and type alias names provided by a type and its extensions.
 fn collect_provided_members(cx: &CompilationContext<'_>, type_entity: Entity) -> ProvidedMembers {
     let mut methods = HashSet::new();
     let mut type_aliases = HashSet::new();
+    let mut fields = HashMap::new();
 
     // Direct members
-    collect_from_entity(cx, type_entity, &mut methods, &mut type_aliases);
+    collect_from_entity(cx, type_entity, &mut methods, &mut type_aliases, &mut fields);
 
     // Extension members
     let extensions = cx.query.query(ExtensionsFor {
@@ -221,10 +281,10 @@ fn collect_provided_members(cx: &CompilationContext<'_>, type_entity: Entity) ->
         root: cx.root,
     });
     for ext in &extensions {
-        collect_from_entity(cx, *ext, &mut methods, &mut type_aliases);
+        collect_from_entity(cx, *ext, &mut methods, &mut type_aliases, &mut fields);
     }
 
-    ProvidedMembers { methods, type_aliases }
+    ProvidedMembers { methods, type_aliases, fields }
 }
 
 fn collect_from_entity(
@@ -232,6 +292,7 @@ fn collect_from_entity(
     entity: Entity,
     methods: &mut HashSet<String>,
     type_aliases: &mut HashSet<String>,
+    fields: &mut HashMap<String, Entity>,
 ) {
     for &child in cx.query.children_of(entity) {
         let Some(name) = cx.query.get::<Name>(child) else { continue };
@@ -244,6 +305,9 @@ fn collect_from_entity(
                 if cx.query.get::<TypeAnnotation>(child).is_some() {
                     type_aliases.insert(name.0.clone());
                 }
+            }
+            Some(NodeKind::Field) => {
+                fields.insert(name.0.clone(), child);
             }
             _ => {}
         }
