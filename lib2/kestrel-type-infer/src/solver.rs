@@ -860,12 +860,38 @@ fn solve_member(
                 span,
             });
         }
-        Err(crate::resolve::MemberError::Ambiguous(_)) => {
-            return SolveResult::Error(InferError::AmbiguousMember {
-                receiver,
-                name: name.to_string(),
-                span,
+        Err(crate::resolve::MemberError::Ambiguous(ranked_candidates)) => {
+            // Try each candidate in specificity order, picking the first compatible one
+            let compatible = ranked_candidates.iter().find(|(_, ext)| {
+                match ext {
+                    Some(ext) => {
+                        extension_type_args_compatible(ctx, *ext, &recv_kind)
+                            && extension_where_clauses_satisfied(ctx, *ext, &recv_kind)
+                    }
+                    None => true,
+                }
             });
+            if let Some(&(winner, ext)) = compatible {
+                match ctx.resolver.resolve_single_member(&recv_kind, winner) {
+                    Ok(mut res) => {
+                        res.from_extension = ext;
+                        res
+                    }
+                    Err(_) => {
+                        return SolveResult::Error(InferError::AmbiguousMember {
+                            receiver,
+                            name: name.to_string(),
+                            span,
+                        });
+                    }
+                }
+            } else {
+                return SolveResult::Error(InferError::NoMember {
+                    receiver,
+                    name: name.to_string(),
+                    span,
+                });
+            }
         }
         Err(crate::resolve::MemberError::NotVisible) => {
             return SolveResult::Error(InferError::MemberNotVisible {

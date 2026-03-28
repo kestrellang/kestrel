@@ -11,7 +11,7 @@ use kestrel_ast_builder::{
 use kestrel_hecs::{Entity, QueryContext};
 use kestrel_hir::Builtin;
 use kestrel_hir::ty::HirTy;
-use kestrel_hir_lower::{LowerCallableTypes, LowerTypeAnnotation};
+use kestrel_hir_lower::{LowerCallableTypes, LowerExtensionTargetTypeArgs, LowerTypeAnnotation};
 use kestrel_name_res::{ConformingProtocols, ResolveBuiltin, ResolveTypePath, TypeResolution};
 use kestrel_span2::Span;
 
@@ -70,7 +70,9 @@ pub enum MemberKind {
 #[derive(Clone, Debug)]
 pub enum MemberError {
     NotFound,
-    Ambiguous(Vec<Entity>),
+    /// Ambiguous candidates, ranked by extension specificity (most specific first).
+    /// Each entry: (candidate_entity, from_extension).
+    Ambiguous(Vec<(Entity, Option<Entity>)>),
     NotVisible,
 }
 
@@ -142,6 +144,14 @@ pub trait TypeResolver {
 
     /// Get where clauses resolving names in a specific context entity's scope.
     fn where_clauses_in_context(&self, entity: Entity, context: Entity) -> Vec<WhereClause>;
+
+    /// Build a MemberResolution for a specific known member entity.
+    /// Used by the solver when picking from ranked ambiguous candidates.
+    fn resolve_single_member(
+        &self,
+        receiver_ty: &TyKind,
+        member: Entity,
+    ) -> Result<MemberResolution, MemberError>;
 
     /// Check if `to` type can be constructed from `from` type via FromValue promotion.
     /// Returns the `from()` method entity if promotion is possible.
@@ -361,13 +371,14 @@ impl TypeResolver for WorldResolver<'_> {
             1 => matches[0],
             _ => {
                 // Multiple candidates with same labels — try protocol-based resolution.
-                // If the ambiguous members implement a single protocol requirement,
-                // return the protocol's abstract method and let the solver
-                // disambiguate via type inference.
                 if let Some(proto_res) = self.try_resolve_through_protocol(*entity, name, _args) {
                     return Ok(proto_res);
                 }
-                return Err(MemberError::Ambiguous(matches));
+
+                // Rank by extension specificity: more concrete type args = more specific.
+                // Return candidates sorted by specificity for solver-side filtering.
+                let ranked = self.rank_by_extension_specificity(&matches, &candidate_extensions);
+                return Err(MemberError::Ambiguous(ranked));
             }
         };
 
@@ -377,6 +388,14 @@ impl TypeResolver for WorldResolver<'_> {
             resolution.from_extension = Some(ext);
         }
         Ok(resolution)
+    }
+
+    fn resolve_single_member(
+        &self,
+        _receiver_ty: &TyKind,
+        member: Entity,
+    ) -> Result<MemberResolution, MemberError> {
+        self.build_member_resolution(member)
     }
 
     fn conforms_to(&self, ty: &TyKind, protocol: Entity) -> bool {
@@ -637,7 +656,7 @@ impl TypeResolver for WorldResolver<'_> {
                 }
             }
             1 => matches[0],
-            _ => return Err(MemberError::Ambiguous(matches)),
+            _ => return Err(MemberError::Ambiguous(matches.into_iter().map(|e| (e, None)).collect())),
         };
 
         self.build_member_resolution(member)
@@ -1156,7 +1175,7 @@ impl WorldResolver<'_> {
                 }
             }
             1 => matches[0],
-            _ => return Err(MemberError::Ambiguous(matches)),
+            _ => return Err(MemberError::Ambiguous(matches.into_iter().map(|e| (e, None)).collect())),
         };
         let mut resolution = self.build_member_resolution(member)?;
 
@@ -1342,7 +1361,7 @@ impl WorldResolver<'_> {
                 }
             }
             1 => matches[0],
-            _ => return Err(MemberError::Ambiguous(matches)),
+            _ => return Err(MemberError::Ambiguous(matches.into_iter().map(|e| (e, None)).collect())),
         };
 
         Ok((instance_candidates, member))
@@ -1408,7 +1427,7 @@ impl WorldResolver<'_> {
             0 if static_candidates.len() == 1 => static_candidates[0],
             0 => return Err(MemberError::NotFound),
             1 => matches[0],
-            _ => return Err(MemberError::Ambiguous(matches)),
+            _ => return Err(MemberError::Ambiguous(matches.into_iter().map(|e| (e, None)).collect())),
         };
 
         self.build_member_resolution(member)
@@ -1641,6 +1660,36 @@ impl WorldResolver<'_> {
             }
             _ => None,
         }
+    }
+
+    /// Rank ambiguous candidates by extension specificity.
+    /// Returns the winning candidate if one extension is strictly more specific.
+    /// Specificity = number of concrete (non-type-parameter) type args in the extension target.
+    /// Rank candidates by extension specificity (most specific first).
+    /// Returns (candidate, from_extension) pairs sorted descending by concrete type arg count.
+    fn rank_by_extension_specificity(
+        &self,
+        matches: &[Entity],
+        candidate_extensions: &[(Entity, Entity)],
+    ) -> Vec<(Entity, Option<Entity>)> {
+        let mut scored: Vec<(Entity, Option<Entity>, usize)> = Vec::new();
+
+        for &candidate in matches {
+            let ext = candidate_extensions.iter().find(|(c, _)| *c == candidate).map(|&(_, e)| e);
+
+            let specificity = ext
+                .and_then(|e| self.ctx.query(LowerExtensionTargetTypeArgs {
+                    extension: e,
+                    root: self.root,
+                }))
+                .map(|args| args.iter().filter(|t| !matches!(t, HirTy::Param(..))).count())
+                .unwrap_or(0);
+
+            scored.push((candidate, ext, specificity));
+        }
+
+        scored.sort_by_key(|(_, _, s)| std::cmp::Reverse(*s));
+        scored.into_iter().map(|(c, e, _)| (c, e)).collect()
     }
 }
 
