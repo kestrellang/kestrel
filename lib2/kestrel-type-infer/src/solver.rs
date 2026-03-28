@@ -876,10 +876,16 @@ fn solve_member(
         }
     };
 
-    // Check extension type arg compatibility: if the member came from a specialized
-    // extension (e.g., extend Box[lang.i64]), verify the receiver's type args match.
+    // Check extension type arg compatibility and where clause satisfaction
     if let Some(ext) = resolution.from_extension {
         if !extension_type_args_compatible(ctx, ext, &recv_kind) {
+            return SolveResult::Error(InferError::NoMember {
+                receiver,
+                name: name.to_string(),
+                span,
+            });
+        }
+        if !extension_where_clauses_satisfied(ctx, ext, &recv_kind) {
             return SolveResult::Error(InferError::NoMember {
                 receiver,
                 name: name.to_string(),
@@ -1383,6 +1389,55 @@ fn extension_type_args_compatible(
                     continue;
                 }
             }
+        }
+    }
+
+    true
+}
+
+/// Check if an extension's where clause constraints are satisfied by the receiver type.
+/// For `extend Box[T] where T: Equatable`, verifies that the receiver's T arg conforms.
+fn extension_where_clauses_satisfied(
+    ctx: &InferCtx<'_>,
+    extension: Entity,
+    recv_kind: &TyKind,
+) -> bool {
+    use crate::resolve::WhereClause;
+
+    // Resolve where clauses in the extension's own context (not the current method's context)
+    let clauses = ctx.resolver.where_clauses_in_context(extension, extension);
+    if clauses.is_empty() {
+        return true;
+    }
+
+    let TyKind::Named { entity: target_entity, args: recv_args, .. } = recv_kind else {
+        return true;
+    };
+
+    // Build map: type param entity → receiver TyVar
+    let type_params: Vec<Entity> = ctx.query_ctx
+        .get::<TypeParams>(*target_entity)
+        .map(|tp| tp.0.clone())
+        .unwrap_or_default();
+    let param_to_recv: Vec<(Entity, crate::ty::TyVar)> = type_params
+        .iter()
+        .zip(recv_args.iter())
+        .map(|(&param, &tv)| (param, tv))
+        .collect();
+
+    for clause in &clauses {
+        if let WhereClause::Bound { param, protocol, .. } = clause {
+            // Find the receiver's type arg for this param
+            if let Some(&(_, recv_tv)) = param_to_recv.iter().find(|(p, _)| p == param) {
+                let resolved = ctx.resolve(recv_tv);
+                if let crate::ty::TySlot::Resolved(kind) = ctx.slot(resolved) {
+                    if !ctx.resolver.conforms_to(kind, *protocol) {
+                        return false;
+                    }
+                }
+                // If not resolved, assume OK (will be checked later)
+            }
+            // If param not in the type params (e.g., Self), skip — handled by type arg check
         }
     }
 

@@ -140,6 +140,9 @@ pub trait TypeResolver {
     /// Get the where clauses for an entity (function, method, init).
     fn where_clauses(&self, entity: Entity) -> Vec<WhereClause>;
 
+    /// Get where clauses resolving names in a specific context entity's scope.
+    fn where_clauses_in_context(&self, entity: Entity, context: Entity) -> Vec<WhereClause>;
+
     /// Check if `to` type can be constructed from `from` type via FromValue promotion.
     /// Returns the `from()` method entity if promotion is possible.
     fn check_promotion(&self, from: &TyKind, to: &TyKind) -> Option<Entity>;
@@ -510,6 +513,11 @@ impl TypeResolver for WorldResolver<'_> {
     }
 
     fn where_clauses(&self, entity: Entity) -> Vec<WhereClause> {
+        self.where_clauses_in_context(entity, self.owner)
+    }
+
+    /// Get where clauses, resolving names in a specific context entity's scope.
+    fn where_clauses_in_context(&self, entity: Entity, context: Entity) -> Vec<WhereClause> {
         let Some(ast_wc) = self.ctx.get::<AstWhereClause>(entity) else {
             return Vec::new();
         };
@@ -520,16 +528,16 @@ impl TypeResolver for WorldResolver<'_> {
                     subject, protocols, ..
                 } => {
                     // Resolve subject to a type param entity
-                    let Some(param) = self.resolve_type_entity(subject) else {
+                    let Some(param) = self.resolve_type_entity_in_context(subject, context) else {
                         continue;
                     };
 
                     // Resolve each protocol, including type arguments
                     for protocol_ty in protocols {
-                        if let Some(protocol) = self.resolve_type_entity(protocol_ty) {
+                        if let Some(protocol) = self.resolve_type_entity_in_context(protocol_ty, context) {
                             // Extract type args from the protocol type (e.g., Factory[lang.i64])
                             let protocol_type_args = extract_protocol_type_args(
-                                self.ctx, self.owner, self.root, protocol_ty,
+                                self.ctx, context, self.root, protocol_ty,
                             );
                             result.push(WhereClause::Bound { param, protocol, protocol_type_args });
                         }
@@ -538,7 +546,7 @@ impl TypeResolver for WorldResolver<'_> {
                 WhereConstraint::Equality { lhs, rhs, .. } => {
                     let rhs_hir = kestrel_hir_lower::lower_ast_type(
                         self.ctx,
-                        self.owner,
+                        context,
                         self.root,
                         rhs,
                     );
@@ -1034,6 +1042,10 @@ impl WorldResolver<'_> {
 
     /// Resolve an AstType to a type entity using ResolveTypePath.
     fn resolve_type_entity(&self, ast_ty: &kestrel_ast_builder::AstType) -> Option<Entity> {
+        self.resolve_type_entity_in_context(ast_ty, self.owner)
+    }
+
+    fn resolve_type_entity_in_context(&self, ast_ty: &kestrel_ast_builder::AstType, context: Entity) -> Option<Entity> {
         use kestrel_ast_builder::AstType;
         match ast_ty {
             AstType::Named { segments, .. } => {
@@ -1041,11 +1053,10 @@ impl WorldResolver<'_> {
                     segments.iter().map(|s| s.name.clone()).collect();
                 match self.ctx.query(ResolveTypePath {
                     segments: seg_names,
-                    context: self.owner,
+                    context,
                     root: self.root,
                 }) {
                     TypeResolution::Found(entity) => Some(entity),
-                    // Self resolves to the enclosing type — find it via parent walk
                     TypeResolution::SelfType => self.resolve_self_entity(),
                     _ => None,
                 }
