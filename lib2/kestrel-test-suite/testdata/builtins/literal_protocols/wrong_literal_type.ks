@@ -1,5 +1,6 @@
 // test: diagnostics
 // stdlib: false
+// include: _prelude_literal_protocols.ks
 
 module Test
 struct Name: Prelude.ExpressibleByStringLiteral {
@@ -10,5 +11,5 @@ struct Name: Prelude.ExpressibleByStringLiteral {
     }
 }
 func test() -> Name {
-    42
+    42 // ERROR: type mismatch
 }

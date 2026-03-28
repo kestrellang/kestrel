@@ -1,5 +1,6 @@
 // test: diagnostics
 // stdlib: false
+// include: _prelude_literal_protocols.ks
 
 module Test
 // -1 = unknown, 0 = false, 1 = true

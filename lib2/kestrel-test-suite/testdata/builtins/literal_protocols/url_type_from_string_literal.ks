@@ -1,5 +1,6 @@
 // test: diagnostics
 // stdlib: false
+// include: _prelude_literal_protocols.ks
 
 module Test
 struct URL: Prelude.ExpressibleByStringLiteral {
