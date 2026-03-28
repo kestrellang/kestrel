@@ -4,5 +4,6 @@
 //! These run once per compilation, not per entity.
 
 pub mod constraint_cycles;
+pub mod extension_conflict;
 pub mod struct_cycles;
 pub mod type_alias_cycles;
