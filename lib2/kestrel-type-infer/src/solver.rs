@@ -313,6 +313,23 @@ fn solve_coerce(
         }
     }
 
+    // Flex closure adaptation: 0-param closure coerced to N-param function.
+    // Also catches implicit `it` in wrong-arity context.
+    if let (TyKind::Function { ret: ret_a, params: pa }, TyKind::Function { ret: ret_b, params: pb }) = (&from_kind, &to_kind) {
+        let from_root = ctx.resolve(from);
+        if pa.is_empty() && ctx.closure_flex.contains(&from_root) {
+            // Adapt: ignore expected params, just equate return types
+            ctx.equal(*ret_a, *ret_b, span);
+            return SolveResult::Solved;
+        }
+        if pa.len() == 1 && ctx.closure_it.contains(&from_root) && pb.len() != 1 {
+            return SolveResult::Error(InferError::ItWrongArity {
+                expected: pb.len(),
+                span,
+            });
+        }
+    }
+
     SolveResult::Error(InferError::TypeMismatch {
         expected: to,
         got: from,

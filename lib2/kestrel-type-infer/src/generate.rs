@@ -742,8 +742,18 @@ fn gen_closure(
     // Infer body
     let body_tv = gen_block(ctx, hir, body);
 
-    // Build function type
-    ctx.function(param_tvs, body_tv)
+    // Build function type and track closure flexibility
+    let fn_tv = ctx.function(param_tvs, body_tv);
+
+    if params.is_empty() {
+        // No explicit params, no `it` — adapts to any expected arity
+        ctx.closure_flex.insert(fn_tv);
+    } else if params.len() == 1 && hir.locals[params[0].local].name == "it" {
+        // Implicit `it` — requires exactly 1-param context
+        ctx.closure_it.insert(fn_tv);
+    }
+
+    fn_tv
 }
 
 /// Instantiate an entity's type: reads the ECS to determine what kind of

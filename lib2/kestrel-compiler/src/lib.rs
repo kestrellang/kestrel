@@ -453,6 +453,7 @@ fn error_variant_name(err: &InferError) -> &'static str {
         InferError::TypeParamAsValue { .. } => "TypeParamAsValue",
         InferError::TypeArgCountMismatch { .. } => "TypeArgCountMismatch",
         InferError::NoMatchingOverload { .. } => "NoMatchingOverload",
+        InferError::ItWrongArity { .. } => "ItWrongArity",
     }
 }
 
@@ -504,6 +505,9 @@ fn format_error(err: &InferError) -> String {
         }
         InferError::NoMatchingOverload { name, .. } => {
             format!("NoMatchingOverload '{}' at {}:{}", name, span.file_id, span.start)
+        }
+        InferError::ItWrongArity { expected, .. } => {
+            format!("ItWrongArity expected={} at {}:{}", expected, span.file_id, span.start)
         }
     }
 }

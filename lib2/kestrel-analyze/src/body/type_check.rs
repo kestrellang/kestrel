@@ -146,6 +146,10 @@ fn format_error(err: &InferError, detail: &str) -> (String, String) {
             format!("no matching overload for '{name}'"),
             format!("no matching overload for '{name}'"),
         ),
+        InferError::ItWrongArity { expected, .. } => (
+            format!("implicit 'it' parameter used in {expected}-parameter context"),
+            "'it' requires exactly 1 parameter".into(),
+        ),
         InferError::FromHir { .. } => unreachable!("filtered above"),
     }
 }

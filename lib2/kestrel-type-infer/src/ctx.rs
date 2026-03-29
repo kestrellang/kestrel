@@ -3,7 +3,7 @@
 //! `InferCtx` holds all mutable state for type inference of a single body.
 //! It owns the type variable table, pending constraints, and result tables.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use kestrel_hecs::{Entity, QueryContext};
 use kestrel_hir::body::HirExprId;
@@ -71,6 +71,11 @@ pub struct InferCtx<'a> {
     /// by a MethodCall or Call. After constraint generation, remaining
     /// entries are reported as "type parameter used as value" errors.
     pub(crate) type_param_defs: HashMap<HirExprId, Span>,
+
+    /// Flex closure TyVars: 0 explicit params, adapts to any expected arity.
+    pub(crate) closure_flex: HashSet<TyVar>,
+    /// Implicit-it closure TyVars: 1 param named "it", requires exactly 1-param context.
+    pub(crate) closure_it: HashSet<TyVar>,
 }
 
 /// Info about a promotion inserted at a Coerce site.
@@ -110,6 +115,8 @@ impl<'a> InferCtx<'a> {
             where_clause_assoc_subs: Vec::new(),
             param_tyvars: HashMap::new(),
             type_param_defs: HashMap::new(),
+            closure_flex: HashSet::new(),
+            closure_it: HashSet::new(),
         }
     }
 

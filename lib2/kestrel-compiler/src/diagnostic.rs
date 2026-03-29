@@ -149,6 +149,12 @@ impl ToDiagnostic for ResolvedInferError<'_> {
             InferError::NoMatchingOverload { name, .. } => Diagnostic::error()
                 .with_message(format!("no matching overload for '{name}'"))
                 .with_labels(vec![Label::primary(file_id, range).with_message(detail)]),
+
+            InferError::ItWrongArity { expected, .. } => Diagnostic::error()
+                .with_message("implicit 'it' parameter requires single-parameter context")
+                .with_labels(vec![Label::primary(file_id, range).with_message(
+                    format!("expected {} parameter(s)", expected),
+                )]),
         }
     }
 }

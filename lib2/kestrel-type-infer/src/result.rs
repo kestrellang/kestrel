@@ -292,5 +292,8 @@ fn describe_error(ctx: &InferCtx<'_>, err: &InferError) -> String {
         InferError::NoMatchingOverload { name, .. } => {
             format!("no matching overload for '{}'", name)
         }
+        InferError::ItWrongArity { expected, .. } => {
+            format!("implicit 'it' parameter used in {}-parameter context", expected)
+        }
     }
 }

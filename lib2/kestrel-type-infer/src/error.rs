@@ -104,6 +104,12 @@ pub enum InferError {
         name: String,
         span: Span,
     },
+
+    /// Implicit `it` parameter used in a context expecting != 1 parameter.
+    ItWrongArity {
+        expected: usize,
+        span: Span,
+    },
 }
 
 impl InferError {
@@ -124,7 +130,8 @@ impl InferError {
             | Self::InstanceMethodAsStatic { span, .. }
             | Self::TypeParamAsValue { span }
             | Self::TypeArgCountMismatch { span, .. }
-            | Self::NoMatchingOverload { span, .. } => span,
+            | Self::NoMatchingOverload { span, .. }
+            | Self::ItWrongArity { span, .. } => span,
         }
     }
 }
