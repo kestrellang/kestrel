@@ -134,8 +134,9 @@ impl BodyCheck for ClosureAnalyzer {
                 check_closure_type(cx, expr_id, params, ty, &mut diags);
             }
 
-            // Check for assignments to closure parameters within the closure body
-            check_param_assignments(cx, body, &param_locals, &mut diags);
+            // Note: E604 (assign to closure parameter) is intentionally not checked
+            // here — the assignment analyzer (E200) already catches writes to
+            // immutable locals, which includes closure parameters.
 
             // TODO: Check for assignments to captured variables (E603).
             // This requires knowing which locals are captures vs parameters.

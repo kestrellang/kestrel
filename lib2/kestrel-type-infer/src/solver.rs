@@ -468,6 +468,14 @@ fn solve_call(
 
     match kind {
         TyKind::Function { params, ret } => {
+            // Reject excess arguments (too few is OK — defaults may fill in)
+            if args.len() > params.len() {
+                return SolveResult::Error(InferError::ArgCountMismatch {
+                    expected: params.len(),
+                    got: args.len(),
+                    span,
+                });
+            }
             // Normal function call — unify params and return
             for (arg, param) in args.iter().zip(params.iter()) {
                 ctx.coerce(arg.ty, *param, expr, span.clone());
