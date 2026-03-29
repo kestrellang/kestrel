@@ -102,6 +102,12 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
+    DiagnosticDescriptor {
+        id: "E605",
+        name: "capturing_closure_escape",
+        default_severity: Severity::Error,
+        category: Category::Correctness,
+    },
 ];
 
 pub struct ClosureAnalyzer;
@@ -121,28 +127,55 @@ impl BodyCheck for ClosureAnalyzer {
 
         // Walk all expressions looking for closures
         for (expr_id, expr) in cx.hir.exprs.iter() {
-            let HirExpr::Closure { params, body, .. } = expr else {
+            let HirExpr::Closure { params, captures, body, .. } = expr else {
                 continue;
             };
 
-            // Collect the closure's parameter locals
-            let param_locals: HashSet<LocalId> = params.iter().map(|p| p.local).collect();
-
             // Check closure arity and types against expected function type.
-            // The expected type comes from inference (the closure expr's type).
             if let Some(ty) = cx.typed.expr_types.get(&expr_id) {
                 check_closure_type(cx, expr_id, params, ty, &mut diags);
             }
 
-            // Note: E604 (assign to closure parameter) is intentionally not checked
-            // here — the assignment analyzer (E200) already catches writes to
-            // immutable locals, which includes closure parameters.
+            // E603: check for assignments to captured variables
+            let diag_count_before = diags.len();
+            if !captures.is_empty() {
+                let capture_set: HashSet<LocalId> = captures.iter().copied().collect();
+                check_capture_assignments(cx, body, &capture_set, &mut diags);
+            }
+            let has_capture_mutation = diags.len() > diag_count_before;
 
-            // TODO: Check for assignments to captured variables (E603).
-            // This requires knowing which locals are captures vs parameters.
-            // In lib2 HIR, closures don't have an explicit capture list — we'd
-            // need to compare body locals against the enclosing function's locals.
-            // Deferred to when capture tracking is added to the HIR.
+            // E605: capturing closure cannot escape its defining scope.
+            // Skip if we already reported capture mutation (E603) — avoid double errors.
+            if !captures.is_empty() && !has_capture_mutation {
+                // Check if this closure is in return position of the function
+                let is_func_tail = cx.hir.tail_expr == Some(expr_id);
+                let is_returned = cx.hir.exprs.iter().any(|(_, e)| {
+                    matches!(e, HirExpr::Return { value: Some(v), .. } if *v == expr_id)
+                });
+                // Check if this closure is in return position of another closure
+                let is_closure_tail = cx.hir.exprs.iter().any(|(_, e)| {
+                    matches!(e, HirExpr::Closure { body: b, .. } if b.tail_expr == Some(expr_id))
+                });
+                if is_func_tail || is_returned || is_closure_tail {
+                    let captured_names: Vec<String> = captures
+                        .iter()
+                        .map(|id| cx.hir.locals[*id].name.clone())
+                        .collect();
+                    diags.push(AnalyzeDiagnostic {
+                        descriptor_id: DESCRIPTORS[5].id,
+                        severity: DESCRIPTORS[5].default_severity,
+                        message: "cannot return a closure that captures variables".into(),
+                        labels: vec![DiagLabel {
+                            span: util::expr_span(cx.hir, expr_id),
+                            message: format!("captures: {}", captured_names.join(", ")),
+                            is_primary: true,
+                        }],
+                        notes: vec![
+                            "closures that capture variables cannot escape their defining function".into(),
+                        ],
+                    });
+                }
+            }
         }
 
         diags
@@ -362,5 +395,90 @@ fn check_block_for_param_assign(
     }
     if let Some(tail) = block.tail_expr {
         check_expr_for_param_assign(cx, tail, param_locals, diags);
+    }
+}
+
+/// Walk a closure body looking for assignments to captured variables (E603).
+fn check_capture_assignments(
+    cx: &BodyContext<'_>,
+    block: &HirBlock,
+    capture_set: &HashSet<LocalId>,
+    diags: &mut Vec<AnalyzeDiagnostic>,
+) {
+    for &stmt_id in &block.stmts {
+        match &cx.hir.stmts[stmt_id] {
+            HirStmt::Expr { expr, .. } => {
+                walk_for_capture_assign(cx, *expr, capture_set, diags);
+            }
+            HirStmt::Let { value: Some(v), .. } => {
+                walk_for_capture_assign(cx, *v, capture_set, diags);
+            }
+            _ => {}
+        }
+    }
+    if let Some(tail) = block.tail_expr {
+        walk_for_capture_assign(cx, tail, capture_set, diags);
+    }
+}
+
+fn walk_for_capture_assign(
+    cx: &BodyContext<'_>,
+    id: HirExprId,
+    capture_set: &HashSet<LocalId>,
+    diags: &mut Vec<AnalyzeDiagnostic>,
+) {
+    match &cx.hir.exprs[id] {
+        HirExpr::Assign { target, value, .. } => {
+            if let HirExpr::Local(local_id, _) = &cx.hir.exprs[*target] {
+                if capture_set.contains(local_id) {
+                    let name = cx.hir.locals[*local_id].name.clone();
+                    diags.push(AnalyzeDiagnostic {
+                        descriptor_id: DESCRIPTORS[3].id,
+                        severity: DESCRIPTORS[3].default_severity,
+                        message: format!("cannot assign to captured variable '{}'", name),
+                        labels: vec![DiagLabel {
+                            span: util::expr_span(cx.hir, *target),
+                            message: "captured variables are immutable in closures".into(),
+                            is_primary: true,
+                        }],
+                        notes: vec![],
+                    });
+                }
+            }
+            walk_for_capture_assign(cx, *value, capture_set, diags);
+        }
+        HirExpr::If { condition, then_body, else_body, .. } => {
+            walk_for_capture_assign(cx, *condition, capture_set, diags);
+            check_capture_assignments(cx, then_body, capture_set, diags);
+            if let Some(eb) = else_body {
+                check_capture_assignments(cx, eb, capture_set, diags);
+            }
+        }
+        HirExpr::Loop { body, .. } | HirExpr::Block { body, .. } => {
+            check_capture_assignments(cx, body, capture_set, diags);
+        }
+        HirExpr::Match { scrutinee, arms, .. } => {
+            walk_for_capture_assign(cx, *scrutinee, capture_set, diags);
+            for arm in arms {
+                if let Some(g) = arm.guard {
+                    walk_for_capture_assign(cx, g, capture_set, diags);
+                }
+                walk_for_capture_assign(cx, arm.body, capture_set, diags);
+            }
+        }
+        HirExpr::Call { callee, args, .. } => {
+            walk_for_capture_assign(cx, *callee, capture_set, diags);
+            for arg in args { walk_for_capture_assign(cx, arg.value, capture_set, diags); }
+        }
+        HirExpr::MethodCall { receiver, args, .. }
+        | HirExpr::ProtocolCall { receiver, args, .. } => {
+            walk_for_capture_assign(cx, *receiver, capture_set, diags);
+            for arg in args { walk_for_capture_assign(cx, arg.value, capture_set, diags); }
+        }
+        HirExpr::Return { value, .. } => {
+            if let Some(v) = value { walk_for_capture_assign(cx, *v, capture_set, diags); }
+        }
+        HirExpr::Closure { .. } => {} // nested closure has own scope
+        _ => {}
     }
 }

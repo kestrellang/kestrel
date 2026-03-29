@@ -29,6 +29,7 @@ impl LowerCtx<'_> {
         if let Some((proto, method, label)) = lookup_short_circuit_op(&op) {
             let rhs_closure = self.alloc_expr(HirExpr::Closure {
                 params: Vec::new(),
+                captures: Vec::new(),
                 body: HirBlock {
                     stmts: Vec::new(),
                     tail_expr: Some(rhs),
@@ -83,6 +84,7 @@ impl LowerCtx<'_> {
         // Wrap RHS in closure for short-circuit
         let rhs_closure = self.alloc_expr(HirExpr::Closure {
             params: Vec::new(),
+            captures: Vec::new(),
             body: HirBlock {
                 stmts: Vec::new(),
                 tail_expr: Some(rhs),
