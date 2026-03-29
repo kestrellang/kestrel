@@ -108,6 +108,12 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
+    DiagnosticDescriptor {
+        id: "E606",
+        name: "cannot_infer_closure_type",
+        default_severity: Severity::Error,
+        category: Category::Correctness,
+    },
 ];
 
 pub struct ClosureAnalyzer;
@@ -134,6 +140,31 @@ impl BodyCheck for ClosureAnalyzer {
             // Check closure arity and types against expected function type.
             if let Some(ty) = cx.typed.expr_types.get(&expr_id) {
                 check_closure_type(cx, expr_id, params, ty, &mut diags);
+            }
+
+            // E606: closure param types could not be inferred (no context at all).
+            // Only emit when inference produced NO other errors — unresolved params
+            // with other errors are likely cascading failures, not missing context.
+            if !params.is_empty() && cx.typed.errors.is_empty() {
+                let has_unresolved = params.iter().any(|p| {
+                    p.ty.is_none()
+                        && cx.typed.local_types.get(&p.local)
+                            .is_some_and(|t| matches!(t, ResolvedTy::Error))
+                });
+                if has_unresolved {
+                    diags.push(AnalyzeDiagnostic {
+                        descriptor_id: DESCRIPTORS[6].id,
+                        severity: DESCRIPTORS[6].default_severity,
+                        message: "could not infer type for closure parameter".into(),
+                        labels: vec![DiagLabel {
+                            span: util::expr_span(cx.hir, expr_id),
+                            message: "closure needs type context".into(),
+                            is_primary: true,
+                        }],
+                        notes: vec![],
+                    });
+                    continue;
+                }
             }
 
             // E603: check for assignments to captured variables
