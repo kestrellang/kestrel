@@ -29,7 +29,25 @@ pub fn build_type_alias(
     world.set(entity, CstNode(node.clone()));
     world.set_parent(entity, parent);
 
-    if let Some(name) = extract_name(node) {
+    // For qualified bindings like `type Iterator.Item = Int`, the Name child
+    // is inside an AssociatedTypeTarget node. extract_name would return "Iterator"
+    // (the protocol name) instead of "Item" (the actual alias name).
+    // Check for AssociatedTypeTarget first and extract the last Name from it.
+    let name = if let Some(target) = find_child(node, SyntaxKind::AssociatedTypeTarget) {
+        // Qualified: last Name > Identifier in the target is the alias name
+        target.children()
+            .filter(|c| c.kind() == SyntaxKind::Name)
+            .last()
+            .and_then(|n| {
+                n.children_with_tokens()
+                    .filter_map(|e| e.into_token())
+                    .find(|t| t.kind() == SyntaxKind::Identifier)
+                    .map(|t| t.text().to_string())
+            })
+    } else {
+        extract_name(node)
+    };
+    if let Some(name) = name {
         world.set(entity, Name(name));
     }
 

@@ -43,7 +43,7 @@ use crate::context::DeclContext;
 use crate::diagnostic::*;
 use crate::traits::{DeclCheck, Describe};
 use crate::util;
-use kestrel_ast_builder::{Name, NodeKind};
+use kestrel_ast_builder::{CstNode, Name, NodeKind};
 use kestrel_span2::Span;
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[
@@ -152,10 +152,20 @@ fn check_duplicates(
             continue;
         };
 
-        // Skip anonymous entities (e.g. associated type bindings like `type Iterator.Item = T`)
+        // Skip anonymous entities and qualified type alias bindings
+        // (e.g., `type Iterator.Item = T` and `type Container.Item = T`
+        // are for different protocols — not duplicates)
         let Some(name_comp) = cx.query.get::<Name>(child) else {
             continue;
         };
+        if *child_kind == NodeKind::TypeAlias {
+            if let Some(cst) = cx.query.get::<CstNode>(child) {
+                use kestrel_syntax_tree2::SyntaxKind;
+                if cst.0.children().any(|c| c.kind() == SyntaxKind::AssociatedTypeTarget) {
+                    continue;
+                }
+            }
+        }
         let name = name_comp.0.clone();
         let span = util::entity_span(cx.query, child);
 
