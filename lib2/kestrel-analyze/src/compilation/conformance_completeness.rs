@@ -18,7 +18,7 @@ use crate::context::CompilationContext;
 use crate::diagnostic::*;
 use crate::traits::{CompilationCheck, Describe};
 use crate::util;
-use kestrel_ast_builder::{Conformances, ConformanceItem, Name, NodeKind, TypeAnnotation};
+use kestrel_ast_builder::{Conformances, ConformanceItem, CstNode, Name, NodeKind, TypeAnnotation};
 use kestrel_hecs::Entity;
 use kestrel_name_res::{ExtensionTargetEntity, ExtensionsFor, ResolveTypePath, TypeResolution};
 

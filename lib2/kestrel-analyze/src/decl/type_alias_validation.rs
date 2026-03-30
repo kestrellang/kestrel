@@ -172,7 +172,7 @@ impl DeclCheck for TypeAliasValidationAnalyzer {
                         descriptor_id: DESCRIPTORS[0].id,
                         severity: DESCRIPTORS[0].default_severity,
                         message: format!(
-                            "type alias '{}' cannot have bounds outside a protocol",
+                            "type alias cannot have bounds outside a protocol: '{}'",
                             name
                         ),
                         labels: vec![DiagLabel {
@@ -196,7 +196,7 @@ impl DeclCheck for TypeAliasValidationAnalyzer {
             diags.push(AnalyzeDiagnostic {
                 descriptor_id: DESCRIPTORS[1].id,
                 severity: DESCRIPTORS[1].default_severity,
-                message: format!("type alias '{}' requires a type definition", name),
+                message: format!("type alias requires a type definition: '{}'", name),
                 labels: vec![DiagLabel {
                     span,
                     message: "add '= Type' to provide a definition".into(),

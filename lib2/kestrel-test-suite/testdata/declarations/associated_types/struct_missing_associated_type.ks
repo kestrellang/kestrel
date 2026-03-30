@@ -6,6 +6,6 @@ module Test
                 type Item;
                 func next() -> Item
             }
-            struct BadIterator: Iterator {
+            struct BadIterator: Iterator { // ERROR: does not provide associated type
                 func next() -> lang.i64 { 0 }
             }
