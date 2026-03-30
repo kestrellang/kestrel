@@ -6,5 +6,5 @@ protocol Iterator {
     type Item;
 }
 struct Foo: Iterator {
-    type Item; // ERROR: associated type binding requires a type
+    type Item; // ERROR: type alias requires a type definition
 }

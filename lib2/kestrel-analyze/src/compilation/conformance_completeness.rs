@@ -186,7 +186,10 @@ fn check_protocol_requirements(
             Some(NodeKind::TypeAlias) => {
                 // Required associated type — only if no default (no TypeAnnotation)
                 let has_default = cx.query.get::<TypeAnnotation>(child).is_some();
-                if !has_default && !provided.type_aliases.contains(name.as_str()) {
+                // Skip if the type has a type alias with this name but no binding
+                // (E442 already reports "requires a type definition")
+                let has_incomplete_alias = has_type_alias_by_name(cx, type_entity, name);
+                if !has_default && !has_incomplete_alias && !provided.type_aliases.contains(name.as_str()) {
                     diags.push(AnalyzeDiagnostic {
                         descriptor_id: DESCRIPTORS[1].id,
                         severity: DESCRIPTORS[1].default_severity,
@@ -257,6 +260,14 @@ fn resolve_type_entity(
         TypeResolution::Found(entity) => Some(entity),
         _ => None,
     }
+}
+
+/// Check if an entity has a TypeAlias child with the given name (regardless of binding).
+fn has_type_alias_by_name(cx: &CompilationContext<'_>, entity: Entity, name: &str) -> bool {
+    cx.query.children_of(entity).iter().any(|&child| {
+        cx.query.get::<NodeKind>(child) == Some(&NodeKind::TypeAlias)
+            && cx.query.get::<Name>(child).is_some_and(|n| n.0 == name)
+    })
 }
 
 struct ProvidedMembers {
