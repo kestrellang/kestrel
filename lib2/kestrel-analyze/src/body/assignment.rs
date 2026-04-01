@@ -156,9 +156,33 @@ fn check_target(
                         }],
                         notes: vec![],
                     });
+                    return;
                 }
             }
-            // If no resolution, inference had an error — don't double-report
+
+            // Field is settable — but the base must also be mutable.
+            // e.g., `p.x = 10` where `p` is a `let` binding is invalid.
+            if !is_mutable_base(cx, *base) {
+                let base_name = if let HirExpr::Local(id, _) = &cx.hir.exprs[*base] {
+                    cx.hir.locals[*id].name.clone()
+                } else {
+                    "expression".into()
+                };
+                diags.push(AnalyzeDiagnostic {
+                    descriptor_id: DESCRIPTORS[0].id,
+                    severity: DESCRIPTORS[0].default_severity,
+                    message: format!(
+                        "cannot assign to immutable variable '{}'",
+                        base_name,
+                    ),
+                    labels: vec![DiagLabel {
+                        span: util::expr_span(cx.hir, target),
+                        message: "cannot assign through immutable binding".into(),
+                        is_primary: true,
+                    }],
+                    notes: vec![],
+                });
+            }
         }
 
         // Tuple index: check if the base is mutable

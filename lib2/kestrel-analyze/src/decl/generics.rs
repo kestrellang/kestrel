@@ -112,6 +112,12 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
+    DiagnosticDescriptor {
+        id: "E440",
+        name: "where_clause_associated_type_not_found",
+        default_severity: Severity::Error,
+        category: Category::Correctness,
+    },
 ];
 
 pub struct GenericsAnalyzer;
@@ -455,11 +461,14 @@ fn check_where_clause_bounds(
             WhereConstraint::Equality { .. } => continue,
         };
 
-        // Check subject is a declared type parameter (E437)
+        let mut subject_valid = true;
+
+        // Check subject is a declared type parameter (E437) or valid associated type path (E440)
         if let AstType::Named { segments, span } = subject {
             if segments.len() == 1 {
                 let name = &segments[0].name;
                 if !declared_names.contains(name) {
+                    subject_valid = false;
                     diags.push(AnalyzeDiagnostic {
                         descriptor_id: "E437",
                         severity: Severity::Error,
@@ -472,7 +481,51 @@ fn check_where_clause_bounds(
                         notes: vec![format!("available type parameters: {}", declared_names.join(", "))],
                     });
                 }
+            } else if segments.len() > 1 {
+                // Multi-segment subject like T.Item — validate the associated type exists
+                let first = &segments[0].name;
+                if !declared_names.contains(first) {
+                    subject_valid = false;
+                    diags.push(AnalyzeDiagnostic {
+                        descriptor_id: "E437",
+                        severity: Severity::Error,
+                        message: format!("undeclared type parameter '{}' in where clause", first),
+                        labels: vec![DiagLabel {
+                            span: span.clone(),
+                            message: "not a declared type parameter".into(),
+                            is_primary: true,
+                        }],
+                        notes: vec![format!("available type parameters: {}", declared_names.join(", "))],
+                    });
+                } else {
+                    // Resolve the full path to check the associated type exists
+                    let seg_names: Vec<String> = segments.iter().map(|s| s.name.clone()).collect();
+                    let result = cx.query.query(ResolveTypePath {
+                        segments: seg_names,
+                        context: cx.entity,
+                        root: cx.root,
+                    });
+                    if let TypeResolution::NotFound(missing) = result {
+                        subject_valid = false;
+                        diags.push(AnalyzeDiagnostic {
+                            descriptor_id: "E440",
+                            severity: Severity::Error,
+                            message: format!("no associated type '{}' on '{}'", missing, first),
+                            labels: vec![DiagLabel {
+                                span: span.clone(),
+                                message: "associated type not found".into(),
+                                is_primary: true,
+                            }],
+                            notes: vec![],
+                        });
+                    }
+                }
             }
+        }
+
+        // Skip bound checking if subject is invalid — avoids cascading errors
+        if !subject_valid {
+            continue;
         }
 
         // Check each bound resolves to a protocol (E436) or exists at all

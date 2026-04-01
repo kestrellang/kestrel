@@ -830,6 +830,7 @@ fn instantiate_entity_inner(
 
     // If explicit type args don't match this entity's params (e.g., Pointer[UInt8].nullPointer
     // where [UInt8] is for Pointer's T, not nullPointer's params), check the parent entity.
+    // Also handles extension methods: Box[i64].wrap where [i64] maps to Box's T.
     if !explicit_type_args.is_empty() && explicit_type_args.len() != type_param_entities.len() {
         if let Some(parent) = qctx.parent_of(entity) {
             let parent_type_params: Vec<Entity> = qctx
@@ -840,6 +841,49 @@ fn instantiate_entity_inner(
                 for (i, &param) in parent_type_params.iter().enumerate() {
                     let tv = lower_hir_ty(ctx, &explicit_type_args[i]);
                     subs.push((param, tv));
+                }
+            } else if qctx.get::<NodeKind>(parent) == Some(&NodeKind::Extension) {
+                // Extension method: map explicit type args to the extension target's type params
+                if let Some(target) = qctx.query(kestrel_name_res::ExtensionTargetEntity {
+                    extension: parent,
+                    root,
+                }) {
+                    let target_type_params: Vec<Entity> = qctx
+                        .get::<TypeParams>(target)
+                        .map(|tp| tp.0.clone())
+                        .unwrap_or_default();
+                    if explicit_type_args.len() == target_type_params.len() {
+                        for (i, &param) in target_type_params.iter().enumerate() {
+                            let tv = lower_hir_ty(ctx, &explicit_type_args[i]);
+                            subs.push((param, tv));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // For methods/functions inside extensions, the extension target's type params
+    // need fresh TyVars even without explicit type args. Without this, return types
+    // like `Box[T]` stay unresolved when calling `Box.wrap(42)` directly.
+    if explicit_type_args.is_empty() && type_param_entities.is_empty() {
+        if let Some(parent) = qctx.parent_of(entity) {
+            if qctx.get::<NodeKind>(parent) == Some(&NodeKind::Extension) {
+                // Get the extension target's type params (e.g., Box's T)
+                if let Some(target) = qctx.query(kestrel_name_res::ExtensionTargetEntity {
+                    extension: parent,
+                    root,
+                }) {
+                    let target_type_params: Vec<Entity> = qctx
+                        .get::<TypeParams>(target)
+                        .map(|tp| tp.0.clone())
+                        .unwrap_or_default();
+                    for &param in &target_type_params {
+                        if !subs.iter().any(|(e, _)| *e == param) {
+                            let fresh = ctx.fresh();
+                            subs.push((param, fresh));
+                        }
+                    }
                 }
             }
         }

@@ -61,8 +61,10 @@ fn extract_single_param(
     file_id: usize,
 ) -> Option<AstParam> {
     // Check for mutating/consuming access mode
-    let is_mut = node.children_with_tokens()
-        .any(|e| e.as_token().is_some_and(|t| t.kind() == SyntaxKind::Mutating || t.kind() == SyntaxKind::Consuming));
+    let is_consuming = node.children_with_tokens()
+        .any(|e| e.as_token().is_some_and(|t| t.kind() == SyntaxKind::Consuming));
+    let is_mut = is_consuming || node.children_with_tokens()
+        .any(|e| e.as_token().is_some_and(|t| t.kind() == SyntaxKind::Mutating));
 
     let pattern_node = find_child(node, SyntaxKind::Pattern)?;
 
@@ -137,6 +139,7 @@ fn extract_single_param(
         label,
         name,
         ty,
+        is_consuming,
         default_entity,
         pattern,
         is_mut,

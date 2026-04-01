@@ -90,6 +90,7 @@ pub fn default_analyzers() -> AnalyzerRegistry {
     r.add_compilation_check(compilation::constraint_cycles::ConstraintCycleAnalyzer);
     r.add_compilation_check(compilation::extension_conflict::ExtensionConflictAnalyzer);
     r.add_compilation_check(compilation::conformance_completeness::ConformanceCompletenessAnalyzer);
+    r.add_compilation_check(compilation::type_annotation_resolution::TypeAnnotationResolutionAnalyzer);
 
     r
 }

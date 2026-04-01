@@ -63,11 +63,16 @@ pub fn build_function(
         }
     }
 
-    // Body — CST wraps it in FunctionBody > CodeBlock
+    // Body — CST wraps it in FunctionBody > CodeBlock (block body)
+    // or FunctionBody > Expression (expression body: `= expr`)
     if let Some(fn_body) = find_child(node, SyntaxKind::FunctionBody) {
         if let Some(code_block) = find_child(&fn_body, SyntaxKind::CodeBlock) {
             world.set(entity, Body(lower::lower_body(&code_block, file_id)));
             world.set(entity, Valued(code_block));
+        } else {
+            // Expression body: `func foo() -> T = expr`
+            world.set(entity, Body(lower::lower_default_value(&fn_body, file_id)));
+            world.set(entity, Valued(fn_body));
         }
     }
 

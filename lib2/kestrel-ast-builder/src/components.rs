@@ -92,8 +92,10 @@ pub struct AstParam {
     /// None for simple binding parameters (`x: Int`).
     /// Some for destructured parameters (`(a, b): (Int, Int)`).
     pub pattern: Option<ParamPattern>,
-    /// Whether this parameter has mutating access mode.
+    /// Whether this parameter has mutating or consuming access mode.
     pub is_mut: bool,
+    /// Whether this parameter specifically has consuming access mode.
+    pub is_consuming: bool,
 }
 
 /// A parameter destructuring pattern — lightweight tree that doesn't need arena allocation.

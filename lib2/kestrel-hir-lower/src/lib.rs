@@ -67,7 +67,7 @@ impl QueryFn for LowerBody {
             // create a synthetic local and prepend a match-based destructure
             // that binds the pattern's variables in the body scope.
             for param in &callable.params {
-                let local = lower.define_local(&param.name, false, Span::synthetic(0));
+                let local = lower.define_local(&param.name, param.is_mut, Span::synthetic(0));
                 lower.params.push(local);
 
                 // Desugar destructured params: match _param_0 { (a, b) => () }

@@ -891,15 +891,24 @@ fn solve_member(
         }
     }
 
-    // Resolve the member via the type resolver
+    // (debug removed)
+    // Resolve the member via the type resolver.
+    // Try instance members first, fall back to static members for type-level calls
+    // (e.g., Box.wrap() where wrap is a static method in an extension).
     let resolution = match ctx.resolver.resolve_member(&recv_kind, name, &args) {
         Ok(res) => res,
         Err(crate::resolve::MemberError::NotFound) => {
-            return SolveResult::Error(InferError::NoMember {
-                receiver,
-                name: name.to_string(),
-                span,
-            });
+            // Fall back to static member search
+            match ctx.resolver.resolve_static_member(&recv_kind, name, &args) {
+                Ok(res) => res,
+                Err(_) => {
+                    return SolveResult::Error(InferError::NoMember {
+                        receiver,
+                        name: name.to_string(),
+                        span,
+                    });
+                }
+            }
         }
         Err(crate::resolve::MemberError::Ambiguous(ranked_candidates)) => {
             // Try each candidate in specificity order, picking the first compatible one
@@ -1036,6 +1045,21 @@ fn solve_member(
             .unwrap_or_default();
         for (&param, &arg) in struct_type_params.iter().zip(recv_type_args.iter()) {
             subs.push((param, arg));
+        }
+    }
+
+    // Map extension target type params to receiver type args.
+    // Extension type params are different entities from the struct's type params,
+    // but represent the same types (e.g., extend Box[T] has its own T entity).
+    if let Some(ext) = resolution.from_extension {
+        let ext_type_params: Vec<kestrel_hecs::Entity> = ctx.query_ctx
+            .get::<TypeParams>(ext)
+            .map(|tp| tp.0.clone())
+            .unwrap_or_default();
+        for (&param, &arg) in ext_type_params.iter().zip(recv_type_args.iter()) {
+            if !subs.iter().any(|(e, _)| *e == param) {
+                subs.push((param, arg));
+            }
         }
     }
 
@@ -1719,8 +1743,9 @@ fn lower_hir_ty_sub(
     use kestrel_hir::ty::HirTy;
     match ty {
         HirTy::Named { entity, args, .. } => {
-            // Substitute Self type with receiver
-            if self_entity == Some(*entity) {
+            // Substitute Self type with receiver — only for bare Self (no type args).
+            // `Wrapper[U]` is NOT Self even if Wrapper == self_entity.
+            if args.is_empty() && self_entity == Some(*entity) {
                 return recv_tv;
             }
             // Check substitution map (type params of the method/struct)
