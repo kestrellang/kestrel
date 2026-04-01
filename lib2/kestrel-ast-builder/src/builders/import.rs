@@ -3,7 +3,7 @@
 use kestrel_hecs::{Entity, World};
 use kestrel_syntax_tree2::SyntaxNode;
 use kestrel_syntax_tree2::imports::extract_import_declaration;
-use kestrel_syntax_tree2::utils::get_node_span;
+use kestrel_syntax_tree2::utils::get_decl_span;
 
 use crate::components::*;
 
@@ -27,7 +27,7 @@ pub fn build_import(
 
     world.set(entity, NodeKind::Import);
     world.set(entity, FileId(file_entity));
-    world.set(entity, DeclSpan(get_node_span(node, file_id)));
+    world.set(entity, DeclSpan(get_decl_span(node, file_id)));
     world.set(entity, CstNode(node.clone()));
     world.set_parent(entity, parent);
 

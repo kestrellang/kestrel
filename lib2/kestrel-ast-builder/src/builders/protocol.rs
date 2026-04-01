@@ -2,7 +2,7 @@
 
 use kestrel_hecs::{Entity, World};
 use kestrel_syntax_tree2::{SyntaxKind, SyntaxNode};
-use kestrel_syntax_tree2::utils::{extract_name, get_node_span};
+use kestrel_syntax_tree2::utils::{extract_name, get_decl_span};
 
 use crate::components::*;
 use super::helpers::*;
@@ -24,7 +24,7 @@ pub fn build_protocol(
     world.set(entity, NodeKind::Protocol);
     world.set(entity, FileId(file_entity));
     world.set(entity, Typed);
-    world.set(entity, DeclSpan(get_node_span(node, file_id)));
+    world.set(entity, DeclSpan(get_decl_span(node, file_id)));
     world.set(entity, CstNode(node.clone()));
     world.set_parent(entity, parent);
 

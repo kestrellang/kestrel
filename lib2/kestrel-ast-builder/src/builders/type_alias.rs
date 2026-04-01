@@ -2,7 +2,7 @@
 
 use kestrel_hecs::{Entity, World};
 use kestrel_syntax_tree2::{SyntaxKind, SyntaxNode};
-use kestrel_syntax_tree2::utils::{extract_name, find_child, get_node_span};
+use kestrel_syntax_tree2::utils::{extract_name, find_child, get_decl_span};
 
 use crate::ast_type::ast_type_from_cst;
 use crate::components::*;
@@ -25,7 +25,7 @@ pub fn build_type_alias(
     world.set(entity, NodeKind::TypeAlias);
     world.set(entity, FileId(file_entity));
     world.set(entity, Typed);
-    world.set(entity, DeclSpan(get_node_span(node, file_id)));
+    world.set(entity, DeclSpan(get_decl_span(node, file_id)));
     world.set(entity, CstNode(node.clone()));
     world.set_parent(entity, parent);
 

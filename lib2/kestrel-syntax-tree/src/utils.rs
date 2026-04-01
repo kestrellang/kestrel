@@ -67,6 +67,31 @@ pub fn get_node_span(node: &SyntaxNode, file_id: usize) -> Span {
     Span::new(file_id, start..end)
 }
 
+/// Get the declaration span of a syntax node, excluding leading attributes and trivia.
+/// Use this for DeclSpan so diagnostics point at the `func`/`struct`/etc keyword
+/// rather than at a leading `@attribute`.
+pub fn get_decl_span(node: &SyntaxNode, file_id: usize) -> Span {
+    let text_range = node.text_range();
+    let end: usize = text_range.end().into();
+
+    // Find the first non-trivia, non-attribute child
+    let start = node.children_with_tokens()
+        .find_map(|child| {
+            match child {
+                SyntaxElement::Token(t) if !is_trivia(t.kind()) => {
+                    Some(t.text_range().start().into())
+                }
+                SyntaxElement::Node(n) if n.kind() != SyntaxKind::AttributeList => {
+                    find_first_non_trivia_start(&n)
+                }
+                _ => None,
+            }
+        })
+        .unwrap_or_else(|| text_range.start().into());
+
+    Span::new(file_id, start..end)
+}
+
 /// Get the span of the visibility node.
 pub fn get_visibility_span(syntax: &SyntaxNode, file_id: usize) -> Option<Span> {
     let visibility_node = find_child(syntax, SyntaxKind::Visibility)?;

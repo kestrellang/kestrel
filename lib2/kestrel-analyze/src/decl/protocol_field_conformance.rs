@@ -1,55 +1,23 @@
 //! # Protocol Field Conformance Analyzer
 //!
-//! Validates that when a struct/enum conforms to a protocol with
-//! `requires_fields_conform` (e.g. Hashable, Equatable, FFISafe), all stored
-//! fields (or enum case payloads) also conform to that protocol.
-//!
-//! ## Status: Shell
-//!
-//! This analyzer requires **resolved field types** and a **conformance oracle**.
-//! The available infrastructure provides:
-//! - `EntityBuiltin` query: can identify protocols with `requires_fields_conform: true`
-//!   via `BuiltinKind::Protocol { requires_fields_conform: true, .. }`
-//! - `ResolveTypePath` + `Conformances`: can resolve which protocols a type conforms to
-//!   and check if any of those protocols have `requires_fields_conform`
-//! - `ResolveBuiltin`: can look up builtin protocol entities by `Builtin` variant
-//!
-//! What's still missing:
-//! - **Resolved field types**: Field entities store `TypeAnnotation(AstType)`, not
-//!   resolved type entities. Simple `Named` types can be resolved via `ResolveTypePath`,
-//!   but generic types (e.g. `Array[T]`) cannot be checked for conformance.
-//! - **Conformance checking oracle**: No query to ask "does type T conform to
-//!   protocol P?" at the declaration level. This needs type inference results or
-//!   a dedicated conformance resolution pass.
-//!
-//! Once resolved field types and a conformance oracle are available, the logic is:
-//! 1. Get struct/enum's `Conformances`, resolve each to an entity
-//! 2. For each conformed protocol, query `EntityBuiltin` to check `requires_fields_conform`
-//! 3. For each such protocol, iterate all Field children
-//! 4. Resolve each field's type and check if it conforms to the protocol
-//! 5. Emit E420 for each non-conforming field
+//! Validates that when a struct conforms to a protocol with
+//! `requires_fields_conform` (e.g. FFISafe), all stored fields also conform.
 //!
 //! ## Diagnostics
 //!
 //! ### E420 -- `fields_not_conforming_to_protocol` (Error, Correctness)
 //!
-//! **Message:** "{kind} '{type_name}' conforms to '{protocol}' but field '{field_name}' of type '{field_type}' does not"
-//!
-//! **Labels:**
-//! - Primary: the struct/enum declaration
-//!   - Span source: `util::entity_span` on the struct/enum entity
-//!   - Message: "type declared here"
-//! - Secondary: each non-conforming field
-//!   - Span source: `util::entity_span` on the field entity
-//!   - Message: "'{field_name}' does not conform to '{protocol}'"
-//!
-//! **Notes:**
-//! - "all fields must conform to '{protocol}' for the type to conform"
+//! **Message:** "fields of '{type_name}' do not conform to '{protocol}'"
 
 use crate::context::DeclContext;
+use crate::decl::extern_ffi_safe::is_ffi_safe;
 use crate::diagnostic::*;
+use crate::util;
+use kestrel_ast_builder::{Name, NodeKind};
+use kestrel_hir::builtin::Builtin;
 use crate::traits::{DeclCheck, Describe};
-use kestrel_ast_builder::NodeKind;
+use kestrel_hir_lower::LowerTypeAnnotation;
+use kestrel_name_res::{ConformingProtocols, ResolveBuiltin};
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
     id: "E420",
@@ -74,9 +42,68 @@ impl DeclCheck for ProtocolFieldConformanceAnalyzer {
         &[NodeKind::Struct, NodeKind::Enum]
     }
 
-    fn check(&self, _cx: &DeclContext<'_>) -> Vec<AnalyzeDiagnostic> {
-        // Shell: blocked on resolved field types + conformance oracle.
-        // See module doc for what's available and what's still needed.
-        vec![]
+    fn check(&self, cx: &DeclContext<'_>) -> Vec<AnalyzeDiagnostic> {
+        // Check if this type conforms to FFISafe
+        let Some(ffi_safe_entity) = cx.query.query(ResolveBuiltin {
+            builtin: Builtin::FFISafe,
+            root: cx.root,
+        }) else {
+            return vec![];
+        };
+
+        let conforming = cx.query.query(ConformingProtocols {
+            entity: cx.entity,
+            root: cx.root,
+        });
+        if !conforming.contains(&ffi_safe_entity) {
+            return vec![];
+        }
+
+        // Check each field's type conforms to FFISafe
+        let mut bad_fields = Vec::new();
+        for &child in cx.query.children_of(cx.entity) {
+            let Some(kind) = cx.query.get::<NodeKind>(child) else { continue };
+            if *kind != NodeKind::Field { continue; }
+
+            let field_name = cx.query.get::<Name>(child)
+                .map(|n| n.0.clone())
+                .unwrap_or_else(|| "<unknown>".into());
+
+            let Some(field_ty) = cx.query.query(LowerTypeAnnotation {
+                entity: child,
+                root: cx.root,
+            }) else {
+                continue;
+            };
+
+            if !is_ffi_safe(cx, &field_ty, ffi_safe_entity) {
+                bad_fields.push(field_name);
+            }
+        }
+
+        if bad_fields.is_empty() {
+            return vec![];
+        }
+
+        let type_name = util::entity_name(cx.query, cx.entity);
+        let span = util::entity_span(cx.query, cx.entity);
+
+        vec![AnalyzeDiagnostic {
+            descriptor_id: "E420",
+            severity: Severity::Error,
+            message: format!(
+                "fields of '{}' do not conform to FFISafe: {}",
+                type_name,
+                bad_fields.join(", ")
+            ),
+            labels: vec![DiagLabel {
+                span,
+                message: "type conforms to FFISafe but has non-FFISafe fields".into(),
+                is_primary: true,
+            }],
+            notes: vec![
+                "all fields must conform to FFISafe for the type to conform".into(),
+            ],
+        }]
     }
 }

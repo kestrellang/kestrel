@@ -1,38 +1,62 @@
 //! # Extern FFI Safe Analyzer
 //!
-//! Validates that extern functions' parameter types and return type conform
-//! to FFISafe. Extern functions are identified by the `@extern` attribute.
+//! Validates extern function constraints and FFISafe conformance:
+//! - Parameter and return types must conform to FFISafe
+//! - Cannot be generic (no stable ABI for generics)
+//! - Cannot have a body (implemented externally)
+//! - Parameters cannot use mutating access mode (must be consuming)
+//! - Must specify a calling convention (e.g. @extern(.C))
 //!
 //! ## Diagnostics
 //!
-//! ### E605 -- `type_not_ffi_safe` (Error, Correctness)
-//!
-//! **Message:** "{context} type '{ty}' does not conform to FFISafe"
-//!
-//! **Labels:**
-//! - Primary: the function declaration
-//!   - Span source: `util::entity_span` on the function entity
-//!   - Message: "type is not FFI-safe"
-//!
-//! **Notes:**
-//! - "only types conforming to FFISafe can cross FFI boundaries"
+//! - E605: type does not conform to FFISafe
+//! - E609: extern function cannot be generic
+//! - E610: extern function cannot have a body
+//! - E611: extern parameter must use consuming access mode
+//! - E612: @extern requires a calling convention
 
 use crate::context::DeclContext;
 use crate::diagnostic::*;
 use crate::traits::{DeclCheck, Describe};
 use crate::util;
-use kestrel_ast_builder::{Attributes, Intrinsic, NodeKind};
+use kestrel_ast_builder::{Attributes, Body, Callable, Intrinsic, NodeKind, TypeParams};
 use kestrel_hir::builtin::Builtin;
 use kestrel_hir::ty::HirTy;
 use kestrel_hir_lower::LowerCallableTypes;
 use kestrel_name_res::{ConformingProtocols, ResolveBuiltin};
 
-static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
-    id: "E605",
-    name: "type_not_ffi_safe",
-    default_severity: Severity::Error,
-    category: Category::Correctness,
-}];
+static DESCRIPTORS: &[DiagnosticDescriptor] = &[
+    DiagnosticDescriptor {
+        id: "E605",
+        name: "type_not_ffi_safe",
+        default_severity: Severity::Error,
+        category: Category::Correctness,
+    },
+    DiagnosticDescriptor {
+        id: "E609",
+        name: "extern_cannot_be_generic",
+        default_severity: Severity::Error,
+        category: Category::Correctness,
+    },
+    DiagnosticDescriptor {
+        id: "E610",
+        name: "extern_cannot_have_body",
+        default_severity: Severity::Error,
+        category: Category::Correctness,
+    },
+    DiagnosticDescriptor {
+        id: "E611",
+        name: "extern_param_not_consuming",
+        default_severity: Severity::Error,
+        category: Category::Correctness,
+    },
+    DiagnosticDescriptor {
+        id: "E612",
+        name: "extern_requires_calling_convention",
+        default_severity: Severity::Error,
+        category: Category::Correctness,
+    },
+];
 
 pub struct ExternFfiSafeAnalyzer;
 
@@ -51,42 +75,112 @@ impl DeclCheck for ExternFfiSafeAnalyzer {
     }
 
     fn check(&self, cx: &DeclContext<'_>) -> Vec<AnalyzeDiagnostic> {
-        // Only check functions with @extern attribute
         let Some(attrs) = cx.query.get::<Attributes>(cx.entity) else {
             return vec![];
         };
-        if !attrs.0.iter().any(|a| a.name == "extern") {
+        let Some(extern_attr) = attrs.0.iter().find(|a| a.name == "extern") else {
             return vec![];
+        };
+
+        let span = util::entity_span(cx.query, cx.entity);
+        let mut diags = Vec::new();
+
+        // @extern requires a calling convention argument like @extern(.C)
+        if extern_attr.args.is_empty() {
+            diags.push(AnalyzeDiagnostic {
+                descriptor_id: "E612",
+                severity: Severity::Error,
+                message: "@extern requires a calling convention".into(),
+                labels: vec![DiagLabel {
+                    span: span.clone(),
+                    message: "missing calling convention (e.g. @extern(.C))".into(),
+                    is_primary: true,
+                }],
+                notes: vec![],
+            });
         }
 
-        // Resolve FFISafe protocol entity
+        // Extern functions cannot be generic — if generic, skip FFISafe checks
+        // since type params can't be checked for conformance
+        let is_generic = cx.query.get::<TypeParams>(cx.entity)
+            .is_some_and(|tp| !tp.0.is_empty());
+        if is_generic {
+            diags.push(AnalyzeDiagnostic {
+                descriptor_id: "E609",
+                severity: Severity::Error,
+                message: "@extern functions cannot be generic".into(),
+                labels: vec![DiagLabel {
+                    span,
+                    message: "generic functions cannot have a stable ABI".into(),
+                    is_primary: true,
+                }],
+                notes: vec![],
+            });
+            return diags;
+        }
+
+        // Extern functions cannot have a body
+        if cx.query.get::<Body>(cx.entity).is_some() {
+            diags.push(AnalyzeDiagnostic {
+                descriptor_id: "E610",
+                severity: Severity::Error,
+                message: "@extern functions cannot have a body".into(),
+                labels: vec![DiagLabel {
+                    span: span.clone(),
+                    message: "extern functions are implemented in external code".into(),
+                    is_primary: true,
+                }],
+                notes: vec![],
+            });
+        }
+
+        // Extern parameters cannot use mutating access mode (must be consuming)
+        if let Some(callable) = cx.query.get::<Callable>(cx.entity) {
+            for param in &callable.params {
+                if param.is_mut && !param.is_consuming {
+                    diags.push(AnalyzeDiagnostic {
+                        descriptor_id: "E611",
+                        severity: Severity::Error,
+                        message: format!(
+                            "@extern function parameter '{}' must use consuming access mode",
+                            param.name
+                        ),
+                        labels: vec![DiagLabel {
+                            span: span.clone(),
+                            message: "extern functions receive values, not references".into(),
+                            is_primary: true,
+                        }],
+                        notes: vec![],
+                    });
+                }
+            }
+        }
+
+        // Check parameter types conform to FFISafe
         let Some(ffi_safe_entity) = cx.query.query(ResolveBuiltin {
             builtin: Builtin::FFISafe,
             root: cx.root,
         }) else {
-            return vec![];
+            return diags;
         };
 
-        let mut diags = Vec::new();
-
-        // Check parameter types
         if let Some(param_types) = cx.query.query(LowerCallableTypes {
             entity: cx.entity,
             root: cx.root,
         }) {
             for (i, param_ty) in param_types.iter().enumerate() {
                 let Some(hir_ty) = param_ty else { continue };
-                if !self.is_ffi_safe(cx, hir_ty, ffi_safe_entity) {
+                if !is_ffi_safe(cx, hir_ty, ffi_safe_entity) {
                     let param_name = self.param_name(cx, i);
                     diags.push(AnalyzeDiagnostic {
-                        descriptor_id: DESCRIPTORS[0].id,
-                        severity: DESCRIPTORS[0].default_severity,
+                        descriptor_id: "E605",
+                        severity: Severity::Error,
                         message: format!(
                             "parameter '{}' type does not conform to FFISafe",
                             param_name
                         ),
                         labels: vec![DiagLabel {
-                            span: util::entity_span(cx.query, cx.entity),
+                            span: span.clone(),
                             message: "type is not FFI-safe".into(),
                             is_primary: true,
                         }],
@@ -103,15 +197,14 @@ impl DeclCheck for ExternFfiSafeAnalyzer {
             entity: cx.entity,
             root: cx.root,
         }) {
-            // Skip unit return type (empty tuple)
             if !matches!(&ret_ty, HirTy::Tuple(elems, _) if elems.is_empty()) {
-                if !self.is_ffi_safe(cx, &ret_ty, ffi_safe_entity) {
+                if !is_ffi_safe(cx, &ret_ty, ffi_safe_entity) {
                     diags.push(AnalyzeDiagnostic {
-                        descriptor_id: DESCRIPTORS[0].id,
-                        severity: DESCRIPTORS[0].default_severity,
+                        descriptor_id: "E605",
+                        severity: Severity::Error,
                         message: "return type does not conform to FFISafe".into(),
                         labels: vec![DiagLabel {
-                            span: util::entity_span(cx.query, cx.entity),
+                            span,
                             message: "type is not FFI-safe".into(),
                             is_primary: true,
                         }],
@@ -128,36 +221,35 @@ impl DeclCheck for ExternFfiSafeAnalyzer {
 }
 
 impl ExternFfiSafeAnalyzer {
-    /// Check if a type conforms to FFISafe.
-    fn is_ffi_safe(
-        &self,
-        cx: &DeclContext<'_>,
-        hir_ty: &HirTy,
-        ffi_safe_entity: kestrel_hecs::Entity,
-    ) -> bool {
-        let HirTy::Named { entity, .. } = hir_ty else {
-            // Non-named types (tuples, functions, etc.) are not FFI-safe
-            return false;
-        };
-
-        // Lang intrinsic types (lang.i64, lang.ptr, etc.) are FFI-safe by definition
-        if cx.query.has::<Intrinsic>(*entity) {
-            return true;
-        }
-
-        let conforming = cx.query.query(ConformingProtocols {
-            entity: *entity,
-            root: cx.root,
-        });
-        conforming.contains(&ffi_safe_entity)
-    }
-
-    /// Get the parameter name at index from the Callable component.
     fn param_name(&self, cx: &DeclContext<'_>, index: usize) -> String {
         cx.query
-            .get::<kestrel_ast_builder::Callable>(cx.entity)
+            .get::<Callable>(cx.entity)
             .and_then(|c| c.params.get(index))
             .map(|p| p.name.clone())
             .unwrap_or_else(|| format!("#{}", index))
+    }
+}
+
+/// Check if a type conforms to FFISafe.
+pub fn is_ffi_safe(
+    cx: &DeclContext<'_>,
+    hir_ty: &HirTy,
+    ffi_safe_entity: kestrel_hecs::Entity,
+) -> bool {
+    match hir_ty {
+        // Tuples are FFI-safe if all elements are FFI-safe
+        HirTy::Tuple(elems, _) => {
+            elems.iter().all(|e| is_ffi_safe(cx, e, ffi_safe_entity))
+        }
+        // Named types: check intrinsic status or protocol conformance
+        HirTy::Named { entity, .. } => {
+            cx.query.has::<Intrinsic>(*entity)
+                || cx.query.query(ConformingProtocols {
+                    entity: *entity,
+                    root: cx.root,
+                }).contains(&ffi_safe_entity)
+        }
+        // Functions, etc. are not FFI-safe
+        _ => false,
     }
 }
