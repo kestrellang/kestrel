@@ -1,11 +1,11 @@
 // test: diagnostics
-// stdlib: false
+// stdlib: true
 
 module Test
-struct Text: Prelude.BooleanConditional {
+struct Text: BooleanConditional {
     var length: lang.i64
 
-    func asBool() -> lang.i1 {
+    func boolValue() -> lang.i1 {
         lang.i64_signed_gt(self.length, 0)
     }
 }

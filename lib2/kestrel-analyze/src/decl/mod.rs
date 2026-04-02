@@ -5,6 +5,7 @@
 
 pub mod builtin_marker_protocol;
 pub mod cloneable_field;
+pub mod default_param_ordering;
 pub mod disallowed_conformance;
 pub mod duplicate_callable;
 pub mod duplicate_case;

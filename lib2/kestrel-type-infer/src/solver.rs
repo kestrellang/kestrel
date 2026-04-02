@@ -1142,9 +1142,12 @@ fn solve_member(
         ctx.conforms(receiver, protocol, span.clone());
     }
 
-    // Validate argument count matches parameter count
-    let required_count = resolution.param_types.len();
-    if args.len() != required_count {
+    // Validate argument count: must be between required (no default) and total params
+    let required_count = resolution.param_types.iter()
+        .filter(|p| !p.has_default)
+        .count();
+    let total_count = resolution.param_types.len();
+    if args.len() < required_count || args.len() > total_count {
         return SolveResult::Error(InferError::ArgCountMismatch {
             expected: required_count,
             got: args.len(),

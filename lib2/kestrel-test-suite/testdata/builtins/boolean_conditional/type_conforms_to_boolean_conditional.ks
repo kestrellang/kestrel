@@ -1,11 +1,11 @@
 // test: diagnostics
-// stdlib: false
+// stdlib: true
 
 module Test
-struct Flag: Prelude.BooleanConditional {
+struct Flag: BooleanConditional {
     var enabled: lang.i1
 
-    func asBool() -> lang.i1 {
+    func boolValue() -> lang.i1 {
         self.enabled
     }
 }

@@ -1,11 +1,11 @@
 // test: diagnostics
-// stdlib: false
+// stdlib: true
 
 module Test
-struct Counter: Prelude.BooleanConditional {
+struct Counter: BooleanConditional {
     var remaining: lang.i64
 
-    func asBool() -> lang.i1 {
+    func boolValue() -> lang.i1 {
         lang.i64_signed_gt(self.remaining, 0)
     }
 

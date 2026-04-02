@@ -1,12 +1,12 @@
 // test: diagnostics
-// stdlib: false
+// stdlib: true
 
 module Test
-enum Option[T]: Prelude.BooleanConditional {
+enum Option[T]: BooleanConditional {
     case Some(T)
     case None
 
-    func asBool() -> lang.i1 {
+    func boolValue() -> lang.i1 {
         match self {
             .Some(_) => true,
             .None => false

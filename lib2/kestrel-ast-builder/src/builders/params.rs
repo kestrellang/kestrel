@@ -37,11 +37,33 @@ pub fn extract_params(
         None => return Vec::new(),
     };
 
-    param_list
+    let params: Vec<AstParam> = param_list
         .children()
         .filter(|c| c.kind() == SyntaxKind::Parameter)
         .filter_map(|param_node| extract_single_param(world, &param_node, parent, file_entity, file_id))
-        .collect()
+        .collect();
+
+    // Detect defaults that reference sibling params. Replace the body with an
+    // empty one (suppresses "undefined name" from inference) and set a marker
+    // component so the analyzer can emit a proper diagnostic.
+    let param_names: Vec<&str> = params.iter().map(|p| p.name.as_str()).collect();
+    for param in &params {
+        let Some(default_entity) = param.default_entity else { continue };
+        let Some(body) = world.get::<crate::components::Body>(default_entity) else { continue };
+        if let Some(referenced) = default_body_references_param(&body.0, &param_names) {
+            world.set(default_entity, crate::components::DefaultReferencesParam(referenced.to_string()));
+            // Replace with empty body so inference doesn't produce "undefined name"
+            world.set(default_entity, crate::components::Body(kestrel_ast::ast_body::AstBody {
+                exprs: kestrel_ast::arena::Arena::new(),
+                pats: kestrel_ast::arena::Arena::new(),
+                stmts: kestrel_ast::arena::Arena::new(),
+                statements: Vec::new(),
+                tail_expr: None,
+            }));
+        }
+    }
+
+    params
 }
 
 /// Extract a single parameter from a Parameter CST node.
@@ -247,4 +269,16 @@ fn extract_param_pattern(node: &SyntaxNode) -> Option<ParamPattern> {
 
         _ => None,
     }
+}
+
+/// Check if a default value body's tail expression is a single-segment path
+/// matching a sibling parameter name. Returns the matched name if found.
+fn default_body_references_param<'a>(body: &kestrel_ast::ast_body::AstBody, param_names: &[&'a str]) -> Option<&'a str> {
+    let tail_id = body.tail_expr?;
+    if let kestrel_ast::ast_body::AstExpr::Path { segments, .. } = &body.exprs[tail_id] {
+        if segments.len() == 1 && segments[0].type_args.is_none() {
+            return param_names.iter().find(|&&p| p == segments[0].name).copied();
+        }
+    }
+    None
 }

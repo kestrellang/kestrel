@@ -1,5 +1,5 @@
 // test: diagnostics
-// stdlib: false
+// stdlib: true
 
 module Test
 // BooleanConditional is defined in Prelude

@@ -54,6 +54,7 @@ pub struct MemberResolution {
 pub struct ParamInfo {
     pub label: Option<String>,
     pub ty: HirTy,
+    pub has_default: bool,
 }
 
 /// What kind of member was resolved.
@@ -788,6 +789,7 @@ impl WorldResolver<'_> {
                     ParamInfo {
                         label: p.label.clone(),
                         ty,
+                        has_default: p.default_entity.is_some(),
                     }
                 })
                 .collect()
@@ -990,6 +992,7 @@ impl WorldResolver<'_> {
                     .and_then(|tys| tys.get(i))
                     .and_then(|t| t.clone())
                     .unwrap_or(HirTy::Error(Span::synthetic(0))),
+                has_default: p.default_entity.is_some(),
             })
             .collect()
     }

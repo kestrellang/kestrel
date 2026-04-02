@@ -1,11 +1,11 @@
 // test: diagnostics
-// stdlib: false
+// stdlib: true
 
 module Test
-struct Number: Prelude.BooleanConditional {
+struct Number: BooleanConditional {
     var value: lang.i64
 
-    func asBool() -> lang.i1 {
+    func boolValue() -> lang.i1 {
         lang.i64_ne(self.value, 0)
     }
 }

@@ -190,7 +190,11 @@ impl LowerCtx<'_> {
 
     // ===== While → Loop =====
 
-    /// Desugar `while condition { body }` → `loop { if !condition { break }; body }`
+    /// Desugar `while condition { body }` → `loop { if condition {} else { break }; body }`
+    ///
+    /// We use `if cond {} else { break }` instead of `if !cond { break }` to avoid
+    /// requiring the condition type to conform to the Not protocol. This matches lib1
+    /// where while conditions only need Bool or BooleanConditional, not Not.
     pub(crate) fn desugar_while(
         &mut self,
         body: &AstBody,
@@ -202,32 +206,22 @@ impl LowerCtx<'_> {
         let lowered_cond = self.lower_expr(body, condition);
         self.while_conditions.push(lowered_cond);
 
-        // Negate condition: !condition
-        let negated = if let Some(protocol) = self.resolve_builtin(Builtin::LogicalNotOperatorProtocol) {
-            self.alloc_expr(HirExpr::ProtocolCall {
-                receiver: lowered_cond,
-                protocol,
-                method: "logicalNot".to_string(),
-                type_args: None,
-                args: Vec::new(),
-                span: span.clone(),
-            })
-        } else {
-            lowered_cond
-        };
-
         let break_expr = self.alloc_expr(HirExpr::Break {
             label: label.map(|l| l.to_string()),
             span: span.clone(),
         });
 
+        // if condition {} else { break } — condition true = continue, false = break
         let if_break = self.alloc_expr(HirExpr::If {
-            condition: negated,
+            condition: lowered_cond,
             then_body: HirBlock {
                 stmts: Vec::new(),
-                tail_expr: Some(break_expr),
+                tail_expr: None,
             },
-            else_body: None,
+            else_body: Some(HirBlock {
+                stmts: Vec::new(),
+                tail_expr: Some(break_expr),
+            }),
             span: span.clone(),
         });
 

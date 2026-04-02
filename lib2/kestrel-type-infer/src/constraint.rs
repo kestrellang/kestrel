@@ -133,10 +133,11 @@ pub struct CallArg {
 }
 
 /// Check if call arg labels match a callable's param labels.
-/// Compares label and arity: arg count must equal param count,
-/// and each arg label must match the corresponding param label.
+/// Arg count must be between required params (no default) and total params,
+/// and each provided arg label must match the corresponding param label.
 pub fn labels_match(params: &[AstParam], arg_labels: &[Option<&str>]) -> bool {
-    if params.len() != arg_labels.len() {
+    let required = params.iter().filter(|p| p.default_entity.is_none()).count();
+    if arg_labels.len() < required || arg_labels.len() > params.len() {
         return false;
     }
     params

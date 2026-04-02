@@ -114,6 +114,7 @@ fn duplicate_key_for(
 impl DeclCheck for DuplicateCallableAnalyzer {
     fn target_kinds(&self) -> &'static [NodeKind] {
         &[
+            NodeKind::Module,
             NodeKind::Struct,
             NodeKind::Enum,
             NodeKind::Protocol,

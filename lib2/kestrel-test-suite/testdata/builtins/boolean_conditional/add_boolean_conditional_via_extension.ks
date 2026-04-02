@@ -1,12 +1,12 @@
 // test: diagnostics
-// stdlib: false
+// stdlib: true
 
 module Test
 struct Status {
     var code: lang.i64
 }
-extend Status: Prelude.BooleanConditional {
-    func asBool() -> lang.i1 {
+extend Status: BooleanConditional {
+    func boolValue() -> lang.i1 {
         lang.i64_eq(self.code, 0)
     }
 }

@@ -1,11 +1,11 @@
 // test: diagnostics
-// stdlib: false
+// stdlib: true
 
 module Test
-struct NonEmpty: Prelude.BooleanConditional {
+struct NonEmpty: BooleanConditional {
     var count: lang.i64
 
-    func asBool() -> lang.i1 {
+    func boolValue() -> lang.i1 {
         lang.i64_signed_gt(self.count, 0)
     }
 }

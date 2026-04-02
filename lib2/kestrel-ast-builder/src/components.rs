@@ -238,6 +238,11 @@ pub struct AstAttributeArg {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Documentation(pub String);
 
+/// Marker: this ParamDefault entity's expression references a sibling parameter.
+/// Stores the referenced parameter name for diagnostic messages.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct DefaultReferencesParam(pub String);
+
 // ===== Import-specific =====
 
 /// Module path for an import declaration.

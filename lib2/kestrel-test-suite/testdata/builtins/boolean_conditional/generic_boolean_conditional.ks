@@ -1,13 +1,13 @@
 // test: diagnostics
-// stdlib: false
+// stdlib: true
 
 module Test
 struct Box[T] {
     var hasValue: lang.i1
     var value: T
 }
-extend Box[T]: Prelude.BooleanConditional {
-    func asBool() -> lang.i1 {
+extend Box[T]: BooleanConditional {
+    func boolValue() -> lang.i1 {
         self.hasValue
     }
 }

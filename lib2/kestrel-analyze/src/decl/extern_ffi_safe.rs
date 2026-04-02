@@ -119,19 +119,21 @@ impl DeclCheck for ExternFfiSafeAnalyzer {
             return diags;
         }
 
-        // Extern functions cannot have a body
+        // Extern functions cannot have a body — skip FFISafe checks if so,
+        // since the function is already structurally invalid
         if cx.query.get::<Body>(cx.entity).is_some() {
             diags.push(AnalyzeDiagnostic {
                 descriptor_id: "E610",
                 severity: Severity::Error,
                 message: "@extern functions cannot have a body".into(),
                 labels: vec![DiagLabel {
-                    span: span.clone(),
+                    span,
                     message: "extern functions are implemented in external code".into(),
                     is_primary: true,
                 }],
                 notes: vec![],
             });
+            return diags;
         }
 
         // Extern parameters cannot use mutating access mode (must be consuming)
