@@ -13,7 +13,7 @@ use crate::context::DeclContext;
 use crate::decl::extern_ffi_safe::is_ffi_safe;
 use crate::diagnostic::*;
 use crate::util;
-use kestrel_ast_builder::{Name, NodeKind};
+use kestrel_ast_builder::{Callable, Name, NodeKind};
 use kestrel_hir::builtin::Builtin;
 use crate::traits::{DeclCheck, Describe};
 use kestrel_hir_lower::LowerTypeAnnotation;
@@ -64,6 +64,8 @@ impl DeclCheck for ProtocolFieldConformanceAnalyzer {
         for &child in cx.query.children_of(cx.entity) {
             let Some(kind) = cx.query.get::<NodeKind>(child) else { continue };
             if *kind != NodeKind::Field { continue; }
+            // Skip computed properties — only stored fields affect layout
+            if cx.query.has::<Callable>(child) { continue; }
 
             let field_name = cx.query.get::<Name>(child)
                 .map(|n| n.0.clone())
