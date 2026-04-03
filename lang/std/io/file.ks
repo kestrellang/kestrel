@@ -337,7 +337,7 @@ public struct File: Read, Write, not Copyable {
     ///     let start = try file.position()  // 0
     ///     try file.read(into: buf.asSlice())
     ///     let after = try file.position()  // advanced by bytes read
-    public func position() -> Result[Int64, Error] {
+    public mutating func position() -> Result[Int64, Error] {
         self.seek(to: .Current(0))
     }
 

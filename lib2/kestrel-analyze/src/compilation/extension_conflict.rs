@@ -20,7 +20,7 @@ use crate::context::CompilationContext;
 use crate::diagnostic::*;
 use crate::traits::{CompilationCheck, Describe};
 use crate::util;
-use kestrel_ast_builder::{Name, NodeKind, WhereClause};
+use kestrel_ast_builder::{Callable, Name, NodeKind, WhereClause};
 use kestrel_hecs::Entity;
 use kestrel_name_res::ExtensionTargetEntity;
 
@@ -78,7 +78,7 @@ impl CompilationCheck for ExtensionConflictAnalyzer {
             let is_concrete_type = matches!(target_kind, Some(NodeKind::Struct | NodeKind::Enum));
             if is_concrete_type {
             for (ext_name, ext_method, _ext) in &ext_methods {
-                if let Some((_, struct_method)) = target_methods.iter().find(|(n, _)| n == ext_name) {
+                if let Some((_, struct_method)) = target_methods.iter().find(|(n, m)| n == ext_name && same_labels(cx, *m, *ext_method)) {
                     diags.push(AnalyzeDiagnostic {
                         descriptor_id: DESCRIPTORS[0].id,
                         severity: DESCRIPTORS[0].default_severity,
@@ -115,7 +115,7 @@ impl CompilationCheck for ExtensionConflictAnalyzer {
                     let (name_i, method_i, ext_i) = &ext_methods[i];
                     let (name_j, method_j, ext_j) = &ext_methods[j];
 
-                    if name_i != name_j || ext_i == ext_j {
+                    if name_i != name_j || ext_i == ext_j || !same_labels(cx, *method_i, *method_j) {
                         continue;
                     }
 
@@ -195,6 +195,18 @@ fn collect_named_children(cx: &CompilationContext<'_>, entity: Entity) -> Vec<(S
             Some((name, child))
         })
         .collect()
+}
+
+/// Check if two callable entities have the same parameter labels.
+/// Methods with the same name but different labels are overloads, not conflicts.
+fn same_labels(cx: &CompilationContext<'_>, a: Entity, b: Entity) -> bool {
+    let labels_a: Vec<Option<String>> = cx.query.get::<Callable>(a)
+        .map(|c| c.params.iter().map(|p| p.label.clone()).collect())
+        .unwrap_or_default();
+    let labels_b: Vec<Option<String>> = cx.query.get::<Callable>(b)
+        .map(|c| c.params.iter().map(|p| p.label.clone()).collect())
+        .unwrap_or_default();
+    labels_a == labels_b
 }
 
 /// Check if an extension has any where clause constraints.

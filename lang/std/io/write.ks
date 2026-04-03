@@ -263,7 +263,7 @@ public struct Buffer: Write {
 ///     var file = try File.create(path: "output.bin")
 ///     try writeAll(writer: file, from: data.asSlice())
 ///     // all bytes guaranteed written (or error)
-public func writeAll[W](writer: W, from buf: Slice[UInt8]) -> Result[(), Error] where W: Write {
+public func writeAll[W](mutating writer: W, from buf: Slice[UInt8]) -> Result[(), Error] where W: Write {
     var written: Int64 = 0;
     while written < buf.count {
         let remaining = Slice(pointer: buf.pointer.offset(by: written), count: buf.count - written);
@@ -281,7 +281,7 @@ public func writeAll[W](writer: W, from buf: Slice[UInt8]) -> Result[(), Error] 
 /// Example:
 ///     var file = try File.create(path: "output.bin")
 ///     try writeByte(writer: file, byte: 0xFF)
-public func writeByte[W](writer: W, byte: UInt8) -> Result[(), Error] where W: Write {
+public func writeByte[W](mutating writer: W, byte: UInt8) -> Result[(), Error] where W: Write {
     var buf = Array[UInt8](capacity: 1);
     buf.append(byte);
     let slice = Slice(pointer: buf.asPointer(), count: 1);
@@ -293,7 +293,7 @@ public func writeByte[W](writer: W, byte: UInt8) -> Result[(), Error] where W: W
 /// Example:
 ///     var file = try File.create(path: "greeting.txt")
 ///     try writeStr(writer: file, s: "Hello, World!")
-public func writeStr[W](writer: W, s: String) -> Result[(), Error] where W: Write {
+public func writeStr[W](mutating writer: W, s: String) -> Result[(), Error] where W: Write {
     // Get the byte count and pointer from string
     let byteCount = s.byteCount;
     if byteCount == 0 {
@@ -318,7 +318,7 @@ public func writeStr[W](writer: W, s: String) -> Result[(), Error] where W: Writ
 ///     var file = try File.create(path: "lines.txt")
 ///     try writeLine(writer: file, s: "First line")
 ///     try writeLine(writer: file, s: "Second line")
-public func writeLine[W](writer: W, s: String) -> Result[(), Error] where W: Write {
+public func writeLine[W](mutating writer: W, s: String) -> Result[(), Error] where W: Write {
     try writeStr(writer, s);
     writeByte(writer, 10)  // '\n'
 }

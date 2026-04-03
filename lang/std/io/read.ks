@@ -120,7 +120,7 @@ public struct Cursor: Read {
 /// Reads a single byte from a reader.
 ///
 /// Returns None on EOF.
-public func readByte[R](reader: R) -> Result[Optional[UInt8], Error] where R: Read {
+public func readByte[R](mutating reader: R) -> Result[Optional[UInt8], Error] where R: Read {
     var buf = Array[UInt8](capacity: 1);
     buf.append(0);
     let slice = Slice(pointer: buf.asPointer(), count: 1);
@@ -135,7 +135,7 @@ public func readByte[R](reader: R) -> Result[Optional[UInt8], Error] where R: Re
 /// Reads all bytes from a reader into an array.
 ///
 /// Returns the total number of bytes read.
-public func readAll[R](reader: R, into buf: Array[UInt8]) -> Result[Int64, Error] where R: Read {
+public func readAll[R](mutating reader: R, mutating into buf: Array[UInt8]) -> Result[Int64, Error] where R: Read {
     var total: Int64 = 0;
     var chunk = Array[UInt8](capacity: 4096);
     // Initialize chunk with zeros
@@ -170,7 +170,7 @@ public func readAll[R](reader: R, into buf: Array[UInt8]) -> Result[Int64, Error
 ///     var file = try File.open(path: "header.bin")
 ///     var header = Array[UInt8](repeating: 0, count: 16)
 ///     try readExact(reader: file, into: header.asSlice())  // must read 16 bytes
-public func readExact[R](reader: R, into buf: Slice[UInt8]) -> Result[(), Error] where R: Read {
+public func readExact[R](mutating reader: R, into buf: Slice[UInt8]) -> Result[(), Error] where R: Read {
     var filled: Int64 = 0;
     while filled < buf.count {
         let remaining = Slice(pointer: buf.pointer.offset(by: filled), count: buf.count - filled);

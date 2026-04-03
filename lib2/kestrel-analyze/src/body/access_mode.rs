@@ -66,6 +66,8 @@ enum MutClass {
     Temporary,
 }
 
+
+
 impl BodyCheck for AccessModeAnalyzer {
     fn check(&self, cx: &BodyContext<'_>) -> Vec<AnalyzeDiagnostic> {
         let mut diags = Vec::new();

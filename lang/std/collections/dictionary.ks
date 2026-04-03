@@ -405,10 +405,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
             let maybeValue = self(key);
             match maybeValue {
                 .Some(v) => v,
-                .None => {
-                    let _ = self.insert( key, defaultValue);
-                    defaultValue
-                }
+                .None => defaultValue
             }
         }
         set {

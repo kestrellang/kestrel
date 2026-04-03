@@ -93,7 +93,7 @@ use crate::diagnostic::*;
 use crate::traits::{DeclCheck, Describe};
 use crate::util;
 use kestrel_ast_builder::{Conformances, CstNode, Name, NodeKind, TypeAnnotation};
-use kestrel_name_res::{ConformingProtocols, ResolveTypePath, TypeResolution};
+use kestrel_name_res::{ConformingProtocols, ExtensionsFor, ResolveTypePath, TypeResolution};
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[
     DiagnosticDescriptor {
@@ -369,7 +369,8 @@ fn check_qualified_binding(
 }
 
 /// Check 5 (E445): Unqualified binding is ambiguous if multiple conformed protocols
-/// declare the same associated type name.
+/// declare the same associated type name, unless the extra protocols are already
+/// covered by qualified bindings in extensions.
 fn check_unqualified_ambiguity(
     cx: &DeclContext<'_>,
     type_entity: kestrel_hecs::Entity,
@@ -383,19 +384,35 @@ fn check_unqualified_ambiguity(
     });
 
     // Find all conformed protocols that declare an associated type with this name
-    let mut matching_protocols: Vec<String> = Vec::new();
+    let mut matching_protocols: Vec<(kestrel_hecs::Entity, String)> = Vec::new();
     for &proto in &conforming {
         let has_assoc = cx.query.children_of(proto).iter().any(|&child| {
             cx.query.get::<NodeKind>(child) == Some(&NodeKind::TypeAlias)
                 && cx.query.get::<Name>(child).is_some_and(|n| n.0 == alias_name)
         });
         if has_assoc {
-            matching_protocols.push(util::entity_name(cx.query, proto));
+            matching_protocols.push((proto, util::entity_name(cx.query, proto)));
         }
     }
 
-    if matching_protocols.len() > 1 {
-        let proto_list = matching_protocols.join(", ");
+    if matching_protocols.len() <= 1 {
+        return;
+    }
+
+    // Collect protocols already covered by qualified bindings in extensions.
+    // e.g., `extend Iterator: Iterable { type Iterable.Item = Self.Item }`
+    // means Iterable.Item is already bound — no ambiguity for that protocol.
+    let covered = protocols_covered_by_qualified_bindings(cx, type_entity, alias_name);
+
+    // Filter out covered protocols
+    let uncovered: Vec<&str> = matching_protocols
+        .iter()
+        .filter(|(entity, _)| !covered.contains(entity))
+        .map(|(_, name)| name.as_str())
+        .collect();
+
+    if uncovered.len() > 1 {
+        let proto_list = uncovered.join(", ");
         diags.push(AnalyzeDiagnostic {
             descriptor_id: DESCRIPTORS[4].id,
             severity: DESCRIPTORS[4].default_severity,
@@ -411,4 +428,64 @@ fn check_unqualified_ambiguity(
             notes: vec![],
         });
     }
+}
+
+/// Find protocols whose associated type is already provided by a qualified
+/// binding in an extension. For example, `extend Iterator: Iterable { type
+/// Iterable.Item = Self.Item }` covers `Iterable` for `Item`.
+fn protocols_covered_by_qualified_bindings(
+    cx: &DeclContext<'_>,
+    type_entity: kestrel_hecs::Entity,
+    alias_name: &str,
+) -> Vec<kestrel_hecs::Entity> {
+    let mut covered = Vec::new();
+
+    // Check extensions of the type entity AND extensions of protocols it conforms to.
+    // The key case: `extend Iterator: Iterable { type Iterable.Item = ... }` targets
+    // Iterator (a protocol), not the concrete type. So we need to check extensions of
+    // all conformed protocols too.
+    let mut targets_to_check = vec![type_entity];
+    let conforming = cx.query.query(ConformingProtocols {
+        entity: type_entity,
+        root: cx.root,
+    });
+    targets_to_check.extend(conforming.iter());
+
+    for &target in &targets_to_check {
+        let extensions = cx.query.query(ExtensionsFor {
+            target,
+            root: cx.root,
+        });
+
+        for ext in &extensions {
+            // Walk the extension's TypeAlias children
+            for &child in cx.query.children_of(*ext) {
+                if cx.query.get::<NodeKind>(child) != Some(&NodeKind::TypeAlias) {
+                    continue;
+                }
+                // Must have the same name as the alias we're checking
+                if !cx.query.get::<Name>(child).is_some_and(|n| n.0 == alias_name) {
+                    continue;
+                }
+                // Must be a qualified binding (has AssociatedTypeTarget in CST)
+                if !is_qualified_binding(cx, child) {
+                    continue;
+                }
+                // Resolve which protocol the qualified binding targets
+                if let Some(proto_segments) = extract_qualified_protocol_segments(cx, child) {
+                    let context = cx.query.parent_of(child).unwrap_or(cx.root);
+                    let resolution = cx.query.query(ResolveTypePath {
+                        segments: proto_segments,
+                        context,
+                        root: cx.root,
+                    });
+                    if let TypeResolution::Found(proto_entity) = resolution {
+                        covered.push(proto_entity);
+                    }
+                }
+            }
+        }
+    }
+
+    covered
 }

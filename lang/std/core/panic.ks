@@ -3,6 +3,6 @@
 module std.core
 
 /// Abort the process with a message.
-public func fatalError(message: String) {
+public func fatalError(message: String) -> ! {
     lang.panic_unwind("fatal error")
 }

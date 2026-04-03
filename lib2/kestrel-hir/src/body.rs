@@ -384,8 +384,8 @@ pub const BINARY_OP_PROTOCOLS: &[(BinaryOp, Builtin, &str, Option<&str>)] = &[
     (BinaryOp::BitAnd, Builtin::BitwiseAndOperatorProtocol, "bitwiseAnd", None),
     (BinaryOp::BitOr, Builtin::BitwiseOrOperatorProtocol, "bitwiseOr", None),
     (BinaryOp::BitXor, Builtin::BitwiseXorOperatorProtocol, "bitwiseXor", None),
-    (BinaryOp::Shl, Builtin::ShiftLeftOperatorProtocol, "shiftLeft", None),
-    (BinaryOp::Shr, Builtin::ShiftRightOperatorProtocol, "shiftRight", None),
+    (BinaryOp::Shl, Builtin::ShiftLeftOperatorProtocol, "shiftLeft", Some("by")),
+    (BinaryOp::Shr, Builtin::ShiftRightOperatorProtocol, "shiftRight", Some("by")),
     (BinaryOp::RangeInclusive, Builtin::InclusiveRangeOperatorProtocol, "inclusiveRange", Some("to")),
     (BinaryOp::RangeExclusive, Builtin::ExclusiveRangeOperatorProtocol, "exclusiveRange", Some("to")),
 ];

@@ -238,7 +238,8 @@ fn check_protocol_requirements(
                     let proto_ty = cx.query.get::<TypeAnnotation>(child);
                     let impl_ty = cx.query.get::<TypeAnnotation>(field_entity);
                     if let (Some(proto_ann), Some(impl_ann)) = (proto_ty, impl_ty) {
-                        let proto_resolved = resolve_type_entity(cx, &proto_ann.0, protocol);
+                        // Resolve protocol side with Self → conforming type
+                        let proto_resolved = resolve_type_entity_with_self(cx, &proto_ann.0, protocol, Some(type_entity));
                         let impl_resolved = resolve_type_entity(cx, &impl_ann.0, type_entity);
                         if proto_resolved != impl_resolved || proto_resolved.is_none() {
                             let field_span = util::entity_span(cx.query, field_entity);
@@ -662,10 +663,21 @@ fn ast_types_equal(a: &AstType, b: &AstType) -> bool {
 }
 
 /// Resolve an AstType to an entity for type comparison.
+/// When `self_type` is provided, `Self` resolves to that entity.
 fn resolve_type_entity(
     cx: &CompilationContext<'_>,
     ast_ty: &kestrel_ast::AstType,
     context: Entity,
+) -> Option<Entity> {
+    resolve_type_entity_with_self(cx, ast_ty, context, None)
+}
+
+/// Resolve an AstType to an entity, substituting `Self` with `self_type` if provided.
+fn resolve_type_entity_with_self(
+    cx: &CompilationContext<'_>,
+    ast_ty: &kestrel_ast::AstType,
+    context: Entity,
+    self_type: Option<Entity>,
 ) -> Option<Entity> {
     let kestrel_ast::AstType::Named { segments, .. } = ast_ty else {
         return None;
@@ -677,6 +689,7 @@ fn resolve_type_entity(
         root: cx.root,
     }) {
         TypeResolution::Found(entity) => Some(entity),
+        TypeResolution::SelfType => self_type,
         _ => None,
     }
 }

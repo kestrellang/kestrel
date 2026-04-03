@@ -168,11 +168,34 @@ impl TestCompiler {
         if errors.is_empty() {
             Ok(())
         } else {
+            // Build file_id → short path map for readable error output
+            let file_names: std::collections::HashMap<usize, String> = self.compiler.files()
+                .iter()
+                .map(|(path, entity)| {
+                    // Shorten path: just keep the last 2 components (e.g. "iter/iterator.ks")
+                    let short = std::path::Path::new(path)
+                        .iter()
+                        .rev()
+                        .take(2)
+                        .collect::<Vec<_>>()
+                        .into_iter()
+                        .rev()
+                        .collect::<std::path::PathBuf>()
+                        .to_string_lossy()
+                        .to_string();
+                    (entity.index(), short)
+                })
+                .collect();
+
             let details: Vec<String> = errors
                 .iter()
                 .map(|d| {
+                    let file = file_names.get(&d.file_id)
+                        .map(|s| s.as_str())
+                        .unwrap_or("?");
                     format!(
-                        "  line {}: {}{}",
+                        "  {}:{}: {}{}",
+                        file,
                         d.line,
                         d.message,
                         d.code
