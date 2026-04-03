@@ -65,6 +65,12 @@ impl QueryFn for ResolveTypePath {
                 if let Some(result) = try_resolve_self_as_type_param(ctx, &self.segments, self.context, self.root) {
                     return result;
                 }
+                // Fallback: resolve Self.Item through the enclosing extension target.
+                // For `extend Iterator: Iterable { type Iterable.Item = Self.Item }`,
+                // Self resolves to Iterator, then .Item walks Iterator's children.
+                if let Some(result) = try_resolve_self_via_extension_target(ctx, &self.segments, self.context, self.root) {
+                    return result;
+                }
             }
             // Bare "Self" — return SelfType for contextual resolution by caller
             if self.segments.len() == 1 {
@@ -207,6 +213,61 @@ fn try_resolve_self_as_type_param(
     }
 
     Some(TypeResolution::Found(current))
+}
+
+/// Resolve `Self.Item` by finding the enclosing extension, resolving its
+/// target type, and walking the remaining segments as children of that type.
+///
+/// This handles `Self.Item` in extensions where Self isn't a TypeParameter
+/// (e.g., `extend Iterator: Iterable { type Iterable.Item = Self.Item }`).
+fn try_resolve_self_via_extension_target(
+    ctx: &QueryContext<'_>,
+    segments: &[String],
+    context: Entity,
+    root: Entity,
+) -> Option<TypeResolution> {
+    // Walk up from context to find an enclosing Extension
+    let mut current = Some(context);
+    let mut extension = None;
+    while let Some(entity) = current {
+        if ctx.get::<NodeKind>(entity) == Some(&NodeKind::Extension) {
+            extension = Some(entity);
+            break;
+        }
+        current = ctx.parent_of(entity);
+    }
+    let extension = extension?;
+
+    // Resolve the extension's target type
+    let target = ctx.query(crate::ExtensionTargetEntity { extension, root })?;
+
+    // Walk remaining segments (after "Self") through the target's children
+    // and associated types. For protocols, this finds associated types;
+    // for structs, this finds nested types.
+    let mut resolved = target;
+    for segment in &segments[1..] {
+        // Check if resolved is a protocol — look for associated types
+        if ctx.get::<NodeKind>(resolved) == Some(&NodeKind::Protocol) {
+            if let Some(assoc) = crate::resolve_name::find_assoc_type(ctx, resolved, segment) {
+                resolved = assoc;
+                continue;
+            }
+        }
+
+        // Check children by name (handles nested types, etc.)
+        let visible = ctx.query(crate::VisibleChildrenByName {
+            parent: resolved,
+            name: segment.clone(),
+            context,
+        });
+        if let Some(entity) = find_type_entity(ctx, &visible) {
+            resolved = entity;
+        } else {
+            return Some(TypeResolution::NotFound(segment.clone()));
+        }
+    }
+
+    Some(TypeResolution::Found(resolved))
 }
 
 /// Resolve an associated type on a type parameter.

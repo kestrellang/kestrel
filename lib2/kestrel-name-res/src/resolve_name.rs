@@ -259,7 +259,7 @@ fn resolve_inherited_protocol_member(
 }
 
 /// Find an associated type (TypeAlias child) in a protocol by name.
-fn find_assoc_type(ctx: &QueryContext<'_>, protocol: Entity, name: &str) -> Option<Entity> {
+pub(crate) fn find_assoc_type(ctx: &QueryContext<'_>, protocol: Entity, name: &str) -> Option<Entity> {
     ctx.children_of(protocol)
         .iter()
         .find(|&&child| {
