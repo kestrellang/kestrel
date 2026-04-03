@@ -124,7 +124,11 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         if !self.is_terminated() {
             if let Some(tail) = self.hir.tail_expr {
                 let value = self.lower_expr(tail);
-                self.set_terminator(Terminator::ret(value));
+                // The tail expression may have set a terminator itself
+                // (e.g., lang.panic_unwind emits Panic). Don't overwrite it.
+                if !self.is_terminated() {
+                    self.set_terminator(Terminator::ret(value));
+                }
             } else {
                 // No tail → return unit
                 self.set_terminator(Terminator::ret(Immediate::unit()));
