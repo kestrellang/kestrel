@@ -432,8 +432,12 @@ fn check_method_return_type(
     // Substitute the impl's return type too (for Self references)
     let actual = substitute_ast_type(&impl_ann.0, &subs);
 
-    // Compare structurally, ignoring spans
-    if !ast_types_equal(&expected, &actual) {
+    // Compare structurally, ignoring spans.
+    // Also treat Self in expected as matching the target type name in actual
+    // (e.g., `type Iter = Self` → expected=Self, actual=Iterator).
+    let types_match = ast_types_equal(&expected, &actual)
+        || (is_named_type(&expected, "Self") && is_named_type(&actual, &util::entity_name(cx.query, type_entity)));
+    if !types_match {
         let impl_span = util::entity_span(cx.query, impl_method);
         diags.push(AnalyzeDiagnostic {
             descriptor_id: DESCRIPTORS[4].id,
@@ -659,6 +663,15 @@ fn ast_types_equal(a: &AstType, b: &AstType) -> bool {
         (AstType::Never(_), AstType::Never(_)) => true,
         (AstType::Inferred(_), AstType::Inferred(_)) => true,
         _ => false,
+    }
+}
+
+/// Check if an AstType is a single-segment name matching the given name.
+fn is_named_type(ast_ty: &kestrel_ast::AstType, name: &str) -> bool {
+    if let kestrel_ast::AstType::Named { segments, .. } = ast_ty {
+        segments.len() == 1 && segments[0].name == name
+    } else {
+        false
     }
 }
 
