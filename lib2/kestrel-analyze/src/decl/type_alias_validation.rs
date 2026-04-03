@@ -237,8 +237,11 @@ impl DeclCheck for TypeAliasValidationAnalyzer {
                 if is_qualified {
                     // Check 3 & 4: Qualified binding validation
                     check_qualified_binding(cx, cx.entity, type_entity, &alias_name, &span, &mut diags);
-                } else {
-                    // Check 5: Unqualified binding ambiguity
+                } else if parent_kind == Some(NodeKind::Extension) {
+                    // Check 5: Unqualified binding ambiguity (extensions only).
+                    // On the type itself (struct/enum), an unqualified binding
+                    // satisfies all protocols that declare the associated type —
+                    // no ambiguity since the binding is on the canonical type.
                     check_unqualified_ambiguity(cx, type_entity, &alias_name, &span, &mut diags);
                 }
             }
@@ -402,7 +405,17 @@ fn check_unqualified_ambiguity(
     // Collect protocols already covered by qualified bindings in extensions.
     // e.g., `extend Iterator: Iterable { type Iterable.Item = Self.Item }`
     // means Iterable.Item is already bound — no ambiguity for that protocol.
-    let covered = protocols_covered_by_qualified_bindings(cx, type_entity, alias_name);
+    let mut covered = protocols_covered_by_qualified_bindings(cx, type_entity, alias_name);
+
+    // Also cover protocols declared directly on this extension's conformance list.
+    // e.g., `extend Array[T]: ArrayMatchable { type Element = T }` — the
+    // unqualified Element is clearly for ArrayMatchable since the extension
+    // declares that conformance.
+    if let Some(parent) = cx.query.parent_of(cx.entity) {
+        if cx.query.get::<NodeKind>(parent) == Some(&NodeKind::Extension) {
+            covered.extend(protocols_from_extension_conformances(cx, parent));
+        }
+    }
 
     // Filter out covered protocols
     let uncovered: Vec<&str> = matching_protocols
@@ -488,4 +501,33 @@ fn protocols_covered_by_qualified_bindings(
     }
 
     covered
+}
+
+/// Get protocol entities from an extension's direct conformance list.
+/// For `extend Array[T]: ArrayMatchable { ... }`, returns [ArrayMatchable_entity].
+fn protocols_from_extension_conformances(
+    cx: &DeclContext<'_>,
+    extension: kestrel_hecs::Entity,
+) -> Vec<kestrel_hecs::Entity> {
+    let Some(conformances) = cx.query.get::<Conformances>(extension) else {
+        return vec![];
+    };
+    let context = cx.query.parent_of(extension).unwrap_or(cx.root);
+    conformances.0.iter().filter_map(|item| {
+        let kestrel_ast_builder::ConformanceItem::Positive(ast_ty, _) = item else {
+            return None;
+        };
+        let kestrel_ast::AstType::Named { segments, .. } = ast_ty else {
+            return None;
+        };
+        let seg_names: Vec<String> = segments.iter().map(|s| s.name.clone()).collect();
+        match cx.query.query(ResolveTypePath {
+            segments: seg_names,
+            context,
+            root: cx.root,
+        }) {
+            TypeResolution::Found(entity) => Some(entity),
+            _ => None,
+        }
+    }).collect()
 }
