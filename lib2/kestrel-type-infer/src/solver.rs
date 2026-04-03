@@ -1709,7 +1709,16 @@ fn emit_type_alias_where_clauses(
     alias_tv: TyVar,
     span: &Span,
 ) {
-    let clauses = ctx.resolver.where_clauses(alias_entity);
+    // Resolve where clause types in the alias's parent scope (e.g., the protocol
+    // that declares it), not the current method body. Names like `Item` in
+    // `type Iter: Iterator where Iter.Item = Item` are in scope of Iterable,
+    // not whatever method body triggered this resolution.
+    let parent = ctx.query_ctx.parent_of(alias_entity);
+    let clauses = if let Some(parent) = parent {
+        ctx.resolver.where_clauses_in_context(alias_entity, parent)
+    } else {
+        ctx.resolver.where_clauses(alias_entity)
+    };
     for clause in clauses {
         match clause {
             crate::resolve::WhereClause::Bound { protocol, .. } => {
