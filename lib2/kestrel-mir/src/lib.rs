@@ -111,6 +111,11 @@ impl MirModule {
             .unwrap_or("<unknown>")
     }
 
+    /// Access the full entity name map (for associated type resolution).
+    pub fn name_map(&self) -> &IndexMap<Entity, String> {
+        &self.entity_names
+    }
+
     /// Resolve a local ID to its name. Searches all function bodies.
     ///
     /// This is used by display code for DeinitIf/SetDeinitFlag which reference

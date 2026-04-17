@@ -55,6 +55,145 @@ pub fn build_subst(func: &FunctionDef, type_args: &[MirTy]) -> HashMap<Entity, M
         .collect()
 }
 
+/// Augment a substitution map with associated type resolutions.
+///
+/// Scans the function body for `Named { entity, type_args: [] }` types that are
+/// protocol associated types (e.g., `Iterable.Iter`) and resolves them through
+/// the witness table using the concrete types from the subst map.
+pub fn resolve_assoc_type_substs(
+    module: &kestrel_mir::MirModule,
+    func: &FunctionDef,
+    subst: &mut HashMap<Entity, MirTy>,
+) {
+    use crate::monomorphize::witness;
+
+    // Collect all Named entities from the function body that might be associated types
+    let mut candidate_entities: Vec<Entity> = Vec::new();
+    collect_named_entities_from_func(func, &mut candidate_entities);
+
+    for entity in candidate_entities {
+        if subst.contains_key(&entity) {
+            continue; // Already resolved
+        }
+
+        let name = module.resolve_name(entity);
+        if name == "<unknown>" {
+            continue;
+        }
+
+        // Check if this entity's name matches <protocol_name>.<assoc_type_name>
+        // for any known protocol
+        for proto_def in &module.protocols {
+            for assoc in &proto_def.associated_types {
+                let expected = format!("{}.{}", proto_def.name, assoc.name);
+                if name == expected {
+                    // Try resolving through each concrete type in the subst map
+                    for concrete in subst.values() {
+                        if let Ok(resolved) = witness::resolve_associated_type(
+                            module, proto_def.entity, concrete, &assoc.name,
+                        ) {
+                            subst.insert(entity, resolved);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Collect all entities from Named types in a function's signature and body.
+fn collect_named_entities_from_func(func: &FunctionDef, out: &mut Vec<Entity>) {
+    // Signature types
+    collect_named_entities_from_ty(&func.ret, out);
+    for param in &func.params {
+        collect_named_entities_from_ty(&param.ty, out);
+    }
+
+    // Body local types and callee types
+    if let Some(body) = &func.body {
+        for local in &body.locals {
+            collect_named_entities_from_ty(&local.ty, out);
+        }
+        for block in &body.blocks {
+            for stmt in &block.stmts {
+                match &stmt.kind {
+                    StatementKind::Call { callee, .. } => {
+                        collect_named_entities_from_callee(callee, out);
+                    }
+                    StatementKind::Assign { rvalue, .. } => {
+                        collect_named_entities_from_rvalue(rvalue, out);
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+}
+
+fn collect_named_entities_from_ty(ty: &MirTy, out: &mut Vec<Entity>) {
+    match ty {
+        MirTy::Named { entity, type_args } => {
+            if type_args.is_empty() {
+                out.push(*entity);
+            }
+            for arg in type_args {
+                collect_named_entities_from_ty(arg, out);
+            }
+        }
+        MirTy::Pointer(inner) | MirTy::Ref(inner) | MirTy::RefMut(inner) => {
+            collect_named_entities_from_ty(inner, out);
+        }
+        MirTy::Tuple(elems) => {
+            for e in elems {
+                collect_named_entities_from_ty(e, out);
+            }
+        }
+        MirTy::FuncThin { params, ret } | MirTy::FuncThick { params, ret } => {
+            for p in params {
+                collect_named_entities_from_ty(p, out);
+            }
+            collect_named_entities_from_ty(ret, out);
+        }
+        MirTy::AssociatedProjection { base, .. } => {
+            collect_named_entities_from_ty(base, out);
+        }
+        _ => {}
+    }
+}
+
+fn collect_named_entities_from_callee(callee: &kestrel_mir::Callee, out: &mut Vec<Entity>) {
+    match callee {
+        kestrel_mir::Callee::Witness { self_type, method_type_args, .. } => {
+            collect_named_entities_from_ty(self_type, out);
+            for arg in method_type_args {
+                collect_named_entities_from_ty(arg, out);
+            }
+        }
+        kestrel_mir::Callee::Direct { self_type, type_args, .. } => {
+            if let Some(st) = self_type {
+                collect_named_entities_from_ty(st, out);
+            }
+            for arg in type_args {
+                collect_named_entities_from_ty(arg, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_named_entities_from_rvalue(rvalue: &Rvalue, out: &mut Vec<Entity>) {
+    match rvalue {
+        Rvalue::Construct { ty, .. } => {
+            collect_named_entities_from_ty(ty, out);
+        }
+        Rvalue::EnumVariant { enum_ty, .. } => {
+            collect_named_entities_from_ty(enum_ty, out);
+        }
+        _ => {}
+    }
+}
+
 /// Compile a function body into Cranelift IR.
 pub fn compile_function(
     ctx: &mut CodegenContext,

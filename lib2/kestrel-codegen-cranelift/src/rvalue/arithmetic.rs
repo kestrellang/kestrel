@@ -261,7 +261,7 @@ pub fn compile_float_intrinsic_op1(
                     let inf = match bits {
                         FloatBits::F32 => builder.ins().f32const(f32::INFINITY),
                         FloatBits::F64 => builder.ins().f64const(f64::INFINITY),
-                        FloatBits::F16 => unreachable!(),
+                        FloatBits::F16 => unreachable!("F16 guarded by early return above"),
                     };
                     Ok(builder.ins().fcmp(FloatCC::Equal, abs, inf))
                 }

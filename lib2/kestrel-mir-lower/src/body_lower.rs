@@ -350,6 +350,24 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 match node_kind {
                     Some(kestrel_ast_builder::NodeKind::Function)
                     | Some(kestrel_ast_builder::NodeKind::Initializer) => {
+                        // If inference resolved this position to a thick callable
+                        // (e.g., `let f = some_fn` where f: (T)->U, or passed to a
+                        // closure-typed parameter), coerce the bare function reference
+                        // into a thick closure with no captures via ApplyPartial.
+                        // Otherwise downstream code memcpys 16 bytes from the function's
+                        // code address into a 16-byte FuncThick slot.
+                        let inferred_ty = self.resolve_expr_type(expr_id);
+                        if matches!(inferred_ty, MirTy::FuncThick { .. }) {
+                            let dest = self.fresh_temp(inferred_ty.clone());
+                            self.emit_stmt(Statement::new(StatementKind::Assign {
+                                dest: Place::local(dest),
+                                rvalue: Rvalue::ApplyPartial {
+                                    func: *entity,
+                                    captures: vec![],
+                                },
+                            }));
+                            return Value::Place(Place::local(dest));
+                        }
                         // Function reference — return as immediate
                         let type_args = self.resolve_type_args(expr_id);
                         Value::Immediate(Immediate::function_ref_generic(*entity, type_args))
@@ -457,23 +475,58 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
             HirExpr::ImplicitMember { name, args, .. } => {
                 let result_ty = self.resolve_expr_type(expr_id);
 
-                // Lower args if present (e.g., .Some(value))
-                let payload: Vec<Value> = args
-                    .as_ref()
-                    .map(|a| a.iter().map(|arg| self.lower_expr(arg.value)).collect())
-                    .unwrap_or_default();
+                // Check if inference resolved this to a static method (e.g., fromResidual)
+                // rather than an enum case. Static methods need a call, not enum construction.
+                let resolved = self.typed.and_then(|t| t.resolutions.get(&expr_id)).copied();
+                let is_enum_case = resolved.map_or(true, |e| {
+                    self.ctx.world.get::<kestrel_ast_builder::NodeKind>(e)
+                        == Some(&kestrel_ast_builder::NodeKind::EnumCase)
+                });
 
-                // Construct enum variant
-                let dest = self.fresh_temp(result_ty.clone());
-                self.emit_stmt(Statement::new(StatementKind::Assign {
-                    dest: Place::local(dest),
-                    rvalue: Rvalue::EnumVariant {
-                        enum_ty: result_ty,
-                        variant: name.clone(),
-                        payload,
-                    },
-                }));
-                Value::Place(Place::local(dest))
+                if is_enum_case {
+                    // Lower args as enum payload (e.g., .Some(value))
+                    let payload: Vec<Value> = args
+                        .as_ref()
+                        .map(|a| a.iter().map(|arg| self.lower_expr(arg.value)).collect())
+                        .unwrap_or_default();
+
+                    let dest = self.fresh_temp(result_ty.clone());
+                    self.emit_stmt(Statement::new(StatementKind::Assign {
+                        dest: Place::local(dest),
+                        rvalue: Rvalue::EnumVariant {
+                            enum_ty: result_ty,
+                            variant: name.clone(),
+                            payload,
+                        },
+                    }));
+                    Value::Place(Place::local(dest))
+                } else {
+                    // Static method call (e.g., .fromResidual(residual: early))
+                    let resolved_entity = resolved.unwrap();
+                    let call_args: Vec<kestrel_mir::CallArg> = args
+                        .as_ref()
+                        .map(|a| a.iter().map(|arg| {
+                            let val = self.lower_expr(arg.value);
+                            kestrel_mir::CallArg::copy(val)
+                        }).collect())
+                        .unwrap_or_default();
+
+                    // Protocol method → Witness dispatch
+                    if let Some(protocol) = self.find_protocol_for_method(resolved_entity) {
+                        self.ctx.register_name(protocol);
+                        let method_type_args = self.resolve_type_args(expr_id);
+                        let type_args = self.prepend_receiver_type_args(&result_ty, method_type_args);
+                        let callee = Callee::witness(protocol, name, result_ty.clone(), type_args);
+                        self.emit_call(callee, call_args, result_ty)
+                    } else {
+                        // Direct static call
+                        self.ctx.register_name(resolved_entity);
+                        let type_args = self.resolve_type_args(expr_id);
+                        let type_args = self.prepend_receiver_type_args(&result_ty, type_args);
+                        let callee = Callee::direct_generic(resolved_entity, type_args);
+                        self.emit_call(callee, call_args, result_ty)
+                    }
+                }
             },
 
             // === Array literal ===
@@ -1734,12 +1787,10 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
             // Init functions inherit type_params from their parent struct, so the
             // struct's type_args must be prepended for correct mangling/substitution.
             let callee = match callee {
-                Callee::Direct { func, mut type_args, self_type: None } => {
-                    if let MirTy::Named { type_args: struct_args, .. } = &result_ty {
-                        if !struct_args.is_empty() && type_args.is_empty() {
-                            type_args = struct_args.clone();
-                        }
-                    }
+                Callee::Direct { func, type_args, self_type: None } => {
+                    // Prepend struct type args, then append init's own type args.
+                    // e.g., Array[Int64].init[I](from:) needs [Int64, Range[Int64]]
+                    let type_args = self.prepend_receiver_type_args(&result_ty, type_args);
                     Callee::Direct { func, type_args, self_type: Some(result_ty.clone()) }
                 }
                 other => other,

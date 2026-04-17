@@ -317,8 +317,9 @@ impl<'a> CodegenContext<'a> {
                 continue;
             }
 
-            // Build substitution map
-            let subst = function::build_subst(func_def, &inst.type_args);
+            // Build substitution map, including associated type resolutions
+            let mut subst = function::build_subst(func_def, &inst.type_args);
+            function::resolve_assoc_type_substs(self.module, func_def, &mut subst);
 
             let sig = self.create_signature(func_def, &inst.type_args, inst.self_type.as_ref())?;
 

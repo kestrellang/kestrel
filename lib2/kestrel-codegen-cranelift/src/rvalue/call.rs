@@ -154,16 +154,17 @@ fn compile_resolved_call(
     // Build argument list
     let mut cl_args: Vec<CrValue> = Vec::new();
 
+    // Build the callee's substitution once — used for sret slot sizing and
+    // for resolving each parameter's expected type when compiling args.
+    let callee_subst: HashMap<Entity, MirTy> = func_def
+        .type_params
+        .iter()
+        .zip(callee_type_args.iter())
+        .map(|(tp, arg)| (tp.entity, arg.clone()))
+        .collect();
+
     // If sret, allocate a stack slot for the return value.
-    // Build the callee's substitution from the concrete type args used
-    // to monomorphize this call (not the caller's subst).
     let sret_addr = if callee_sret {
-        let callee_subst: HashMap<Entity, MirTy> = func_def
-            .type_params
-            .iter()
-            .zip(callee_type_args.iter())
-            .map(|(tp, arg)| (tp.entity, arg.clone()))
-            .collect();
         let ret_ty = substitute_type(&func_def.ret, &callee_subst);
         let layout = ctx.layouts.layout_of(&ret_ty);
         let slot = builder.create_sized_stack_slot(StackSlotData::new(
@@ -179,9 +180,15 @@ fn compile_resolved_call(
         None
     };
 
-    // Compile each argument
-    for arg in args {
-        let val = compile_call_arg(ctx, state, builder, arg)?;
+    // Compile each argument, threading the callee's expected param type so we
+    // can correctly size stack slots and coerce FunctionRef → FuncThick when
+    // a function value is passed where a thick closure is expected.
+    for (i, arg) in args.iter().enumerate() {
+        let expected = func_def
+            .params
+            .get(i)
+            .map(|p| substitute_type(&p.ty, &callee_subst));
+        let val = compile_call_arg(ctx, state, builder, arg, expected.as_ref())?;
         cl_args.push(val);
     }
 
@@ -308,8 +315,9 @@ fn compile_indirect_call(
     if let Some(env_ptr) = env_ptr {
         cl_args.push(env_ptr);
     }
-    for arg in args {
-        cl_args.push(compile_call_arg(ctx, state, builder, arg)?);
+    for (i, arg) in args.iter().enumerate() {
+        let expected = param_tys.get(i);
+        cl_args.push(compile_call_arg(ctx, state, builder, arg, expected)?);
     }
 
     let inst = builder.ins().call_indirect(sig_ref, func_ptr, &cl_args);
@@ -343,27 +351,76 @@ fn compile_indirect_call(
 }
 
 /// Compile a call argument based on its passing mode.
+///
+/// `expected_param_ty` is the callee's declared type for this parameter (after
+/// substitution). It's used to:
+///   - size the stack slot correctly when materializing an Immediate by reference
+///     (the old code hardcoded 8 bytes, which overflowed for aggregates and
+///     under-allocated for thick closures)
+///   - coerce a bare `FunctionRef` (8-byte fn pointer) into a `FuncThick` thick
+///     closure `[fn_ptr, null_env]` when the callee expects a closure type
 fn compile_call_arg(
     ctx: &mut CodegenContext,
     state: &FunctionState,
     builder: &mut FunctionBuilder,
     arg: &CallArg,
+    expected_param_ty: Option<&MirTy>,
 ) -> Result<CrValue, CodegenError> {
     match arg.mode {
         PassingMode::Ref | PassingMode::MutRef => {
             // Pass by reference: take the address
             match &arg.value {
                 Value::Place(p) => place::compile_place_addr(ctx, state, builder, p),
-                Value::Immediate(_) => {
-                    // Need to materialize on stack to take address
-                    let val = rvalue::compile_value(ctx, state, builder, &arg.value)?;
+                Value::Immediate(imm) => {
                     let ptr_ty = common::ptr_type(ctx.target);
+                    let ptr_size = ctx.target.pointer_size();
+
+                    // Coerce FunctionRef → FuncThick when a closure is expected.
+                    // Without this, we'd materialize an 8-byte fn pointer into a slot the
+                    // callee reads as 16 bytes, reading 8 bytes of stack garbage as the env.
+                    let is_funcref =
+                        matches!(&imm.kind, kestrel_mir::ImmediateKind::FunctionRef { .. });
+                    let is_thick_expected =
+                        matches!(expected_param_ty, Some(MirTy::FuncThick { .. }));
+                    if is_funcref && is_thick_expected {
+                        let func_addr = rvalue::compile_value(ctx, state, builder, &arg.value)?;
+                        let thick_size = ptr_size * 2;
+                        let slot = builder.create_sized_stack_slot(StackSlotData::new(
+                            StackSlotKind::ExplicitSlot,
+                            thick_size as u32,
+                            common::align_to_shift(ptr_size),
+                        ));
+                        let addr = builder.ins().stack_addr(ptr_ty, slot, Offset32::new(0));
+                        builder.ins().store(MemFlags::new(), func_addr, addr, Offset32::new(0));
+                        let null = builder.ins().iconst(ptr_ty, 0);
+                        builder.ins().store(
+                            MemFlags::new(),
+                            null,
+                            addr,
+                            Offset32::new(ptr_size as i32),
+                        );
+                        return Ok(addr);
+                    }
+
+                    // General case: size the slot to the expected param type so aggregate
+                    // immediates (thick closures, wrapper structs) land in a large-enough slot.
+                    let val = rvalue::compile_value(ctx, state, builder, &arg.value)?;
+                    let (slot_size, slot_align) = match expected_param_ty {
+                        Some(ty) => {
+                            let layout = ctx.layouts.layout_of(ty);
+                            (layout.size.max(1), layout.align.max(1))
+                        }
+                        None => (ptr_size, ptr_size),
+                    };
                     let slot = builder.create_sized_stack_slot(StackSlotData::new(
                         StackSlotKind::ExplicitSlot,
-                        8,
-                        3,
+                        slot_size as u32,
+                        common::align_to_shift(slot_align),
                     ));
                     let addr = builder.ins().stack_addr(ptr_ty, slot, Offset32::new(0));
+                    if slot_size > ptr_size {
+                        common::zero_memory(builder, addr, slot_size, ptr_ty);
+                    }
                     builder.ins().store(MemFlags::new(), val, addr, Offset32::new(0));
                     Ok(addr)
                 }
@@ -376,43 +433,50 @@ fn compile_call_arg(
     }
 }
 
-/// Resolve a self_type that might be an associated type (e.g., Iterator.Item).
-/// Checks if the type is a Named entity that's a TypeAlias on a protocol,
-/// and if so, resolves it through the witness table using the current
-/// function's self_type as the implementing type.
+/// Resolve a self_type that might be an associated type (e.g., Iterable.Iter).
+/// Searches all protocols for the one that owns the associated type, then
+/// resolves it through the witness table using the subst map or self_type.
 fn resolve_associated_self_type(
     ctx: &CodegenContext,
     state: &FunctionState,
-    protocol: Entity,
+    _protocol: Entity,
     self_type: &MirTy,
 ) -> MirTy {
-    // Check if self_type is Named with a TypeAlias entity (associated type)
+    // Check if self_type is Named with no type args (bare associated type entity)
     let entity = match self_type {
         MirTy::Named { entity, type_args } if type_args.is_empty() => *entity,
-        MirTy::Named { .. } => return self_type.clone(),
         _ => return self_type.clone(),
-    };
-
-    let Some(proto_def) = ctx.module.protocols.iter().find(|p| p.entity == protocol) else {
-        return self_type.clone();
     };
 
     // Get the associated type short name
     let assoc_name = ctx.module.resolve_name(entity);
     let short_name = assoc_name.rsplit('.').next().unwrap_or(&assoc_name).to_string();
-    if proto_def.associated_type_by_name(&short_name).is_none() {
-        return self_type.clone();
-    }
 
-    // Use the current function's self_type to find the concrete associated type
-    let base_self = state.self_type.as_ref();
-    let Some(base) = base_self else {
+    // Find which protocol owns this associated type (not necessarily the one being called)
+    let owning_proto = ctx.module.protocols.iter()
+        .find(|p| p.associated_type_by_name(&short_name).is_some());
+    let Some(proto_def) = owning_proto else {
         return self_type.clone();
     };
 
-    // Look up in witness table
-    match witness::resolve_associated_type(ctx.module, proto_def.entity, base, &short_name) {
-        Ok(resolved) => resolved,
-        Err(_) => self_type.clone(),
+    // Try resolving via concrete types from the substitution map first,
+    // then fall back to the function's self_type
+    for candidate in state.subst.values() {
+        if let Ok(resolved) = witness::resolve_associated_type(
+            ctx.module, proto_def.entity, candidate, &short_name,
+        ) {
+            return resolved;
+        }
     }
+
+    // Fall back to function's self_type
+    if let Some(base) = state.self_type.as_ref() {
+        if let Ok(resolved) = witness::resolve_associated_type(
+            ctx.module, proto_def.entity, base, &short_name,
+        ) {
+            return resolved;
+        }
+    }
+
+    self_type.clone()
 }

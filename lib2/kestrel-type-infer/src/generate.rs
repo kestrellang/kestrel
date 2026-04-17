@@ -122,10 +122,10 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             }
 
             // Struct construction: Def(struct) used as callee
-            if let HirExpr::Def(entity, _, _) = &hir.exprs[*callee] {
+            if let HirExpr::Def(entity, explicit_type_args, _) = &hir.exprs[*callee] {
                 if ctx.query_ctx.get::<NodeKind>(*entity) == Some(&NodeKind::Struct) {
                     let arg_tvs = gen_call_args(ctx, hir, args);
-                    return gen_struct_init(ctx, *entity, &arg_tvs, id, span);
+                    return gen_struct_init(ctx, *entity, explicit_type_args, &arg_tvs, id, span);
                 }
             }
 
@@ -547,6 +547,7 @@ fn gen_pat(ctx: &mut InferCtx<'_>, hir: &HirBody, pat_id: HirPatId, scrutinee_tv
 fn gen_struct_init(
     ctx: &mut InferCtx<'_>,
     struct_entity: Entity,
+    explicit_type_args: &[HirTy],
     args: &[CallArg],
     expr_id: HirExprId,
     span: &Span,
@@ -560,6 +561,21 @@ fn gen_struct_init(
         .map(|tp| tp.0.clone())
         .unwrap_or_default();
     let fresh_args: Vec<TyVar> = type_params.iter().map(|_| ctx.fresh()).collect();
+
+    // Constrain fresh type args with explicit type args (e.g., Array[Int64]())
+    if !explicit_type_args.is_empty() {
+        for (i, (&fresh_tv, &param_entity)) in fresh_args.iter().zip(type_params.iter()).enumerate() {
+            if let Some(hir_ty) = explicit_type_args.get(i) {
+                let explicit_tv = lower_hir_ty(ctx, hir_ty);
+                ctx.equal(fresh_tv, explicit_tv, span.clone());
+            } else if let Some(default_ty) = qctx.query(LowerTypeAnnotation { entity: param_entity, root }) {
+                // Apply default type param (e.g., Set[Int64]() → H defaults to DefaultHasher)
+                let default_tv = lower_hir_ty(ctx, &default_ty);
+                ctx.equal(fresh_tv, default_tv, span.clone());
+            }
+        }
+    }
+
     let result_tv = ctx.named(struct_entity, fresh_args.clone());
 
     // Substitution map: struct type params → fresh TyVars.
@@ -620,6 +636,9 @@ fn gen_struct_init(
                 .map(|tp| tp.0.clone())
                 .unwrap_or_default();
             let init_fresh: Vec<TyVar> = init_type_params.iter().map(|_| ctx.fresh()).collect();
+            if !init_fresh.is_empty() {
+                ctx.type_args.insert(expr_id, init_fresh.clone());
+            }
             let mut init_subs = struct_subs.clone();
             for (&e, &tv) in init_type_params.iter().zip(init_fresh.iter()) {
                 init_subs.push((e, tv));

@@ -137,8 +137,9 @@ impl<'a> CollectionContext<'a> {
         self.processing_func_id = Some(inst.func_id);
         let func = &self.module.functions[inst.func_id.index()];
 
-        // Build substitution map for this instantiation
-        let subst = build_subst(func, &inst.type_args);
+        // Build substitution map for this instantiation, including associated types
+        let mut subst = build_subst(func, &inst.type_args);
+        crate::function::resolve_assoc_type_substs(self.module, func, &mut subst);
 
         // Scan function body for callees
         let Some(body) = &func.body else { return };
@@ -240,27 +241,36 @@ impl<'a> CollectionContext<'a> {
                     self_type, subst, parent_self.as_ref(),
                 );
                 // Resolve associated types (e.g., Iterator.Item → concrete type)
-                // via witness table using the parent's self_type
+                // via witness table. Search all protocols for the owning one,
+                // not just the protocol being called (handles cross-protocol
+                // cases like Iterable.Iter used as self_type for Iterator.next)
                 if let MirTy::Named { entity, ref type_args } = concrete_self {
                     if type_args.is_empty() {
-                        if let Some(ps) = parent_self {
-                            let assoc_name = self.module.resolve_name(entity);
-                            let short_name = assoc_name.rsplit('.').next().unwrap_or(&assoc_name);
-                            if self
-                                .module
-                                .protocols
-                                .iter()
-                                .find(|p| p.entity == *protocol)
-                                .and_then(|p| p.associated_type_by_name(short_name))
-                                .is_some()
-                                && let Ok(resolved) = witness::resolve_associated_type(
-                                    self.module,
-                                    *protocol,
-                                    ps,
-                                    short_name,
-                                )
-                            {
-                                concrete_self = resolved;
+                        let assoc_name = self.module.resolve_name(entity);
+                        let short_name = assoc_name.rsplit('.').next().unwrap_or(&assoc_name);
+
+                        // Find which protocol owns this associated type
+                        let owning_protocol = self.module.protocols.iter()
+                            .find(|p| p.associated_type_by_name(short_name).is_some())
+                            .map(|p| p.entity);
+
+                        if let Some(owner_proto) = owning_protocol {
+                            // Try parent_self first, then search the subst map for a
+                            // concrete type that implements the owning protocol
+                            let candidates: Vec<&MirTy> = if let Some(ps) = parent_self {
+                                vec![ps]
+                            } else {
+                                vec![]
+                            };
+                            // Also try all concrete types from the substitution map
+                            let subst_values: Vec<&MirTy> = subst.values().collect();
+                            for candidate in candidates.iter().chain(subst_values.iter()) {
+                                if let Ok(resolved) = witness::resolve_associated_type(
+                                    self.module, owner_proto, candidate, short_name,
+                                ) {
+                                    concrete_self = resolved;
+                                    break;
+                                }
                             }
                         }
                     }

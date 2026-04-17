@@ -142,7 +142,7 @@ fn compile_matrix(
 
     // Base: zero-width matrix = first row wins
     if matrix.is_unit() {
-        return compile_leaf(hir, &matrix.rows, arm_pat_ids);
+        return compile_leaf(hir, query, &matrix.rows, arm_pat_ids);
     }
 
     // Select best column (most distinct constructors)
@@ -196,7 +196,7 @@ fn compile_matrix(
 }
 
 /// Compile a leaf node (matrix width is 0).
-fn compile_leaf(hir: &HirBody, rows: &[PatternRow], arm_pat_ids: &[HirPatId]) -> DecisionTree {
+fn compile_leaf(hir: &HirBody, query: &QueryContext<'_>, rows: &[PatternRow], arm_pat_ids: &[HirPatId]) -> DecisionTree {
     let Some(row) = rows.first() else {
         return DecisionTree::Failure;
     };
@@ -206,7 +206,7 @@ fn compile_leaf(hir: &HirBody, rows: &[PatternRow], arm_pat_ids: &[HirPatId]) ->
         .get(row.arm_index)
         .map(|&pat_id| {
             let mut bindings = Vec::new();
-            collect_bindings(hir, pat_id, &vec![], &mut bindings);
+            collect_bindings(hir, query, pat_id, &vec![], &mut bindings);
             bindings
         })
         .unwrap_or_default();
@@ -221,7 +221,7 @@ fn compile_leaf(hir: &HirBody, rows: &[PatternRow], arm_pat_ids: &[HirPatId]) ->
         let failure = if remaining.is_empty() {
             DecisionTree::Failure
         } else {
-            compile_leaf(hir, &remaining, arm_pat_ids)
+            compile_leaf(hir, query, &remaining, arm_pat_ids)
         };
 
         DecisionTree::Guard {
@@ -320,7 +320,7 @@ fn build_default_paths(col_paths: &[AccessPath], col: usize) -> Vec<AccessPath> 
 // ===== Binding collection =====
 
 /// Recursively collect bindings from a HirPat.
-fn collect_bindings(hir: &HirBody, pat_id: HirPatId, path: &AccessPath, bindings: &mut Vec<Binding>) {
+fn collect_bindings(hir: &HirBody, query: &QueryContext<'_>, pat_id: HirPatId, path: &AccessPath, bindings: &mut Vec<Binding>) {
     match &hir.pats[pat_id] {
         HirPat::Binding { local, .. } => {
             let local_data = &hir.locals[*local];
@@ -346,7 +346,7 @@ fn collect_bindings(hir: &HirBody, pat_id: HirPatId, path: &AccessPath, bindings
                 ty: ResolvedTy::Error,
                 path: path.clone(),
             });
-            collect_bindings(hir, *subpattern, path, bindings);
+            collect_bindings(hir, query, *subpattern, path, bindings);
         }
 
         HirPat::Tuple { prefix, suffix, .. } => {
@@ -354,27 +354,32 @@ fn collect_bindings(hir: &HirBody, pat_id: HirPatId, path: &AccessPath, bindings
             for (i, &elem) in prefix.iter().enumerate() {
                 let mut elem_path = path.clone();
                 elem_path.push(PathElement::Index(i));
-                collect_bindings(hir, elem, &elem_path, bindings);
+                collect_bindings(hir, query, elem, &elem_path, bindings);
             }
             // Suffix elements: actual indices depend on tuple arity (set during flattening)
             // For now, use placeholder indices — codegen will resolve from the decision tree
             for (j, &elem) in suffix.iter().enumerate() {
                 let mut elem_path = path.clone();
                 elem_path.push(PathElement::Index(prefix.len() + j));
-                collect_bindings(hir, elem, &elem_path, bindings);
+                collect_bindings(hir, query, elem, &elem_path, bindings);
             }
         }
 
         HirPat::Variant { args, .. } | HirPat::ImplicitVariant { args, .. } => {
             let case_name = match &hir.pats[pat_id] {
                 HirPat::ImplicitVariant { name, .. } => name.clone(),
-                _ => "variant".to_string(),
+                HirPat::Variant { entity, .. } => {
+                    query.get::<Name>(*entity)
+                        .map(|n| n.0.clone())
+                        .unwrap_or_else(|| format!("{:?}", entity))
+                }
+                _ => unreachable!(),
             };
             for (i, arg) in args.iter().enumerate() {
                 let mut arg_path = path.clone();
                 arg_path.push(PathElement::Downcast(case_name.clone()));
                 arg_path.push(PathElement::Index(i));
-                collect_bindings(hir, arg.pattern, &arg_path, bindings);
+                collect_bindings(hir, query, arg.pattern, &arg_path, bindings);
             }
         }
 
@@ -382,12 +387,12 @@ fn collect_bindings(hir: &HirBody, pat_id: HirPatId, path: &AccessPath, bindings
             for (i, &elem) in prefix.iter().enumerate() {
                 let mut elem_path = path.clone();
                 elem_path.push(PathElement::Index(i));
-                collect_bindings(hir, elem, &elem_path, bindings);
+                collect_bindings(hir, query, elem, &elem_path, bindings);
             }
             for (j, &elem) in suffix.iter().enumerate() {
                 let mut elem_path = path.clone();
                 elem_path.push(PathElement::Index(prefix.len() + j));
-                collect_bindings(hir, elem, &elem_path, bindings);
+                collect_bindings(hir, query, elem, &elem_path, bindings);
             }
         }
 
@@ -396,7 +401,7 @@ fn collect_bindings(hir: &HirBody, pat_id: HirPatId, path: &AccessPath, bindings
                 if let Some(pat) = field.pattern {
                     let mut field_path = path.clone();
                     field_path.push(PathElement::Field(field.field_name.clone()));
-                    collect_bindings(hir, pat, &field_path, bindings);
+                    collect_bindings(hir, query, pat, &field_path, bindings);
                 }
             }
         }
@@ -404,7 +409,7 @@ fn collect_bindings(hir: &HirBody, pat_id: HirPatId, path: &AccessPath, bindings
         HirPat::Or { alternatives, .. } => {
             // Use first alternative's bindings (type checker ensures consistency)
             if let Some(&first) = alternatives.first() {
-                collect_bindings(hir, first, path, bindings);
+                collect_bindings(hir, query, first, path, bindings);
             }
         }
 

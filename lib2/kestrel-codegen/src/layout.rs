@@ -393,9 +393,18 @@ pub fn substitute_type_with_self(
 
         MirTy::Tuple(elems) => MirTy::Tuple(elems.iter().map(|e| sub(e)).collect()),
 
-        MirTy::Named { entity, type_args } => MirTy::Named {
-            entity: *entity,
-            type_args: type_args.iter().map(|a| sub(a)).collect(),
+        MirTy::Named { entity, type_args } => {
+            // Check if this Named entity is in the subst map (associated type resolution).
+            // e.g., Iterable.Iter entity → ArrayIterator[Int64]
+            if type_args.is_empty() {
+                if let Some(concrete) = subst.get(entity) {
+                    return concrete.clone();
+                }
+            }
+            MirTy::Named {
+                entity: *entity,
+                type_args: type_args.iter().map(|a| sub(a)).collect(),
+            }
         },
 
         MirTy::AssociatedProjection {
