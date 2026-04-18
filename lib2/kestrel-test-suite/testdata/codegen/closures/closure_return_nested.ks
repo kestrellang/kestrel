@@ -4,7 +4,7 @@
 module Test
 
 func make_curried_add() -> (std.num.Int64) -> (std.num.Int64) -> std.num.Int64 {
-    { (a) in { (b) in a + b } }
+    { (a) in { (b) in a + b } } // ERROR: cannot return a closure that captures variables
 }
 
 func main() -> lang.i64 {

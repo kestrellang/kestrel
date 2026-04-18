@@ -373,6 +373,11 @@ impl PrettyCtx<'_> {
                 self.indent(depth);
                 self.buf.push('}');
             }
+            AstExpr::Paren { inner, .. } => {
+                self.buf.push('(');
+                self.print_expr(*inner, depth);
+                self.buf.push(')');
+            }
             AstExpr::Error { .. } => {
                 self.buf.push_str("<error>");
             }

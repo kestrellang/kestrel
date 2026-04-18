@@ -333,17 +333,18 @@ impl LowerCtx {
             SyntaxKind::ExprDictionary => self.lower_dictionary(&node),
             SyntaxKind::ExprTuple => self.lower_tuple(&node),
 
-            // Grouping — transparent
+            // Grouping — wrap so HIR binary-flattening stops at parens.
             SyntaxKind::ExprGrouping => {
                 let inner = node
                     .children()
                     .find(|c| c.kind() == SyntaxKind::Expression || is_expr_kind(c.kind()));
+                let span = self.span(&node);
                 match inner {
-                    Some(c) => self.lower_expr(&c),
-                    None => {
-                        let span = self.span(&node);
-                        self.alloc_expr(AstExpr::Error { span })
+                    Some(c) => {
+                        let inner_id = self.lower_expr(&c);
+                        self.alloc_expr(AstExpr::Paren { inner: inner_id, span })
                     }
+                    None => self.alloc_expr(AstExpr::Error { span }),
                 }
             }
 

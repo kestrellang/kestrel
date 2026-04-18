@@ -176,12 +176,18 @@ fn collect_protocol_methods_recursive(
         return; // avoid cycles
     }
 
-    // Collect this protocol's own methods
+    // Collect this protocol's own methods (and property requirements, which
+    // dispatch through witnesses just like methods). Any Field on a protocol
+    // is a property requirement — protocols don't have stored fields.
     for &child in ctx.world.children_of(protocol) {
         let Some(kind) = ctx.world.get::<NodeKind>(child) else {
             continue;
         };
-        if *kind == NodeKind::Function || *kind == NodeKind::Subscript || *kind == NodeKind::Initializer {
+        if *kind == NodeKind::Function
+            || *kind == NodeKind::Subscript
+            || *kind == NodeKind::Initializer
+            || *kind == NodeKind::Field
+        {
             let name = ctx
                 .world
                 .get::<Name>(child)
@@ -221,6 +227,14 @@ fn find_method_by_name(
         };
         match kind {
             NodeKind::Function | NodeKind::Subscript => {
+                let name = ctx.world.get::<Name>(child).map(|n| n.0.as_str()).unwrap_or_default();
+                if name == method_name {
+                    return Some(child);
+                }
+            }
+            // Computed property: a Field with a body (Callable) — the getter satisfies
+            // a protocol's property requirement (also a Field, but Gettable-only).
+            NodeKind::Field if ctx.world.get::<Callable>(child).is_some() => {
                 let name = ctx.world.get::<Name>(child).map(|n| n.0.as_str()).unwrap_or_default();
                 if name == method_name {
                     return Some(child);

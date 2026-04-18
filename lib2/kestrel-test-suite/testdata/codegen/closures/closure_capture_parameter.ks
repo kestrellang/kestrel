@@ -4,7 +4,7 @@
 module Test
 
 func make_multiplier(factor: std.num.Int64) -> (std.num.Int64) -> std.num.Int64 {
-    { (x) in x * factor }
+    { (x) in x * factor } // ERROR: cannot return a closure that captures variables
 }
 
 func main() -> lang.i64 {

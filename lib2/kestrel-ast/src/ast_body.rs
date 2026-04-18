@@ -182,6 +182,12 @@ pub enum AstExpr {
         body: AstBlock,
         span: Span,
     },
+    /// Parenthesized expression: `(expr)`. Preserved so binary-operator
+    /// flattening doesn't merge across user-written grouping.
+    Paren {
+        inner: ExprId,
+        span: Span,
+    },
     /// Malformed expression (parse error recovery)
     Error {
         span: Span,

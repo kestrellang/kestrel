@@ -7,7 +7,7 @@ func compose(
     f: (std.num.Int64) -> std.num.Int64,
     g: (std.num.Int64) -> std.num.Int64
 ) -> (std.num.Int64) -> std.num.Int64 {
-    { (x) in g(f(x)) }
+    { (x) in g(f(x)) } // ERROR: cannot return a closure that captures variables
 }
 
 func main() -> lang.i64 {

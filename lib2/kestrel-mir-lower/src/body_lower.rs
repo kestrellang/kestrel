@@ -257,11 +257,46 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
             HirExpr::Field { base, name, .. } => {
                 // Check if this is a computed property (resolved entity has Callable)
                 let resolved = self.typed.and_then(|t| t.resolutions.get(&expr_id)).copied();
-                let is_computed = resolved.map_or(false, |e| {
+                let is_callable = resolved.map_or(false, |e| {
                     self.ctx.world.get::<kestrel_ast_builder::Callable>(e).is_some()
                 });
+                // Abstract protocol property: a Field whose parent is a Protocol
+                // (no body, no Callable). Dispatch via witness so monomorphization
+                // resolves to the conforming type's computed property.
+                let is_protocol_property = !is_callable
+                    && resolved.map_or(false, |e| {
+                        let is_field = matches!(
+                            self.ctx.world.get::<kestrel_ast_builder::NodeKind>(e),
+                            Some(kestrel_ast_builder::NodeKind::Field)
+                        );
+                        if !is_field {
+                            return false;
+                        }
+                        self.ctx.world.parent_of(e).map_or(false, |p| {
+                            matches!(
+                                self.ctx.world.get::<kestrel_ast_builder::NodeKind>(p),
+                                Some(kestrel_ast_builder::NodeKind::Protocol)
+                            )
+                        })
+                    });
 
-                if is_computed {
+                if is_protocol_property {
+                    let property_entity = resolved.unwrap();
+                    let protocol = self.ctx.world.parent_of(property_entity).unwrap();
+                    self.ctx.register_name(protocol);
+                    let receiver_ty = self.resolve_expr_type(*base);
+                    let base_val = self.lower_expr(*base);
+                    let result_ty = self.resolve_expr_type(expr_id);
+                    let receiver_arg = CallArg::borrow(base_val);
+                    let method_type_args = self.resolve_type_args(expr_id);
+                    let callee = Callee::witness(
+                        protocol,
+                        name.clone(),
+                        receiver_ty,
+                        method_type_args,
+                    );
+                    self.emit_call(callee, vec![receiver_arg], result_ty)
+                } else if is_callable {
                     // Computed property: emit a getter call
                     let getter_entity = resolved.unwrap();
                     self.ctx.register_name(getter_entity);
@@ -1661,19 +1696,30 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
             }
         }
 
-        let receiver_val = self.lower_expr(receiver_expr);
+        // If the resolved method is `static`, it takes no receiver — don't lower or
+        // prepend one. The receiver expression is just a type ref (e.g. `T` for a
+        // type-param-rooted call like `T.create()`) with no side effects to evaluate.
+        let resolved_entity = self.typed.and_then(|t| t.resolutions.get(&expr_id)).copied();
+        let is_static = resolved_entity.map_or(false, |e| {
+            self.ctx.world.get::<kestrel_ast_builder::Static>(e).is_some()
+        });
 
-        // Build args: receiver first (copy if trivially copyable), then explicit args
-        let receiver_arg = if receiver_ty.is_trivially_copyable() {
-            CallArg::copy(receiver_val)
+        let call_args = if is_static {
+            self.lower_call_args(args)
         } else {
-            CallArg::borrow(receiver_val)
+            let receiver_val = self.lower_expr(receiver_expr);
+            let receiver_arg = if receiver_ty.is_trivially_copyable() {
+                CallArg::copy(receiver_val)
+            } else {
+                CallArg::borrow(receiver_val)
+            };
+            let mut a = vec![receiver_arg];
+            a.extend(self.lower_call_args(args));
+            a
         };
-        let mut call_args = vec![receiver_arg];
-        call_args.extend(self.lower_call_args(args));
 
         // Type inference tells us which function entity this resolves to
-        if let Some(&resolved_entity) = self.typed.and_then(|t| t.resolutions.get(&expr_id)) {
+        if let Some(resolved_entity) = resolved_entity {
             // Expand default arguments for missing params
             let explicit_count = args.len();
             let call_args = self.expand_default_args(call_args, resolved_entity, explicit_count);

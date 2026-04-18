@@ -184,6 +184,7 @@ impl LowerCtx<'_> {
                     span: span.clone(),
                 })
             }
+            AstExpr::Paren { inner, .. } => self.lower_expr(body, inner),
             AstExpr::Error { span } => self.alloc_expr(HirExpr::Error { span }),
         }
     }
