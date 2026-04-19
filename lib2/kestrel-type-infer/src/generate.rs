@@ -299,9 +299,15 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                 // Both branches must agree — use block value spans so
                 // errors point at the mismatched expression, not the if keyword
                 let then_span = block_value_span(hir, then_body).unwrap_or_else(|| span.clone());
-                let else_span = block_value_span(hir, else_block).unwrap_or_else(|| span.clone());
                 ctx.equal(then_tv, result_tv, then_span);
-                ctx.equal(else_tv, result_tv, else_span);
+                // Guard-let desugars to `if cond {} else { body }` where the
+                // else block is required to diverge. Don't equate its value
+                // type with the empty then branch — the guard_let_divergence
+                // analyzer is responsible for enforcing divergence.
+                if !is_guard_let_if(hir, id) {
+                    let else_span = block_value_span(hir, else_block).unwrap_or_else(|| span.clone());
+                    ctx.equal(else_tv, result_tv, else_span);
+                }
                 result_tv
             } else {
                 // No else: expression has unit type
@@ -328,9 +334,12 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                     let _guard_tv = gen_expr(ctx, hir, guard);
                 }
 
-                // Body must match result type
+                // Body must match result type — use the arm body's span so
+                // mismatch diagnostics point at the offending arm, not the
+                // match keyword.
                 let body_tv = gen_expr(ctx, hir, arm.body);
-                ctx.equal(body_tv, result_tv, span.clone());
+                let body_span = expr_span(hir, arm.body);
+                ctx.equal(body_tv, result_tv, body_span);
             }
             result_tv
         }
@@ -1164,6 +1173,15 @@ fn literal_to_tyvar(ctx: &mut InferCtx<'_>, value: &HirLiteral) -> TyVar {
 }
 
 /// Extract the span from an expression.
+/// Whether this If expression is the desugared form of a guard-let.
+/// Guard-let lowers to `HirStmt::Expr { HirExpr::If { then: empty, else: body } }`
+/// and the statement id is tracked in `hir.guard_let_stmts`.
+fn is_guard_let_if(hir: &HirBody, expr_id: HirExprId) -> bool {
+    hir.guard_let_stmts.iter().any(|&stmt_id| {
+        matches!(&hir.stmts[stmt_id], HirStmt::Expr { expr, .. } if *expr == expr_id)
+    })
+}
+
 /// Get the span of a block's value expression (tail expr or last statement expr).
 /// Returns None if the block has no value expression.
 fn block_value_span(hir: &HirBody, block: &HirBlock) -> Option<Span> {

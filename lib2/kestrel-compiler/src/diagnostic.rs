@@ -89,8 +89,11 @@ impl ToDiagnostic for ResolvedInferError<'_> {
                 .with_message("protocol conformance failure")
                 .with_labels(vec![Label::primary(file_id, range).with_message(detail)]),
 
-            InferError::NoMember { name, .. } => Diagnostic::error()
-                .with_message(format!("no member '{name}'"))
+            InferError::NoMember { .. } => Diagnostic::error()
+                // `detail` already includes the lib1-style wording
+                // ("no method 'X' on type 'Y'" or "no member ..."), so we use it
+                // directly instead of prepending a redundant prefix.
+                .with_message(detail.clone())
                 .with_labels(vec![Label::primary(file_id, range).with_message(detail)]),
 
             InferError::AmbiguousMember { name, .. } => Diagnostic::error()
@@ -155,6 +158,10 @@ impl ToDiagnostic for ResolvedInferError<'_> {
                 .with_labels(vec![Label::primary(file_id, range).with_message(
                     format!("expected {} parameter(s)", expected),
                 )]),
+
+            InferError::LiteralNotAccepted { .. } => Diagnostic::error()
+                .with_message("does not conform to protocol")
+                .with_labels(vec![Label::primary(file_id, range).with_message(detail)]),
         }
     }
 }

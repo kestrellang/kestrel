@@ -128,6 +128,15 @@ IDs follow the pattern `E<NNN>`:
 Current allocations:
 - E001: `missing_return` (exhaustive_return.rs)
 - E002: `unreachable_code` (dead_code.rs)
+- E301: `refutable_for_loop_pattern` (for_loop_pattern.rs)
+- E302: `irrefutable_if_let` (exhaustiveness.rs)
+- E303: `irrefutable_match_arm` (exhaustiveness.rs) — reserved; currently not emitted (E306 subsumes)
+- E304: `empty_match` (exhaustiveness.rs)
+- E305: `non_exhaustive_match` (exhaustiveness.rs)
+- E306: `unreachable_pattern` (exhaustiveness.rs)
+- E307: `overlapping_range` (exhaustiveness.rs)
+- E308: `irrefutable_while_let` (exhaustiveness.rs)
+- E309: `irrefutable_guard_let` (exhaustiveness.rs)
 
 ## Key Conventions
 
@@ -137,3 +146,36 @@ Current allocations:
 - Return `Vec<AnalyzeDiagnostic>` — the framework handles accumulation and memoization
 - Use `DESCRIPTORS[N].id` and `DESCRIPTORS[N].default_severity` when constructing diagnostics
 - Prefer early returns for inapplicable entities (wrong NodeKind, no return type, empty body, etc.)
+
+## One analyzer per fact
+
+If two analyzers ask the same question (e.g. irrefutable-pattern and
+exhaustiveness both run Maranget), merge them. Two analyzers computing the
+same thing drift — one gets updated, the other doesn't, diagnostics
+disagree at the edges. Precedent: E302 / E303 / E306 all describe the
+same pattern-matrix fact and live in `exhaustiveness.rs`. The old
+`irrefutable_pattern.rs` was deleted when its logic duplicated the
+exhaustiveness walk.
+
+A single analyzer can own multiple diagnostic codes. Use a lookup helper
+(`fn descriptor(id: &str) -> &'static DiagnosticDescriptor`) when
+selecting by code at emit time.
+
+## Pick one diagnostic per fact, and pick the one that labels the fix
+
+When two codes describe the same situation (cause vs effect, umbrella vs
+specific), emit only one. Prefer the diagnostic whose label points at the
+code the user needs to change. Precedent: E306 (unreachable pattern —
+labels the dead code) beats E303 (irrefutable-cause — labels the arm that
+*caused* the dead code); they describe the same fact, E306 is actionable.
+
+## Source-based dispatch for desugared constructs
+
+When analyzing `HirExpr::Match`, branch on `source` first. `UserMatch`
+gets the full diagnostic suite; desugared sources get source-specific
+codes or are skipped entirely. See `MatchSource::is_desugared()` and the
+per-source dispatch in `exhaustiveness.rs`.
+
+Do not check for desugared-ness via side-tables on `HirBody`
+(`for_loop_matches` was removed for this reason). Use the enum on the
+node.

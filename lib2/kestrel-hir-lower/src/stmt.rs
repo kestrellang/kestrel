@@ -80,8 +80,10 @@ impl LowerCtx<'_> {
                     span: span.clone(),
                 });
 
-                // Lower the pattern (this allocates locals for bindings within)
-                let hir_pat = self.lower_pat(body, pattern);
+                // Lower the pattern (this allocates locals for bindings within).
+                // Pass `is_mut` so an outer `var (a, b) = …` propagates mutability
+                // into each sub-pattern binding (a, b), not just the temp.
+                let hir_pat = self.lower_pat_forcing_mut(body, pattern, is_mut);
 
                 // Create a match expression to destructure:
                 // match $let_tmp { pattern => () }

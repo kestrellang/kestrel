@@ -30,6 +30,20 @@ use ctx::InferCtx;
 use resolve::WorldResolver;
 use result::TypedBody;
 
+/// Resolve the logical enclosing container for a function-like entity.
+/// For a Setter (child of Field/Subscript), skip through the accessor-owner
+/// parent so the true container (Struct/Enum/Extension/Protocol/Module) is
+/// used for `self` typing, type-param inheritance, and where-clause resolution.
+/// For plain Functions/Initializers/Deinits/Fields/Subscripts, returns the
+/// direct parent unchanged.
+fn accessor_enclosing_container(qctx: &QueryContext<'_>, entity: Entity) -> Option<Entity> {
+    let direct = qctx.parent_of(entity)?;
+    match qctx.get::<NodeKind>(direct) {
+        Some(NodeKind::Field) | Some(NodeKind::Subscript) => qctx.parent_of(direct),
+        _ => Some(direct),
+    }
+}
+
 // ===== InferBody query =====
 
 /// Query: infer types for a function/init/getter body.
@@ -99,7 +113,9 @@ fn create_param_types(
     if callable.receiver.is_some() {
         // Self type = the parent type entity with fresh TyVars for type params.
         // For methods in extensions, resolve to the extension's target type.
-        let self_tv = if let Some(parent) = query_ctx.parent_of(entity) {
+        // Setters are children of Field/Subscript — skip one more hop to the
+        // actual enclosing type (Struct/Enum/Extension/Protocol/Module).
+        let self_tv = if let Some(parent) = accessor_enclosing_container(query_ctx, entity) {
             let parent_kind = query_ctx.get::<NodeKind>(parent);
             if parent_kind == Some(&NodeKind::Extension) {
                 // Resolve extension target to the actual type

@@ -6,10 +6,11 @@
 use kestrel_hecs::{Entity, World};
 use kestrel_span2::Span;
 use kestrel_syntax_tree2::{SyntaxKind, SyntaxNode};
-use kestrel_syntax_tree2::utils::{extract_path_segments, extract_visibility, find_child, is_trivia};
+use kestrel_syntax_tree2::utils::{extract_path_segments, extract_visibility, find_child, get_decl_span, is_trivia};
 
 use crate::ast_type::{AstType, PathSegment, ast_type_from_cst};
 use crate::components::*;
+use crate::lower;
 
 /// Extract and set visibility component from a declaration node.
 pub fn set_visibility(world: &mut World, entity: Entity, node: &SyntaxNode) {
@@ -389,4 +390,36 @@ pub fn is_type_kind(kind: SyntaxKind) -> bool {
 /// Check if a declaration node has a StaticModifier child.
 pub fn has_static_modifier(node: &SyntaxNode) -> bool {
     find_child(node, SyntaxKind::StaticModifier).is_some()
+}
+
+/// Spawn a `NodeKind::Setter` child entity under a Field or Subscript.
+///
+/// Caller supplies the full params list (for Field: `[newValue]`; for Subscript:
+/// `[index_params..., newValue]`) and the receiver kind. No `Name`, `Vis`, or
+/// `TypeAnnotation` component is set — setters are discovered by `NodeKind::
+/// Setter` via `children_of(parent)`, access control flows through the parent
+/// declaration's `Settable`, and setters return unit (no explicit return type).
+pub fn spawn_setter(
+    world: &mut World,
+    parent: Entity,
+    setter_clause: &SyntaxNode,
+    setter_body: &SyntaxNode,
+    params: Vec<AstParam>,
+    receiver: Option<ReceiverKind>,
+    file_entity: Entity,
+    file_id: usize,
+    is_static: bool,
+) {
+    let setter = world.spawn();
+    world.set(setter, NodeKind::Setter);
+    world.set(setter, FileId(file_entity));
+    world.set(setter, DeclSpan(get_decl_span(setter_clause, file_id)));
+    world.set(setter, CstNode(setter_clause.clone()));
+    world.set_parent(setter, parent);
+    world.set(setter, Callable { params, receiver });
+    world.set(setter, Body(lower::lower_body(setter_body, file_id)));
+    world.set(setter, Valued(setter_body.clone()));
+    if is_static {
+        world.set(setter, Static);
+    }
 }

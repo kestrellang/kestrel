@@ -61,6 +61,12 @@ impl BodyCheck for GuardLetDivergenceAnalyzer {
 
             // Check if the else block diverges
             if !block_diverges(cx.hir, else_block) {
+                // Point at the non-diverging value expression inside the else
+                // block (the tail expression or last statement), not the whole
+                // guard-let statement — this lines the diagnostic up with the
+                // code the user needs to change.
+                let span = non_diverging_span(cx.hir, else_block)
+                    .unwrap_or_else(|| util::stmt_span(cx.hir, stmt_id));
                 diags.push(AnalyzeDiagnostic {
                     descriptor_id: DESCRIPTORS[0].id,
                     severity: DESCRIPTORS[0].default_severity,
@@ -68,7 +74,7 @@ impl BodyCheck for GuardLetDivergenceAnalyzer {
                         "guard-let else block must diverge (return, break, continue, or throw)"
                             .into(),
                     labels: vec![DiagLabel {
-                        span: util::stmt_span(cx.hir, stmt_id),
+                        span,
                         message: "else block does not diverge".into(),
                         is_primary: true,
                     }],
@@ -79,6 +85,22 @@ impl BodyCheck for GuardLetDivergenceAnalyzer {
 
         diags
     }
+}
+
+/// Span of the expression that *should* diverge but doesn't — i.e. the
+/// block's tail expression, or the last statement-expression. Used to put
+/// the E003 diagnostic under the offending value rather than the whole
+/// guard-let statement.
+fn non_diverging_span(hir: &HirBody, block: &HirBlock) -> Option<kestrel_span2::Span> {
+    if let Some(tail) = block.tail_expr {
+        return Some(util::expr_span(hir, tail));
+    }
+    if let Some(&last_stmt) = block.stmts.last() {
+        if let HirStmt::Expr { expr, .. } = &hir.stmts[last_stmt] {
+            return Some(util::expr_span(hir, *expr));
+        }
+    }
+    None
 }
 
 // ===== Divergence analysis (private to this analyzer) =====

@@ -86,7 +86,10 @@ fn format_error(err: &InferError, detail: &str) -> (String, String) {
             "type does not conform".into(),
         ),
         InferError::NoMember { name, .. } => (
-            format!("no member '{}' found: {}", name, detail),
+            // `detail` already comes formatted as "no method 'X' on type 'Y'"
+            // (see kestrel_type_infer::result::describe_error), so we surface
+            // it directly as the diagnostic message.
+            detail.to_string(),
             format!("'{}' not found", name),
         ),
         InferError::AmbiguousMember { name, .. } => (
@@ -149,6 +152,10 @@ fn format_error(err: &InferError, detail: &str) -> (String, String) {
         InferError::ItWrongArity { expected, .. } => (
             format!("implicit 'it' parameter used in {expected}-parameter context"),
             "'it' requires exactly 1 parameter".into(),
+        ),
+        InferError::LiteralNotAccepted { .. } => (
+            format!("does not conform to protocol: {}", detail),
+            "type does not accept this literal".into(),
         ),
         InferError::FromHir { .. } => unreachable!("filtered above"),
     }

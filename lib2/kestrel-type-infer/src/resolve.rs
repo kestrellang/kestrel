@@ -362,8 +362,12 @@ impl TypeResolver for WorldResolver<'_> {
 
         let member = match matches.len() {
             0 => {
-                // No label match — fall back to single candidate if only one exists
-                if instance_candidates.len() == 1 {
+                // No label match — fall back to single candidate ONLY if its arity
+                // accepts the call. If arity is wrong too, treat as NotFound so the
+                // diagnostic is "no member" rather than a misleading "wrong arity".
+                if instance_candidates.len() == 1
+                    && self.matches_arity(instance_candidates[0], arg_labels.len())
+                {
                     instance_candidates[0]
                 } else {
                     return Err(MemberError::NotFound);
@@ -650,7 +654,9 @@ impl TypeResolver for WorldResolver<'_> {
 
         let member = match matches.len() {
             0 => {
-                if static_candidates.len() == 1 {
+                if static_candidates.len() == 1
+                    && self.matches_arity(static_candidates[0], arg_labels.len())
+                {
                     static_candidates[0]
                 } else {
                     return Err(MemberError::NotFound);
@@ -1025,6 +1031,22 @@ impl WorldResolver<'_> {
         }
 
         true
+    }
+
+    /// Check whether an entity could accept `arg_count` args based on arity alone
+    /// (ignores labels). Used to gate the single-candidate fallback in member
+    /// resolution: if arity doesn't even match, don't accept the candidate.
+    ///
+    /// For non-callable members (fields, properties), always returns true — the
+    /// solver handles the "field used as call" pattern (e.g., `self.data(idx)`
+    /// where `data: Array[T]` and `(idx)` is an Array subscript) downstream.
+    fn matches_arity(&self, entity: Entity, arg_count: usize) -> bool {
+        let Some(callable) = self.ctx.get::<Callable>(entity) else {
+            return true;
+        };
+        let params = &callable.params;
+        let required = params.iter().filter(|p| p.default_entity.is_none()).count();
+        arg_count >= required && arg_count <= params.len()
     }
 
     /// Build a signature string from a callable's param labels for deduplication.

@@ -56,7 +56,6 @@ pub fn default_analyzers() -> AnalyzerRegistry {
     // Wave 6: Pattern checks
     r.add_body_check(body::refutable_pattern::RefutablePatternAnalyzer);
     r.add_body_check(body::for_loop_pattern::ForLoopPatternAnalyzer);
-    r.add_body_check(body::irrefutable_pattern::IrrefutablePatternAnalyzer);
     r.add_body_check(body::exhaustiveness::ExhaustivenessAnalyzer);
 
     // Declaration checks

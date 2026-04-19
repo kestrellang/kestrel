@@ -180,9 +180,11 @@ fn determine_function_kind(ctx: &LowerCtx, entity: Entity) -> FunctionKind {
                 _ => FunctionKind::Free,
             }
         },
-        // Computed property getters and subscripts — treated as methods
-        NodeKind::Field | NodeKind::Subscript => {
-            let parent = ctx.world.parent_of(entity).unwrap_or(ctx.root);
+        // Computed property getters/subscripts — treated as methods.
+        // Setters are children of Field/Subscript, so their "enclosing type"
+        // is one hop further up than `parent_of(entity)`.
+        NodeKind::Field | NodeKind::Subscript | NodeKind::Setter => {
+            let parent = accessor_enclosing_container(ctx, entity).unwrap_or(ctx.root);
             if let Some(callable) = ctx.world.get::<Callable>(entity) {
                 if let Some(receiver) = &callable.receiver {
                     let conv = match receiver {
@@ -202,10 +204,27 @@ fn determine_function_kind(ctx: &LowerCtx, entity: Entity) -> FunctionKind {
     }
 }
 
+/// Resolve the logical enclosing container for an accessor-like entity.
+/// For a direct Field/Subscript, that's its own parent. For a Setter (child
+/// of Field/Subscript), skip one more level so generic type-param inheritance
+/// and FunctionKind::Method `parent` see the actual Struct/Enum/Extension/
+/// Protocol/Module.
+fn accessor_enclosing_container(ctx: &LowerCtx, entity: Entity) -> Option<Entity> {
+    let direct = ctx.world.parent_of(entity)?;
+    match ctx.world.get::<NodeKind>(direct).cloned() {
+        Some(NodeKind::Field) | Some(NodeKind::Subscript) => ctx.world.parent_of(direct),
+        _ => Some(direct),
+    }
+}
+
 /// Collect type parameters inherited from parent types (for methods inside
 /// generic structs/enums). These come before the function's own type params.
 fn collect_inherited_type_params(ctx: &mut LowerCtx, entity: Entity, def: &mut FunctionDef) {
-    let Some(parent) = ctx.world.parent_of(entity) else {
+    // Setters are children of Field/Subscript, so resolve the true enclosing
+    // container one hop further up; otherwise the parent is the container.
+    let Some(parent) = accessor_enclosing_container(ctx, entity)
+        .or_else(|| ctx.world.parent_of(entity))
+    else {
         return;
     };
     let parent_kind = ctx.world.get::<NodeKind>(parent).cloned();

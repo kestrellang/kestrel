@@ -454,6 +454,7 @@ fn error_variant_name(err: &InferError) -> &'static str {
         InferError::TypeArgCountMismatch { .. } => "TypeArgCountMismatch",
         InferError::NoMatchingOverload { .. } => "NoMatchingOverload",
         InferError::ItWrongArity { .. } => "ItWrongArity",
+        InferError::LiteralNotAccepted { .. } => "LiteralNotAccepted",
     }
 }
 
@@ -508,6 +509,9 @@ fn format_error(err: &InferError) -> String {
         }
         InferError::ItWrongArity { expected, .. } => {
             format!("ItWrongArity expected={} at {}:{}", expected, span.file_id, span.start)
+        }
+        InferError::LiteralNotAccepted { literal, .. } => {
+            format!("LiteralNotAccepted {:?} at {}:{}", literal, span.file_id, span.start)
         }
     }
 }

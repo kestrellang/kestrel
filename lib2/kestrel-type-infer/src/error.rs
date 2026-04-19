@@ -6,7 +6,7 @@
 use kestrel_hecs::Entity;
 use kestrel_span2::Span;
 
-use crate::ty::TyVar;
+use crate::ty::{LiteralKind, TyVar};
 
 /// A type inference error. Accumulated during solving; each produces
 /// a `TyKind::Error` TyVar that silently absorbs further constraints.
@@ -27,9 +27,13 @@ pub enum InferError {
     },
 
     /// No member with this name on the receiver type.
+    /// `is_call` distinguishes a method/init lookup (`x.foo(...)`) from a
+    /// field/property access (`x.foo`); it drives the diagnostic wording
+    /// ("no method '...' on type 'T'" vs "no member '...' on type 'T'").
     NoMember {
         receiver: TyVar,
         name: String,
+        is_call: bool,
         span: Span,
     },
 
@@ -110,6 +114,18 @@ pub enum InferError {
         expected: usize,
         span: Span,
     },
+
+    /// A literal of a given kind can't be accepted by the target type.
+    /// Emitted when an unresolved literal TyVar meets a concrete type that
+    /// doesn't conform to the corresponding `ExpressibleBy*Literal` protocol.
+    /// Used instead of `DoesNotConform` when the protocol entity isn't
+    /// available (e.g., stdlib disabled) — we still know the literal kind
+    /// from the TySlot.
+    LiteralNotAccepted {
+        ty: TyVar,
+        literal: LiteralKind,
+        span: Span,
+    },
 }
 
 impl InferError {
@@ -131,7 +147,8 @@ impl InferError {
             | Self::TypeParamAsValue { span }
             | Self::TypeArgCountMismatch { span, .. }
             | Self::NoMatchingOverload { span, .. }
-            | Self::ItWrongArity { span, .. } => span,
+            | Self::ItWrongArity { span, .. }
+            | Self::LiteralNotAccepted { span, .. } => span,
         }
     }
 }

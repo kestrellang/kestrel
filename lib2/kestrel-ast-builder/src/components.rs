@@ -26,6 +26,10 @@ pub enum NodeKind {
     Initializer,
     Deinit,
     Field,
+    /// Setter accessor body for a Field or Subscript. Child of the
+    /// declaration it sets. Implicit `newValue` param and Mutating (or
+    /// None, for static/global) receiver.
+    Setter,
     Subscript,
     TypeAlias,
     Import,

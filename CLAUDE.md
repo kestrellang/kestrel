@@ -31,3 +31,34 @@ Whenever you get stuck, and figure something out, add a memory for it so you won
 Prioritize early returns, avoid code smells such as deep nesting and long functions
 Try to reuse existing code rather than rewriting new functions
 Code should be terse but include comments explaining what it does and why
+All solutions should be clean, comprehensive, and stick to hECS patterns
+Always use a single source of truth, don't spread it over multiple locations
+Make sure to consider incremental compilation.
+
+# Lib 2 rewrite
+
+We are rewriting it in lib2, focus on that
+
+# Directory-scoped guidance (`AGENTS.md`)
+
+Before editing a file, look for an `AGENTS.md` in its directory or any parent
+directory up to the repo root. These files document patterns and principles
+that apply inside the containing subtree — design conventions, diagnostic-ID
+allocations, analyzer structure, HIR invariants, etc. Nearer files are more
+specific and take precedence; the repo-root `CLAUDE.md` is the fallback.
+
+## Proactively capture patterns
+
+While working, watch for reusable patterns, invariants, or design decisions —
+things like "we always do X here because Y," "never do Z in this subtree,"
+"when adding a new W, update these three places." Examples: a naming rule
+picked up from a code review, a new diagnostic-ID allocation, a non-obvious
+ordering constraint between passes, a decision to prefer one approach over
+another after weighing tradeoffs.
+
+When you notice one, **ask the user** whether to record it in the nearest
+applicable `AGENTS.md` (or create a new one scoped to the smallest subtree
+where the pattern applies). A one-line ask is enough: "Noticed we're doing X
+here — want me to add it to `path/AGENTS.md`?" Don't silently add entries,
+and don't hoard patterns for a session-ending summary — capture them as they
+come up, while the context is fresh.

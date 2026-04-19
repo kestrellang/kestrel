@@ -12,7 +12,19 @@ use crate::ctx::LowerCtx;
 
 impl LowerCtx<'_> {
     /// Lower an AST pattern to an HIR pattern.
+    /// Callers that don't inherit mutability from an outer `var` should use this.
     pub fn lower_pat(&mut self, body: &AstBody, id: PatId) -> HirPatId {
+        self.lower_pat_inner(body, id, false)
+    }
+
+    /// Lower an AST pattern, forcing all bindings mutable.
+    /// Used by `var <pattern> = …` destructuring so the outer `var` propagates
+    /// into every binding the pattern introduces.
+    pub fn lower_pat_forcing_mut(&mut self, body: &AstBody, id: PatId, force_mut: bool) -> HirPatId {
+        self.lower_pat_inner(body, id, force_mut)
+    }
+
+    fn lower_pat_inner(&mut self, body: &AstBody, id: PatId, force_mut: bool) -> HirPatId {
         let pat = &body.pats[id];
         match pat {
             AstPat::Wildcard { span } => self.alloc_pat(HirPat::Wildcard {
@@ -20,7 +32,7 @@ impl LowerCtx<'_> {
             }),
 
             AstPat::Binding { is_mut, name, span } => {
-                let local = self.define_local(name, *is_mut, span.clone());
+                let local = self.define_local(name, *is_mut || force_mut, span.clone());
                 self.alloc_pat(HirPat::Binding {
                     local,
                     span: span.clone(),
@@ -39,9 +51,9 @@ impl LowerCtx<'_> {
                     );
                 }
                 let lowered_prefix: Vec<HirPatId> =
-                    prefix.iter().map(|&id| self.lower_pat(body, id)).collect();
+                    prefix.iter().map(|&id| self.lower_pat_inner(body, id, force_mut)).collect();
                 let lowered_suffix: Vec<HirPatId> =
-                    suffix.iter().map(|&id| self.lower_pat(body, id)).collect();
+                    suffix.iter().map(|&id| self.lower_pat_inner(body, id, force_mut)).collect();
                 self.alloc_pat(HirPat::Tuple {
                     prefix: lowered_prefix,
                     has_rest: *has_rest,
@@ -102,27 +114,27 @@ impl LowerCtx<'_> {
                 case_name,
                 args,
                 span,
-            } => self.lower_enum_pat(body, case_name, args, span),
+            } => self.lower_enum_pat(body, case_name, args, span, force_mut),
 
             AstPat::Struct {
                 name,
                 fields,
                 has_rest,
                 span,
-            } => self.lower_struct_pat(body, name, fields, *has_rest, span),
+            } => self.lower_struct_pat(body, name, fields, *has_rest, span, force_mut),
 
             AstPat::Array { prefix, rest, suffix, span } => {
                 let lowered_prefix: Vec<HirPatId> =
-                    prefix.iter().map(|&id| self.lower_pat(body, id)).collect();
+                    prefix.iter().map(|&id| self.lower_pat_inner(body, id, force_mut)).collect();
                 // Map Option<Option<String>> → Option<Option<LocalId>>:
                 // - None → None (no rest)
                 // - Some(None) → Some(None) (bare `..`)
-                // - Some(Some(name)) → Some(Some(local)) (named `..name`)
+                // - Some(Some(name)) → Some(Some(local)) (named `..name`, inherits outer `var`)
                 let hir_rest = rest.as_ref().map(|inner| {
-                    inner.as_ref().map(|name| self.define_local(name, false, span.clone()))
+                    inner.as_ref().map(|name| self.define_local(name, force_mut, span.clone()))
                 });
                 let lowered_suffix: Vec<HirPatId> =
-                    suffix.iter().map(|&id| self.lower_pat(body, id)).collect();
+                    suffix.iter().map(|&id| self.lower_pat_inner(body, id, force_mut)).collect();
                 self.alloc_pat(HirPat::Array {
                     prefix: lowered_prefix,
                     rest: hir_rest,
@@ -149,8 +161,8 @@ impl LowerCtx<'_> {
                     );
                 }
 
-                let local = self.define_local(name, *is_mut, span.clone());
-                let lowered_sub = self.lower_pat(body, *subpattern);
+                let local = self.define_local(name, *is_mut || force_mut, span.clone());
+                let lowered_sub = self.lower_pat_inner(body, *subpattern, force_mut);
                 self.alloc_pat(HirPat::At {
                     binding: local,
                     subpattern: lowered_sub,
@@ -161,7 +173,7 @@ impl LowerCtx<'_> {
             AstPat::Or { alternatives, span } => {
                 let lowered: Vec<HirPatId> = alternatives
                     .iter()
-                    .map(|&id| self.lower_pat(body, id))
+                    .map(|&id| self.lower_pat_inner(body, id, force_mut))
                     .collect();
                 self.alloc_pat(HirPat::Or {
                     alternatives: lowered,
@@ -189,12 +201,13 @@ impl LowerCtx<'_> {
         case_name: &str,
         args: &[EnumPatArg],
         span: &Span,
+        force_mut: bool,
     ) -> HirPatId {
         let lowered_args: Vec<HirPatArg> = args
             .iter()
             .map(|arg| HirPatArg {
                 label: arg.label.clone(),
-                pattern: self.lower_pat(body, arg.pattern),
+                pattern: self.lower_pat_inner(body, arg.pattern, force_mut),
             })
             .collect();
 
@@ -245,15 +258,17 @@ impl LowerCtx<'_> {
         fields: &[StructPatField],
         has_rest: bool,
         span: &Span,
+        force_mut: bool,
     ) -> HirPatId {
         let lowered_fields: Vec<HirStructPatField> = fields
             .iter()
             .map(|f| {
-                // Shorthand fields (Point { x }) have pattern: None — create a binding
+                // Shorthand fields (Point { x }) have pattern: None — create a binding.
+                // Shorthand bindings inherit outer `var` via force_mut.
                 let pattern = if let Some(id) = f.pattern {
-                    Some(self.lower_pat(body, id))
+                    Some(self.lower_pat_inner(body, id, force_mut))
                 } else {
-                    let local = self.define_local(&f.field_name, false, span.clone());
+                    let local = self.define_local(&f.field_name, force_mut, span.clone());
                     Some(self.alloc_pat(HirPat::Binding { local, span: span.clone() }))
                 };
                 HirStructPatField {

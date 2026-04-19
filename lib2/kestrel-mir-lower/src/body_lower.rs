@@ -201,6 +201,66 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         MirTy::Error
     }
 
+    /// If the assignment target is a computed property (Field or Def entity
+    /// with a `NodeKind::Setter` child), emit a setter call and return the
+    /// unit value. Otherwise returns None so the caller falls through to the
+    /// default stored-Place assignment path.
+    ///
+    /// Handles the three concrete shapes exercised by
+    /// `validation/properties_intended/*_get_set.ks`:
+    ///   - `globalComputedVar = v`      (HirExpr::Def, no receiver)
+    ///   - `Foo.staticComputed = v`     (HirExpr::Field, type-ref base, no receiver)
+    ///   - `obj.computed = v`           (HirExpr::Field, value base, mut-borrow receiver)
+    ///
+    /// Protocol-property setter dispatch (witness) is intentionally out of
+    /// scope here — no failing test exercises it; add a matching witness
+    /// branch alongside future protocol-setter work.
+    fn try_lower_setter_assign(&mut self, target_id: HirExprId, value_id: HirExprId) -> Option<Value> {
+        let target = self.hir.exprs[target_id].clone();
+        match target {
+            HirExpr::Field { base, .. } => {
+                let resolved = self
+                    .typed
+                    .and_then(|t| t.resolutions.get(&target_id))
+                    .copied()?;
+                let setter = find_setter_child(self.ctx, resolved)?;
+                self.ctx.register_name(setter);
+                let is_static = self
+                    .ctx
+                    .world
+                    .get::<kestrel_ast_builder::Static>(resolved)
+                    .is_some();
+                let rhs_val = self.lower_expr(value_id);
+                let newval_arg = CallArg::copy(rhs_val);
+                if is_static {
+                    let self_type = self.type_from_type_ref(base);
+                    let type_args = self.prepend_receiver_type_args(&self_type, vec![]);
+                    let callee = Callee::method(setter, type_args, self_type);
+                    self.emit_call(callee, vec![newval_arg], MirTy::Unit);
+                } else {
+                    let receiver_ty = self.resolve_expr_type(base);
+                    let base_val = self.lower_expr(base);
+                    let receiver_arg = CallArg::mutating(base_val);
+                    let type_args = self.resolve_type_args(target_id);
+                    let type_args = self.prepend_receiver_type_args(&receiver_ty, type_args);
+                    let callee = Callee::method(setter, type_args, receiver_ty);
+                    self.emit_call(callee, vec![receiver_arg, newval_arg], MirTy::Unit);
+                }
+                Some(Value::Immediate(Immediate::unit()))
+            },
+            HirExpr::Def(entity, _, _) => {
+                let setter = find_setter_child(self.ctx, entity)?;
+                self.ctx.register_name(setter);
+                let rhs_val = self.lower_expr(value_id);
+                let newval_arg = CallArg::copy(rhs_val);
+                let callee = Callee::direct_generic(setter, Vec::new());
+                self.emit_call(callee, vec![newval_arg], MirTy::Unit);
+                Some(Value::Immediate(Immediate::unit()))
+            },
+            _ => None,
+        }
+    }
+
     /// Derive a MirTy from an expression that's used as a type reference (e.g.,
     /// the base of a static member access like `T.foo` or `MyStruct.bar`).
     /// For Def(TypeParameter) returns MirTy::TypeParam; for Def(Struct/Enum/TypeAlias)
@@ -428,6 +488,13 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 Value::Immediate(Immediate::unit())
             },
             HirExpr::Assign { target, value, .. } => {
+                // Computed-property assignments (`obj.computed = v`,
+                // `Foo.staticComputed = v`, `globalComputedVar = v`) dispatch
+                // through the Field's Setter child entity rather than emitting
+                // a stored-Place write.
+                if let Some(val) = self.try_lower_setter_assign(*target, *value) {
+                    return val;
+                }
                 let rhs = self.lower_expr(*value);
                 let lhs = self.lower_expr(*target);
                 if let Value::Place(dest) = lhs {
@@ -3352,6 +3419,22 @@ fn constructor_name(ctor: &Constructor, ctx: &mut LowerCtx) -> String {
         Constructor::NonExhaustive => "non_exhaustive".to_string(),
         Constructor::Missing => "missing".to_string(),
     }
+}
+
+/// Find the `NodeKind::Setter` child of a Field or Subscript entity.
+/// Setters are spawned by the AST builder as children — one per declaration
+/// with a `SetterClause` — so at most one match per parent.
+fn find_setter_child(ctx: &LowerCtx, parent: Entity) -> Option<Entity> {
+    ctx.world
+        .children_of(parent)
+        .iter()
+        .copied()
+        .find(|&e| {
+            matches!(
+                ctx.world.get::<kestrel_ast_builder::NodeKind>(e),
+                Some(kestrel_ast_builder::NodeKind::Setter)
+            )
+        })
 }
 
 #[cfg(test)]

@@ -81,13 +81,21 @@ fn report_unsolved(ctx: &mut InferCtx<'_>) {
                 if ctx.is_error(ctx.resolve(a)) || ctx.is_error(ctx.resolve(b)) {
                     continue;
                 }
-                InferError::TypeMismatch { expected: a, got: b, span }
+                let err = mismatch_error(ctx, a, b, span);
+                report_and_poison(ctx, err, a, b);
+                continue;
             }
-            Constraint::Coerce { from, to, span, .. } => {
+            Constraint::Coerce { from, to, expr, span } => {
                 if ctx.is_error(ctx.resolve(from)) || ctx.is_error(ctx.resolve(to)) {
                     continue;
                 }
-                InferError::TypeMismatch { expected: to, got: from, span }
+                if ctx.errored_coerce_exprs.contains(&expr) {
+                    continue;
+                }
+                let err = mismatch_error(ctx, to, from, span);
+                ctx.errored_coerce_exprs.insert(expr);
+                report_and_poison(ctx, err, from, to);
+                continue;
             }
             Constraint::Conforms { ty, protocol, span } => {
                 if ctx.is_error(ctx.resolve(ty)) {
@@ -101,11 +109,11 @@ fn report_unsolved(ctx: &mut InferCtx<'_>) {
                 }
                 InferError::NoAssociatedType { container, name, span }
             }
-            Constraint::Member { receiver, name, span, .. } => {
+            Constraint::Member { receiver, name, span, is_call, .. } => {
                 if ctx.is_error(ctx.resolve(receiver)) {
                     continue;
                 }
-                InferError::NoMember { receiver, name, span }
+                InferError::NoMember { receiver, name, is_call, span }
             }
             Constraint::Call { callee, span, .. } => {
                 if ctx.is_error(ctx.resolve(callee)) {
@@ -114,6 +122,7 @@ fn report_unsolved(ctx: &mut InferCtx<'_>) {
                 InferError::NoMember {
                     receiver: callee,
                     name: "(subscript)".into(),
+                    is_call: true,
                     span,
                 }
             }
@@ -126,7 +135,7 @@ fn report_unsolved(ctx: &mut InferCtx<'_>) {
                     .and_then(|&e| ctx.query_ctx.get::<Name>(e))
                     .map(|n| n.0.clone())
                     .unwrap_or_else(|| "<overloaded>".into());
-                InferError::NoMember { receiver: result, name, span }
+                InferError::NoMember { receiver: result, name, is_call: true, span }
             }
             Constraint::Implicit { expected, name, span, .. } => {
                 if ctx.is_error(ctx.resolve(expected)) {
@@ -222,20 +231,18 @@ fn try_solve(ctx: &mut InferCtx<'_>, c: Constraint) -> SolveResult {
 fn solve_equal(ctx: &mut InferCtx<'_>, a: TyVar, b: TyVar, span: Span) -> SolveResult {
     match unify::unify(ctx, a, b) {
         Ok(()) => SolveResult::Solved,
-        Err(UnifyError::Mismatch) => SolveResult::Error(InferError::TypeMismatch {
-            expected: a,
-            got: b,
-            span,
-        }),
+        Err(UnifyError::Mismatch) => {
+            let err = mismatch_error(ctx, a, b, span);
+            report_and_poison(ctx, err, a, b);
+            SolveResult::Solved
+        }
         Err(UnifyError::LiteralGuard) => {
             // Literal couldn't unify — could be deferred or error.
             // If both sides are concrete, it's an error.
             if ctx.is_concrete(a) && ctx.is_concrete(b) {
-                SolveResult::Error(InferError::TypeMismatch {
-                    expected: a,
-                    got: b,
-                    span,
-                })
+                let err = mismatch_error(ctx, a, b, span);
+                report_and_poison(ctx, err, a, b);
+                SolveResult::Solved
             } else {
                 SolveResult::Deferred(Constraint::Equal { a, b, span })
             }
@@ -244,6 +251,65 @@ fn solve_equal(ctx: &mut InferCtx<'_>, a: TyVar, b: TyVar, span: Span) -> SolveR
             SolveResult::Error(InferError::InfiniteType { span })
         }
     }
+}
+
+/// Report an error (captures detail against pristine TyVars), then poison
+/// both sides so downstream constraints absorb. Order matters: `report_error`
+/// must run first so the detail reflects pre-poison types.
+fn report_and_poison(ctx: &mut InferCtx<'_>, err: InferError, a: TyVar, b: TyVar) {
+    ctx.report_error(err);
+    ctx.poison(a);
+    ctx.poison(b);
+}
+
+/// Build the right flavor of mismatch error for an Equal/Coerce failure.
+///
+/// If one side is an unresolved-literal TyVar and the other is concrete,
+/// the conceptual failure is "the concrete type doesn't accept this literal
+/// kind" — surface it as `DoesNotConform` (when `ExpressibleBy*Literal` is
+/// available) or `LiteralNotAccepted` (when it isn't, e.g., stdlib disabled).
+///
+/// Otherwise fall back to `TypeMismatch`.
+fn mismatch_error(ctx: &InferCtx<'_>, a: TyVar, b: TyVar, span: Span) -> InferError {
+    if let Some(err) = try_literal_mismatch(ctx, a, b, span.clone()) {
+        return err;
+    }
+    if let Some(err) = try_literal_mismatch(ctx, b, a, span.clone()) {
+        return err;
+    }
+    InferError::TypeMismatch { expected: a, got: b, span }
+}
+
+/// If `lit_side` resolves to an unresolved-literal TyVar and `ty_side` is
+/// concrete, build a literal-conformance error against `ty_side`.
+fn try_literal_mismatch(
+    ctx: &InferCtx<'_>,
+    lit_side: TyVar,
+    ty_side: TyVar,
+    span: Span,
+) -> Option<InferError> {
+    let lit_resolved = ctx.resolve(lit_side);
+    let literal = match &ctx.types[lit_resolved.0 as usize] {
+        TySlot::Unresolved { literal: Some(lit) } => *lit,
+        _ => return None,
+    };
+    if !ctx.is_concrete(ty_side) {
+        return None;
+    }
+    let feature = match literal {
+        LiteralKind::Integer => Builtin::ExpressibleByIntegerLiteral,
+        LiteralKind::Float => Builtin::ExpressibleByFloatLiteral,
+        LiteralKind::String => Builtin::ExpressibleByStringLiteral,
+        LiteralKind::Bool => Builtin::ExpressibleByBoolLiteral,
+        LiteralKind::Char => Builtin::ExpressibleByCharLiteral,
+        LiteralKind::Null => Builtin::ExpressibleByNullLiteral,
+        LiteralKind::Array => Builtin::ExpressibleByArrayLiteral,
+        LiteralKind::Dictionary => Builtin::ExpressibleByDictionaryLiteral,
+    };
+    Some(match ctx.resolver.builtin(feature) {
+        Some(protocol) => InferError::DoesNotConform { ty: ty_side, protocol, span },
+        None => InferError::LiteralNotAccepted { ty: ty_side, literal, span },
+    })
 }
 
 fn solve_coerce(
@@ -330,11 +396,15 @@ fn solve_coerce(
         }
     }
 
-    SolveResult::Error(InferError::TypeMismatch {
-        expected: to,
-        got: from,
-        span,
-    })
+    // Cascade suppression: if an earlier arg of the same call already
+    // reported a Coerce error, skip this one.
+    if ctx.errored_coerce_exprs.contains(&expr) {
+        return SolveResult::Solved;
+    }
+    let err = mismatch_error(ctx, to, from, span);
+    ctx.errored_coerce_exprs.insert(expr);
+    report_and_poison(ctx, err, from, to);
+    SolveResult::Solved
 }
 
 fn solve_conforms(
@@ -535,6 +605,7 @@ fn solve_call(
             SolveResult::Error(InferError::NoMember {
                 receiver: callee,
                 name: "(subscript)".to_string(),
+                is_call: true,
                 span,
             })
         }
@@ -606,6 +677,7 @@ fn solve_overloaded_call(
                 0 => SolveResult::Error(InferError::NoMember {
                     receiver: result,
                     name: overload_name,
+                    is_call: true,
                     span,
                 }),
                 1 => emit_resolved_call(ctx, compatible[0], &type_args, args, result, expr, span),
@@ -905,6 +977,7 @@ fn solve_member(
                     return SolveResult::Error(InferError::NoMember {
                         receiver,
                         name: name.to_string(),
+                        is_call,
                         span,
                     });
                 }
@@ -939,6 +1012,7 @@ fn solve_member(
                 return SolveResult::Error(InferError::NoMember {
                     receiver,
                     name: name.to_string(),
+                    is_call,
                     span,
                 });
             }
@@ -958,6 +1032,7 @@ fn solve_member(
             return SolveResult::Error(InferError::NoMember {
                 receiver,
                 name: name.to_string(),
+                is_call,
                 span,
             });
         }
@@ -965,6 +1040,7 @@ fn solve_member(
             return SolveResult::Error(InferError::NoMember {
                 receiver,
                 name: name.to_string(),
+                is_call,
                 span,
             });
         }
@@ -1373,7 +1449,16 @@ fn solve_implicit_pat(
             if let Some(hir_ty) = param_ty {
                 let payload_tv =
                     crate::generate::lower_hir_ty_with_subs(ctx, hir_ty, &subs);
-                ctx.equal(*arg_tv, payload_tv, span.clone());
+                // Solve inline, not via ctx.equal: the binding's TyVar must
+                // be resolved in this same round, before any Equal constraints
+                // from enclosing branches merge it with other TyVars.
+                match solve_equal(ctx, *arg_tv, payload_tv, span.clone()) {
+                    SolveResult::Solved => {}
+                    SolveResult::Deferred(c) => ctx.constraints.push(c),
+                    SolveResult::Error(err) => {
+                        ctx.report_error(err);
+                    }
+                }
             }
         }
     }

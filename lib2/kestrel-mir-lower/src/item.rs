@@ -55,8 +55,9 @@ fn lower_entity(ctx: &mut LowerCtx, entity: Entity) {
             // Lower methods defined in extensions
             lower_member_functions(ctx, entity);
         },
-        NodeKind::Function => {
-            // Top-level function (not inside a type)
+        NodeKind::Function | NodeKind::Setter => {
+            // Top-level function (not inside a type) or a setter accessor
+            // that reached lower_entity via its parent Field's children.
             lower_function_sig(ctx, entity);
         },
         NodeKind::Field => {
@@ -69,6 +70,9 @@ fn lower_entity(ctx: &mut LowerCtx, entity: Entity) {
             } else {
                 lower_static(ctx, entity);
             }
+            // A computed global may own a Setter child — recurse so it gets
+            // lowered as its own function.
+            lower_children(ctx, entity);
         },
         // Enum cases, type params, etc. are handled by their parent's lowering
         _ => {},
@@ -84,12 +88,22 @@ fn lower_member_functions(ctx: &mut LowerCtx, parent: Entity) {
             continue;
         };
         match kind {
-            NodeKind::Function | NodeKind::Initializer | NodeKind::Deinit | NodeKind::Subscript => {
+            NodeKind::Function
+            | NodeKind::Initializer
+            | NodeKind::Deinit
+            | NodeKind::Subscript
+            | NodeKind::Setter => {
                 lower_function_sig(ctx, child);
+                // Subscripts may own a Setter child — recurse to lower it.
+                if matches!(kind, NodeKind::Subscript) {
+                    lower_children(ctx, child);
+                }
             },
-            // Computed properties (fields with a getter body) are lowered as methods
+            // Computed properties (fields with a getter body) are lowered as methods.
+            // They may also own a Setter child — recurse to lower it.
             NodeKind::Field if ctx.world.get::<Callable>(child).is_some() => {
                 lower_function_sig(ctx, child);
+                lower_children(ctx, child);
             },
             // Static stored fields (e.g. `static var _s: Int64 = 5`) become
             // globals. Instance stored fields are handled by struct_lower.

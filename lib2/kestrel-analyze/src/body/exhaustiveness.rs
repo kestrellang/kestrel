@@ -1,50 +1,33 @@
 //! # Exhaustiveness Analyzer
 //!
-//! Checks that match expressions cover all possible values, detects
-//! unreachable arms, and warns about overlapping range patterns.
+//! The single analyzer for match correctness. Walks every `HirExpr::Match`
+//! and, based on its `MatchSource`, emits:
 //!
-//! Uses the pattern matrix algorithm (Maranget 2007) via the `pattern`
-//! module for full exhaustiveness, redundancy, and overlap checking.
+//! - **`UserMatch`**: full exhaustiveness / redundancy / overlap analysis
+//!   (`E303`–`E307`). Uses the pattern matrix algorithm (Maranget 2007).
+//! - **`IfLet`**: `E302` when the user pattern is irrefutable (the else
+//!   branch is dead code).
+//! - **`WhileLet`**: `E308` when the user pattern is irrefutable (loop
+//!   never terminates via a failed bind).
+//! - **`GuardLet`**: `E309` when the user pattern is irrefutable (the
+//!   `else { ... }` branch is dead code).
+//! - **`ForLoop` / `LetDestructure` / `TryOp` / `UnwrapOp`**: nothing —
+//!   these desugared shapes are always exhaustive by construction and
+//!   their irrefutability is checked by dedicated analyzers (e.g.
+//!   `for_loop_pattern`, `refutable_pattern`).
 //!
 //! ## Diagnostics
 //!
-//! ### E304 — `empty_match` (Error, Correctness)
-//!
-//! **Message:** "empty match on inhabited type"
-//!
-//! **Labels:**
-//! - Primary: the match expression
-//!   - Span source: `util::expr_span` on the match `HirExprId`
-//!   - Message: "match has no arms"
-//!
-//! ### E305 — `non_exhaustive_match` (Error, Correctness)
-//!
-//! **Message:** "non-exhaustive match: missing {witnesses}"
-//!
-//! **Labels:**
-//! - Primary: the match expression
-//!   - Span source: `util::expr_span` on the match `HirExprId`
-//!   - Message: "not all cases covered"
-//!
-//! **Notes:** "help: add a wildcard pattern '_' or cover the missing cases"
-//!
-//! ### E306 — `unreachable_pattern` (Warning, Correctness)
-//!
-//! **Message:** "unreachable pattern"
-//!
-//! **Labels:**
-//! - Primary: the unreachable pattern
-//!   - Span source: `util::pat_span` on the `HirPatId`
-//!   - Message: "this pattern is unreachable"
-//!
-//! ### E307 — `overlapping_range` (Warning, Correctness)
-//!
-//! **Message:** "overlapping range patterns"
-//!
-//! **Labels:**
-//! - Primary: the overlapping range pattern
-//!   - Span source: `util::pat_span` on the `HirPatId`
-//!   - Message: "this range overlaps with a previous pattern"
+//! | Code | Severity | Meaning |
+//! |------|----------|---------|
+//! | E302 | Warning  | irrefutable pattern in if-let condition |
+//! | E303 | Warning  | irrefutable pattern in match arm makes subsequent arms unreachable |
+//! | E304 | Error    | empty match on inhabited type |
+//! | E305 | Error    | non-exhaustive match: missing {witnesses} |
+//! | E306 | Warning  | unreachable pattern |
+//! | E307 | Warning  | overlapping range patterns |
+//! | E308 | Warning  | irrefutable pattern in while-let condition |
+//! | E309 | Warning  | irrefutable pattern in guard-let condition |
 
 use crate::context::BodyContext;
 use crate::diagnostic::*;
@@ -56,6 +39,18 @@ use kestrel_type_infer::result::ResolvedTy;
 use kestrel_pattern_matching as pattern;
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[
+    DiagnosticDescriptor {
+        id: "E302",
+        name: "irrefutable_if_let",
+        default_severity: Severity::Warning,
+        category: Category::Correctness,
+    },
+    DiagnosticDescriptor {
+        id: "E303",
+        name: "irrefutable_match_arm",
+        default_severity: Severity::Warning,
+        category: Category::Correctness,
+    },
     DiagnosticDescriptor {
         id: "E304",
         name: "empty_match",
@@ -80,7 +75,26 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
         default_severity: Severity::Warning,
         category: Category::Correctness,
     },
+    DiagnosticDescriptor {
+        id: "E308",
+        name: "irrefutable_while_let",
+        default_severity: Severity::Warning,
+        category: Category::Correctness,
+    },
+    DiagnosticDescriptor {
+        id: "E309",
+        name: "irrefutable_guard_let",
+        default_severity: Severity::Warning,
+        category: Category::Correctness,
+    },
 ];
+
+fn descriptor(id: &str) -> &'static DiagnosticDescriptor {
+    DESCRIPTORS
+        .iter()
+        .find(|d| d.id == id)
+        .expect("descriptor id must exist")
+}
 
 pub struct ExhaustivenessAnalyzer;
 
@@ -105,101 +119,189 @@ impl BodyCheck for ExhaustivenessAnalyzer {
                 continue;
             };
 
-            // Skip desugared matches (for-loop, let-destructure, try, unwrap,
-            // if-let, while-let, guard-let) — their arm sets are synthetic
-            // and always exhaustive by construction. The irrefutable-pattern
-            // diagnostics for if-let/while-let/guard-let are emitted below.
-            if source.is_desugared() {
-                // Only run the full exhaustiveness analysis for user matches.
-                // Desugared if-let / while-let / guard-let still get their own
-                // irrefutable-pattern warning (E302 / E308 / E309) handled elsewhere.
-                let _ = expr_id;
-                continue;
-            }
-
-            // Get scrutinee type from inference results
-            let Some(scrutinee_ty) = cx.typed.expr_types.get(scrutinee) else {
-                continue;
-            };
-
-            // E304: empty match on inhabited type
-            if arms.is_empty() {
-                let is_never = matches!(scrutinee_ty, ResolvedTy::Never);
-                if !is_never {
-                    diags.push(AnalyzeDiagnostic {
-                        descriptor_id: DESCRIPTORS[0].id,
-                        severity: DESCRIPTORS[0].default_severity,
-                        message: "empty match on inhabited type".into(),
-                        labels: vec![DiagLabel {
-                            span: util::expr_span(cx.hir, expr_id),
-                            message: "match has no arms".into(),
-                            is_primary: true,
-                        }],
-                        notes: vec![],
-                    });
+            match source {
+                MatchSource::UserMatch => {
+                    check_user_match(cx, expr_id, *scrutinee, arms, &mut diags);
                 }
-                continue;
-            }
-
-            // Run full exhaustiveness analysis via pattern module
-            let result = pattern::check_match(cx.hir, cx.query, scrutinee_ty, arms);
-
-            // E305: non-exhaustive match
-            if !result.is_exhaustive {
-                let witnesses: Vec<String> =
-                    result.missing_patterns.iter().map(|w| w.to_string()).collect();
-                let witness_str = witnesses.join(", ");
-
-                diags.push(AnalyzeDiagnostic {
-                    descriptor_id: DESCRIPTORS[1].id,
-                    severity: DESCRIPTORS[1].default_severity,
-                    message: format!("non-exhaustive match: missing {}", witness_str),
-                    labels: vec![DiagLabel {
-                        span: util::expr_span(cx.hir, expr_id),
-                        message: "not all cases covered".into(),
-                        is_primary: true,
-                    }],
-                    notes: vec![
-                        "help: add a wildcard pattern '_' or cover the missing cases".into(),
-                    ],
-                });
-            }
-
-            // E306: unreachable patterns
-            for &arm_idx in &result.redundant_arms {
-                if let Some(arm) = arms.get(arm_idx) {
-                    diags.push(AnalyzeDiagnostic {
-                        descriptor_id: DESCRIPTORS[2].id,
-                        severity: DESCRIPTORS[2].default_severity,
-                        message: "unreachable pattern".into(),
-                        labels: vec![DiagLabel {
-                            span: util::pat_span(cx.hir, arm.pattern),
-                            message: "this pattern is unreachable".into(),
-                            is_primary: true,
-                        }],
-                        notes: vec![],
-                    });
+                MatchSource::IfLet => {
+                    check_irrefutable_let(cx, *scrutinee, arms, "E302", &mut diags);
                 }
-            }
-
-            // E307: overlapping ranges
-            for &arm_idx in &result.overlapping_arms {
-                if let Some(arm) = arms.get(arm_idx) {
-                    diags.push(AnalyzeDiagnostic {
-                        descriptor_id: DESCRIPTORS[3].id,
-                        severity: DESCRIPTORS[3].default_severity,
-                        message: "overlapping range patterns".into(),
-                        labels: vec![DiagLabel {
-                            span: util::pat_span(cx.hir, arm.pattern),
-                            message: "this range overlaps with a previous pattern".into(),
-                            is_primary: true,
-                        }],
-                        notes: vec![],
-                    });
+                MatchSource::WhileLet => {
+                    check_irrefutable_let(cx, *scrutinee, arms, "E308", &mut diags);
                 }
+                MatchSource::GuardLet => {
+                    check_irrefutable_let(cx, *scrutinee, arms, "E309", &mut diags);
+                }
+                // Desugared matches whose arm shape is synthetic and always
+                // exhaustive by construction. Dedicated analyzers handle
+                // refutability concerns (for_loop_pattern, refutable_pattern).
+                MatchSource::ForLoop
+                | MatchSource::LetDestructure
+                | MatchSource::TryOp
+                | MatchSource::UnwrapOp => {}
             }
         }
 
         diags
     }
+}
+
+/// Full analysis for a user-written `match`: empty-match, non-exhaustive,
+/// redundant arms, irrefutable non-last arms, overlapping ranges.
+fn check_user_match(
+    cx: &BodyContext<'_>,
+    expr_id: HirExprId,
+    scrutinee: HirExprId,
+    arms: &[HirMatchArm],
+    diags: &mut Vec<AnalyzeDiagnostic>,
+) {
+    let Some(scrutinee_ty) = cx.typed.expr_types.get(&scrutinee) else {
+        return;
+    };
+
+    // E304: empty match on inhabited type.
+    if arms.is_empty() {
+        if !matches!(scrutinee_ty, ResolvedTy::Never) {
+            let d = descriptor("E304");
+            diags.push(AnalyzeDiagnostic {
+                descriptor_id: d.id,
+                severity: d.default_severity,
+                message: "empty match on inhabited type".into(),
+                labels: vec![DiagLabel {
+                    span: util::expr_span(cx.hir, expr_id),
+                    message: "match has no arms".into(),
+                    is_primary: true,
+                }],
+                notes: vec![],
+            });
+        }
+        return;
+    }
+
+    let result = pattern::check_match(cx.hir, cx.query, scrutinee_ty, arms);
+
+    // E305: non-exhaustive match.
+    if !result.is_exhaustive {
+        let witnesses: Vec<String> =
+            result.missing_patterns.iter().map(|w| w.to_string()).collect();
+        let d = descriptor("E305");
+        diags.push(AnalyzeDiagnostic {
+            descriptor_id: d.id,
+            severity: d.default_severity,
+            message: format!("non-exhaustive match: missing {}", witnesses.join(", ")),
+            labels: vec![DiagLabel {
+                span: util::expr_span(cx.hir, expr_id),
+                message: "not all cases covered".into(),
+                is_primary: true,
+            }],
+            notes: vec!["help: add a wildcard pattern '_' or cover the missing cases".into()],
+        });
+    }
+
+    // E307: overlapping ranges (partial overlap with a prior range).
+    for &arm_idx in &result.overlapping_arms {
+        if let Some(arm) = arms.get(arm_idx) {
+            let d = descriptor("E307");
+            diags.push(AnalyzeDiagnostic {
+                descriptor_id: d.id,
+                severity: d.default_severity,
+                message: "overlapping range patterns".into(),
+                labels: vec![DiagLabel {
+                    span: util::pat_span(cx.hir, arm.pattern),
+                    message: "this range overlaps with a previous pattern".into(),
+                    is_primary: true,
+                }],
+                notes: vec![],
+            });
+        }
+    }
+
+    // E303 vs E306: an arm is redundant either because a PRIOR arm was
+    // irrefutable (the "cause") or because its individual coverage was
+    // subsumed (the "effect"). Both facts describe the same unreachable
+    // code — we emit at most one diagnostic per arm, preferring E306
+    // (labels the unreachable code itself, which is what the user needs
+    // to fix). E303 is reserved for the degenerate case where no E306
+    // would fire but an arm is still irrefutable — vanishingly rare in
+    // practice and currently unreached.
+    //
+    // Overlap-flagged arms are partial overlaps (not fully covered), so
+    // they shouldn't also be in redundant_arms, but we filter defensively.
+    for &arm_idx in &result.redundant_arms {
+        if result.overlapping_arms.contains(&arm_idx) {
+            continue;
+        }
+        if let Some(arm) = arms.get(arm_idx) {
+            let d = descriptor("E306");
+            diags.push(AnalyzeDiagnostic {
+                descriptor_id: d.id,
+                severity: d.default_severity,
+                message: "unreachable pattern".into(),
+                labels: vec![DiagLabel {
+                    span: util::pat_span(cx.hir, arm.pattern),
+                    message: "this pattern is unreachable".into(),
+                    is_primary: true,
+                }],
+                notes: vec![],
+            });
+        }
+    }
+}
+
+/// Desugared `if let` / `while let` / `guard let` all produce the same
+/// 2-arm match shape: `{ user_pattern => true, _ => false }`. If the user's
+/// pattern is irrefutable for the scrutinee type, the second arm is dead
+/// and we emit the source-specific warning.
+fn check_irrefutable_let(
+    cx: &BodyContext<'_>,
+    scrutinee: HirExprId,
+    arms: &[HirMatchArm],
+    code: &'static str,
+    diags: &mut Vec<AnalyzeDiagnostic>,
+) {
+    let Some(user_arm) = arms.first() else {
+        return;
+    };
+    if user_arm.guard.is_some() {
+        return;
+    }
+    let Some(scrutinee_ty) = cx.typed.expr_types.get(&scrutinee) else {
+        return;
+    };
+    let is_irrefutable = kestrel_pattern_matching::is_irrefutable(
+        cx.hir,
+        cx.query,
+        user_arm.pattern,
+        scrutinee_ty,
+    );
+    if !is_irrefutable {
+        return;
+    }
+    let d = descriptor(code);
+    let (message, note) = match code {
+        "E302" => (
+            "irrefutable pattern in if-let condition",
+            "help: use a plain 'let' binding instead",
+        ),
+        "E308" => (
+            "irrefutable pattern in while-let condition",
+            "help: use a plain 'while' with a 'let' binding inside instead",
+        ),
+        "E309" => (
+            "irrefutable pattern in guard-let condition",
+            "help: use a plain 'let' binding — the else branch is dead code",
+        ),
+        _ => unreachable!("check_irrefutable_let called with unknown code {}", code),
+    };
+    diags.push(AnalyzeDiagnostic {
+        descriptor_id: d.id,
+        severity: d.default_severity,
+        message: message.into(),
+        labels: vec![DiagLabel {
+            span: util::pat_span(cx.hir, user_arm.pattern),
+            message: "this pattern always matches".into(),
+            is_primary: true,
+        }],
+        notes: vec![note.into()],
+    });
 }

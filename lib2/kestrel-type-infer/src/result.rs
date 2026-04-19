@@ -11,7 +11,7 @@ use kestrel_hir::res::LocalId;
 
 use crate::ctx::InferCtx;
 use crate::error::InferError;
-use crate::ty::{TyKind, TySlot, TyVar};
+use crate::ty::{LiteralKind, TyKind, TySlot, TyVar};
 
 /// Result of type inference for a single body.
 #[derive(Clone, Debug)]
@@ -170,8 +170,6 @@ pub fn build_result(ctx: &InferCtx<'_>) -> TypedBody {
         })
         .collect();
 
-    let error_details = ctx.errors.iter().map(|err| describe_error(ctx, err)).collect();
-
     TypedBody {
         expr_types,
         local_types,
@@ -179,7 +177,7 @@ pub fn build_result(ctx: &InferCtx<'_>) -> TypedBody {
         promotions,
         type_args,
         errors: ctx.errors.clone(),
-        error_details,
+        error_details: ctx.error_details.clone(),
     }
 }
 
@@ -188,8 +186,23 @@ fn describe_tyvar(ctx: &InferCtx<'_>, tv: TyVar) -> String {
     let resolved = ctx.resolve(tv);
     match &ctx.types[resolved.0 as usize] {
         TySlot::Resolved(kind) => describe_tykind(ctx, kind),
-        TySlot::Unresolved { .. } => "?".into(),
+        TySlot::Unresolved { literal: Some(lit) } => literal_kind_name(*lit).into(),
+        TySlot::Unresolved { literal: None } => "?".into(),
         TySlot::Redirect(_) => "?redirect".into(),
+    }
+}
+
+/// Human-readable name for a literal kind (used when the TyVar never got a concrete type).
+fn literal_kind_name(lit: LiteralKind) -> &'static str {
+    match lit {
+        LiteralKind::Integer => "integer literal",
+        LiteralKind::Float => "float literal",
+        LiteralKind::String => "string literal",
+        LiteralKind::Bool => "bool literal",
+        LiteralKind::Char => "char literal",
+        LiteralKind::Null => "null literal",
+        LiteralKind::Array => "array literal",
+        LiteralKind::Dictionary => "dictionary literal",
     }
 }
 
@@ -238,7 +251,11 @@ fn describe_tykind(ctx: &InferCtx<'_>, kind: &TyKind) -> String {
 }
 
 /// Build a human-readable error description with resolved types.
-fn describe_error(ctx: &InferCtx<'_>, err: &InferError) -> String {
+///
+/// Callers must invoke this *at error-report time*, before cascade-suppression
+/// poisoning rewrites any of the referenced TyVars to `TyKind::Error`. See
+/// `InferCtx::report_error` for the standard entry point.
+pub(crate) fn describe_error(ctx: &InferCtx<'_>, err: &InferError) -> String {
     match err {
         InferError::TypeMismatch { expected, got, .. } => {
             format!("expected {} got {}", describe_tyvar(ctx, *expected), describe_tyvar(ctx, *got))
@@ -251,8 +268,14 @@ fn describe_error(ctx: &InferCtx<'_>, err: &InferError) -> String {
                 .unwrap_or_else(|| format!("{:?}", protocol));
             format!("{} !: {}", ty_name, proto_name)
         }
-        InferError::NoMember { receiver, name, .. } => {
-            format!("{}.{} not found", describe_tyvar(ctx, *receiver), name)
+        InferError::NoMember { receiver, name, is_call, .. } => {
+            // Wording mirrors lib1: delegating-init misses say "no method
+            // 'init' on type 'T'", while all other member misses (regular
+            // method calls, field/property access) say "no member 'X' on
+            // type 'T'". The init wording is special-cased because lib1's
+            // `resolve_delegating_init` path produced its own diagnostic.
+            let kind = if *is_call && name == "init" { "method" } else { "member" };
+            format!("no {} '{}' on type '{}'", kind, name, describe_tyvar(ctx, *receiver))
         }
         InferError::AmbiguousMember { receiver, name, .. } => {
             format!("{}.{} ambiguous", describe_tyvar(ctx, *receiver), name)
@@ -294,6 +317,9 @@ fn describe_error(ctx: &InferCtx<'_>, err: &InferError) -> String {
         }
         InferError::ItWrongArity { expected, .. } => {
             format!("implicit 'it' parameter used in {}-parameter context", expected)
+        }
+        InferError::LiteralNotAccepted { ty, literal, .. } => {
+            format!("type '{}' does not accept {}", describe_tyvar(ctx, *ty), literal_kind_name(*literal))
         }
     }
 }

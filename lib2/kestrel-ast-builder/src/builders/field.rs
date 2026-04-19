@@ -101,8 +101,45 @@ pub fn build_field(
             world.set(entity, Valued(body));
             world.set(entity, Callable {
                 params: Vec::new(),
-                receiver,
+                receiver: receiver.clone(),
             });
+        }
+
+        // Setter accessor: spawn a child entity with its own Callable + Body.
+        // `newValue` is an implicit parameter typed as the field's type.
+        // Instance setters are Mutating (they write self's backing storage);
+        // static/global setters have no receiver.
+        if has_setter {
+            if let Some(setter_clause) = find_child(&accessors, SyntaxKind::SetterClause) {
+                if let Some(setter_body) = find_child(&setter_clause, SyntaxKind::CodeBlock) {
+                    let new_value_ty = world.get::<TypeAnnotation>(entity).map(|t| t.0.clone());
+                    let setter_receiver = if is_static_field || !parent_is_type {
+                        None
+                    } else {
+                        Some(ReceiverKind::Mutating)
+                    };
+                    let params = vec![AstParam {
+                        label: None,
+                        name: "newValue".into(),
+                        ty: new_value_ty,
+                        default_entity: None,
+                        pattern: None,
+                        is_mut: false,
+                        is_consuming: false,
+                    }];
+                    spawn_setter(
+                        world,
+                        entity,
+                        &setter_clause,
+                        &setter_body,
+                        params,
+                        setter_receiver,
+                        file_entity,
+                        file_id,
+                        is_static_field,
+                    );
+                }
+            }
         }
     } else {
         // Stored property: always Gettable

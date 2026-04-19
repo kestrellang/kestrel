@@ -103,8 +103,14 @@ pub fn check_match(
     let mut redundant_arms = Vec::new();
     let mut overlapping_arms = Vec::new();
 
-    // Track previous ranges for overlap detection
-    let mut previous_ranges: Vec<(usize, i64, i64)> = Vec::new();
+    // Track prior range intervals for overlap / union-coverage detection.
+    // The usefulness algorithm's `specialize` treats any overlap between two
+    // ranges as full coverage, which misclassifies partial overlaps as
+    // redundant. We fix that here: a range arm is redundant iff its interval
+    // is fully covered by the union of prior intervals, and overlapping iff
+    // it shares some values with a prior interval but owns some new ones.
+    let mut prior_int_ranges: Vec<(usize, i64, i64)> = Vec::new();
+    let mut prior_char_ranges: Vec<(usize, u32, u32)> = Vec::new();
 
     for (i, (flat_pat, arm)) in flat_pats.iter().zip(arms.iter()).enumerate() {
         let has_guard = arm.guard.is_some();
@@ -112,21 +118,43 @@ pub fn check_match(
         // Check usefulness against prior patterns
         let query_row = PatternRow::new(vec![flat_pat.clone()], i, has_guard);
         let usefulness = is_useful(&matrix, &query_row, query);
+        let mut is_redundant = !usefulness.is_useful && !has_guard;
 
-        // Check for overlapping integer ranges
-        if let Some((start, end)) = extract_int_range(flat_pat) {
-            let has_overlap = previous_ranges.iter().any(|&(_, ps, pe)| {
-                start <= pe && ps <= end
-            });
-            if has_overlap && !has_guard {
-                overlapping_arms.push(i);
-            }
-            if !has_guard {
-                previous_ranges.push((i, start, end));
+        // Range arms: apply union-coverage check to correct the bug in
+        // `specialize` where overlapping ranges look fully covered.
+        // Empty ranges (start > end, e.g. `10..=0`) are left for a separate
+        // bounds-validation pass and skipped here.
+        if !has_guard {
+            if let Some((s, e)) = extract_int_range(flat_pat) {
+                if s <= e {
+                    let has_overlap =
+                        prior_int_ranges.iter().any(|&(_, ps, pe)| s <= pe && ps <= e);
+                    let covered = range_covered_by_union_i64(s, e, &prior_int_ranges);
+                    if covered {
+                        is_redundant = true;
+                    } else if has_overlap {
+                        is_redundant = false;
+                        overlapping_arms.push(i);
+                    }
+                    prior_int_ranges.push((i, s, e));
+                }
+            } else if let Some((s, e)) = extract_char_range(flat_pat) {
+                if s <= e {
+                    let has_overlap =
+                        prior_char_ranges.iter().any(|&(_, ps, pe)| s <= pe && ps <= e);
+                    let covered = range_covered_by_union_u32(s, e, &prior_char_ranges);
+                    if covered {
+                        is_redundant = true;
+                    } else if has_overlap {
+                        is_redundant = false;
+                        overlapping_arms.push(i);
+                    }
+                    prior_char_ranges.push((i, s, e));
+                }
             }
         }
 
-        if !usefulness.is_useful && !has_guard {
+        if is_redundant {
             redundant_arms.push(i);
         }
 
@@ -372,16 +400,15 @@ fn expand_or_pattern(pat: &FlatPat) -> Vec<FlatPat> {
 }
 
 /// Extract integer range bounds from a FlatPat, if it is a bounded int range.
+/// `None` bounds are widened to `i64::MIN`/`MAX` so open ranges can participate
+/// in union-coverage checks.
 fn extract_int_range(pat: &FlatPat) -> Option<(i64, i64)> {
     if let FlatPat::Ctor {
-        ctor: Constructor::IntRange {
-            start: Some(s),
-            end: Some(e),
-        },
+        ctor: Constructor::IntRange { start, end },
         ..
     } = pat
     {
-        Some((*s, *e))
+        Some((start.unwrap_or(i64::MIN), end.unwrap_or(i64::MAX)))
     } else if let FlatPat::Ctor {
         ctor: Constructor::IntLiteral(v),
         ..
@@ -391,4 +418,69 @@ fn extract_int_range(pat: &FlatPat) -> Option<(i64, i64)> {
     } else {
         None
     }
+}
+
+/// Extract char range bounds (as u32 codepoints) for union-coverage checks.
+fn extract_char_range(pat: &FlatPat) -> Option<(u32, u32)> {
+    if let FlatPat::Ctor {
+        ctor: Constructor::CharRange { start, end },
+        ..
+    } = pat
+    {
+        Some((
+            start.map(|c| c as u32).unwrap_or(0),
+            end.map(|c| c as u32).unwrap_or(char::MAX as u32),
+        ))
+    } else if let FlatPat::Ctor {
+        ctor: Constructor::CharLiteral(c),
+        ..
+    } = pat
+    {
+        Some((*c as u32, *c as u32))
+    } else {
+        None
+    }
+}
+
+/// True if `[qs, qe]` is fully covered by the union of `prior` intervals.
+/// Sorts `prior` by start, walks, and checks there are no gaps in `[qs, qe]`.
+fn range_covered_by_union_i64(qs: i64, qe: i64, prior: &[(usize, i64, i64)]) -> bool {
+    let mut intervals: Vec<(i64, i64)> = prior.iter().map(|&(_, s, e)| (s, e)).collect();
+    intervals.sort_by_key(|&(s, _)| s);
+    let mut cursor = qs;
+    for (s, e) in intervals {
+        if cursor > qe {
+            return true;
+        }
+        if s > cursor {
+            return false; // gap
+        }
+        if e == i64::MAX {
+            cursor = i64::MAX;
+        } else if e + 1 > cursor {
+            cursor = e + 1;
+        }
+    }
+    cursor > qe
+}
+
+/// Same as `range_covered_by_union_i64` but for char codepoints (u32).
+fn range_covered_by_union_u32(qs: u32, qe: u32, prior: &[(usize, u32, u32)]) -> bool {
+    let mut intervals: Vec<(u32, u32)> = prior.iter().map(|&(_, s, e)| (s, e)).collect();
+    intervals.sort_by_key(|&(s, _)| s);
+    let mut cursor = qs;
+    for (s, e) in intervals {
+        if cursor > qe {
+            return true;
+        }
+        if s > cursor {
+            return false;
+        }
+        if e == u32::MAX {
+            cursor = u32::MAX;
+        } else if e + 1 > cursor {
+            cursor = e + 1;
+        }
+    }
+    cursor > qe
 }

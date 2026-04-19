@@ -32,6 +32,16 @@ pub struct InferCtx<'a> {
     /// Accumulated errors (each produces an Error TyVar).
     pub(crate) errors: Vec<InferError>,
 
+    /// Error description strings, computed at report-time before any
+    /// cascade-suppression poisoning alters the referenced TyVars.
+    /// Parallel to `errors`.
+    pub(crate) error_details: Vec<String>,
+
+    /// HirExprIds that have had a Coerce-derived error reported. Used to
+    /// suppress duplicate errors on subsequent args of the same call (e.g.
+    /// `Point(x: "a", y: "b")` — emit once, not per field).
+    pub(crate) errored_coerce_exprs: HashSet<HirExprId>,
+
     // === Results (populated during solving) ===
     /// Resolved entity for MethodCall/Field expressions.
     pub(crate) resolutions: HashMap<HirExprId, Entity>,
@@ -104,6 +114,8 @@ impl<'a> InferCtx<'a> {
             types,
             constraints: Vec::new(),
             errors: Vec::new(),
+            error_details: Vec::new(),
+            errored_coerce_exprs: HashSet::new(),
             resolutions: HashMap::new(),
             promotions: HashMap::new(),
             type_args: HashMap::new(),
@@ -190,8 +202,14 @@ impl<'a> InferCtx<'a> {
 
     /// Report an error and return an Error TyVar.
     /// Guarantees every Error TyVar has a corresponding diagnostic.
+    ///
+    /// The error's description is computed immediately so it reflects TyVar
+    /// state *before* any cascade-suppression poisoning rewrites the
+    /// referenced TyVars to `TyKind::Error`.
     pub fn report_error(&mut self, err: InferError) -> TyVar {
+        let detail = crate::result::describe_error(self, &err);
         self.errors.push(err);
+        self.error_details.push(detail);
         let idx = self.types.len() as u32;
         self.types.push(TySlot::Resolved(TyKind::Error));
         TyVar(idx)
@@ -221,6 +239,13 @@ impl<'a> InferCtx<'a> {
     /// Check if a TyVar is resolved to Error.
     pub fn is_error(&self, tv: TyVar) -> bool {
         matches!(self.slot(tv), TySlot::Resolved(TyKind::Error))
+    }
+
+    /// Overwrite `tv`'s resolved root with `TyKind::Error` so downstream
+    /// constraints referencing it absorb silently (cascade suppression).
+    pub fn poison(&mut self, tv: TyVar) {
+        let root = self.resolve(tv);
+        self.types[root.0 as usize] = TySlot::Resolved(TyKind::Error);
     }
 
     // ===== Constraint emission =====

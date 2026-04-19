@@ -61,7 +61,8 @@ pub fn build_subscript(
     // Check for getter/setter in SubscriptBody > PropertyAccessors
     if let Some(body) = find_child(node, SyntaxKind::SubscriptBody) {
         if let Some(acc) = find_child(&body, SyntaxKind::PropertyAccessors) {
-            if find_child(&acc, SyntaxKind::SetterClause).is_some() {
+            let has_setter = find_child(&acc, SyntaxKind::SetterClause).is_some();
+            if has_setter {
                 world.set(entity, Settable);
             }
             // Lower getter body if present
@@ -69,6 +70,45 @@ pub fn build_subscript(
                 if let Some(code_block) = find_child(&getter, SyntaxKind::CodeBlock) {
                     world.set(entity, Body(lower::lower_body(&code_block, file_id)));
                     world.set(entity, Valued(code_block));
+                }
+            }
+            // Setter accessor: spawn a child entity whose Callable is
+            // `[index_params..., newValue]`. Receiver upgraded to Mutating
+            // (setters mutate self's backing storage); None for static.
+            if has_setter {
+                if let Some(setter_clause) = find_child(&acc, SyntaxKind::SetterClause) {
+                    if let Some(setter_body) = find_child(&setter_clause, SyntaxKind::CodeBlock) {
+                        let new_value_ty = world.get::<TypeAnnotation>(entity).map(|t| t.0.clone());
+                        let mut setter_params = world
+                            .get::<Callable>(entity)
+                            .map(|c| c.params.clone())
+                            .unwrap_or_default();
+                        setter_params.push(AstParam {
+                            label: None,
+                            name: "newValue".into(),
+                            ty: new_value_ty,
+                            default_entity: None,
+                            pattern: None,
+                            is_mut: false,
+                            is_consuming: false,
+                        });
+                        let setter_receiver = if is_static || !parent_is_type {
+                            None
+                        } else {
+                            Some(ReceiverKind::Mutating)
+                        };
+                        spawn_setter(
+                            world,
+                            entity,
+                            &setter_clause,
+                            &setter_body,
+                            setter_params,
+                            setter_receiver,
+                            file_entity,
+                            file_id,
+                            is_static,
+                        );
+                    }
                 }
             }
         } else if let Some(code_block) = find_child(&body, SyntaxKind::CodeBlock) {

@@ -18,5 +18,4 @@ pub mod access_mode;
 // Wave 6: Pattern checks
 pub mod refutable_pattern;
 pub mod for_loop_pattern;
-pub mod irrefutable_pattern;
 pub mod exhaustiveness;
