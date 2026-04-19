@@ -60,6 +60,7 @@ fn check_block(
     diags: &mut Vec<AnalyzeDiagnostic>,
 ) {
     let mut diverged = false;
+    let mut reported_in_block = false;
 
     for (i, &stmt_id) in stmts.iter().enumerate() {
         if diverged {
@@ -74,6 +75,7 @@ fn check_block(
                 }],
                 notes: vec![],
             });
+            reported_in_block = true;
             // Only report the first unreachable statement in a block
             break;
         }
@@ -92,17 +94,22 @@ fn check_block(
     // Check tail expression for inner dead code
     if let Some(tail) = tail {
         if diverged {
-            diags.push(AnalyzeDiagnostic {
-                descriptor_id: DESCRIPTORS[0].id,
-                severity: DESCRIPTORS[0].default_severity,
-                message: "unreachable code".into(),
-                labels: vec![DiagLabel {
-                    span: util::expr_span(hir, tail),
-                    message: "this code will never execute".into(),
-                    is_primary: true,
-                }],
-                notes: vec![],
-            });
+            // Suppress the tail warning if we already reported an unreachable
+            // statement in this block — the whole trailing chain is dead; one
+            // warning per block is enough.
+            if !reported_in_block {
+                diags.push(AnalyzeDiagnostic {
+                    descriptor_id: DESCRIPTORS[0].id,
+                    severity: DESCRIPTORS[0].default_severity,
+                    message: "unreachable code".into(),
+                    labels: vec![DiagLabel {
+                        span: util::expr_span(hir, tail),
+                        message: "this code will never execute".into(),
+                        is_primary: true,
+                    }],
+                    notes: vec![],
+                });
+            }
         } else {
             check_expr_inner(hir, tail, in_loop, diags);
         }
@@ -170,14 +177,19 @@ fn expr_diverges(hir: &HirBody, id: HirExprId, in_loop: bool) -> bool {
         }
 
         HirExpr::Loop { body, .. } => {
-            // If the loop body always returns (via `return`, not `break`),
-            // then the loop itself diverges — control never reaches code after it.
+            // A loop that can exit via `break` does NOT diverge — even if another
+            // path inside the body returns. This matches lib1 and also handles
+            // desugared `while cond { ... }` whose loop body contains an implicit
+            // break (from the condition check).
+            if block_contains_break(hir, body) {
+                return false;
+            }
+            // No break: if the body always returns, the loop diverges by returning.
             if block_always_returns(hir, body) {
                 return true;
             }
-            // If the loop has no break, it's an infinite loop — diverges.
-            // If it has a break, control can exit the loop normally.
-            !block_contains_break(hir, body)
+            // Otherwise it's an infinite loop — also diverges.
+            true
         }
 
         HirExpr::If {
