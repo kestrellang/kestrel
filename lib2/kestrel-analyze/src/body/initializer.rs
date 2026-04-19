@@ -357,11 +357,26 @@ fn analyze_expr(
         HirExpr::Assign { target, value, .. } => {
             state = analyze_expr(cx, *value, state, false, vctx);
 
-            // Check if assigning to self.field
-            if let HirExpr::Field { base, name, .. } = &cx.hir.exprs[*target] {
-                if is_self_local(cx, *base) && vctx.all_fields.contains(name) {
+            // Target may be `self.x` (Field) or bare `x` resolved via name lookup
+            // (Def pointing at a field of the enclosing struct). Both initialize
+            // the field.
+            let assigned_field = match &cx.hir.exprs[*target] {
+                HirExpr::Field { base, name, .. } if is_self_local(cx, *base) => {
+                    Some(name.clone())
+                }
+                HirExpr::Def(entity, _, _)
+                    if cx.query.get::<NodeKind>(*entity) == Some(&NodeKind::Field)
+                        && cx.query.parent_of(*entity) == cx.query.parent_of(cx.entity) =>
+                {
+                    Some(util::entity_name(cx.query, *entity))
+                }
+                _ => None,
+            };
+
+            if let Some(name) = assigned_field {
+                if vctx.all_fields.contains(&name) {
                     // Check double-assign to let field
-                    if vctx.let_fields.contains(name) && state.let_assigned.contains(name) {
+                    if vctx.let_fields.contains(&name) && state.let_assigned.contains(&name) {
                         vctx.diags.push(AnalyzeDiagnostic {
                             descriptor_id: DESCRIPTORS[1].id,
                             severity: DESCRIPTORS[1].default_severity,
@@ -378,8 +393,8 @@ fn analyze_expr(
                         });
                     }
                     state.assigned.insert(name.clone());
-                    if vctx.let_fields.contains(name) {
-                        state.let_assigned.insert(name.clone());
+                    if vctx.let_fields.contains(&name) {
+                        state.let_assigned.insert(name);
                     }
                 }
             }

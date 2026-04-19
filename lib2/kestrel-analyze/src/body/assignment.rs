@@ -216,6 +216,14 @@ fn check_target(
                 .get::<NodeKind>(*entity)
                 .is_some_and(|k| *k == NodeKind::Field);
             if is_field {
+                // Inside an initializer, bare `x = ...` resolves to a Def pointing
+                // at a field of the enclosing struct — this is field initialization
+                // and is always allowed regardless of the field's Settable marker.
+                if is_initializer
+                    && cx.query.parent_of(*entity) == cx.query.parent_of(cx.entity)
+                {
+                    return;
+                }
                 let is_settable = cx.query.get::<Settable>(*entity).is_some();
                 if !is_settable {
                     let name = util::entity_name(cx.query, *entity);
