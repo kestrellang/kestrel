@@ -472,18 +472,21 @@ impl<'a> VerifyCtx<'a> {
             }
             TerminatorKind::Switch { discriminant, cases } => {
                 self.verify_place(func, bi, discriminant, body);
-                for (variant_name, target) in cases {
+                for (case, target) in cases {
                     self.verify_block_id(func, bi, *target, body);
-                    // Check for display_name leak
-                    if variant_name.contains('(') || variant_name.contains(')') {
-                        self.err(
-                            func,
-                            Some(bi),
-                            format!(
-                                "switch: case name '{}' contains parens (likely display_name leak)",
-                                variant_name
-                            ),
-                        );
+                    // Guard against display_name leakage on enum variants —
+                    // case_by_name keys on short names, not display form.
+                    if let crate::SwitchCase::Variant(name) = case {
+                        if name.contains('(') || name.contains(')') {
+                            self.err(
+                                func,
+                                Some(bi),
+                                format!(
+                                    "switch: case name '{}' contains parens (likely display_name leak)",
+                                    name
+                                ),
+                            );
+                        }
                     }
                 }
             }

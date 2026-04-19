@@ -11,11 +11,11 @@ Compiler rejects valid code, produces spurious diagnostics, emits wrong code, or
 
 ## Range matchable — false non-exhaustive-match on total range patterns
 
-- [ ] `patterns/range_matchable/range_from.ks` — **got:** `non-exhaustive match: missing _ [E305]`
-- [ ] `patterns/range_matchable/char_range_from.ks` — **got:** `non-exhaustive match: missing _ [E305]`
-- [ ] `patterns/range_matchable/char_range_exclusive.ks` — **got:** `Expected exit code 0, got 1` (compiler OK, runtime fail)
-- [ ] `patterns/range_matchable/char_range_inclusive.ks` — **got:** `Expected exit code 0, got 1`
-- [ ] `expressions/match/never_type/match_arm_with_break_in_loop.ks` — **got:** `non-exhaustive match: missing _ [E305]` (break→Never arm not counted as covering)
+- [x] `patterns/range_matchable/range_from.ks` — **got:** `non-exhaustive match: missing _ [E305]`
+- [x] `patterns/range_matchable/char_range_from.ks` — **got:** `non-exhaustive match: missing _ [E305]`
+- [x] `patterns/range_matchable/char_range_exclusive.ks` — **got:** `Expected exit code 0, got 1` (compiler OK, runtime fail)
+- [x] `patterns/range_matchable/char_range_inclusive.ks` — **got:** `Expected exit code 0, got 1`
+- [x] `expressions/match/never_type/match_arm_with_break_in_loop.ks` — **got:** `non-exhaustive match: missing _ [E305]` (break→Never arm not counted as covering)
 
 ## `type Alias = X` init-call and assoc-type projection regressions
 
@@ -28,8 +28,8 @@ Compiler rejects valid code, produces spurious diagnostics, emits wrong code, or
 
 E419 requires Copyable to be a marker protocol (no methods/types), but these tests declare it with methods/assoc types *expecting* the check — and E419 now fires unconditionally before the specific wording test expects.
 
-- [ ] `builtins/protocols/copyable_on_protocol_with_associated_type.ks` — **got:** E419 `@builtin(.Copyable) must be a marker protocol`
-- [ ] `builtins/protocols/copyable_on_protocol_with_method.ks` — **got:** E419 `@builtin(.Copyable) must be a marker protocol`
+- [x] `builtins/protocols/copyable_on_protocol_with_associated_type.ks` — **got:** E419 `@builtin(.Copyable) must be a marker protocol`
+- [x] `builtins/protocols/copyable_on_protocol_with_method.ks` — **got:** E419 `@builtin(.Copyable) must be a marker protocol`
 
 ## Extension type-parameter not in where-clause scope
 

@@ -31,7 +31,7 @@ pub enum TerminatorKind {
     /// `switch <discriminant> { Case => bb, ... }`
     Switch {
         discriminant: Place,
-        cases: Vec<(String, BlockId)>,
+        cases: Vec<(SwitchCase, BlockId)>,
     },
 
     /// `panic "message"`
@@ -39,6 +39,80 @@ pub enum TerminatorKind {
 
     /// `unreachable` — control flow should never reach here
     Unreachable,
+}
+
+/// A single arm of a `switch` terminator.
+///
+/// Replaces the earlier `String`-keyed scheme so codegen can test ranges
+/// and literal values without parsing case names.
+#[derive(Debug, Clone)]
+pub enum SwitchCase {
+    /// Default / wildcard arm — always matches. Emitted as an unconditional
+    /// jump at codegen.
+    Wildcard,
+    /// Enum variant, resolved by name against the enum definition.
+    Variant(String),
+    /// Boolean constant (True/False).
+    Bool(bool),
+    /// Exact integer literal.
+    IntLiteral(i64),
+    /// Integer range with inclusive bounds; `None` means the bound is open.
+    IntRange { start: Option<i64>, end: Option<i64> },
+    /// Character literal as a Unicode codepoint.
+    CharLiteral(u32),
+    /// Character range with inclusive bounds.
+    CharRange { start: Option<u32>, end: Option<u32> },
+    /// String literal (byte-equality test).
+    StringLiteral(String),
+}
+
+impl SwitchCase {
+    /// True if this arm unconditionally matches (wildcard).
+    pub fn is_wildcard(&self) -> bool {
+        matches!(self, SwitchCase::Wildcard)
+    }
+}
+
+impl std::fmt::Display for SwitchCase {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SwitchCase::Wildcard => write!(f, "_"),
+            SwitchCase::Variant(name) => write!(f, "{}", name),
+            SwitchCase::Bool(b) => write!(f, "{}", b),
+            SwitchCase::IntLiteral(n) => write!(f, "{}", n),
+            SwitchCase::IntRange { start, end } => {
+                if let Some(s) = start { write!(f, "{}", s)?; }
+                write!(f, "..=")?;
+                if let Some(e) = end { write!(f, "{}", e)?; }
+                Ok(())
+            }
+            SwitchCase::CharLiteral(c) => {
+                match char::from_u32(*c) {
+                    Some(ch) => write!(f, "'{}'", ch),
+                    None => write!(f, "\\u{{{:x}}}", c),
+                }
+            }
+            SwitchCase::CharRange { start, end } => {
+                if let Some(s) = start {
+                    if let Some(ch) = char::from_u32(*s) {
+                        write!(f, "'{}'", ch)?;
+                    } else {
+                        write!(f, "\\u{{{:x}}}", s)?;
+                    }
+                }
+                write!(f, "..=")?;
+                if let Some(e) = end {
+                    if let Some(ch) = char::from_u32(*e) {
+                        write!(f, "'{}'", ch)?;
+                    } else {
+                        write!(f, "\\u{{{:x}}}", e)?;
+                    }
+                }
+                Ok(())
+            }
+            SwitchCase::StringLiteral(s) => write!(f, "{:?}", s),
+        }
+    }
 }
 
 impl Terminator {
@@ -71,7 +145,7 @@ impl Terminator {
         }
     }
 
-    pub fn switch(discriminant: Place, cases: Vec<(String, BlockId)>) -> Self {
+    pub fn switch(discriminant: Place, cases: Vec<(SwitchCase, BlockId)>) -> Self {
         Self {
             kind: TerminatorKind::Switch {
                 discriminant,

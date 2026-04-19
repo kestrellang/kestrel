@@ -302,7 +302,7 @@ impl<'a> BlockBuilder<'a> {
     }
 
     /// `switch <discriminant> { cases... }`
-    pub fn switch(&mut self, discriminant: Place, cases: Vec<(String, BlockId)>) {
+    pub fn switch(&mut self, discriminant: Place, cases: Vec<(crate::SwitchCase, BlockId)>) {
         self.terminate(Terminator::switch(discriminant, cases));
     }
 

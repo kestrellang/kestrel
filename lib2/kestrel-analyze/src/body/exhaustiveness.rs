@@ -159,6 +159,14 @@ fn check_user_match(
         return;
     };
 
+    // Skip analysis when the scrutinee type couldn't be inferred — a
+    // type-inference error will already be reported and any exhaustiveness
+    // finding would be based on `Unknown` constructors, producing a
+    // misleading "missing _" diagnostic on valid code.
+    if matches!(scrutinee_ty, ResolvedTy::Error) {
+        return;
+    }
+
     // E304: empty match on inhabited type.
     if arms.is_empty() {
         if !matches!(scrutinee_ty, ResolvedTy::Never) {

@@ -3,6 +3,6 @@
 
 module Test
 @builtin(.Copyable)
-protocol Copyable {
+protocol Copyable { // ERROR: must be a marker protocol
     type Element;
 }

@@ -274,6 +274,22 @@ fn is_wildcard_useful(
         }
 
         None => {
+            // Range patterns (`..<0 | 0..=59 | 60..`) produce constructors on
+            // Infinite types (Int64, Char). The main algorithm can't see that
+            // their union covers the full value space, so it would fall
+            // through to the default matrix and report a false non-exhaustive.
+            // Handle that here before asking `Constructor::missing`.
+            if let Some(ranges) = collect_int_ranges(&covered) {
+                if range_covered_by_union_i64(i64::MIN, i64::MAX, &ranges) {
+                    return UsefulnessResult::not_useful();
+                }
+            }
+            if let Some(ranges) = collect_char_ranges(&covered) {
+                if range_covered_by_union_u32(0, char::MAX as u32, &ranges) {
+                    return UsefulnessResult::not_useful();
+                }
+            }
+
             // Infinite constructor set — check missing_constructors for special cases
             if let Some(missing) = Constructor::missing(ctx, col_type, &covered) {
                 if missing.is_empty() {
@@ -443,25 +459,24 @@ fn extract_char_range(pat: &FlatPat) -> Option<(u32, u32)> {
 }
 
 /// True if `[qs, qe]` is fully covered by the union of `prior` intervals.
-/// Sorts `prior` by start, walks, and checks there are no gaps in `[qs, qe]`.
+/// Sorts `prior` by start and walks, returning true as soon as some interval
+/// reaches `qe`. Empty intervals (`s > e`) are skipped harmlessly.
 fn range_covered_by_union_i64(qs: i64, qe: i64, prior: &[(usize, i64, i64)]) -> bool {
     let mut intervals: Vec<(i64, i64)> = prior.iter().map(|&(_, s, e)| (s, e)).collect();
     intervals.sort_by_key(|&(s, _)| s);
     let mut cursor = qs;
     for (s, e) in intervals {
-        if cursor > qe {
-            return true;
-        }
         if s > cursor {
             return false; // gap
         }
-        if e == i64::MAX {
-            cursor = i64::MAX;
-        } else if e + 1 > cursor {
-            cursor = e + 1;
+        if e >= qe {
+            return true;
+        }
+        if e >= cursor {
+            cursor = e + 1; // safe: e < qe <= i64::MAX
         }
     }
-    cursor > qe
+    false
 }
 
 /// Same as `range_covered_by_union_i64` but for char codepoints (u32).
@@ -470,17 +485,52 @@ fn range_covered_by_union_u32(qs: u32, qe: u32, prior: &[(usize, u32, u32)]) -> 
     intervals.sort_by_key(|&(s, _)| s);
     let mut cursor = qs;
     for (s, e) in intervals {
-        if cursor > qe {
-            return true;
-        }
         if s > cursor {
             return false;
         }
-        if e == u32::MAX {
-            cursor = u32::MAX;
-        } else if e + 1 > cursor {
+        if e >= qe {
+            return true;
+        }
+        if e >= cursor {
             cursor = e + 1;
         }
     }
-    cursor > qe
+    false
+}
+
+/// Collect `(idx, start, end)` tuples for each covered int-range-like
+/// constructor. Returns `None` if any covered constructor isn't an int
+/// range or literal — mixing other constructors means the union-coverage
+/// check doesn't apply.
+fn collect_int_ranges(covered: &HashSet<Constructor>) -> Option<Vec<(usize, i64, i64)>> {
+    let mut out = Vec::with_capacity(covered.len());
+    for (i, c) in covered.iter().enumerate() {
+        match c {
+            Constructor::IntRange { start, end } => {
+                out.push((i, start.unwrap_or(i64::MIN), end.unwrap_or(i64::MAX)));
+            }
+            Constructor::IntLiteral(v) => out.push((i, *v, *v)),
+            _ => return None,
+        }
+    }
+    (!out.is_empty()).then_some(out)
+}
+
+/// Same as `collect_int_ranges` but for char literals / char ranges.
+fn collect_char_ranges(covered: &HashSet<Constructor>) -> Option<Vec<(usize, u32, u32)>> {
+    let mut out = Vec::with_capacity(covered.len());
+    for (i, c) in covered.iter().enumerate() {
+        match c {
+            Constructor::CharRange { start, end } => {
+                out.push((
+                    i,
+                    start.map(|c| c as u32).unwrap_or(0),
+                    end.map(|c| c as u32).unwrap_or(char::MAX as u32),
+                ));
+            }
+            Constructor::CharLiteral(c) => out.push((i, *c as u32, *c as u32)),
+            _ => return None,
+        }
+    }
+    (!out.is_empty()).then_some(out)
 }

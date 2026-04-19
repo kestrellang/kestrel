@@ -3065,11 +3065,12 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 }
 
                 // General switch: create a block for each case + optional default
-                let mut case_blocks: Vec<(String, BlockId)> = Vec::with_capacity(cases.len());
+                let mut case_blocks: Vec<(kestrel_mir::SwitchCase, BlockId)> =
+                    Vec::with_capacity(cases.len());
                 for (ctor, _) in cases.iter() {
-                    let name = constructor_name(ctor, self.ctx);
+                    let case = constructor_to_switch_case(ctor, self.ctx);
                     let block = self.new_block();
-                    case_blocks.push((name, block));
+                    case_blocks.push((case, block));
                 }
 
                 let default_block = if default.is_some() {
@@ -3081,7 +3082,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 // Build switch cases — include default as the last case if present
                 let mut switch_cases = case_blocks.clone();
                 if let Some(def_block) = default_block {
-                    switch_cases.push(("_".to_string(), def_block));
+                    switch_cases.push((kestrel_mir::SwitchCase::Wildcard, def_block));
                 }
 
                 self.set_terminator(Terminator::switch(test_place, switch_cases));
@@ -3386,38 +3387,41 @@ fn apply_access_path(mut place: Place, path: &[PathElement]) -> Place {
     place
 }
 
-/// Get a display name for a constructor (used in switch case labels).
-fn constructor_name(ctor: &Constructor, ctx: &mut LowerCtx) -> String {
+/// Map a decision-tree `Constructor` to a `SwitchCase` for MIR.
+///
+/// The single-constructor cases (`Tuple`, `Struct`, `Unit`) are never
+/// emitted as a real multi-case switch — they get flattened to unconditional
+/// jumps upstream — but they're still handled here for completeness.
+fn constructor_to_switch_case(ctor: &Constructor, ctx: &mut LowerCtx) -> kestrel_mir::SwitchCase {
+    use kestrel_mir::SwitchCase;
     match ctor {
-        Constructor::True => "true".to_string(),
-        Constructor::False => "false".to_string(),
+        Constructor::True => SwitchCase::Bool(true),
+        Constructor::False => SwitchCase::Bool(false),
         Constructor::Variant { entity, .. } => {
             ctx.register_name(*entity);
-            ctx.module.resolve_name(*entity).to_string()
-        },
-        Constructor::Tuple { arity } => format!("tuple_{}", arity),
+            SwitchCase::Variant(ctx.module.resolve_name(*entity).to_string())
+        }
         Constructor::Struct { entity, .. } => {
             ctx.register_name(*entity);
-            ctx.module.resolve_name(*entity).to_string()
+            SwitchCase::Variant(ctx.module.resolve_name(*entity).to_string())
+        }
+        Constructor::IntLiteral(v) => SwitchCase::IntLiteral(*v),
+        Constructor::IntRange { start, end } => SwitchCase::IntRange {
+            start: *start,
+            end: *end,
         },
-        Constructor::IntLiteral(v) => format!("{}", v),
-        Constructor::IntRange { start, end } => {
-            let s = start.map(|v| v.to_string()).unwrap_or_default();
-            let e = end.map(|v| v.to_string()).unwrap_or_default();
-            format!("{}..{}", s, e)
+        Constructor::CharLiteral(c) => SwitchCase::CharLiteral(*c as u32),
+        Constructor::CharRange { start, end } => SwitchCase::CharRange {
+            start: start.map(|c| c as u32),
+            end: end.map(|c| c as u32),
         },
-        Constructor::CharLiteral(c) => format!("'{}'", c),
-        Constructor::CharRange { start, end } => {
-            let s = start.map(|c| format!("'{}'", c)).unwrap_or_default();
-            let e = end.map(|c| format!("'{}'", c)).unwrap_or_default();
-            format!("{}..{}", s, e)
-        },
-        Constructor::StringLiteral(s) => format!("{:?}", s),
-        Constructor::Unit => "()".to_string(),
-        Constructor::Wildcard => "_".to_string(),
-        Constructor::Array { prefix_len, .. } => format!("array_{}", prefix_len),
-        Constructor::NonExhaustive => "non_exhaustive".to_string(),
-        Constructor::Missing => "missing".to_string(),
+        Constructor::StringLiteral(s) => SwitchCase::StringLiteral(s.clone()),
+        Constructor::Wildcard | Constructor::Tuple { .. } | Constructor::Unit => {
+            SwitchCase::Wildcard
+        }
+        Constructor::Array { .. } | Constructor::NonExhaustive | Constructor::Missing => {
+            SwitchCase::Wildcard
+        }
     }
 }
 

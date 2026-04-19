@@ -547,8 +547,8 @@ impl fmt::Display for TerminatorDisplay<'_> {
                 cases,
             } => {
                 writeln!(f, "switch {} {{", discriminant.display(self.module))?;
-                for (case_name, target) in cases {
-                    writeln!(f, "    {} => bb{}", case_name, target.index())?;
+                for (case, target) in cases {
+                    writeln!(f, "    {} => bb{}", case, target.index())?;
                 }
                 write!(f, "}}")
             },

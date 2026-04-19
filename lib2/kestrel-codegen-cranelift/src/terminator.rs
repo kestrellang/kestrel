@@ -14,7 +14,7 @@ use cranelift_codegen::ir::immediates::Offset32;
 use cranelift_codegen::ir::{self, InstBuilder, MemFlags, TrapCode, Value as CrValue};
 use cranelift_frontend::FunctionBuilder;
 use kestrel_codegen2::{substitute_type, NamedKind};
-use kestrel_mir::{MirTy, Terminator, TerminatorKind, Value};
+use kestrel_mir::{MirTy, SwitchCase, Terminator, TerminatorKind, Value};
 
 /// Compile a block terminator.
 pub fn compile_terminator(
@@ -153,9 +153,9 @@ fn compile_switch(
     state: &FunctionState,
     builder: &mut FunctionBuilder,
     discriminant: &kestrel_mir::Place,
-    cases: &[(String, kestrel_mir::BlockId)],
+    cases: &[(SwitchCase, kestrel_mir::BlockId)],
 ) -> Result<(), CodegenError> {
-    // Fast path: single wildcard or single case → unconditional jump
+    // Fast path: single case → unconditional jump.
     if cases.len() == 1 {
         let (_, target_block) = &cases[0];
         let target_cl = state.block_map[target_block];
@@ -163,15 +163,15 @@ fn compile_switch(
         return Ok(());
     }
 
-    // Resolve the discriminant type to determine how to read it
-    let enum_ty = common::get_place_type(
+    // Resolve the discriminant type to decide how to read it.
+    let disc_ty = common::get_place_type(
         ctx.module,
         state.body,
         discriminant,
         &state.subst,
         &ctx.layouts,
     )?;
-    let enum_id = match &enum_ty {
+    let enum_id = match &disc_ty {
         MirTy::Named { entity, .. } => match ctx.layouts.resolve_named(*entity) {
             NamedKind::Enum(id) => Some(id),
             _ => None,
@@ -181,8 +181,11 @@ fn compile_switch(
 
     let disc_val_raw = place::compile_place_read(ctx, state, builder, discriminant)?;
 
-    // For enums: the discriminant is at offset 0 of the enum pointer.
-    // For primitives (I32, I8, etc.): the value IS the discriminant.
+    // Build the scalar we compare against.
+    //   - Enum: load the i32 discriminant from offset 0 of the enum pointer.
+    //   - Primitive / primitive-wrapped struct (Bool, Char, Int64, …): use
+    //     the value directly if already a scalar of the right width, or
+    //     load it from offset 0 if we have a pointer to the struct.
     let discr_val = if enum_id.is_some() {
         builder.ins().load(
             ir::types::I32,
@@ -191,38 +194,68 @@ fn compile_switch(
             Offset32::new(0),
         )
     } else {
-        disc_val_raw
+        let width_ty = primitive_width_ty(ctx, &disc_ty);
+        let raw_ty = builder.func.dfg.value_type(disc_val_raw);
+        if raw_ty == width_ty {
+            disc_val_raw
+        } else if raw_ty == common::ptr_type(ctx.target) {
+            builder.ins().load(width_ty, MemFlags::new(), disc_val_raw, Offset32::new(0))
+        } else {
+            disc_val_raw
+        }
     };
 
-    for (i, (case_name, target_block)) in cases.iter().enumerate() {
+    for (i, (case, target_block)) in cases.iter().enumerate() {
         let target_cl = state.block_map[target_block];
 
-        // Wildcard case: unconditional jump
-        if case_name == "_" {
+        // Wildcard case or exhaustive last arm: unconditional jump.
+        if case.is_wildcard() || i == cases.len() - 1 {
             builder.ins().jump(target_cl, &[]);
             return Ok(());
         }
 
-        // Last case: unconditional jump (exhaustive match, no need to compare)
-        if i == cases.len() - 1 {
-            builder.ins().jump(target_cl, &[]);
-            return Ok(());
-        }
-
-        // Look up the discriminant value for this case. `case_name` arrives
-        // fully-qualified (e.g. "std.core.Ordering.Less") but `case_by_name`
-        // keys on short names.
-        let expected = if let Some(eid) = enum_id {
-            let enum_def = &ctx.module.enums[eid.index()];
-            enum_def
-                .case_by_name(common::short_name(case_name))
-                .map(|c| c.discriminant as i64)
-                .unwrap_or(i as i64)
-        } else {
-            i as i64
+        let cmp = match case {
+            SwitchCase::Wildcard => unreachable!("handled above"),
+            SwitchCase::Variant(name) => {
+                // case_by_name keys on short names; fully-qualified names
+                // (e.g. "std.core.Ordering.Less") get trimmed here.
+                let expected = if let Some(eid) = enum_id {
+                    let enum_def = &ctx.module.enums[eid.index()];
+                    enum_def
+                        .case_by_name(common::short_name(name))
+                        .map(|c| c.discriminant as i64)
+                        .unwrap_or(i as i64)
+                } else {
+                    i as i64
+                };
+                builder.ins().icmp_imm(IntCC::Equal, discr_val, expected)
+            }
+            SwitchCase::Bool(b) => {
+                builder.ins().icmp_imm(IntCC::Equal, discr_val, *b as i64)
+            }
+            SwitchCase::IntLiteral(v) => {
+                builder.ins().icmp_imm(IntCC::Equal, discr_val, *v)
+            }
+            SwitchCase::IntRange { start, end } => {
+                range_test(builder, discr_val, *start, *end, /*signed*/ true)
+            }
+            SwitchCase::CharLiteral(c) => {
+                builder.ins().icmp_imm(IntCC::Equal, discr_val, *c as i64)
+            }
+            SwitchCase::CharRange { start, end } => {
+                range_test(
+                    builder,
+                    discr_val,
+                    start.map(|s| s as i64),
+                    end.map(|e| e as i64),
+                    /*signed*/ false,
+                )
+            }
+            SwitchCase::StringLiteral(_) => {
+                // Not yet implemented — fall through to the next case.
+                builder.ins().iconst(ir::types::I8, 0)
+            }
         };
-
-        let cmp = builder.ins().icmp_imm(IntCC::Equal, discr_val, expected);
         let next_block = builder.create_block();
         builder.ins().brif(cmp, target_cl, &[], next_block, &[]);
         builder.switch_to_block(next_block);
@@ -232,4 +265,46 @@ fn compile_switch(
     // Fallthrough (shouldn't reach here for exhaustive matches)
     builder.ins().trap(TrapCode::unwrap_user(4));
     Ok(())
+}
+
+/// Pick the cranelift integer type that matches the scrutinee's layout size.
+/// Works for `lang.iN` primitives and their stdlib wrappers (Bool, Char, Int64, …),
+/// which are all single-field structs whose byte layout matches the primitive.
+fn primitive_width_ty(ctx: &mut CodegenContext, ty: &MirTy) -> ir::Type {
+    match ty {
+        MirTy::Bool | MirTy::I8 => ir::types::I8,
+        MirTy::I16 => ir::types::I16,
+        MirTy::I32 | MirTy::F32 => ir::types::I32,
+        MirTy::I64 | MirTy::F64 => ir::types::I64,
+        _ => match ctx.layouts.layout_of(ty).size {
+            1 => ir::types::I8,
+            2 => ir::types::I16,
+            4 => ir::types::I32,
+            _ => ir::types::I64,
+        },
+    }
+}
+
+/// Build a boolean condition for `start <= val <= end`. Open bounds act as `true`.
+fn range_test(
+    builder: &mut FunctionBuilder,
+    val: CrValue,
+    start: Option<i64>,
+    end: Option<i64>,
+    signed: bool,
+) -> CrValue {
+    let (gte, lte) = if signed {
+        (IntCC::SignedGreaterThanOrEqual, IntCC::SignedLessThanOrEqual)
+    } else {
+        (IntCC::UnsignedGreaterThanOrEqual, IntCC::UnsignedLessThanOrEqual)
+    };
+    let low_ok = match start {
+        Some(s) => builder.ins().icmp_imm(gte, val, s),
+        None => builder.ins().iconst(ir::types::I8, 1),
+    };
+    let high_ok = match end {
+        Some(e) => builder.ins().icmp_imm(lte, val, e),
+        None => builder.ins().iconst(ir::types::I8, 1),
+    };
+    builder.ins().band(low_ok, high_ok)
 }
