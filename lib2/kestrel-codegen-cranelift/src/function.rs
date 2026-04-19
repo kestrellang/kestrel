@@ -223,14 +223,21 @@ pub fn compile_function(
     // Collect address-taken locals
     let stack_locals = collect_address_taken_locals(body, subst, &mut ctx.layouts);
 
-    // `mutating` parameters: locals receive a pointer to caller storage. The
-    // local Cranelift Variable holds that pointer; reads/writes deref through it.
-    let inout_param_locals: HashSet<LocalId> = func_def
-        .params
-        .iter()
-        .filter(|p| matches!(p.mode, kestrel_mir::ParamMode::InOut))
-        .map(|p| p.local)
-        .collect();
+    // `mutating` (InOut) and aggregate `In` parameters receive a pointer to
+    // caller storage. The local Cranelift Variable holds that pointer; reads/
+    // writes deref through it. This matches lib1's Borrow→Ref convention and
+    // ensures `lang.ptr_to(in_param)` returns the caller's address, not a
+    // dangling pointer to a callee-local copy.
+    let mut inout_param_locals: HashSet<LocalId> = HashSet::new();
+    for p in &func_def.params {
+        let pty = substitute_type(&p.ty, subst);
+        let pass_as_ptr = matches!(p.mode, kestrel_mir::ParamMode::InOut)
+            || (matches!(p.mode, kestrel_mir::ParamMode::In)
+                && is_aggregate(&pty, &mut ctx.layouts));
+        if pass_as_ptr {
+            inout_param_locals.insert(p.local);
+        }
+    }
 
     // Create Cranelift blocks for all MIR blocks
     let mut block_map = HashMap::new();
@@ -276,9 +283,11 @@ pub fn compile_function(
         let cl_param = builder.block_params(entry_cl)[param_idx + param_offset];
         let ty = substitute_type(&param.ty, subst);
 
-        if matches!(param.mode, kestrel_mir::ParamMode::InOut) {
-            // `mutating` param: cl_param IS the caller's pointer. Bind directly,
-            // skip the fresh-slot allocation that would defeat write-back.
+        if inout_param_locals.contains(&local_id) {
+            // InOut or aggregate In param: cl_param IS the caller's pointer.
+            // Bind directly — no copy. For InOut this preserves write-back; for
+            // In aggregates this matches lib1's Borrow→Ref convention so that
+            // `lang.ptr_to(value)` returns the caller's address.
             builder.def_var(local_vars[local_id.index()], cl_param);
         } else if is_aggregate(&ty, &mut ctx.layouts) || stack_locals.contains(&local_id) {
             // Aggregate or address-taken: allocate a stack slot, copy the value

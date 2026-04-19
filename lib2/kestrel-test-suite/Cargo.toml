@@ -26,3 +26,7 @@ datatest-stable = "0.2"
 [[test]]
 name = "file_tests"
 harness = false
+
+[[example]]
+name = "build_test"
+path = "examples/build_test.rs"

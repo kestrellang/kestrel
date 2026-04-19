@@ -66,6 +66,32 @@ pub enum AnnotationKind {
     Warning { message: Option<String> },
 }
 
+/// Decode backslash escapes in header values so `\n`, `\t`, `\r`, `\\`
+/// become their corresponding characters. Unknown escapes are left as-is.
+fn decode_escapes(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars();
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            out.push(c);
+            continue;
+        }
+        match chars.next() {
+            Some('n') => out.push('\n'),
+            Some('t') => out.push('\t'),
+            Some('r') => out.push('\r'),
+            Some('\\') => out.push('\\'),
+            Some('0') => out.push('\0'),
+            Some(other) => {
+                out.push('\\');
+                out.push(other);
+            }
+            None => out.push('\\'),
+        }
+    }
+    out
+}
+
 /// Parse the header config from a source file.
 ///
 /// Headers are `// key: value` lines at the top of the file,
@@ -112,10 +138,10 @@ pub fn parse_test_config(source: &str) -> TestConfig {
                 config.expect_exit = i32::from_str(value).ok();
             }
             "expect-stdout" => {
-                config.expect_stdout = Some(value.to_string());
+                config.expect_stdout = Some(decode_escapes(value));
             }
             "stdout-contains" => {
-                config.stdout_contains = Some(value.to_string());
+                config.stdout_contains = Some(decode_escapes(value));
             }
             "mir-snapshot" => {
                 config.mir_snapshot = Some(value.to_string());
