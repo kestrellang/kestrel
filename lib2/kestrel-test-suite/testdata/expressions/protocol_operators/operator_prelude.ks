@@ -97,13 +97,13 @@ public protocol BitwiseXorOperatorProtocol {
 @builtin(.ShiftLeftOperatorProtocol)
 public protocol ShiftLeftOperatorProtocol {
     @builtin(.ShiftLeftOperatorMethod)
-    func shiftLeft(rhs: Self) -> Self
+    func shiftLeft(by count: Self) -> Self
 }
 
 @builtin(.ShiftRightOperatorProtocol)
 public protocol ShiftRightOperatorProtocol {
     @builtin(.ShiftRightOperatorMethod)
-    func shiftRight(rhs: Self) -> Self
+    func shiftRight(by count: Self) -> Self
 }
 
 @builtin(.BitwiseNotOperatorProtocol)

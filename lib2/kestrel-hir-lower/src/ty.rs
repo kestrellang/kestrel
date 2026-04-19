@@ -94,6 +94,8 @@ pub fn lower_ast_type(
                         }
                     }
 
+                    let args = fill_type_arg_defaults(ctx, root, entity, args);
+
                     HirTy::Named {
                         entity,
                         args,
@@ -206,9 +208,10 @@ fn lower_sugar_type(
         .collect();
 
     if let Some(entity) = resolve_std_type(ctx, owner, root, name) {
+        let args = fill_type_arg_defaults(ctx, root, entity, lowered_args);
         HirTy::Named {
             entity,
-            args: lowered_args,
+            args,
             span: span.clone(),
         }
     } else {
@@ -220,6 +223,32 @@ fn lower_sugar_type(
             .with_notes(vec!["is the standard library imported?".to_string()]));
         HirTy::Error(span.clone())
     }
+}
+
+/// Fill in default type arguments for type parameters beyond user-provided args.
+/// Defaults are stored as `TypeAnnotation` on the type param entity and lowered in
+/// the defining scope so e.g. `H = DefaultHasher` resolves in the declaring module.
+/// Stops on the first type param without a default (defaults must be trailing).
+fn fill_type_arg_defaults(
+    ctx: &QueryContext<'_>,
+    root: Entity,
+    entity: Entity,
+    mut args: Vec<HirTy>,
+) -> Vec<HirTy> {
+    let Some(tp) = ctx.get::<TypeParams>(entity) else {
+        return args;
+    };
+    if args.len() >= tp.0.len() {
+        return args;
+    }
+    let type_params = tp.0.clone();
+    for &param in type_params.iter().skip(args.len()) {
+        match ctx.query(LowerTypeAnnotation { entity: param, root }) {
+            Some(default_ty) => args.push(default_ty),
+            None => break,
+        }
+    }
+    args
 }
 
 /// Resolve a well-known standard library type name (e.g. "Array", "Optional").

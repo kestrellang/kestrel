@@ -5,8 +5,8 @@
 module Test
 struct Bits: Prelude.ShiftLeftOperatorProtocol {
     var value: lang.i64
-    func shiftLeft(rhs: Bits) -> Bits {
-        Bits(value: lang.i64_shl(self.value, rhs.value))
+    func shiftLeft(by count: Bits) -> Bits {
+        Bits(value: lang.i64_shl(self.value, count.value))
     }
 }
 func test() -> Bits {

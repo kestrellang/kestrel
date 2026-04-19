@@ -71,6 +71,10 @@ pub fn build_subscript(
                     world.set(entity, Valued(code_block));
                 }
             }
+        } else if let Some(code_block) = find_child(&body, SyntaxKind::CodeBlock) {
+            // Shorthand getter-only form: subscript(...) -> T { expr }
+            world.set(entity, Body(lower::lower_body(&code_block, file_id)));
+            world.set(entity, Valued(code_block));
         }
     }
 
