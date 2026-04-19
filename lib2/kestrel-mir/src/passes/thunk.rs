@@ -113,10 +113,14 @@ pub fn run_thunk_pass(module: &mut MirModule) {
         thunk_def.params.push(ParamDef::new("_env", env_local, MirTy::Pointer(Box::new(MirTy::Unit))));
         body.param_count += 1;
 
-        // If the target closure expects an env pointer, forward it
+        // If the target closure expects an env pointer, forward it.
+        // Use Copy mode (not Borrow): env_local is itself a pointer; we want to
+        // pass the pointer VALUE so the callee receives env_ptr directly.
+        // Borrow mode would pass &env_ptr_storage and the callee would need a
+        // double dereference it doesn't perform — captured values become garbage.
         let mut forward_args = Vec::new();
         if target_needs_env {
-            forward_args.push(CallArg::borrow(Value::Place(crate::place::Place::local(env_local))));
+            forward_args.push(CallArg::copy(Value::Place(crate::place::Place::local(env_local))));
         }
         for param in &target_params {
             let local = body.add_local(LocalDef::new(&param.name, param.ty.clone()));

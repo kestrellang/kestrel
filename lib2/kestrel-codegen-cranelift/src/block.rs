@@ -1,6 +1,6 @@
 //! Block and statement compilation.
 
-use crate::common::{self, is_aggregate_type};
+use crate::common;
 use crate::context::CodegenContext;
 use crate::error::CodegenError;
 use crate::function::FunctionState;

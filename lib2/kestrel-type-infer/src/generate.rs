@@ -227,6 +227,18 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             let base_tv = gen_expr(ctx, hir, *base);
             let result_tv = ctx.fresh();
 
+            // Field access through a type-param ref (T.staticProp) is a static
+            // protocol-property access — analogous to T.method() in MethodCall.
+            // Consume the Def(TypeParameter) so it isn't flagged as a stray
+            // type-param-as-value at end of inference.
+            if matches!(
+                &hir.exprs[*base],
+                HirExpr::Def(entity, _, _) if ctx.query_ctx.get::<NodeKind>(*entity)
+                    == Some(&NodeKind::TypeParameter)
+            ) {
+                ctx.type_param_defs.remove(base);
+            }
+
             // Member constraint with no args (field/property access)
             ctx.member(base_tv, name, vec![], result_tv, id, false, span.clone());
             result_tv

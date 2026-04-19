@@ -12,7 +12,7 @@ pub mod immediate;
 pub mod pointer;
 pub mod string;
 
-use crate::common::{self, is_aggregate_type};
+use crate::common;
 use crate::context::CodegenContext;
 use crate::error::CodegenError;
 use crate::function::FunctionState;
@@ -38,6 +38,10 @@ pub fn compile_rvalue(
 
         // Operations (dispatch by category via the Op enum)
         Rvalue::Op1 { op, arg } => {
+            // StackAlloc needs the raw MIR Value to require a compile-time count.
+            if let Op::StackAlloc(ty) = op {
+                return pointer::compile_stack_alloc(ctx, state, builder, ty, arg);
+            }
             let a = compile_value(ctx, state, builder, arg)?;
             dispatch_op1(ctx, state, builder, op, a)
         }

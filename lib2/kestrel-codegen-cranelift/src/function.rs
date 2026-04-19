@@ -5,7 +5,7 @@
 //! the 10+ parameter lists in lib1.
 
 use crate::block;
-use crate::common::{self, is_aggregate_type};
+use crate::common::{self, is_aggregate};
 use crate::context::CodegenContext;
 use crate::error::CodegenError;
 use crate::types;
@@ -15,7 +15,7 @@ use cranelift_codegen::ir::Value as CrValue;
 use cranelift_codegen::verifier::verify_function;
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext, Variable};
 use cranelift_module::Module;
-use kestrel_codegen2::substitute_type;
+use kestrel_codegen2::{substitute_type, LayoutCache};
 use kestrel_hecs::Entity;
 use kestrel_mir::{
     BlockId, FunctionDef, FunctionKind, LocalId, MirBody, MirTy, PassingMode, Place, Rvalue,
@@ -221,7 +221,16 @@ pub fn compile_function(
     let mut builder = FunctionBuilder::new(&mut cl_func, &mut func_builder_ctx);
 
     // Collect address-taken locals
-    let stack_locals = collect_address_taken_locals(body, subst);
+    let stack_locals = collect_address_taken_locals(body, subst, &mut ctx.layouts);
+
+    // `mutating` parameters: locals receive a pointer to caller storage. The
+    // local Cranelift Variable holds that pointer; reads/writes deref through it.
+    let inout_param_locals: HashSet<LocalId> = func_def
+        .params
+        .iter()
+        .filter(|p| matches!(p.mode, kestrel_mir::ParamMode::InOut))
+        .map(|p| p.local)
+        .collect();
 
     // Create Cranelift blocks for all MIR blocks
     let mut block_map = HashMap::new();
@@ -240,8 +249,12 @@ pub fn compile_function(
     let mut local_vars = Vec::with_capacity(body.locals.len());
     for (i, local) in body.locals.iter().enumerate() {
         let ty = substitute_type(&local.ty, subst);
-        let cl_ty = if is_aggregate_type(&ty) || stack_locals.contains(&LocalId::new(i)) {
-            ptr_ty // Aggregates and address-taken locals store pointers to stack slots
+        let local_id = LocalId::new(i);
+        let cl_ty = if is_aggregate(&ty, &mut ctx.layouts)
+            || stack_locals.contains(&local_id)
+            || inout_param_locals.contains(&local_id)
+        {
+            ptr_ty // Aggregates, address-taken locals, and InOut params store pointers
         } else {
             types::translate_type(&ty, ctx.target)
         };
@@ -263,7 +276,11 @@ pub fn compile_function(
         let cl_param = builder.block_params(entry_cl)[param_idx + param_offset];
         let ty = substitute_type(&param.ty, subst);
 
-        if is_aggregate_type(&ty) || stack_locals.contains(&local_id) {
+        if matches!(param.mode, kestrel_mir::ParamMode::InOut) {
+            // `mutating` param: cl_param IS the caller's pointer. Bind directly,
+            // skip the fresh-slot allocation that would defeat write-back.
+            builder.def_var(local_vars[local_id.index()], cl_param);
+        } else if is_aggregate(&ty, &mut ctx.layouts) || stack_locals.contains(&local_id) {
             // Aggregate or address-taken: allocate a stack slot, copy the value
             let layout = ctx.layouts.layout_of(&ty);
             let slot = builder.create_sized_stack_slot(StackSlotData::new(
@@ -273,7 +290,7 @@ pub fn compile_function(
             ));
             let addr = builder.ins().stack_addr(ptr_ty, slot, Offset32::new(0));
 
-            if is_aggregate_type(&ty) {
+            if is_aggregate(&ty, &mut ctx.layouts) {
                 // Large aggregate: parameter is a pointer; copy the data
                 common::copy_aggregate(&mut builder, &mut ctx.layouts, &ty, addr, cl_param);
             } else {
@@ -296,7 +313,7 @@ pub fn compile_function(
         }
 
         let ty = substitute_type(&local.ty, subst);
-        if is_aggregate_type(&ty) || stack_locals.contains(&local_id) {
+        if is_aggregate(&ty, &mut ctx.layouts) || stack_locals.contains(&local_id) {
             let layout = ctx.layouts.layout_of(&ty);
             let slot = builder.create_sized_stack_slot(StackSlotData::new(
                 StackSlotKind::ExplicitSlot,
@@ -384,6 +401,7 @@ pub fn compile_function(
 fn collect_address_taken_locals(
     body: &MirBody,
     subst: &HashMap<Entity, MirTy>,
+    layouts: &mut LayoutCache,
 ) -> HashSet<LocalId> {
     let mut result = HashSet::new();
 
@@ -394,7 +412,7 @@ fn collect_address_taken_locals(
                     Rvalue::Ref(place) | Rvalue::RefMut(place) => {
                         if let Some(id) = place.root_local() {
                             let ty = substitute_type(&body.locals[id.index()].ty, subst);
-                            if !is_aggregate_type(&ty) {
+                            if !is_aggregate(&ty, layouts) {
                                 result.insert(id);
                             }
                         }
@@ -408,7 +426,7 @@ fn collect_address_taken_locals(
                                 if let Some(id) = place.root_local() {
                                     let ty =
                                         substitute_type(&body.locals[id.index()].ty, subst);
-                                    if !is_aggregate_type(&ty) {
+                                    if !is_aggregate(&ty, layouts) {
                                         result.insert(id);
                                     }
                                 }

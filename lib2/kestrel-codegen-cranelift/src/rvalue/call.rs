@@ -37,10 +37,7 @@ pub fn compile_call(
             self_type,
         } => {
             // Resolve the concrete type args
-            let concrete_type_args: Vec<MirTy> = type_args
-                .iter()
-                .map(|a| substitute_type(a, &state.subst))
-                .collect();
+            let concrete_type_args = common::substitute_type_args(type_args, &state.subst);
             let concrete_self = self_type
                 .as_ref()
                 .map(|st| substitute_type(st, &state.subst));
@@ -209,7 +206,7 @@ fn compile_resolved_call(
                 let dest_ty = common::get_place_type(
                     ctx.module, state.body, dest_place, &state.subst, &ctx.layouts,
                 )?;
-                if common::is_aggregate_type(&dest_ty) {
+                if common::is_aggregate(&dest_ty, &mut ctx.layouts) {
                     let dest_ptr = builder.use_var(state.local_vars[id.index()]);
                     place::store_scalar_to_aggregate(
                         builder, &mut ctx.layouts, &dest_ty, dest_ptr, result,
@@ -335,7 +332,7 @@ fn compile_indirect_call(
                     &state.subst,
                     &ctx.layouts,
                 )?;
-                if common::is_aggregate_type(&dest_ty) {
+                if common::is_aggregate(&dest_ty, &mut ctx.layouts) {
                     let dest_ptr = builder.use_var(state.local_vars[id.index()]);
                     place::store_scalar_to_aggregate(
                         builder, &mut ctx.layouts, &dest_ty, dest_ptr, result,
@@ -450,11 +447,11 @@ fn resolve_associated_self_type(
 
     // Get the associated type short name
     let assoc_name = ctx.module.resolve_name(entity);
-    let short_name = assoc_name.rsplit('.').next().unwrap_or(&assoc_name).to_string();
+    let short = common::short_name(&assoc_name);
 
     // Find which protocol owns this associated type (not necessarily the one being called)
     let owning_proto = ctx.module.protocols.iter()
-        .find(|p| p.associated_type_by_name(&short_name).is_some());
+        .find(|p| p.associated_type_by_name(short).is_some());
     let Some(proto_def) = owning_proto else {
         return self_type.clone();
     };
@@ -463,7 +460,7 @@ fn resolve_associated_self_type(
     // then fall back to the function's self_type
     for candidate in state.subst.values() {
         if let Ok(resolved) = witness::resolve_associated_type(
-            ctx.module, proto_def.entity, candidate, &short_name,
+            ctx.module, proto_def.entity, candidate, short,
         ) {
             return resolved;
         }
@@ -472,7 +469,7 @@ fn resolve_associated_self_type(
     // Fall back to function's self_type
     if let Some(base) = state.self_type.as_ref() {
         if let Ok(resolved) = witness::resolve_associated_type(
-            ctx.module, proto_def.entity, base, &short_name,
+            ctx.module, proto_def.entity, base, short,
         ) {
             return resolved;
         }

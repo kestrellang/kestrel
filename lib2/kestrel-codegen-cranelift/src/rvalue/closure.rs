@@ -104,7 +104,7 @@ pub fn compile_apply_partial(
                     .iadd_imm(env_addr, env_layout.field_offsets[i] as i64);
                 let val = rvalue::compile_value(ctx, state, builder, capture)?;
 
-                if common::is_aggregate_type(&field_ty) {
+                if common::is_aggregate(&field_ty, &mut ctx.layouts) {
                     common::copy_aggregate(builder, &mut ctx.layouts, &field_ty, field_ptr, val);
                 } else {
                     builder

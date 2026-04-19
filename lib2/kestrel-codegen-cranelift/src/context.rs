@@ -138,7 +138,12 @@ impl<'a> CodegenContext<'a> {
         let linkage = Linkage::Local;
 
         if let Some(ref file_const) = static_def.file_constant_data {
-            // File constant: embed bytes in rodata, create slice struct in data
+            // File constant: embed bytes in rodata, create slice struct in data.
+            // The file is read here (codegen time) — MIR lowering attaches only
+            // the path via `FileConstantData`. If the file moves between lower
+            // and codegen the read fails and aborts this static's emission;
+            // that's the intended contract since the bytes are baked into the
+            // object file and there's no other opportunity to embed them.
             let data_name = format!("{mangled}_data");
             let base_path = file_const
                 .base_path
@@ -210,16 +215,13 @@ impl<'a> CodegenContext<'a> {
         for inst in &insts {
             let func_def = &self.module.functions[inst.func_id.index()];
 
-            let mangled = self.mangle_instantiation(inst);
-            let sig = self.create_signature(func_def, &inst.type_args, inst.self_type.as_ref())?;
-
             let is_main = self.is_main_function(func_def);
-
-            // Skip bodyless non-extern functions (lang builtins, abstract methods).
-            // They can't be compiled and would cause "declared but not defined" errors.
-            if !func_def.is_extern() && func_def.body.is_none() && !is_main {
+            if emit_action(func_def, is_main) == EmitAction::Skip {
                 continue;
             }
+
+            let mangled = self.mangle_instantiation(inst);
+            let sig = self.create_signature(func_def, &inst.type_args, inst.self_type.as_ref())?;
 
             let (symbol_name, linkage) = if is_main {
                 // Main entry point: export as "main" — Cranelift adds the platform
@@ -244,7 +246,11 @@ impl<'a> CodegenContext<'a> {
                     name: symbol_name.clone(),
                     source: e,
                 })?;
-            // Store under both the mangled name and the symbol name for lookup
+            // Store under both the mangled name and the linker symbol name, so
+            // later lookups by either key resolve to the same FuncId.
+            // `symbol_name` differs from `mangled` only for main (`"main"`) and
+            // extern functions (their C symbol); for everything else the two
+            // are equal and the second insert is skipped.
             self.func_ids_by_name.insert(mangled.clone(), func_id);
             if symbol_name != mangled {
                 self.func_ids_by_name.insert(symbol_name, func_id);
@@ -289,15 +295,11 @@ impl<'a> CodegenContext<'a> {
         for (idx, inst) in insts.into_iter().enumerate() {
             let func_def = &self.module.functions[inst.func_id.index()];
 
-            // Skip extern functions (no body to compile)
-            if func_def.is_extern() {
+            // Only functions in the `Full` emit path have bodies to compile.
+            let is_main = self.is_main_function(func_def);
+            if emit_action(func_def, is_main) != EmitAction::Full {
                 continue;
             }
-
-            // Skip functions without bodies
-            let Some(_body) = &func_def.body else {
-                continue;
-            };
 
             let mangled = self.mangle_instantiation(&inst);
             let Some(&func_id) = self.func_ids_by_name.get(&mangled) else {
@@ -392,11 +394,16 @@ impl<'a> CodegenContext<'a> {
                 .push(AbiParam::special(ptr_ty, ir::ArgumentPurpose::StructReturn));
         }
 
-        // Regular parameters
+        // Regular parameters. `mutating` (InOut) params are passed as pointers
+        // regardless of value type so the callee can write back to caller storage.
         for param in &func_def.params {
             let ty = substitute_type(&param.ty, &subst);
-            sig.params
-                .push(AbiParam::new(types::translate_type(&ty, self.target)));
+            let cl_ty = if matches!(param.mode, kestrel_mir::ParamMode::InOut) {
+                ptr_ty
+            } else {
+                types::translate_type(&ty, self.target)
+            };
+            sig.params.push(AbiParam::new(cl_ty));
         }
 
         // Return type
@@ -448,5 +455,30 @@ impl<'a> CodegenContext<'a> {
 
         self.string_data.insert(s.to_string(), data_id);
         Ok(data_id)
+    }
+}
+
+/// What to do with a given function instantiation during the declare/define passes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EmitAction {
+    /// Declare and define — the function has a body (or is `main`).
+    Full,
+    /// Declare only — extern function with no body to compile.
+    DeclareOnly,
+    /// Skip — bodyless non-extern function (lang builtin, abstract method).
+    /// Declaring one would cause a "declared but not defined" linker error.
+    Skip,
+}
+
+/// Decide the emit action for a function instantiation.
+///
+/// Shared by the declare and define passes so their filter logic can't drift.
+fn emit_action(func_def: &FunctionDef, is_main: bool) -> EmitAction {
+    if func_def.is_extern() {
+        EmitAction::DeclareOnly
+    } else if func_def.body.is_some() || is_main {
+        EmitAction::Full
+    } else {
+        EmitAction::Skip
     }
 }

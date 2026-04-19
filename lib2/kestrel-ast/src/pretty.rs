@@ -603,7 +603,7 @@ fn format_type(ty: &AstType) -> String {
 fn format_unary_op(op: &UnaryOp) -> &'static str {
     match op {
         UnaryOp::Neg => "-",
-        UnaryOp::BitNot => "^",
+        UnaryOp::BitNot => "!",
         UnaryOp::LogicalNot => "not ",
         UnaryOp::Pos => "+",
     }

@@ -70,12 +70,20 @@ pub fn lower_function_sig(ctx: &mut LowerCtx, entity: Entity) -> FunctionId {
                 .unwrap_or(kestrel_mir::MirTy::Error);
             let local_id = kestrel_mir::LocalId::new(def.params.len());
 
+            let mode = if ast_param.is_consuming {
+                kestrel_mir::ParamMode::Consuming
+            } else if ast_param.is_mut {
+                kestrel_mir::ParamMode::InOut
+            } else {
+                kestrel_mir::ParamMode::In
+            };
             let param = kestrel_mir::ParamDef::with_label(
                 &ast_param.name,
                 local_id,
                 param_ty,
                 ast_param.label.clone(),
-            );
+            )
+            .with_mode(mode);
             def.params.push(param);
         }
     }

@@ -1,6 +1,6 @@
 //! Composite value construction — structs, tuples, enums, array/dict literals.
 
-use crate::common::{self, get_enum_payload_offset, get_field_info, is_aggregate_type};
+use crate::common::{self, get_enum_payload_offset, get_field_info, is_aggregate};
 use crate::context::CodegenContext;
 use crate::error::CodegenError;
 use crate::function::FunctionState;
@@ -38,9 +38,7 @@ pub fn compile_construct(
     if let MirTy::Named { entity, type_args } = &concrete_ty {
         match ctx.layouts.resolve_named(*entity) {
             NamedKind::Struct(struct_id) => {
-                let type_args: Vec<MirTy> = type_args.iter()
-                    .map(|a| substitute_type(a, &state.subst))
-                    .collect();
+                let type_args = common::substitute_type_args(type_args, &state.subst);
 
                 for (name, value) in fields {
                     let (offset, field_ty) = get_field_info(
@@ -49,7 +47,7 @@ pub fn compile_construct(
                     let val = rvalue::compile_value(ctx, state, builder, value)?;
                     let field_ptr = builder.ins().iadd_imm(addr, offset as i64);
 
-                    if is_aggregate_type(&field_ty) {
+                    if is_aggregate(&field_ty, &mut ctx.layouts) {
                         common::copy_aggregate(builder, &mut ctx.layouts, &field_ty, field_ptr, val);
                     } else {
                         builder.ins().store(MemFlags::new(), val, field_ptr, Offset32::new(0));
@@ -108,7 +106,7 @@ pub fn compile_tuple(
         let val = rvalue::compile_value(ctx, state, builder, value)?;
         let elem_ptr = builder.ins().iadd_imm(addr, offset as i64);
 
-        if is_aggregate_type(&elem_types[i]) {
+        if is_aggregate(&elem_types[i], &mut ctx.layouts) {
             common::copy_aggregate(builder, &mut ctx.layouts, &elem_types[i], elem_ptr, val);
         } else {
             builder.ins().store(MemFlags::new(), val, elem_ptr, Offset32::new(0));
@@ -142,9 +140,7 @@ pub fn compile_enum_variant(
     if let MirTy::Named { entity, type_args } = &concrete_ty {
         match ctx.layouts.resolve_named(*entity) {
             NamedKind::Enum(enum_id) => {
-                let type_args: Vec<MirTy> = type_args.iter()
-                    .map(|a| substitute_type(a, &state.subst))
-                    .collect();
+                let type_args = common::substitute_type_args(type_args, &state.subst);
 
                 let enum_def = &ctx.module.enums[enum_id.index()];
                 let case = enum_def.case_by_name(variant).ok_or_else(|| {
@@ -187,7 +183,7 @@ pub fn compile_enum_variant(
                             let field_ty = &payload_struct.fields[i].ty;
                             let concrete_field = substitute_type(field_ty, &enum_subst);
 
-                            if is_aggregate_type(&concrete_field) {
+                            if is_aggregate(&concrete_field, &mut ctx.layouts) {
                                 common::copy_aggregate(
                                     builder, &mut ctx.layouts, &concrete_field, field_ptr, val,
                                 );
@@ -234,7 +230,7 @@ pub fn compile_array_literal(
         let val = rvalue::compile_value(ctx, state, builder, value)?;
         let elem_ptr = builder.ins().iadd_imm(addr, offset as i64);
 
-        if is_aggregate_type(&concrete_elem) {
+        if is_aggregate(&concrete_elem, &mut ctx.layouts) {
             common::copy_aggregate(builder, &mut ctx.layouts, &concrete_elem, elem_ptr, val);
         } else {
             builder.ins().store(MemFlags::new(), val, elem_ptr, Offset32::new(0));

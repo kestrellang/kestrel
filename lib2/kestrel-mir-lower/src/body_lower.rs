@@ -201,6 +201,33 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         MirTy::Error
     }
 
+    /// Derive a MirTy from an expression that's used as a type reference (e.g.,
+    /// the base of a static member access like `T.foo` or `MyStruct.bar`).
+    /// For Def(TypeParameter) returns MirTy::TypeParam; for Def(Struct/Enum/TypeAlias)
+    /// returns MirTy::Named with type args lowered from the HIR. Falls back to
+    /// the inferred expression type for anything else.
+    fn type_from_type_ref(&mut self, expr_id: HirExprId) -> MirTy {
+        if let HirExpr::Def(entity, hir_type_args, _) = self.hir.exprs[expr_id].clone() {
+            let kind = self.ctx.world.get::<kestrel_ast_builder::NodeKind>(entity).cloned();
+            match kind {
+                Some(kestrel_ast_builder::NodeKind::TypeParameter) => {
+                    return MirTy::TypeParam(entity);
+                },
+                Some(kestrel_ast_builder::NodeKind::Struct)
+                | Some(kestrel_ast_builder::NodeKind::Enum)
+                | Some(kestrel_ast_builder::NodeKind::TypeAlias)
+                | Some(kestrel_ast_builder::NodeKind::Protocol) => {
+                    let type_args = hir_type_args.iter()
+                        .map(|t| lower_type(self.ctx, t))
+                        .collect();
+                    return MirTy::Named { entity, type_args };
+                },
+                _ => {},
+            }
+        }
+        self.resolve_expr_type(expr_id)
+    }
+
     /// Map a HIR local ID to its MIR local ID.
     fn map_local(&self, hir_id: HirLocalId) -> LocalId {
         self.local_map
@@ -279,8 +306,29 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                             )
                         })
                     });
+                // Static property: no receiver. The base is a type-ref (Def of
+                // TypeParameter or concrete type), not a value expression.
+                let is_static = resolved.map_or(false, |e| {
+                    self.ctx.world.get::<kestrel_ast_builder::Static>(e).is_some()
+                });
 
-                if is_protocol_property {
+                if is_protocol_property && is_static {
+                    // Static protocol property: dispatch via witness with no receiver.
+                    // Self type comes from the base's type-ref.
+                    let property_entity = resolved.unwrap();
+                    let protocol = self.ctx.world.parent_of(property_entity).unwrap();
+                    self.ctx.register_name(protocol);
+                    let self_type = self.type_from_type_ref(*base);
+                    let result_ty = self.resolve_expr_type(expr_id);
+                    let method_type_args = self.resolve_type_args(expr_id);
+                    let callee = Callee::witness(
+                        protocol,
+                        name.clone(),
+                        self_type,
+                        method_type_args,
+                    );
+                    self.emit_call(callee, vec![], result_ty)
+                } else if is_protocol_property {
                     let property_entity = resolved.unwrap();
                     let protocol = self.ctx.world.parent_of(property_entity).unwrap();
                     self.ctx.register_name(protocol);
@@ -296,6 +344,16 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                         method_type_args,
                     );
                     self.emit_call(callee, vec![receiver_arg], result_ty)
+                } else if is_callable && is_static {
+                    // Static computed property on concrete type: direct getter
+                    // call, no receiver. Base is a type-ref, not a value.
+                    let getter_entity = resolved.unwrap();
+                    self.ctx.register_name(getter_entity);
+                    let self_type = self.type_from_type_ref(*base);
+                    let result_ty = self.resolve_expr_type(expr_id);
+                    let type_args = self.prepend_receiver_type_args(&self_type, vec![]);
+                    let callee = Callee::method(getter_entity, type_args, self_type);
+                    self.emit_call(callee, vec![], result_ty)
                 } else if is_callable {
                     // Computed property: emit a getter call
                     let getter_entity = resolved.unwrap();
@@ -1394,6 +1452,32 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
             .collect()
     }
 
+    /// After lowering args, override their passing modes to match the callee's
+    /// `mutating`/`consuming` parameter declarations. Indexes 1:1 against the
+    /// callee's `params` (which include `self` at index 0 for instance methods).
+    fn apply_callee_param_modes(&self, call_args: &mut [CallArg], callee_entity: kestrel_hecs::Entity) {
+        let Some(callee) = self
+            .ctx
+            .module
+            .functions
+            .iter()
+            .find(|f| f.entity == callee_entity)
+        else {
+            return;
+        };
+        for (arg, param) in call_args.iter_mut().zip(callee.params.iter()) {
+            match param.mode {
+                kestrel_mir::ParamMode::InOut => {
+                    arg.mode = kestrel_mir::PassingMode::MutRef;
+                }
+                kestrel_mir::ParamMode::Consuming => {
+                    arg.mode = kestrel_mir::PassingMode::Move;
+                }
+                kestrel_mir::ParamMode::In => {}
+            }
+        }
+    }
+
     /// Lower a direct call: `callee(args...)`
     fn lower_call(
         &mut self,
@@ -1413,6 +1497,52 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         // Intercept lang intrinsics — emit as MIR Ops, not function calls
         if let Some(val) = self.try_lower_intrinsic_call(expr_id, callee_expr, args) {
             return val;
+        }
+
+        // Intercept enum case construction: `Foo.Bar(args)` must emit Rvalue::EnumVariant,
+        // not a function call. Enum cases are not real functions — only the parent enum's
+        // EnumDef and per-case payload StructDefs exist in MIR, so a Direct callee with
+        // the case entity would fail symbol lookup at codegen.
+        if let HirExpr::Def(entity, _, _) = &self.hir.exprs[callee_expr] {
+            let entity = *entity;
+            if matches!(
+                self.ctx.world.get::<kestrel_ast_builder::NodeKind>(entity),
+                Some(kestrel_ast_builder::NodeKind::EnumCase)
+            ) {
+                // Inference often doesn't tag the Call expr's type for case
+                // construction — fall back to deriving from the parent enum.
+                let inferred = self.resolve_expr_type(expr_id);
+                let result_ty = if matches!(inferred, MirTy::Error) {
+                    if let Some(parent) = self.ctx.world.parent_of(entity) {
+                        self.ctx.register_name(parent);
+                        // Generic enum type args (B3) come from explicit_type_args
+                        // on the callee Def — try to resolve them.
+                        let type_args = self.resolve_type_args(callee_expr);
+                        MirTy::Named { entity: parent, type_args }
+                    } else {
+                        inferred
+                    }
+                } else {
+                    inferred
+                };
+                let case_name = self.ctx.world
+                    .get::<kestrel_ast_builder::Name>(entity)
+                    .map(|n| n.0.clone())
+                    .unwrap_or_default();
+                let payload: Vec<Value> = args.iter()
+                    .map(|arg| self.lower_expr(arg.value))
+                    .collect();
+                let dest = self.fresh_temp(result_ty.clone());
+                self.emit_stmt(Statement::new(StatementKind::Assign {
+                    dest: Place::local(dest),
+                    rvalue: Rvalue::EnumVariant {
+                        enum_ty: result_ty,
+                        variant: case_name,
+                        payload,
+                    },
+                }));
+                return Value::Place(Place::local(dest));
+            }
         }
 
         let call_args = self.lower_call_args(args);
@@ -1954,9 +2084,15 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
     fn emit_call(
         &mut self,
         callee: Callee,
-        args: Vec<CallArg>,
+        mut args: Vec<CallArg>,
         result_ty: MirTy,
     ) -> Value {
+        // Override arg passing modes from the callee's `mutating`/`consuming`
+        // param declarations. Only applies to Direct calls — witness/indirect
+        // dispatch can't know the param modes at MIR-emission time.
+        if let Callee::Direct { func, .. } = &callee {
+            self.apply_callee_param_modes(&mut args, *func);
+        }
         if result_ty == MirTy::Unit || result_ty == MirTy::Never {
             self.emit_stmt(Statement::new(StatementKind::Call {
                 dest: None,
@@ -1974,6 +2110,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
             Value::Place(Place::local(dest))
         }
     }
+
 
     /// Lower a literal value to an immediate.
     /// Lower a literal expression. If the target type is a Named struct (e.g., Bool, Int64),

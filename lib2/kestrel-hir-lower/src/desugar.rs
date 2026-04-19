@@ -836,8 +836,8 @@ fn binary_op_symbol(op: &BinaryOp) -> &'static str {
 fn unary_op_symbol(op: &UnaryOp) -> &'static str {
     match op {
         UnaryOp::Neg => "-",
-        UnaryOp::BitNot => "~",
-        UnaryOp::LogicalNot => "!",
+        UnaryOp::BitNot => "!",
+        UnaryOp::LogicalNot => "not",
         UnaryOp::Pos => "+",
     }
 }

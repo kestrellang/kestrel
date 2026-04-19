@@ -1035,7 +1035,7 @@ pub fn expr_parser<'tokens>()
 
         let postfix_op = arg_list.clone().or(member_access).or(postfix_bang);
 
-        // Prefix unary operators: -, +, !, not
+        // Prefix unary operators: -, +, ! (bitwise-not), not (logical-not)
         let unary_op = skip_trivia().ignore_then(
             just(Token::Minus)
                 .map_with(|tok, e| (tok, to_kestrel_span2(e.span())))

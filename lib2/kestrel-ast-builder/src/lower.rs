@@ -1923,8 +1923,8 @@ fn has_sibling_code_block_before(parent: &SyntaxNode, child: &SyntaxNode) -> boo
 fn token_to_unary_op(kind: SyntaxKind) -> Option<UnaryOp> {
     match kind {
         SyntaxKind::Minus => Some(UnaryOp::Neg),
-        SyntaxKind::Not | SyntaxKind::Bang => Some(UnaryOp::LogicalNot),
-        SyntaxKind::Caret => Some(UnaryOp::BitNot),
+        SyntaxKind::Not => Some(UnaryOp::LogicalNot),
+        SyntaxKind::Bang => Some(UnaryOp::BitNot),
         SyntaxKind::Plus => Some(UnaryOp::Pos),
         _ => None,
     }

@@ -2,7 +2,7 @@
 //!
 //! Fixes the lib1 Switch last-case bug: uses `jump` instead of `brif(same, same)`.
 
-use crate::common::{self, is_aggregate_type};
+use crate::common::{self, is_aggregate};
 use crate::context::CodegenContext;
 use crate::error::CodegenError;
 use crate::function::FunctionState;
@@ -77,7 +77,7 @@ fn compile_return(
         builder.ins().return_(&[]);
     } else if state.is_main {
         // Main returns i64 — may need to extract from wrapper struct
-        if is_aggregate_type(&ret_ty) {
+        if is_aggregate(&ret_ty, &mut ctx.layouts) {
             let loaded = builder.ins().load(
                 ir::types::I64,
                 MemFlags::new(),
@@ -88,7 +88,7 @@ fn compile_return(
         } else {
             builder.ins().return_(&[val]);
         }
-    } else if is_aggregate_type(&ret_ty) {
+    } else if is_aggregate(&ret_ty, &mut ctx.layouts) {
         // Non-sret aggregate return: if the value is a scalar (e.g., Bool literal
         // compiled as i8 but return type is Named{Bool} which is a pointer),
         // we need to check the value's Cranelift type vs the signature's return type.
@@ -209,14 +209,13 @@ fn compile_switch(
             return Ok(());
         }
 
-        // Look up the discriminant value for this case.
-        // case_name may be fully-qualified (e.g., "std.core.Ordering.Less")
-        // but case_by_name keys on short names ("Less"), so strip the prefix.
+        // Look up the discriminant value for this case. `case_name` arrives
+        // fully-qualified (e.g. "std.core.Ordering.Less") but `case_by_name`
+        // keys on short names.
         let expected = if let Some(eid) = enum_id {
             let enum_def = &ctx.module.enums[eid.index()];
-            let short_name = case_name.rsplit('.').next().unwrap_or(case_name);
             enum_def
-                .case_by_name(short_name)
+                .case_by_name(common::short_name(case_name))
                 .map(|c| c.discriminant as i64)
                 .unwrap_or(i as i64)
         } else {

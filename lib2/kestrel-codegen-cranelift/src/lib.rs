@@ -207,7 +207,7 @@ mod integration_tests {
         let diagnostics = compiler.diagnostics();
         let _ = compiler.emit_diagnostics();
         let error_count = diagnostics.iter()
-            .filter(|d| format!("{:?}", d.severity).contains("Error"))
+            .filter(|d| d.severity >= kestrel_reporting2::Severity::Error)
             .count();
         if error_count > 0 {
             panic!("{} error(s) during build/inference — see diagnostics above", error_count);

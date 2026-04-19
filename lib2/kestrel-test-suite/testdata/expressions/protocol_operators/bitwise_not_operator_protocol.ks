@@ -11,5 +11,5 @@ struct Bits: Prelude.BitwiseNotOperatorProtocol {
 }
 func test() -> Bits {
     let a = Bits(value: 0b1010);
-    ~a
+    !a
 }

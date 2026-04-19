@@ -4,5 +4,5 @@
 module Test
 struct Error {}
 func failing() -> Error {
-    throw // ERROR: expected
-}
+    throw
+} // ERROR: expected

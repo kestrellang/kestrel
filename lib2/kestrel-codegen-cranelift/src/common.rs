@@ -1,6 +1,6 @@
 //! Shared helpers used across codegen modules.
 //!
-//! Eliminates the duplication found in lib1 where `is_aggregate_type`,
+//! Eliminates the duplication found in lib1 where `is_aggregate`,
 //! `copy_aggregate_value`, `get_place_type`, and `get_field_info` were
 //! each defined 2-3 times across different files.
 
@@ -16,10 +16,37 @@ use kestrel_mir::{
 };
 use std::collections::HashMap;
 
+/// Apply `substitute_type` to every element of a type-argument list.
+///
+/// Replaces the repeated pattern
+/// `type_args.iter().map(|a| substitute_type(a, subst)).collect()`
+/// that appeared at 8+ call sites across `place.rs`, `rvalue/construct.rs`,
+/// `rvalue/call.rs`, and `monomorphize/collect.rs`.
+pub fn substitute_type_args(
+    type_args: &[MirTy],
+    subst: &HashMap<Entity, MirTy>,
+) -> Vec<MirTy> {
+    type_args.iter().map(|a| substitute_type(a, subst)).collect()
+}
+
+/// Extract the final segment of a fully-qualified MIR name.
+///
+/// Entities like `AssociatedTypeDef` and `EnumCaseDef` store a short name
+/// (e.g., `"Item"`, `"Less"`), but the ECS `resolve_name(entity)` returns the
+/// fully-qualified path (e.g., `"std.core.Iterator.Item"`). This helper strips
+/// the prefix so the short name can be used with `ProtocolDef::associated_type_by_name`
+/// or `EnumDef::case_by_name`.
+pub fn short_name(qualified: &str) -> &str {
+    qualified.rsplit('.').next().unwrap_or(qualified)
+}
+
 /// Check if a MirTy is an aggregate type (passed by pointer, not in registers).
-/// Conservative: treats all Named types as aggregate. Use `is_aggregate_with_layout`
-/// when a LayoutCache is available for accurate classification.
-pub fn is_aggregate_type(ty: &MirTy) -> bool {
+///
+/// Treats all `Named` types as aggregate (passed by pointer). This is
+/// conservative but consistent — every codegen site uses the same rule so
+/// callers and callees agree on ABI. `layouts` is threaded through for
+/// future layout-aware refinement; it is currently unused by this predicate.
+pub fn is_aggregate(ty: &MirTy, _layouts: &mut LayoutCache) -> bool {
     matches!(
         ty,
         MirTy::Tuple(_) | MirTy::Named { .. } | MirTy::Str | MirTy::FuncThick { .. }
@@ -44,25 +71,9 @@ pub fn type_has_unresolved_params(ty: &MirTy) -> bool {
     }
 }
 
-/// Layout-aware aggregate check. Named types that fit in a register (≤ pointer size)
-/// are passed by value, not by pointer. This correctly handles wrapper structs like
-/// Bool, Int64, etc. that are Named in MIR but small enough for registers.
-pub fn is_aggregate_with_layout(ty: &MirTy, layouts: &mut LayoutCache) -> bool {
-    match ty {
-        MirTy::Named { .. } => {
-            let layout = layouts.layout_of(ty);
-            layout.size > 8
-        }
-        _ => is_aggregate_type(ty),
-    }
-}
-
 /// Check if a function return type requires sret (struct-return) ABI.
-/// Uses conservative `is_aggregate_type` to match lib1: ALL Named types
-/// use sret, ensuring consistency with the aggregate pointer convention
-/// used throughout the codegen.
-pub fn needs_sret(ret: &MirTy, _layouts: &mut LayoutCache) -> bool {
-    !matches!(ret, MirTy::Unit | MirTy::Never) && is_aggregate_type(ret)
+pub fn needs_sret(ret: &MirTy, layouts: &mut LayoutCache) -> bool {
+    !matches!(ret, MirTy::Unit | MirTy::Never) && is_aggregate(ret, layouts)
 }
 
 /// Get the Cranelift pointer type for the target.
@@ -127,9 +138,10 @@ pub fn zero_memory(builder: &mut FunctionBuilder, ptr: CrValue, size: u64, ptr_t
     let _ = ptr_ty; // Available for future use
 }
 
-/// Copy an aggregate value byte-by-byte between two pointers.
+/// Copy an aggregate value between two pointers using 8/4/2/1-byte strides.
 ///
-/// Single definition replacing 3 copies in lib1 (rvalue.rs, place.rs, terminator.rs).
+/// Mirrors the word-stride strategy in `zero_memory` so a struct copy emits a
+/// handful of loads/stores instead of one per byte.
 pub fn copy_aggregate(
     builder: &mut FunctionBuilder,
     layouts: &mut LayoutCache,
@@ -139,18 +151,38 @@ pub fn copy_aggregate(
 ) {
     let layout = layouts.layout_of(ty);
     let size = layout.size;
+    if size == 0 {
+        return;
+    }
 
-    // Copy byte by byte (correctness-first; could be optimized with word copies)
-    for i in 0..size {
-        let byte = builder.ins().load(
-            ir::types::I8,
-            MemFlags::new(),
-            src,
-            Offset32::new(i as i32),
+    let mut offset = 0u64;
+
+    while offset + 8 <= size {
+        let v = builder.ins().load(
+            ir::types::I64, MemFlags::new(), src, Offset32::new(offset as i32),
         );
-        builder
-            .ins()
-            .store(MemFlags::new(), byte, dest, Offset32::new(i as i32));
+        builder.ins().store(MemFlags::new(), v, dest, Offset32::new(offset as i32));
+        offset += 8;
+    }
+    if offset + 4 <= size {
+        let v = builder.ins().load(
+            ir::types::I32, MemFlags::new(), src, Offset32::new(offset as i32),
+        );
+        builder.ins().store(MemFlags::new(), v, dest, Offset32::new(offset as i32));
+        offset += 4;
+    }
+    if offset + 2 <= size {
+        let v = builder.ins().load(
+            ir::types::I16, MemFlags::new(), src, Offset32::new(offset as i32),
+        );
+        builder.ins().store(MemFlags::new(), v, dest, Offset32::new(offset as i32));
+        offset += 2;
+    }
+    if offset < size {
+        let v = builder.ins().load(
+            ir::types::I8, MemFlags::new(), src, Offset32::new(offset as i32),
+        );
+        builder.ins().store(MemFlags::new(), v, dest, Offset32::new(offset as i32));
     }
 }
 

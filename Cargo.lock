@@ -1078,6 +1078,7 @@ dependencies = [
  "kestrel-hecs",
  "kestrel-mir",
  "kestrel-mir-lower",
+ "kestrel-reporting2",
  "stacker",
  "target-lexicon 0.12.16",
 ]

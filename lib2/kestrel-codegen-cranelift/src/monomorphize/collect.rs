@@ -11,6 +11,7 @@
 use super::error::MonomorphizeError;
 use super::instantiation::{FunctionInstantiation, MonomorphizationSet};
 use super::witness;
+use crate::common;
 use kestrel_codegen2::{substitute_type, substitute_type_with_self};
 use kestrel_debug::ktrace;
 use kestrel_hecs::Entity;
@@ -183,8 +184,7 @@ impl<'a> CollectionContext<'a> {
                 };
 
                 // Substitute type args using the current instantiation's substitution
-                let concrete_type_args: Vec<MirTy> =
-                    type_args.iter().map(|a| substitute_type(a, subst)).collect();
+                let concrete_type_args = common::substitute_type_args(type_args, subst);
 
                 // Resolve self type: only inherit parent's self_type if the callee
                 // actually uses SelfType in its signature. Static methods on other types
@@ -247,11 +247,11 @@ impl<'a> CollectionContext<'a> {
                 if let MirTy::Named { entity, ref type_args } = concrete_self {
                     if type_args.is_empty() {
                         let assoc_name = self.module.resolve_name(entity);
-                        let short_name = assoc_name.rsplit('.').next().unwrap_or(&assoc_name);
+                        let short = common::short_name(&assoc_name);
 
                         // Find which protocol owns this associated type
                         let owning_protocol = self.module.protocols.iter()
-                            .find(|p| p.associated_type_by_name(short_name).is_some())
+                            .find(|p| p.associated_type_by_name(short).is_some())
                             .map(|p| p.entity);
 
                         if let Some(owner_proto) = owning_protocol {
@@ -266,7 +266,7 @@ impl<'a> CollectionContext<'a> {
                             let subst_values: Vec<&MirTy> = subst.values().collect();
                             for candidate in candidates.iter().chain(subst_values.iter()) {
                                 if let Ok(resolved) = witness::resolve_associated_type(
-                                    self.module, owner_proto, candidate, short_name,
+                                    self.module, owner_proto, candidate, short,
                                 ) {
                                     concrete_self = resolved;
                                     break;
@@ -365,8 +365,7 @@ impl<'a> CollectionContext<'a> {
             Rvalue::Const(imm) => {
                 if let kestrel_mir::ImmediateKind::FunctionRef { func, type_args } = &imm.kind {
                     if let Some(&func_id) = self.entity_to_func.get(func) {
-                        let concrete_type_args: Vec<MirTy> =
-                            type_args.iter().map(|a| substitute_type(a, subst)).collect();
+                        let concrete_type_args = common::substitute_type_args(type_args, subst);
 
                         let inst = FunctionInstantiation {
                             func_id,
