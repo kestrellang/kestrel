@@ -14,7 +14,7 @@ use kestrel_span2::Span;
 use crate::constraint::{labels_match, CallArg, Constraint};
 use crate::ctx::InferCtx;
 use crate::error::InferError;
-use crate::ty::{LiteralKind, TyVar};
+use crate::ty::{LiteralKind, TyKind, TySlot, TyVar};
 
 // ===== Entry point =====
 
@@ -313,6 +313,7 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             scrutinee,
             arms,
             span,
+            ..
         } => {
             let scrut_tv = gen_expr(ctx, hir, *scrutinee);
             let result_tv = ctx.fresh();
@@ -530,21 +531,63 @@ fn gen_pat(ctx: &mut InferCtx<'_>, hir: &HirBody, pat_id: HirPatId, scrutinee_tv
             gen_pat(ctx, hir, *subpattern, scrutinee_tv);
         }
 
-        HirPat::Array { prefix, has_rest: _, suffix, span } => {
-            // Each element has the same type (Array[T] → T)
-            let elem_tv = ctx.fresh();
+        HirPat::Array { prefix, rest, suffix, span } => {
+            // Array patterns accept both `Array[T]` and `Slice[T]` scrutinees.
+            // If the scrutinee is already resolved to `Slice[T]`, take the
+            // element type from there; otherwise default to equating with
+            // `Array[elem_tv]` (preserves existing behavior for generic /
+            // unresolved scrutinees).
+            let slice_entity = ctx.resolver.builtin(kestrel_hir::Builtin::SliceStruct);
+            let elem_tv = {
+                let already_slice = if let Some(slice_ent) = slice_entity {
+                    matches!(
+                        ctx.slot(scrutinee_tv),
+                        TySlot::Resolved(TyKind::Named { entity, .. }) if *entity == slice_ent
+                    )
+                } else {
+                    false
+                };
 
-            // Build Array[elem_tv] and equate with scrutinee
-            if let Some(array_entity) = ctx.resolver.builtin(kestrel_hir::Builtin::DefaultArrayLiteralType) {
-                let array_tv = ctx.named(array_entity, vec![elem_tv]);
-                ctx.equal(scrutinee_tv, array_tv, span.clone());
-            }
+                if already_slice {
+                    // Reuse the scrutinee's element type arg directly.
+                    match ctx.slot(scrutinee_tv) {
+                        TySlot::Resolved(TyKind::Named { args, .. }) => args
+                            .first()
+                            .copied()
+                            .unwrap_or_else(|| ctx.fresh()),
+                        _ => unreachable!(),
+                    }
+                } else {
+                    let elem_tv = ctx.fresh();
+                    if let Some(array_entity) = ctx
+                        .resolver
+                        .builtin(kestrel_hir::Builtin::DefaultArrayLiteralType)
+                    {
+                        let array_tv = ctx.named(array_entity, vec![elem_tv]);
+                        ctx.equal(scrutinee_tv, array_tv, span.clone());
+                    }
+                    elem_tv
+                }
+            };
 
             // Equate each prefix/suffix element pattern against elem_tv
             for &elem_pat in prefix.iter().chain(suffix.iter()) {
                 let pat_tv = ctx.fresh();
                 ctx.equal(pat_tv, elem_tv, span.clone());
                 gen_pat(ctx, hir, elem_pat, pat_tv);
+            }
+
+            // Named rest binding → `Slice[elem_tv]` local.
+            if let Some(Some(local)) = rest {
+                if let Some(slice_ent) = slice_entity {
+                    let slice_tv = ctx.named(slice_ent, vec![elem_tv]);
+                    ctx.local_types.insert(*local, slice_tv);
+                } else {
+                    // No SliceStruct builtin available — fall back to a fresh
+                    // TyVar so at least the local is resolvable.
+                    let tv = ctx.fresh();
+                    ctx.local_types.insert(*local, tv);
+                }
             }
         }
 

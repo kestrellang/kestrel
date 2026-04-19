@@ -3,8 +3,8 @@
 //! Checks that for-loop bindings use irrefutable patterns. In lib2 HIR,
 //! for-loops are desugared to `loop { match iter.next() { .Some(pat) => body, .None => break } }`.
 //! The user's pattern is embedded inside the `.Some` variant. This analyzer
-//! uses the `for_loop_matches` marker on HirBody to find these desugared
-//! matches and extracts the user's pattern to check irrefutability.
+//! finds these desugared matches by checking `MatchSource::ForLoop` and
+//! extracts the user's pattern to check irrefutability.
 //!
 //! ## Diagnostics
 //!
@@ -48,8 +48,14 @@ impl BodyCheck for ForLoopPatternAnalyzer {
     fn check(&self, cx: &BodyContext<'_>) -> Vec<AnalyzeDiagnostic> {
         let mut diags = Vec::new();
 
-        for &match_id in &cx.hir.for_loop_matches {
-            let HirExpr::Match { scrutinee, arms, .. } = &cx.hir.exprs[match_id] else {
+        for (_match_id, expr) in cx.hir.exprs.iter() {
+            let HirExpr::Match {
+                scrutinee,
+                arms,
+                source: MatchSource::ForLoop,
+                ..
+            } = expr
+            else {
                 continue;
             };
 

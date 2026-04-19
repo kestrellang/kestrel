@@ -344,18 +344,19 @@ pub fn flatten(
             }
         }
 
-        HirPat::Array { prefix, has_rest, suffix, .. } => {
-            // Extract element type from scrutinee (Array[T] → T)
+        HirPat::Array { prefix, rest, suffix, .. } => {
+            // Extract element type from scrutinee (Array[T] or Slice[T] → T)
             let elem_ty = match scrutinee_ty {
                 ResolvedTy::Named { args, .. } => args.first().cloned().unwrap_or(ResolvedTy::Error),
                 _ => ResolvedTy::Error,
             };
 
+            let has_rest = rest.is_some();
             let mut children: Vec<_> = prefix
                 .iter()
                 .map(|&id| flatten(hir, query, id, &elem_ty))
                 .collect();
-            if *has_rest {
+            if has_rest {
                 children.push(FlatPat::Wildcard); // rest slot
             }
             children.extend(suffix.iter().map(|&id| flatten(hir, query, id, &elem_ty)));
@@ -364,7 +365,7 @@ pub fn flatten(
                 ctor: Constructor::Array {
                     prefix_len: prefix.len(),
                     suffix_len: suffix.len(),
-                    has_rest: *has_rest,
+                    has_rest,
                 },
                 children,
             }

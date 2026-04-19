@@ -236,11 +236,18 @@ pub(crate) fn describe_pattern(hir: &HirBody, pat_id: HirPatId) -> String {
                 .collect();
             format!("{{ {} }}", inner.join(", "))
         }
-        HirPat::Array { prefix, has_rest, suffix, .. } => {
+        HirPat::Array { prefix, rest, suffix, .. } => {
             let mut parts: Vec<String> = prefix.iter().map(|&e| describe_pattern(hir, e)).collect();
-            if *has_rest {
-                parts.push("..".into());
-                parts.extend(suffix.iter().map(|&e| describe_pattern(hir, e)));
+            match rest {
+                Some(Some(local)) => {
+                    parts.push(format!("..{}", hir.locals[*local].name));
+                    parts.extend(suffix.iter().map(|&e| describe_pattern(hir, e)));
+                }
+                Some(None) => {
+                    parts.push("..".into());
+                    parts.extend(suffix.iter().map(|&e| describe_pattern(hir, e)));
+                }
+                None => {}
             }
             format!("[{}]", parts.join(", "))
         }

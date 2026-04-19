@@ -777,7 +777,7 @@ impl LowerCtx<'_> {
         else_body: Option<&ElseBody>,
         span: &Span,
     ) -> HirExprId {
-        let condition = self.lower_if_conditions(body, conditions, span);
+        let condition = self.lower_if_conditions(body, conditions, MatchSource::IfLet, span);
         let then_block = self.lower_block(body, then_body);
         let else_block = else_body.map(|eb| match eb {
             ElseBody::Block(block) => self.lower_block(body, block),
@@ -802,10 +802,13 @@ impl LowerCtx<'_> {
     /// Lower if-condition chains into a single boolean expression.
     /// Multiple conditions are ANDed together.
     /// Let-conditions create bindings in the current scope.
+    /// `source` tags any desugared let-condition matches so the right
+    /// diagnostic fires (IfLet → E302, WhileLet → E308, GuardLet → E309).
     pub(crate) fn lower_if_conditions(
         &mut self,
         body: &AstBody,
         conditions: &[IfCondition],
+        source: MatchSource,
         span: &Span,
     ) -> HirExprId {
         if conditions.is_empty() {
@@ -848,6 +851,7 @@ impl LowerCtx<'_> {
                                 body: false_lit,
                             },
                         ],
+                        source,
                         span: span.clone(),
                     })
                 },
@@ -855,8 +859,8 @@ impl LowerCtx<'_> {
         }
 
         // Multiple conditions: lower first, AND with rest
-        let first = self.lower_if_conditions(body, &conditions[..1], span);
-        let rest = self.lower_if_conditions(body, &conditions[1..], span);
+        let first = self.lower_if_conditions(body, &conditions[..1], source, span);
+        let rest = self.lower_if_conditions(body, &conditions[1..], source, span);
 
         // first && rest — desugar to protocol call
         self.desugar_logical_and(first, rest, span)
@@ -910,6 +914,7 @@ impl LowerCtx<'_> {
                             guard: None,
                             body: unit,
                         }],
+                        source: MatchSource::LetDestructure,
                         span: span.clone(),
                     });
                     let stmt = self.alloc_stmt(HirStmt::Expr {
@@ -975,6 +980,7 @@ impl LowerCtx<'_> {
         self.alloc_expr(HirExpr::Match {
             scrutinee: lowered_scrutinee,
             arms: lowered_arms,
+            source: MatchSource::UserMatch,
             span: span.clone(),
         })
     }

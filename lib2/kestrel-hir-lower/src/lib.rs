@@ -18,7 +18,7 @@ pub mod ty;
 
 use kestrel_ast_builder::{Body, Callable};
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
-use kestrel_hir::body::{HirBody, HirExpr, HirMatchArm, HirStmt};
+use kestrel_hir::body::{HirBody, HirExpr, HirMatchArm, HirStmt, MatchSource};
 use kestrel_span2::Span;
 
 pub use ty::{lower_ast_type, LowerCallableTypes, LowerExtensionTargetTypeArgs, LowerTypeAnnotation};
@@ -86,6 +86,7 @@ impl QueryFn for LowerBody {
                             guard: None,
                             body: unit,
                         }],
+                        source: MatchSource::LetDestructure,
                         span: span.clone(),
                     });
                     let stmt = lower.alloc_stmt(HirStmt::Expr {
@@ -120,7 +121,6 @@ impl QueryFn for LowerBody {
             statements,
             tail_expr,
             guard_let_stmts: lower.guard_let_stmts,
-            for_loop_matches: lower.for_loop_matches,
             while_conditions: lower.while_conditions,
         })
     }

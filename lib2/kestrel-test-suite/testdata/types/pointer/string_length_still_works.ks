@@ -4,5 +4,5 @@
 module Test
 
 func len(s: lang.str) -> lang.i64 {
-    s.length()
+    lang.str_len(s)
 }

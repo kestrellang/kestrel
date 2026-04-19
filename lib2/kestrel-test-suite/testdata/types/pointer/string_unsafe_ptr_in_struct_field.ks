@@ -8,5 +8,5 @@ struct StringView {
     let len: lang.i64
 }
 func makeView(s: lang.str) -> StringView {
-    StringView(ptr: s.unsafePtr(), len: s.length())
+    StringView(ptr: lang.str_ptr(s), len: lang.str_len(s))
 }

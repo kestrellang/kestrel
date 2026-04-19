@@ -354,6 +354,12 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                     let type_args = self.prepend_receiver_type_args(&self_type, vec![]);
                     let callee = Callee::method(getter_entity, type_args, self_type);
                     self.emit_call(callee, vec![], result_ty)
+                } else if is_static {
+                    // Static stored field on a concrete type (e.g. `Foo.staticVar`).
+                    // No receiver, no call — just a global place.
+                    let static_entity = resolved.unwrap();
+                    self.ctx.register_name(static_entity);
+                    Value::Place(Place::Global(static_entity))
                 } else if is_callable {
                     // Computed property: emit a getter call
                     let getter_entity = resolved.unwrap();
@@ -493,20 +499,20 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                         }
                     },
                     Some(kestrel_ast_builder::NodeKind::Field) => {
-                        // Static computed property (has Callable) → call the getter
+                        // Computed property (has Callable) → call the getter.
+                        // Otherwise it's a stored field referenced by bare name —
+                        // that only happens for globals (module-level or `static`
+                        // inside a type); instance fields always go through
+                        // `HirExpr::Field { base, .. }`, not `HirExpr::Def`.
                         if self.ctx.world.get::<kestrel_ast_builder::Callable>(*entity).is_some() {
                             self.ctx.register_name(*entity);
                             let result_ty = self.resolve_expr_type(expr_id);
                             // Static getter: no receiver, no type args
                             let callee = Callee::direct_generic(*entity, Vec::new());
                             self.emit_call(callee, Vec::new(), result_ty)
-                        } else if self.ctx.world.get::<kestrel_ast_builder::Static>(*entity).is_some() {
-                            // Static stored field → global access
-                            Value::Place(Place::Global(*entity))
                         } else {
-                            // Non-static field used as bare value — shouldn't happen in
-                            // well-typed code but handle gracefully
-                            Value::Immediate(Immediate::error())
+                            self.ctx.register_name(*entity);
+                            Value::Place(Place::Global(*entity))
                         }
                     },
                     Some(kestrel_ast_builder::NodeKind::TypeParameter)
@@ -1126,7 +1132,6 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
             // String operations
             "str_ptr" => emit_op1(self, Op::StrPtr),
             "str_len" => emit_op1(self, Op::StrLen),
-            "str_eq" => emit_op2(self, Op::StrEq),
 
             // Memory
             "sizeof" | "size_of" => {
@@ -3293,12 +3298,22 @@ fn unescape_string_literal(s: &str) -> String {
 
 /// Apply an access path to a place to reach a sub-value.
 /// e.g., scrutinee + [Downcast("Some"), Index(0)] → scrutinee.Some.0
+///
+/// `IndexFromEnd` / `RestSlice` produce values (not places) and must be
+/// materialized by `emit_bindings` via the `ArrayMatchable` protocol — they
+/// should never appear in switch-test paths. If they're encountered here,
+/// emit_bindings didn't route them correctly; fall back to returning the
+/// scrutinee place unchanged so MIR still compiles (runtime correctness is
+/// handled by emit_array_pattern_binding below).
 fn apply_access_path(mut place: Place, path: &[PathElement]) -> Place {
     for elem in path {
         place = match elem {
             PathElement::Field(name) => place.field(name.clone()),
             PathElement::Index(i) => place.index(*i),
             PathElement::Downcast(variant) => place.downcast(variant.clone()),
+            // Array-matchable paths: pass through (emit_bindings handles them
+            // separately via matchGet / matchSlice protocol calls).
+            PathElement::IndexFromEnd(_) | PathElement::RestSlice { .. } => place,
         };
     }
     place

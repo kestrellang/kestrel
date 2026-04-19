@@ -46,6 +46,7 @@ pub fn seed_lang_module(world: &mut World, root: Entity) -> Entity {
     seed_float_ops(world, lang);
     seed_cast_ops(world, lang);
     seed_pointer_ops(world, lang);
+    seed_string_ops(world, lang);
     seed_misc_ops(world, lang);
 
     lang
@@ -333,6 +334,17 @@ fn seed_pointer_ops(world: &mut World, lang: Entity) {
         &[("ptr", ptr_t.clone())], i1_ty);
     seed_generic_fn(world, lang, "ptr_to_address",
         &[("ptr", ptr_t.clone())], i64_ty);
+}
+
+/// String intrinsics — raw pointer and length queries on `lang.str`.
+/// MIR lowering recognizes these by name (see body_lower.rs).
+fn seed_string_ops(world: &mut World, lang: Entity) {
+    let str_ty = lang_ty("str");
+    let i64_ty = lang_ty("i64");
+    let ptr_i8 = ptr_of(lang_ty("i8"));
+
+    seed_fn(world, lang, "str_ptr", &[("s", str_ty.clone())], ptr_i8);
+    seed_fn(world, lang, "str_len", &[("s", str_ty)], i64_ty);
 }
 
 /// Misc intrinsics: panic, atomics.

@@ -19,6 +19,7 @@ mod item;
 mod name;
 mod protocol_lower;
 mod resolved_ty;
+mod static_lower;
 mod struct_lower;
 mod witness_lower;
 pub mod ty;
@@ -36,6 +37,10 @@ pub fn lower_module(world: &World, root: Entity) -> MirModule {
     let mut ctx = LowerCtx::new(world, root, "main");
     item::lower_items(&mut ctx);
     witness_lower::lower_witnesses(&mut ctx);
+    // Statics and the synthetic `__kestrel_init_statics` function exist only
+    // after all items are known (we need per-static init thunks registered
+    // before main-injection runs).
+    static_lower::synthesize_static_inits(&mut ctx);
     ctx.finish()
 }
 

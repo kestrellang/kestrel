@@ -30,42 +30,42 @@ All fail during link with `unknown global entity` / `unknown function entity` fo
 
 - [ ] `validation/properties_intended/enum_computed_var_get_set.ks` — **got:** `codegen/link failed: unknown global entity Entity(3524) (Main.Foo._v)`
 - [ ] `validation/properties_intended/enum_static_computed_var_get_set.ks` — **got:** `unknown global entity Entity(3524) (Main.Foo._s)`
-- [ ] `validation/properties_intended/enum_static_let_initial_value.ks` — **got:** `unknown global Entity(3524)`
-- [ ] `validation/properties_intended/enum_static_var_mutability_and_initial_value.ks` — **got:** `unknown global Entity(3524)`
+- [x] `validation/properties_intended/enum_static_let_initial_value.ks` — **got:** `unknown global Entity(3524)`
+- [x] `validation/properties_intended/enum_static_var_mutability_and_initial_value.ks` — **got:** `unknown global Entity(3524)`
 - [ ] `validation/properties_intended/global_computed_var_get_set.ks` — **got:** `call to unknown function entity Entity(3523) (Main.globalComputedVar)`
 - [ ] `validation/properties_intended/struct_static_computed_var_get_set.ks` — **got:** `unknown global entity Entity(3523) (Main.Foo._s)`
-- [ ] `validation/properties_intended/struct_static_let_initial_value.ks` — **got:** `unknown global Entity(3523)`
-- [ ] `validation/properties_intended/struct_static_var_mutability_and_initial_value.ks` — **got:** `unknown global Entity(3523)`
+- [x] `validation/properties_intended/struct_static_let_initial_value.ks` — **got:** `unknown global Entity(3523)`
+- [x] `validation/properties_intended/struct_static_var_mutability_and_initial_value.ks` — **got:** `unknown global Entity(3523)`
 
 ## Runtime: global / computed property wrong value
 
 The binary runs but produces wrong output. Related family to the codegen-link failures above.
 
-- [ ] `validation/properties_intended/global_let_initial_value.ks` — **expected stdout:** `7` · **got:** `-256` (uninitialized storage)
-- [ ] `validation/properties_intended/global_var_mutability_and_initial_value.ks` — **expected:** `0\n5` · **got:** `8663501056\n8660684288` (stack address leaked as value)
+- [x] `validation/properties_intended/global_let_initial_value.ks` — **expected stdout:** `7` · **got:** `-256` (uninitialized storage)
+- [x] `validation/properties_intended/global_var_mutability_and_initial_value.ks` — **expected:** `0\n5` · **got:** `8663501056\n8660684288` (stack address leaked as value)
 - [ ] `validation/properties_intended/struct_computed_var_get_set.ks` — **expected:** `5\n9` · **got:** `5\n5` (setter not invoked)
 
 ## Array rest-pattern bindings lower to `.count.raw` on undeclared symbol
 
 Lowering of `[a, b, ...rest]` / `[all...]` emits `<binding>.count.raw` in MIR before the binding is actually introduced. All fail with `undefined name 'X.count.raw'`.
 
-- [ ] `patterns/array_matchable/capture_all_as_slice.ks` — **got:** `undefined name 'all.count.raw'`
-- [ ] `patterns/array_matchable/let_array_destructure.ks` — **got:** `undefined name 'all.count.raw'`
-- [ ] `patterns/array_matchable/let_with_rest.ks` — **got:** `undefined name 'rest.count.raw'`
-- [ ] `patterns/array_matchable/prefix_rest_suffix.ks` — **got:** `undefined name 'middle.count.raw'`
-- [ ] `patterns/array_matchable/recursive_slice_destructuring.ks` — **got:** `undefined name 'rest'`
-- [ ] `patterns/array_matchable/rest_suffix_without_prefix.ks` — **got:** `undefined name 'rest.count.raw'`
-- [ ] `patterns/array_matchable/rest_with_binding.ks` — **got:** `undefined name 'rest.count.raw'`
-- [ ] `patterns/array_matchable/slice_array_pattern.ks` — **got:** `type mismatch: expected Slice[i64] got Array[i64]`
+- [x] `patterns/array_matchable/capture_all_as_slice.ks` — **got:** `undefined name 'all.count.raw'`
+- [x] `patterns/array_matchable/let_array_destructure.ks` — **got:** `undefined name 'all.count.raw'`
+- [x] `patterns/array_matchable/let_with_rest.ks` — **got:** `undefined name 'rest.count.raw'`
+- [x] `patterns/array_matchable/prefix_rest_suffix.ks` — **got:** `undefined name 'middle.count.raw'`
+- [x] `patterns/array_matchable/recursive_slice_destructuring.ks` — **got:** `undefined name 'rest'`
+- [x] `patterns/array_matchable/rest_suffix_without_prefix.ks` — **got:** `undefined name 'rest.count.raw'`
+- [x] `patterns/array_matchable/rest_with_binding.ks` — **got:** `undefined name 'rest.count.raw'`
+- [x] `patterns/array_matchable/slice_array_pattern.ks` — **got:** `type mismatch: expected Slice[i64] got Array[i64]`
 
 ## Mutating-init body: `self.x = …` double-flagged as E201 + E005
 
 Every init-body `self.field = value` fires both `cannot assign to immutable field 'x' [E201]` AND `initializer does not initialize all fields: 'x' [E005]`. Init-self-field assignment path is broken — both analyses see it as a no-op.
 
-- [ ] `validation/duplicate_callable/different_arity_with_same_label_start_is_valid.ks` — **got:** E201+E005 on lines 8,9
-- [ ] `validation/duplicate_callable/different_labels_is_valid_overload_init.ks` — **got:** E201+E005 on lines 8,9
-- [ ] `validation/duplicate_callable/same_labels_is_duplicate_init.ks` — **got:** E201+E005 on lines 8,9
-- [ ] `validation/duplicate_callable/two_protocols_same_init_label_different_types.ks` — **got:** E201+E005 on lines 16,17
+- [x] `validation/duplicate_callable/different_arity_with_same_label_start_is_valid.ks` — **got:** E201+E005 on lines 8,9
+- [x] `validation/duplicate_callable/different_labels_is_valid_overload_init.ks` — **got:** E201+E005 on lines 8,9
+- [x] `validation/duplicate_callable/same_labels_is_duplicate_init.ks` — **got:** E201+E005 on lines 8,9
+- [x] `validation/duplicate_callable/two_protocols_same_init_label_different_types.ks` — **got:** E201+E005 on lines 16,17
 
 ## Protocol subscripts require a body (E608)
 
@@ -108,15 +108,15 @@ Extension's generic params (`extend S[T] where …`) don't make `T`, `U` visible
 
 Primitive `str` lost these members somewhere; tests targeting pointer-interop fail.
 
-- [ ] `types/pointer/string_length_still_works.ks` — **got:** `no member 'length': str.length not found`
-- [ ] `types/pointer/string_unsafe_ptr_compiles.ks` — **got:** `no member 'unsafePtr': str.unsafePtr not found`
-- [ ] `types/pointer/string_unsafe_ptr_in_struct_field.ks` — **got:** `str.unsafePtr not found`, `str.length not found`
-- [ ] `types/pointer/string_unsafe_ptr_return_type.ks` — **got:** `str.unsafePtr not found`
+- [x] `types/pointer/string_length_still_works.ks` — **got:** `no member 'length': str.length not found`
+- [x] `types/pointer/string_unsafe_ptr_compiles.ks` — **got:** `no member 'unsafePtr': str.unsafePtr not found`
+- [x] `types/pointer/string_unsafe_ptr_in_struct_field.ks` — **got:** `str.unsafePtr not found`, `str.length not found`
+- [x] `types/pointer/string_unsafe_ptr_return_type.ks` — **got:** `str.unsafePtr not found`
 
 ## `Prelude.*` path not resolvable
 
-- [ ] `builtins/matchable/generic_matchable.ks` — **got:** `cannot find type 'Prelude.Matchable' in this scope [E436]`, `no member 'matches': T.matches`
-- [ ] `expressions/throw/throw_with_try_pattern.ks` — **got:** `cannot find type 'Prelude' in this scope`, `undefined 'Prelude.ControlFlow.{Continue,Break}'`
+- [x] `builtins/matchable/generic_matchable.ks` — **got:** `cannot find type 'Prelude.Matchable' in this scope [E436]`, `no member 'matches': T.matches`
+- [x] `expressions/throw/throw_with_try_pattern.ks` — **got:** `cannot find type 'Prelude' in this scope`, `undefined 'Prelude.ControlFlow.{Continue,Break}'`
 
 ## Shift operators leak `by:` label
 
@@ -147,9 +147,9 @@ Exhaustiveness pass flags these as unreachable/irrefutable when they aren't.
 
 ## Spurious dead-code / unreachable-code warnings
 
-- [ ] `expressions/returns/return_with_semicolon_followed_by_code.ks` — **got:** `unreachable code [E002]` on lines 8,9
-- [ ] `validation/dead_code/code_after_return_warns.ks` — **got:** `unreachable code [E002]` on line 9 (wrong line)
-- [ ] `validation/type_checking/while_with_wrong_return.ks` — **got:** `unreachable code [E002]` on line 10
+- [x] `expressions/returns/return_with_semicolon_followed_by_code.ks` — **got:** `unreachable code [E002]` on lines 8,9
+- [x] `validation/dead_code/code_after_return_warns.ks` — **got:** `unreachable code [E002]` on line 9 (wrong line)
+- [x] `validation/type_checking/while_with_wrong_return.ks` — **got:** `unreachable code [E002]` on line 10
 
 ## Init delegation (`self.init(…)`) emits wrong diagnostics
 
@@ -175,7 +175,7 @@ Exhaustiveness pass flags these as unreachable/irrefutable when they aren't.
 
 ## Binary-expression LHS of assignment produces wrong diagnostic
 
-- [ ] `validation/mutability/assign_to_binary_expression_fails.ks` — **got:** `unsupported binary operator '+'`
+- [x] `validation/mutability/assign_to_binary_expression_fails.ks` — **got:** `unsupported binary operator '+'`
 
 ## `type Alias = X` init-call and assoc-type projection regressions
 
@@ -207,7 +207,7 @@ Exhaustiveness pass flags these as unreachable/irrefutable when they aren't.
 
 ## Assign-to-field-on-immutable-receiver fires wrong diagnostic
 
-- [ ] `validation/mutability/assign_to_field_on_immutable_receiver.ks` — **got:** `cannot assign to immutable variable 's' [E200]` (should be "immutable field 'x'")
+- [x] `validation/mutability/assign_to_field_on_immutable_receiver.ks` — **got:** `cannot assign to immutable variable 's' [E200]` (should be "immutable field 'x'")
 
 ## Regressions on positive tests
 
@@ -433,8 +433,8 @@ Tests expect specific phrasing ("no member 'z' on type 'Point'", "cannot index i
 
 ## Field / variable mutability diagnostics on nested/field paths
 
-- [ ] `validation/mutability/nested_field_assignment_outer_immutable_fails.ks` — **expected:** `cannot assign to immutable field`
-- [ ] `validation/mutability/nested_field_assignment_receiver_immutable_fails.ks` — **expected:** `cannot assign to immutable field`
+- [x] `validation/mutability/nested_field_assignment_outer_immutable_fails.ks` — **expected:** `cannot assign to immutable field`
+- [x] `validation/mutability/nested_field_assignment_receiver_immutable_fails.ks` — **expected:** `cannot assign to immutable field`
 
 ## Self in wrong context
 

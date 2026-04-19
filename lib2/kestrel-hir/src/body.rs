@@ -40,12 +40,40 @@ pub struct HirBody {
     /// Statements that originated from guard-let desugaring.
     /// Used by the guard-let divergence analyzer to check that the else block diverges.
     pub guard_let_stmts: Vec<HirStmtId>,
-    /// Match expressions that originated from for-loop desugaring.
-    /// Used by the for-loop pattern analyzer to extract and check the user's pattern.
-    pub for_loop_matches: Vec<HirExprId>,
     /// Original condition expressions from while-loop desugaring.
     /// Used by the condition type analyzer to check that while conditions are Bool.
     pub while_conditions: Vec<HirExprId>,
+}
+
+/// Where a `HirExpr::Match` came from. Drives diagnostic phrasing and lets
+/// analyzers skip desugared matches (for-loop bodies, if-let wildcards) that
+/// would otherwise produce false-positive unreachable / irrefutable warnings.
+#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
+pub enum MatchSource {
+    /// `match x { ... }` written by the user.
+    UserMatch,
+    /// Desugared from `if let p = v { ... } else { ... }`.
+    IfLet,
+    /// Desugared from `while let p = v { ... }`.
+    WhileLet,
+    /// Desugared from `guard let p = v else { ... }`.
+    GuardLet,
+    /// Desugared from `for p in iter { ... }` (the Option match on iterator.next()).
+    ForLoop,
+    /// Desugared from `let <pattern> = expr;` or function parameter destructuring.
+    LetDestructure,
+    /// Desugared from `try expr` (Continue/Break matching on ControlFlow).
+    TryOp,
+    /// Desugared from `expr!` unwrap.
+    UnwrapOp,
+}
+
+impl MatchSource {
+    /// True if this match is a desugared construct whose arms are synthetic
+    /// (analyzers should skip exhaustiveness/redundancy checks).
+    pub fn is_desugared(self) -> bool {
+        !matches!(self, MatchSource::UserMatch)
+    }
 }
 
 /// A nested code block (if/loop/match arm bodies, desugared blocks).
@@ -160,6 +188,7 @@ pub enum HirExpr {
     Match {
         scrutinee: HirExprId,
         arms: Vec<HirMatchArm>,
+        source: MatchSource,
         span: Span,
     },
     Break {
@@ -265,7 +294,11 @@ pub enum HirPat {
     },
     Array {
         prefix: Vec<HirPatId>,
-        has_rest: bool,
+        /// Rest pattern:
+        /// - `None` — no rest (`[a, b]`)
+        /// - `Some(None)` — bare rest (`[a, .., b]`)
+        /// - `Some(Some(local))` — named rest (`[a, ..name, b]`), bound to `Slice[T]`
+        rest: Option<Option<LocalId>>,
         suffix: Vec<HirPatId>,
         span: Span,
     },

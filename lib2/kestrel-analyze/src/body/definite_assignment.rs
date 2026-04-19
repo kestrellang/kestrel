@@ -424,9 +424,17 @@ fn mark_pattern_assigned(hir: &HirBody, pat_id: HirPatId, assigned: &mut HashSet
         HirPat::Binding { local, .. } => {
             assigned.insert(*local);
         }
-        HirPat::Tuple { prefix, suffix, .. } | HirPat::Array { prefix, suffix, .. } => {
+        HirPat::Tuple { prefix, suffix, .. } => {
             for &elem in prefix.iter().chain(suffix.iter()) {
                 mark_pattern_assigned(hir, elem, assigned);
+            }
+        }
+        HirPat::Array { prefix, rest, suffix, .. } => {
+            for &elem in prefix.iter().chain(suffix.iter()) {
+                mark_pattern_assigned(hir, elem, assigned);
+            }
+            if let Some(Some(local)) = rest {
+                assigned.insert(*local);
             }
         }
         HirPat::Variant { args, .. } | HirPat::ImplicitVariant { args, .. } => {

@@ -65,13 +65,15 @@ impl BodyCheck for IrrefutablePatternAnalyzer {
     fn check(&self, cx: &BodyContext<'_>) -> Vec<AnalyzeDiagnostic> {
         let mut diags = Vec::new();
 
-        for (expr_id, expr) in cx.hir.exprs.iter() {
-            let HirExpr::Match { scrutinee, arms, .. } = expr else {
+        for (_expr_id, expr) in cx.hir.exprs.iter() {
+            let HirExpr::Match { scrutinee, arms, source, .. } = expr else {
                 continue;
             };
 
-            // Skip for-loop desugared matches — they're always exhaustive by construction
-            if cx.hir.for_loop_matches.contains(&expr_id) {
+            // Skip desugared matches — the exhaustiveness analyzer handles the
+            // source-specific irrefutable diagnostic (E302/E308/E309) for
+            // if-let/while-let/guard-let; other desugared forms don't warn.
+            if source.is_desugared() {
                 continue;
             }
 

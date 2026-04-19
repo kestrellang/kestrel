@@ -114,11 +114,18 @@ impl LowerCtx<'_> {
             AstPat::Array { prefix, rest, suffix, span } => {
                 let lowered_prefix: Vec<HirPatId> =
                     prefix.iter().map(|&id| self.lower_pat(body, id)).collect();
+                // Map Option<Option<String>> → Option<Option<LocalId>>:
+                // - None → None (no rest)
+                // - Some(None) → Some(None) (bare `..`)
+                // - Some(Some(name)) → Some(Some(local)) (named `..name`)
+                let hir_rest = rest.as_ref().map(|inner| {
+                    inner.as_ref().map(|name| self.define_local(name, false, span.clone()))
+                });
                 let lowered_suffix: Vec<HirPatId> =
                     suffix.iter().map(|&id| self.lower_pat(body, id)).collect();
                 self.alloc_pat(HirPat::Array {
                     prefix: lowered_prefix,
-                    has_rest: rest.is_some(),
+                    rest: hir_rest,
                     suffix: lowered_suffix,
                     span: span.clone(),
                 })

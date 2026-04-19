@@ -160,21 +160,15 @@ fn check_target(
                 }
             }
 
-            // Field is settable — but the base must also be mutable.
-            // e.g., `p.x = 10` where `p` is a `let` binding is invalid.
+            // Field is settable — but the whole base chain must also be mutable.
+            // e.g., `p.x = 10` where `p` is `let`, or `o.inner.x = 10` where
+            // `inner` is `let`, is invalid. Report this as an immutable field
+            // access on the assigned field.
             if !is_mutable_base(cx, *base) {
-                let base_name = if let HirExpr::Local(id, _) = &cx.hir.exprs[*base] {
-                    cx.hir.locals[*id].name.clone()
-                } else {
-                    "expression".into()
-                };
                 diags.push(AnalyzeDiagnostic {
-                    descriptor_id: DESCRIPTORS[0].id,
-                    severity: DESCRIPTORS[0].default_severity,
-                    message: format!(
-                        "cannot assign to immutable variable '{}'",
-                        base_name,
-                    ),
+                    descriptor_id: DESCRIPTORS[1].id,
+                    severity: DESCRIPTORS[1].default_severity,
+                    message: format!("cannot assign to immutable field '{}'", name),
                     labels: vec![DiagLabel {
                         span: util::expr_span(cx.hir, target),
                         message: "cannot assign through immutable binding".into(),
@@ -281,14 +275,23 @@ fn is_self_local(cx: &BodyContext<'_>, expr_id: HirExprId) -> bool {
     }
 }
 
-/// Check if a base expression refers to a mutable local.
+/// Check whether a base path is mutable. Walks through field / tuple-index
+/// chains: the path is mutable only if the root local is `var` AND every
+/// intermediate field along the chain is settable.
 fn is_mutable_base(cx: &BodyContext<'_>, expr_id: HirExprId) -> bool {
-    if let HirExpr::Local(local_id, _) = &cx.hir.exprs[expr_id] {
-        cx.hir.locals[*local_id].is_mut
-    } else {
-        // Conservative: for non-local bases (fields, method returns, etc.),
-        // we don't have enough info to determine mutability at this level.
-        // The type inference phase handles these cases.
-        true
+    match &cx.hir.exprs[expr_id] {
+        HirExpr::Local(local_id, _) => cx.hir.locals[*local_id].is_mut,
+        HirExpr::Field { base, .. } => {
+            if let Some(&field_entity) = cx.typed.resolutions.get(&expr_id) {
+                if cx.query.get::<Settable>(field_entity).is_none() {
+                    return false;
+                }
+            }
+            is_mutable_base(cx, *base)
+        }
+        HirExpr::TupleIndex { base, .. } => is_mutable_base(cx, *base),
+        // Non-place expressions (call results, literals, etc.) — conservatively
+        // treat as mutable; the type inference / validation phases handle these.
+        _ => true,
     }
 }

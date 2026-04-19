@@ -206,8 +206,6 @@ pub enum Op {
     StrPtr,
     /// Op1: str -> i64
     StrLen,
-    /// Op2: (str, str) -> bool
-    StrEq,
     /// Op1: int -> str
     IntToString,
 

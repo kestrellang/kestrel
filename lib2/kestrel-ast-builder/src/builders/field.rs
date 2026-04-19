@@ -69,10 +69,15 @@ pub fn build_field(
         }
 
         // Store getter body as Valued + Body if present.
-        // Instance computed properties access `self` via a borrowing receiver.
-        // Static computed properties have no receiver.
+        // Instance computed properties access `self` via a borrowing receiver;
+        // `static` fields and module-level computed globals have no receiver
+        // (the latter have no parent type to bind `self` to).
         let is_static_field = has_static_modifier(node);
-        let receiver = if is_static_field {
+        let parent_is_type = matches!(
+            world.get::<NodeKind>(parent),
+            Some(NodeKind::Struct | NodeKind::Enum | NodeKind::Protocol | NodeKind::Extension)
+        );
+        let receiver = if is_static_field || !parent_is_type {
             None
         } else {
             Some(ReceiverKind::Borrowing)

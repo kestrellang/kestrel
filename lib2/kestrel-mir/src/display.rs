@@ -976,7 +976,6 @@ impl fmt::Display for crate::op::Op {
             Op::StackAlloc(_) => write!(f, "stack_alloc"),
             Op::StrPtr => write!(f, "str.ptr"),
             Op::StrLen => write!(f, "str.len"),
-            Op::StrEq => write!(f, "str.eq"),
             Op::IntToString => write!(f, "int.to_string"),
             Op::AtomicAdd => write!(f, "atomic.add"),
             Op::AtomicSub => write!(f, "atomic.sub"),

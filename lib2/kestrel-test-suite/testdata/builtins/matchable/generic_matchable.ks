@@ -1,5 +1,6 @@
 // test: diagnostics
 // stdlib: false
+// include: matchable_prelude.ks
 
 module Test
 struct Box[T] where T: Prelude.Matchable {

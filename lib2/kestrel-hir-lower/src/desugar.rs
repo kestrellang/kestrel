@@ -259,7 +259,7 @@ impl LowerCtx<'_> {
         span: &Span,
     ) -> HirExprId {
         // Lower conditions to a boolean expression
-        let cond = self.lower_if_conditions(body, conditions, span);
+        let cond = self.lower_if_conditions(body, conditions, MatchSource::WhileLet, span);
 
         let break_expr = self.alloc_expr(HirExpr::Break {
             label: label.map(|l| l.to_string()),
@@ -434,12 +434,9 @@ impl LowerCtx<'_> {
                     body: break_expr,
                 },
             ],
+            source: MatchSource::ForLoop,
             span: span.clone(),
         });
-
-        // Track this match as originating from a for-loop so the
-        // for_loop_pattern analyzer can extract and check the user's pattern.
-        self.for_loop_matches.push(match_expr);
 
         let match_stmt = self.alloc_stmt(HirStmt::Expr {
             expr: match_expr,
@@ -593,6 +590,7 @@ impl LowerCtx<'_> {
                     body: return_early,
                 },
             ],
+            source: MatchSource::TryOp,
             span: span.clone(),
         })
     }
@@ -674,6 +672,7 @@ impl LowerCtx<'_> {
                     body: trap,
                 },
             ],
+            source: MatchSource::UnwrapOp,
             span: span.clone(),
         })
     }

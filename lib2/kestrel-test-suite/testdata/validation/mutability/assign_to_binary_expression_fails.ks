@@ -1,8 +1,8 @@
 // test: diagnostics
-// stdlib: false
+// stdlib: true
 
 module Test
-func test() -> lang.i64 {
+func test() -> Int64 {
     (5 + 10) = 20; // ERROR: cannot assign to this expression
     0
 }

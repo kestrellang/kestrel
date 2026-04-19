@@ -1,7 +1,7 @@
 //! String operation compilation.
 //!
 //! Only StrPtr and StrLen are actually emitted by lib2's MIR lowering.
-//! String equality goes through the `.equals()` method protocol, not StrEq.
+//! String equality goes through the `.equals()` method protocol.
 //! IntToString doesn't exist in lib2's MIR.
 
 use crate::common;

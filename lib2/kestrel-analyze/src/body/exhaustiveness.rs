@@ -99,14 +99,21 @@ impl BodyCheck for ExhaustivenessAnalyzer {
 
         for (expr_id, expr) in cx.hir.exprs.iter() {
             let HirExpr::Match {
-                scrutinee, arms, ..
+                scrutinee, arms, source, ..
             } = expr
             else {
                 continue;
             };
 
-            // Skip for-loop desugared matches — always exhaustive by construction
-            if cx.hir.for_loop_matches.contains(&expr_id) {
+            // Skip desugared matches (for-loop, let-destructure, try, unwrap,
+            // if-let, while-let, guard-let) — their arm sets are synthetic
+            // and always exhaustive by construction. The irrefutable-pattern
+            // diagnostics for if-let/while-let/guard-let are emitted below.
+            if source.is_desugared() {
+                // Only run the full exhaustiveness analysis for user matches.
+                // Desugared if-let / while-let / guard-let still get their own
+                // irrefutable-pattern warning (E302 / E308 / E309) handled elsewhere.
+                let _ = expr_id;
                 continue;
             }
 

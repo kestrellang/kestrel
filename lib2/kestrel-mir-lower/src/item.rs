@@ -1,12 +1,13 @@
 //! Item dispatch — walk entity tree, route by NodeKind.
 
-use kestrel_ast_builder::{Callable, NodeKind};
+use kestrel_ast_builder::{Callable, NodeKind, Static};
 use kestrel_hecs::Entity;
 
 use crate::context::LowerCtx;
 use crate::enum_lower::lower_enum;
 use crate::function_lower::lower_function_sig;
 use crate::protocol_lower::lower_protocol;
+use crate::static_lower::lower_static;
 use crate::struct_lower::lower_struct;
 
 /// Walk all entities under the root and lower declarations to MIR items.
@@ -58,7 +59,18 @@ fn lower_entity(ctx: &mut LowerCtx, entity: Entity) {
             // Top-level function (not inside a type)
             lower_function_sig(ctx, entity);
         },
-        // Fields, enum cases, type params, etc. are handled by their parent's lowering
+        NodeKind::Field => {
+            // Module-level field: a global variable or constant.
+            // Computed globals (with `Callable`) lower as functions —
+            // `field.rs` gives them no receiver when the parent is a Module.
+            // Stored globals lower as statics.
+            if ctx.world.get::<Callable>(entity).is_some() {
+                lower_function_sig(ctx, entity);
+            } else {
+                lower_static(ctx, entity);
+            }
+        },
+        // Enum cases, type params, etc. are handled by their parent's lowering
         _ => {},
     }
 }
@@ -78,6 +90,11 @@ fn lower_member_functions(ctx: &mut LowerCtx, parent: Entity) {
             // Computed properties (fields with a getter body) are lowered as methods
             NodeKind::Field if ctx.world.get::<Callable>(child).is_some() => {
                 lower_function_sig(ctx, child);
+            },
+            // Static stored fields (e.g. `static var _s: Int64 = 5`) become
+            // globals. Instance stored fields are handled by struct_lower.
+            NodeKind::Field if ctx.world.get::<Static>(child).is_some() => {
+                lower_static(ctx, child);
             },
             _ => {},
         }

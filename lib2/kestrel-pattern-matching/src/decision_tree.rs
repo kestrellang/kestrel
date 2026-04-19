@@ -61,6 +61,13 @@ pub enum PathElement {
     Index(usize),
     /// Enum variant downcast
     Downcast(String),
+    /// Array pattern suffix element accessed from the end.
+    /// `offset` is 1-based: 1 = last, 2 = second-to-last, etc.
+    /// MIR lowers as `matchGet(matchLength() - offset)`.
+    IndexFromEnd(usize),
+    /// Rest slice of an array pattern (the `..name` binding).
+    /// MIR lowers as `matchSlice(prefix_len, matchLength() - suffix_len)`.
+    RestSlice { prefix_len: usize, suffix_len: usize },
 }
 
 /// Path from the scrutinee root to a sub-value.
@@ -383,16 +390,42 @@ fn collect_bindings(hir: &HirBody, query: &QueryContext<'_>, pat_id: HirPatId, p
             }
         }
 
-        HirPat::Array { prefix, suffix, .. } => {
+        HirPat::Array { prefix, rest, suffix, .. } => {
+            // Prefix: indexed from the start.
             for (i, &elem) in prefix.iter().enumerate() {
                 let mut elem_path = path.clone();
                 elem_path.push(PathElement::Index(i));
                 collect_bindings(hir, query, elem, &elem_path, bindings);
             }
+            // Suffix: when a rest is present, suffix elements are positioned
+            // from the end (runtime `len - offset`); without a rest the
+            // total length is fixed and we can use absolute indices.
+            let suffix_len = suffix.len();
             for (j, &elem) in suffix.iter().enumerate() {
                 let mut elem_path = path.clone();
-                elem_path.push(PathElement::Index(prefix.len() + j));
+                if rest.is_some() {
+                    // offset_from_end = suffix_len - j (1-based: last element = 1)
+                    elem_path.push(PathElement::IndexFromEnd(suffix_len - j));
+                } else {
+                    elem_path.push(PathElement::Index(prefix.len() + j));
+                }
                 collect_bindings(hir, query, elem, &elem_path, bindings);
+            }
+            // Named rest binding → Slice[T] extracted via matchSlice.
+            if let Some(Some(local)) = rest {
+                let local_data = &hir.locals[*local];
+                let mut rest_path = path.clone();
+                rest_path.push(PathElement::RestSlice {
+                    prefix_len: prefix.len(),
+                    suffix_len,
+                });
+                bindings.push(Binding {
+                    local_id: *local,
+                    name: local_data.name.clone(),
+                    is_mutable: local_data.is_mut,
+                    ty: ResolvedTy::Error,
+                    path: rest_path,
+                });
             }
         }
 

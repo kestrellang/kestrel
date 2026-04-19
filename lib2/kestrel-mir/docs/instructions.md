@@ -159,7 +159,6 @@ pub enum Op {
     // === String ===
     StrPtr,                     // Op1: str -> ptr
     StrLen,                     // Op1: str -> i64
-    StrEq,                      // Op2: (str, str) -> bool
     IntToString,                // Op1: int -> str
 
     // === Atomic ===

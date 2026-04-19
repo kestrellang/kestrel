@@ -97,6 +97,7 @@ impl LowerCtx<'_> {
                         guard: None,
                         body: unit,
                     }],
+                    source: MatchSource::LetDestructure,
                     span: span.clone(),
                 });
                 let match_stmt = self.alloc_stmt(HirStmt::Expr {
@@ -133,7 +134,8 @@ impl LowerCtx<'_> {
         let lowered_else = self.lower_block(body, else_body);
 
         // Build the condition check
-        let condition_expr = self.lower_if_conditions(body, conditions, span);
+        let condition_expr =
+            self.lower_if_conditions(body, conditions, MatchSource::GuardLet, span);
 
         // Guard-let: if condition fails (is false / pattern doesn't match), run else
         // The bindings from let-conditions are defined in the current scope (not nested)

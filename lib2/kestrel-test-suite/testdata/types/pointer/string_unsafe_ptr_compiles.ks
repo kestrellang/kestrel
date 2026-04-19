@@ -4,5 +4,5 @@
 module Test
 
 func getPtr(s: lang.str) -> lang.ptr[lang.i8] {
-    s.unsafePtr()
+    lang.str_ptr(s)
 }
