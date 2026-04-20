@@ -77,7 +77,7 @@ impl BodyCheck for ForLoopPatternAnalyzer {
             };
 
             // Type-aware irrefutability check
-            if !kestrel_pattern_matching::is_irrefutable(cx.hir, cx.query, user_pat, &element_ty) {
+            if !kestrel_pattern_matching::is_irrefutable(cx.hir, cx.query, cx.root, user_pat, &element_ty) {
                 diags.push(make_diagnostic(cx, user_pat));
             }
         }

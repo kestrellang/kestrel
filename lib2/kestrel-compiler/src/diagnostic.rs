@@ -86,7 +86,7 @@ impl ToDiagnostic for ResolvedInferError<'_> {
                 .with_labels(vec![Label::primary(file_id, range).with_message(detail)]),
 
             InferError::DoesNotConform { .. } => Diagnostic::error()
-                .with_message("protocol conformance failure")
+                .with_message("type mismatch: does not conform to protocol")
                 .with_labels(vec![Label::primary(file_id, range).with_message(detail)]),
 
             InferError::NoMember { .. } => Diagnostic::error()
@@ -160,7 +160,7 @@ impl ToDiagnostic for ResolvedInferError<'_> {
                 )]),
 
             InferError::LiteralNotAccepted { .. } => Diagnostic::error()
-                .with_message("does not conform to protocol")
+                .with_message("type mismatch: does not conform to protocol")
                 .with_labels(vec![Label::primary(file_id, range).with_message(detail)]),
         }
     }

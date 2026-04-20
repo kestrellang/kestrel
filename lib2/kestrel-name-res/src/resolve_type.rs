@@ -274,7 +274,7 @@ fn try_resolve_self_via_extension_target(
 ///
 /// For `T.Item` where `T: Iterator`, find the `Item` associated type
 /// by walking the ancestor chain to collect all where-clause bounds.
-fn resolve_type_param_assoc(
+pub fn resolve_type_param_assoc(
     ctx: &QueryContext<'_>,
     type_param: Entity,
     assoc_name: &str,
@@ -456,7 +456,7 @@ fn search_protocols_for_assoc(
 ///
 /// For `T.Iter.Item` — after resolving `Iter` to a TypeAlias in a protocol,
 /// this looks at `Iter`'s bounds (e.g. `type Iter: Iterator`) to find `Item`.
-fn resolve_assoc_type_nested(
+pub fn resolve_assoc_type_nested(
     ctx: &QueryContext<'_>,
     assoc_type: Entity,
     assoc_name: &str,

@@ -104,6 +104,21 @@ fn resolve_single_segment(
                                 };
                             }
                         }
+                        // Free-standing alias — dereference to the underlying
+                        // entity so downstream (HIR, inference, call dispatch)
+                        // sees the concrete type. Mirrors what
+                        // `resolve_multi_segment` already does for intermediate
+                        // segments. Walks chains (`type A = B; type B = C`).
+                        let mut current = e;
+                        for _ in 0..8 {
+                            let Some(target) = resolve_type_alias_target(ctx, current, context, root) else {
+                                break;
+                            };
+                            if ctx.get::<NodeKind>(target) != Some(&NodeKind::TypeAlias) {
+                                return ValueResolution::Def(target);
+                            }
+                            current = target;
+                        }
                     }
                     _ => {}
                 }
@@ -184,6 +199,44 @@ fn resolve_multi_segment(
         if ctx.get::<NodeKind>(current) == Some(&NodeKind::TypeAlias) {
             if let Some(resolved) = resolve_type_alias_target(ctx, current, context, root) {
                 current = resolved;
+            }
+        }
+
+        // If current is a TypeParameter, look up the segment in its protocol
+        // bounds' associated types. Handles `T.Item`, `T.Next`, etc.
+        if ctx.get::<NodeKind>(current) == Some(&NodeKind::TypeParameter) {
+            if let Some(found) =
+                crate::resolve_type::resolve_type_param_assoc(ctx, current, segment, context, root)
+            {
+                if is_last {
+                    // Associated type referenced as a value (e.g. `T.Item` as
+                    // the receiver of a method call). Handled downstream as a
+                    // type reference that dispatches on the associated type.
+                    return ValueResolution::AssociatedType {
+                        entity: found,
+                        container: Some(current),
+                    };
+                }
+                current = found;
+                continue;
+            }
+        }
+
+        // If current is an abstract associated type (TypeAlias inside a
+        // protocol) with its own protocol bounds, walk through to a nested
+        // associated type. Handles `T.Iter.Item`, `T.Next.Next`, etc.
+        if ctx.get::<NodeKind>(current) == Some(&NodeKind::TypeAlias) {
+            if let Some(found) =
+                crate::resolve_type::resolve_assoc_type_nested(ctx, current, segment, context, root)
+            {
+                if is_last {
+                    return ValueResolution::AssociatedType {
+                        entity: found,
+                        container: Some(current),
+                    };
+                }
+                current = found;
+                continue;
             }
         }
 

@@ -114,6 +114,19 @@ pub enum Constraint {
         span: Span,
     },
 
+    /// Reduce a `TyKind::TypeAlias { entity, args }` referenced through `alias`
+    /// to the substituted definition stored in `entity`'s `TypeAnnotation`.
+    /// Also emits any conformance obligations implied by the alias's type-param
+    /// bounds (e.g. `type Pair[T: Hashable] = (T, T)` requires `T: Hashable`).
+    ///
+    /// After reduction, `result` is equated with the substituted definition.
+    /// Deferred until `alias` resolves to a concrete TypeAlias.
+    Reduce {
+        alias: TyVar,
+        result: TyVar,
+        span: Span,
+    },
+
     /// `(prefix.., suffix..)` — tuple pattern with rest.
     /// Deferred until scrutinee resolves to a concrete tuple type, then equates
     /// prefix TyVars against the first N elements and suffix TyVars against the last M.

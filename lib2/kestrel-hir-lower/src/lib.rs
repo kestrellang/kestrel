@@ -86,7 +86,7 @@ impl QueryFn for LowerBody {
                             guard: None,
                             body: unit,
                         }],
-                        source: MatchSource::LetDestructure,
+                        source: MatchSource::ParamDestructure,
                         span: span.clone(),
                     });
                     let stmt = lower.alloc_stmt(HirStmt::Expr {

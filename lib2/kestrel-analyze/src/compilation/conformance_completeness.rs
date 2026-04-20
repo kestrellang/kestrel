@@ -25,7 +25,7 @@ use crate::diagnostic::*;
 use crate::traits::{CompilationCheck, Describe};
 use crate::util;
 use kestrel_ast::AstType;
-use kestrel_ast_builder::{Callable, Conformances, ConformanceItem, CstNode, Name, NodeKind, TypeAnnotation, TypeParams, WhereClause, WhereConstraint};
+use kestrel_ast_builder::{Conformances, ConformanceItem, Name, NodeKind, QualifiedTarget, TypeAnnotation, TypeParams, WhereClause, WhereConstraint};
 use kestrel_hecs::Entity;
 use kestrel_name_res::{ConformingProtocols, ExtensionTargetEntity, ExtensionsFor, ResolveTypePath, TypeResolution};
 
@@ -490,23 +490,28 @@ fn build_associated_type_subs(
             let Some(ann) = cx.query.get::<TypeAnnotation>(child) else { continue };
 
             // Only include if this is an associated type declared by our target protocol.
-            // For qualified bindings (type Addable.Output = MyInt), check the CST target.
-            // For unqualified bindings (type Output = MyInt), accept if the protocol declares it.
+            // For qualified bindings (`type Addable.Output = MyInt`), resolve the
+            // QualifiedTarget path to a protocol entity and match against ours.
+            // For unqualified bindings (`type Output = MyInt`), accept if the
+            // protocol declares it.
             if proto_assoc_names.contains(&name.0) {
-                let is_for_this_protocol = if let Some(cst) = cx.query.get::<CstNode>(child) {
-                    use kestrel_syntax_tree2::SyntaxKind;
-                    if let Some(target) = cst.0.children().find(|c| c.kind() == SyntaxKind::AssociatedTypeTarget) {
-                        // Qualified binding — check the protocol name matches
-                        let proto_name_in_cst = target.children()
-                            .find(|c| c.kind() == SyntaxKind::Ty)
-                            .and_then(|ty| extract_first_identifier(&ty));
-                        let our_proto_name = util::entity_name(cx.query, protocol);
-                        proto_name_in_cst.as_deref() == Some(our_proto_name.as_str())
-                    } else {
-                        true // Unqualified — accept it
-                    }
-                } else {
-                    true // No CST — accept it
+                let is_for_this_protocol = match cx.query.get::<QualifiedTarget>(child) {
+                    Some(target) => match &target.0 {
+                        AstType::Named { segments, .. } => {
+                            let path = segments.iter().map(|s| s.name.clone()).collect();
+                            let context = cx.query.parent_of(child).unwrap_or(cx.root);
+                            matches!(
+                                cx.query.query(ResolveTypePath {
+                                    segments: path,
+                                    context,
+                                    root: cx.root,
+                                }),
+                                TypeResolution::Found(e) if e == protocol,
+                            )
+                        }
+                        _ => false,
+                    },
+                    None => true, // Unqualified — accept it
                 };
 
                 if is_for_this_protocol {
@@ -555,25 +560,6 @@ fn build_associated_type_subs(
     });
 
     subs
-}
-
-/// Extract the first Identifier token text from a CST node (recursive).
-fn extract_first_identifier(node: &kestrel_syntax_tree2::SyntaxNode) -> Option<String> {
-    use kestrel_syntax_tree2::SyntaxKind;
-    for child in node.children_with_tokens() {
-        match child {
-            kestrel_syntax_tree2::SyntaxElement::Token(tok) if tok.kind() == SyntaxKind::Identifier => {
-                return Some(tok.text().to_string());
-            }
-            kestrel_syntax_tree2::SyntaxElement::Node(n) => {
-                if let Some(id) = extract_first_identifier(&n) {
-                    return Some(id);
-                }
-            }
-            _ => {}
-        }
-    }
-    None
 }
 
 /// Recursively substitute named types in an AstType using a substitution map.

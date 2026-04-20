@@ -1,6 +1,6 @@
 ---
 name: run-tests
-description: Run the kestrel-test-suite2 file_tests harness single-threaded in the background, with output streamed to a temp file you can grep, tail, or analyze. Includes a hang-watchdog because compiled test binaries can wedge in macOS ReportCrash and become unkillable. Use when the user asks to "run the tests", "run the test suite", "run kestrel-test-suite2", or wants to see how many tests pass/fail.
+description: Run the kestrel-test-suite2 file_tests harness single-threaded in the background, with output streamed to a temp file you can grep, tail, or analyze. Includes a hang-watchdog because compiled test binaries can wedge in macOS ReportCrash and become unkillable. TRIGGER for ANY invocation of the Kestrel test suite — full suite, targeted subsets, or single tests. Includes phrasings like "run the tests", "run the test suite", "run kestrel-test-suite2", "run the <name> tests", "run tests for <feature>", "re-run the failing test", "check if tests pass", "verify this works", "did that break anything", "does it still work", "make sure nothing regressed". ALSO TRIGGER before reaching for `cargo test -p kestrel-test-suite2` or executing `target/*/deps/file_tests-*` directly — this skill replaces both. SKIP only for non-kestrel-test-suite2 crates (e.g., `cargo test -p kestrel-hir`).
 ---
 
 # Run kestrel-test-suite2

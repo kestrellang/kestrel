@@ -137,6 +137,7 @@ impl BodyCheck for ExhaustivenessAnalyzer {
                 // refutability concerns (for_loop_pattern, refutable_pattern).
                 MatchSource::ForLoop
                 | MatchSource::LetDestructure
+                | MatchSource::ParamDestructure
                 | MatchSource::TryOp
                 | MatchSource::UnwrapOp => {}
             }
@@ -186,7 +187,7 @@ fn check_user_match(
         return;
     }
 
-    let result = pattern::check_match(cx.hir, cx.query, scrutinee_ty, arms);
+    let result = pattern::check_match(cx.hir, cx.query, cx.root, scrutinee_ty, arms);
 
     // E305: non-exhaustive match.
     if !result.is_exhaustive {
@@ -279,6 +280,7 @@ fn check_irrefutable_let(
     let is_irrefutable = kestrel_pattern_matching::is_irrefutable(
         cx.hir,
         cx.query,
+        cx.root,
         user_arm.pattern,
         scrutinee_ty,
     );

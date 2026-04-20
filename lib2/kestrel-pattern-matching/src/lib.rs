@@ -73,7 +73,7 @@ pub use decision_tree::DecisionTree;
 pub use usefulness::ExhaustivenessResult;
 pub use witness::Witness;
 
-use kestrel_hecs::QueryContext;
+use kestrel_hecs::{Entity, QueryContext};
 use kestrel_hir::body::*;
 use kestrel_type_infer::result::ResolvedTy;
 
@@ -81,10 +81,11 @@ use kestrel_type_infer::result::ResolvedTy;
 pub fn check_match(
     hir: &HirBody,
     query: &QueryContext<'_>,
+    root: Entity,
     scrutinee_ty: &ResolvedTy,
     arms: &[HirMatchArm],
 ) -> ExhaustivenessResult {
-    usefulness::check_match(hir, query, scrutinee_ty, arms)
+    usefulness::check_match(hir, query, root, scrutinee_ty, arms)
 }
 
 /// Type-aware irrefutability check.
@@ -97,21 +98,27 @@ pub fn check_match(
 pub fn is_irrefutable(
     hir: &HirBody,
     query: &QueryContext<'_>,
+    root: Entity,
     pat_id: HirPatId,
     ty: &ResolvedTy,
 ) -> bool {
     let flat = flat_pat::flatten(hir, query, pat_id, ty);
-    check_irrefutable(&flat, query, ty)
+    check_irrefutable(&flat, query, root, ty)
 }
 
 /// Recursive irrefutability check on a FlatPat.
-fn check_irrefutable(pat: &flat_pat::FlatPat, query: &QueryContext<'_>, ty: &ResolvedTy) -> bool {
+fn check_irrefutable(
+    pat: &flat_pat::FlatPat,
+    query: &QueryContext<'_>,
+    root: Entity,
+    ty: &ResolvedTy,
+) -> bool {
     match pat {
         flat_pat::FlatPat::Wildcard => true,
 
         flat_pat::FlatPat::Ctor { ctor, children } => {
             // Check if this constructor is the only one for the type
-            let all = constructor::Constructor::all_for_type(query, ty);
+            let all = constructor::Constructor::all_for_type(query, root, ty);
             let is_sole_ctor = all.as_ref().is_some_and(|ctors| {
                 ctors.len() == 1 && ctors[0] == *ctor
             });
@@ -124,13 +131,13 @@ fn check_irrefutable(pat: &flat_pat::FlatPat, query: &QueryContext<'_>, ty: &Res
             let field_types = ctor.field_types(query, ty);
             children.iter().enumerate().all(|(i, child)| {
                 let child_ty = field_types.get(i).unwrap_or(&ResolvedTy::Error);
-                check_irrefutable(child, query, child_ty)
+                check_irrefutable(child, query, root, child_ty)
             })
         }
 
         // Or-pattern is irrefutable if ANY alternative is irrefutable
         flat_pat::FlatPat::Or(alts) => {
-            alts.iter().any(|alt| check_irrefutable(alt, query, ty))
+            alts.iter().any(|alt| check_irrefutable(alt, query, root, ty))
         }
     }
 }
@@ -139,6 +146,7 @@ fn check_irrefutable(pat: &flat_pat::FlatPat, query: &QueryContext<'_>, ty: &Res
 pub fn compile_decision_tree(
     hir: &HirBody,
     query: &QueryContext<'_>,
+    root: Entity,
     scrutinee_ty: &ResolvedTy,
     arms: &[HirMatchArm],
 ) -> DecisionTree {
@@ -149,5 +157,5 @@ pub fn compile_decision_tree(
     let arm_pat_ids: Vec<_> = arms.iter().map(|arm| arm.pattern).collect();
     let has_guards: Vec<_> = arms.iter().map(|arm| arm.guard.is_some()).collect();
 
-    decision_tree::compile(hir, query, &flat_pats, &arm_pat_ids, scrutinee_ty, &has_guards)
+    decision_tree::compile(hir, query, root, &flat_pats, &arm_pat_ids, scrutinee_ty, &has_guards)
 }

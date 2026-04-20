@@ -60,8 +60,13 @@ pub enum MatchSource {
     GuardLet,
     /// Desugared from `for p in iter { ... }` (the Option match on iterator.next()).
     ForLoop,
-    /// Desugared from `let <pattern> = expr;` or function parameter destructuring.
+    /// Desugared from `let <pattern> = expr;`.
     LetDestructure,
+    /// Desugared from a destructured fn / method / closure parameter
+    /// (`func f((a, b): (I, I))` or `{ ((a, b): (I, I)) in ... }`).
+    /// Distinct from `LetDestructure` so inference can skip the cascading
+    /// tuple-arity equate when `param_pattern` will emit E111 for the same site.
+    ParamDestructure,
     /// Desugared from `try expr` (Continue/Break matching on ControlFlow).
     TryOp,
     /// Desugared from `expr!` unwrap.
@@ -372,10 +377,18 @@ pub struct HirMatchArm {
 }
 
 /// A parameter in a closure expression.
+///
+/// Destructured closure params (`{ (a, b) in … }`) are desugared in hir-lower
+/// into a synthetic `local` plus a prepended `match` statement. The original
+/// pattern is still recorded in `pattern` so analyzers can validate it
+/// without re-reading the AST.
 #[derive(Clone, Debug, Hash)]
 pub struct HirClosureParam {
     pub local: LocalId,
     pub ty: Option<HirTy>,
+    /// Present for destructured params (tuple/struct). `None` for simple
+    /// bindings and wildcards (the `local` already captures those).
+    pub pattern: Option<HirPatId>,
 }
 
 /// A single argument in an enum/variant pattern.

@@ -41,7 +41,7 @@
 //! constructors, minimizing the total number of tests.
 
 use kestrel_ast_builder::Name;
-use kestrel_hecs::QueryContext;
+use kestrel_hecs::{Entity, QueryContext};
 use kestrel_hir::body::*;
 use kestrel_hir::res::LocalId;
 use kestrel_type_infer::result::ResolvedTy;
@@ -118,6 +118,7 @@ pub enum DecisionTree {
 pub fn compile(
     hir: &HirBody,
     query: &QueryContext<'_>,
+    root: Entity,
     patterns: &[FlatPat],
     arm_pat_ids: &[HirPatId],
     scrutinee_ty: &ResolvedTy,
@@ -131,13 +132,14 @@ pub fn compile(
     }
 
     let col_paths = vec![vec![]]; // single column = scrutinee root
-    compile_matrix(hir, query, &matrix, &col_paths, arm_pat_ids)
+    compile_matrix(hir, query, root, &matrix, &col_paths, arm_pat_ids)
 }
 
 /// Recursive matrix compilation.
 fn compile_matrix(
     hir: &HirBody,
     query: &QueryContext<'_>,
+    root: Entity,
     matrix: &PatternMatrix,
     col_paths: &[AccessPath],
     arm_pat_ids: &[HirPatId],
@@ -161,7 +163,7 @@ fn compile_matrix(
     let head_ctors = matrix.head_constructors(col);
 
     // Check completeness
-    let all_ctors = Constructor::all_for_type(query, col_type);
+    let all_ctors = Constructor::all_for_type(query, root, col_type);
     let is_complete = all_ctors
         .as_ref()
         .is_some_and(|all| head_ctors.len() >= all.len() && all.iter().all(|c| head_ctors.contains(c)));
@@ -171,7 +173,7 @@ fn compile_matrix(
     for ctor in &head_ctors {
         let specialized = matrix.specialize(query, col, ctor);
         let new_paths = build_specialized_paths(col_paths, col, ctor, query);
-        let subtree = compile_matrix(hir, query, &specialized, &new_paths, arm_pat_ids);
+        let subtree = compile_matrix(hir, query, root, &specialized, &new_paths, arm_pat_ids);
         cases.push((ctor.clone(), subtree));
     }
 
@@ -183,6 +185,7 @@ fn compile_matrix(
             Some(Box::new(compile_matrix(
                 hir,
                 query,
+                root,
                 &default_matrix,
                 &default_paths,
                 arm_pat_ids,

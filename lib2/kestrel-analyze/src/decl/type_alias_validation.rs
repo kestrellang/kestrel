@@ -92,7 +92,7 @@ use crate::context::DeclContext;
 use crate::diagnostic::*;
 use crate::traits::{DeclCheck, Describe};
 use crate::util;
-use kestrel_ast_builder::{Conformances, CstNode, Name, NodeKind, TypeAnnotation};
+use kestrel_ast_builder::{Conformances, Name, NodeKind, QualifiedTarget, TypeAnnotation};
 use kestrel_name_res::{ConformingProtocols, ExtensionsFor, ResolveTypePath, TypeResolution};
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[
@@ -251,47 +251,21 @@ impl DeclCheck for TypeAliasValidationAnalyzer {
     }
 }
 
-/// Check if a type alias entity has an AssociatedTypeTarget CST node (qualified binding).
+/// Check if a type alias entity has a qualified binding (`type P.Assoc = ...`).
 fn is_qualified_binding(cx: &DeclContext<'_>, entity: kestrel_hecs::Entity) -> bool {
-    if let Some(cst) = cx.query.get::<CstNode>(entity) {
-        use kestrel_syntax_tree2::SyntaxKind;
-        cst.0.children().any(|c| c.kind() == SyntaxKind::AssociatedTypeTarget)
-    } else {
-        false
-    }
+    cx.query.get::<QualifiedTarget>(entity).is_some()
 }
 
-/// Extract the protocol path segments from a qualified binding's AssociatedTypeTarget.
+/// Extract the protocol path segments from a qualified binding's QualifiedTarget.
 /// For `type Iterator.Item = Int`, returns vec!["Iterator"].
 /// For `type Add[Int].Output = Int`, returns vec!["Add"].
 fn extract_qualified_protocol_segments(cx: &DeclContext<'_>, entity: kestrel_hecs::Entity) -> Option<Vec<String>> {
-    let cst = cx.query.get::<CstNode>(entity)?;
-    use kestrel_syntax_tree2::SyntaxKind;
-    let target = cst.0.children().find(|c| c.kind() == SyntaxKind::AssociatedTypeTarget)?;
-    // The protocol path is inside a Ty > TyPath > Path > PathElement > Identifier structure.
-    // Find the Ty child (which is the protocol path type).
-    let ty_node = target.children().find(|c| c.kind() == SyntaxKind::Ty)?;
-    // Collect all Identifier tokens from PathElement nodes inside the path
-    let mut segments = Vec::new();
-    collect_path_identifiers(&ty_node, &mut segments);
-    if segments.is_empty() { None } else { Some(segments) }
-}
-
-/// Recursively collect Identifier tokens from Path > PathElement structure.
-fn collect_path_identifiers(node: &kestrel_syntax_tree2::SyntaxNode, segments: &mut Vec<String>) {
-    use kestrel_syntax_tree2::SyntaxKind;
-    for child in node.children() {
-        if child.kind() == SyntaxKind::PathElement {
-            // Extract Identifier token from PathElement
-            for tok in child.children_with_tokens().filter_map(|e| e.into_token()) {
-                if tok.kind() == SyntaxKind::Identifier {
-                    segments.push(tok.text().to_string());
-                }
-            }
-        } else {
-            collect_path_identifiers(&child, segments);
-        }
-    }
+    let target = cx.query.get::<QualifiedTarget>(entity)?;
+    let kestrel_ast::AstType::Named { segments, .. } = &target.0 else {
+        return None;
+    };
+    let names: Vec<String> = segments.iter().map(|s| s.name.clone()).collect();
+    if names.is_empty() { None } else { Some(names) }
 }
 
 /// Check 3 & 4: Validate a qualified binding like `type Iterator.Item = Int`.

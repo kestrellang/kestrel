@@ -212,17 +212,75 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
     ///   - `Foo.staticComputed = v`     (HirExpr::Field, type-ref base, no receiver)
     ///   - `obj.computed = v`           (HirExpr::Field, value base, mut-borrow receiver)
     ///
-    /// Protocol-property setter dispatch (witness) is intentionally out of
-    /// scope here — no failing test exercises it; add a matching witness
-    /// branch alongside future protocol-setter work.
+    /// Protocol property requirements (a Field whose parent is a `Protocol`
+    /// with `Settable` but no `Callable`) dispatch through the conformance
+    /// witness using the `<name>.set` convention, mirroring the getter side.
     fn try_lower_setter_assign(&mut self, target_id: HirExprId, value_id: HirExprId) -> Option<Value> {
         let target = self.hir.exprs[target_id].clone();
         match target {
-            HirExpr::Field { base, .. } => {
+            HirExpr::Field { base, name, .. } => {
                 let resolved = self
                     .typed
                     .and_then(|t| t.resolutions.get(&target_id))
                     .copied()?;
+
+                // Protocol property requirement: no setter child to call directly;
+                // emit a witness call with `<field>.set`.
+                let is_field = self
+                    .ctx
+                    .world
+                    .get::<kestrel_ast_builder::NodeKind>(resolved)
+                    == Some(&kestrel_ast_builder::NodeKind::Field);
+                let parent_is_protocol = is_field
+                    && self.ctx.world.parent_of(resolved).is_some_and(|p| {
+                        self.ctx.world.get::<kestrel_ast_builder::NodeKind>(p)
+                            == Some(&kestrel_ast_builder::NodeKind::Protocol)
+                    });
+                let has_callable = self
+                    .ctx
+                    .world
+                    .get::<kestrel_ast_builder::Callable>(resolved)
+                    .is_some();
+                let has_settable = self
+                    .ctx
+                    .world
+                    .get::<kestrel_ast_builder::Settable>(resolved)
+                    .is_some();
+                if parent_is_protocol && !has_callable && has_settable {
+                    let protocol = self.ctx.world.parent_of(resolved).unwrap();
+                    self.ctx.register_name(protocol);
+                    let is_static = self
+                        .ctx
+                        .world
+                        .get::<kestrel_ast_builder::Static>(resolved)
+                        .is_some();
+                    let rhs_val = self.lower_expr(value_id);
+                    let newval_arg = CallArg::copy(rhs_val);
+                    let method_type_args = self.resolve_type_args(target_id);
+                    if is_static {
+                        let self_type = self.type_from_type_ref(base);
+                        let callee = Callee::witness(
+                            protocol,
+                            format!("{name}.set"),
+                            self_type,
+                            method_type_args,
+                        );
+                        self.emit_call(callee, vec![newval_arg], MirTy::Unit);
+                    } else {
+                        let receiver_ty = self.resolve_expr_type(base);
+                        let base_val = self.lower_expr(base);
+                        let receiver_arg = CallArg::mutating(base_val);
+                        let callee = Callee::witness(
+                            protocol,
+                            format!("{name}.set"),
+                            receiver_ty,
+                            method_type_args,
+                        );
+                        self.emit_call(callee, vec![receiver_arg, newval_arg], MirTy::Unit);
+                    }
+                    return Some(Value::Immediate(Immediate::unit()));
+                }
+
                 let setter = find_setter_child(self.ctx, resolved)?;
                 self.ctx.register_name(setter);
                 let is_static = self
@@ -2992,6 +3050,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         let tree = kestrel_pattern_matching::compile_decision_tree(
             self.hir,
             &self.ctx.query,
+            self.ctx.root,
             &scrutinee_ty,
             arms,
         );

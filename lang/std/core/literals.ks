@@ -61,7 +61,8 @@ public protocol _ExpressibleByArrayLiteral {
 
 /// User-facing protocol for array literal initialization.
 /// Provides a more convenient interface using LiteralSlice.
-@builtin(.ExpressibleByArrayLiteral)
+/// The compiler only uses `_ExpressibleByArrayLiteral` directly; this is a
+/// convenience wrapper a type may also adopt to take `LiteralSlice` arguments.
 public protocol ExpressibleByArrayLiteral: _ExpressibleByArrayLiteral {
     /// Creates an instance from a literal slice of elements.
     init(arrayLiteral: LiteralSlice[Element])
@@ -86,7 +87,8 @@ public protocol _ExpressibleByDictionaryLiteral {
 
 /// User-facing protocol for dictionary literal initialization.
 /// Provides a more convenient interface using LiteralSlice.
-@builtin(.ExpressibleByDictionaryLiteral)
+/// The compiler only uses `_ExpressibleByDictionaryLiteral` directly; this is
+/// a convenience wrapper a type may also adopt to take `LiteralSlice` arguments.
 public protocol ExpressibleByDictionaryLiteral: _ExpressibleByDictionaryLiteral {
     /// Creates an instance from a literal slice of key-value pairs.
     init(dictionaryLiteral: LiteralSlice[(Key, Value)])
@@ -119,6 +121,7 @@ public type CharLiteralType = Char
 public type NullLiteralType[T] = std.result.Optional[T]
 
 /// The default type for array literals when type cannot be inferred.
+@builtin(.DefaultArrayLiteralType)
 public type ArrayLiteralType[T] = std.collections.Array[T]
 
 /// The default type for dictionary literals when type cannot be inferred.

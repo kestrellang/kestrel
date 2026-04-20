@@ -97,9 +97,7 @@ pub enum Builtin {
     ExpressibleByBoolLiteral,
     ExpressibleByCharLiteral,
     ExpressibleByNullLiteral,
-    ExpressibleByArrayLiteral,
     InternalExpressibleByArrayLiteral,
-    ExpressibleByDictionaryLiteral,
     InternalExpressibleByDictionaryLiteral,
 
     // ===== Default literal types =====
@@ -277,9 +275,7 @@ impl Builtin {
             Self::ExpressibleByBoolLiteral => "ExpressibleByBoolLiteral",
             Self::ExpressibleByCharLiteral => "ExpressibleByCharLiteral",
             Self::ExpressibleByNullLiteral => "ExpressibleByNullLiteral",
-            Self::ExpressibleByArrayLiteral => "ExpressibleByArrayLiteral",
             Self::InternalExpressibleByArrayLiteral => "_ExpressibleByArrayLiteral",
-            Self::ExpressibleByDictionaryLiteral => "ExpressibleByDictionaryLiteral",
             Self::InternalExpressibleByDictionaryLiteral => "_ExpressibleByDictionaryLiteral",
 
             // Default literal types — resolved by source name
@@ -454,9 +450,7 @@ impl Builtin {
             "ExpressibleByBoolLiteral" => Some(Self::ExpressibleByBoolLiteral),
             "ExpressibleByCharLiteral" => Some(Self::ExpressibleByCharLiteral),
             "ExpressibleByNullLiteral" => Some(Self::ExpressibleByNullLiteral),
-            "ExpressibleByArrayLiteral" => Some(Self::ExpressibleByArrayLiteral),
             "_ExpressibleByArrayLiteral" => Some(Self::InternalExpressibleByArrayLiteral),
-            "ExpressibleByDictionaryLiteral" => Some(Self::ExpressibleByDictionaryLiteral),
             "_ExpressibleByDictionaryLiteral" => Some(Self::InternalExpressibleByDictionaryLiteral),
 
             // FFI
@@ -631,9 +625,7 @@ impl Builtin {
             | Self::ExpressibleByBoolLiteral
             | Self::ExpressibleByCharLiteral
             | Self::ExpressibleByNullLiteral
-            | Self::ExpressibleByArrayLiteral
             | Self::InternalExpressibleByArrayLiteral
-            | Self::ExpressibleByDictionaryLiteral
             | Self::InternalExpressibleByDictionaryLiteral => BuiltinKind::protocol(),
 
             // Default literal types

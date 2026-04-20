@@ -144,9 +144,11 @@ impl CloneableFieldAnalyzer {
             root: cx.root,
         })?;
 
-        // Extract the type entity from Named types
+        // Extract the type entity from nominal types
         let type_entity = match &hir_ty {
-            HirTy::Named { entity, .. } => *entity,
+            HirTy::Struct { entity, .. }
+            | HirTy::Enum { entity, .. }
+            | HirTy::Protocol { entity, .. } => *entity,
             _ => return None,
         };
 

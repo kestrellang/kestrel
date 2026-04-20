@@ -243,15 +243,17 @@ pub fn is_ffi_safe(
         HirTy::Tuple(elems, _) => {
             elems.iter().all(|e| is_ffi_safe(cx, e, ffi_safe_entity))
         }
-        // Named types: check intrinsic status or protocol conformance
-        HirTy::Named { entity, .. } => {
+        // Nominal types: check intrinsic status or protocol conformance
+        HirTy::Struct { entity, .. }
+        | HirTy::Enum { entity, .. }
+        | HirTy::Protocol { entity, .. } => {
             cx.query.has::<Intrinsic>(*entity)
                 || cx.query.query(ConformingProtocols {
                     entity: *entity,
                     root: cx.root,
                 }).contains(&ffi_safe_entity)
         }
-        // Functions, etc. are not FFI-safe
+        // Functions, type params, unresolved alias uses, projections — not FFI-safe
         _ => false,
     }
 }

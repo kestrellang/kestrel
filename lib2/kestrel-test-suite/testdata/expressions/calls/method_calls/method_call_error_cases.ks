@@ -11,8 +11,8 @@ struct Counter {
     func getValue() -> lang.i64 { 42 }
 }
 
-func test(p: Point, b: B) -> lang.i64 {
-    p.nonExistent() // ERROR:
-    b.methodA()
-    Counter.getValue()
+func test(p: Point, b: B) -> () {
+    p.nonExistent();    // ERROR:
+    b.methodA();        // ERROR:
+    Counter.getValue(); // ERROR:
 }

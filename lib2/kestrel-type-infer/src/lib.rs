@@ -533,16 +533,16 @@ fn find_assoc_type_in_bounds(
     assoc_name: &str,
 ) -> Option<Entity> {
     // Resolve the associated type through the resolver's associated type mechanism.
-    // Build a TyKind::Named for the param entity to query the resolver.
-    let param_kind = ty::TyKind::Named {
-        entity: param,
-        args: vec![],
-    };
+    // Build a TyKind::Param for the param entity to query the resolver.
+    let param_kind = ty::TyKind::Param { entity: param };
     let resolved = ctx.resolver.resolve_associated_type(&param_kind, assoc_name)?;
-    // The resolved HirTy should be Named { entity: assoc_type_entity } for abstract types
-    if let kestrel_hir::ty::HirTy::Named { entity, .. } = &resolved.resolved {
-        Some(*entity)
-    } else {
-        None
+    // Extract the entity from whichever variant the resolver returned.
+    match &resolved.resolved {
+        kestrel_hir::ty::HirTy::Struct { entity, .. }
+        | kestrel_hir::ty::HirTy::Enum { entity, .. }
+        | kestrel_hir::ty::HirTy::Protocol { entity, .. }
+        | kestrel_hir::ty::HirTy::AliasUse { entity, .. } => Some(*entity),
+        kestrel_hir::ty::HirTy::AssocProjection { assoc, .. } => Some(*assoc),
+        _ => None,
     }
 }

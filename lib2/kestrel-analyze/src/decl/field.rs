@@ -50,7 +50,7 @@ use crate::context::DeclContext;
 use crate::diagnostic::*;
 use crate::traits::{DeclCheck, Describe};
 use crate::util;
-use kestrel_ast_builder::{Callable, CstNode, NodeKind, Settable, Static, TypeParams};
+use kestrel_ast_builder::{Computed, FieldMutability, NodeKind, Static, TypeParams};
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[
     DiagnosticDescriptor {
@@ -101,18 +101,11 @@ impl DeclCheck for FieldAnalyzer {
 
         let is_static = cx.query.get::<Static>(cx.entity).is_some();
 
-        // Check the CST node for computed property and var keyword
-        let (is_computed, has_var_keyword) = cx
-            .query
-            .get::<CstNode>(cx.entity)
-            .map(|cst| {
-                use kestrel_syntax_tree2::SyntaxKind;
-                let computed = cst.0.children().any(|c| c.kind() == SyntaxKind::PropertyAccessors);
-                let var_kw = cst.0.children_with_tokens()
-                    .any(|e| e.as_token().is_some_and(|t| t.kind() == SyntaxKind::Var));
-                (computed, var_kw)
-            })
-            .unwrap_or((false, false));
+        let is_computed = cx.query.get::<Computed>(cx.entity).is_some();
+        let has_var_keyword = matches!(
+            cx.query.get::<FieldMutability>(cx.entity),
+            Some(FieldMutability::Var)
+        );
 
         // Check 1: computed properties must use 'var' (not 'let')
         if is_computed && !has_var_keyword {

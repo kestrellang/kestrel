@@ -116,15 +116,51 @@ fn unify_concrete(
     b: &TyKind,
 ) -> Result<(), UnifyError> {
     match (a, b) {
-        // Named types: same entity + unify type args pairwise
+        // Nominal types: same entity + unify type args pairwise. Each nominal
+        // category only unifies with itself (Struct with Struct, Enum with Enum, etc.).
         (
-            TyKind::Named { entity: ea, args: aa },
-            TyKind::Named { entity: eb, args: ab },
+            TyKind::Struct { entity: ea, args: aa },
+            TyKind::Struct { entity: eb, args: ab },
+        )
+        | (
+            TyKind::Enum { entity: ea, args: aa },
+            TyKind::Enum { entity: eb, args: ab },
+        )
+        | (
+            TyKind::Protocol { entity: ea, args: aa },
+            TyKind::Protocol { entity: eb, args: ab },
         ) => {
             if ea != eb || aa.len() != ab.len() {
                 return Err(UnifyError::Mismatch);
             }
-            // Clone args to avoid borrow issues
+            let pairs: Vec<(TyVar, TyVar)> =
+                aa.iter().copied().zip(ab.iter().copied()).collect();
+            for (a, b) in pairs {
+                unify(ctx, a, b)?;
+            }
+            Ok(())
+        }
+
+        // TypeAlias vs TypeAlias: allow name-based matching as a fallback.
+        // Different protocols can define associated types with the same name
+        // (e.g. Iterator.Item and Iterable.Item). These are logically the same
+        // when one protocol refines another. Require same arg count.
+        (
+            TyKind::TypeAlias { entity: ea, args: aa },
+            TyKind::TypeAlias { entity: eb, args: ab },
+        ) => {
+            let same_entity = ea == eb;
+            let same_name = !same_entity && {
+                let na = ctx.query_ctx.get::<Name>(*ea);
+                let nb = ctx.query_ctx.get::<Name>(*eb);
+                matches!((na, nb), (Some(a), Some(b)) if a.0 == b.0)
+            };
+            if !same_entity && !same_name {
+                return Err(UnifyError::Mismatch);
+            }
+            if aa.len() != ab.len() {
+                return Err(UnifyError::Mismatch);
+            }
             let pairs: Vec<(TyVar, TyVar)> =
                 aa.iter().copied().zip(ab.iter().copied()).collect();
             for (a, b) in pairs {
@@ -171,6 +207,31 @@ fn unify_concrete(
             }
         }
 
+        // AssocProjections: same assoc entity + unified bases
+        (
+            TyKind::AssocProjection { base: ba, assoc: aa },
+            TyKind::AssocProjection { base: bb, assoc: ab },
+        ) => {
+            if aa != ab {
+                return Err(UnifyError::Mismatch);
+            }
+            unify(ctx, *ba, *bb)
+        }
+
+        // AssocProjection vs bare TypeAlias: they refer to the same underlying
+        // associated-type entity and should unify. This arises when a protocol
+        // method's return type references the assoc type bare (`Self.Item` or
+        // just `Item`) — the declared receiver comes back as AssocProjection
+        // from a concrete receiver's projection, while the return is TypeAlias.
+        (
+            TyKind::AssocProjection { assoc: a, .. },
+            TyKind::TypeAlias { entity: e, .. },
+        )
+        | (
+            TyKind::TypeAlias { entity: e, .. },
+            TyKind::AssocProjection { assoc: a, .. },
+        ) if a == e => Ok(()),
+
         // Error already handled above; remaining combos are mismatches
         _ => Err(UnifyError::Mismatch),
     }
@@ -183,7 +244,10 @@ fn occurs_check(ctx: &InferCtx<'_>, tv: TyVar, target: TyVar) -> Result<(), Unif
         return Err(UnifyError::OccursCheck);
     }
     match &ctx.types[target.0 as usize] {
-        TySlot::Resolved(TyKind::Named { args, .. }) => {
+        TySlot::Resolved(TyKind::Struct { args, .. })
+        | TySlot::Resolved(TyKind::Enum { args, .. })
+        | TySlot::Resolved(TyKind::Protocol { args, .. })
+        | TySlot::Resolved(TyKind::TypeAlias { args, .. }) => {
             for &arg in args {
                 occurs_check(ctx, tv, arg)?;
             }
@@ -200,6 +264,9 @@ fn occurs_check(ctx: &InferCtx<'_>, tv: TyVar, target: TyVar) -> Result<(), Unif
                 occurs_check(ctx, tv, p)?;
             }
             occurs_check(ctx, tv, *ret)
+        }
+        TySlot::Resolved(TyKind::AssocProjection { base, .. }) => {
+            occurs_check(ctx, tv, *base)
         }
         _ => Ok(()),
     }
@@ -224,8 +291,8 @@ pub fn conforms_to_literal_protocol(
         LiteralKind::Bool => Builtin::ExpressibleByBoolLiteral,
         LiteralKind::Char => Builtin::ExpressibleByCharLiteral,
         LiteralKind::Null => Builtin::ExpressibleByNullLiteral,
-        LiteralKind::Array => Builtin::ExpressibleByArrayLiteral,
-        LiteralKind::Dictionary => Builtin::ExpressibleByDictionaryLiteral,
+        LiteralKind::Array => Builtin::InternalExpressibleByArrayLiteral,
+        LiteralKind::Dictionary => Builtin::InternalExpressibleByDictionaryLiteral,
     };
     let Some(protocol) = ctx.resolver.builtin(feature) else {
         return false;
@@ -237,7 +304,7 @@ pub fn conforms_to_literal_protocol(
 /// e.g. integer literals → i8/i16/i32/i64/u8/u16/u32/u64,
 ///      bool literals → i1, string literals → str
 fn is_intrinsic_literal_compatible(ctx: &InferCtx<'_>, ty: &TyKind, lit: LiteralKind) -> bool {
-    let TyKind::Named { entity, .. } = ty else {
+    let TyKind::Struct { entity, .. } = ty else {
         return false;
     };
     // Must be an intrinsic struct

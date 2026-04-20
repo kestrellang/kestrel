@@ -17,8 +17,9 @@ use crate::context::BodyContext;
 use crate::diagnostic::*;
 use crate::traits::{BodyCheck, Describe};
 use crate::util;
-use kestrel_ast::ast_body::{AstExpr, AstPat};
-use kestrel_ast_builder::{AstType, Body, Callable, ParamPattern};
+use kestrel_ast_builder::{AstType, Callable, ParamPattern};
+use kestrel_hir::body::{HirBody, HirExpr, HirPat, HirPatId};
+use kestrel_hir::ty::HirTy;
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[
     DiagnosticDescriptor {
@@ -71,25 +72,19 @@ impl BodyCheck for ParamPatternAnalyzer {
             }
         }
 
-        // Check closure parameters (walk AST body for Closure expressions)
-        if let Some(body_comp) = cx.query.get::<Body>(cx.entity) {
-            let ast_body = &body_comp.0;
-            for (_id, expr) in ast_body.exprs.iter() {
-                if let AstExpr::Closure { params, .. } = expr {
-                    for param in params {
-                        let pat = &ast_body.pats[param.pattern];
-                        // Skip simple bindings and wildcards
-                        if matches!(pat, AstPat::Binding { .. } | AstPat::Wildcard { .. }) {
-                            continue;
-                        }
-                        let span = pat_span(pat);
-                        // Duplicate bindings
-                        let mut seen = HashMap::new();
-                        check_duplicate_bindings_ast(pat, ast_body, &mut seen, &span, &mut diags);
-                        // Structural type checks
-                        if let Some(ref ty) = param.ty {
-                            check_pattern_type_ast(pat, ast_body, ty, &span, &mut diags);
-                        }
+        // Check closure parameters. HirClosureParam.pattern is Some only for
+        // destructured params (tuple/struct); simple bindings desugar to a
+        // local with no residual pattern.
+        for (_id, expr) in cx.hir.exprs.iter() {
+            if let HirExpr::Closure { params, .. } = expr {
+                for param in params {
+                    let Some(pat_id) = param.pattern else { continue };
+                    let pat = &cx.hir.pats[pat_id];
+                    let span = hir_pat_span(pat).clone();
+                    let mut seen = HashMap::new();
+                    check_duplicate_bindings_hir(cx.hir, pat_id, &mut seen, &span, &mut diags);
+                    if let Some(ref ty) = param.ty {
+                        check_pattern_type_hir(cx.hir, pat_id, ty, &span, &mut diags);
                     }
                 }
             }
@@ -158,18 +153,19 @@ fn check_pattern_type(
     }
 }
 
-// ===== AST-based checks (for closure params) =====
+// ===== HIR-based checks (for closure params) =====
 
-/// Walk an AstPat tree and flag duplicate binding names.
-fn check_duplicate_bindings_ast(
-    pat: &AstPat,
-    body: &kestrel_ast::ast_body::AstBody,
+/// Walk an HirPat tree and flag duplicate binding names.
+fn check_duplicate_bindings_hir(
+    hir: &HirBody,
+    pat_id: HirPatId,
     seen: &mut HashMap<String, bool>,
     span: &kestrel_span2::Span,
     diags: &mut Vec<AnalyzeDiagnostic>,
 ) {
-    match pat {
-        AstPat::Binding { name, .. } => {
+    match &hir.pats[pat_id] {
+        HirPat::Binding { local, .. } => {
+            let name = &hir.locals[*local].name;
             if name == "_" {
                 return;
             }
@@ -187,30 +183,30 @@ fn check_duplicate_bindings_ast(
                 });
             }
         }
-        AstPat::Tuple { prefix, suffix, .. } => {
-            for &elem_id in prefix.iter().chain(suffix.iter()) {
-                check_duplicate_bindings_ast(&body.pats[elem_id], body, seen, span, diags);
+        HirPat::Tuple { prefix, suffix, .. } => {
+            for &elem in prefix.iter().chain(suffix.iter()) {
+                check_duplicate_bindings_hir(hir, elem, seen, span, diags);
             }
         }
-        AstPat::Struct { fields, .. } => {
+        HirPat::Struct { fields, .. } => {
             for field in fields {
-                if let Some(pat_id) = field.pattern {
-                    check_duplicate_bindings_ast(&body.pats[pat_id], body, seen, span, diags);
-                } else {
-                    // Shorthand: field name is the binding
-                    if seen.insert(field.field_name.clone(), true).is_some() {
-                        diags.push(AnalyzeDiagnostic {
-                            descriptor_id: DESCRIPTORS[0].id,
-                            severity: DESCRIPTORS[0].default_severity,
-                            message: format!("duplicate binding '{}' in parameter pattern", field.field_name),
-                            labels: vec![DiagLabel {
-                                span: span.clone(),
-                                message: format!("'{}' bound more than once", field.field_name),
-                                is_primary: true,
-                            }],
-                            notes: vec![],
-                        });
-                    }
+                if let Some(sub) = field.pattern {
+                    check_duplicate_bindings_hir(hir, sub, seen, span, diags);
+                } else if seen.insert(field.field_name.clone(), true).is_some() {
+                    diags.push(AnalyzeDiagnostic {
+                        descriptor_id: DESCRIPTORS[0].id,
+                        severity: DESCRIPTORS[0].default_severity,
+                        message: format!(
+                            "duplicate binding '{}' in parameter pattern",
+                            field.field_name
+                        ),
+                        labels: vec![DiagLabel {
+                            span: span.clone(),
+                            message: format!("'{}' bound more than once", field.field_name),
+                            is_primary: true,
+                        }],
+                        notes: vec![],
+                    });
                 }
             }
         }
@@ -218,20 +214,19 @@ fn check_duplicate_bindings_ast(
     }
 }
 
-/// Check that an AstPat is structurally compatible with its declared type.
-fn check_pattern_type_ast(
-    pat: &AstPat,
-    body: &kestrel_ast::ast_body::AstBody,
-    ty: &AstType,
+/// Check that an HirPat is structurally compatible with its declared type.
+fn check_pattern_type_hir(
+    hir: &HirBody,
+    pat_id: HirPatId,
+    ty: &HirTy,
     span: &kestrel_span2::Span,
     diags: &mut Vec<AnalyzeDiagnostic>,
 ) {
-    if let AstPat::Tuple { prefix, has_rest, suffix, .. } = pat {
+    if let HirPat::Tuple { prefix, has_rest, suffix, .. } = &hir.pats[pat_id] {
         match ty {
-            AstType::Tuple(type_elems, _) => {
+            HirTy::Tuple(type_elems, _) => {
                 let pat_count = prefix.len() + suffix.len();
                 if *has_rest {
-                    // Rest absorbs middle elements — just check min arity
                     if pat_count > type_elems.len() {
                         emit_arity_mismatch(pat_count, type_elems.len(), span, diags);
                     }
@@ -244,21 +239,21 @@ fn check_pattern_type_ast(
     }
 }
 
-/// Get the span from an AstPat.
-fn pat_span(pat: &AstPat) -> kestrel_span2::Span {
+/// Get the span from an HirPat.
+fn hir_pat_span(pat: &HirPat) -> &kestrel_span2::Span {
     match pat {
-        AstPat::Wildcard { span }
-        | AstPat::Binding { span, .. }
-        | AstPat::Tuple { span, .. }
-        | AstPat::Literal { span, .. }
-        | AstPat::Range { span, .. }
-        | AstPat::Enum { span, .. }
-        | AstPat::Struct { span, .. }
-        | AstPat::Array { span, .. }
-        | AstPat::At { span, .. }
-        | AstPat::Or { span, .. }
-        | AstPat::Rest { span }
-        | AstPat::Error { span } => span.clone(),
+        HirPat::Wildcard { span }
+        | HirPat::Binding { span, .. }
+        | HirPat::Tuple { span, .. }
+        | HirPat::Literal { span, .. }
+        | HirPat::Range { span, .. }
+        | HirPat::Variant { span, .. }
+        | HirPat::ImplicitVariant { span, .. }
+        | HirPat::Struct { span, .. }
+        | HirPat::Array { span, .. }
+        | HirPat::Or { span, .. }
+        | HirPat::At { span, .. }
+        | HirPat::Error { span } => span,
     }
 }
 

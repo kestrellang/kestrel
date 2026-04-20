@@ -14,6 +14,7 @@ use crate::constraint::{CallArg, Constraint};
 use crate::error::InferError;
 use crate::resolve::TypeResolver;
 use crate::ty::{LiteralKind, TyKind, TySlot, TyVar};
+use kestrel_ast_builder::NodeKind;
 
 /// Mutable state for type inference of a single function/init/getter body.
 pub struct InferCtx<'a> {
@@ -86,6 +87,14 @@ pub struct InferCtx<'a> {
     pub(crate) closure_flex: HashSet<TyVar>,
     /// Implicit-it closure TyVars: 1 param named "it", requires exactly 1-param context.
     pub(crate) closure_it: HashSet<TyVar>,
+
+    /// Bidirectional hint for the *element* type of the next array literal to be
+    /// lowered. Set by `HirStmt::Let` when the annotation is `Array[E]`; read and
+    /// cleared by `HirExpr::Array`. Pre-seeding `elem_tv` with the annotated
+    /// element type stops the first element from dictating `elem_tv`'s literal
+    /// kind and surfacing confusing "expected bool literal got integer literal"
+    /// errors for mixed-type arrays.
+    pub(crate) expected_array_elem: Option<TyVar>,
 }
 
 /// Info about a promotion inserted at a Coerce site.
@@ -129,6 +138,7 @@ impl<'a> InferCtx<'a> {
             type_param_defs: HashMap::new(),
             closure_flex: HashSet::new(),
             closure_it: HashSet::new(),
+            expected_array_elem: None,
         }
     }
 
@@ -150,11 +160,69 @@ impl<'a> InferCtx<'a> {
         TyVar(idx)
     }
 
-    /// Allocate a TyVar bound to a Named type.
+    /// Allocate a TyVar bound to a nominal type, dispatching on the entity's
+    /// NodeKind to pick the right variant (Struct / Enum / Protocol / TypeAlias).
+    ///
+    /// Callers that know the kind should prefer the explicit builders
+    /// (`struct_ty`, `enum_ty`, `protocol_ty`, `type_alias`) for clarity.
     pub fn named(&mut self, entity: Entity, args: Vec<TyVar>) -> TyVar {
+        let kind = match self.query_ctx.get::<NodeKind>(entity).cloned() {
+            Some(NodeKind::Enum) => TyKind::Enum { entity, args },
+            Some(NodeKind::Protocol) => TyKind::Protocol { entity, args },
+            Some(NodeKind::TypeAlias) => TyKind::TypeAlias { entity, args },
+            Some(NodeKind::TypeParameter) => {
+                // A type-parameter used as a Named slot: fall back to Param.
+                debug_assert!(args.is_empty(), "TypeParameter should not have args");
+                return self.param(entity);
+            }
+            // Struct is the default for Typed entities without a more specific kind
+            // (covers Struct, lang.* primitives seeded as leaf types, etc.).
+            _ => TyKind::Struct { entity, args },
+        };
+        let idx = self.types.len() as u32;
+        self.types.push(TySlot::Resolved(kind));
+        TyVar(idx)
+    }
+
+    /// Allocate a TyVar bound to a Struct type.
+    pub fn struct_ty(&mut self, entity: Entity, args: Vec<TyVar>) -> TyVar {
         let idx = self.types.len() as u32;
         self.types
-            .push(TySlot::Resolved(TyKind::Named { entity, args }));
+            .push(TySlot::Resolved(TyKind::Struct { entity, args }));
+        TyVar(idx)
+    }
+
+    /// Allocate a TyVar bound to an Enum type.
+    pub fn enum_ty(&mut self, entity: Entity, args: Vec<TyVar>) -> TyVar {
+        let idx = self.types.len() as u32;
+        self.types
+            .push(TySlot::Resolved(TyKind::Enum { entity, args }));
+        TyVar(idx)
+    }
+
+    /// Allocate a TyVar bound to a Protocol type.
+    pub fn protocol_ty(&mut self, entity: Entity, args: Vec<TyVar>) -> TyVar {
+        let idx = self.types.len() as u32;
+        self.types
+            .push(TySlot::Resolved(TyKind::Protocol { entity, args }));
+        TyVar(idx)
+    }
+
+    /// Allocate a TyVar bound to a TypeAlias. Inference will `Reduce` this to
+    /// the substituted definition (or leave it for protocol-bound lookup if
+    /// the alias is abstract — no `TypeAnnotation`).
+    pub fn type_alias(&mut self, entity: Entity, args: Vec<TyVar>) -> TyVar {
+        let idx = self.types.len() as u32;
+        self.types
+            .push(TySlot::Resolved(TyKind::TypeAlias { entity, args }));
+        TyVar(idx)
+    }
+
+    /// Allocate a TyVar bound to an associated-type projection.
+    pub fn assoc_projection(&mut self, base: TyVar, assoc: Entity) -> TyVar {
+        let idx = self.types.len() as u32;
+        self.types
+            .push(TySlot::Resolved(TyKind::AssocProjection { base, assoc }));
         TyVar(idx)
     }
 
@@ -353,6 +421,13 @@ impl<'a> InferCtx<'a> {
             expr,
             span,
         });
+    }
+
+    /// Emit a constraint that reduces a TypeAlias TyVar to its substituted
+    /// definition (and emits bound obligations).
+    pub fn reduce(&mut self, alias: TyVar, result: TyVar, span: Span) {
+        self.constraints
+            .push(Constraint::Reduce { alias, result, span });
     }
 
     pub fn implicit(

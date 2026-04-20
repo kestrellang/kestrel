@@ -31,9 +31,11 @@
 use std::collections::HashSet;
 
 use kestrel_ast_builder::{
-    Callable, ConformanceItem, Conformances, Intrinsic, Name, NodeKind, TypeAnnotation, TypeParams,
+    Callable, Intrinsic, Name, NodeKind, TypeAnnotation, TypeParams,
 };
 use kestrel_hecs::{Entity, QueryContext};
+use kestrel_hir::Builtin;
+use kestrel_name_res::{ConformingProtocols, ResolveBuiltin};
 use kestrel_type_infer::result::ResolvedTy;
 
 use super::witness::Witness;
@@ -245,14 +247,19 @@ impl Constructor {
     }
 
     /// Enumerate all constructors for a type. Returns `None` for infinite types.
-    pub fn all_for_type(query: &QueryContext<'_>, ty: &ResolvedTy) -> Option<Vec<Constructor>> {
-        let shape = TypeShape::classify(query, ty);
+    pub fn all_for_type(
+        query: &QueryContext<'_>,
+        root: Entity,
+        ty: &ResolvedTy,
+    ) -> Option<Vec<Constructor>> {
+        let shape = TypeShape::classify(query, root, ty);
         shape.constructors(query)
     }
 
     /// Find constructors not covered by `covered`. Returns `None` if impossible.
     pub fn missing(
         query: &QueryContext<'_>,
+        root: Entity,
         ty: &ResolvedTy,
         covered: &HashSet<Constructor>,
     ) -> Option<Vec<Constructor>> {
@@ -260,14 +267,14 @@ impl Constructor {
             return Some(vec![]);
         }
 
-        match Constructor::all_for_type(query, ty) {
+        match Constructor::all_for_type(query, root, ty) {
             Some(all) => {
                 let missing: Vec<_> = all.into_iter().filter(|c| !covered.contains(c)).collect();
                 Some(missing)
             }
             None => {
                 // Infinite type — check for special cases like arrays
-                if is_array_type(query, ty) {
+                if is_array_type(query, root, ty) {
                     return missing_array_constructors(covered);
                 }
                 // Need a wildcard to cover infinite types
@@ -422,7 +429,7 @@ impl TypeShape {
     /// Classify a resolved type into its constructor space.
     ///
     /// This is the single entry point for type → exhaustiveness mapping.
-    pub fn classify(query: &QueryContext<'_>, ty: &ResolvedTy) -> Self {
+    pub fn classify(query: &QueryContext<'_>, root: Entity, ty: &ResolvedTy) -> Self {
         match ty {
             ResolvedTy::Never => TypeShape::Never,
 
@@ -465,7 +472,7 @@ impl TypeShape {
                         }
 
                         // Layer 2: stdlib types (identified by declared conformances)
-                        if let Some(shape) = classify_by_conformances(query, *entity) {
+                        if let Some(shape) = classify_by_conformances(query, root, *entity) {
                             return shape;
                         }
 
@@ -544,27 +551,26 @@ fn classify_intrinsic(query: &QueryContext<'_>, entity: Entity) -> TypeShape {
 
 /// Classify a non-intrinsic struct by its declared protocol conformances.
 /// Returns None for regular user structs with no special classification.
-fn classify_by_conformances(query: &QueryContext<'_>, entity: Entity) -> Option<TypeShape> {
-    let conformances = query.get::<Conformances>(entity)?;
-
-    let conforms_to = |name: &str| -> bool {
-        conformances.0.iter().any(|item| match item {
-            ConformanceItem::Positive(ast_ty, _) => conformance_name_matches(ast_ty, name),
-            _ => false,
-        })
-    };
+fn classify_by_conformances(
+    query: &QueryContext<'_>,
+    root: Entity,
+    entity: Entity,
+) -> Option<TypeShape> {
+    let conforms_to = |builtin: Builtin| -> bool { conforms_to_builtin(query, root, entity, builtin) };
 
     // Bool-like: two constructors (True/False)
-    if conforms_to("ExpressibleByBoolLiteral") {
+    if conforms_to(Builtin::ExpressibleByBoolLiteral) {
         return Some(TypeShape::Bool);
     }
 
-    // Literal types have infinite value spaces
-    if conforms_to("ExpressibleByIntLiteral")
-        || conforms_to("ExpressibleByFloatLiteral")
-        || conforms_to("ExpressibleByCharLiteral")
-        || conforms_to("ExpressibleByStringLiteral")
-        || conforms_to("ExpressibleByArrayLiteral")
+    // Literal types have infinite value spaces. ExpressibleByArrayLiteral is
+    // a stdlib wrapper that inherits from InternalExpressibleByArrayLiteral,
+    // so checking the internal protocol suffices.
+    if conforms_to(Builtin::ExpressibleByIntegerLiteral)
+        || conforms_to(Builtin::ExpressibleByFloatLiteral)
+        || conforms_to(Builtin::ExpressibleByCharLiteral)
+        || conforms_to(Builtin::ExpressibleByStringLiteral)
+        || conforms_to(Builtin::InternalExpressibleByArrayLiteral)
     {
         return Some(TypeShape::Infinite);
     }
@@ -572,17 +578,25 @@ fn classify_by_conformances(query: &QueryContext<'_>, entity: Entity) -> Option<
     None
 }
 
-/// Check if an AstType's last path segment matches the given protocol name.
-fn conformance_name_matches(ast_ty: &kestrel_ast::AstType, name: &str) -> bool {
-    if let kestrel_ast::AstType::Named { segments, .. } = ast_ty {
-        segments.last().is_some_and(|seg| seg.name == name)
-    } else {
-        false
-    }
+/// Test whether an entity transitively conforms to a builtin protocol.
+/// Resolves the protocol's entity via ResolveBuiltin, then checks membership
+/// in ConformingProtocols — no name-based matching.
+fn conforms_to_builtin(
+    query: &QueryContext<'_>,
+    root: Entity,
+    entity: Entity,
+    builtin: Builtin,
+) -> bool {
+    let Some(proto) = query.query(ResolveBuiltin { builtin, root }) else {
+        return false;
+    };
+    query
+        .query(ConformingProtocols { entity, root })
+        .contains(&proto)
 }
 
 /// Check if a ResolvedTy is an array-like type (supports variable-length array patterns).
-fn is_array_type(query: &QueryContext<'_>, ty: &ResolvedTy) -> bool {
+fn is_array_type(query: &QueryContext<'_>, root: Entity, ty: &ResolvedTy) -> bool {
     let ResolvedTy::Named { entity, .. } = ty else {
         return false;
     };
@@ -590,15 +604,9 @@ fn is_array_type(query: &QueryContext<'_>, ty: &ResolvedTy) -> bool {
     if query.has::<Intrinsic>(*entity) {
         return false;
     }
-    // Check for ExpressibleByArrayLiteral conformance
-    query.get::<Conformances>(*entity).is_some_and(|conformances| {
-        conformances.0.iter().any(|item| match item {
-            ConformanceItem::Positive(ast_ty, _) => {
-                conformance_name_matches(ast_ty, "ExpressibleByArrayLiteral")
-            }
-            _ => false,
-        })
-    })
+    // ExpressibleByArrayLiteral inherits from _ExpressibleByArrayLiteral, so
+    // ConformingProtocols surfaces the internal protocol for any conforming type.
+    conforms_to_builtin(query, root, *entity, Builtin::InternalExpressibleByArrayLiteral)
 }
 
 /// Collect Field children of an entity, in declaration order.

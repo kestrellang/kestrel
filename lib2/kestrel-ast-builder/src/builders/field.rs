@@ -46,20 +46,35 @@ pub fn build_field(
         world.set(entity, TypeAnnotation(ty));
     }
 
-    // Determine mutability from var/let keyword
+    // Determine mutability from var/let keyword and capture it as a component
+    // so downstream analyzers don't need to re-scan tokens.
     let is_var = node
         .children_with_tokens()
         .any(|e| e.as_token().is_some_and(|t| t.kind() == SyntaxKind::Var));
+    world.set(
+        entity,
+        if is_var { FieldMutability::Var } else { FieldMutability::Let },
+    );
 
     // Check for computed property accessors
     let has_accessors = find_child(node, SyntaxKind::PropertyAccessors).is_some();
+    if has_accessors {
+        world.set(entity, Computed);
+    }
 
     if has_accessors {
         // Computed property: Gettable/Settable based on get/set clauses
         let accessors = find_child(node, SyntaxKind::PropertyAccessors).unwrap();
 
-        let has_getter = find_child(&accessors, SyntaxKind::GetterClause).is_some();
-        let has_setter = find_child(&accessors, SyntaxKind::SetterClause).is_some();
+        // Clauses wrap an accessor body; bare `Get`/`Set` tokens appear as
+        // direct children for protocol requirements (`{ get set }`) where
+        // accessors are declared without bodies.
+        let has_getter = find_child(&accessors, SyntaxKind::GetterClause).is_some()
+            || accessors.children_with_tokens()
+                .any(|e| e.as_token().is_some_and(|t| t.kind() == SyntaxKind::Get));
+        let has_setter = find_child(&accessors, SyntaxKind::SetterClause).is_some()
+            || accessors.children_with_tokens()
+                .any(|e| e.as_token().is_some_and(|t| t.kind() == SyntaxKind::Set));
 
         if has_getter {
             world.set(entity, Gettable);

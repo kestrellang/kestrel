@@ -110,13 +110,25 @@ fn resolve_to_concrete(ctx: &InferCtx<'_>, tv: TyVar) -> ResolvedTy {
 }
 
 /// Convert a TyKind to a ResolvedTy, recursively resolving any TyVar args.
+///
+/// ResolvedTy is what downstream consumers (MIR, codegen) see. It keeps a
+/// single `Named` variant because downstream already dispatches via NodeKind.
+/// A leftover `TypeAlias` or `AssocProjection` indicates inference couldn't
+/// reduce/resolve it — those surface as Error so consumers don't see ambiguous types.
 fn kind_to_resolved(ctx: &InferCtx<'_>, kind: &TyKind) -> ResolvedTy {
     match kind {
-        TyKind::Named { entity, args } => ResolvedTy::Named {
+        TyKind::Struct { entity, args }
+        | TyKind::Enum { entity, args }
+        | TyKind::Protocol { entity, args } => ResolvedTy::Named {
+            entity: *entity,
+            args: args.iter().map(|&tv| resolve_to_concrete(ctx, tv)).collect(),
+        },
+        TyKind::TypeAlias { entity, args } => ResolvedTy::Named {
             entity: *entity,
             args: args.iter().map(|&tv| resolve_to_concrete(ctx, tv)).collect(),
         },
         TyKind::Param { entity } => ResolvedTy::Param { entity: *entity },
+        TyKind::AssocProjection { .. } => ResolvedTy::Error,
         TyKind::Tuple(elems) => {
             ResolvedTy::Tuple(elems.iter().map(|&tv| resolve_to_concrete(ctx, tv)).collect())
         }
@@ -209,7 +221,10 @@ fn literal_kind_name(lit: LiteralKind) -> &'static str {
 /// Describe a TyKind as a short type name string.
 fn describe_tykind(ctx: &InferCtx<'_>, kind: &TyKind) -> String {
     match kind {
-        TyKind::Named { entity, args } => {
+        TyKind::Struct { entity, args }
+        | TyKind::Enum { entity, args }
+        | TyKind::Protocol { entity, args }
+        | TyKind::TypeAlias { entity, args } => {
             let name = ctx.query_ctx
                 .get::<kestrel_ast_builder::Name>(*entity)
                 .map(|n| n.0.clone())
@@ -232,6 +247,14 @@ fn describe_tykind(ctx: &InferCtx<'_>, kind: &TyKind) -> String {
                 .get::<kestrel_ast_builder::Name>(*entity)
                 .map(|n| n.0.clone())
                 .unwrap_or("Param".into())
+        }
+        TyKind::AssocProjection { base, assoc } => {
+            let base_str = describe_tyvar(ctx, *base);
+            let assoc_name = ctx.query_ctx
+                .get::<kestrel_ast_builder::Name>(*assoc)
+                .map(|n| n.0.clone())
+                .unwrap_or_else(|| format!("{:?}", assoc));
+            format!("{}.{}", base_str, assoc_name)
         }
         TyKind::Tuple(elems) => {
             if elems.is_empty() {

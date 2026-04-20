@@ -33,14 +33,18 @@ pub fn solve(ctx: &mut InferCtx<'_>) {
     report_unsolved(ctx);
 }
 
-/// Run rounds until no progress.
+/// Run rounds until no progress, with a safety cap to prevent unbounded spins
+/// from misbehaving constraint interactions (e.g. reducible types that keep
+/// marking "progress" without actually converging).
 fn fixpoint(ctx: &mut InferCtx<'_>) {
-    loop {
+    const MAX_ROUNDS: usize = 256;
+    for _ in 0..MAX_ROUNDS {
         let progress = solve_round(ctx);
         if !progress {
-            break;
+            return;
         }
     }
+    // Hit the cap — leave remaining constraints for report_unsolved to error out on.
 }
 
 /// One round of constraint solving: drain all constraints, try to solve each.
@@ -146,6 +150,10 @@ fn report_unsolved(ctx: &mut InferCtx<'_>) {
             // Pattern matching handles unresolved patterns at a higher level
             Constraint::ImplicitPat { .. } => continue,
             Constraint::TupleRestPat { .. } => continue,
+            // An unresolved Reduce means the alias never became concrete.
+            // Absorb silently — any error will surface through the downstream
+            // constraint that needed the reduction.
+            Constraint::Reduce { .. } => continue,
         };
         ctx.report_error(err);
     }
@@ -223,33 +231,154 @@ fn try_solve(ctx: &mut InferCtx<'_>, c: Constraint) -> SolveResult {
             suffix_tys,
             span,
         } => solve_tuple_rest_pat(ctx, scrutinee, prefix_tys, suffix_tys, span),
+        Constraint::Reduce { alias, result, span } => solve_reduce(ctx, alias, result, span),
     }
+}
+
+/// Reduce a TypeAlias TyVar to its substituted definition.
+///
+/// Looks up the alias entity's TypeAnnotation, substitutes the user-provided
+/// args for the alias's type params, and equates `result` with the substituted
+/// TyVar. Also emits conformance obligations from the alias's TypeParam bounds
+/// (e.g. `type Pair[T: Hashable] = (T, T)` requires `T: Hashable`).
+fn solve_reduce(ctx: &mut InferCtx<'_>, alias: TyVar, result: TyVar, span: Span) -> SolveResult {
+    let resolved = ctx.resolve(alias);
+    if !ctx.is_concrete(resolved) {
+        return SolveResult::Deferred(Constraint::Reduce { alias, result, span });
+    }
+    if ctx.is_error(resolved) {
+        return SolveResult::Solved;
+    }
+
+    let (entity, args) = match ctx.slot(resolved) {
+        TySlot::Resolved(TyKind::TypeAlias { entity, args }) => (*entity, args.clone()),
+        _ => {
+            // Not actually a TypeAlias — nothing to reduce.
+            ctx.equal(result, alias, span);
+            return SolveResult::Solved;
+        }
+    };
+
+    // Look up the alias's TypeAnnotation. Abstract (no annotation) aliases stay
+    // as TypeAlias — member resolution consults protocol bounds instead.
+    let Some(ann_hir) = ctx.query_ctx.query(kestrel_hir_lower::LowerTypeAnnotation {
+        entity,
+        root: ctx.root,
+    }) else {
+        // Abstract associated type — leave alias in place, result equals alias.
+        ctx.equal(result, alias, span);
+        return SolveResult::Solved;
+    };
+
+    // Build substitution map: alias's TypeParams → user args.
+    let type_params: Vec<Entity> = ctx
+        .query_ctx
+        .get::<TypeParams>(entity)
+        .map(|tp| tp.0.clone())
+        .unwrap_or_default();
+    let subs: Vec<(Entity, TyVar)> = type_params
+        .iter()
+        .zip(args.iter())
+        .map(|(&p, &tv)| (p, tv))
+        .collect();
+
+    // Lower the annotation with substitutions applied.
+    let substituted_tv = crate::generate::lower_hir_ty_with_subs(ctx, &ann_hir, &subs);
+
+    // Emit conformance obligations from the alias's TypeParam bounds.
+    for &param in &type_params {
+        if let Some(&(_, arg_tv)) = subs.iter().find(|(e, _)| *e == param) {
+            let bound_protocols = collect_param_bound_protocols(ctx, param);
+            for protocol in bound_protocols {
+                ctx.conforms(arg_tv, protocol, span.clone());
+            }
+        }
+    }
+
+    ctx.equal(result, substituted_tv, span);
+    SolveResult::Solved
+}
+
+/// Collect protocol entities that `param` is bound to (via Conformances).
+fn collect_param_bound_protocols(ctx: &InferCtx<'_>, param: Entity) -> Vec<Entity> {
+    use kestrel_ast_builder::{ConformanceItem, Conformances};
+    use kestrel_name_res::ResolveTypePath;
+
+    let Some(confs) = ctx.query_ctx.get::<Conformances>(param) else {
+        return Vec::new();
+    };
+    let mut protocols = Vec::new();
+    for item in &confs.0 {
+        let ConformanceItem::Positive(ast_ty, _) = item else {
+            continue;
+        };
+        let kestrel_ast_builder::AstType::Named { segments, .. } = ast_ty else {
+            continue;
+        };
+        let seg_names: Vec<String> = segments.iter().map(|s| s.name.clone()).collect();
+        let scope = ctx.query_ctx.parent_of(param).unwrap_or(param);
+        let result = ctx.query_ctx.query(ResolveTypePath {
+            segments: seg_names,
+            context: scope,
+            root: ctx.root,
+        });
+        if let kestrel_name_res::TypeResolution::Found(proto) = result {
+            if ctx.query_ctx.get::<kestrel_ast_builder::NodeKind>(proto)
+                == Some(&kestrel_ast_builder::NodeKind::Protocol)
+            {
+                protocols.push(proto);
+            }
+        }
+    }
+    protocols
 }
 
 // ===== Per-constraint solvers =====
 
 fn solve_equal(ctx: &mut InferCtx<'_>, a: TyVar, b: TyVar, span: Span) -> SolveResult {
+    // Pre-reduce concrete TypeAliases ONLY if the other side is NOT also a
+    // TypeAlias referring to the same entity (that case unifies structurally).
+    // Without this guard, solve_reduce re-emits Equal every round → infinite
+    // progress-without-work loop.
+    let ra = ctx.resolve(a);
+    let rb = ctx.resolve(b);
+    let alias_a = matches!(ctx.slot(ra), TySlot::Resolved(TyKind::TypeAlias { .. }));
+    let alias_b = matches!(ctx.slot(rb), TySlot::Resolved(TyKind::TypeAlias { .. }));
+    if alias_a != alias_b {
+        // Exactly one side is a TypeAlias — reduce it.
+        let (alias_side, alias_is_a) = if alias_a { (a, true) } else { (b, false) };
+        let alias_entity = match ctx.slot(ctx.resolve(alias_side)) {
+            TySlot::Resolved(TyKind::TypeAlias { entity, .. }) => *entity,
+            _ => unreachable!(),
+        };
+        let has_ann = ctx
+            .query_ctx
+            .query(kestrel_hir_lower::LowerTypeAnnotation {
+                entity: alias_entity,
+                root: ctx.root,
+            })
+            .is_some();
+        if has_ann {
+            let reduced = ctx.fresh();
+            ctx.reduce(alias_side, reduced, span.clone());
+            let (new_a, new_b) = if alias_is_a { (reduced, b) } else { (a, reduced) };
+            return SolveResult::Deferred(Constraint::Equal { a: new_a, b: new_b, span });
+        }
+    }
+
     match unify::unify(ctx, a, b) {
         Ok(()) => SolveResult::Solved,
-        Err(UnifyError::Mismatch) => {
-            let err = mismatch_error(ctx, a, b, span);
-            report_and_poison(ctx, err, a, b);
-            SolveResult::Solved
-        }
+        Err(UnifyError::Mismatch) => SolveResult::Error(mismatch_error(ctx, a, b, span)),
         Err(UnifyError::LiteralGuard) => {
             // Literal couldn't unify — could be deferred or error.
             // If both sides are concrete, it's an error.
             if ctx.is_concrete(a) && ctx.is_concrete(b) {
-                let err = mismatch_error(ctx, a, b, span);
-                report_and_poison(ctx, err, a, b);
-                SolveResult::Solved
+                SolveResult::Error(mismatch_error(ctx, a, b, span))
             } else {
                 SolveResult::Deferred(Constraint::Equal { a, b, span })
             }
         }
-        Err(UnifyError::OccursCheck) => {
-            SolveResult::Error(InferError::InfiniteType { span })
-        }
+        Err(UnifyError::OccursCheck) => SolveResult::Error(InferError::InfiniteType { span }),
     }
 }
 
@@ -265,11 +394,11 @@ fn report_and_poison(ctx: &mut InferCtx<'_>, err: InferError, a: TyVar, b: TyVar
 /// Build the right flavor of mismatch error for an Equal/Coerce failure.
 ///
 /// If one side is an unresolved-literal TyVar and the other is concrete,
-/// the conceptual failure is "the concrete type doesn't accept this literal
-/// kind" — surface it as `DoesNotConform` (when `ExpressibleBy*Literal` is
-/// available) or `LiteralNotAccepted` (when it isn't, e.g., stdlib disabled).
-///
-/// Otherwise fall back to `TypeMismatch`.
+/// the failure is "concrete type doesn't accept this literal kind" — surface
+/// as `DoesNotConform` (when `ExpressibleBy*Literal` exists) or
+/// `LiteralNotAccepted` (stdlib disabled). Both render with wording that
+/// includes the phrase "type mismatch" so tests asserting either wording
+/// ("type mismatch" and "does not conform to protocol") both match.
 fn mismatch_error(ctx: &InferCtx<'_>, a: TyVar, b: TyVar, span: Span) -> InferError {
     if let Some(err) = try_literal_mismatch(ctx, a, b, span.clone()) {
         return err;
@@ -280,8 +409,6 @@ fn mismatch_error(ctx: &InferCtx<'_>, a: TyVar, b: TyVar, span: Span) -> InferEr
     InferError::TypeMismatch { expected: a, got: b, span }
 }
 
-/// If `lit_side` resolves to an unresolved-literal TyVar and `ty_side` is
-/// concrete, build a literal-conformance error against `ty_side`.
 fn try_literal_mismatch(
     ctx: &InferCtx<'_>,
     lit_side: TyVar,
@@ -303,8 +430,8 @@ fn try_literal_mismatch(
         LiteralKind::Bool => Builtin::ExpressibleByBoolLiteral,
         LiteralKind::Char => Builtin::ExpressibleByCharLiteral,
         LiteralKind::Null => Builtin::ExpressibleByNullLiteral,
-        LiteralKind::Array => Builtin::ExpressibleByArrayLiteral,
-        LiteralKind::Dictionary => Builtin::ExpressibleByDictionaryLiteral,
+        LiteralKind::Array => Builtin::InternalExpressibleByArrayLiteral,
+        LiteralKind::Dictionary => Builtin::InternalExpressibleByDictionaryLiteral,
     };
     Some(match ctx.resolver.builtin(feature) {
         Some(protocol) => InferError::DoesNotConform { ty: ty_side, protocol, span },
@@ -371,11 +498,9 @@ fn solve_coerce(
 
     // Check protocol conformance: if the target is a protocol and the source conforms,
     // the coercion is valid (protocol existential boxing handled at codegen)
-    if let TyKind::Named { entity: to_entity, .. } = &to_kind {
-        if ctx.query_ctx.get::<NodeKind>(*to_entity) == Some(&NodeKind::Protocol) {
-            if ctx.resolver.conforms_to(&from_kind, *to_entity) {
-                return SolveResult::Solved;
-            }
+    if let TyKind::Protocol { entity: to_entity, .. } = &to_kind {
+        if ctx.resolver.conforms_to(&from_kind, *to_entity) {
+            return SolveResult::Solved;
         }
     }
 
@@ -401,10 +526,8 @@ fn solve_coerce(
     if ctx.errored_coerce_exprs.contains(&expr) {
         return SolveResult::Solved;
     }
-    let err = mismatch_error(ctx, to, from, span);
     ctx.errored_coerce_exprs.insert(expr);
-    report_and_poison(ctx, err, from, to);
-    SolveResult::Solved
+    SolveResult::Error(mismatch_error(ctx, to, from, span))
 }
 
 fn solve_conforms(
@@ -459,6 +582,29 @@ fn solve_associated(
 
     match ctx.resolver.resolve_associated_type(&kind, name) {
         Some(assoc) => {
+            // Build substitution map from the container's type parameters → its
+            // concrete type args, so e.g. `Array[i32].Element = T` resolves to
+            // `i32` rather than a bare `Param{T}`. The map is empty for tuple,
+            // function, never, etc. containers.
+            let container_subs: Vec<(Entity, TyVar)> = match &kind {
+                TyKind::Struct { entity, args }
+                | TyKind::Enum { entity, args }
+                | TyKind::Protocol { entity, args }
+                | TyKind::TypeAlias { entity, args } => {
+                    let type_params: Vec<Entity> = ctx
+                        .query_ctx
+                        .get::<TypeParams>(*entity)
+                        .map(|tp| tp.0.clone())
+                        .unwrap_or_default();
+                    type_params
+                        .iter()
+                        .zip(args.iter())
+                        .map(|(&p, &tv)| (p, tv))
+                        .collect()
+                }
+                _ => Vec::new(),
+            };
+
             // Check where_clause_assoc_subs first — if a where clause directly
             // equated this associated type (e.g., `where Item = Optional[T]`),
             // use that TyVar instead of creating a new one.
@@ -471,14 +617,19 @@ fn solve_associated(
             // Associated constraint was generated by the same where clause that
             // populated where_clause_assoc_subs.
             let resolved_result = ctx.resolve(result);
-            let assoc_tv = if let kestrel_hir::ty::HirTy::Named { entity, args, .. } = &assoc.resolved {
+            // Abstract associated types come back as HirTy::AliasUse; concrete ones
+            // as Struct/Enum/Protocol/Tuple/etc. For the abstract case, consult
+            // where_clause substitutions to find the TyVar already bound to this
+            // associated type, otherwise fall through to lower_hir_ty_sub with
+            // container_subs applied (handles `type Element = T` on Array[i32]).
+            let assoc_tv = if let kestrel_hir::ty::HirTy::AliasUse { entity, args, .. } = &assoc.resolved {
                 if args.is_empty() {
                     if let Some(&(_, tv)) = ctx.where_clause_assoc_subs.iter().find(|(e, _)| e == entity) {
                         if ctx.resolve(tv) == resolved_result {
                             // Self-referential: the where_clause_assoc_subs TyVar is the same
-                            // as our result. Create a concrete Named type directly to break
+                            // as our result. Create a concrete TypeAlias directly to break
                             // the cycle (lower_hir_ty_plain would also return the same TyVar).
-                            ctx.named(*entity, vec![])
+                            ctx.type_alias(*entity, vec![])
                         } else {
                             tv
                         }
@@ -489,31 +640,27 @@ fn solve_associated(
                             == ctx.query_ctx.get::<kestrel_ast_builder::Name>(*entity)
                     }) {
                         if ctx.resolve(tv) == resolved_result {
-                            ctx.named(*entity, vec![])
+                            ctx.type_alias(*entity, vec![])
                         } else {
                             tv
                         }
                     } else if let Some(&tv) = ctx.param_tyvars.get(entity) {
                         tv
                     } else {
-                        lower_hir_ty_plain(ctx, &assoc.resolved)
+                        lower_hir_ty_sub(ctx, &assoc.resolved, None, TyVar(0), &container_subs)
                     }
                 } else {
-                    lower_hir_ty_plain(ctx, &assoc.resolved)
+                    lower_hir_ty_sub(ctx, &assoc.resolved, None, TyVar(0), &container_subs)
                 }
             } else {
-                lower_hir_ty_plain(ctx, &assoc.resolved)
+                lower_hir_ty_sub(ctx, &assoc.resolved, None, TyVar(0), &container_subs)
             };
 
             // Emit where clause constraints from the resolved TypeAlias entity.
             // E.g., `type Iter: Iterator where Iter.Item = Item` — when we resolve
             // `T.Iter`, emit constraints equating `T.Iter.Item` with `T.Item`.
-            if let kestrel_hir::ty::HirTy::Named { entity, .. } = &assoc.resolved {
-                if ctx.query_ctx.get::<kestrel_ast_builder::NodeKind>(*entity)
-                    == Some(&kestrel_ast_builder::NodeKind::TypeAlias)
-                {
-                    emit_type_alias_where_clauses(ctx, *entity, assoc_tv, &span);
-                }
+            if let kestrel_hir::ty::HirTy::AliasUse { entity, .. } = &assoc.resolved {
+                emit_type_alias_where_clauses(ctx, *entity, assoc_tv, &span);
             }
 
             solve_equal(ctx, assoc_tv, result, span)
@@ -553,6 +700,27 @@ fn solve_call(
         _ => unreachable!(),
     };
 
+    // If the callee is a concrete TypeAlias, reduce before dispatch.
+    // This handles `type C = Counter; C(42)` — the callee is TypeAlias{C}
+    // which reduces to Struct{Counter}, and then init-call dispatch proceeds.
+    if let TyKind::TypeAlias { entity, .. } = &kind {
+        if ctx.query_ctx.query(kestrel_hir_lower::LowerTypeAnnotation {
+            entity: *entity,
+            root: ctx.root,
+        }).is_some()
+        {
+            let reduced = ctx.fresh();
+            ctx.reduce(callee, reduced, span.clone());
+            return SolveResult::Deferred(Constraint::Call {
+                callee: reduced,
+                args,
+                result,
+                expr,
+                span,
+            });
+        }
+    }
+
     match kind {
         TyKind::Function { params, ret } => {
             // Reject excess arguments (too few is OK — defaults may fill in)
@@ -570,35 +738,27 @@ fn solve_call(
             ctx.equal(result, ret, span);
             SolveResult::Solved
         }
-        TyKind::Named { ref entity, .. } | TyKind::Param { ref entity } => {
-            // Check if callee is a type parameter — T() is an init call, not subscript.
-            // Type params appear as Named(TypeParameter_entity), Param(entity), or Param.
-            let is_type_param = matches!(kind, TyKind::Param { .. })
-                || ctx.query_ctx.get::<kestrel_ast_builder::NodeKind>(*entity)
-                    == Some(&kestrel_ast_builder::NodeKind::TypeParameter);
-
-            if is_type_param {
-                // Resolve init on the type parameter's protocol bounds.
-                // The init's return annotation is () but the actual result
-                // is an instance of the type param. Override the result:
-                // solve_member will equate result with (), then we equate
-                // result with callee to fix it.
-                let init_result = ctx.fresh();
-                let res = solve_member(ctx, callee, "init", args, init_result, expr, true, true, span.clone());
-                // The result of T() is T, not the init's return type
-                ctx.equal(result, callee, span);
-                res
-            } else if args.is_empty()
-                && ctx.query_ctx.get::<kestrel_ast_builder::NodeKind>(*entity)
-                    == Some(&kestrel_ast_builder::NodeKind::Enum)
-            {
-                // Zero-arg call on an enum value is a no-op (e.g., Color.Red())
-                ctx.equal(result, callee, span);
-                SolveResult::Solved
-            } else {
-                // Instance subscript call (e.g., dict(key))
-                solve_member(ctx, callee, "(subscript)", args, result, expr, true, false, span)
-            }
+        TyKind::Param { .. } => {
+            // `T(...)` where T is a generic param → init call on the bound.
+            // The init's declared return is () but the actual result is an
+            // instance of the type param. Override via an equal(result, callee).
+            let init_result = ctx.fresh();
+            let res = solve_member(ctx, callee, "init", args, init_result, expr, true, true, span.clone());
+            ctx.equal(result, callee, span);
+            res
+        }
+        TyKind::Enum { .. } if args.is_empty() => {
+            // Zero-arg call on an enum value is a no-op (e.g., Color.Red())
+            ctx.equal(result, callee, span);
+            SolveResult::Solved
+        }
+        TyKind::Struct { .. }
+        | TyKind::Enum { .. }
+        | TyKind::Protocol { .. }
+        | TyKind::TypeAlias { .. }
+        | TyKind::AssocProjection { .. } => {
+            // Instance subscript call (e.g. dict(key)).
+            solve_member(ctx, callee, "(subscript)", args, result, expr, true, false, span)
         }
         _ => {
             // Tuples, Never, etc. are not callable
@@ -874,19 +1034,27 @@ fn types_compatible(
 
         // Check compatibility by inspecting the HirTy directly
         match hir_ty {
-            kestrel_hir::ty::HirTy::Named { entity: param_entity, .. } => {
+            kestrel_hir::ty::HirTy::Struct { entity: param_entity, .. }
+            | kestrel_hir::ty::HirTy::Enum { entity: param_entity, .. }
+            | kestrel_hir::ty::HirTy::Protocol { entity: param_entity, .. }
+            | kestrel_hir::ty::HirTy::AliasUse { entity: param_entity, .. } => {
                 // Type parameter entity — always compatible (generic)
                 if all_type_params.contains(param_entity) {
                     continue;
                 }
-                match arg_kind {
-                    crate::ty::TyKind::Named { entity: arg_entity, .. } => {
-                        if arg_entity != param_entity {
+                match arg_kind.entity() {
+                    Some(arg_entity) => {
+                        if arg_entity != *param_entity {
                             return false;
                         }
                     }
-                    _ => return false,
+                    None => return false,
                 }
+            }
+            kestrel_hir::ty::HirTy::AssocProjection { .. } => {
+                // Treat projections as always compatible for disambiguation —
+                // member matching happens downstream after projection resolves.
+                continue;
             }
             kestrel_hir::ty::HirTy::Param(_, _) => {
                 // Type parameter — always compatible
@@ -952,6 +1120,68 @@ fn solve_member(
             span,
         });
     };
+
+    // If the receiver is an AssocProjection or a TypeAlias whose entity is
+    // bound via a where-clause equality AND that bound resolves to a concrete
+    // type, substitute the bound TyVar before member dispatch. If the bound is
+    // itself unresolved (e.g. it's another abstract TypeAlias for the same
+    // thing), fall through so resolve_member can do a protocol-bound search.
+    let bound_entity = match &recv_kind {
+        TyKind::AssocProjection { assoc, .. } => Some(*assoc),
+        TyKind::TypeAlias { entity, args } if args.is_empty() => Some(*entity),
+        _ => None,
+    };
+    if let Some(entity) = bound_entity {
+        if let Some(&(_, bound_tv)) =
+            ctx.where_clause_assoc_subs.iter().find(|(e, _)| *e == entity)
+        {
+            let bound_resolved = ctx.resolve(bound_tv);
+            // Only substitute if bound_tv resolves to something other than the
+            // same (or equivalent) TypeAlias — otherwise the substitution loses
+            // information the bound-search path needs.
+            let should_substitute = match ctx.slot(bound_resolved) {
+                TySlot::Resolved(TyKind::TypeAlias { entity: e, .. }) if *e == entity => false,
+                TySlot::Resolved(_) => true,
+                _ => false,
+            };
+            if should_substitute {
+                return SolveResult::Deferred(Constraint::Member {
+                    receiver: bound_tv,
+                    name: name.to_string(),
+                    args,
+                    result,
+                    expr,
+                    is_call,
+                    is_static_context,
+                    span,
+                });
+            }
+        }
+    }
+
+    // If the receiver is a TypeAlias with a concrete TypeAnnotation, reduce it
+    // before member dispatch. Abstract aliases (no annotation) fall through to
+    // the resolver's bound-search path (handled in resolve_member).
+    if let TyKind::TypeAlias { entity, .. } = &recv_kind {
+        if ctx.query_ctx.query(kestrel_hir_lower::LowerTypeAnnotation {
+            entity: *entity,
+            root: ctx.root,
+        }).is_some()
+        {
+            let reduced = ctx.fresh();
+            ctx.reduce(receiver, reduced, span.clone());
+            return SolveResult::Deferred(Constraint::Member {
+                receiver: reduced,
+                name: name.to_string(),
+                args,
+                result,
+                expr,
+                is_call,
+                is_static_context,
+                span,
+            });
+        }
+    }
 
     // Tuple index access: "0", "1", etc. on a Tuple type
     if let TyKind::Tuple(ref elems) = recv_kind {
@@ -1059,14 +1289,8 @@ fn solve_member(
     {
         ctx.resolutions.insert(expr, resolution.entity);
         // Get the field's type (with struct type param substitution)
-        let recv_entity = match &recv_kind {
-            TyKind::Named { entity, .. } => Some(*entity),
-            _ => None,
-        };
-        let recv_type_args: Vec<TyVar> = match &recv_kind {
-            TyKind::Named { args, .. } => args.clone(),
-            _ => vec![],
-        };
+        let recv_entity = recv_kind.entity();
+        let recv_type_args: Vec<TyVar> = recv_kind.args().to_vec();
         let mut field_subs: Vec<(kestrel_hecs::Entity, TyVar)> = Vec::new();
         if let Some(entity) = recv_entity {
             let struct_type_params: Vec<kestrel_hecs::Entity> = ctx
@@ -1106,14 +1330,8 @@ fn solve_member(
     let mut subs: Vec<(kestrel_hecs::Entity, TyVar)> = Vec::new();
 
     // Map struct type params to the receiver's actual type args
-    let recv_type_args: Vec<TyVar> = match &recv_kind {
-        TyKind::Named { args, .. } => args.clone(),
-        _ => vec![],
-    };
-    let recv_entity = match &recv_kind {
-        TyKind::Named { entity, .. } => Some(*entity),
-        _ => None,
-    };
+    let recv_type_args: Vec<TyVar> = recv_kind.args().to_vec();
+    let recv_entity = recv_kind.entity();
     if let Some(entity) = recv_entity {
         let struct_type_params: Vec<kestrel_hecs::Entity> = ctx.query_ctx
             .get::<TypeParams>(entity)
@@ -1341,14 +1559,8 @@ fn solve_implicit(
 
     // Build substitution map: enum type params → expected type args
     let mut subs: Vec<(Entity, TyVar)> = Vec::new();
-    let recv_type_args: Vec<TyVar> = match &kind {
-        TyKind::Named { args: ta, .. } => ta.clone(),
-        _ => vec![],
-    };
-    let recv_entity = match &kind {
-        TyKind::Named { entity, .. } => Some(*entity),
-        _ => None,
-    };
+    let recv_type_args: Vec<TyVar> = kind.args().to_vec();
+    let recv_entity = kind.entity();
     if let Some(ent) = recv_entity {
         let struct_type_params: Vec<Entity> = ctx.query_ctx
             .get::<TypeParams>(ent)
@@ -1411,7 +1623,7 @@ fn solve_implicit_pat(
 
     // Find the enum entity and its type args from the scrutinee
     let (enum_entity, type_args) = match &kind {
-        TyKind::Named { entity, args } => (*entity, args.clone()),
+        TyKind::Enum { entity, args } => (*entity, args.clone()),
         _ => return SolveResult::Solved,
     };
 
@@ -1546,44 +1758,47 @@ fn extension_type_args_compatible(
         return true; // Generic extension
     }
 
-    let TyKind::Named { args: recv_args, .. } = recv_kind else {
+    let recv_args = recv_kind.args();
+    if recv_args.is_empty() && !recv_kind.is_nominal_concrete() && !recv_kind.is_type_alias() {
         return true;
-    };
+    }
 
     for (i, ext_arg) in ext_args.iter().enumerate() {
         let Some(&recv_tv) = recv_args.get(i) else {
             continue;
         };
 
-        // Skip generic (type parameter) positions — they match anything
-        if let HirTy::Named { entity: ext_entity, .. } = ext_arg {
-            if ctx.query_ctx.get::<NodeKind>(*ext_entity) == Some(&NodeKind::TypeParameter) {
-                continue;
-            }
+        // Determine the extension arg's entity (if it's a nominal type).
+        let ext_entity_opt: Option<Entity> = match ext_arg {
+            HirTy::Struct { entity, .. }
+            | HirTy::Enum { entity, .. }
+            | HirTy::Protocol { entity, .. }
+            | HirTy::AliasUse { entity, .. } => Some(*entity),
+            _ => None,
+        };
+        let Some(ext_entity) = ext_entity_opt else { continue };
 
-            // Concrete extension arg — resolve receiver arg and compare entities
-            let resolved_recv = ctx.resolve(recv_tv);
-            match ctx.slot(resolved_recv) {
-                TySlot::Resolved(TyKind::Named { entity: recv_entity, .. }) => {
-                    if ext_entity != recv_entity {
-                        return false;
-                    }
-                }
-                TySlot::Resolved(_) => {
+        // Skip generic (type parameter) positions — they match anything.
+        // (TypeParameter entities shouldn't appear via the nominal variants,
+        // but allow a defensive check.)
+        if ctx.query_ctx.get::<NodeKind>(ext_entity) == Some(&NodeKind::TypeParameter) {
+            continue;
+        }
+
+        // Concrete extension arg — resolve receiver arg and compare entities.
+        let resolved_recv = ctx.resolve(recv_tv);
+        match ctx.slot(resolved_recv) {
+            TySlot::Resolved(k) if k.entity() == Some(ext_entity) => continue,
+            TySlot::Resolved(k) if k.entity().is_some() => return false,
+            TySlot::Resolved(_) => return false,
+            TySlot::Unresolved { literal: Some(lit) } => {
+                // Unresolved literal — check if the expected type is compatible.
+                let ext_ty = TyKind::Struct { entity: ext_entity, args: vec![] };
+                if !crate::unify::conforms_to_literal_protocol(ctx, &ext_ty, *lit) {
                     return false;
                 }
-                TySlot::Unresolved { literal: Some(lit) } => {
-                    // Unresolved literal — check if the expected type is compatible
-                    let ext_ty = TyKind::Named { entity: *ext_entity, args: vec![] };
-                    if !crate::unify::conforms_to_literal_protocol(ctx, &ext_ty, *lit) {
-                        return false;
-                    }
-                }
-                _ => {
-                    // Truly unresolved — allow
-                    continue;
-                }
             }
+            _ => continue, // Truly unresolved — allow
         }
     }
 
@@ -1605,13 +1820,14 @@ fn extension_where_clauses_satisfied(
         return true;
     }
 
-    let TyKind::Named { entity: target_entity, args: recv_args, .. } = recv_kind else {
+    let Some(target_entity) = recv_kind.entity() else {
         return true;
     };
+    let recv_args = recv_kind.args().to_vec();
 
     // Build map: type param entity → receiver TyVar
     let type_params: Vec<Entity> = ctx.query_ctx
-        .get::<TypeParams>(*target_entity)
+        .get::<TypeParams>(target_entity)
         .map(|tp| tp.0.clone())
         .unwrap_or_default();
     let param_to_recv: Vec<(Entity, crate::ty::TyVar)> = type_params
@@ -1718,7 +1934,18 @@ fn apply_literal_defaults(ctx: &mut InferCtx<'_>) {
         };
 
         if let Some(entity) = ctx.resolver.builtin(feature) {
-            let default_tv = ctx.named(entity, vec![]);
+            // Create fresh TyVars for each of the default entity's type parameters
+            // so e.g. `DefaultArrayLiteralType[T]` becomes `Array[?]` with a real
+            // inference slot — letting later Associated/Coerce constraints flow
+            // element types into T. `ctx.named(entity, vec![])` would leave args
+            // empty, breaking substitution in solve_associated.
+            let type_param_count = ctx
+                .query_ctx
+                .get::<TypeParams>(entity)
+                .map(|tp| tp.0.len())
+                .unwrap_or(0);
+            let args: Vec<TyVar> = (0..type_param_count).map(|_| ctx.fresh()).collect();
+            let default_tv = ctx.named(entity, args);
             ctx.types[resolved.0 as usize] = TySlot::Redirect(default_tv);
         }
     }
@@ -1740,7 +1967,10 @@ pub fn kind_to_tyvar_sub(
     recv_tv: TyVar,
 ) -> TyVar {
     match kind {
-        TyKind::Named { entity, args } => {
+        TyKind::Struct { entity, args }
+        | TyKind::Enum { entity, args }
+        | TyKind::Protocol { entity, args }
+        | TyKind::TypeAlias { entity, args } => {
             // Substitute Self type with receiver
             if self_entity == Some(*entity) {
                 return recv_tv;
@@ -1751,6 +1981,10 @@ pub fn kind_to_tyvar_sub(
             ctx.named(*entity, arg_tvs)
         }
         TyKind::Param { entity } => ctx.param(*entity),
+        TyKind::AssocProjection { base, assoc } => {
+            let base_tv = kind_to_tyvar_sub(ctx, &resolve_kind(ctx, *base), self_entity, recv_tv);
+            ctx.assoc_projection(base_tv, *assoc)
+        }
         TyKind::Tuple(elems) => {
             let elem_tvs: Vec<TyVar> = elems.iter()
                 .map(|e| kind_to_tyvar_sub(ctx, &resolve_kind(ctx, *e), self_entity, recv_tv))
@@ -1839,37 +2073,49 @@ fn lower_hir_ty_sub(
 ) -> TyVar {
     use kestrel_hir::ty::HirTy;
     match ty {
-        HirTy::Named { entity, args, .. } => {
+        HirTy::Struct { entity, args, .. }
+        | HirTy::Enum { entity, args, .. }
+        | HirTy::Protocol { entity, args, .. } => {
             // Substitute Self type with receiver — only for bare Self (no type args).
-            // `Wrapper[U]` is NOT Self even if Wrapper == self_entity.
             if args.is_empty() && self_entity == Some(*entity) {
                 return recv_tv;
             }
-            // Check substitution map (type params of the method/struct)
             if let Some(&(_, tv)) = subs.iter().find(|(e, _)| e == entity) {
                 return tv;
             }
-            // Check where clause associated type subs (e.g., Output → Item
-            // from extension where clause `Item.Output = Item`).
+            let arg_tvs: Vec<TyVar> = args.iter()
+                .map(|a| lower_hir_ty_sub(ctx, a, self_entity, recv_tv, subs))
+                .collect();
+            ctx.named(*entity, arg_tvs)
+        }
+        HirTy::AliasUse { entity, args, .. } => {
+            // Associated-type style alias use: check substitution maps first.
             if args.is_empty() {
-                if let Some(&(_, tv)) = ctx.where_clause_assoc_subs.iter().find(|(e, _)| e == entity) {
+                if let Some(&(_, tv)) = subs.iter().find(|(e, _)| e == entity) {
+                    return tv;
+                }
+                if let Some(&(_, tv)) =
+                    ctx.where_clause_assoc_subs.iter().find(|(e, _)| e == entity)
+                {
                     return tv;
                 }
             }
-            // Associated type resolution: if this entity is a TypeAlias
-            // (e.g., `Iter` in `protocol Iterable { type Iter }`) and we have
-            // a concrete receiver (not the protocol itself or a type param),
-            // emit an Associated constraint so the solver resolves it via the
-            // concrete type (e.g., ArrayIterator[T] for Array).
-            if self_entity.is_some()
-                && ctx.query_ctx.get::<kestrel_ast_builder::NodeKind>(*entity)
-                    == Some(&kestrel_ast_builder::NodeKind::TypeAlias)
-            {
+
+            // If this alias is a protocol associated type (parent is a Protocol)
+            // AND we have a concrete receiver (not the protocol itself), emit an
+            // Associated constraint so the solver resolves via the concrete type.
+            let parent_is_protocol = ctx
+                .query_ctx
+                .parent_of(*entity)
+                .and_then(|p| ctx.query_ctx.get::<kestrel_ast_builder::NodeKind>(p).cloned())
+                == Some(kestrel_ast_builder::NodeKind::Protocol);
+            if parent_is_protocol && self_entity.is_some() {
                 let recv_resolved = ctx.resolve(recv_tv);
                 let is_concrete_non_self = match ctx.slot(recv_resolved) {
-                    TySlot::Resolved(TyKind::Named { entity: recv_entity, .. }) => {
-                        self_entity != Some(*recv_entity)
-                    }
+                    TySlot::Resolved(k) => match k.entity() {
+                        Some(recv_entity) => self_entity != Some(recv_entity),
+                        None => false,
+                    },
                     _ => false,
                 };
                 if is_concrete_non_self {
@@ -1880,13 +2126,23 @@ fn lower_hir_ty_sub(
                     }
                 }
             }
+
             let arg_tvs: Vec<TyVar> = args.iter()
                 .map(|a| lower_hir_ty_sub(ctx, a, self_entity, recv_tv, subs))
                 .collect();
-            ctx.named(*entity, arg_tvs)
+            ctx.type_alias(*entity, arg_tvs)
+        }
+        HirTy::AssocProjection { base, assoc, .. } => {
+            let base_tv = lower_hir_ty_sub(ctx, base, self_entity, recv_tv, subs);
+            if let Some(&(_, tv)) =
+                ctx.where_clause_assoc_subs.iter().find(|(e, _)| e == assoc)
+            {
+                let _ = base_tv;
+                return tv;
+            }
+            ctx.assoc_projection(base_tv, *assoc)
         }
         HirTy::Param(entity, _) => {
-            // Check substitution map
             if let Some(&(_, tv)) = subs.iter().find(|(e, _)| e == entity) {
                 return tv;
             }

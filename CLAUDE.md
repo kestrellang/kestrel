@@ -18,9 +18,10 @@ workflows.md
 - Verbose debug tracing is available via `VERBOSE_DEBUG_OUTPUT=1`. This enables `debug_trace!` output in the binder and semantic tree crates (member resolution, method calls, where clause checks, type substitutions).
 
 ## Testing
-- Full suite takes ~5 minutes. Use `--release` for full runs: `cargo test -p kestrel-test-suite --release`
-- During iteration, target specific tests: `cargo test -p kestrel-test-suite --release -- test_name`
-- Only run the full suite before commits, not after every edit
+- **ALWAYS use the `/run-tests` skill** for anything that runs `kestrel-test-suite2` — full suite, targeted subsets, or single tests. Do not invoke `cargo test -p kestrel-test-suite2` or the `file_tests-*` binary directly; the skill handles backgrounding, the hang-watchdog (mandatory on macOS), and the grep-able output file at `/tmp/kts2.out`.
+- After a run completes, **read the output** — check pass/fail counts and grep `/tmp/kts2.out` for failures before reporting results. A started run with ignored output is not a test run.
+- Only run the full suite before commits, not after every edit. For iteration, pass a positional substring filter to the skill.
+- Do not run `kestrel-test-suite` (the lib1 suite) — lib2 is the active target.
 
 ### Fluid Memory
 

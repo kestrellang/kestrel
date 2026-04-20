@@ -88,19 +88,32 @@ impl TestCompiler {
         let codespan_diags = self.compiler.diagnostics();
         result.extend(from_codespan_diagnostics(&codespan_diags, &sources));
 
-        // Analyzer diagnostics (skip E100 — those duplicate inference errors
-        // already collected via the codespan path above)
+        // Analyzer diagnostics. Two dedup passes:
+        //  1. Skip E100 — duplicates an inference error already in the codespan stream.
+        //  2. Skip any analyzer diag whose (file_id, line, severity, message) is
+        //     a prefix of a codespan diag already collected. HIR lowering and the
+        //     analyzer both independently emit "cannot find type 'X' in this scope"
+        //     for the same unresolved annotation; the codespan version appends a
+        //     label suffix (": not found (failed at 'X')"), so prefix-match catches it.
         let analyze_summary = self.analyze();
-        let non_duplicate_diags: Vec<_> = analyze_summary
+        let analyzer_diags: Vec<_> = analyze_summary
             .diagnostics
             .iter()
             .filter(|d| d.descriptor_id != "E100")
             .cloned()
             .collect();
-        result.extend(from_analyze_diagnostics_with_source(
-            &non_duplicate_diags,
-            &sources,
-        ));
+        let analyzer_test_diags = from_analyze_diagnostics_with_source(&analyzer_diags, &sources);
+        for a in analyzer_test_diags {
+            let duplicate = result.iter().any(|c| {
+                c.file_id == a.file_id
+                    && c.line == a.line
+                    && c.severity == a.severity
+                    && (c.message == a.message || c.message.starts_with(&format!("{}: ", a.message)))
+            });
+            if !duplicate {
+                result.push(a);
+            }
+        }
 
         result
     }

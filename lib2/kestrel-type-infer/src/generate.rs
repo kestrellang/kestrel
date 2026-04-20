@@ -121,7 +121,9 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                 return result_tv;
             }
 
-            // Struct construction: Def(struct) used as callee
+            // Struct construction: Def(struct) used as callee. Free-standing
+            // type aliases are already dereferenced by name resolution, so
+            // `type C = Counter; C(42)` reaches here with Def(Counter).
             if let HirExpr::Def(entity, explicit_type_args, _) = &hir.exprs[*callee] {
                 if ctx.query_ctx.get::<NodeKind>(*entity) == Some(&NodeKind::Struct) {
                     let arg_tvs = gen_call_args(ctx, hir, args);
@@ -318,7 +320,7 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
         HirExpr::Match {
             scrutinee,
             arms,
-            span,
+            source,
             ..
         } => {
             let scrut_tv = gen_expr(ctx, hir, *scrutinee);
@@ -326,7 +328,7 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
 
             for arm in arms {
                 // Pattern constrains scrutinee type
-                gen_pat(ctx, hir, arm.pattern, scrut_tv);
+                gen_pat(ctx, hir, arm.pattern, scrut_tv, *source);
 
                 // Guard must be bool
                 if let Some(guard) = arm.guard {
@@ -382,25 +384,44 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
 
         // === Aggregates ===
         HirExpr::Array { elements, span } => {
+            // Tie elements to `target.Element` via an Associated constraint, so
+            // when the array literal is coerced into a custom target type (e.g.
+            // `MyList` with `type Element = Int64`) the element type flows back
+            // to each literal element. Falls back to fresh on the default path.
+            let arr_tv = ctx.fresh_literal(LiteralKind::Array);
             let elem_tv = ctx.fresh();
+            ctx.associated(arr_tv, "Element", elem_tv, span.clone());
+            // Bidirectional hint: if the enclosing `let` annotated this array
+            // with `Array[E]`, pre-seed `elem_tv` with `E` before element
+            // constraints run. This way each element is compared against the
+            // target element type, not against whatever literal kind the first
+            // element happens to have.
+            if let Some(hint_elem) = ctx.expected_array_elem.take() {
+                ctx.equal(elem_tv, hint_elem, span.clone());
+            }
             for &e in elements {
                 let e_tv = gen_expr(ctx, hir, e);
-                ctx.equal(e_tv, elem_tv, span.clone());
+                let e_span = expr_span(hir, e);
+                // Order (elem_tv, e_tv) so diagnostics read "expected <target>
+                // got <element>" rather than the reverse.
+                ctx.equal(elem_tv, e_tv, e_span);
             }
-            // Result is an array literal — will default to DefaultArrayLiteralType[elem]
-            ctx.fresh_literal(LiteralKind::Array)
+            arr_tv
         }
 
         HirExpr::Dict { entries, span } => {
+            let dict_tv = ctx.fresh_literal(LiteralKind::Dictionary);
             let key_tv = ctx.fresh();
             let val_tv = ctx.fresh();
+            ctx.associated(dict_tv, "Key", key_tv, span.clone());
+            ctx.associated(dict_tv, "Value", val_tv, span.clone());
             for entry in entries {
                 let k = gen_expr(ctx, hir, entry.key);
                 let v = gen_expr(ctx, hir, entry.value);
                 ctx.equal(k, key_tv, span.clone());
                 ctx.equal(v, val_tv, span.clone());
             }
-            ctx.fresh_literal(LiteralKind::Dictionary)
+            dict_tv
         }
 
         HirExpr::Tuple { elements, span: _ } => {
@@ -440,7 +461,15 @@ fn gen_stmt(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirStmtId) {
             ctx.local_types.insert(*local, local_tv);
 
             if let Some(val) = value {
+                // Bidirectional hint: if the annotation is `Array[E]` and the
+                // RHS is an array literal, feed `E` down so the array's element
+                // TyVar is pinned to the target before element equates run.
+                let prev_hint = ctx.expected_array_elem;
+                if ty.is_some() && matches!(&hir.exprs[*val], HirExpr::Array { .. }) {
+                    ctx.expected_array_elem = extract_array_elem_hint(ctx, local_tv);
+                }
                 let val_tv = gen_expr(ctx, hir, *val);
+                ctx.expected_array_elem = prev_hint;
                 // Value flows to the binding (allows promotion)
                 ctx.coerce(val_tv, local_tv, *val, span.clone());
             }
@@ -459,7 +488,18 @@ fn gen_stmt(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirStmtId) {
 // ===== Pattern generation =====
 
 /// Generate constraints for a pattern given the type of the scrutinee.
-fn gen_pat(ctx: &mut InferCtx<'_>, hir: &HirBody, pat_id: HirPatId, scrutinee_tv: TyVar) {
+///
+/// `source` identifies the enclosing `HirExpr::Match`. For
+/// `MatchSource::ParamDestructure`, a tuple-pattern arity mismatch is left to
+/// the `param_pattern` analyzer (E111) — skipping the scrutinee/pattern
+/// equate here prevents the cascading generic "type mismatch" diagnostic.
+fn gen_pat(
+    ctx: &mut InferCtx<'_>,
+    hir: &HirBody,
+    pat_id: HirPatId,
+    scrutinee_tv: TyVar,
+    source: MatchSource,
+) {
     match &hir.pats[pat_id] {
         HirPat::Wildcard { .. } => {
             // No constraint — matches anything
@@ -488,16 +528,27 @@ fn gen_pat(ctx: &mut InferCtx<'_>, hir: &HirBody, pat_id: HirPatId, scrutinee_tv
                     span: span.clone(),
                 });
             } else {
-                // Fixed arity: equate scrutinee against tuple of exactly these elements
-                let tuple_tv = ctx.tuple(prefix_tvs.clone());
-                ctx.equal(scrutinee_tv, tuple_tv, span.clone());
+                // Fixed arity: equate scrutinee against tuple of exactly these
+                // elements, unless the param_pattern analyzer will flag the
+                // arity (E111) — in that case, skip the equate to avoid a
+                // duplicate generic type-mismatch diagnostic.
+                let pat_arity = prefix.len();
+                let suppress = matches!(source, MatchSource::ParamDestructure)
+                    && matches!(
+                        ctx.slot(scrutinee_tv),
+                        TySlot::Resolved(TyKind::Tuple(elems)) if elems.len() != pat_arity
+                    );
+                if !suppress {
+                    let tuple_tv = ctx.tuple(prefix_tvs.clone());
+                    ctx.equal(scrutinee_tv, tuple_tv, span.clone());
+                }
             }
 
             for (&elem_pat, elem_tv) in prefix.iter().zip(prefix_tvs) {
-                gen_pat(ctx, hir, elem_pat, elem_tv);
+                gen_pat(ctx, hir, elem_pat, elem_tv, source);
             }
             for (&elem_pat, elem_tv) in suffix.iter().zip(suffix_tvs) {
-                gen_pat(ctx, hir, elem_pat, elem_tv);
+                gen_pat(ctx, hir, elem_pat, elem_tv, source);
             }
         }
 
@@ -506,11 +557,11 @@ fn gen_pat(ctx: &mut InferCtx<'_>, hir: &HirBody, pat_id: HirPatId, scrutinee_tv
             args,
             span,
         } => {
-            gen_variant_pat(ctx, hir, *entity, args, scrutinee_tv, span);
+            gen_variant_pat(ctx, hir, *entity, args, scrutinee_tv, span, source);
         }
 
         HirPat::ImplicitVariant { name, args, span } => {
-            gen_implicit_variant_pat(ctx, hir, name, args, scrutinee_tv, span);
+            gen_implicit_variant_pat(ctx, hir, name, args, scrutinee_tv, span, source);
         }
 
         HirPat::Struct {
@@ -519,12 +570,12 @@ fn gen_pat(ctx: &mut InferCtx<'_>, hir: &HirBody, pat_id: HirPatId, scrutinee_tv
             span,
             ..
         } => {
-            gen_struct_pat(ctx, hir, *entity, fields, scrutinee_tv, span);
+            gen_struct_pat(ctx, hir, *entity, fields, scrutinee_tv, span, source);
         }
 
         HirPat::Or { alternatives, .. } => {
             for &alt in alternatives {
-                gen_pat(ctx, hir, alt, scrutinee_tv);
+                gen_pat(ctx, hir, alt, scrutinee_tv, source);
             }
         }
 
@@ -537,7 +588,7 @@ fn gen_pat(ctx: &mut InferCtx<'_>, hir: &HirBody, pat_id: HirPatId, scrutinee_tv
         HirPat::At { binding, subpattern, .. } => {
             // Bind the whole matched value to the local, then constrain via subpattern
             ctx.local_types.insert(*binding, scrutinee_tv);
-            gen_pat(ctx, hir, *subpattern, scrutinee_tv);
+            gen_pat(ctx, hir, *subpattern, scrutinee_tv, source);
         }
 
         HirPat::Array { prefix, rest, suffix, span } => {
@@ -551,7 +602,7 @@ fn gen_pat(ctx: &mut InferCtx<'_>, hir: &HirBody, pat_id: HirPatId, scrutinee_tv
                 let already_slice = if let Some(slice_ent) = slice_entity {
                     matches!(
                         ctx.slot(scrutinee_tv),
-                        TySlot::Resolved(TyKind::Named { entity, .. }) if *entity == slice_ent
+                        TySlot::Resolved(k) if k.entity() == Some(slice_ent)
                     )
                 } else {
                     false
@@ -559,13 +610,11 @@ fn gen_pat(ctx: &mut InferCtx<'_>, hir: &HirBody, pat_id: HirPatId, scrutinee_tv
 
                 if already_slice {
                     // Reuse the scrutinee's element type arg directly.
-                    match ctx.slot(scrutinee_tv) {
-                        TySlot::Resolved(TyKind::Named { args, .. }) => args
-                            .first()
-                            .copied()
-                            .unwrap_or_else(|| ctx.fresh()),
+                    let first_arg = match ctx.slot(scrutinee_tv) {
+                        TySlot::Resolved(k) => k.args().first().copied(),
                         _ => unreachable!(),
-                    }
+                    };
+                    first_arg.unwrap_or_else(|| ctx.fresh())
                 } else {
                     let elem_tv = ctx.fresh();
                     if let Some(array_entity) = ctx
@@ -583,7 +632,7 @@ fn gen_pat(ctx: &mut InferCtx<'_>, hir: &HirBody, pat_id: HirPatId, scrutinee_tv
             for &elem_pat in prefix.iter().chain(suffix.iter()) {
                 let pat_tv = ctx.fresh();
                 ctx.equal(pat_tv, elem_tv, span.clone());
-                gen_pat(ctx, hir, elem_pat, pat_tv);
+                gen_pat(ctx, hir, elem_pat, pat_tv, source);
             }
 
             // Named rest binding → `Slice[elem_tv]` local.
@@ -1111,39 +1160,89 @@ pub fn lower_hir_ty(ctx: &mut InferCtx<'_>, ty: &HirTy) -> TyVar {
     lower_hir_ty_with_subs(ctx, ty, &[])
 }
 
+/// If `tv` resolves to `Array[E]`, return the TyVar for `E`; otherwise None.
+/// Used by `HirStmt::Let` to feed the annotation's element type into an
+/// array-literal RHS so element mismatches compare against the target
+/// element type rather than each other.
+fn extract_array_elem_hint(ctx: &InferCtx<'_>, tv: TyVar) -> Option<TyVar> {
+    let resolved = ctx.resolve(tv);
+    let TySlot::Resolved(crate::ty::TyKind::Struct { entity, args }) = ctx.slot(resolved) else {
+        return None;
+    };
+    if ctx.resolver.builtin(kestrel_hir::Builtin::DefaultArrayLiteralType) != Some(*entity) {
+        return None;
+    }
+    args.first().copied()
+}
+
 /// Convert HirTy to TyVar, substituting type params found in `subs`.
 /// Used when instantiating generic entities: type params become fresh TyVars.
-/// Also substitutes Named entities (e.g., TypeAlias for associated types) in subs.
+/// Also substitutes associated-type entities (where-clause equalities) in subs.
 pub(crate) fn lower_hir_ty_with_subs(
     ctx: &mut InferCtx<'_>,
     ty: &HirTy,
     subs: &[(Entity, TyVar)],
 ) -> TyVar {
     match ty {
-        HirTy::Named { entity, args, .. } => {
-            // Check substitution map (e.g., associated type entities from where clauses)
+        HirTy::Struct { entity, args, .. } => {
+            let arg_tvs: Vec<TyVar> =
+                args.iter().map(|a| lower_hir_ty_with_subs(ctx, a, subs)).collect();
+            ctx.struct_ty(*entity, arg_tvs)
+        }
+        HirTy::Enum { entity, args, .. } => {
+            let arg_tvs: Vec<TyVar> =
+                args.iter().map(|a| lower_hir_ty_with_subs(ctx, a, subs)).collect();
+            ctx.enum_ty(*entity, arg_tvs)
+        }
+        HirTy::Protocol { entity, args, .. } => {
+            let arg_tvs: Vec<TyVar> =
+                args.iter().map(|a| lower_hir_ty_with_subs(ctx, a, subs)).collect();
+            ctx.protocol_ty(*entity, arg_tvs)
+        }
+        HirTy::AliasUse { entity, args, .. } => {
+            // Zero-arg alias uses participate in associated-type substitution:
+            // where clauses map specific TypeAlias entities to TyVars.
             if args.is_empty() {
                 if let Some(&(_, tv)) = subs.iter().find(|(e, _)| e == entity) {
                     return tv;
                 }
-                // Check where_clause_assoc_subs for associated types (e.g., Item → Optional[T])
-                if let Some(&(_, tv)) = ctx.where_clause_assoc_subs.iter().find(|(e, _)| e == entity) {
+                if let Some(&(_, tv)) = ctx
+                    .where_clause_assoc_subs
+                    .iter()
+                    .find(|(e, _)| e == entity)
+                {
                     return tv;
                 }
-                // Also check param_tyvars for redirected params (from DirectEquality)
                 if let Some(&tv) = ctx.param_tyvars.get(entity) {
                     return tv;
                 }
             }
-            let arg_tvs: Vec<TyVar> = args.iter().map(|a| lower_hir_ty_with_subs(ctx, a, subs)).collect();
-            ctx.named(*entity, arg_tvs)
+            let arg_tvs: Vec<TyVar> =
+                args.iter().map(|a| lower_hir_ty_with_subs(ctx, a, subs)).collect();
+            ctx.type_alias(*entity, arg_tvs)
+        }
+        HirTy::AssocProjection { base, assoc, .. } => {
+            let base_tv = lower_hir_ty_with_subs(ctx, base, subs);
+            // Short-circuit if this specific assoc is already bound via a
+            // where-clause equality (e.g. `Item = (A, B)`).
+            if let Some(&(_, tv)) = ctx
+                .where_clause_assoc_subs
+                .iter()
+                .find(|(e, _)| e == assoc)
+            {
+                let _ = base_tv;
+                return tv;
+            }
+            ctx.assoc_projection(base_tv, *assoc)
         }
         HirTy::Tuple(types, _) => {
-            let elem_tvs: Vec<TyVar> = types.iter().map(|t| lower_hir_ty_with_subs(ctx, t, subs)).collect();
+            let elem_tvs: Vec<TyVar> =
+                types.iter().map(|t| lower_hir_ty_with_subs(ctx, t, subs)).collect();
             ctx.tuple(elem_tvs)
         }
         HirTy::Function { params, ret, .. } => {
-            let param_tvs: Vec<TyVar> = params.iter().map(|p| lower_hir_ty_with_subs(ctx, p, subs)).collect();
+            let param_tvs: Vec<TyVar> =
+                params.iter().map(|p| lower_hir_ty_with_subs(ctx, p, subs)).collect();
             let ret_tv = lower_hir_ty_with_subs(ctx, ret, subs);
             ctx.function(param_tvs, ret_tv)
         }
@@ -1228,7 +1327,11 @@ fn expr_span(hir: &HirBody, id: HirExprId) -> Span {
 /// Extract a span from a HirTy.
 fn hir_ty_span(ty: &HirTy) -> Span {
     match ty {
-        HirTy::Named { span, .. }
+        HirTy::Struct { span, .. }
+        | HirTy::Enum { span, .. }
+        | HirTy::Protocol { span, .. }
+        | HirTy::AliasUse { span, .. }
+        | HirTy::AssocProjection { span, .. }
         | HirTy::Tuple(_, span)
         | HirTy::Function { span, .. }
         | HirTy::Param(_, span)
@@ -1248,6 +1351,7 @@ fn gen_variant_pat(
     args: &[HirPatArg],
     scrutinee_tv: TyVar,
     span: &Span,
+    source: MatchSource,
 ) {
     let qctx = ctx.query_ctx;
     let root = ctx.root;
@@ -1290,12 +1394,12 @@ fn gen_variant_pat(
     // Constrain each arg pattern against the corresponding payload type
     let payload_len = payload_types.len();
     for (arg, payload_tv) in args.iter().zip(payload_types) {
-        gen_pat(ctx, hir, arg.pattern, payload_tv);
+        gen_pat(ctx, hir, arg.pattern, payload_tv, source);
     }
     // Extra args with no corresponding type get fresh TyVars
     for arg in args.iter().skip(payload_len) {
         let arg_tv = ctx.fresh();
-        gen_pat(ctx, hir, arg.pattern, arg_tv);
+        gen_pat(ctx, hir, arg.pattern, arg_tv, source);
     }
 }
 
@@ -1311,12 +1415,13 @@ fn gen_implicit_variant_pat(
     args: &[HirPatArg],
     scrutinee_tv: TyVar,
     span: &Span,
+    source: MatchSource,
 ) {
     let arg_tys: Vec<TyVar> = args
         .iter()
         .map(|arg| {
             let tv = ctx.fresh();
-            gen_pat(ctx, hir, arg.pattern, tv);
+            gen_pat(ctx, hir, arg.pattern, tv, source);
             tv
         })
         .collect();
@@ -1339,6 +1444,7 @@ fn gen_struct_pat(
     fields: &[HirStructPatField],
     scrutinee_tv: TyVar,
     span: &Span,
+    source: MatchSource,
 ) {
     let qctx = ctx.query_ctx;
     let root = ctx.root;
@@ -1372,7 +1478,7 @@ fn gen_struct_pat(
             .unwrap_or_else(|| ctx.fresh());
 
         if let Some(pat) = field.pattern {
-            gen_pat(ctx, hir, pat, field_tv);
+            gen_pat(ctx, hir, pat, field_tv, source);
         }
     }
 }

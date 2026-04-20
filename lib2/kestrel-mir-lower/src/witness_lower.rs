@@ -3,7 +3,7 @@
 //! For each type that conforms to a protocol, generates a witness table
 //! mapping protocol method names to implementing function entities.
 
-use kestrel_ast_builder::{Callable, NodeKind, Name, TypeParams};
+use kestrel_ast_builder::{Callable, NodeKind, Name, Settable, TypeParams};
 use kestrel_hecs::Entity;
 use kestrel_mir::{MethodBinding, MirTy, TypeParamDef, WitnessDef};
 use kestrel_name_res::conformances::ConformingProtocols;
@@ -197,7 +197,14 @@ fn collect_protocol_methods_recursive(
                     NodeKind::Subscript => "subscript".to_string(),
                     _ => String::new(),
                 });
-            methods.push((name, child));
+            methods.push((name.clone(), child));
+            // Property requirements with a setter need a second binding so
+            // assignment (`T.prop = v`) can dispatch through the witness.
+            // Convention: `<name>.set` resolves to the conforming type's
+            // setter child entity.
+            if *kind == NodeKind::Field && ctx.world.get::<Settable>(child).is_some() {
+                methods.push((format!("{name}.set"), child));
+            }
         }
     }
 
@@ -221,6 +228,27 @@ fn find_method_by_name(
     method_name: &str,
     required_labels: Option<&[Option<String>]>,
 ) -> Option<Entity> {
+    // `<name>.set`: locate the Field by its base name, then return its Setter child.
+    if let Some(field_name) = method_name.strip_suffix(".set") {
+        for &child in ctx.world.children_of(parent) {
+            let Some(kind) = ctx.world.get::<NodeKind>(child) else {
+                continue;
+            };
+            if *kind != NodeKind::Field {
+                continue;
+            }
+            let name = ctx.world.get::<Name>(child).map(|n| n.0.as_str()).unwrap_or_default();
+            if name != field_name {
+                continue;
+            }
+            for &gc in ctx.world.children_of(child) {
+                if ctx.world.get::<NodeKind>(gc) == Some(&NodeKind::Setter) {
+                    return Some(gc);
+                }
+            }
+        }
+        return None;
+    }
     for &child in ctx.world.children_of(parent) {
         let Some(kind) = ctx.world.get::<NodeKind>(child) else {
             continue;

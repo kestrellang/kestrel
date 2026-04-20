@@ -27,7 +27,7 @@
 
 use std::collections::HashSet;
 
-use kestrel_hecs::QueryContext;
+use kestrel_hecs::{Entity, QueryContext};
 use kestrel_hir::body::*;
 use kestrel_type_infer::result::ResolvedTy;
 
@@ -79,6 +79,7 @@ impl UsefulnessResult {
 pub fn check_match(
     hir: &HirBody,
     query: &QueryContext<'_>,
+    root: Entity,
     scrutinee_ty: &ResolvedTy,
     arms: &[HirMatchArm],
 ) -> ExhaustivenessResult {
@@ -117,7 +118,7 @@ pub fn check_match(
 
         // Check usefulness against prior patterns
         let query_row = PatternRow::new(vec![flat_pat.clone()], i, has_guard);
-        let usefulness = is_useful(&matrix, &query_row, query);
+        let usefulness = is_useful(&matrix, &query_row, root, query);
         let mut is_redundant = !usefulness.is_useful && !has_guard;
 
         // Range arms: apply union-coverage check to correct the bug in
@@ -170,10 +171,10 @@ pub fn check_match(
 
     // Check exhaustiveness: is a wildcard useful?
     let wildcard_row = PatternRow::new(vec![FlatPat::Wildcard], arms.len(), false);
-    let exhaustiveness = is_useful(&matrix, &wildcard_row, query);
+    let exhaustiveness = is_useful(&matrix, &wildcard_row, root, query);
 
     let (is_exhaustive, missing_patterns) = if exhaustiveness.is_useful {
-        let witnesses = generate_witnesses(query, scrutinee_ty, &matrix);
+        let witnesses = generate_witnesses(query, root, scrutinee_ty, &matrix);
         (false, witnesses)
     } else {
         (true, vec![])
@@ -193,6 +194,7 @@ pub fn check_match(
 pub fn is_useful(
     matrix: &PatternMatrix,
     query: &PatternRow,
+    root: Entity,
     ctx: &QueryContext<'_>,
 ) -> UsefulnessResult {
     // Base case 1: empty matrix — query matches everything that fell through
@@ -216,9 +218,9 @@ pub fn is_useful(
     let query_ctor = query.pats[col].head_constructor();
 
     if query_ctor.is_wildcard() {
-        is_wildcard_useful(matrix, query, col, col_type, ctx)
+        is_wildcard_useful(matrix, query, col, col_type, root, ctx)
     } else {
-        is_constructor_useful(matrix, query, col, &query_ctor, col_type, ctx)
+        is_constructor_useful(matrix, query, col, &query_ctor, col_type, root, ctx)
     }
 }
 
@@ -238,6 +240,7 @@ fn is_wildcard_useful(
     query: &PatternRow,
     col: usize,
     col_type: &ResolvedTy,
+    root: Entity,
     ctx: &QueryContext<'_>,
 ) -> UsefulnessResult {
     // If any row has a wildcard in this column, use the default matrix
@@ -249,13 +252,13 @@ fn is_wildcard_useful(
             query.arm_index,
             query.has_guard,
         );
-        return is_useful(&default, &default_query, ctx);
+        return is_useful(&default, &default_query, root, ctx);
     }
 
     // Get covered constructors
     let covered: HashSet<Constructor> = matrix.head_constructors(col).into_iter().collect();
 
-    match Constructor::all_for_type(ctx, col_type) {
+    match Constructor::all_for_type(ctx, root, col_type) {
         Some(all_ctors) => {
             // Finite constructor set — check for uncovered constructors
             for ctor in &all_ctors {
@@ -265,7 +268,7 @@ fn is_wildcard_useful(
             }
             // All covered — check sub-patterns
             for ctor in &all_ctors {
-                let result = is_constructor_useful(matrix, query, col, ctor, col_type, ctx);
+                let result = is_constructor_useful(matrix, query, col, ctor, col_type, root, ctx);
                 if result.is_useful {
                     return result;
                 }
@@ -291,11 +294,11 @@ fn is_wildcard_useful(
             }
 
             // Infinite constructor set — check missing_constructors for special cases
-            if let Some(missing) = Constructor::missing(ctx, col_type, &covered) {
+            if let Some(missing) = Constructor::missing(ctx, root, col_type, &covered) {
                 if missing.is_empty() {
                     // All covered (e.g., array with rest) — check sub-patterns
                     for ctor in &covered {
-                        let result = is_constructor_useful(matrix, query, col, ctor, col_type, ctx);
+                        let result = is_constructor_useful(matrix, query, col, ctor, col_type, root, ctx);
                         if result.is_useful {
                             return result;
                         }
@@ -317,7 +320,7 @@ fn is_wildcard_useful(
             if default.is_unit() && default.is_empty() {
                 UsefulnessResult::useful(Witness::any())
             } else {
-                is_useful(&default, &default_query, ctx)
+                is_useful(&default, &default_query, root, ctx)
             }
         }
     }
@@ -330,6 +333,7 @@ fn is_constructor_useful(
     col: usize,
     ctor: &Constructor,
     _col_type: &ResolvedTy,
+    root: Entity,
     ctx: &QueryContext<'_>,
 ) -> UsefulnessResult {
     // Specialize matrix and query for this constructor
@@ -347,7 +351,7 @@ fn is_constructor_useful(
     }
     let specialized_query = PatternRow::new(new_query_pats, query.arm_index, query.has_guard);
 
-    let result = is_useful(&specialized, &specialized_query, ctx);
+    let result = is_useful(&specialized, &specialized_query, root, ctx);
 
     if result.is_useful {
         // Wrap witness with this constructor
@@ -389,12 +393,13 @@ fn wrap_witness(inner: Witness, ctor: &Constructor, ctx: &QueryContext<'_>) -> W
 /// Generate witnesses for missing patterns.
 fn generate_witnesses(
     query: &QueryContext<'_>,
+    root: Entity,
     scrutinee_ty: &ResolvedTy,
     matrix: &PatternMatrix,
 ) -> Vec<Witness> {
     let covered: HashSet<Constructor> = matrix.head_constructors(0).into_iter().collect();
 
-    match Constructor::all_for_type(query, scrutinee_ty) {
+    match Constructor::all_for_type(query, root, scrutinee_ty) {
         Some(all) => {
             let missing: Vec<_> = all.into_iter().filter(|c| !covered.contains(c)).collect();
             if missing.is_empty() {

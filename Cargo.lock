@@ -1288,6 +1288,7 @@ dependencies = [
  "kestrel-ast-builder",
  "kestrel-hecs",
  "kestrel-hir",
+ "kestrel-name-res",
  "kestrel-span2",
  "kestrel-type-infer",
 ]

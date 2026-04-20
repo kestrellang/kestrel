@@ -33,7 +33,8 @@ pub fn build_type_alias(
     // is inside an AssociatedTypeTarget node. extract_name would return "Iterator"
     // (the protocol name) instead of "Item" (the actual alias name).
     // Check for AssociatedTypeTarget first and extract the last Name from it.
-    let name = if let Some(target) = find_child(node, SyntaxKind::AssociatedTypeTarget) {
+    let assoc_target = find_child(node, SyntaxKind::AssociatedTypeTarget);
+    let name = if let Some(target) = &assoc_target {
         // Qualified: last Name > Identifier in the target is the alias name
         target.children()
             .filter(|c| c.kind() == SyntaxKind::Name)
@@ -49,6 +50,18 @@ pub fn build_type_alias(
     };
     if let Some(name) = name {
         world.set(entity, Name(name));
+    }
+
+    // Capture the qualifying protocol path (`Protocol` in `type Protocol.Assoc = …`)
+    // as an AstType so analyzers can resolve it via ResolveTypePath.
+    if let Some(target) = &assoc_target {
+        if let Some(proto_ty) = target
+            .children()
+            .find(|c| is_type_kind(c.kind()))
+            .and_then(|c| ast_type_from_cst(&c, file_id))
+        {
+            world.set(entity, QualifiedTarget(proto_ty));
+        }
     }
 
     // Target type from AliasedType child

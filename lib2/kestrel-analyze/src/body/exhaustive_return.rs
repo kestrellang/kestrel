@@ -23,6 +23,7 @@ use crate::traits::{BodyCheck, Describe};
 use crate::util;
 use kestrel_ast_builder::{NodeKind, TypeAnnotation};
 use kestrel_hir::body::*;
+use kestrel_type_infer::result::{ResolvedTy, TypedBody};
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
     id: "E001",
@@ -66,7 +67,7 @@ impl BodyCheck for ExhaustiveReturnAnalyzer {
         }
 
         // Check if the statement list definitely diverges
-        if block_diverges(cx.hir, &cx.hir.statements) {
+        if block_diverges(cx.hir, cx.typed, &cx.hir.statements) {
             return vec![];
         }
 
@@ -132,15 +133,20 @@ impl ReturnState {
 }
 
 /// Whether a block of statements definitely returns.
-fn block_state(hir: &HirBody, stmts: &[HirStmtId], tail: Option<HirExprId>) -> ReturnState {
+fn block_state(
+    hir: &HirBody,
+    typed: &TypedBody,
+    stmts: &[HirStmtId],
+    tail: Option<HirExprId>,
+) -> ReturnState {
     for &stmt_id in stmts {
-        let state = stmt_state(hir, stmt_id);
+        let state = stmt_state(hir, typed, stmt_id);
         if state.definitely_returns() {
             return state;
         }
     }
     if let Some(tail) = tail {
-        let state = expr_state(hir, tail);
+        let state = expr_state(hir, typed, tail);
         if state.definitely_returns() {
             return state;
         }
@@ -151,20 +157,20 @@ fn block_state(hir: &HirBody, stmts: &[HirStmtId], tail: Option<HirExprId>) -> R
 }
 
 /// Whether a block of statements definitely diverges (for the top-level check).
-fn block_diverges(hir: &HirBody, stmts: &[HirStmtId]) -> bool {
-    block_state(hir, stmts, None).definitely_returns()
+fn block_diverges(hir: &HirBody, typed: &TypedBody, stmts: &[HirStmtId]) -> bool {
+    block_state(hir, typed, stmts, None).definitely_returns()
 }
 
-fn stmt_state(hir: &HirBody, id: HirStmtId) -> ReturnState {
+fn stmt_state(hir: &HirBody, typed: &TypedBody, id: HirStmtId) -> ReturnState {
     match &hir.stmts[id] {
-        HirStmt::Expr { expr, .. } => expr_state(hir, *expr),
-        HirStmt::Let { value: Some(v), .. } => expr_state(hir, *v),
+        HirStmt::Expr { expr, .. } => expr_state(hir, typed, *expr),
+        HirStmt::Let { value: Some(v), .. } => expr_state(hir, typed, *v),
         _ => ReturnState::MayFallThrough,
     }
 }
 
-fn expr_state(hir: &HirBody, id: HirExprId) -> ReturnState {
-    match &hir.exprs[id] {
+fn expr_state(hir: &HirBody, typed: &TypedBody, id: HirExprId) -> ReturnState {
+    let state = match &hir.exprs[id] {
         HirExpr::Return { .. } => ReturnState::Returns,
         HirExpr::Break { .. } | HirExpr::Continue { .. } => ReturnState::Diverges,
 
@@ -173,33 +179,33 @@ fn expr_state(hir: &HirBody, id: HirExprId) -> ReturnState {
             else_body,
             ..
         } => {
-            let then_s = block_part_state(hir, then_body);
+            let then_s = block_part_state(hir, typed, then_body);
             match else_body {
-                Some(else_block) => then_s.merge(block_part_state(hir, else_block)),
+                Some(else_block) => then_s.merge(block_part_state(hir, typed, else_block)),
                 None => ReturnState::MayFallThrough,
             }
         }
 
         HirExpr::Match { arms, .. } => {
             if arms.is_empty() {
-                return ReturnState::MayFallThrough;
+                ReturnState::MayFallThrough
+            } else {
+                // All arms must definitely return for the match to definitely return
+                let mut combined = expr_state(hir, typed, arms[0].body);
+                for arm in &arms[1..] {
+                    combined = combined.merge(expr_state(hir, typed, arm.body));
+                }
+                combined
             }
-            // All arms must definitely return for the match to definitely return
-            let mut combined = expr_state(hir, arms[0].body);
-            for arm in &arms[1..] {
-                combined = combined.merge(expr_state(hir, arm.body));
-            }
-            combined
         }
 
         HirExpr::Loop { body, .. } => {
             // Check if the body always returns before any break could execute
-            let body_state = block_part_state(hir, body);
+            let body_state = block_part_state(hir, typed, body);
             if body_state == ReturnState::Returns {
-                return ReturnState::Returns;
-            }
-            // If the loop body has a break, control can exit the loop
-            if block_contains_break(hir, body) {
+                ReturnState::Returns
+            } else if block_contains_break(hir, body) {
+                // If the loop body has a break, control can exit the loop
                 ReturnState::MayFallThrough
             } else {
                 // Infinite loop with no break — diverges (never falls through)
@@ -207,17 +213,29 @@ fn expr_state(hir: &HirBody, id: HirExprId) -> ReturnState {
             }
         }
 
-        HirExpr::Block { body, .. } => block_part_state(hir, body),
+        HirExpr::Block { body, .. } => block_part_state(hir, typed, body),
 
         // Closures don't cause the enclosing function to return
         HirExpr::Closure { .. } => ReturnState::MayFallThrough,
 
         _ => ReturnState::MayFallThrough,
+    };
+
+    if state.definitely_returns() {
+        return state;
     }
+
+    // Fallback: if inference proved the expression has type `Never`
+    // (e.g. a call to `lang.panic_unwind`), treat it as diverging.
+    if matches!(typed.expr_types.get(&id), Some(ResolvedTy::Never)) {
+        return ReturnState::Diverges;
+    }
+
+    state
 }
 
-fn block_part_state(hir: &HirBody, block: &HirBlock) -> ReturnState {
-    block_state(hir, &block.stmts, block.tail_expr)
+fn block_part_state(hir: &HirBody, typed: &TypedBody, block: &HirBlock) -> ReturnState {
+    block_state(hir, typed, &block.stmts, block.tail_expr)
 }
 
 // ===== Break detection for loop analysis =====

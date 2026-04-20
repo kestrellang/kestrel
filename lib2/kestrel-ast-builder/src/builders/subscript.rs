@@ -61,7 +61,11 @@ pub fn build_subscript(
     // Check for getter/setter in SubscriptBody > PropertyAccessors
     if let Some(body) = find_child(node, SyntaxKind::SubscriptBody) {
         if let Some(acc) = find_child(&body, SyntaxKind::PropertyAccessors) {
-            let has_setter = find_child(&acc, SyntaxKind::SetterClause).is_some();
+            // SetterClause wraps a setter with a body; a bare `Set` token
+            // appears for protocol requirements (`{ get set }`) without a body.
+            let has_setter = find_child(&acc, SyntaxKind::SetterClause).is_some()
+                || acc.children_with_tokens()
+                    .any(|e| e.as_token().is_some_and(|t| t.kind() == SyntaxKind::Set));
             if has_setter {
                 world.set(entity, Settable);
             }

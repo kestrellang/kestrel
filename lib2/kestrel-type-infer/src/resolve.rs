@@ -180,29 +180,35 @@ impl TypeResolver for WorldResolver<'_> {
             return self.resolve_param_member(*entity, name, _args);
         }
 
-        let TyKind::Named { entity, .. } = receiver_ty else {
-            return Err(MemberError::NotFound);
-        };
-
-        // TypeParameter entities can arrive as Named (from lower_hir_ty_sub fallthrough).
-        // Route to protocol-bound search instead of direct member search.
-        if self.ctx.get::<NodeKind>(*entity) == Some(&NodeKind::TypeParameter) {
-            return self.resolve_param_member(*entity, name, _args);
+        // Abstract associated-type projection: member-lookup through the
+        // assoc entity's bounds (same machinery as TypeAlias below).
+        if let TyKind::AssocProjection { assoc, .. } = receiver_ty {
+            match self.resolve_assoc_type_member(*assoc, name, _args) {
+                Ok(res) => return Ok(res),
+                Err(MemberError::NotFound) => {
+                    return self.resolve_assoc_type_static_member_resolve(*assoc, name, _args);
+                }
+                Err(e) => return Err(e),
+            }
         }
 
-        // TypeAlias entities are protocol associated types (e.g., Iter, Item).
-        // Search the protocol's bounds on that associated type for the member.
-        // If instance member search fails, retry with static members (e.g., Item.zero).
-        if self.ctx.get::<NodeKind>(*entity) == Some(&NodeKind::TypeAlias) {
+        // TypeAlias receiver: abstract associated types consult protocol bounds;
+        // concrete aliases should have been reduced by the solver's Reduce rule
+        // before reaching here (but handle defensively in case they show up).
+        if let TyKind::TypeAlias { entity, .. } = receiver_ty {
             match self.resolve_assoc_type_member(*entity, name, _args) {
                 Ok(res) => return Ok(res),
                 Err(MemberError::NotFound) => {
-                    // Fall back to static member search (e.g., Item.zero where Item: Addable)
                     return self.resolve_assoc_type_static_member_resolve(*entity, name, _args);
                 }
                 Err(e) => return Err(e),
             }
         }
+
+        let Some(entity) = receiver_ty.entity() else {
+            return Err(MemberError::NotFound);
+        };
+        let entity = &entity;
 
         // Search direct children by name
         let candidates = self.ctx.query(kestrel_name_res::VisibleChildrenByName {
@@ -405,29 +411,28 @@ impl TypeResolver for WorldResolver<'_> {
 
     fn conforms_to(&self, ty: &TyKind, protocol: Entity) -> bool {
         match ty {
-            TyKind::Named { entity, .. } => {
-                // TypeParameter entities can arrive as Named (from lower_hir_ty_sub).
-                // Check their where clause bounds instead of conformance declarations.
-                if self.ctx.get::<NodeKind>(*entity) == Some(&NodeKind::TypeParameter) {
-                    let bound_protocols = self.collect_param_protocol_bounds(*entity);
-                    return bound_protocols.contains(&protocol);
-                }
-                // TypeAlias entities (associated types like Item, Iter) — check
-                // protocol bounds from conformances and where clauses.
-                if self.ctx.get::<NodeKind>(*entity) == Some(&NodeKind::TypeAlias) {
-                    let bound_protocols = self.collect_assoc_type_protocol_bounds(*entity);
-                    return bound_protocols.contains(&protocol);
-                }
-                // Walk the full transitive conformance chain (memoized query)
+            TyKind::Struct { entity, .. }
+            | TyKind::Enum { entity, .. }
+            | TyKind::Protocol { entity, .. } => {
                 let all_protocols = self.ctx.query(kestrel_name_res::ConformingProtocols {
                     entity: *entity,
                     root: self.root,
                 });
                 all_protocols.contains(&protocol)
             }
+            TyKind::TypeAlias { entity, .. } => {
+                // Associated-type bounds (e.g. `type Item: Equatable`) live on
+                // the TypeAlias entity itself.
+                let bound_protocols = self.collect_assoc_type_protocol_bounds(*entity);
+                bound_protocols.contains(&protocol)
+            }
             TyKind::Param { entity } => {
-                // Type parameters: check where clause bounds for protocol conformance
                 let bound_protocols = self.collect_param_protocol_bounds(*entity);
+                bound_protocols.contains(&protocol)
+            }
+            TyKind::AssocProjection { assoc, .. } => {
+                // Conformance bounds on the associated type.
+                let bound_protocols = self.collect_assoc_type_protocol_bounds(*assoc);
                 bound_protocols.contains(&protocol)
             }
             _ => false,
@@ -440,27 +445,39 @@ impl TypeResolver for WorldResolver<'_> {
         name: &str,
     ) -> Option<AssociatedTypeResolution> {
         match container {
-            TyKind::Named { entity, .. } => {
-                let node_kind = self.ctx.get::<NodeKind>(*entity);
-
-                // TypeAlias (protocol associated type like Iter) or TypeParameter —
-                // search protocol bounds for the associated type.
-                // E.g., Iter: Iterator → look for Iterator.Item
-                if matches!(node_kind, Some(NodeKind::TypeAlias) | Some(NodeKind::TypeParameter)) {
-                    let bound_protocols = if node_kind == Some(&NodeKind::TypeAlias) {
-                        self.collect_assoc_type_protocol_bounds(*entity)
-                    } else {
-                        self.collect_param_protocol_bounds(*entity)
-                    };
-                    return self.find_associated_type_in_protocols(&bound_protocols, name);
+            TyKind::Struct { entity, .. }
+            | TyKind::Enum { entity, .. }
+            | TyKind::Protocol { entity, .. } => {
+                // Concrete type — search children for a TypeAlias with matching name,
+                // then extensions (e.g. Dictionary's `type Key = K` lives on an
+                // `extend Dictionary[K, V, H]: _ExpressibleByDictionaryLiteral` block).
+                if let Some(res) = self.find_associated_type_in_entity(*entity, name) {
+                    return Some(res);
                 }
-
-                // Concrete type — search children for a TypeAlias with matching name
-                self.find_associated_type_in_entity(*entity, name)
+                let extensions = self.ctx.query(kestrel_name_res::ExtensionsFor {
+                    target: *entity,
+                    root: self.root,
+                });
+                for ext in &extensions {
+                    if let Some(res) = self.find_associated_type_in_entity(*ext, name) {
+                        return Some(res);
+                    }
+                }
+                None
+            }
+            TyKind::TypeAlias { entity, .. } => {
+                // Protocol associated type (e.g. Iter: Iterator) —
+                // search the bound protocols for the name.
+                let bound_protocols = self.collect_assoc_type_protocol_bounds(*entity);
+                self.find_associated_type_in_protocols(&bound_protocols, name)
             }
             TyKind::Param { entity } => {
-                // Type parameter — search protocol bounds for the associated type
                 let bound_protocols = self.collect_param_protocol_bounds(*entity);
+                self.find_associated_type_in_protocols(&bound_protocols, name)
+            }
+            TyKind::AssocProjection { assoc, .. } => {
+                // Nested: T.Iter.Item — search Iter's bound protocols for Item.
+                let bound_protocols = self.collect_assoc_type_protocol_bounds(*assoc);
                 self.find_associated_type_in_protocols(&bound_protocols, name)
             }
             _ => None,
@@ -475,8 +492,11 @@ impl TypeResolver for WorldResolver<'_> {
     }
 
     fn check_promotion(&self, _from: &TyKind, to: &TyKind) -> Option<Entity> {
-        let TyKind::Named { entity: to_entity, .. } = to else {
-            return None;
+        let to_entity = &match to {
+            TyKind::Struct { entity, .. }
+            | TyKind::Enum { entity, .. }
+            | TyKind::Protocol { entity, .. } => *entity,
+            _ => return None,
         };
 
         // Resolve the FromValue protocol
@@ -608,9 +628,10 @@ impl TypeResolver for WorldResolver<'_> {
         name: &str,
         args: &[crate::constraint::CallArg],
     ) -> Result<MemberResolution, MemberError> {
-        let TyKind::Named { entity, .. } = receiver_ty else {
+        let Some(entity_val) = receiver_ty.entity() else {
             return Err(MemberError::NotFound);
         };
+        let entity = &entity_val;
 
         // Search direct children and extensions for static members
         let mut all_candidates: Vec<kestrel_hecs::Entity> = Vec::new();
@@ -711,9 +732,12 @@ impl WorldResolver<'_> {
                 }) {
                     return Some(AssociatedTypeResolution { resolved: hir_ty });
                 }
-                // Abstract associated type (no TypeAnnotation) — return as Named entity
+                // Abstract associated type (no TypeAnnotation) — keep as AliasUse
+                // so the solver can detect the missing definition and dispatch via
+                // protocol bounds. (Inference reduces AliasUse with a TypeAnnotation;
+                // an AliasUse without one stays abstract.)
                 return Some(AssociatedTypeResolution {
-                    resolved: kestrel_hir::ty::HirTy::Named {
+                    resolved: kestrel_hir::ty::HirTy::AliasUse {
                         entity: child,
                         args: vec![],
                         span: kestrel_span2::Span::synthetic(0),

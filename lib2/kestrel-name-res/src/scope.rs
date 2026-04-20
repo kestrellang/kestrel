@@ -103,8 +103,13 @@ impl QueryFn for ScopeFor {
             }
         }
 
-        // Auto-imports: if not in std.*, add all std leaf modules as wildcards
-        if !is_in_std_module(ctx, self.entity) {
+        // Auto-imports: if this is a non-std module, add all std leaf modules
+        // as wildcards. Only apply at module scope — otherwise auto-imports
+        // would shadow local declarations in the enclosing module when name
+        // lookup reaches a nested scope (function, struct, etc.) first.
+        if ctx.get::<NodeKind>(self.entity) == Some(&NodeKind::Module)
+            && !is_in_std_module(ctx, self.entity)
+        {
             let std_modules = ctx.query(StdModules { root: self.root });
             wildcard_imports.extend(std_modules);
         }

@@ -488,32 +488,52 @@ impl LowerCtx<'_> {
                     }
                 }
 
-                // Type parameter static call: T.method(args) → MethodCall
-                // The solver resolves the method via protocol bounds.
+                // Type parameter static call: T.method(args) or T.Item.method(args)
+                // → MethodCall. The solver resolves the method via protocol bounds.
+                // The receiver is segments[..last], which may walk through
+                // associated types on a type parameter (e.g. T.Item where T: Container).
                 {
                     let first_result = self.ctx.query(ResolveValuePath {
                         segments: vec![segments[0].name.clone()],
                         context: self.owner,
                         root: self.root,
                     });
-                    if let ValueResolution::TypeParameter(entity) = first_result {
-                        let first_type_args: Vec<kestrel_hir::ty::HirTy> = segments[0]
-                            .type_args.iter().flatten()
-                            .map(|t| self.lower_type(t))
+                    if matches!(first_result, ValueResolution::TypeParameter(_)) {
+                        let prefix_segments: Vec<String> = segments[..segments.len() - 1]
+                            .iter()
+                            .map(|s| s.name.clone())
                             .collect();
-                        let receiver = self.alloc_expr(
-                            HirExpr::Def(entity, first_type_args, segments[0].span.clone()),
-                        );
-                        let last = &segments[segments.len() - 1];
-                        let lowered_type_args = last.type_args.as_ref()
-                            .map(|args| args.iter().map(|t| self.lower_type(t)).collect());
-                        return self.alloc_expr(HirExpr::MethodCall {
-                            receiver,
-                            method: last.name.clone(),
-                            type_args: lowered_type_args,
-                            args: lowered_args,
-                            span: span.clone(),
+                        let prefix_result = self.ctx.query(ResolveValuePath {
+                            segments: prefix_segments,
+                            context: self.owner,
+                            root: self.root,
                         });
+                        // Build receiver from the prefix resolution.
+                        let receiver_entity = match prefix_result {
+                            ValueResolution::TypeParameter(entity)
+                            | ValueResolution::Def(entity) => Some(entity),
+                            ValueResolution::AssociatedType { entity, .. } => Some(entity),
+                            _ => None,
+                        };
+                        if let Some(entity) = receiver_entity {
+                            let first_type_args: Vec<kestrel_hir::ty::HirTy> = segments[0]
+                                .type_args.iter().flatten()
+                                .map(|t| self.lower_type(t))
+                                .collect();
+                            let receiver = self.alloc_expr(
+                                HirExpr::Def(entity, first_type_args, segments[0].span.clone()),
+                            );
+                            let last = &segments[segments.len() - 1];
+                            let lowered_type_args = last.type_args.as_ref()
+                                .map(|args| args.iter().map(|t| self.lower_type(t)).collect());
+                            return self.alloc_expr(HirExpr::MethodCall {
+                                receiver,
+                                method: last.name.clone(),
+                                type_args: lowered_type_args,
+                                args: lowered_args,
+                                span: span.clone(),
+                            });
+                        }
                     }
                 }
 
@@ -899,7 +919,7 @@ impl LowerCtx<'_> {
                 let local = self.define_local(&name, is_mut, span.clone());
                 let ty = p.ty.as_ref().map(|t| self.lower_type(t));
 
-                if needs_desugar {
+                let pattern = if needs_desugar {
                     // Lower the pattern (creates locals for bindings)
                     let hir_pat = self.lower_pat(body, p.pattern);
                     let param_ref = self.alloc_expr(HirExpr::Local(local, span.clone()));
@@ -914,7 +934,7 @@ impl LowerCtx<'_> {
                             guard: None,
                             body: unit,
                         }],
-                        source: MatchSource::LetDestructure,
+                        source: MatchSource::ParamDestructure,
                         span: span.clone(),
                     });
                     let stmt = self.alloc_stmt(HirStmt::Expr {
@@ -922,9 +942,12 @@ impl LowerCtx<'_> {
                         span: span.clone(),
                     });
                     desugar_stmts.push(stmt);
-                }
+                    Some(hir_pat)
+                } else {
+                    None
+                };
 
-                HirClosureParam { local, ty }
+                HirClosureParam { local, ty, pattern }
             })
             .collect();
 

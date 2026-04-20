@@ -43,7 +43,9 @@ pub fn resolve_callable_types(ctx: &mut LowerCtx, entity: Entity) -> Vec<Option<
 /// Lower a HirTy to a MirTy.
 pub fn lower_type(ctx: &mut LowerCtx, ty: &HirTy) -> MirTy {
     match ty {
-        HirTy::Named { entity, args, .. } => lower_named_type(ctx, *entity, args),
+        HirTy::Struct { entity, args, .. }
+        | HirTy::Enum { entity, args, .. }
+        | HirTy::Protocol { entity, args, .. } => lower_named_type(ctx, *entity, args),
         HirTy::Tuple(elems, _) => {
             let lowered: Vec<MirTy> = elems.iter().map(|t| lower_type(ctx, t)).collect();
             MirTy::Tuple(lowered)
@@ -62,6 +64,9 @@ pub fn lower_type(ctx: &mut LowerCtx, ty: &HirTy) -> MirTy {
             ctx.register_name(*entity);
             MirTy::TypeParam(*entity)
         },
+        // Alias uses and associated-type projections should be reduced by
+        // inference before MIR. If they reach here something upstream is broken.
+        HirTy::AliasUse { .. } | HirTy::AssocProjection { .. } => MirTy::Error,
         HirTy::Never(_) => MirTy::Never,
         HirTy::Infer(_) => MirTy::Error, // shouldn't happen after inference
         HirTy::Error(_) => MirTy::Error,

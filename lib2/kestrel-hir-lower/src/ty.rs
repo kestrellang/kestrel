@@ -1,7 +1,7 @@
 //! Type lowering: AstType → HirTy.
 //!
 //! Resolves type paths to entities and expands sugar types
-//! (Array, Optional, Dictionary, Result) into Named types.
+//! (Array, Optional, Dictionary, Result) into Struct types.
 //!
 //! The standalone `lower_ast_type` function is the shared implementation
 //! used both during body lowering (via LowerCtx) and by type inference
@@ -11,7 +11,7 @@ use kestrel_ast::AstType;
 use kestrel_ast_builder::{Callable, DeclSpan, ExtensionTarget, NodeKind, TypeAnnotation, TypeParams};
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
 use kestrel_hir::ty::HirTy;
-use kestrel_name_res::{ResolveTypePath, TypeResolution};
+use kestrel_name_res::{ExtensionTargetEntity, ResolveTypePath, TypeResolution};
 use kestrel_reporting2::{Diagnostic, Label};
 use kestrel_span2::Span;
 
@@ -40,75 +40,11 @@ pub fn lower_ast_type(
 
             match result {
                 TypeResolution::Found(entity) => {
-                    // Type parameter → HirTy::Param
-                    if ctx.get::<NodeKind>(entity) == Some(&NodeKind::TypeParameter) {
-                        return HirTy::Param(entity, span.clone());
-                    }
-
-                    // Type alias with concrete definition (e.g., `type Fd = Int32`):
-                    // resolve to the aliased type so Fd and Int32 are the same HirTy.
-                    // Only for simple aliases (no user-provided type args) with a
-                    // concrete TypeAnnotation (not abstract associated types).
-                    if ctx.get::<NodeKind>(entity) == Some(&NodeKind::TypeAlias) {
-                        let has_user_args = segments.iter().any(|s| !s.type_args.is_empty());
-                        if !has_user_args {
-                            if let Some(ann) = ctx.get::<TypeAnnotation>(entity) {
-                                return lower_ast_type(ctx, owner, root, &ann.0);
-                            }
-                        }
-                    }
-
-                    // Lower type arguments from all segments
-                    let args: Vec<HirTy> = segments
-                        .iter()
-                        .flat_map(|s| s.type_args.iter())
-                        .map(|a| lower_ast_type(ctx, owner, root, a))
-                        .collect();
-
-                    // Validate type argument arity when explicit args are provided
-                    if !args.is_empty() {
-                        if let Some(tp) = ctx.get::<TypeParams>(entity) {
-                            let total = tp.0.len();
-                            let required = tp.0.iter()
-                                .filter(|&&p| ctx.get::<TypeAnnotation>(p).is_none())
-                                .count();
-                            if args.len() < required {
-                                let type_name = segments.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join(".");
-                                ctx.accumulate(Diagnostic::error()
-                                    .with_message(format!("too few type arguments for '{type_name}'"))
-                                    .with_labels(vec![
-                                        Label::primary(span.file_id, span.range())
-                                            .with_message(format!("expected at least {required}, got {}", args.len())),
-                                    ]));
-                                return HirTy::Error(span.clone());
-                            } else if args.len() > total {
-                                let type_name = segments.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join(".");
-                                ctx.accumulate(Diagnostic::error()
-                                    .with_message(format!("too many type arguments for '{type_name}'"))
-                                    .with_labels(vec![
-                                        Label::primary(span.file_id, span.range())
-                                            .with_message(format!("expected at most {total}, got {}", args.len())),
-                                    ]));
-                                return HirTy::Error(span.clone());
-                            }
-                        }
-                    }
-
-                    let args = fill_type_arg_defaults(ctx, root, entity, args);
-
-                    HirTy::Named {
-                        entity,
-                        args,
-                        span: span.clone(),
-                    }
+                    build_hir_ty_for_entity(ctx, owner, root, entity, segments, span)
                 }
                 TypeResolution::SelfType => {
                     if let Some(self_entity) = find_self_type(ctx, owner, root) {
-                        HirTy::Named {
-                            entity: self_entity,
-                            args: Vec::new(),
-                            span: span.clone(),
-                        }
+                        build_self_hir_ty(ctx, self_entity, span)
                     } else {
                         ctx.accumulate(Diagnostic::error()
                             .with_message("'Self' is not valid in this scope")
@@ -176,7 +112,7 @@ pub fn lower_ast_type(
             }
         }
 
-        // Sugar types → resolve standard library entity + Named
+        // Sugar types → resolve standard library entity + Struct
         AstType::Array(elem, span) => lower_sugar_type(ctx, owner, root, "Array", &[elem], span),
         AstType::Optional(inner, span) => {
             lower_sugar_type(ctx, owner, root, "Optional", &[inner], span)
@@ -190,6 +126,200 @@ pub fn lower_ast_type(
         AstType::Unit(span) => HirTy::Tuple(Vec::new(), span.clone()),
         AstType::Never(span) => HirTy::Never(span.clone()),
         AstType::Inferred(span) => HirTy::Infer(span.clone()),
+    }
+}
+
+/// Build a HirTy for a resolved entity, dispatching on NodeKind.
+///
+/// - `TypeParameter` → `HirTy::Param`
+/// - `TypeAlias` whose parent is a Protocol → `HirTy::AssocProjection` (abstract associated type)
+/// - `TypeAlias` otherwise → `HirTy::AliasUse` (regular alias; inference reduces)
+/// - `Struct` / `Enum` / `Protocol` → corresponding variant
+///
+/// Shared between the Found and SelfType resolution branches.
+fn build_hir_ty_for_entity(
+    ctx: &QueryContext<'_>,
+    owner: Entity,
+    root: Entity,
+    entity: Entity,
+    segments: &[kestrel_ast::PathSegment],
+    span: &Span,
+) -> HirTy {
+    let kind = ctx.get::<NodeKind>(entity).cloned();
+
+    // Type parameter: no args, no projection.
+    if kind == Some(NodeKind::TypeParameter) {
+        return HirTy::Param(entity, span.clone());
+    }
+
+    // Lower type arguments from all segments. Applies to Struct/Enum/Protocol/AliasUse.
+    let args: Vec<HirTy> = segments
+        .iter()
+        .flat_map(|s| s.type_args.iter())
+        .map(|a| lower_ast_type(ctx, owner, root, a))
+        .collect();
+
+    // Validate arity for non-alias, non-associated entities.
+    let args = match validate_arity(ctx, entity, args, segments, span) {
+        Ok(args) => args,
+        Err(err) => return err,
+    };
+    let args = fill_type_arg_defaults(ctx, root, entity, args);
+
+    match kind {
+        Some(NodeKind::TypeAlias) => {
+            // Trivial (non-generic, bound-free) aliases with a concrete
+            // TypeAnnotation are eagerly expanded — avoids constraint bloat
+            // for `type Fd = Int32` style declarations.
+            if is_trivial_alias(ctx, entity) && args.is_empty() {
+                if let Some(ann) = ctx.get::<TypeAnnotation>(entity) {
+                    return lower_ast_type(ctx, owner, root, &ann.0);
+                }
+            }
+            // Everything else (associated types in protocols, parameterized
+            // or constrained aliases) flows as AliasUse. The solver reduces
+            // concrete ones via the Reduce constraint and looks up abstract
+            // ones via protocol bounds.
+            HirTy::AliasUse {
+                entity,
+                args,
+                span: span.clone(),
+            }
+        }
+        Some(NodeKind::Enum) => HirTy::Enum {
+            entity,
+            args,
+            span: span.clone(),
+        },
+        Some(NodeKind::Protocol) => HirTy::Protocol {
+            entity,
+            args,
+            span: span.clone(),
+        },
+        // Struct is the default for Typed entities without a more specific kind
+        // (covers Struct, Module-owned foreign types, lang.* intrinsics, etc.).
+        _ => HirTy::Struct {
+            entity,
+            args,
+            span: span.clone(),
+        },
+    }
+}
+
+/// True if an alias entity is trivial — has no type params, no protocol bounds,
+/// no where clause. These aliases can be safely expanded at HIR lowering.
+fn is_trivial_alias(ctx: &QueryContext<'_>, entity: Entity) -> bool {
+    let has_type_params = ctx
+        .get::<TypeParams>(entity)
+        .map(|tp| !tp.0.is_empty())
+        .unwrap_or(false);
+    if has_type_params {
+        return false;
+    }
+    if ctx.get::<kestrel_ast_builder::Conformances>(entity).is_some() {
+        return false;
+    }
+    if ctx.get::<kestrel_ast_builder::WhereClause>(entity).is_some() {
+        return false;
+    }
+    true
+}
+
+/// Build the `base` of an AssocProjection when we've resolved a path to an
+/// associated type (TypeAlias inside a Protocol).
+///
+/// - Multi-segment (`T.Item`, `Self.Item`): lower segments[..last] as a type path.
+/// - Single-segment (`Item` used bare inside the owning protocol): base = Self.
+fn build_assoc_projection_base(
+    ctx: &QueryContext<'_>,
+    owner: Entity,
+    root: Entity,
+    segments: &[kestrel_ast::PathSegment],
+    span: &Span,
+) -> HirTy {
+    if segments.len() >= 2 {
+        // Lower segments[..last] as a standalone path.
+        let prefix = AstType::Named {
+            segments: segments[..segments.len() - 1].to_vec(),
+            span: span.clone(),
+        };
+        lower_ast_type(ctx, owner, root, &prefix)
+    } else {
+        // Bare `Item` inside the protocol — base is Self.
+        if let Some(self_entity) = find_self_type(ctx, owner, root) {
+            build_self_hir_ty(ctx, self_entity, span)
+        } else {
+            HirTy::Error(span.clone())
+        }
+    }
+}
+
+/// Build a HirTy for a `Self`-resolved entity (returned by `find_self_type`).
+///
+/// `find_self_type` resolves Self to the nearest Struct/Enum/Protocol (or an
+/// extension's target type), so we dispatch on NodeKind here.
+fn build_self_hir_ty(ctx: &QueryContext<'_>, self_entity: Entity, span: &Span) -> HirTy {
+    match ctx.get::<NodeKind>(self_entity).cloned() {
+        Some(NodeKind::Enum) => HirTy::Enum {
+            entity: self_entity,
+            args: Vec::new(),
+            span: span.clone(),
+        },
+        Some(NodeKind::Protocol) => HirTy::Protocol {
+            entity: self_entity,
+            args: Vec::new(),
+            span: span.clone(),
+        },
+        Some(NodeKind::TypeParameter) => HirTy::Param(self_entity, span.clone()),
+        _ => HirTy::Struct {
+            entity: self_entity,
+            args: Vec::new(),
+            span: span.clone(),
+        },
+    }
+}
+
+/// Validate that the number of type arguments matches the entity's TypeParams.
+/// Returns `Err(HirTy::Error)` with an accumulated diagnostic on mismatch.
+fn validate_arity(
+    ctx: &QueryContext<'_>,
+    entity: Entity,
+    args: Vec<HirTy>,
+    segments: &[kestrel_ast::PathSegment],
+    span: &Span,
+) -> Result<Vec<HirTy>, HirTy> {
+    if args.is_empty() {
+        return Ok(args);
+    }
+    let Some(tp) = ctx.get::<TypeParams>(entity) else {
+        return Ok(args);
+    };
+    let total = tp.0.len();
+    let required = tp
+        .0
+        .iter()
+        .filter(|&&p| ctx.get::<TypeAnnotation>(p).is_none())
+        .count();
+    if args.len() < required {
+        let type_name = segments.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join(".");
+        ctx.accumulate(Diagnostic::error()
+            .with_message(format!("too few type arguments for '{type_name}'"))
+            .with_labels(vec![
+                Label::primary(span.file_id, span.range())
+                    .with_message(format!("expected at least {required}, got {}", args.len())),
+            ]));
+        Err(HirTy::Error(span.clone()))
+    } else if args.len() > total {
+        let type_name = segments.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join(".");
+        ctx.accumulate(Diagnostic::error()
+            .with_message(format!("too many type arguments for '{type_name}'"))
+            .with_labels(vec![
+                Label::primary(span.file_id, span.range())
+                    .with_message(format!("expected at most {total}, got {}", args.len())),
+            ]));
+        Err(HirTy::Error(span.clone()))
+    } else {
+        Ok(args)
     }
 }
 
@@ -209,10 +339,11 @@ fn lower_sugar_type(
 
     if let Some(entity) = resolve_std_type(ctx, owner, root, name) {
         let args = fill_type_arg_defaults(ctx, root, entity, lowered_args);
-        HirTy::Named {
-            entity,
-            args,
-            span: span.clone(),
+        // Dispatch by NodeKind — Optional is an enum, Array/Dictionary are structs.
+        match ctx.get::<NodeKind>(entity).cloned() {
+            Some(NodeKind::Enum) => HirTy::Enum { entity, args, span: span.clone() },
+            Some(NodeKind::Protocol) => HirTy::Protocol { entity, args, span: span.clone() },
+            _ => HirTy::Struct { entity, args, span: span.clone() },
         }
     } else {
         ctx.accumulate(Diagnostic::error()
@@ -389,13 +520,45 @@ impl QueryFn for LowerExtensionTargetTypeArgs {
             return Some(vec![]);
         }
 
+        // If the target's arity is known and the extension provides too many
+        // args, truncate. The arity-mismatch analyzer (E453) reports the
+        // excess; lowering "cannot find type 'X'" for the extras would be
+        // redundant noise. Args beyond the expected count become HirTy::Error
+        // without triggering a name-resolution diagnostic.
+        let expected_arity = ctx
+            .query(ExtensionTargetEntity { extension: self.extension, root: self.root })
+            .and_then(|target| ctx.get::<TypeParams>(target).map(|tp| tp.0.len()));
+
         // Lower each type arg in the extension's own scope (so type params like T are visible)
         let context = self.extension;
+        let limit = expected_arity.unwrap_or(last_seg.type_args.len());
         let args = last_seg
             .type_args
             .iter()
-            .map(|ast_ty| lower_ast_type(ctx, context, self.root, ast_ty))
+            .enumerate()
+            .map(|(i, ast_ty)| {
+                if i < limit {
+                    lower_ast_type(ctx, context, self.root, ast_ty)
+                } else {
+                    HirTy::Error(ast_type_span(ast_ty))
+                }
+            })
             .collect();
         Some(args)
+    }
+}
+
+fn ast_type_span(ty: &AstType) -> Span {
+    match ty {
+        AstType::Named { span, .. }
+        | AstType::Tuple(_, span)
+        | AstType::Function { span, .. }
+        | AstType::Array(_, span)
+        | AstType::Optional(_, span)
+        | AstType::Dictionary(_, _, span)
+        | AstType::Result { span, .. }
+        | AstType::Unit(span)
+        | AstType::Never(span)
+        | AstType::Inferred(span) => span.clone(),
     }
 }

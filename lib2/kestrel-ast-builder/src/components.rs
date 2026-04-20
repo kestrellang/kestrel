@@ -155,6 +155,21 @@ pub struct Static;
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Subscript;
 
+/// Whether a Field was declared with `var` (mutable) or `let` (read-only).
+/// Captured at build time so downstream analyzers don't have to inspect
+/// tokens. Only present on entities with NodeKind::Field.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum FieldMutability {
+    Var,
+    Let,
+}
+
+/// Marker: this Field is a computed property (has a `{ get }` / `{ get set }`
+/// accessor block, possibly bodyless in a protocol). Absence means a stored
+/// property. Set by the field builder when the CST has PropertyAccessors.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct Computed;
+
 // ===== Generics =====
 
 /// Entity IDs of type parameter children.
@@ -206,6 +221,13 @@ pub enum ConformanceItem {
 /// The type being extended by an extension declaration.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ExtensionTarget(pub AstType);
+
+/// On a TypeAlias declared as `type Protocol.Assoc = T` — the qualifying
+/// protocol path. Absence means the alias is unqualified (`type Assoc = T`).
+/// Captured at build time so analyzers can resolve the protocol entity via
+/// ResolveTypePath instead of walking CST tokens.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct QualifiedTarget(pub AstType);
 
 // ===== Modifiers =====
 
