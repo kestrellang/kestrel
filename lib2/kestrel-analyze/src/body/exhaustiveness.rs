@@ -168,6 +168,14 @@ fn check_user_match(
         return;
     }
 
+    // Skip when any arm pattern contains an HirPat::Error (e.g. a malformed
+    // pattern that hir-lower already diagnosed). The flattener treats Error
+    // as a wildcard, which would falsely mark subsequent arms as unreachable
+    // and declare the match exhaustive.
+    if arms.iter().any(|a| pat_has_error(cx.hir, a.pattern)) {
+        return;
+    }
+
     // E304: empty match on inhabited type.
     if arms.is_empty() {
         if !matches!(scrutinee_ty, ResolvedTy::Never) {
@@ -314,4 +322,28 @@ fn check_irrefutable_let(
         }],
         notes: vec![note.into()],
     });
+}
+
+/// Walk a HIR pattern tree looking for an `Error` node left behind by
+/// hir-lower when it couldn't lower a malformed pattern.
+fn pat_has_error(hir: &HirBody, pat: HirPatId) -> bool {
+    match &hir.pats[pat] {
+        HirPat::Error { .. } => true,
+        HirPat::Wildcard { .. }
+        | HirPat::Binding { .. }
+        | HirPat::Literal { .. }
+        | HirPat::Range { .. } => false,
+        HirPat::Tuple { prefix, suffix, .. } | HirPat::Array { prefix, suffix, .. } => {
+            prefix.iter().any(|&p| pat_has_error(hir, p))
+                || suffix.iter().any(|&p| pat_has_error(hir, p))
+        }
+        HirPat::Variant { args, .. } | HirPat::ImplicitVariant { args, .. } => {
+            args.iter().any(|a| pat_has_error(hir, a.pattern))
+        }
+        HirPat::Struct { fields, .. } => fields
+            .iter()
+            .any(|f| f.pattern.map_or(false, |p| pat_has_error(hir, p))),
+        HirPat::Or { alternatives, .. } => alternatives.iter().any(|&p| pat_has_error(hir, p)),
+        HirPat::At { subpattern, .. } => pat_has_error(hir, *subpattern),
+    }
 }

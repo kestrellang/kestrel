@@ -25,7 +25,7 @@ use crate::diagnostic::*;
 use crate::traits::{CompilationCheck, Describe};
 use crate::util;
 use kestrel_ast::AstType;
-use kestrel_ast_builder::{Conformances, ConformanceItem, Name, NodeKind, QualifiedTarget, TypeAnnotation, TypeParams, WhereClause, WhereConstraint};
+use kestrel_ast_builder::{Conformances, ConformanceItem, Name, NodeKind, QualifiedTarget, TypeAnnotation, WhereClause, WhereConstraint};
 use kestrel_hecs::Entity;
 use kestrel_name_res::{ConformingProtocols, ExtensionTargetEntity, ExtensionsFor, ResolveTypePath, TypeResolution};
 
@@ -396,7 +396,9 @@ fn find_type_alias_binding(
 }
 
 /// Check that an impl method's return type matches the protocol method's,
-/// with associated types substituted for their concrete bindings.
+/// comparing by resolved entity so `Self`, associated-type projections, and
+/// fully-qualified paths (`std.num.Int64` vs `Int64`) compare equal when they
+/// denote the same type.
 fn check_method_return_type(
     cx: &CompilationContext<'_>,
     proto_method: Entity,
@@ -407,37 +409,24 @@ fn check_method_return_type(
     proto_name: &str,
     diags: &mut Vec<AnalyzeDiagnostic>,
 ) {
-    // Both methods need return type annotations
     let Some(proto_ann) = cx.query.get::<TypeAnnotation>(proto_method) else { return };
     let Some(impl_ann) = cx.query.get::<TypeAnnotation>(impl_method) else { return };
 
-    // Only check when the protocol return type is a bare associated type name.
-    // Complex return types (generics, tuples, etc.) need full type param substitution
-    // which we don't have yet — skip to avoid false positives.
+    // Only check single-segment Named return types on the protocol side.
+    // Complex return types (generics, tuples, fn types, etc.) would need full
+    // type-param substitution which the entity-resolution path doesn't do yet.
     let AstType::Named { segments, .. } = &proto_ann.0 else { return };
-    if segments.len() != 1 || !segments[0].type_args.is_empty() {
-        return;
-    }
+    if segments.len() != 1 || !segments[0].type_args.is_empty() { return; }
     let proto_return_name = &segments[0].name;
 
-    // Build substitution map: associated type name → concrete AstType
-    let subs = build_associated_type_subs(cx, type_entity, protocol);
-
-    // The protocol return type must be a substitutable associated type
-    let Some(expected) = subs.get(proto_return_name) else {
-        return; // Not an associated type, or missing binding (E455 handles it)
+    let Some(expected) = resolve_expected_return(cx, proto_return_name, type_entity, protocol) else {
+        return;
     };
-    let expected = expected.clone();
+    let Some(actual) = resolve_type_entity_with_self(cx, &impl_ann.0, type_entity, Some(type_entity)) else {
+        return;
+    };
 
-    // Substitute the impl's return type too (for Self references)
-    let actual = substitute_ast_type(&impl_ann.0, &subs);
-
-    // Compare structurally, ignoring spans.
-    // Also treat Self in expected as matching the target type name in actual
-    // (e.g., `type Iter = Self` → expected=Self, actual=Iterator).
-    let types_match = ast_types_equal(&expected, &actual)
-        || (is_named_type(&expected, "Self") && is_named_type(&actual, &util::entity_name(cx.query, type_entity)));
-    if !types_match {
+    if expected != actual {
         let impl_span = util::entity_span(cx.query, impl_method);
         diags.push(AnalyzeDiagnostic {
             descriptor_id: DESCRIPTORS[4].id,
@@ -456,209 +445,97 @@ fn check_method_return_type(
     }
 }
 
-/// Build a substitution map from a type's associated type bindings for a specific protocol.
-/// Maps associated type names (e.g., "Output") to their bound AstType (e.g., AstType for "MyInt").
-/// Only includes bindings that target the given protocol's associated types,
-/// so that `type Addable.Output` and `type RangeConstructible.Output` don't collide.
-fn build_associated_type_subs(
+/// Resolve a protocol method's single-segment return-type name to the entity
+/// the impl is expected to return. If the name is one of the protocol's
+/// associated types, project through the type's binding (falling back to a
+/// protocol-provided default). Otherwise resolve as a regular type name
+/// (covers `Self`, concrete types, etc.) with `Self → type_entity`.
+fn resolve_expected_return(
     cx: &CompilationContext<'_>,
+    name: &str,
     type_entity: Entity,
     protocol: Entity,
-) -> HashMap<String, AstType> {
-    let mut subs = HashMap::new();
+) -> Option<Entity> {
+    // Find the protocol's associated type with this name, if any.
+    let assoc_entity = cx.query.children_of(protocol).iter().copied().find(|&c| {
+        cx.query.get::<NodeKind>(c) == Some(&NodeKind::TypeAlias)
+            && cx.query.get::<Name>(c).is_some_and(|n| n.0 == name)
+    });
 
-    // Collect the protocol's declared associated type names
-    let proto_assoc_names: HashSet<String> = cx.query.children_of(protocol).iter()
-        .filter(|&&c| cx.query.get::<NodeKind>(c) == Some(&NodeKind::TypeAlias))
-        .filter_map(|&c| cx.query.get::<Name>(c).map(|n| n.0.clone()))
-        .collect();
+    if let Some(assoc) = assoc_entity {
+        // Associated type: find the impl's binding (direct or via extension).
+        if let Some(binding) = find_associated_type_binding(cx, type_entity, name, protocol) {
+            return resolve_type_entity_with_self(cx, &binding, type_entity, Some(type_entity));
+        }
+        // Fall back to the protocol's default binding on the associated type itself.
+        if let Some(default) = cx.query.get::<TypeAnnotation>(assoc) {
+            return resolve_type_entity_with_self(cx, &default.0, protocol, Some(type_entity));
+        }
+        // No binding and no default — E455 handles "missing associated type".
+        return None;
+    }
 
-    // Collect bindings from the type and its extensions, filtered to this protocol
-    let mut search_entities = vec![type_entity];
+    // Not an associated type — resolve the name as a regular path in the
+    // protocol's context, mapping `Self → type_entity`.
+    let synthetic = AstType::Named {
+        segments: vec![kestrel_ast::PathSegment {
+            name: name.to_string(),
+            type_args: vec![],
+            span: kestrel_span2::Span::synthetic(0),
+        }],
+        span: kestrel_span2::Span::synthetic(0),
+    };
+    resolve_type_entity_with_self(cx, &synthetic, protocol, Some(type_entity))
+}
+
+/// Find the impl's binding for `assoc_name` on `type_entity`, searching the
+/// type itself and its extensions. Qualified bindings (`type P.Output = …`)
+/// must match `protocol`; unqualified bindings are accepted.
+fn find_associated_type_binding(
+    cx: &CompilationContext<'_>,
+    type_entity: Entity,
+    assoc_name: &str,
+    protocol: Entity,
+) -> Option<AstType> {
+    let mut search = vec![type_entity];
     let extensions = cx.query.query(ExtensionsFor {
         target: type_entity,
         root: cx.root,
     });
-    search_entities.extend(extensions.iter());
+    search.extend(extensions.iter());
 
-    for &entity in &search_entities {
+    for &entity in &search {
         for &child in cx.query.children_of(entity) {
-            if cx.query.get::<NodeKind>(child) != Some(&NodeKind::TypeAlias) {
-                continue;
-            }
+            if cx.query.get::<NodeKind>(child) != Some(&NodeKind::TypeAlias) { continue; }
             let Some(name) = cx.query.get::<Name>(child) else { continue };
+            if name.0 != assoc_name { continue; }
             let Some(ann) = cx.query.get::<TypeAnnotation>(child) else { continue };
 
-            // Only include if this is an associated type declared by our target protocol.
-            // For qualified bindings (`type Addable.Output = MyInt`), resolve the
-            // QualifiedTarget path to a protocol entity and match against ours.
-            // For unqualified bindings (`type Output = MyInt`), accept if the
-            // protocol declares it.
-            if proto_assoc_names.contains(&name.0) {
-                let is_for_this_protocol = match cx.query.get::<QualifiedTarget>(child) {
-                    Some(target) => match &target.0 {
-                        AstType::Named { segments, .. } => {
-                            let path = segments.iter().map(|s| s.name.clone()).collect();
-                            let context = cx.query.parent_of(child).unwrap_or(cx.root);
-                            matches!(
-                                cx.query.query(ResolveTypePath {
-                                    segments: path,
-                                    context,
-                                    root: cx.root,
-                                }),
-                                TypeResolution::Found(e) if e == protocol,
-                            )
-                        }
-                        _ => false,
-                    },
-                    None => true, // Unqualified — accept it
-                };
-
-                if is_for_this_protocol {
-                    subs.insert(name.0.clone(), ann.0.clone());
-                }
-            }
-        }
-    }
-
-    // Also collect defaults from the protocol's own associated types
-    for &child in cx.query.children_of(protocol) {
-        if cx.query.get::<NodeKind>(child) == Some(&NodeKind::TypeAlias) {
-            if let Some(name) = cx.query.get::<Name>(child) {
-                // Only use protocol default if the type didn't provide a binding
-                if !subs.contains_key(&name.0) {
-                    if let Some(ann) = cx.query.get::<TypeAnnotation>(child) {
-                        subs.insert(name.0.clone(), ann.0.clone());
+            let is_for_this_protocol = match cx.query.get::<QualifiedTarget>(child) {
+                Some(target) => match &target.0 {
+                    AstType::Named { segments, .. } => {
+                        let path = segments.iter().map(|s| s.name.clone()).collect();
+                        let context = cx.query.parent_of(child).unwrap_or(cx.root);
+                        matches!(
+                            cx.query.query(ResolveTypePath {
+                                segments: path,
+                                context,
+                                root: cx.root,
+                            }),
+                            TypeResolution::Found(e) if e == protocol,
+                        )
                     }
-                }
+                    _ => false,
+                },
+                None => true,
+            };
+
+            if is_for_this_protocol {
+                return Some(ann.0.clone());
             }
         }
     }
-
-    // Map Self to the concrete type, including type parameters if generic.
-    // e.g., for `struct Optional[T]`, Self → Optional[T]
-    let type_name = util::entity_name(cx.query, type_entity);
-    let type_args = cx.query.get::<TypeParams>(type_entity)
-        .map(|tp| tp.0.iter().filter_map(|&p| {
-            cx.query.get::<Name>(p).map(|n| AstType::Named {
-                segments: vec![kestrel_ast::PathSegment {
-                    name: n.0.clone(),
-                    type_args: vec![],
-                    span: kestrel_span2::Span::synthetic(0),
-                }],
-                span: kestrel_span2::Span::synthetic(0),
-            })
-        }).collect::<Vec<_>>())
-        .unwrap_or_default();
-    subs.insert("Self".into(), AstType::Named {
-        segments: vec![kestrel_ast::PathSegment {
-            name: type_name,
-            type_args,
-            span: kestrel_span2::Span::synthetic(0),
-        }],
-        span: kestrel_span2::Span::synthetic(0),
-    });
-
-    subs
-}
-
-/// Recursively substitute named types in an AstType using a substitution map.
-/// Single-segment named types matching a key are replaced with the mapped value.
-fn substitute_ast_type(ty: &AstType, subs: &HashMap<String, AstType>) -> AstType {
-    match ty {
-        AstType::Named { segments, span } => {
-            // Single-segment named type — check for direct substitution
-            if segments.len() == 1 && segments[0].type_args.is_empty() {
-                if let Some(replacement) = subs.get(&segments[0].name) {
-                    return replacement.clone();
-                }
-            }
-            // Recurse into type arguments
-            AstType::Named {
-                segments: segments.iter().map(|seg| kestrel_ast::PathSegment {
-                    name: seg.name.clone(),
-                    type_args: seg.type_args.iter().map(|a| substitute_ast_type(a, subs)).collect(),
-                    span: seg.span.clone(),
-                }).collect(),
-                span: span.clone(),
-            }
-        }
-        AstType::Tuple(types, span) => {
-            AstType::Tuple(types.iter().map(|t| substitute_ast_type(t, subs)).collect(), span.clone())
-        }
-        AstType::Function { params, return_type, span } => {
-            AstType::Function {
-                params: params.iter().map(|p| substitute_ast_type(p, subs)).collect(),
-                return_type: Box::new(substitute_ast_type(return_type, subs)),
-                span: span.clone(),
-            }
-        }
-        AstType::Array(inner, span) => {
-            AstType::Array(Box::new(substitute_ast_type(inner, subs)), span.clone())
-        }
-        AstType::Dictionary(key, val, span) => {
-            AstType::Dictionary(
-                Box::new(substitute_ast_type(key, subs)),
-                Box::new(substitute_ast_type(val, subs)),
-                span.clone(),
-            )
-        }
-        AstType::Optional(inner, span) => {
-            AstType::Optional(Box::new(substitute_ast_type(inner, subs)), span.clone())
-        }
-        AstType::Result { ok, err, span } => {
-            AstType::Result {
-                ok: Box::new(substitute_ast_type(ok, subs)),
-                err: Box::new(substitute_ast_type(err, subs)),
-                span: span.clone(),
-            }
-        }
-        // Unit, Never, Inferred — no substitution needed
-        other => other.clone(),
-    }
-}
-
-/// Compare two AstTypes structurally, ignoring spans.
-fn ast_types_equal(a: &AstType, b: &AstType) -> bool {
-    match (a, b) {
-        (AstType::Named { segments: sa, .. }, AstType::Named { segments: sb, .. }) => {
-            sa.len() == sb.len() && sa.iter().zip(sb).all(|(a, b)| {
-                a.name == b.name
-                    && a.type_args.len() == b.type_args.len()
-                    && a.type_args.iter().zip(&b.type_args).all(|(x, y)| ast_types_equal(x, y))
-            })
-        }
-        (AstType::Tuple(a, _), AstType::Tuple(b, _)) => {
-            a.len() == b.len() && a.iter().zip(b).all(|(x, y)| ast_types_equal(x, y))
-        }
-        (AstType::Function { params: pa, return_type: ra, .. },
-         AstType::Function { params: pb, return_type: rb, .. }) => {
-            pa.len() == pb.len()
-                && pa.iter().zip(pb).all(|(x, y)| ast_types_equal(x, y))
-                && ast_types_equal(ra, rb)
-        }
-        (AstType::Array(a, _), AstType::Array(b, _)) => ast_types_equal(a, b),
-        (AstType::Dictionary(ka, va, _), AstType::Dictionary(kb, vb, _)) => {
-            ast_types_equal(ka, kb) && ast_types_equal(va, vb)
-        }
-        (AstType::Optional(a, _), AstType::Optional(b, _)) => ast_types_equal(a, b),
-        (AstType::Result { ok: oa, err: ea, .. }, AstType::Result { ok: ob, err: eb, .. }) => {
-            ast_types_equal(oa, ob) && ast_types_equal(ea, eb)
-        }
-        (AstType::Unit(_), AstType::Unit(_)) => true,
-        (AstType::Never(_), AstType::Never(_)) => true,
-        (AstType::Inferred(_), AstType::Inferred(_)) => true,
-        _ => false,
-    }
-}
-
-/// Check if an AstType is a single-segment name matching the given name.
-fn is_named_type(ast_ty: &kestrel_ast::AstType, name: &str) -> bool {
-    if let kestrel_ast::AstType::Named { segments, .. } = ast_ty {
-        segments.len() == 1 && segments[0].name == name
-    } else {
-        false
-    }
+    None
 }
 
 /// Resolve an AstType to an entity for type comparison.

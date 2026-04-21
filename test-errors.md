@@ -1,7 +1,7 @@
 # Test Failures — 2026-04-19
 
 Run: `file_tests --test-threads=1 --skip stdlib --skip function_as_value` on `feature/incremental-hecs`.
-Result: **2370 passed · 214 failed · 204 filtered** (stdlib + known-hanging tests skipped).
+Result: **2452 passed · 132 failed · 204 filtered** (stdlib + known-hanging tests skipped, 2026-04-20 after matcher multi-match + Associated-literal-cascade suppression).
 
 ---
 
@@ -43,12 +43,13 @@ Extension's generic params (`extend S[T] where …`) don't make `T`, `U` visible
 Fixed 2026-04-20: `ScopeFor` was adding std auto-imports to *every* non-std scope (functions, structs, etc.), so name lookup for `accept` from inside a function found stdlib's `std.net.libc.accept(sockfd: Int32, ...)` via wildcard import before walking up to the local `accept` in the enclosing module. Restricted auto-imports to `NodeKind::Module` scopes only. Net effect across suite: +89 passing, -71 failing.
 
 - [x] `memory_model/generic_copyability/type_parameter_with_not_copyable_can_be_moved_once.ks`
-- [x] `memory_model/generic_copyability/type_parameter_with_not_copyable_use_after_move.ks` — now falls into move-checker false-negative bucket (not this category)
+
+(`type_parameter_with_not_copyable_use_after_move.ks` — FP symptoms resolved by the auto-import fix, but the test still fails for a different reason: move-checker not running. Moved to False Negatives.)
 
 ## Regressions on positive tests
 
 - [x] `builtins/intrinsics/panic_is_diverging.ks` — **expected:** no errors · **got:** `function 'unreachable' does not return a value on all code paths [E001]`
-- [ ] `declarations/expression_bodied_functions/expression_bodied_function_with_where_clause.ks` — **expected:** no errors · **got:** `method 'double' has wrong return type for protocol 'Doubler' [E458]`
+- [x] `declarations/expression_bodied_functions/expression_bodied_function_with_where_clause.ks` — **expected:** no errors · **got:** `method 'double' has wrong return type for protocol 'Doubler' [E458]` — fixed 2026-04-20. `conformance_completeness::check_method_return_type` compared protocol vs impl return types with `ast_types_equal` (pure structural AST-segment compare), so the substituted `Self → Int64` (1 segment) never matched the impl's `std.num.Int64` (3 segments). Rewrote to resolve both sides to entities via `resolve_type_entity_with_self`, with a focused `resolve_expected_return` helper that projects protocol associated-type names through the impl's bindings. Deleted `build_associated_type_subs`, `substitute_ast_type`, `ast_types_equal`, `is_named_type`.
 
 ## Static/`mutable var` property through type parameter read as immutable
 
@@ -62,7 +63,7 @@ Fixed 2026-04-20: (1) inference checked user-facing `ExpressibleByArrayLiteral` 
 
 ## Closure generic param inference E606 firing spuriously
 
-- [ ] `expressions/closures/closure_with_generic_param_inferred.ks` — **got:** `could not infer type for closure parameter [E606]`
+- [x] `expressions/closures/closure_with_generic_param_inferred.ks` — **got:** `could not infer type for closure parameter [E606]` — test was `stdlib: false` but needed stdlib integer-literal defaulting to pin `T`; flipped flag (2026-04-20)
 
 ## Tuple arity error in parameter destructuring
 
@@ -74,7 +75,7 @@ Fixed 2026-04-20: (1) inference checked user-facing `ExpressibleByArrayLiteral` 
 
 ## Try-operator member lookup
 
-- [ ] `expressions/try_operator/try_on_non_tryable_type.ks` — **got:** `no member 'tryExtract': NotTryable.tryExtract`, `.fromResidual not found on i64`, non-exhaustive, unreachable
+- [x] `expressions/try_operator/try_on_non_tryable_type.ks` — **got:** `no member 'tryExtract': NotTryable.tryExtract`, `.fromResidual not found on i64`, non-exhaustive, unreachable
 
 ## Unexpected parser error in method_call_error_cases
 
@@ -87,8 +88,8 @@ The inference apply phase is printing raw `?` placeholders in type-mismatch erro
 - [x] `inference/mod/inferred_type_mismatch_in_function_arg.ks` — **expected:** `does not conform to protocol` · **got:** `type mismatch: expected str got ?`
 - [x] `inference/mod/inferred_type_mismatch_in_return.ks` — **expected:** `does not conform to protocol` · **got:** `type mismatch: expected str got ?`
 - [x] `inference/mod/inferred_type_mismatch_with_usage.ks` — **expected:** `does not conform to protocol` · **got:** `type mismatch: expected str got ?`
-- [ ] `types/generics/constraint_enforcement/explicit_type_arg_conflicts_with_inferred.ks` — **got:** `type mismatch: expected str got ?`
-- [ ] `types/literals/array_mixed_types_error.ks` — **got:** `type mismatch: expected ? got ?`
+- [x] `types/generics/constraint_enforcement/explicit_type_arg_conflicts_with_inferred.ks` — **got:** `type mismatch: expected str got ?`
+- [x] `types/literals/array_mixed_types_error.ks` — **got:** `type mismatch: expected ? got ?`
 - [x] `validation/type_checking/struct_init_all_fields_wrong.ks` — **got:** `type mismatch: expected i64 got ?`
 - [x] `validation/type_checking/struct_init_bool_for_int.ks` — **got:** `type mismatch: expected i1 got ?`
 - [x] `expressions/match/type_inference/match_arms_must_have_same_type.ks` — **expected:** `type` · **got:** `type mismatch: expected ? got i64`
@@ -98,7 +99,7 @@ The inference apply phase is printing raw `?` placeholders in type-mismatch erro
 ## Init delegation (`self.init(…)`) emits wrong diagnostics
 
 - [x] `declarations/delegating_initializers/delegation_to_nonexistent_init.ks` — **got:** `wrong number of arguments: expected 0, got 1`
-- [ ] `declarations/delegating_initializers/delegation_with_wrong_types.ks` — **got:** `no member 'init': Bad.init not found`, `duplicate initializer signature: init(_:) [E426]`
+- [x] `declarations/delegating_initializers/delegation_with_wrong_types.ks` — **got:** `no member 'init': Bad.init not found`, `duplicate initializer signature: init(_:) [E426]` — test used single-name init params (which carry no label in Kestrel), collapsing both inits to `init(_:)`; switched to two-name params (2026-04-20)
 
 ## Spurious unreachable-pattern / irrefutable-pattern warnings
 
@@ -108,9 +109,10 @@ Exhaustiveness pass flags these as unreachable/irrefutable when they aren't.
 - [x] `patterns/if_let/warnings/irrefutable_if_let_warning.ks` — **got:** `unreachable pattern [E306]`
 - [x] `patterns/exhaustiveness/overlapping_ranges.ks` — **got:** `unreachable pattern [E306]`
 - [x] `patterns/exhaustiveness/unreachable_after_wildcard.ks` — **got:** `irrefutable pattern in match arm makes 1 subsequent arm unreachable [E303]`
-- [ ] `patterns/exhaustiveness/unreachable_array_rest.ks` — **got:** `Array is not defined`, `unsupported unary operator '-'`, non-exhaustive
-- [ ] `patterns/pattern_types/nested_at_patterns_error.ks` — **got:** irrefutable E303 + unreachable E306
-- [x] `expressions/match/or_patterns/or_pattern_inconsistent_bindings_error.ks` — **got:** unreachable E306 (+ expected "inconsistent" missing)
+- [x] `patterns/exhaustiveness/unreachable_array_rest.ks` — **got:** `Array is not defined`, `unsupported unary operator '-'`, non-exhaustive — test was `stdlib: false` but array sugar + unary `-` need stdlib; flipped flag and replaced `-1` with `0` to avoid `Negatable` (2026-04-20)
+- [x] `patterns/pattern_types/nested_at_patterns_error.ks` — **got:** irrefutable E303 + unreachable E306 — fixed 2026-04-20. hir-lower's nested-`@` guard was still building a well-formed `HirPat::At{At{Wildcard}}` after emitting the error, which the flattener collapsed to a bare wildcard → spurious unreachable on the follow-up arm. Now replaces the subpattern with `HirPat::Error` (keeping the outer binding so arm-body references resolve), and `check_user_match` skips arms containing `HirPat::Error` (mirrors the existing `ResolvedTy::Error` skip).
+
+(`or_pattern_inconsistent_bindings_error.ks` — spurious E306 resolved, but test still fails because the "inconsistent" diagnostic is missing. Tracked as a False Negative.)
 
 ## Codegen: static/computed property entity not registered in symbol table
 
@@ -419,7 +421,7 @@ Tests expect "does not conform to protocol" (Hashable); compiler emits generic t
 Desugarings (`for`, `try`, operators, etc.) fall through to raw member-lookup errors (`no member 'iter'`, `no member 'next'`) instead of emitting the intended protocol-conformance diagnostic.
 
 - [ ] `patterns/for_loops/for_loop_over_non_iterator_without_iter_method.ks` — **expected:** `Iterable` · **got:** `no member 'iter' on type 'NotIterable'`, `does not conform to protocol: ? !: Iterator`, `no member 'next' on type '?'`
-- [ ] `expressions/protocol_operators/operator_without_protocol_conformance.ks` — **expected:** `add` · **got:** `does not conform to protocol: Number !: AddOperatorProtocol` (correct) + `no member 'add' on type 'Number'` (cascading; annotation matches the first, second is flagged unexpected)
+- [x] `expressions/protocol_operators/operator_without_protocol_conformance.ks` — **expected:** `add` · **got:** `does not conform to protocol: Number !: AddOperatorProtocol` (correct) + `no member 'add' on type 'Number'` (cascading; annotation matches the first, second is flagged unexpected)
 
 ## Match-expression diagnostics
 
@@ -509,7 +511,7 @@ No analyzer in lib2 detects delegating-init calls from non-init contexts. Curren
 
 > **lib1:** `kestrel-semantic-analyzers/src/analyzers/type_check/mod.rs` — `try x` desugar expects `Tryable` conformance, which surfaces the `tryExtract` diagnostic when the operand type doesn't have it.
 
-- [ ] `expressions/control_flow/try_on_non_tryable_type.ks` — **expected:** `tryExtract`
+- [x] `expressions/control_flow/try_on_non_tryable_type.ks` — **expected:** `tryExtract`
 
 ## Or-pattern inconsistent bindings
 
@@ -526,3 +528,102 @@ No analyzer in lib2 detects delegating-init calls from non-init contexts. Curren
 ## Move checker silent on non-Copyable double-move (with stdlib)
 
 - [x] `memory_model/copy_semantics/not_copyable_move_semantics_with_stdlib.ks` — **expected at line 15:** `use of moved value` · **got:** none (pre-existing; was never passing)
+
+---
+
+# Stdlib
+
+Run: `file_tests --test-threads=1 stdlib` on `feature/incremental-hecs` (2026-04-20).
+Result: **142 passed · 60 failed**.
+
+## E205 `cannot pass temporary value to 'mutating' parameter` — iterator / view chaining
+
+Method chains like `arr.iter().map(f).collect()` fail because iterator adapters take `mutating self` and validation rejects a temporary as the receiver. Dominant cause across iterator/views/string tests.
+
+- [ ] `stdlib/iterator/filter_map_explicit.ks` — lines 8, 14, 18
+- [ ] `stdlib/iterator/filter_map_flatten.ks` — lines 13, 28 (+ unrelated errors)
+- [ ] `stdlib/iterator/flatten_iterator.ks` — line 21
+- [ ] `stdlib/iterator/fuse_and_cycle.ks` — lines 8, 14
+- [ ] `stdlib/iterator/inspect_adapter.ks` — lines 8, 16, 22
+- [ ] `stdlib/iterator/intersperse_adapter.ks` — lines 8, 17, 23
+- [ ] `stdlib/iterator/intersperse_with_adapter.ks` — lines 8, 17, 23, 28
+- [ ] `stdlib/iterator/is_sorted_by_comparator.ks` — 7 occurrences
+- [ ] `stdlib/iterator/is_sorted_by_key.ks` — 8 occurrences
+- [ ] `stdlib/iterator/is_sorted_checks.ks` — 11 occurrences
+- [ ] `stdlib/iterator/map_filter_collect.ks` — lines 15, 21, 27
+- [ ] `stdlib/iterator/min_by_max_by.ks` — 5 occurrences
+- [ ] `stdlib/iterator/min_max_sorted.ks` — 5 occurrences
+- [ ] `stdlib/iterator/reduce_adapter.ks` — 4 occurrences
+- [ ] `stdlib/iterator/take_skip_methods.ks` — lines 15, 20, 25, 30
+- [ ] `stdlib/iterator/terminal_operations.ks` — 12 occurrences (test also has explicit `// ERROR` mismatches)
+- [ ] `stdlib/iterator/try_fold_adapter.ks` — 4 occurrences
+- [ ] `stdlib/iterator/try_for_each_adapter.ks` — 3 occurrences
+- [ ] `stdlib/iterator/unzip_iterator.ks` — lines 13, 25
+- [ ] `stdlib/iterator/utility_adapters.ks` — 5 occurrences
+- [ ] `stdlib/iterator/zip_chain_enumerate.ks` — lines 18, 25, 32
+- [ ] `stdlib/string/replacement_and_splitting.ks` — lines 36, 44, 50, 56
+- [ ] `stdlib/views/bytes_view_iter.ks` — lines 10, 24
+- [ ] `stdlib/views/chars_view_iter_and_count.ks` — line 13
+- [ ] `stdlib/views/graphemes_view.ks` — line 13
+- [ ] `stdlib/views/lines_view.ks` — lines 9, 17, 23, 30
+- [ ] `stdlib/views/string_iter.ks` — lines 10, 16, 21, 28
+
+## Type parameter not in scope inside stdlib signatures
+
+`cannot find type '<P>' in this scope` emitted from **stdlib** source (not user code). Generic params declared on the enclosing extension/method aren't visible to a specific child construct — likely a scope-linking gap for certain signature shapes.
+
+- [ ] `collections/array.ks:783` — `T` (triggered by `stdlib/array/append_from_iterable.ks`)
+- [ ] `collections/dictionary.ks:802` — `K`, `V` (triggered by `stdlib/dictionary/dictionary_merge_from_pairs.ks`)
+- [ ] `collections/set.ks:222` — `T` (triggered by `stdlib/set/set_insert_contents_of.ks`)
+- [ ] `result/optional.ks:227` — `U` (triggered by `stdlib/optional/optional_flatten.ks`)
+- [ ] `iter/iterator.ks:249` — `T` (triggered by `stdlib/iterator/filter_map_flatten.ks`)
+- [ ] `iter/iterator.ks:401` — `Item` (triggered by `stdlib/iterator/zip_chain_enumerate.ks`)
+- [ ] `iter/iterator.ks:578` — `A`, `B` (triggered by `stdlib/iterator/unzip_iterator.ks`)
+
+## Derived-protocol bounds not propagated to generic params
+
+Generic param bound on base protocol (e.g. `Equal`, `Comparable`) doesn't satisfy auto-derived/refinement protocols (`NotEqual`, `Greater`, `Multipliable`). Solver emits `Item !: NotEqual` + `no member 'notEquals' on type 'Item'`.
+
+- [ ] `stdlib/array/misc_extensions.ks` — `NotEqual` on `Item` (16 errors)
+- [ ] `stdlib/array/init_count_generator.ks` — `Multipliable` on inferred closure param
+- [ ] `stdlib/iterator/flatten_iterator.ks` — `NotEqual` on `Item`
+- [ ] `stdlib/iterator/inspect_adapter.ks` — `Greater` on `Item`
+- [ ] `stdlib/iterator/map_filter_collect.ks` — `NotEqual`, `Multipliable`
+- [ ] `stdlib/iterator/peekable_adapter.ks` — `NotEqual` on `Item`
+- [ ] `stdlib/iterator/take_skip_methods.ks` — `NotEqual` on `Item`
+- [ ] `stdlib/iterator/zip_chain_enumerate.ks` — `NotEqual` on `Item`
+- [ ] `stdlib/memory/memory_allocator.ks` — `NotEqual` on `?`
+- [ ] `stdlib/memory/memory_raw_pointer.ks` — `NotEqual` on `?`
+
+## Runtime exit-code failures (compile OK, assert/behavior wrong)
+
+Program compiles and links but exits non-zero — asserts failing or behavior diverging from expectation. Likely codegen or semantic issues.
+
+- [ ] `stdlib/char/char_case_conversion.ks` — exit -1
+- [ ] `stdlib/dictionary/dictionary_capacity_management.ks` — exit -1
+- [ ] `stdlib/dictionary/dictionary_subscripts.ks` — exit 6
+- [ ] `stdlib/float32/float32_conversion.ks` — exit 1
+- [ ] `stdlib/float64/float64_clamp_lerp_conversion_format.ks` — exit 15
+- [ ] `stdlib/float64/float64_constructors_and_constants.ks` — exit 5
+- [ ] `stdlib/int16/int16_bitwidth_and_conversion.ks` — exit 1
+- [ ] `stdlib/int16/int16_boundaries_and_constants.ks` — exit 1
+- [ ] `stdlib/int32/int32_bitwidth_and_conversion.ks` — exit 1
+- [ ] `stdlib/int32/int32_boundaries_and_constants.ks` — exit 1
+- [ ] `stdlib/int64/int64_byte_conversion_big_endian.ks` — exit 11
+- [ ] `stdlib/int64/int64_byte_conversion_little_endian.ks` — exit 7
+- [ ] `stdlib/io/io_error_types.ks` — exit 2
+- [ ] `stdlib/string/case_conversion.ks` — exit 7
+- [ ] `stdlib/uint8/uint8_bitwidth_and_conversion.ks` — exit 17
+- [ ] `stdlib/uint16/uint16_bitwidth_and_conversion.ks` — exit 11
+- [ ] `stdlib/uint32/uint32_bitwidth_and_conversion.ks` — exit 11
+- [ ] `stdlib/uint64/uint64_bitwidth_and_conversion.ks` — exit 5
+- [ ] `stdlib/uint64/uint64_boundaries_and_constants.ks` — exit 7
+- [ ] `stdlib/uint64/uint64_overflow_behavior.ks` — exit 3
+
+## One-offs
+
+- [ ] `stdlib/result/result_transforms.ks` — link failure: `call to undeclared function: _K0N3_std6_result6_Result5_isErr…` (symbol mangling / monomorphization miss)
+- [ ] `stdlib/int64/int64_parsing.ks` — `parse()` arity mismatch: test calls with 2 args, stdlib signature takes 1
+- [ ] `stdlib/array/subscript_assignment.ks` — wrong diagnostic: expected `cannot assign to temporary value`, got E202 `cannot assign to this expression`
+- [ ] `stdlib/float64/float64_exp_and_log.ks` — line 26: `no member '(subscript)' on type 'Float64'` (subscript lookup unexpectedly triggered on scalar)
+- [ ] `memory_model/copy_semantics/not_copyable_move_semantics_with_stdlib.ks` — expected `use of moved value` at line 15, not emitted (also listed above in move-checker bucket)

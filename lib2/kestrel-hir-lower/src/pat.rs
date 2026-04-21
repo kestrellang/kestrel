@@ -159,6 +159,19 @@ impl LowerCtx<'_> {
                                     .with_message("use a single @ pattern with the outermost binding"),
                             ])
                     );
+                    // Still define the outer binding so arm-body references
+                    // resolve, but replace the subpattern with Error so the
+                    // exhaustiveness pass skips this arm instead of seeing
+                    // an irrefutable @-over-wildcard.
+                    let local = self.define_local(name, *is_mut || force_mut, span.clone());
+                    let err_sub = self.alloc_pat(HirPat::Error {
+                        span: span.clone(),
+                    });
+                    return self.alloc_pat(HirPat::At {
+                        binding: local,
+                        subpattern: err_sub,
+                        span: span.clone(),
+                    });
                 }
 
                 let local = self.define_local(name, *is_mut || force_mut, span.clone());

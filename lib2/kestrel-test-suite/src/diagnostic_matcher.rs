@@ -184,14 +184,17 @@ pub fn check(
     let mut errors = Vec::new();
     let mut matched_diags: Vec<bool> = vec![false; test_diags.len()];
 
-    // Check 1: every annotation must have a matching diagnostic
+    // Check 1: every annotation must have a matching diagnostic.
+    // One annotation covers every matching diagnostic on its line — if the
+    // compiler emits several legitimate errors on the same expression (e.g.
+    // an arg type mismatch *and* a return type mismatch on the same call),
+    // a single `// ERROR: type` shouldn't flag the extras as unexpected.
     for ann in annotations {
         let mut found = false;
         for (i, diag) in test_diags.iter().enumerate() {
             if matches_annotation(ann, diag) {
                 found = true;
                 matched_diags[i] = true;
-                break;
             }
         }
         if !found {

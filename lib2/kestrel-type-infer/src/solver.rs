@@ -108,7 +108,19 @@ fn report_unsolved(ctx: &mut InferCtx<'_>) {
                 InferError::DoesNotConform { ty, protocol, span }
             }
             Constraint::Associated { container, name, span, .. } => {
-                if ctx.is_error(ctx.resolve(container)) {
+                let resolved = ctx.resolve(container);
+                if ctx.is_error(resolved) {
+                    continue;
+                }
+                // Container stayed an unresolved literal TyVar — the only way
+                // this happens is when no `Default<Kind>LiteralType` builtin
+                // exists (e.g. stdlib disabled in a diagnostics test) or the
+                // literal was already flagged in a prior mismatch. Either way,
+                // any associated-type lookup is a cascading non-answer.
+                if matches!(
+                    ctx.slot(resolved),
+                    TySlot::Unresolved { literal: Some(_) }
+                ) {
                     continue;
                 }
                 InferError::NoAssociatedType { container, name, span }

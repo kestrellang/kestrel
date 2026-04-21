@@ -6,7 +6,7 @@ module Test
 struct Bad {
     var value: lang.i64
 
-    init(value: lang.i64) {
+    init(value value: lang.i64) {
         self.value = value
     }
 

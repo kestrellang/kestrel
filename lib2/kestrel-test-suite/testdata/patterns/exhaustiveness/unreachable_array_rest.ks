@@ -1,5 +1,5 @@
 // test: diagnostics
-// stdlib: false
+// stdlib: true
 
 module Main
 
@@ -8,6 +8,6 @@ func test(arr: [lang.i64]) -> lang.i64 {
         [] => 0,
         [x] => x,
         [first, ..rest, last] => lang.i64_add(first, last),
-        [..] => -1 // WARN: unreachable
+        [..] => 0 // WARN: unreachable
     }
 }
