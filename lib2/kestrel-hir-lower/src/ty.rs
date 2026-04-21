@@ -287,7 +287,10 @@ fn build_assoc_projection_base(
 /// Build a HirTy for a `Self`-resolved entity (returned by `find_self_type`).
 ///
 /// `find_self_type` resolves Self to the nearest Struct/Enum/Protocol (or an
-/// extension's target type), so we dispatch on NodeKind here.
+/// extension's target type), so we dispatch on NodeKind here. The protocol
+/// case emits `HirTy::SelfType` — the abstract implementer — so
+/// monomorphization can substitute it with the concrete caller type.
+/// Struct/Enum cases stay concrete because their entity is fully known.
 fn build_self_hir_ty(ctx: &QueryContext<'_>, self_entity: Entity, span: &Span) -> HirTy {
     match ctx.get::<NodeKind>(self_entity).cloned() {
         Some(NodeKind::Enum) => HirTy::Enum {
@@ -295,11 +298,7 @@ fn build_self_hir_ty(ctx: &QueryContext<'_>, self_entity: Entity, span: &Span) -
             args: Vec::new(),
             span: span.clone(),
         },
-        Some(NodeKind::Protocol) => HirTy::Protocol {
-            entity: self_entity,
-            args: Vec::new(),
-            span: span.clone(),
-        },
+        Some(NodeKind::Protocol) => HirTy::SelfType(self_entity, span.clone()),
         Some(NodeKind::TypeParameter) => HirTy::Param(self_entity, span.clone()),
         _ => HirTy::Struct {
             entity: self_entity,

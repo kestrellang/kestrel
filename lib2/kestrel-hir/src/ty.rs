@@ -50,6 +50,14 @@ pub enum HirTy {
     },
     /// Type parameter resolved to its declaring entity.
     Param(Entity, Span),
+    /// `Self` inside a protocol declaration or `extend <protocol>` — the
+    /// abstract implementing type. Resolves to a concrete type at
+    /// monomorphization time via `MirTy::SelfType`. Only used in contexts
+    /// where the enclosing "Self" is a protocol; extensions on concrete
+    /// types emit `Struct`/`Enum` directly. Carries the owning protocol
+    /// entity so every lowering site can substitute it without relying on
+    /// ambient context (e.g. where-clause RHS lowering from an outer body).
+    SelfType(Entity, Span),
     /// Abstract associated-type projection: `base.assoc` (e.g. `T.Item`, `Self.Output`).
     /// `base` is the receiver type; `assoc` is the TypeAlias entity on the protocol.
     /// Nested projections chain naturally: `T.Next.Next` is AssocProjection over AssocProjection.

@@ -14,14 +14,6 @@ use crate::ty::{resolve_callable_return_type, resolve_callable_types};
 pub fn lower_function_sig(ctx: &mut LowerCtx, entity: Entity) -> FunctionId {
     let name = ctx.register_name(entity);
 
-    // Scope: if this function belongs to a protocol (directly, or via
-    // `extend P` where P is a protocol), mark `current_self_protocol` so
-    // `lower_type` can re-tag `HirTy::Protocol(P)` (the HIR encoding of
-    // bare `Self` in that scope) as `MirTy::SelfType`. Saved/restored
-    // around the whole lowering so the body lowering also sees it.
-    let prev_self_proto = ctx.current_self_protocol;
-    ctx.current_self_protocol = owning_self_protocol(ctx, entity);
-
     // Resolve return type through the central callable-return query so
     // the unit default applies uniformly (see `LowerCallableReturnType`).
     let ret_ty = resolve_callable_return_type(ctx, entity);
@@ -119,9 +111,7 @@ pub fn lower_function_sig(ctx: &mut LowerCtx, entity: Entity) -> FunctionId {
 
     // Intrinsic functions have params but no body — register and stop
     if ctx.world.get::<Intrinsic>(entity).is_some() {
-        let fid = ctx.module.add_function(def);
-        ctx.current_self_protocol = prev_self_proto;
-        return fid;
+        return ctx.module.add_function(def);
     }
 
     let func_id = ctx.module.add_function(def);
@@ -131,35 +121,7 @@ pub fn lower_function_sig(ctx: &mut LowerCtx, entity: Entity) -> FunctionId {
         crate::body_lower::lower_function_body(ctx, entity, func_id);
     }
 
-    ctx.current_self_protocol = prev_self_proto;
     func_id
-}
-
-/// Walk the entity's container chain to find the protocol for which `Self`
-/// refers to the implementer: a `protocol P` declaration, or an `extend T`
-/// whose target `T` is itself a protocol. Returns `None` for methods on
-/// concrete types (struct/enum extensions) — their `Self` reaches MIR as
-/// a concrete `Named(T)` that layout can handle directly.
-fn owning_self_protocol(ctx: &LowerCtx, entity: Entity) -> Option<Entity> {
-    let parent = ctx.world.parent_of(entity)?;
-    match ctx.world.get::<NodeKind>(parent)? {
-        NodeKind::Protocol => Some(parent),
-        NodeKind::Extension => {
-            // Extension target may be a protocol (`extend Iterator`) or a
-            // concrete type (`extend Array`). Only the protocol case needs
-            // the Self re-tag.
-            let target = ctx.query.query(kestrel_name_res::ExtensionTargetEntity {
-                extension: parent,
-                root: ctx.root,
-            })?;
-            if matches!(ctx.world.get::<NodeKind>(target)?, NodeKind::Protocol) {
-                Some(target)
-            } else {
-                None
-            }
-        },
-        _ => None,
-    }
 }
 
 /// Determine the FunctionKind based on entity's NodeKind and parent context.

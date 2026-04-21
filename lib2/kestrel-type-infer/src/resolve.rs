@@ -583,6 +583,26 @@ impl TypeResolver for WorldResolver<'_> {
             .filter(|&c| self.ctx.has::<Static>(c))
             .collect();
 
+        if std::env::var("DEBUG_STATIC_MEMBER").is_ok() {
+            eprintln!(
+                "resolve_static_member: name={} candidates={}",
+                name,
+                static_candidates.len()
+            );
+            for &c in &static_candidates {
+                let callable = self.ctx.get::<kestrel_ast_builder::Callable>(c);
+                eprintln!(
+                    "  candidate {:?} params={:?}",
+                    c,
+                    callable.map(|cc| cc
+                        .params
+                        .iter()
+                        .map(|p| (p.label.clone(), p.name.clone()))
+                        .collect::<Vec<_>>())
+                );
+            }
+        }
+
         if static_candidates.is_empty() {
             return Err(MemberError::NotFound);
         }
@@ -593,6 +613,14 @@ impl TypeResolver for WorldResolver<'_> {
             .copied()
             .filter(|&c| self.matches_labels(c, &arg_labels))
             .collect();
+
+        if std::env::var("DEBUG_STATIC_MEMBER").is_ok() {
+            eprintln!(
+                "  arg_labels={:?} matches={}",
+                arg_labels,
+                matches.len()
+            );
+        }
 
         let member = match matches.len() {
             0 => {

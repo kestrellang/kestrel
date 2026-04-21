@@ -1334,6 +1334,19 @@ pub(crate) fn lower_hir_ty_with_subs(
             }
             ctx.param(*entity)
         },
+        HirTy::SelfType(_) => {
+            // Constraint-generation time: emit a `Protocol(owning_protocol)`
+            // TyVar so `resolve_associated_type` can look up `Self.Item` etc.
+            // through the protocol's associated types, same as the pre-
+            // HirTy::SelfType behavior (when bare `Self` lowered to
+            // `HirTy::Protocol(P)`). `lower_hir_ty_sub` substitutes this with
+            // the concrete receiver TyVar at method-dispatch time.
+            if let Some(p) = ctx.owning_self_protocol() {
+                ctx.protocol_ty(p, Vec::new())
+            } else {
+                ctx.fresh()
+            }
+        },
         HirTy::Never(_) => ctx.never(),
         HirTy::Infer(_) => ctx.fresh(),
         HirTy::Error(span) => ctx.report_error(InferError::FromHir { span: span.clone() }),
@@ -1416,6 +1429,7 @@ fn hir_ty_span(ty: &HirTy) -> Span {
         | HirTy::Tuple(_, span)
         | HirTy::Function { span, .. }
         | HirTy::Param(_, span)
+        | HirTy::SelfType(span)
         | HirTy::Never(span)
         | HirTy::Infer(span)
         | HirTy::Error(span) => span.clone(),

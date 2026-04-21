@@ -160,6 +160,35 @@ impl<'a> InferCtx<'a> {
         }
     }
 
+    /// Walk the owner's container chain to find the protocol for which `Self`
+    /// refers to the implementer: a `protocol P { … }` or `extend T { … }` whose
+    /// target `T` is a protocol. Returns `None` for bodies in concrete-type
+    /// scopes (struct/enum methods) — `Self` there lowers to the concrete type
+    /// directly, not through `HirTy::SelfType`.
+    pub fn owning_self_protocol(&self) -> Option<Entity> {
+        let mut current = Some(self.owner);
+        while let Some(e) = current {
+            match self.query_ctx.get::<kestrel_ast_builder::NodeKind>(e) {
+                Some(kestrel_ast_builder::NodeKind::Protocol) => return Some(e),
+                Some(kestrel_ast_builder::NodeKind::Extension) => {
+                    let target = self.query_ctx.query(kestrel_name_res::ExtensionTargetEntity {
+                        extension: e,
+                        root: self.root,
+                    })?;
+                    if matches!(
+                        self.query_ctx.get::<kestrel_ast_builder::NodeKind>(target),
+                        Some(kestrel_ast_builder::NodeKind::Protocol)
+                    ) {
+                        return Some(target);
+                    }
+                    return None;
+                },
+                _ => current = self.query_ctx.parent_of(e),
+            }
+        }
+        None
+    }
+
     // ===== TyVar creation =====
 
     /// Allocate a fresh unconstrained type variable.
