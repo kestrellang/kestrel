@@ -50,20 +50,8 @@ impl QueryFn for ConformingProtocols {
             gather_protocol_conformances(ctx, *ext, self.root, &mut protocols, &mut visited);
         }
 
-        // Walk extensions of discovered protocols for additional conformances.
-        // E.g., `extend Comparable: Less[Self]` adds Less through a protocol extension.
-        let mut i = 0;
-        while i < protocols.len() {
-            let proto = protocols[i];
-            let proto_extensions = ctx.query(ExtensionsFor {
-                target: proto,
-                root: self.root,
-            });
-            for ext in &proto_extensions {
-                gather_protocol_conformances(ctx, *ext, self.root, &mut protocols, &mut visited);
-            }
-            i += 1;
-        }
+        // Walk extensions of discovered protocols (e.g. `extend Comparable: Less[Self]`).
+        expand_protocol_closure_in_place(ctx, self.root, &mut protocols, &mut visited);
 
         protocols
     }
@@ -71,6 +59,60 @@ impl QueryFn for ConformingProtocols {
     fn describe(&self) -> String {
         format!("ConformingProtocols({:?})", self.entity)
     }
+}
+
+// ===== Shared transitive-closure walk =====
+
+/// Expand `protocols` in place: for each protocol already in the list, walk
+/// its inherited parents (via direct `Conformances`) and the conformances
+/// added via `extend P: Q` (via `ExtensionsFor`). Protocols already in
+/// `visited` are skipped.
+///
+/// Callers that seed `protocols` from where-clause bounds (as opposed to a
+/// `Conformances` component) use this to complete the transitive closure.
+/// Used internally by `ConformingProtocols`; exposed for use by
+/// `kestrel-type-infer` on type-parameter / associated-type bounds.
+pub fn expand_protocol_closure_in_place(
+    ctx: &QueryContext<'_>,
+    root: Entity,
+    protocols: &mut Vec<Entity>,
+    visited: &mut HashSet<Entity>,
+) {
+    let mut i = 0;
+    while i < protocols.len() {
+        let proto = protocols[i];
+        // Inherited parents (protocol inheritance via direct Conformances)
+        gather_protocol_conformances(ctx, proto, root, protocols, visited);
+        // Extension-added conformances (e.g. `extend Equatable: NotEqual`)
+        let proto_extensions = ctx.query(ExtensionsFor {
+            target: proto,
+            root,
+        });
+        for ext in &proto_extensions {
+            gather_protocol_conformances(ctx, *ext, root, protocols, visited);
+        }
+        i += 1;
+    }
+}
+
+/// Convenience wrapper: expand a seed set of protocol entities into their
+/// full transitive closure (seeds ∪ inherited parents ∪ extension-added).
+///
+/// Seeds already present in the result are deduplicated.
+pub fn expand_protocol_closure(
+    ctx: &QueryContext<'_>,
+    root: Entity,
+    seeds: impl IntoIterator<Item = Entity>,
+) -> Vec<Entity> {
+    let mut protocols = Vec::new();
+    let mut visited = HashSet::new();
+    for seed in seeds {
+        if visited.insert(seed) {
+            protocols.push(seed);
+        }
+    }
+    expand_protocol_closure_in_place(ctx, root, &mut protocols, &mut visited);
+    protocols
 }
 
 // ===== Helpers =====
@@ -138,8 +180,71 @@ fn resolve_conformance_entity(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kestrel_ast_builder::Name;
+    use kestrel_ast::PathSegment;
+    use kestrel_ast_builder::{ConformanceItem, Conformances, ExtensionTarget, Name, Typed};
     use kestrel_hecs::World;
+    use kestrel_span2::Span;
+    use kestrel_syntax_tree2::{GreenNodeBuilder, SyntaxKind, SyntaxNode};
+
+    fn span() -> Span {
+        Span::synthetic(0)
+    }
+
+    /// Build a throwaway SyntaxNode — `ConformanceItem::Positive` stores one
+    /// but the conformance walk never reads it.
+    fn fake_syntax() -> SyntaxNode {
+        let mut builder = GreenNodeBuilder::new();
+        builder.start_node(SyntaxKind::Root.into());
+        builder.finish_node();
+        SyntaxNode::new_root(builder.finish())
+    }
+
+    fn named_ast(name: &str) -> AstType {
+        AstType::Named {
+            segments: vec![PathSegment {
+                name: name.into(),
+                type_args: vec![],
+                span: span(),
+            }],
+            span: span(),
+        }
+    }
+
+    fn positive(name: &str) -> ConformanceItem {
+        ConformanceItem::Positive(named_ast(name), fake_syntax())
+    }
+
+    fn spawn_protocol(world: &mut World, parent: Entity, name: &str) -> Entity {
+        let e = world.spawn();
+        world.set(e, NodeKind::Protocol);
+        world.set(e, Name(name.into()));
+        world.set(e, Typed);
+        world.set_parent(e, parent);
+        e
+    }
+
+    fn spawn_struct(world: &mut World, parent: Entity, name: &str) -> Entity {
+        let e = world.spawn();
+        world.set(e, NodeKind::Struct);
+        world.set(e, Name(name.into()));
+        world.set(e, Typed);
+        world.set_parent(e, parent);
+        e
+    }
+
+    fn spawn_extension(
+        world: &mut World,
+        parent: Entity,
+        target_name: &str,
+        added: Vec<&str>,
+    ) -> Entity {
+        let e = world.spawn();
+        world.set(e, NodeKind::Extension);
+        world.set(e, ExtensionTarget(named_ast(target_name)));
+        world.set(e, Conformances(added.iter().map(|n| positive(n)).collect()));
+        world.set_parent(e, parent);
+        e
+    }
 
     #[test]
     fn no_conformances() {
@@ -150,10 +255,7 @@ mod tests {
         world.set(root, NodeKind::Module);
         world.set(root, Name("<root>".into()));
 
-        let bare_struct = world.spawn();
-        world.set(bare_struct, NodeKind::Struct);
-        world.set(bare_struct, Name("Bare".into()));
-        world.set_parent(bare_struct, root);
+        let bare_struct = spawn_struct(&mut world, root, "Bare");
 
         let ctx = world.query_context();
         let protocols = ctx.query(ConformingProtocols {
@@ -161,5 +263,84 @@ mod tests {
             root,
         });
         assert!(protocols.is_empty());
+    }
+
+    /// `extend Equatable: NotEqual` should make any `S: Equatable` also
+    /// conform to `NotEqual`.
+    #[test]
+    fn extension_added_conformance() {
+        let mut world = World::new();
+        world.begin_revision();
+
+        let root = world.spawn();
+        world.set(root, NodeKind::Module);
+        world.set(root, Name("<root>".into()));
+
+        let equatable = spawn_protocol(&mut world, root, "Equatable");
+        let not_equal = spawn_protocol(&mut world, root, "NotEqual");
+        spawn_extension(&mut world, root, "Equatable", vec!["NotEqual"]);
+
+        let s = spawn_struct(&mut world, root, "S");
+        world.set(s, Conformances(vec![positive("Equatable")]));
+
+        let ctx = world.query_context();
+        let protocols = ctx.query(ConformingProtocols { entity: s, root });
+        assert!(protocols.contains(&equatable), "missing Equatable");
+        assert!(protocols.contains(&not_equal), "missing NotEqual from extension");
+    }
+
+    /// Chained extensions: `Ord` inherits `Eq`; `extend Ord: Greater`;
+    /// `extend Greater: AtLeastAsGreat`. `S: Ord` should see all four.
+    #[test]
+    fn nested_extension_added_conformance() {
+        let mut world = World::new();
+        world.begin_revision();
+
+        let root = world.spawn();
+        world.set(root, NodeKind::Module);
+        world.set(root, Name("<root>".into()));
+
+        let eq = spawn_protocol(&mut world, root, "Eq");
+        let ord = spawn_protocol(&mut world, root, "Ord");
+        world.set(ord, Conformances(vec![positive("Eq")])); // Ord: Eq
+        let greater = spawn_protocol(&mut world, root, "Greater");
+        let at_least = spawn_protocol(&mut world, root, "AtLeastAsGreat");
+        spawn_extension(&mut world, root, "Ord", vec!["Greater"]);
+        spawn_extension(&mut world, root, "Greater", vec!["AtLeastAsGreat"]);
+
+        let s = spawn_struct(&mut world, root, "S");
+        world.set(s, Conformances(vec![positive("Ord")]));
+
+        let ctx = world.query_context();
+        let protocols = ctx.query(ConformingProtocols { entity: s, root });
+        for (e, name) in [
+            (ord, "Ord"),
+            (eq, "Eq"),
+            (greater, "Greater"),
+            (at_least, "AtLeastAsGreat"),
+        ] {
+            assert!(protocols.contains(&e), "missing {name}");
+        }
+    }
+
+    /// `expand_protocol_closure` directly: seed with `[Equatable]`, expect
+    /// `NotEqual` via the `extend Equatable: NotEqual` extension.
+    #[test]
+    fn expand_protocol_closure_from_seeds() {
+        let mut world = World::new();
+        world.begin_revision();
+
+        let root = world.spawn();
+        world.set(root, NodeKind::Module);
+        world.set(root, Name("<root>".into()));
+
+        let equatable = spawn_protocol(&mut world, root, "Equatable");
+        let not_equal = spawn_protocol(&mut world, root, "NotEqual");
+        spawn_extension(&mut world, root, "Equatable", vec!["NotEqual"]);
+
+        let ctx = world.query_context();
+        let closure = expand_protocol_closure(&ctx, root, [equatable]);
+        assert!(closure.contains(&equatable));
+        assert!(closure.contains(&not_equal), "seed expansion missed NotEqual");
     }
 }

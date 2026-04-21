@@ -16,3 +16,4 @@ kestrel-ast = { path = "../kestrel-ast" }
 kestrel-lexer2 = { path = "../kestrel-lexer" }
 kestrel-parser2 = { path = "../kestrel-parser" }
 kestrel-span2 = { path = "../kestrel-span" }
+kestrel-syntax-tree2 = { path = "../kestrel-syntax-tree" }

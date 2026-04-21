@@ -544,7 +544,7 @@ extend Iterator {
     /// Example:
     ///     [1, 2, 3].iter().filter({ it > 1 }).collect()  // [2, 3]
     ///     (1..5).iter().map({ it * it }).collect()  // [1, 4, 9, 16]
-    public mutating func collect() -> Array[Item] {
+    public consuming func collect() -> Array[Item] {
         var result = Array[Item]();
         while let .Some(item) = self.next() {
             result.append(item);
@@ -558,7 +558,7 @@ extend Iterator {
     ///
     /// Example:
     ///     [1, 2, 3, 4, 5].iter().filter({ it % 2 == 0 }).count()  // 2
-    public mutating func count() -> Int64 {
+    public consuming func count() -> Int64 {
         var count = Int64(intLiteral: 0);
         while let .Some(_) = self.next() {
             count = count + Int64(intLiteral: 1);
@@ -575,7 +575,7 @@ extend Iterator {
     ///     let pairs = [(1, "a"), (2, "b"), (3, "c")];
     ///     let (nums, strs) = pairs.iter().unzip();
     ///     // nums = [1, 2, 3], strs = ["a", "b", "c"]
-    public mutating func unzip[A, B]() -> (Array[A], Array[B]) where Item = (A, B) {
+    public consuming func unzip[A, B]() -> (Array[A], Array[B]) where Item = (A, B) {
         var left = Array[A]();
         var right = Array[B]();
         while let .Some(pair) = self.next() {
@@ -602,7 +602,7 @@ extend Iterator {
     ///     [1, 2, 3, 4].iter().fold(initial: 0, combine: |acc, x| acc + x)  // 10
     ///     [1, 2, 3].iter().fold(initial: 1, combine: |acc, x| acc * x)  // 6
     ///     [].iter().fold(initial: 42, combine: |acc, x| acc + x)  // 42
-    public mutating func fold[Acc](initial initial: Acc, combine combine: (Acc, Item) -> Acc) -> Acc {
+    public consuming func fold[Acc](initial initial: Acc, combine combine: (Acc, Item) -> Acc) -> Acc {
         var acc = initial;
         while let .Some(item) = self.next() {
             acc = combine(acc, item);
@@ -618,7 +618,7 @@ extend Iterator {
     ///     [1, 2, 3, 4].iter().reduce(combine: |a, b| a + b)  // Some(10)
     ///     [5].iter().reduce(combine: |a, b| a + b)  // Some(5)
     ///     [].iter().reduce(combine: |a, b| a + b)  // None
-    public mutating func reduce(combine combine: (Item, Item) -> Item) -> Item? {
+    public consuming func reduce(combine combine: (Item, Item) -> Item) -> Item? {
         if let .Some(first) = self.next() {
             .Some(self.fold(initial: first, combine: combine))
         } else {
@@ -693,7 +693,7 @@ extend Iterator {
     ///
     /// Example:
     ///     [1, 2, 3].iter().forEach({ print(it) })
-    public mutating func forEach(action: (Item) -> ()) {
+    public consuming func forEach(action: (Item) -> ()) {
         while let .Some(item) = self.next() {
             action(item);
         }
@@ -811,7 +811,7 @@ extend Iterator {
     /// Example:
     ///     [1, 2, 3].iter().last()  // Some(3)
     ///     [].iter().last()         // None
-    public mutating func last() -> Item? {
+    public consuming func last() -> Item? {
         var last: Item? = .None;
         while let .Some(item) = self.next() {
             last = .Some(item);
@@ -864,7 +864,7 @@ extend Iterator where Item: Comparable {
     /// Example:
     ///     [3, 1, 4, 1, 5].iter().min()  // Some(1)
     ///     [].iter().min()               // None
-    public mutating func min() -> Item? {
+    public consuming func min() -> Item? {
         self.reduce(combine: { (a, b) in if a.compare(b) == Ordering.Less { a } else { b } })
     }
 
@@ -875,7 +875,7 @@ extend Iterator where Item: Comparable {
     /// Example:
     ///     [3, 1, 4, 1, 5].iter().max()  // Some(5)
     ///     [].iter().max()               // None
-    public mutating func max() -> Item? {
+    public consuming func max() -> Item? {
         self.reduce(combine: { (a, b) in if a.compare(b) == Ordering.Greater { a } else { b } })
     }
 
@@ -886,7 +886,7 @@ extend Iterator where Item: Comparable {
     /// Example:
     ///     [3, 1, 4, 1, 5].iter().sorted()  // [1, 1, 3, 4, 5]
     ///     [3, 1, 2].iter().filter({ it > 1 }).sorted()  // [2, 3]
-    public mutating func sorted() -> Array[Item] {
+    public consuming func sorted() -> Array[Item] {
         var arr = self.collect();
         arr.sort(by: { (a, b) in a.compare(b) == Ordering.Less });
         arr
@@ -905,7 +905,7 @@ extend Iterator where Item: Comparable {
     ///     words.iter().minBy(key: { it.count })  // Some("hi")
     ///
     ///     [].iter().minBy(key: { it })  // None
-    public mutating func minBy[K](key: (Item) -> K) -> Item? where K: Comparable {
+    public consuming func minBy[K](key: (Item) -> K) -> Item? where K: Comparable {
         if let .Some(first) = self.next() {
             var minItem = first;
             var minKey = key(first);
@@ -935,7 +935,7 @@ extend Iterator where Item: Comparable {
     ///     words.iter().maxBy(key: { it.count })  // Some("hello")
     ///
     ///     [].iter().maxBy(key: { it })  // None
-    public mutating func maxBy[K](key: (Item) -> K) -> Item? where K: Comparable {
+    public consuming func maxBy[K](key: (Item) -> K) -> Item? where K: Comparable {
         if let .Some(first) = self.next() {
             var maxItem = first;
             var maxKey = key(first);
@@ -966,7 +966,7 @@ extend Iterator where Item: Comparable {
     ///
     ///     // Short-circuits on first out-of-order pair
     ///     [1, 0, 2, 3, 4, 5, ...].iter().isSorted()  // false (stops at 1, 0)
-    public mutating func isSorted() -> Bool {
+    public consuming func isSorted() -> Bool {
         if let .Some(first) = self.next() {
             var prev = first;
             while let .Some(item) = self.next() {
@@ -984,7 +984,7 @@ extend Iterator where Item: Comparable {
     /// Example:
     ///     [5, 4, 3, 2, 1].iter().isSortedDescending()  // true
     ///     [5, 3, 4, 2, 1].iter().isSortedDescending()  // false
-    public mutating func isSortedDescending() -> Bool {
+    public consuming func isSortedDescending() -> Bool {
         if let .Some(first) = self.next() {
             var prev = first;
             while let .Some(item) = self.next() {
@@ -1016,7 +1016,7 @@ extend Iterator {
     ///     // Case-insensitive string sorting
     ///     ["Apple", "banana", "Cherry"].iter()
     ///         .isSorted(by: |a, b| a.lowercase() <= b.lowercase())  // true
-    public mutating func isSorted(by comparator: (Item, Item) -> Bool) -> Bool {
+    public consuming func isSorted(by comparator: (Item, Item) -> Bool) -> Bool {
         if let .Some(first) = self.next() {
             var prev = first;
             while let .Some(item) = self.next() {
@@ -1037,7 +1037,7 @@ extend Iterator {
     ///
     ///     let words = ["a", "bb", "ccc"]
     ///     words.iter().isSortedBy(key: { it.count })  // true (sorted by length)
-    public mutating func isSortedBy[K](key: (Item) -> K) -> Bool where K: Comparable {
+    public consuming func isSortedBy[K](key: (Item) -> K) -> Bool where K: Comparable {
         self.isSorted(by: { (a, b) in key(a).compare(key(b)) != Ordering.Greater })
     }
 }
@@ -1061,7 +1061,7 @@ extend Iterator where Item: Addable, Item.Output = Item {
     ///
     ///     // With filtering
     ///     [1, 2, 3, 4, 5].iter().filter({ it % 2 == 0 }).sum()  // 6
-    public mutating func sum() -> Item {
+    public consuming func sum() -> Item {
         self.fold(initial: Item.zero, combine: { (acc, x) in acc.add(x) })
     }
 }
@@ -1081,7 +1081,7 @@ extend Iterator where Item: Multipliable, Item.Output = Item {
     ///
     ///     // Factorial via range
     ///     (1..=5).iter().product()  // 120 (5!)
-    public mutating func product() -> Item {
+    public consuming func product() -> Item {
         self.fold(initial: Item.one, combine: { (acc, x) in acc.multiply(x) })
     }
 }

@@ -534,68 +534,62 @@ No analyzer in lib2 detects delegating-init calls from non-init contexts. Curren
 # Stdlib
 
 Run: `file_tests --test-threads=1 stdlib` on `feature/incremental-hecs` (2026-04-20).
-Result: **142 passed · 60 failed**.
+Result: **146 passed · 57 failed**.
 
-## E205 `cannot pass temporary value to 'mutating' parameter` — iterator / view chaining
+Previously resolved categories:
+- **E205 `cannot pass temporary value to 'mutating' parameter`** — fully resolved 2026-04-20 (access-mode analyzer receiver/arg split + stdlib `mutating` → `consuming` flip). All former E205 tests reclassified below by their remaining failure.
+- **Type parameter not in scope** — fixed 2026-04-20 (`WorldResolver::where_clauses` context fix). 3 stdlib tests now pass (`append_from_iterable`, `dictionary_merge_from_pairs`, `set_insert_contents_of`); 4 others moved to derived-protocol bucket.
 
-Method chains like `arr.iter().map(f).collect()` fail because iterator adapters take `mutating self` and validation rejects a temporary as the receiver. Dominant cause across iterator/views/string tests.
+## Monomorphization witness gaps — protocol extension methods not in witness (25 tests)
 
-- [ ] `stdlib/iterator/filter_map_explicit.ks` — lines 8, 14, 18
-- [ ] `stdlib/iterator/filter_map_flatten.ks` — lines 13, 28 (+ unrelated errors)
-- [ ] `stdlib/iterator/flatten_iterator.ks` — line 21
-- [ ] `stdlib/iterator/fuse_and_cycle.ks` — lines 8, 14
-- [ ] `stdlib/iterator/inspect_adapter.ks` — lines 8, 16, 22
-- [ ] `stdlib/iterator/intersperse_adapter.ks` — lines 8, 17, 23
-- [ ] `stdlib/iterator/intersperse_with_adapter.ks` — lines 8, 17, 23, 28
-- [ ] `stdlib/iterator/is_sorted_by_comparator.ks` — 7 occurrences
-- [ ] `stdlib/iterator/is_sorted_by_key.ks` — 8 occurrences
-- [ ] `stdlib/iterator/is_sorted_checks.ks` — 11 occurrences
-- [ ] `stdlib/iterator/map_filter_collect.ks` — lines 15, 21, 27
-- [ ] `stdlib/iterator/min_by_max_by.ks` — 5 occurrences
-- [ ] `stdlib/iterator/min_max_sorted.ks` — 5 occurrences
-- [ ] `stdlib/iterator/reduce_adapter.ks` — 4 occurrences
-- [ ] `stdlib/iterator/take_skip_methods.ks` — lines 15, 20, 25, 30
-- [ ] `stdlib/iterator/terminal_operations.ks` — 12 occurrences (test also has explicit `// ERROR` mismatches)
-- [ ] `stdlib/iterator/try_fold_adapter.ks` — 4 occurrences
-- [ ] `stdlib/iterator/try_for_each_adapter.ks` — 3 occurrences
-- [ ] `stdlib/iterator/unzip_iterator.ks` — lines 13, 25
-- [ ] `stdlib/iterator/utility_adapters.ks` — 5 occurrences
-- [ ] `stdlib/iterator/zip_chain_enumerate.ks` — lines 18, 25, 32
-- [ ] `stdlib/string/replacement_and_splitting.ks` — lines 36, 44, 50, 56
-- [ ] `stdlib/views/bytes_view_iter.ks` — lines 10, 24
-- [ ] `stdlib/views/chars_view_iter_and_count.ks` — line 13
-- [ ] `stdlib/views/graphemes_view.ks` — line 13
-- [ ] `stdlib/views/lines_view.ks` — lines 9, 17, 23, 30
-- [ ] `stdlib/views/string_iter.ks` — lines 10, 16, 21, 28
+Dominant failure category. Methods defined in `extend Iterator` (and protocol extensions on concrete iterator/view types) are not found in the monomorphized witness table. All fail at codegen/link with `method 'X' not found in witness for Y: std.iter.Iterator`. Root cause: monomorphizer doesn't include extension-provided methods when building witness tables for concrete types.
 
-## Type parameter not in scope inside stdlib signatures
+- [ ] `stdlib/iterator/filter_map_explicit.ks` — `filterMap`/`collect` not found on ArrayIterator/FilterMapIterator
+- [ ] `stdlib/iterator/flatten_iterator.ks` — `map`/`flatten`/`collect` not found
+- [ ] `stdlib/iterator/fuse_and_cycle.ks` — `fuse`/`collect`/`cycle`/`take` not found
+- [ ] `stdlib/iterator/inspect_adapter.ks` — `inspect`/`collect`/`filter` not found
+- [ ] `stdlib/iterator/intersperse_adapter.ks` — `intersperse`/`collect` not found
+- [ ] `stdlib/iterator/intersperse_with_adapter.ks` — `intersperseWith`/`collect` not found
+- [ ] `stdlib/iterator/is_sorted_by_comparator.ks` — `isSorted` not found
+- [ ] `stdlib/iterator/is_sorted_by_key.ks` — `isSortedBy` not found
+- [ ] `stdlib/iterator/is_sorted_checks.ks` — `isSorted`/`isSortedDescending` not found
+- [ ] `stdlib/iterator/map_filter_collect.ks` — `map`/`collect`/`filter` not found
+- [ ] `stdlib/iterator/min_by_max_by.ks` — `minBy`/`maxBy` not found
+- [ ] `stdlib/iterator/min_max_sorted.ks` — `min`/`max`/`sorted`/`sum`/`product` not found
+- [ ] `stdlib/iterator/peekable_adapter.ks` — `peekable` not found
+- [ ] `stdlib/iterator/reduce_adapter.ks` — `reduce` not found
+- [ ] `stdlib/iterator/take_skip_methods.ks` — `take`/`skip`/`takeWhile`/`skipWhile` not found
+- [ ] `stdlib/iterator/try_fold_adapter.ks` — `tryFold` not found
+- [ ] `stdlib/iterator/try_for_each_adapter.ks` — `tryForEach` not found
+- [ ] `stdlib/iterator/utility_adapters.ks` — `stepBy`/`scan`/`position`/`contains` not found
+- [ ] `stdlib/iterator/zip_chain_enumerate.ks` — `zip`/`enumerate`/`chain` not found
+- [ ] `stdlib/string/replacement_and_splitting.ks` — `collect` not found on SplitIterator/SplitWhereIterator
+- [ ] `stdlib/views/bytes_view_iter.ks` — `collect` not found on BytesIterator
+- [ ] `stdlib/views/chars_view_iter_and_count.ks` — `collect` not found on CharsIterator
+- [ ] `stdlib/views/graphemes_view.ks` — `collect` not found on GraphemesIterator
+- [ ] `stdlib/views/lines_view.ks` — `collect` not found on LinesIterator
+- [ ] `stdlib/views/string_iter.ks` — `collect`/`map`/`filter`/`count` not found on StringIterator
 
-`cannot find type '<P>' in this scope` emitted from **stdlib** source (not user code). Generic params declared on the enclosing extension/method aren't visible to a specific child construct — likely a scope-linking gap for certain signature shapes.
+Note: 8 of these (flatten_iterator, inspect_adapter, map_filter_collect, peekable_adapter, take_skip_methods, zip_chain_enumerate, plus flatten/inspect) previously showed derived-protocol errors (`NotEqual`/`Greater` on `Item`). Those type-checking errors are now resolved — tests get past inference but hit the monomorphization wall.
 
-- [ ] `collections/array.ks:783` — `T` (triggered by `stdlib/array/append_from_iterable.ks`)
-- [ ] `collections/dictionary.ks:802` — `K`, `V` (triggered by `stdlib/dictionary/dictionary_merge_from_pairs.ks`)
-- [ ] `collections/set.ks:222` — `T` (triggered by `stdlib/set/set_insert_contents_of.ks`)
-- [ ] `result/optional.ks:227` — `U` (triggered by `stdlib/optional/optional_flatten.ks`)
-- [ ] `iter/iterator.ks:249` — `T` (triggered by `stdlib/iterator/filter_map_flatten.ks`)
-- [ ] `iter/iterator.ks:401` — `Item` (triggered by `stdlib/iterator/zip_chain_enumerate.ks`)
-- [ ] `iter/iterator.ks:578` — `A`, `B` (triggered by `stdlib/iterator/unzip_iterator.ks`)
+## Derived-protocol bounds not propagated to generic params (5 tests)
 
-## Derived-protocol bounds not propagated to generic params
+Generic param bound on base protocol (e.g. `Equal`) doesn't satisfy auto-derived/refinement protocols (`NotEqual`). Solver emits `? !: NotEqual` + `no member 'notEquals' on type '?'`. Reduced from 13 → 5 tests; the other 8 now get past type-checking and fail in the monomorphization bucket above.
 
-Generic param bound on base protocol (e.g. `Equal`, `Comparable`) doesn't satisfy auto-derived/refinement protocols (`NotEqual`, `Greater`, `Multipliable`). Solver emits `Item !: NotEqual` + `no member 'notEquals' on type 'Item'`.
+- [ ] `stdlib/iterator/filter_map_flatten.ks` — `? !: NotEqual`
+- [ ] `stdlib/iterator/unzip_iterator.ks` — `? !: NotEqual`
+- [ ] `stdlib/optional/optional_flatten.ks` — `? !: NotEqual`
+- [ ] `stdlib/memory/memory_allocator.ks` — `? !: NotEqual`
+- [ ] `stdlib/memory/memory_raw_pointer.ks` — `? !: NotEqual`
 
-- [ ] `stdlib/array/misc_extensions.ks` — `NotEqual` on `Item` (16 errors)
-- [ ] `stdlib/array/init_count_generator.ks` — `Multipliable` on inferred closure param
-- [ ] `stdlib/iterator/flatten_iterator.ks` — `NotEqual` on `Item`
-- [ ] `stdlib/iterator/inspect_adapter.ks` — `Greater` on `Item`
-- [ ] `stdlib/iterator/map_filter_collect.ks` — `NotEqual`, `Multipliable`
-- [ ] `stdlib/iterator/peekable_adapter.ks` — `NotEqual` on `Item`
-- [ ] `stdlib/iterator/take_skip_methods.ks` — `NotEqual` on `Item`
-- [ ] `stdlib/iterator/zip_chain_enumerate.ks` — `NotEqual` on `Item`
-- [ ] `stdlib/memory/memory_allocator.ks` — `NotEqual` on `?`
-- [ ] `stdlib/memory/memory_raw_pointer.ks` — `NotEqual` on `?`
+## Codegen symbol not found (2 tests)
 
-## Runtime exit-code failures (compile OK, assert/behavior wrong)
+Compiled but link fails with `call to undeclared function` — symbol mangling or monomorphization miss for specific functions.
+
+- [ ] `stdlib/array/misc_extensions.ks` — `call to undeclared function: Array.init(count:generator:)` (was 16 NotEqual errors — derived-protocol issue resolved, now hits codegen)
+- [ ] `stdlib/result/result_transforms.ks` — `call to undeclared function: Result.isErr`
+
+## Runtime exit-code failures (compile OK, assert/behavior wrong) (20 tests)
 
 Program compiles and links but exits non-zero — asserts failing or behavior diverging from expectation. Likely codegen or semantic issues.
 
@@ -620,10 +614,10 @@ Program compiles and links but exits non-zero — asserts failing or behavior di
 - [ ] `stdlib/uint64/uint64_boundaries_and_constants.ks` — exit 7
 - [ ] `stdlib/uint64/uint64_overflow_behavior.ks` — exit 3
 
-## One-offs
+## One-offs (5 tests)
 
-- [ ] `stdlib/result/result_transforms.ks` — link failure: `call to undeclared function: _K0N3_std6_result6_Result5_isErr…` (symbol mangling / monomorphization miss)
+- [ ] `stdlib/array/init_count_generator.ks` — type mismatch: `expected i64 got (?) -> ?` + `? !: Multipliable` — closure param type not inferred for `Array(count:generator:)` init
 - [ ] `stdlib/int64/int64_parsing.ks` — `parse()` arity mismatch: test calls with 2 args, stdlib signature takes 1
 - [ ] `stdlib/array/subscript_assignment.ks` — wrong diagnostic: expected `cannot assign to temporary value`, got E202 `cannot assign to this expression`
 - [ ] `stdlib/float64/float64_exp_and_log.ks` — line 26: `no member '(subscript)' on type 'Float64'` (subscript lookup unexpectedly triggered on scalar)
-- [ ] `memory_model/copy_semantics/not_copyable_move_semantics_with_stdlib.ks` — expected `use of moved value` at line 15, not emitted (also listed above in move-checker bucket)
+- [ ] `memory_model/copy_semantics/not_copyable_move_semantics_with_stdlib.ks` — expected `use of moved value` at line 15, not emitted (move checker not running)

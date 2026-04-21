@@ -218,12 +218,24 @@ impl<'a> InferCtx<'a> {
         TyVar(idx)
     }
 
-    /// Allocate a TyVar bound to an associated-type projection.
-    pub fn assoc_projection(&mut self, base: TyVar, assoc: Entity) -> TyVar {
-        let idx = self.types.len() as u32;
-        self.types
-            .push(TySlot::Resolved(TyKind::AssocProjection { base, assoc }));
-        TyVar(idx)
+    /// Project an associated type on a base TyVar, emitting the constraint
+    /// that drives the solver to resolve it.
+    ///
+    /// Returns a fresh TyVar that `solve_associated` will unify with the
+    /// concrete projected type once `base` is known. Pairs allocation +
+    /// constraint emission in a single call — the previous two-step API
+    /// (`assoc_projection` raw, then `associated` separately) was easy to
+    /// misuse: callers who forgot the constraint caused abstract `Item`
+    /// names to leak into diagnostics. Do not add a raw variant back.
+    pub fn project_associated(&mut self, base: TyVar, assoc: Entity, span: Span) -> TyVar {
+        let name = self
+            .query_ctx
+            .get::<kestrel_ast_builder::Name>(assoc)
+            .map(|n| n.0.clone())
+            .unwrap_or_default();
+        let result = self.fresh();
+        self.associated(base, &name, result, span);
+        result
     }
 
     /// Allocate a TyVar bound to a Tuple type.

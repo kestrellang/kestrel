@@ -1221,7 +1221,7 @@ pub(crate) fn lower_hir_ty_with_subs(
                 args.iter().map(|a| lower_hir_ty_with_subs(ctx, a, subs)).collect();
             ctx.type_alias(*entity, arg_tvs)
         }
-        HirTy::AssocProjection { base, assoc, .. } => {
+        HirTy::AssocProjection { base, assoc, span } => {
             let base_tv = lower_hir_ty_with_subs(ctx, base, subs);
             // Short-circuit if this specific assoc is already bound via a
             // where-clause equality (e.g. `Item = (A, B)`).
@@ -1233,7 +1233,7 @@ pub(crate) fn lower_hir_ty_with_subs(
                 let _ = base_tv;
                 return tv;
             }
-            ctx.assoc_projection(base_tv, *assoc)
+            ctx.project_associated(base_tv, *assoc, span.clone())
         }
         HirTy::Tuple(types, _) => {
             let elem_tvs: Vec<TyVar> =

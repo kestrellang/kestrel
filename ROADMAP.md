@@ -660,45 +660,120 @@ See [docs/memory-model/implementation-plan.md](docs/memory-model/implementation-
 
 - [x] Doc comments - `///` with structured sections
 
-## Phase 16+ Advanced Types & Runtime
+# Preview 2: Types & Expressiveness (0.16–0.20)
 
-### Types
+## Version 0.16: Boxing & Existentials
 
 - [ ] Opaque types (`some Protocol`)
 - [ ] Existential types (`any Protocol`)
+  - Boxed via `GlobalAllocator`, vtable with drop/size/align + protocol methods
+  - `any P` is non-Copyable; `Cloneable` requires `P: Cloneable`
+- [ ] Escaping closures — box captures when closure outlives its frame
+- [ ] Indirect enums — heap-box `indirect case` variant payloads via `GlobalAllocator`
 
-### Classes
+## Version 0.17: Derives, Attributes & Sugar
 
-- [ ] Class runtime completeness (identity, RTTI, weak/unowned references)
+- [ ] Attribute system infrastructure — parsed, propagated through AST/HIR/MIR
+- [ ] Auto-derived protocols — `@derive(Equatable, Hashable, Cloneable, Comparable)`
+- [ ] Built-in attributes — `@inline`, `@deprecated`
+- [ ] Optional chaining
+- [ ] Pipe operator (`|>`)
+- [ ] Placeholder arguments (`_` for partial application)
 
-### Async & Generators
+## Version 0.18: Properties & Conditional Conformance
 
-- [ ] `async` / `await`
-- [ ] `generator` / `yield`
-- [ ] `async generator`
+- [ ] Lazy properties — `lazy let expensive = compute()`
+- [ ] Property observers — `willSet` / `didSet` blocks
+- [ ] Conditional conformance — e.g. `Box[T]: Copyable where T: Copyable`
 
-### Partial Application
+## Version 0.19: Standard Library & Polish
 
-- [ ] Pipe Operator (`|>`)
-- [ ] Placeholder Arguments (`_` for partial application)
+- [ ] Standard library expansion and depth
+- [ ] Language refinements informed by 0.16–0.18 usage
+
+## Version 0.20: Class Runtime (Preview 2 Milestone)
+
+- [ ] Class declarations with reference semantics
+- [ ] Reference counting with control blocks
+- [ ] Identity — `===` reference equality
+- [ ] RTTI via extended vtables
+- [ ] `@weak` / `@unowned` reference attributes
+- [ ] `@final` classes
+
+# Preview 3: Concurrency (0.21–0.25)
+
+Built on an effects-lite architecture: async, yield, and throw are modeled as
+capabilities provided by handlers. Internal design is compatible with `using`/`given`
+generalization in Preview 4. Prepares the ground for full algebraic effects in 3.0.
+
+## Version 0.21: Generators
+
+- [ ] `generator` / `yield` syntax
+- [ ] CPS / state-machine lowering
+- [ ] Lazy sequences via generator functions
+
+## Version 0.22: Async/Await Foundations
+
+- [ ] `async` / `await` syntax
+- [ ] Executor and runtime
+- [ ] `Future` type
+- [ ] Built on generator state-machine infrastructure
+
+## Version 0.23: Atomics & Memory Model
+
+- [ ] Atomic operations and ordering semantics
+- [ ] Memory model for concurrent access
+- [ ] `send` / `sync` capabilities for thread safety
+
+## Version 0.24: Structured Concurrency & Async Iteration
+
+- [ ] Task groups and cancellation
+- [ ] Async generators and async sequences
+- [ ] Async standard library APIs
+
+## Version 0.25: Concurrency Completeness (Preview 3 Milestone)
+
+- [ ] Actors or concurrency model refinement
+- [ ] Multithreading primitives
+- [ ] Concurrency testing and debugging tools
+
+# Preview 4: Expressiveness & Ecosystem (0.26–0.30)
+
+## Versions 0.26–0.30
 
 ### Implicits
 
 - [ ] `using` / `given` implicit parameters
+- [ ] Allocator migration — `GlobalAllocator` becomes `given Allocator`
+- [ ] Async context migration — executors, cancellation tokens via `using`
+- [ ] Effect-lite generalization — implicit propagation, handler blocks, effect inference
 
-### Syntax & Sugar
+### Language & Ecosystem
 
-- [ ] Optional Chaining
+- [ ] Language features informed by real-world usage
+- [ ] Standard library shape and depth
+- [ ] Ecosystem tooling and refinements
 
-### Properties
+# Release Candidate (0.31–1.0)
 
-- [ ] Lazy properties - `lazy let expensive = compute()`
-- [ ] Property observers - `willSet` / `didSet` blocks
+- [ ] LLVM backend
+- [ ] WebAssembly target
+- [ ] `const` compile-time evaluation
+- [ ] `unsafe` blocks and escape hatches
+- [ ] Standard library stabilization
 
-### Metaprogramming
+# 2.0: Metaprogramming
 
-- [ ] Auto-derived protocols - `@derive(Equatable, Hashable)`
+- [ ] User-defined procedural macros — extends `@derive` from 0.17
+- [ ] Compile-time reflection — inspect types, fields, conformances
+- [ ] `comptime` blocks — compile-time evaluation
+- [ ] Custom attributes that generate code
 
-### Standard Library
+# 3.0: Algebraic Effects
 
-- [ ] Expand stdlib
+- [ ] User-defined `effect` declarations
+- [ ] `handle` blocks (effect handlers)
+- [ ] Effect polymorphism — `func map(f: (A) -> B / E) -> Array[B] / E`
+- [ ] Existing async/generators/throw reframed as built-in effects
+- [ ] Built-in effects: `async`, `throws`, `yield`, `alloc`, `unsafe`, `const` (purity)
+- [ ] Unifies control flow under a single composable model

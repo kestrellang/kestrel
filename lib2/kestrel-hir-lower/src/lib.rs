@@ -296,6 +296,7 @@ mod tests {
                         default_entity: None,
                         pattern: None,
                         is_mut: false,
+                        is_consuming: false,
                     },
                     kestrel_ast_builder::AstParam {
                         label: None,
@@ -304,6 +305,7 @@ mod tests {
                         default_entity: None,
                         pattern: None,
                         is_mut: false,
+                        is_consuming: false,
                     },
                 ],
                 receiver: None,

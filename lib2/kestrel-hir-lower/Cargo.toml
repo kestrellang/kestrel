@@ -19,3 +19,4 @@ kestrel-reporting2 = { path = "../kestrel-reporting" }
 [dev-dependencies]
 kestrel-lexer2 = { path = "../kestrel-lexer" }
 kestrel-parser2 = { path = "../kestrel-parser" }
+kestrel-syntax-tree2 = { path = "../kestrel-syntax-tree" }

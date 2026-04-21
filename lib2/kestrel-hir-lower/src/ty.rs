@@ -176,10 +176,25 @@ fn build_hir_ty_for_entity(
                     return lower_ast_type(ctx, owner, root, &ann.0);
                 }
             }
-            // Everything else (associated types in protocols, parameterized
-            // or constrained aliases) flows as AliasUse. The solver reduces
-            // concrete ones via the Reduce constraint and looks up abstract
-            // ones via protocol bounds.
+            // An associated type (TypeAlias whose parent is a Protocol) must
+            // carry its base so the solver can project it through the concrete
+            // receiver. E.g. `T.Item` lowers to AssocProjection{ base: T,
+            // assoc: Item } — without the base, inference has no way to
+            // reach `type Item = X` on the concrete type's Iterable extension.
+            let parent_is_protocol = ctx
+                .parent_of(entity)
+                .and_then(|p| ctx.get::<NodeKind>(p).cloned())
+                == Some(NodeKind::Protocol);
+            if parent_is_protocol {
+                let base = build_assoc_projection_base(ctx, owner, root, segments, span);
+                return HirTy::AssocProjection {
+                    base: Box::new(base),
+                    assoc: entity,
+                    span: span.clone(),
+                };
+            }
+            // Non-associated aliases (parameterized or constrained) flow as
+            // AliasUse. The solver reduces concrete ones via Reduce.
             HirTy::AliasUse {
                 entity,
                 args,
@@ -560,5 +575,100 @@ fn ast_type_span(ty: &AstType) -> Span {
         | AstType::Unit(span)
         | AstType::Never(span)
         | AstType::Inferred(span) => span.clone(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use kestrel_ast::PathSegment;
+    use kestrel_ast_builder::{Name, Typed};
+    use kestrel_hecs::World;
+
+    fn span() -> Span {
+        Span::synthetic(0)
+    }
+
+    fn seg(name: &str) -> PathSegment {
+        PathSegment {
+            name: name.into(),
+            type_args: vec![],
+            span: span(),
+        }
+    }
+
+    /// An associated type reference (`Iter.Item` where `Item` is a TypeAlias
+    /// child of the `Iter` protocol) must lower to `HirTy::AssocProjection`,
+    /// preserving the base (`Iter`) so the solver can project it through a
+    /// concrete receiver. Previously this arm returned `HirTy::AliasUse`
+    /// dropping the base, which caused associated-type names to leak into
+    /// diagnostics ("Array[Item]" instead of "Array[Int64]").
+    #[test]
+    fn associated_type_lowers_to_assoc_projection() {
+        let mut world = World::new();
+        world.begin_revision();
+
+        let root = world.spawn();
+        world.set(root, NodeKind::Module);
+        world.set(root, Name("<root>".into()));
+
+        let iter_proto = world.spawn();
+        world.set(iter_proto, NodeKind::Protocol);
+        world.set(iter_proto, Name("Iter".into()));
+        world.set(iter_proto, Typed);
+        world.set_parent(iter_proto, root);
+
+        let item_alias = world.spawn();
+        world.set(item_alias, NodeKind::TypeAlias);
+        world.set(item_alias, Name("Item".into()));
+        world.set(item_alias, Typed);
+        world.set_parent(item_alias, iter_proto);
+
+        let ctx = world.query_context();
+        let ast_ty = AstType::Named {
+            segments: vec![seg("Iter"), seg("Item")],
+            span: span(),
+        };
+        let lowered = lower_ast_type(&ctx, root, root, &ast_ty);
+        match lowered {
+            HirTy::AssocProjection { base, assoc, .. } => {
+                assert_eq!(assoc, item_alias);
+                match *base {
+                    HirTy::Protocol { entity, .. } => assert_eq!(entity, iter_proto),
+                    other => panic!("expected Protocol base, got {other:?}"),
+                }
+            }
+            other => panic!("expected AssocProjection, got {other:?}"),
+        }
+    }
+
+    /// Non-associated TypeAliases (parent is Module, not Protocol) still
+    /// lower to `HirTy::AliasUse`. Guards against over-broadening the
+    /// `parent_is_protocol` branch.
+    #[test]
+    fn module_level_alias_stays_alias_use() {
+        let mut world = World::new();
+        world.begin_revision();
+
+        let root = world.spawn();
+        world.set(root, NodeKind::Module);
+        world.set(root, Name("<root>".into()));
+
+        let alias = world.spawn();
+        world.set(alias, NodeKind::TypeAlias);
+        world.set(alias, Name("Fd".into()));
+        world.set(alias, Typed);
+        // no TypeAnnotation → non-trivial; stays as AliasUse
+        let tp = world.spawn();
+        world.set(alias, kestrel_ast_builder::TypeParams(vec![tp]));
+        world.set_parent(alias, root);
+
+        let ctx = world.query_context();
+        let ast_ty = AstType::Named {
+            segments: vec![seg("Fd")],
+            span: span(),
+        };
+        let lowered = lower_ast_type(&ctx, root, root, &ast_ty);
+        matches!(lowered, HirTy::AliasUse { .. });
     }
 }

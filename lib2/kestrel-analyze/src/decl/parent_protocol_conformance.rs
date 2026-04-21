@@ -69,7 +69,11 @@ fn resolve_conformance_type(cx: &DeclContext<'_>, ast_type: &AstType) -> Option<
     }
 }
 
-/// Collect all positively conformed protocol entities for a given entity.
+/// Collect the positively conformed protocol entities declared *directly* on
+/// `entity` (reads the `Conformances` component only). Does not walk
+/// inheritance or `ExtensionsFor`: the outer E421 loop already iterates the
+/// full transitive set via `ConformingProtocols`, so transitivity is handled
+/// at the call site.
 fn collect_positive_conformances(cx: &DeclContext<'_>, entity: Entity) -> Vec<Entity> {
     let Some(conformances) = cx.query.get::<Conformances>(entity) else {
         return vec![];

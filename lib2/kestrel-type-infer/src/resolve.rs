@@ -12,7 +12,10 @@ use kestrel_hecs::{Entity, QueryContext};
 use kestrel_hir::Builtin;
 use kestrel_hir::ty::HirTy;
 use kestrel_hir_lower::{LowerCallableTypes, LowerExtensionTargetTypeArgs, LowerTypeAnnotation};
-use kestrel_name_res::{ConformingProtocols, ResolveBuiltin, ResolveTypePath, TypeResolution};
+use kestrel_name_res::{
+    expand_protocol_closure_in_place, ConformingProtocols, ResolveBuiltin, ResolveTypePath,
+    TypeResolution,
+};
 use kestrel_span2::Span;
 
 use crate::ty::TyKind;
@@ -515,7 +518,7 @@ impl TypeResolver for WorldResolver<'_> {
 
         for ext in &extensions {
             // Check if this extension provides FromValue conformance
-            if !self.entity_conforms_to(*ext, from_value_protocol) {
+            if !self.extension_directly_conforms_to(*ext, from_value_protocol) {
                 continue;
             }
 
@@ -560,7 +563,11 @@ impl TypeResolver for WorldResolver<'_> {
     }
 
     fn where_clauses(&self, entity: Entity) -> Vec<WhereClause> {
-        self.where_clauses_in_context(entity, self.owner)
+        // Resolve where-clause names in the *entity's own* scope. Using
+        // `self.owner` (the body currently being inferred) can't see the
+        // method's own type params or its enclosing type's params — e.g.
+        // `func appendFrom[I](..) where I.Item = T` in Array[T].
+        self.where_clauses_in_context(entity, entity)
     }
 
     /// Get where clauses, resolving names in a specific context entity's scope.
@@ -1092,8 +1099,15 @@ impl WorldResolver<'_> {
         format!("{}({})", name, labels)
     }
 
-    /// Check if an entity has a conformance to the given protocol.
-    fn entity_conforms_to(&self, entity: Entity, protocol: Entity) -> bool {
+    /// Direct-only: does this extension entity declare a conformance to
+    /// `protocol` in its own `Conformances` list?
+    ///
+    /// Intentionally does NOT walk inheritance or other extensions — callers
+    /// that want the full transitive set must use `ConformingProtocols`.
+    /// Used by `check_promotion` to identify which extension directly declares
+    /// `FromValue` so we can search it for the corresponding static `from`
+    /// method.
+    fn extension_directly_conforms_to(&self, entity: Entity, protocol: Entity) -> bool {
         let Some(conformances) = self.ctx.get::<Conformances>(entity) else {
             return false;
         };
@@ -1154,36 +1168,6 @@ impl WorldResolver<'_> {
             }
         }
         None
-    }
-
-    /// Gather protocols from an entity's Conformances, recursively walking inherited protocols.
-    fn gather_protocol_conformances(
-        &self,
-        entity: Entity,
-        protocols: &mut Vec<Entity>,
-        visited: &mut std::collections::HashSet<Entity>,
-    ) {
-        let Some(conformances) = self.ctx.get::<Conformances>(entity) else {
-            return;
-        };
-
-        for item in &conformances.0 {
-            let ConformanceItem::Positive(ast_ty, _) = item else { continue };
-            let Some(resolved) = self.resolve_type_entity(ast_ty) else { continue };
-
-            if self.ctx.get::<NodeKind>(resolved) != Some(&NodeKind::Protocol) {
-                continue;
-            }
-
-            if !visited.insert(resolved) {
-                continue; // Already visited
-            }
-
-            protocols.push(resolved);
-
-            // Walk inherited protocols transitively
-            self.gather_protocol_conformances(resolved, protocols, visited);
-        }
     }
 
     /// Resolve a member on a type parameter by searching its protocol bounds.
@@ -1525,20 +1509,8 @@ impl WorldResolver<'_> {
             current = self.ctx.parent_of(entity);
         }
 
-        // Walk inherited protocols transitively
-        let mut i = 0;
-        while i < protocols.len() {
-            let proto = protocols[i];
-            self.gather_protocol_conformances(proto, &mut protocols, &mut visited);
-            let proto_extensions = self.ctx.query(kestrel_name_res::ExtensionsFor {
-                target: proto,
-                root: self.root,
-            });
-            for ext in &proto_extensions {
-                self.gather_protocol_conformances(*ext, &mut protocols, &mut visited);
-            }
-            i += 1;
-        }
+        // Walk inherited protocols + extension-added conformances transitively.
+        expand_protocol_closure_in_place(self.ctx, self.root, &mut protocols, &mut visited);
 
         protocols
     }
@@ -1606,20 +1578,8 @@ impl WorldResolver<'_> {
             current = self.ctx.parent_of(entity);
         }
 
-        // Walk inherited protocols transitively
-        let mut i = 0;
-        while i < protocols.len() {
-            let proto = protocols[i];
-            self.gather_protocol_conformances(proto, &mut protocols, &mut visited);
-            let proto_extensions = self.ctx.query(kestrel_name_res::ExtensionsFor {
-                target: proto,
-                root: self.root,
-            });
-            for ext in &proto_extensions {
-                self.gather_protocol_conformances(*ext, &mut protocols, &mut visited);
-            }
-            i += 1;
-        }
+        // Walk inherited protocols + extension-added conformances transitively.
+        expand_protocol_closure_in_place(self.ctx, self.root, &mut protocols, &mut visited);
 
         protocols
     }

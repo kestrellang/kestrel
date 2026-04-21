@@ -582,6 +582,7 @@ mod tests {
                     default_entity: None,
                     pattern: None,
                     is_mut: false,
+                    is_consuming: false,
                 }],
                 receiver: None,
             },

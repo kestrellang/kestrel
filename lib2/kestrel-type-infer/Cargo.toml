@@ -18,3 +18,4 @@ kestrel-debug = { path = "../kestrel-debug" }
 [dev-dependencies]
 kestrel-lexer2 = { path = "../kestrel-lexer" }
 kestrel-parser2 = { path = "../kestrel-parser" }
+codespan-reporting.workspace = true

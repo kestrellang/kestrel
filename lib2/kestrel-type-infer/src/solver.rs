@@ -300,7 +300,7 @@ fn solve_reduce(ctx: &mut InferCtx<'_>, alias: TyVar, result: TyVar, span: Span)
     // Emit conformance obligations from the alias's TypeParam bounds.
     for &param in &type_params {
         if let Some(&(_, arg_tv)) = subs.iter().find(|(e, _)| *e == param) {
-            let bound_protocols = collect_param_bound_protocols(ctx, param);
+            let bound_protocols = direct_param_bound_protocols(ctx, param);
             for protocol in bound_protocols {
                 ctx.conforms(arg_tv, protocol, span.clone());
             }
@@ -311,8 +311,11 @@ fn solve_reduce(ctx: &mut InferCtx<'_>, alias: TyVar, result: TyVar, span: Span)
     SolveResult::Solved
 }
 
-/// Collect protocol entities that `param` is bound to (via Conformances).
-fn collect_param_bound_protocols(ctx: &InferCtx<'_>, param: Entity) -> Vec<Entity> {
+/// Collect protocols `param` is DIRECTLY bound to via its `Conformances`
+/// component. Does not walk inheritance or extension-added conformances —
+/// downstream `solve_conforms` runs each emitted obligation through
+/// `ConformingProtocols`, so the transitive closure is handled there.
+fn direct_param_bound_protocols(ctx: &InferCtx<'_>, param: Entity) -> Vec<Entity> {
     use kestrel_ast_builder::{ConformanceItem, Conformances};
     use kestrel_name_res::ResolveTypePath;
 
@@ -1995,7 +1998,10 @@ pub fn kind_to_tyvar_sub(
         TyKind::Param { entity } => ctx.param(*entity),
         TyKind::AssocProjection { base, assoc } => {
             let base_tv = kind_to_tyvar_sub(ctx, &resolve_kind(ctx, *base), self_entity, recv_tv);
-            ctx.assoc_projection(base_tv, *assoc)
+            // TyKind has no span; this rematerialization path runs when
+            // instantiating an already-resolved type back into a fresh TyVar
+            // set, so a synthetic span is acceptable for the emitted constraint.
+            ctx.project_associated(base_tv, *assoc, kestrel_span2::Span::synthetic(0))
         }
         TyKind::Tuple(elems) => {
             let elem_tvs: Vec<TyVar> = elems.iter()
@@ -2144,7 +2150,7 @@ fn lower_hir_ty_sub(
                 .collect();
             ctx.type_alias(*entity, arg_tvs)
         }
-        HirTy::AssocProjection { base, assoc, .. } => {
+        HirTy::AssocProjection { base, assoc, span } => {
             let base_tv = lower_hir_ty_sub(ctx, base, self_entity, recv_tv, subs);
             if let Some(&(_, tv)) =
                 ctx.where_clause_assoc_subs.iter().find(|(e, _)| e == assoc)
@@ -2152,7 +2158,7 @@ fn lower_hir_ty_sub(
                 let _ = base_tv;
                 return tv;
             }
-            ctx.assoc_projection(base_tv, *assoc)
+            ctx.project_associated(base_tv, *assoc, span.clone())
         }
         HirTy::Param(entity, _) => {
             if let Some(&(_, tv)) = subs.iter().find(|(e, _)| e == entity) {

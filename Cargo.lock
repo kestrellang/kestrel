@@ -1184,6 +1184,7 @@ dependencies = [
  "kestrel-parser2",
  "kestrel-reporting2",
  "kestrel-span2",
+ "kestrel-syntax-tree2",
 ]
 
 [[package]]
@@ -1256,6 +1257,7 @@ dependencies = [
  "kestrel-lexer2",
  "kestrel-parser2",
  "kestrel-span2",
+ "kestrel-syntax-tree2",
 ]
 
 [[package]]
@@ -1477,6 +1479,7 @@ dependencies = [
 name = "kestrel-type-infer"
 version = "0.15.0"
 dependencies = [
+ "codespan-reporting",
  "kestrel-ast-builder",
  "kestrel-debug",
  "kestrel-hecs",

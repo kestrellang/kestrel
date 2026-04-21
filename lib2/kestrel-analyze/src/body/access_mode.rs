@@ -114,10 +114,14 @@ fn check_call_args(
 ) {
     let Some(callable) = cx.query.get::<Callable>(callee) else { return };
 
-    // Check receiver for mutating methods
+    // Check receiver for mutating methods. Unlike argument position, a
+    // receiver that is a temporary (call result, literal, if-expr, etc.) is
+    // an owned mutable place — the caller owns it for the duration of the
+    // call chain, so mutating it is fine. Only reject when the receiver is a
+    // *named* immutable place (let binding or let field).
     if let (Some(recv_id), Some(recv_kind)) = (receiver, &callable.receiver) {
         if matches!(recv_kind, ReceiverKind::Mutating) {
-            check_mutating_arg(cx, recv_id, diags);
+            check_mutating_receiver(cx, recv_id, diags);
         }
     }
 
@@ -129,6 +133,46 @@ fn check_call_args(
             if param.is_mut && !param.is_consuming {
                 check_mutating_arg(cx, arg.value, diags);
             }
+        }
+    }
+}
+
+/// Check that a receiver passed to a `mutating self` method is acceptable.
+/// Temporaries (call results, literals, etc.) are owned mutable places and
+/// pass; only named immutable bindings/fields are rejected.
+fn check_mutating_receiver(
+    cx: &BodyContext<'_>,
+    recv_id: HirExprId,
+    diags: &mut Vec<AnalyzeDiagnostic>,
+) {
+    let span = util::expr_span(cx.hir, recv_id);
+    match classify_mutability(cx, recv_id) {
+        MutClass::Mutable | MutClass::Temporary => {} // ok — owned or mutable place
+        MutClass::ImmutableLocal(name) => {
+            diags.push(AnalyzeDiagnostic {
+                descriptor_id: DESCRIPTORS[0].id,
+                severity: DESCRIPTORS[0].default_severity,
+                message: format!("cannot pass immutable binding '{}' to 'mutating' parameter", name),
+                labels: vec![DiagLabel {
+                    span,
+                    message: "cannot pass to 'mutating' parameter".into(),
+                    is_primary: true,
+                }],
+                notes: vec![],
+            });
+        }
+        MutClass::ImmutableField(name) => {
+            diags.push(AnalyzeDiagnostic {
+                descriptor_id: DESCRIPTORS[1].id,
+                severity: DESCRIPTORS[1].default_severity,
+                message: format!("cannot pass immutable field '{}' to 'mutating' parameter", name),
+                labels: vec![DiagLabel {
+                    span,
+                    message: "cannot pass to 'mutating' parameter".into(),
+                    is_primary: true,
+                }],
+                notes: vec![],
+            });
         }
     }
 }

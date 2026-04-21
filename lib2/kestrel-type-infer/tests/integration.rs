@@ -314,3 +314,40 @@ func test() { let f = foo; }
 
     assert!(!typed.errors.is_empty(), "expected an error for bare overload reference");
 }
+
+/// Regression: `WorldResolver::where_clauses(entity)` used to pass `self.owner`
+/// as the name-resolution context, so when a caller body inferred a method whose
+/// `where` clause referenced the method's own type param (or its enclosing type's),
+/// the RHS failed to resolve — "cannot find type 'U' in this scope". The fix
+/// resolves where clauses in the entity's own scope.
+#[test]
+fn where_clauses_resolve_method_type_params_when_called_from_other_body() {
+    let source = r#"
+module TestMod
+protocol P {
+    type Item;
+}
+func collect[T, U](iter: T) where T: P, T.Item = U { }
+func caller(b: Bool) { collect(b) }
+"#;
+    let (world, root) = build_from_source(source);
+    let ctx = world.query_context();
+    let _ = infer_func(&ctx, root, "TestMod", "caller");
+
+    // The "cannot find type" diagnostic is emitted by `lower_ast_type` through
+    // the query accumulator, not `TypedBody::errors`. Check the world directly.
+    // Filter for `U` specifically — this test doesn't set up the lang module, so
+    // ambient name-resolution noise ("cannot find type 'Bool'") is expected and
+    // unrelated to the regression we're guarding against.
+    let diags = world
+        .accumulated::<codespan_reporting::diagnostic::Diagnostic<usize>>();
+    let offenders: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("cannot find type 'U'"))
+        .collect();
+    assert!(
+        offenders.is_empty(),
+        "method-level where-clause type param 'U' leaked out of method scope: {:#?}",
+        offenders.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}

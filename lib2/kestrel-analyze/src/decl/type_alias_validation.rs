@@ -387,7 +387,7 @@ fn check_unqualified_ambiguity(
     // declares that conformance.
     if let Some(parent) = cx.query.parent_of(cx.entity) {
         if cx.query.get::<NodeKind>(parent) == Some(&NodeKind::Extension) {
-            covered.extend(protocols_from_extension_conformances(cx, parent));
+            covered.extend(protocols_declared_on_extension(cx, parent));
         }
     }
 
@@ -477,9 +477,15 @@ fn protocols_covered_by_qualified_bindings(
     covered
 }
 
-/// Get protocol entities from an extension's direct conformance list.
-/// For `extend Array[T]: ArrayMatchable { ... }`, returns [ArrayMatchable_entity].
-fn protocols_from_extension_conformances(
+/// Return the protocol entities the given extension block declares in its
+/// own conformance list. For `extend Array[T]: ArrayMatchable { ... }`,
+/// returns `[ArrayMatchable_entity]`.
+///
+/// Intentionally local-only — this asks "what conformances does *this
+/// extension block* add?", not "what protocols does the target type
+/// transitively conform to." Callers wanting the transitive set use
+/// `ConformingProtocols` instead.
+fn protocols_declared_on_extension(
     cx: &DeclContext<'_>,
     extension: kestrel_hecs::Entity,
 ) -> Vec<kestrel_hecs::Entity> {
