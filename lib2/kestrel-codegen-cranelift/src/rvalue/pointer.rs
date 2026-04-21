@@ -37,7 +37,7 @@ pub fn compile_pointer_op1(
 
         Op::PtrRead(ty) => {
             // Substitute type params with concrete types from the current instantiation
-            let concrete_ty = kestrel_codegen2::substitute_type(ty, &state.subst);
+            let concrete_ty = kestrel_codegen2::substitute_type_with_self(ty, &state.subst, state.self_type.as_ref());
             if is_aggregate(&concrete_ty, &mut ctx.layouts)
                 && !common::type_has_unresolved_params(&concrete_ty)
             {
@@ -83,7 +83,7 @@ pub fn compile_memory_op1(
 
     match op {
         Op::SizeOf(ty) => {
-            let concrete_ty = kestrel_codegen2::substitute_type(ty, &state.subst);
+            let concrete_ty = kestrel_codegen2::substitute_type_with_self(ty, &state.subst, state.self_type.as_ref());
             if matches!(concrete_ty, kestrel_mir::MirTy::Error) {
                 return Err(CodegenError::Unsupported(format!(
                     "SizeOf on unresolved type in {} (raw: {:?})",
@@ -95,7 +95,7 @@ pub fn compile_memory_op1(
         },
 
         Op::AlignOf(ty) => {
-            let concrete_ty = kestrel_codegen2::substitute_type(ty, &state.subst);
+            let concrete_ty = kestrel_codegen2::substitute_type_with_self(ty, &state.subst, state.self_type.as_ref());
             if matches!(concrete_ty, kestrel_mir::MirTy::Error) {
                 return Err(CodegenError::Unsupported(format!(
                     "AlignOf on unresolved type in {} (raw: {:?})",
@@ -128,7 +128,7 @@ pub fn compile_stack_alloc(
     element_ty: &MirTy,
     arg: &Value,
 ) -> Result<CrValue, CodegenError> {
-    let concrete_ty = kestrel_codegen2::substitute_type(element_ty, &state.subst);
+    let concrete_ty = kestrel_codegen2::substitute_type_with_self(element_ty, &state.subst, state.self_type.as_ref());
     let layout = ctx.layouts.layout_of(&concrete_ty);
 
     let count = match arg {
@@ -182,7 +182,7 @@ pub fn compile_pointer_op2(
 
         Op::PtrWrite(ty) => {
             // Substitute type params to get the concrete pointee type
-            let concrete_ty = kestrel_codegen2::substitute_type(ty, &state.subst);
+            let concrete_ty = kestrel_codegen2::substitute_type_with_self(ty, &state.subst, state.self_type.as_ref());
             if is_aggregate(&concrete_ty, &mut ctx.layouts) {
                 if common::type_has_unresolved_params(&concrete_ty) {
                     builder

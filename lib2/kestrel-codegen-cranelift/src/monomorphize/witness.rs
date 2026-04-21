@@ -437,7 +437,7 @@ mod tests {
             .push(TypeParamDef::new(protocol_param, "Product"));
         module.protocols.push(protocol_def);
 
-        let mut function = FunctionDef::new(implementation, "Thing.make", MirTy::Unit);
+        let mut function = FunctionDef::new(implementation, "Thing.make", MirTy::unit());
         function
             .type_params
             .push(TypeParamDef::new(method_param, "T"));

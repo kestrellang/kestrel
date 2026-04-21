@@ -6,7 +6,7 @@
 
 use crate::common;
 use cranelift_codegen::ir;
-use kestrel_codegen2::TargetConfig;
+use kestrel_codegen2::{TargetConfig, normalize_projection};
 use kestrel_mir::MirTy;
 
 /// Translate a MirTy to its Cranelift type representation.
@@ -26,9 +26,10 @@ pub fn translate_type(ty: &MirTy, target: &TargetConfig) -> ir::Type {
         MirTy::F32 => ir::types::F32,
         MirTy::F64 => ir::types::F64,
 
-        // Zero-size types use pointer type to avoid type mismatches
-        // in phi nodes when Unit merges with aggregate pointers
-        MirTy::Unit | MirTy::Never => ptr,
+        // Never (zero-size divergence) uses pointer type so it unifies in
+        // phi nodes against aggregate pointers. Unit is the empty tuple and
+        // is handled by the `Tuple(_)` arm below.
+        MirTy::Never => ptr,
 
         // All pointer-like types use the pointer type
         MirTy::Pointer(_) | MirTy::Ref(_) | MirTy::RefMut(_) => ptr,
@@ -60,6 +61,18 @@ pub fn translate_type_with_layout(
     target: &TargetConfig,
     layouts: &mut kestrel_codegen2::LayoutCache,
 ) -> ir::Type {
+    // Resolve any AssociatedProjection to its concrete bound type before
+    // dispatching. Without this, a projection that normalizes to Int64
+    // (etc.) would fall through the `_` arm and return `ptr`, disagreeing
+    // with the layout-aware treatment Named types get.
+    let normalized_storage;
+    let ty = if matches!(ty, MirTy::AssociatedProjection { .. }) {
+        normalized_storage = normalize_projection(ty, layouts.module());
+        &normalized_storage
+    } else {
+        ty
+    };
+
     match ty {
         MirTy::Named { .. } => {
             let layout = layouts.layout_of(ty);

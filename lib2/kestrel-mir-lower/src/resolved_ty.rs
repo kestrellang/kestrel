@@ -20,6 +20,12 @@ pub fn lower_resolved_ty(ctx: &mut LowerCtx, ty: &ResolvedTy) -> MirTy {
             ctx.register_name(*entity);
             MirTy::TypeParam(*entity)
         },
+        ResolvedTy::SelfType { .. } => {
+            // Abstract `Self` of a protocol. Monomorphization substitutes via
+            // `substitute_type_with_self` against the enclosing function's
+            // concrete self_type.
+            MirTy::SelfType
+        },
         ResolvedTy::Tuple(elems) => {
             let lowered: Vec<MirTy> = elems.iter().map(|t| lower_resolved_ty(ctx, t)).collect();
             MirTy::Tuple(lowered)

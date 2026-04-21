@@ -208,7 +208,8 @@ impl<'a> CollectionContext<'a> {
                 };
 
                 // Substitute type args using the current instantiation's substitution
-                let concrete_type_args = common::substitute_type_args(type_args, subst);
+                let concrete_type_args =
+                    common::substitute_type_args(type_args, subst, parent_self.as_ref());
 
                 // Resolve self type: only inherit parent's self_type if the callee
                 // actually uses SelfType in its signature. Static methods on other types
@@ -217,7 +218,7 @@ impl<'a> CollectionContext<'a> {
                 let callee_func = &self.module.functions[func_id.index()];
                 let concrete_self = self_type
                     .as_ref()
-                    .map(|st| substitute_type(st, subst))
+                    .map(|st| substitute_type_with_self(st, subst, parent_self.as_ref()))
                     .or_else(|| {
                         if self.func_uses_self_type(callee_func) {
                             parent_self.clone()
@@ -402,7 +403,8 @@ impl<'a> CollectionContext<'a> {
             Rvalue::Const(imm) => {
                 if let kestrel_mir::ImmediateKind::FunctionRef { func, type_args } = &imm.kind {
                     if let Some(&func_id) = self.entity_to_func.get(func) {
-                        let concrete_type_args = common::substitute_type_args(type_args, subst);
+                        let concrete_type_args =
+                            common::substitute_type_args(type_args, subst, parent_self.as_ref());
 
                         let inst = FunctionInstantiation {
                             func_id,

@@ -117,11 +117,11 @@ pub fn run_thunk_pass(module: &mut MirModule) {
 
         // Env parameter (ignored)
         let env_local =
-            body.add_local(LocalDef::new("_env", MirTy::Pointer(Box::new(MirTy::Unit))));
+            body.add_local(LocalDef::new("_env", MirTy::Pointer(Box::new(MirTy::unit()))));
         thunk_def.params.push(ParamDef::new(
             "_env",
             env_local,
-            MirTy::Pointer(Box::new(MirTy::Unit)),
+            MirTy::Pointer(Box::new(MirTy::unit())),
         ));
         body.param_count += 1;
 
@@ -163,7 +163,7 @@ pub fn run_thunk_pass(module: &mut MirModule) {
             _ => Callee::direct_generic(*target, forward_type_args.clone()),
         };
 
-        if ret_ty == MirTy::Unit || ret_ty == MirTy::Never {
+        if ret_ty.is_unit() || ret_ty == MirTy::Never {
             // Void call + return unit
             entry.stmts.push(Statement::new(StatementKind::Call {
                 dest: None,

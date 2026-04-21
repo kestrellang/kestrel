@@ -54,7 +54,7 @@ pub fn lower_protocol(ctx: &mut LowerCtx, entity: Entity) -> ProtocolId {
                     .unwrap_or_default();
                 let mut assoc_def = AssociatedTypeDef::new(assoc_name);
                 let default_ty = resolve_type_annotation(ctx, child);
-                if default_ty != kestrel_mir::MirTy::Unit {
+                if !default_ty.is_unit() {
                     assoc_def = assoc_def.with_default(default_ty);
                 }
                 def.add_associated_type(assoc_def);

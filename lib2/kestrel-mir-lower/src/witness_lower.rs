@@ -536,7 +536,7 @@ fn find_associated_type(ctx: &mut LowerCtx, parent: Entity, name: &str) -> Optio
         }
         // Resolve the type alias's TypeAnnotation
         let ty = resolve_type_annotation(ctx, child);
-        if ty != MirTy::Unit {
+        if !ty.is_unit() {
             return Some(ty);
         }
     }

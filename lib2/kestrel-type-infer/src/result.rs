@@ -82,6 +82,12 @@ pub enum ResolvedTy {
     Param {
         entity: Entity,
     },
+    /// Abstract `Self` inside `extend P` / `protocol P`. Preserved through
+    /// inference output so MIR receives `MirTy::SelfType` and monomorphization
+    /// substitutes it with the caller's concrete self type.
+    SelfType {
+        entity: Entity,
+    },
     Tuple(Vec<ResolvedTy>),
     Function {
         params: Vec<ResolvedTy>,
@@ -134,6 +140,7 @@ fn kind_to_resolved(ctx: &InferCtx<'_>, kind: &TyKind) -> ResolvedTy {
                 .collect(),
         },
         TyKind::Param { entity } => ResolvedTy::Param { entity: *entity },
+        TyKind::SelfType { entity } => ResolvedTy::SelfType { entity: *entity },
         TyKind::AssocProjection { .. } => ResolvedTy::Error,
         TyKind::Tuple(elems) => ResolvedTy::Tuple(
             elems
@@ -262,6 +269,7 @@ fn describe_tykind(ctx: &InferCtx<'_>, kind: &TyKind) -> String {
             .get::<kestrel_ast_builder::Name>(*entity)
             .map(|n| n.0.clone())
             .unwrap_or("Param".into()),
+        TyKind::SelfType { .. } => "Self".into(),
         TyKind::AssocProjection { base, assoc } => {
             let base_str = describe_tyvar(ctx, *base);
             let assoc_name = ctx

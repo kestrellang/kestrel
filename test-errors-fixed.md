@@ -341,3 +341,18 @@ Fix: deleted the `subscript(key:inserting:)` block from `lang/std/collections/di
 - [x] `stdlib/char/char_case_conversion.ks` — was exit -1 SIGSEGV on `'A'.toUppercase()` (also previously on the macOS-UNE skip list)
 - [x] `stdlib/string/case_conversion.ks` — was exit 7 (`titlecased` used the same broken case-mapping tables)
 - [x] `stdlib/views/graphemes_view.ks` — was exit 1 (grapheme break tables `GBP_STAGE1`/`GBP_STAGE2` are also `@fileconstant`)
+
+### `Self` in `extend Protocol` was demoted to `Named(Protocol)` through inference, breaking generic adapter monomorphization (2026-04-21)
+
+`HirTy::SelfType` round-tripped through inference as `TyKind::Protocol(P)` → `ResolvedTy::Named(P)` → `MirTy::Named(P)`. Generic iterator adapter inits like `InspectIterator[I].init(inner: I, inspector: (I.Item)->())` were therefore monomorphized **once** with `I = Iterator (the protocol entity)` rather than per concrete `I`. The shared body assumed `I` was ptr-sized (8 bytes) and wrote `inspector` at the wrong field offset; concrete callers used the correct layout and read garbage at the actual offset, leading to SIGSEGV at the first thick-closure dispatch.
+
+Fix: thread the `Self` identity through every layer.
+- Add `TyKind::SelfType { entity }` (parallel to `TyKind::Protocol`) and `ResolvedTy::SelfType { entity }`. Inference's `lower_hir_ty_with_subs` now emits `self_type_ty(entity)` instead of demoting to `protocol_ty(entity, vec![])`. Solver match sites for `TyKind::Protocol` got matching `SelfType` arms (conformance, associated-type lookup, unify with same-protocol Self, kind_to_resolved → ResolvedTy::SelfType). `lower_resolved_ty` maps `ResolvedTy::SelfType → MirTy::SelfType`.
+- Inside `extend Protocol` bodies, the receiver TyVar is now `SelfType(P)` (was `Protocol(P)` via `ctx.named(target, args)`).
+- Codegen now threads `state.self_type` through every type-substitution path: `get_place_type`, `substitute_type_args`, `compile_function`, `compile_resolved_call`, `compile_construct`, `pointer/SizeOf/AlignOf/StackAlloc`. Each `substitute_type` call inside a function-state context now uses `substitute_type_with_self`.
+- Mangler's `MirTy::SelfType` arm guards against infinite recursion when the substituted `self_type` itself contains `MirTy::SelfType` (common when `Iter.self_type = Named(InspectIterator, [SelfType])`): saves and clears `self.self_type` during the recursive mangle so any nested SelfType emits the abstract `S` marker.
+
+Two of the nine 2026-04-21 SIGSEGV iterator adapter tests now pass (`filter_map_explicit`, `string_iter`). The remaining seven still fail with downstream layout/codegen issues for nested generic adapters (`Optional<I.Item>` field layout, deep witness chains) — see `test-errors.md` for the new failure modes.
+
+- [x] `stdlib/iterator/filter_map_explicit.ks` — was SIGSEGV in `FilterMapIterator.next` (Cranelift verifier `i64`/`i8` mismatch in the original report)
+- [x] `stdlib/views/string_iter.ks` — was SIGSEGV in `MapIterator<StringIterator, Char>.next`

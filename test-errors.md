@@ -336,15 +336,13 @@ Extension methods that require additional protocol conformances on `Iterator.Ite
 Program compiles and links but exits non-zero — asserts failing or behavior diverging from expectation.
 
 - [ ] `stdlib/io/io_error_types.ks` — exit 2
-- [ ] `stdlib/iterator/filter_map_explicit.ks` — SIGSEGV (was Cranelift verifier `i64`/`i8` mismatch in `FilterMapIterator.next`)
 - [ ] `stdlib/iterator/filter_map_flatten.ks` — SIGSEGV (was Cranelift verifier mismatch, Optional payload)
-- [ ] `stdlib/iterator/flatten_iterator.ks` — SIGSEGV (was Cranelift verifier `load.i64 v79` where `v79 has type i8` in `FlattenIterator.next`)
+- [ ] `stdlib/iterator/flatten_iterator.ks` — SIGSEGV (was Cranelift verifier `load.i64 v79` where `v79 has type i8` in `FlattenIterator.next`); after the 2026-04-21 SelfType-through-inference fix, init now mangles per-concrete-I but `Pointer.read` deref still hits address 0x1 in `ArrayIterator.next` inside `FlattenIterator` — Optional<I.Item> layout still wrong for nested adapters
 - [ ] `stdlib/iterator/fuse_and_cycle.ks` — exit 1 (was `Array.init` codegen-link failure)
-- [ ] `stdlib/iterator/inspect_adapter.ks` — SIGSEGV (was Cranelift verifier mismatch in `InspectIterator.next`)
-- [ ] `stdlib/iterator/intersperse_adapter.ks` — SIGSEGV (was Cranelift verifier mismatch, 3 sites in `Test.main`)
-- [ ] `stdlib/iterator/intersperse_with_adapter.ks` — SIGSEGV (was Cranelift verifier `load.i64`/i8 mismatch in `IntersperseWithIterator.next`)
-- [ ] `stdlib/iterator/map_filter_collect.ks` — SIGSEGV (was Cranelift verifier mismatch in `MapIterator.next`)
+- [ ] `stdlib/iterator/inspect_adapter.ks` — exit 2 (was SIGSEGV; init is now monomorphized per concrete `I` after the SelfType fix, but assertion `result(unchecked: 0) != 1` still fails — closure dispatch through inspector field needs further investigation)
+- [ ] `stdlib/iterator/intersperse_adapter.ks` — SIGSEGV at `IntersperseIterator.next` +300 deref of address 0x2 (init writes pendingItem discriminant=1 instead of 0 — Optional<I.Item> .None construction broken for generic I)
+- [ ] `stdlib/iterator/intersperse_with_adapter.ks` — SIGSEGV (similar to intersperse_adapter)
+- [ ] `stdlib/iterator/map_filter_collect.ks` — exit 5 (was SIGSEGV; assertion failure now)
 - [ ] `stdlib/iterator/peekable_adapter.ks` — exit 2
-- [ ] `stdlib/iterator/take_skip_methods.ks` — exit 1 (was Cranelift verifier mismatch in `TakeWhileIterator.next`)
-- [ ] `stdlib/views/string_iter.ks` — SIGSEGV (was Cranelift verifier mismatch in `MapIterator<StringIterator, Char>.next`)
+- [ ] `stdlib/iterator/take_skip_methods.ks` — exit 2 (was exit 1; assertion in `TakeWhileIterator.next` chain)
 

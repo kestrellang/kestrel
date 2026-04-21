@@ -255,6 +255,16 @@ impl<'a> InferCtx<'a> {
         TyVar(idx)
     }
 
+    /// Allocate a TyVar for abstract `Self` inside `extend P` / `protocol P`.
+    /// Behaves like `protocol_ty(P, vec![])` for associated-type / conformance
+    /// lookups but is distinguished at output so MIR sees `MirTy::SelfType`.
+    pub fn self_type_ty(&mut self, entity: Entity) -> TyVar {
+        let idx = self.types.len() as u32;
+        self.types
+            .push(TySlot::Resolved(TyKind::SelfType { entity }));
+        TyVar(idx)
+    }
+
     /// Allocate a TyVar bound to a TypeAlias. Inference will `Reduce` this to
     /// the substituted definition (or leave it for protocol-bound lookup if
     /// the alias is abstract — no `TypeAnnotation`).

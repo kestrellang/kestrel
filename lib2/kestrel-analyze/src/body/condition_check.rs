@@ -163,6 +163,7 @@ fn describe_type(cx: &BodyContext<'_>, ty: &ResolvedTy) -> String {
         ResolvedTy::Never => "Never".into(),
         ResolvedTy::Error => "?".into(),
         ResolvedTy::Param { .. } => "type parameter".into(),
+        ResolvedTy::SelfType { .. } => "Self".into(),
         ResolvedTy::Function { .. } => "function type".into(),
     }
 }

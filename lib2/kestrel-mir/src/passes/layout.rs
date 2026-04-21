@@ -92,7 +92,6 @@ fn size_and_align_of(ty: &MirTy, module: &MirModule) -> Option<(u64, u64)> {
         MirTy::F16 => Some((2, 2)),
         MirTy::F32 => Some((4, 4)),
         MirTy::F64 => Some((8, 8)),
-        MirTy::Unit => Some((0, 1)),
         MirTy::Never => Some((0, 1)),
 
         // Str is a fat pointer (ptr + len)

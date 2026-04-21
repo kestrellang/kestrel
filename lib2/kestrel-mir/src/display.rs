@@ -84,7 +84,6 @@ impl fmt::Display for MirTyDisplay<'_> {
             MirTy::F32 => write!(f, "f32"),
             MirTy::F64 => write!(f, "f64"),
             MirTy::Bool => write!(f, "bool"),
-            MirTy::Unit => write!(f, "()"),
             MirTy::Never => write!(f, "!"),
             MirTy::Str => write!(f, "str"),
             MirTy::Pointer(inner) => write!(f, "p[{}]", inner.display(self.module)),

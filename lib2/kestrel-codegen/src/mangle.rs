@@ -210,7 +210,6 @@ impl<'a> Mangler<'a> {
             MirTy::F32 => self.push_str("f4"),
             MirTy::F64 => self.push_str("f8"),
             MirTy::Bool => self.push('b'),
-            MirTy::Unit => self.push('v'),
             MirTy::Never => self.push('n'),
             MirTy::Str => self.push('s'),
 
@@ -228,11 +227,17 @@ impl<'a> Mangler<'a> {
             },
 
             MirTy::Tuple(elems) => {
-                self.push('T');
-                for elem in elems {
-                    self.mangle_type(elem);
+                // Unit is the empty tuple; keep the legacy 'v' encoding so
+                // existing symbol names don't churn.
+                if elems.is_empty() {
+                    self.push('v');
+                } else {
+                    self.push('T');
+                    for elem in elems {
+                        self.mangle_type(elem);
+                    }
+                    self.push('E');
                 }
-                self.push('E');
             },
 
             MirTy::Named { entity, type_args } => {
@@ -277,12 +282,20 @@ impl<'a> Mangler<'a> {
             },
 
             MirTy::SelfType => {
-                if let Some(st) = self.self_type {
-                    // Clone to avoid double borrow
-                    let st = st.clone();
-                    self.mangle_type(&st);
-                } else {
-                    self.push('S');
+                // Substitute `SelfType` with the mangler's `self_type` context,
+                // but temporarily clear it during the recursive mangle so any
+                // `SelfType` *inside* the substituted type emits the abstract
+                // 'S' marker rather than infinitely re-substituting the same
+                // self_type into itself (common for `Iter.self_type =
+                // Named(InspectIterator, [SelfType])`, whose Iter arg IS Self).
+                match self.self_type {
+                    Some(MirTy::SelfType) | None => self.push('S'),
+                    Some(st) => {
+                        let st = st.clone();
+                        let saved = self.self_type.take();
+                        self.mangle_type(&st);
+                        self.self_type = saved;
+                    },
                 }
             },
 
@@ -371,7 +384,7 @@ mod tests {
         m.mangle_type(&MirTy::F32);
         m.mangle_type(&MirTy::F64);
         m.mangle_type(&MirTy::Bool);
-        m.mangle_type(&MirTy::Unit);
+        m.mangle_type(&MirTy::unit());
         m.mangle_type(&MirTy::Never);
         m.mangle_type(&MirTy::Str);
         assert_eq!(m.finish(), "i1i2i4i8f2f4f8bvns");
@@ -447,7 +460,7 @@ mod tests {
         let mut m = Mangler::new(&module);
         m.mangle_type(&MirTy::FuncThick {
             params: vec![MirTy::I64],
-            ret: Box::new(MirTy::Unit),
+            ret: Box::new(MirTy::unit()),
         });
         assert_eq!(m.finish(), "C1_i8vE");
     }
@@ -528,7 +541,7 @@ mod tests {
     #[test]
     fn labeled_params() {
         let module = test_module();
-        let mut func = FunctionDef::new(dummy_entity(1), "insert", MirTy::Unit);
+        let mut func = FunctionDef::new(dummy_entity(1), "insert", MirTy::unit());
         func.params.push(ParamDef::with_label(
             "value",
             LocalId::new(0),
@@ -551,7 +564,7 @@ mod tests {
     #[test]
     fn self_type_disambiguation() {
         let module = test_module();
-        let mut func = FunctionDef::new(dummy_entity(1), "std.Iterator.next", MirTy::Unit);
+        let mut func = FunctionDef::new(dummy_entity(1), "std.Iterator.next", MirTy::unit());
         func.kind = FunctionKind::Method {
             parent: dummy_entity(2),
             receiver: ReceiverConvention::RefMut,
@@ -577,7 +590,7 @@ mod tests {
     #[test]
     fn initializer_skips_self() {
         let module = test_module();
-        let mut func = FunctionDef::new(dummy_entity(1), "Point.init", MirTy::Unit);
+        let mut func = FunctionDef::new(dummy_entity(1), "Point.init", MirTy::unit());
         func.kind = FunctionKind::Initializer {
             parent: dummy_entity(2),
         };

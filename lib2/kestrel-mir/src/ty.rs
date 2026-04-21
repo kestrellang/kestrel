@@ -20,7 +20,6 @@ pub enum MirTy {
     F32,
     F64,
     Bool,
-    Unit,
     Never,
     Str,
 
@@ -75,6 +74,21 @@ pub enum MirTy {
 }
 
 impl MirTy {
+    /// Canonical unit value — the empty tuple.
+    ///
+    /// MIR has no `Unit` variant; `()` *is* `Tuple([])`. HIR already uses this
+    /// representation (`AstType::Unit → HirTy::Tuple(Vec::new(), …)`), so
+    /// keeping MIR in sync removes a class of "which form did this come through
+    /// as?" bugs at the HIR→MIR boundary.
+    pub fn unit() -> Self {
+        MirTy::Tuple(Vec::new())
+    }
+
+    /// Check if this is the unit type (empty tuple).
+    pub fn is_unit(&self) -> bool {
+        matches!(self, MirTy::Tuple(elems) if elems.is_empty())
+    }
+
     /// Check if this is a primitive integer type.
     pub fn is_integer(&self) -> bool {
         matches!(self, MirTy::I8 | MirTy::I16 | MirTy::I32 | MirTy::I64)
@@ -112,7 +126,6 @@ impl MirTy {
             MirTy::AssociatedProjection { base, .. } => base.contains_error(),
             MirTy::TypeParam(_)
             | MirTy::SelfType
-            | MirTy::Unit
             | MirTy::Never
             | MirTy::Bool
             | MirTy::I8
@@ -129,6 +142,9 @@ impl MirTy {
     /// Check if this type is trivially copyable (passed by value, no ownership transfer).
     /// Includes primitives, refs, pointers, and thin function pointers.
     pub fn is_trivially_copyable(&self) -> bool {
+        if self.is_unit() {
+            return true;
+        }
         matches!(
             self,
             MirTy::I8
@@ -139,7 +155,6 @@ impl MirTy {
                 | MirTy::F32
                 | MirTy::F64
                 | MirTy::Bool
-                | MirTy::Unit
                 | MirTy::Never
                 | MirTy::Ref(_)
                 | MirTy::RefMut(_)

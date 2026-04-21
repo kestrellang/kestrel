@@ -161,7 +161,18 @@ fn create_param_types(
                             fresh_type_args(ctx, query_ctx, target)
                         };
 
-                        let self_tv = ctx.named(target, args.clone());
+                        // For protocol extensions, `self` is the abstract Self
+                        // of the protocol — not the protocol entity itself. Use
+                        // `SelfType(P)` so it round-trips through inference output
+                        // as `ResolvedTy::SelfType` → `MirTy::SelfType` and gets
+                        // substituted per-concrete-receiver at monomorphization.
+                        // Other kinds (Struct/Enum) emit the concrete target.
+                        let target_kind = query_ctx.get::<NodeKind>(target).cloned();
+                        let self_tv = if matches!(target_kind, Some(NodeKind::Protocol)) {
+                            ctx.self_type_ty(target)
+                        } else {
+                            ctx.named(target, args.clone())
+                        };
 
                         // Emit extension where clause constraints so the solver
                         // knows about bounds like Item: Addable, Item.Output = Item

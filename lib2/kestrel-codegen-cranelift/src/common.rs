@@ -9,7 +9,10 @@ use crate::types;
 use cranelift_codegen::ir::immediates::Offset32;
 use cranelift_codegen::ir::{self, InstBuilder, MemFlags, Value as CrValue};
 use cranelift_frontend::FunctionBuilder;
-use kestrel_codegen2::{Layout, LayoutCache, TargetConfig, substitute_type};
+use kestrel_codegen2::{
+    Layout, LayoutCache, TargetConfig, normalize_projection, substitute_type,
+    substitute_type_with_self,
+};
 use kestrel_hecs::Entity;
 use kestrel_mir::{
     BasicBlock, BlockId, EnumId, LocalId, MirBody, MirModule, MirTy, Place, StructId,
@@ -22,10 +25,14 @@ use std::collections::HashMap;
 /// `type_args.iter().map(|a| substitute_type(a, subst)).collect()`
 /// that appeared at 8+ call sites across `place.rs`, `rvalue/construct.rs`,
 /// `rvalue/call.rs`, and `monomorphize/collect.rs`.
-pub fn substitute_type_args(type_args: &[MirTy], subst: &HashMap<Entity, MirTy>) -> Vec<MirTy> {
+pub fn substitute_type_args(
+    type_args: &[MirTy],
+    subst: &HashMap<Entity, MirTy>,
+    self_type: Option<&MirTy>,
+) -> Vec<MirTy> {
     type_args
         .iter()
-        .map(|a| substitute_type(a, subst))
+        .map(|a| substitute_type_with_self(a, subst, self_type))
         .collect()
 }
 
@@ -44,9 +51,20 @@ pub fn short_name(qualified: &str) -> &str {
 ///
 /// Treats all `Named` types as aggregate (passed by pointer). This is
 /// conservative but consistent — every codegen site uses the same rule so
-/// callers and callees agree on ABI. `layouts` is threaded through for
-/// future layout-aware refinement; it is currently unused by this predicate.
-pub fn is_aggregate(ty: &MirTy, _layouts: &mut LayoutCache) -> bool {
+/// callers and callees agree on ABI.
+///
+/// Normalizes `AssociatedProjection` through the witness table first; without
+/// this, read and consume sites can disagree on aggregate-ness when a field's
+/// declared type is a projection but the consumer sees the resolved concrete
+/// type.
+pub fn is_aggregate(ty: &MirTy, layouts: &mut LayoutCache) -> bool {
+    if matches!(ty, MirTy::AssociatedProjection { .. }) {
+        let normalized = normalize_projection(ty, layouts.module());
+        return matches!(
+            normalized,
+            MirTy::Tuple(_) | MirTy::Named { .. } | MirTy::Str | MirTy::FuncThick { .. }
+        );
+    }
     matches!(
         ty,
         MirTy::Tuple(_) | MirTy::Named { .. } | MirTy::Str | MirTy::FuncThick { .. }
@@ -73,7 +91,7 @@ pub fn type_has_unresolved_params(ty: &MirTy) -> bool {
 
 /// Check if a function return type requires sret (struct-return) ABI.
 pub fn needs_sret(ret: &MirTy, layouts: &mut LayoutCache) -> bool {
-    !matches!(ret, MirTy::Unit | MirTy::Never) && is_aggregate(ret, layouts)
+    !(ret.is_unit() || matches!(ret, MirTy::Never)) && is_aggregate(ret, layouts)
 }
 
 /// Get the Cranelift pointer type for the target.
@@ -214,19 +232,20 @@ pub fn get_place_type(
     body: &MirBody,
     place: &Place,
     subst: &HashMap<Entity, MirTy>,
+    self_type: Option<&MirTy>,
     layouts: &LayoutCache,
 ) -> Result<MirTy, CodegenError> {
     match place {
         Place::Local(id) => {
             let ty = &body.locals[id.index()].ty;
-            Ok(substitute_type(ty, subst))
+            Ok(substitute_type_with_self(ty, subst, self_type))
         },
 
         Place::Global(entity) => {
             // Find the static by entity
             for s in &module.statics {
                 if s.entity == *entity {
-                    return Ok(substitute_type(&s.ty, subst));
+                    return Ok(substitute_type_with_self(&s.ty, subst, self_type));
                 }
             }
             let name = module.resolve_name(*entity);
@@ -237,12 +256,12 @@ pub fn get_place_type(
         },
 
         Place::Field { parent, name } => {
-            let parent_ty = get_place_type(module, body, parent, subst, layouts)?;
+            let parent_ty = get_place_type(module, body, parent, subst, self_type, layouts)?;
             match &parent_ty {
                 MirTy::Named { entity, type_args } => {
                     let type_args = type_args
                         .iter()
-                        .map(|a| substitute_type(a, subst))
+                        .map(|a| substitute_type_with_self(a, subst, self_type))
                         .collect::<Vec<_>>();
                     match layouts.resolve_named(*entity) {
                         kestrel_codegen2::NamedKind::Struct(struct_id) => {
@@ -254,14 +273,20 @@ pub fn get_place_type(
                                 ))
                             })?;
                             let field_ty = &struct_def.fields[field_id.index()].ty;
-                            // Substitute the struct's type params into the field type
+                            // Substitute the struct's type params into the field type.
+                            // No self_type here — struct fields are parameterized by
+                            // the struct's own type params, not by the enclosing
+                            // function's Self.
                             let field_subst: HashMap<Entity, MirTy> = struct_def
                                 .type_params
                                 .iter()
                                 .zip(type_args.iter())
                                 .map(|(tp, arg)| (tp.entity, arg.clone()))
                                 .collect();
-                            Ok(substitute_type(field_ty, &field_subst))
+                            Ok(normalize_projection(
+                                &substitute_type(field_ty, &field_subst),
+                                module,
+                            ))
                         },
                         _ => Err(CodegenError::Unsupported(format!(
                             "field access on non-struct Named type: {name}"
@@ -275,7 +300,7 @@ pub fn get_place_type(
         },
 
         Place::Index { parent, index } => {
-            let parent_ty = get_place_type(module, body, parent, subst, layouts)?;
+            let parent_ty = get_place_type(module, body, parent, subst, self_type, layouts)?;
             match &parent_ty {
                 MirTy::Tuple(elems) => {
                     if *index < elems.len() {
@@ -298,7 +323,10 @@ pub fn get_place_type(
                                 .zip(type_args.iter())
                                 .map(|(tp, arg)| (tp.entity, arg.clone()))
                                 .collect();
-                            Ok(substitute_type(field_ty, &field_subst))
+                            Ok(normalize_projection(
+                                &substitute_type(field_ty, &field_subst),
+                                module,
+                            ))
                         } else {
                             Err(CodegenError::Unsupported(format!(
                                 "struct index {index} out of range"
@@ -316,7 +344,7 @@ pub fn get_place_type(
         },
 
         Place::Downcast { parent, variant } => {
-            let parent_ty = get_place_type(module, body, parent, subst, layouts)?;
+            let parent_ty = get_place_type(module, body, parent, subst, self_type, layouts)?;
             // Downcast returns the payload struct type for this variant
             match &parent_ty {
                 MirTy::Named { entity, type_args } => {
@@ -348,7 +376,7 @@ pub fn get_place_type(
         },
 
         Place::Deref(inner) => {
-            let inner_ty = get_place_type(module, body, inner, subst, layouts)?;
+            let inner_ty = get_place_type(module, body, inner, subst, self_type, layouts)?;
             match inner_ty {
                 MirTy::Pointer(pointee) | MirTy::Ref(pointee) | MirTy::RefMut(pointee) => {
                     Ok(*pointee)
@@ -382,7 +410,10 @@ pub fn get_field_info(
     let sl = layouts.struct_layout(struct_id, type_args);
     let offset = sl.field_offsets[field_id.index()];
 
-    // Substitute type params into field type
+    // Substitute type params into field type, then normalize any resulting
+    // associated-type projections (I.Item → Int64 via the ArrayIterator
+    // witness). Without the normalize step, the returned MirTy disagrees
+    // with the consumer's inferred type on aggregate-vs-scalar handling.
     let field_ty = &struct_def.fields[field_id.index()].ty;
     let subst: HashMap<Entity, MirTy> = struct_def
         .type_params
@@ -390,7 +421,8 @@ pub fn get_field_info(
         .zip(type_args.iter())
         .map(|(tp, arg)| (tp.entity, arg.clone()))
         .collect();
-    let concrete_ty = substitute_type(field_ty, &subst);
+    let substituted = substitute_type(field_ty, &subst);
+    let concrete_ty = normalize_projection(&substituted, module);
 
     Ok((offset, concrete_ty))
 }
@@ -421,7 +453,8 @@ pub fn get_field_by_index(
         .zip(type_args.iter())
         .map(|(tp, arg)| (tp.entity, arg.clone()))
         .collect();
-    let concrete_ty = substitute_type(field_ty, &subst);
+    let substituted = substitute_type(field_ty, &subst);
+    let concrete_ty = normalize_projection(&substituted, module);
 
     Ok((offset, concrete_ty))
 }

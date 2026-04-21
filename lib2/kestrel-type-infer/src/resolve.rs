@@ -410,6 +410,15 @@ impl TypeResolver for WorldResolver<'_> {
                 });
                 all_protocols.contains(&protocol)
             },
+            TyKind::SelfType { entity } => {
+                // Abstract Self of protocol P conforms to P (and P's parents).
+                // Use the same conforming-protocols walk as for Protocol.
+                let all_protocols = self.ctx.query(kestrel_name_res::ConformingProtocols {
+                    entity: *entity,
+                    root: self.root,
+                });
+                all_protocols.contains(&protocol)
+            },
             TyKind::TypeAlias { entity, .. } => {
                 // Associated-type bounds (e.g. `type Item: Equatable`) live on
                 // the TypeAlias entity itself.
@@ -437,10 +446,12 @@ impl TypeResolver for WorldResolver<'_> {
         match container {
             TyKind::Struct { entity, .. }
             | TyKind::Enum { entity, .. }
-            | TyKind::Protocol { entity, .. } => {
+            | TyKind::Protocol { entity, .. }
+            | TyKind::SelfType { entity } => {
                 // Concrete type — search children for a TypeAlias with matching name,
                 // then extensions (e.g. Dictionary's `type Key = K` lives on an
                 // `extend Dictionary[K, V, H]: _ExpressibleByDictionaryLiteral` block).
+                // SelfType(P) resolves associated types via P's declaration + extensions.
                 if let Some(res) = self.find_associated_type_in_entity(*entity, name) {
                     return Some(res);
                 }

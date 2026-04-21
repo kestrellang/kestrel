@@ -17,7 +17,7 @@ use cranelift_frontend::FunctionBuilderContext;
 use cranelift_module::{DataDescription, FuncId, Linkage, Module};
 use cranelift_object::{ObjectBuilder, ObjectModule};
 use kestrel_codegen2::{
-    LayoutCache, Mangler, TargetConfig, mangle_function_with_self, substitute_type,
+    LayoutCache, Mangler, TargetConfig, mangle_function_with_self, substitute_type_with_self,
 };
 use kestrel_debug::ktrace;
 use kestrel_hecs::Entity;
@@ -382,18 +382,18 @@ impl<'a> CodegenContext<'a> {
             .collect();
 
         // Resolve return type
-        let ret_ty = substitute_type(&func_def.ret, &subst);
+        let ret_ty = substitute_type_with_self(&func_def.ret, &subst, self_type);
         let is_main = self.is_main_function(func_def);
 
         // Extern functions use C calling convention
         if let Some(extern_info) = &func_def.extern_info {
             sig.call_conv = self.c_call_conv();
             for param in &func_def.params {
-                let ty = substitute_type(&param.ty, &subst);
+                let ty = substitute_type_with_self(&param.ty, &subst, self_type);
                 sig.params
                     .push(AbiParam::new(types::translate_type(&ty, self.target)));
             }
-            if !matches!(ret_ty, MirTy::Unit) {
+            if !ret_ty.is_unit() {
                 sig.returns
                     .push(AbiParam::new(types::translate_type(&ret_ty, self.target)));
             }
@@ -410,7 +410,7 @@ impl<'a> CodegenContext<'a> {
         // Regular parameters. `mutating` (InOut) params are passed as pointers
         // regardless of value type so the callee can write back to caller storage.
         for param in &func_def.params {
-            let ty = substitute_type(&param.ty, &subst);
+            let ty = substitute_type_with_self(&param.ty, &subst, self_type);
             let cl_ty = if matches!(param.mode, kestrel_mir::ParamMode::InOut) {
                 ptr_ty
             } else {
@@ -422,7 +422,7 @@ impl<'a> CodegenContext<'a> {
         // Return type
         if is_main {
             sig.returns.push(AbiParam::new(ir::types::I64));
-        } else if !use_sret && !matches!(ret_ty, MirTy::Unit | MirTy::Never) {
+        } else if !use_sret && !(ret_ty.is_unit() || matches!(ret_ty, MirTy::Never)) {
             sig.returns
                 .push(AbiParam::new(types::translate_type(&ret_ty, self.target)));
         }

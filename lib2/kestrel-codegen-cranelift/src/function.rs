@@ -15,7 +15,7 @@ use cranelift_codegen::ir::{self, InstBuilder, MemFlags, StackSlotData, StackSlo
 use cranelift_codegen::verifier::verify_function;
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext, Variable};
 use cranelift_module::Module;
-use kestrel_codegen2::{LayoutCache, substitute_type};
+use kestrel_codegen2::{LayoutCache, substitute_type_with_self};
 use kestrel_hecs::Entity;
 use kestrel_mir::{
     BlockId, FunctionDef, FunctionKind, LocalId, MirBody, MirTy, PassingMode, Place, Rvalue,
@@ -229,7 +229,7 @@ pub fn compile_function(
     let ptr_ty = common::ptr_type(ctx.target);
 
     // Compute these before creating the builder (avoids borrow conflicts)
-    let ret_ty = substitute_type(&func_def.ret, subst);
+    let ret_ty = substitute_type_with_self(&func_def.ret, subst, self_type);
     let is_main = ctx.is_main_function(func_def);
     let use_sret = !is_main && common::needs_sret(&ret_ty, &mut ctx.layouts);
 
@@ -239,7 +239,7 @@ pub fn compile_function(
     let mut builder = FunctionBuilder::new(&mut cl_func, &mut func_builder_ctx);
 
     // Collect address-taken locals
-    let stack_locals = collect_address_taken_locals(body, subst, &mut ctx.layouts);
+    let stack_locals = collect_address_taken_locals(body, subst, self_type, &mut ctx.layouts);
 
     // `mutating` (InOut) and aggregate `In` parameters receive a pointer to
     // caller storage. The local Cranelift Variable holds that pointer; reads/
@@ -248,7 +248,7 @@ pub fn compile_function(
     // dangling pointer to a callee-local copy.
     let mut inout_param_locals: HashSet<LocalId> = HashSet::new();
     for p in &func_def.params {
-        let pty = substitute_type(&p.ty, subst);
+        let pty = substitute_type_with_self(&p.ty, subst, self_type);
         let pass_as_ptr = matches!(p.mode, kestrel_mir::ParamMode::InOut)
             || (matches!(p.mode, kestrel_mir::ParamMode::In)
                 && is_aggregate(&pty, &mut ctx.layouts));
@@ -273,7 +273,7 @@ pub fn compile_function(
     // In cranelift 0.129, declare_var(type) returns a Variable automatically
     let mut local_vars = Vec::with_capacity(body.locals.len());
     for (i, local) in body.locals.iter().enumerate() {
-        let ty = substitute_type(&local.ty, subst);
+        let ty = substitute_type_with_self(&local.ty, subst, self_type);
         let local_id = LocalId::new(i);
         let cl_ty = if is_aggregate(&ty, &mut ctx.layouts)
             || stack_locals.contains(&local_id)
@@ -299,7 +299,7 @@ pub fn compile_function(
     for (param_idx, param) in func_def.params.iter().enumerate() {
         let local_id = param.local;
         let cl_param = builder.block_params(entry_cl)[param_idx + param_offset];
-        let ty = substitute_type(&param.ty, subst);
+        let ty = substitute_type_with_self(&param.ty, subst, self_type);
 
         if inout_param_locals.contains(&local_id) {
             // InOut or aggregate In param: cl_param IS the caller's pointer.
@@ -341,7 +341,7 @@ pub fn compile_function(
             continue;
         }
 
-        let ty = substitute_type(&local.ty, subst);
+        let ty = substitute_type_with_self(&local.ty, subst, self_type);
         if is_aggregate(&ty, &mut ctx.layouts) || stack_locals.contains(&local_id) {
             let layout = ctx.layouts.layout_of(&ty);
             let slot = builder.create_sized_stack_slot(StackSlotData::new(
@@ -430,6 +430,7 @@ pub fn compile_function(
 fn collect_address_taken_locals(
     body: &MirBody,
     subst: &HashMap<Entity, MirTy>,
+    self_type: Option<&MirTy>,
     layouts: &mut LayoutCache,
 ) -> HashSet<LocalId> {
     let mut result = HashSet::new();
@@ -440,7 +441,7 @@ fn collect_address_taken_locals(
                 StatementKind::Assign { rvalue, .. } => match rvalue {
                     Rvalue::Ref(place) | Rvalue::RefMut(place) => {
                         if let Some(id) = place.root_local() {
-                            let ty = substitute_type(&body.locals[id.index()].ty, subst);
+                            let ty = substitute_type_with_self(&body.locals[id.index()].ty, subst, self_type);
                             if !is_aggregate(&ty, layouts) {
                                 result.insert(id);
                             }
@@ -453,7 +454,7 @@ fn collect_address_taken_locals(
                         if matches!(arg.mode, PassingMode::Ref | PassingMode::MutRef) {
                             if let kestrel_mir::Value::Place(place) = &arg.value {
                                 if let Some(id) = place.root_local() {
-                                    let ty = substitute_type(&body.locals[id.index()].ty, subst);
+                                    let ty = substitute_type_with_self(&body.locals[id.index()].ty, subst, self_type);
                                     if !is_aggregate(&ty, layouts) {
                                         result.insert(id);
                                     }

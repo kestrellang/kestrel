@@ -235,6 +235,32 @@ fn unify_concrete(ctx: &mut InferCtx<'_>, a: &TyKind, b: &TyKind) -> Result<(), 
             }
         },
 
+        // SelfType: must be the same protocol entity. SelfType(P) ~ SelfType(P)
+        // succeeds; otherwise mismatch. (Unification with concrete types is
+        // handled at the call-site boundary by `lower_hir_ty_sub`, which swaps
+        // SelfType for `recv_tv` when the receiver is known.)
+        (TyKind::SelfType { entity: a }, TyKind::SelfType { entity: b }) => {
+            if a == b {
+                Ok(())
+            } else {
+                Err(UnifyError::Mismatch)
+            }
+        },
+
+        // SelfType(P) unifies with Protocol(P) (no args) — the abstract Self
+        // of P is an instance of P. Used when a where-clause or signature
+        // reference produces Protocol(P) on one side while Self lowered to
+        // SelfType(P) on the other. No arg unification needed: SelfType has
+        // no args, so Protocol side must have none too.
+        (TyKind::SelfType { entity: a }, TyKind::Protocol { entity: b, args })
+        | (TyKind::Protocol { entity: b, args }, TyKind::SelfType { entity: a }) => {
+            if a == b && args.is_empty() {
+                Ok(())
+            } else {
+                Err(UnifyError::Mismatch)
+            }
+        },
+
         // AssocProjections: same assoc entity + unified bases
         (
             TyKind::AssocProjection {

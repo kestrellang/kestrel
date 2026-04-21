@@ -20,7 +20,7 @@ pub fn resolve_type_annotation(ctx: &mut LowerCtx, entity: Entity) -> MirTy {
     });
     match hir_ty {
         Some(ty) => lower_type(ctx, &ty),
-        None => MirTy::Unit,
+        None => MirTy::unit(),
     }
 }
 
@@ -58,7 +58,7 @@ pub fn lower_type(ctx: &mut LowerCtx, ty: &HirTy) -> MirTy {
         // `Self` in a protocol/extend-protocol scope. Carries through to
         // codegen as `MirTy::SelfType`, where `substitute_type_with_self`
         // resolves it against the enclosing function's concrete self_type.
-        HirTy::SelfType(_) => MirTy::SelfType,
+        HirTy::SelfType(_, _) => MirTy::SelfType,
         HirTy::Struct { entity, args, .. }
         | HirTy::Enum { entity, args, .. }
         | HirTy::Protocol { entity, args, .. } => lower_named_type(ctx, *entity, args),

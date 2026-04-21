@@ -153,7 +153,7 @@ fn synthesize_master_init(
     ctx.module
         .register_name(entity, INIT_STATICS_NAME.to_string());
 
-    let mut def = FunctionDef::new(entity, INIT_STATICS_NAME, MirTy::Unit);
+    let mut def = FunctionDef::new(entity, INIT_STATICS_NAME, MirTy::unit());
     def.kind = FunctionKind::Free;
     let func_id = ctx.module.add_function(def);
 

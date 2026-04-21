@@ -44,14 +44,18 @@ pub fn solve(ctx: &mut InferCtx<'_>, hir: &HirBody) {
     // return, loops whose only break values are `!`, etc.
     default_never_fallback(ctx);
 
+    // Phase 5: report remaining unsolved constraints as errors. Runs before
+    // phase 4.5 so real `TypeMismatch` / `DoesNotConform` errors fire on
+    // deferred `Equal` / `Coerce` constraints (and poison their TyVars via
+    // `report_and_poison`) before the generic "could not infer type" fallback
+    // gets a chance to eat them.
+    report_unsolved(ctx);
+
     // Phase 4.5: report any expression or local whose TyVar stayed unresolved.
     // These slots would otherwise surface as `MirTy::Error` downstream and
-    // trigger misleading Cranelift type-mismatch panics. Runs after phase 4
-    // so we don't double-report type-args that were already diagnosed there.
+    // trigger misleading Cranelift type-mismatch panics. Runs after phase 5
+    // so constraints that can name a better error already have.
     report_unresolved_slots(ctx, hir);
-
-    // Phase 5: report remaining unsolved constraints as errors
-    report_unsolved(ctx);
 }
 
 /// Diagnose type parameters at generic call sites that inference couldn't
@@ -150,7 +154,14 @@ fn report_unresolved_slots(ctx: &mut InferCtx<'_>, hir: &HirBody) {
 
     for (id, tv) in expr_entries {
         let resolved = ctx.resolve(tv);
-        if !matches!(&ctx.types[resolved.0 as usize], TySlot::Unresolved { .. }) {
+        // Skip literal slots (`Unresolved { literal: Some(_) }`) — those get
+        // a primitive fallback in `apply_literal_defaults`, and when no
+        // default exists at all (stdlib absent, no lang primitive) the
+        // silent Error-lowering is what diagnostics-only tests rely on.
+        if !matches!(
+            &ctx.types[resolved.0 as usize],
+            TySlot::Unresolved { literal: None }
+        ) {
             continue;
         }
         // Skip expressions whose HIR is `Error` — `FromHir` already covers them.
@@ -169,7 +180,10 @@ fn report_unresolved_slots(ctx: &mut InferCtx<'_>, hir: &HirBody) {
 
     for (id, tv) in local_entries {
         let resolved = ctx.resolve(tv);
-        if !matches!(&ctx.types[resolved.0 as usize], TySlot::Unresolved { .. }) {
+        if !matches!(
+            &ctx.types[resolved.0 as usize],
+            TySlot::Unresolved { literal: None }
+        ) {
             continue;
         }
         let local = &hir.locals[id];
@@ -260,7 +274,10 @@ fn report_unsolved(ctx: &mut InferCtx<'_>) {
     let constraints = std::mem::take(&mut ctx.constraints);
 
     for constraint in constraints {
-        let err = match constraint {
+        // `poison_tv` is the TyVar to mark as Error after reporting so the
+        // downstream `report_unresolved_slots` (phase 4.5) doesn't double-
+        // diagnose the same slot with the generic "could not infer type".
+        let (err, poison_tv) = match constraint {
             Constraint::Equal { a, b, span } => {
                 if ctx.is_error(ctx.resolve(a)) || ctx.is_error(ctx.resolve(b)) {
                     continue;
@@ -290,13 +307,13 @@ fn report_unsolved(ctx: &mut InferCtx<'_>) {
                 if ctx.is_error(ctx.resolve(ty)) {
                     continue;
                 }
-                InferError::DoesNotConform { ty, protocol, span }
+                (InferError::DoesNotConform { ty, protocol, span }, Some(ty))
             },
             Constraint::Associated {
                 container,
                 name,
+                result,
                 span,
-                ..
             } => {
                 let resolved = ctx.resolve(container);
                 if ctx.is_error(resolved) {
@@ -310,39 +327,54 @@ fn report_unsolved(ctx: &mut InferCtx<'_>) {
                 if matches!(ctx.slot(resolved), TySlot::Unresolved { literal: Some(_) }) {
                     continue;
                 }
-                InferError::NoAssociatedType {
-                    container,
-                    name,
-                    span,
-                }
+                (
+                    InferError::NoAssociatedType {
+                        container,
+                        name,
+                        span,
+                    },
+                    Some(result),
+                )
             },
             Constraint::Member {
                 receiver,
                 name,
                 span,
                 is_call,
+                result,
                 ..
             } => {
                 if ctx.is_error(ctx.resolve(receiver)) {
                     continue;
                 }
-                InferError::NoMember {
-                    receiver,
-                    name,
-                    is_call,
-                    span,
-                }
+                (
+                    InferError::NoMember {
+                        receiver,
+                        name,
+                        is_call,
+                        span,
+                    },
+                    Some(result),
+                )
             },
-            Constraint::Call { callee, span, .. } => {
+            Constraint::Call {
+                callee,
+                result,
+                span,
+                ..
+            } => {
                 if ctx.is_error(ctx.resolve(callee)) {
                     continue;
                 }
-                InferError::NoMember {
-                    receiver: callee,
-                    name: "subscript".into(),
-                    is_call: true,
-                    span,
-                }
+                (
+                    InferError::NoMember {
+                        receiver: callee,
+                        name: "subscript".into(),
+                        is_call: true,
+                        span,
+                    },
+                    Some(result),
+                )
             },
             Constraint::OverloadedCall {
                 candidates,
@@ -358,12 +390,15 @@ fn report_unsolved(ctx: &mut InferCtx<'_>) {
                     .and_then(|&e| ctx.query_ctx.get::<Name>(e))
                     .map(|n| n.0.clone())
                     .unwrap_or_else(|| "<overloaded>".into());
-                InferError::NoMember {
-                    receiver: result,
-                    name,
-                    is_call: true,
-                    span,
-                }
+                (
+                    InferError::NoMember {
+                        receiver: result,
+                        name,
+                        is_call: true,
+                        span,
+                    },
+                    Some(result),
+                )
             },
             Constraint::Implicit {
                 expected,
@@ -374,11 +409,14 @@ fn report_unsolved(ctx: &mut InferCtx<'_>) {
                 if ctx.is_error(ctx.resolve(expected)) {
                     continue;
                 }
-                InferError::ImplicitMemberNotFound {
-                    expected,
-                    name,
-                    span,
-                }
+                (
+                    InferError::ImplicitMemberNotFound {
+                        expected,
+                        name,
+                        span,
+                    },
+                    Some(expected),
+                )
             },
             // Pattern matching handles unresolved patterns at a higher level
             Constraint::ImplicitPat { .. } => continue,
@@ -389,6 +427,9 @@ fn report_unsolved(ctx: &mut InferCtx<'_>) {
             Constraint::Reduce { .. } => continue,
         };
         ctx.report_error(err);
+        if let Some(tv) = poison_tv {
+            ctx.poison(tv);
+        }
     }
 }
 
@@ -773,12 +814,14 @@ fn solve_coerce(
     }
 
     // Check protocol conformance: if the target is a protocol and the source conforms,
-    // the coercion is valid (protocol existential boxing handled at codegen)
-    if let TyKind::Protocol {
-        entity: to_entity, ..
-    } = &to_kind
-    {
-        if ctx.resolver.conforms_to(&from_kind, *to_entity) {
+    // the coercion is valid (protocol existential boxing handled at codegen).
+    // `SelfType { entity: P }` acts as an abstract `P` for this purpose.
+    let to_protocol_entity = match &to_kind {
+        TyKind::Protocol { entity, .. } | TyKind::SelfType { entity } => Some(*entity),
+        _ => None,
+    };
+    if let Some(to_entity) = to_protocol_entity {
+        if ctx.resolver.conforms_to(&from_kind, to_entity) {
             return SolveResult::Solved;
         }
     }
@@ -1089,6 +1132,7 @@ fn solve_call(
         TyKind::Struct { .. }
         | TyKind::Enum { .. }
         | TyKind::Protocol { .. }
+        | TyKind::SelfType { .. }
         | TyKind::TypeAlias { .. }
         | TyKind::AssocProjection { .. } => {
             // Instance subscript call (e.g. dict(key)).
@@ -2174,6 +2218,7 @@ fn extension_type_args_compatible(
             | HirTy::Enum { entity, .. }
             | HirTy::Protocol { entity, .. }
             | HirTy::AliasUse { entity, .. } => Some(*entity),
+            HirTy::SelfType(entity, _) => Some(*entity),
             _ => None,
         };
         let Some(ext_entity) = ext_entity_opt else {
@@ -2369,8 +2414,40 @@ fn apply_literal_defaults(ctx: &mut InferCtx<'_>) {
             let args: Vec<TyVar> = (0..type_param_count).map(|_| ctx.fresh()).collect();
             let default_tv = ctx.named(entity, args);
             ctx.types[resolved.0 as usize] = TySlot::Redirect(default_tv);
+        } else if let Some(prim_entity) = lang_primitive_for_literal(ctx, literal) {
+            // Stdlib absent: mirror lib1's fallback to `lang.<primitive>` so tests
+            // with `// stdlib: false` still pin literals (Integer→i64, Bool→i1, …).
+            // Null/Array/Dict have no primitive equivalent and stay unresolved.
+            let default_tv = ctx.named(prim_entity, Vec::new());
+            ctx.types[resolved.0 as usize] = TySlot::Redirect(default_tv);
         }
     }
+}
+
+/// Look up a `lang.<name>` intrinsic struct entity for a literal kind.
+/// Used as a fallback when the `Default<Kind>LiteralType` builtin isn't
+/// registered (e.g. `// stdlib: false` tests).
+fn lang_primitive_for_literal(ctx: &InferCtx<'_>, lit: LiteralKind) -> Option<Entity> {
+    let prim_name = match lit {
+        LiteralKind::Integer => "i64",
+        LiteralKind::Float => "f64",
+        LiteralKind::Bool => "i1",
+        LiteralKind::String => "str",
+        LiteralKind::Char => "i32",
+        // No lang primitive for these literal kinds.
+        LiteralKind::Null | LiteralKind::Array | LiteralKind::Dictionary => return None,
+    };
+    let lang = ctx
+        .query_ctx
+        .children_of(ctx.root)
+        .iter()
+        .copied()
+        .find(|&e| ctx.query_ctx.get::<Name>(e).is_some_and(|n| n.0 == "lang"))?;
+    ctx.query_ctx
+        .children_of(lang)
+        .iter()
+        .copied()
+        .find(|&e| ctx.query_ctx.get::<Name>(e).is_some_and(|n| n.0 == prim_name))
 }
 
 // ===== Helpers =====
@@ -2402,6 +2479,14 @@ pub fn kind_to_tyvar_sub(
                 .map(|a| kind_to_tyvar_sub(ctx, &resolve_kind(ctx, *a), self_entity, recv_tv))
                 .collect();
             ctx.named(*entity, arg_tvs)
+        },
+        TyKind::SelfType { entity } => {
+            // SelfType(P) substitutes to the concrete receiver at call time,
+            // same as the `self_entity == Some(entity)` branch above.
+            if self_entity == Some(*entity) {
+                return recv_tv;
+            }
+            ctx.self_type_ty(*entity)
         },
         TyKind::Param { entity } => ctx.param(*entity),
         TyKind::AssocProjection { base, assoc } => {
@@ -2500,7 +2585,7 @@ fn lower_hir_ty_sub(
 ) -> TyVar {
     use kestrel_hir::ty::HirTy;
     match ty {
-        HirTy::SelfType(_) => {
+        HirTy::SelfType(_, _) => {
             // Substitute Self with the receiver TyVar when we know what Self is.
             // Outside a body scope (plain HirTy walk, no self_entity supplied),
             // fall back to a fresh TyVar — the solver pins it via `recv_tv` at

@@ -38,6 +38,14 @@ pub enum TyKind {
     /// Protocol type (used as a bound or, eventually, as an existential).
     Protocol { entity: Entity, args: Vec<TyVar> },
 
+    /// Abstract `Self` inside `extend P` / `protocol P { ... }`. Behaves like
+    /// `Protocol(P)` for associated-type lookup and conformance but preserves
+    /// the "this is Self" identity through inference output so MIR receives
+    /// `MirTy::SelfType` and monomorphization substitutes with the caller's
+    /// concrete self type. Without this, `Self` leaked as `Named(P)` into call-
+    /// site type-args and broke per-concrete-I generic adapter layouts.
+    SelfType { entity: Entity },
+
     /// Reducible alias reference. The solver equates it to the substituted
     /// definition (and emits bound obligations) via the `Reduce` constraint.
     /// An AliasUse without a concrete `TypeAnnotation` (i.e. an abstract
@@ -78,7 +86,7 @@ impl TyKind {
             | TyKind::Enum { entity, .. }
             | TyKind::Protocol { entity, .. }
             | TyKind::TypeAlias { entity, .. } => Some(*entity),
-            TyKind::Param { entity } => Some(*entity),
+            TyKind::Param { entity } | TyKind::SelfType { entity } => Some(*entity),
             _ => None,
         }
     }

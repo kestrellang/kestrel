@@ -151,7 +151,7 @@ fn needs_deinit(ty: &MirTy) -> bool {
         // Primitives — no deinit
         MirTy::Bool | MirTy::I8 | MirTy::I16 | MirTy::I32 | MirTy::I64 => false,
         MirTy::F16 | MirTy::F32 | MirTy::F64 => false,
-        MirTy::Unit | MirTy::Never => false,
+        MirTy::Never => false,
 
         // References and pointers — no ownership, no deinit
         MirTy::Ref(_) | MirTy::RefMut(_) | MirTy::Pointer(_) => false,
@@ -164,6 +164,9 @@ fn needs_deinit(ty: &MirTy) -> bool {
 
         // Thick callables might own an env — need deinit
         MirTy::FuncThick { .. } => true,
+
+        // Empty tuple == unit: nothing to deinit.
+        MirTy::Tuple(elems) if elems.is_empty() => false,
 
         // Named types, tuples, strings — may need deinit
         MirTy::Named { .. } | MirTy::Tuple(_) | MirTy::Str => true,

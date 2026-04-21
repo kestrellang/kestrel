@@ -43,8 +43,12 @@ pub fn compile_and_run(compiler: &Compiler) -> Result<RunResult, String> {
         .output()
         .map_err(|e| format!("failed to execute: {e}"))?;
 
-    // Clean up temp directory
-    let _ = std::fs::remove_dir_all(&temp_dir);
+    // Clean up temp directory (unless KESTREL_KEEP_TEST_BIN is set for debugging)
+    if std::env::var("KESTREL_KEEP_TEST_BIN").is_err() {
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    } else {
+        eprintln!("KEPT: {}", exe_path.display());
+    }
 
     Ok(RunResult {
         exit_code: output.status.code().unwrap_or(-1),

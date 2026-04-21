@@ -269,7 +269,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                             self_type,
                             method_type_args,
                         );
-                        self.emit_call(callee, vec![newval_arg], MirTy::Unit);
+                        self.emit_call(callee, vec![newval_arg], MirTy::unit());
                     } else {
                         let receiver_ty = self.resolve_expr_type(base);
                         let base_val = self.lower_expr(base);
@@ -280,7 +280,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                             receiver_ty,
                             method_type_args,
                         );
-                        self.emit_call(callee, vec![receiver_arg, newval_arg], MirTy::Unit);
+                        self.emit_call(callee, vec![receiver_arg, newval_arg], MirTy::unit());
                     }
                     return Some(Value::Immediate(Immediate::unit()));
                 }
@@ -298,7 +298,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                     let self_type = self.type_from_type_ref(base);
                     let type_args = self.prepend_receiver_type_args(&self_type, vec![]);
                     let callee = Callee::method(setter, type_args, self_type);
-                    self.emit_call(callee, vec![newval_arg], MirTy::Unit);
+                    self.emit_call(callee, vec![newval_arg], MirTy::unit());
                 } else {
                     let receiver_ty = self.resolve_expr_type(base);
                     let base_val = self.lower_expr(base);
@@ -306,7 +306,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                     let type_args = self.resolve_type_args(target_id);
                     let type_args = self.prepend_receiver_type_args(&receiver_ty, type_args);
                     let callee = Callee::method(setter, type_args, receiver_ty);
-                    self.emit_call(callee, vec![receiver_arg, newval_arg], MirTy::Unit);
+                    self.emit_call(callee, vec![receiver_arg, newval_arg], MirTy::unit());
                 }
                 Some(Value::Immediate(Immediate::unit()))
             },
@@ -316,7 +316,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 let rhs_val = self.lower_expr(value_id);
                 let newval_arg = CallArg::copy(rhs_val);
                 let callee = Callee::direct_generic(setter, Vec::new());
-                self.emit_call(callee, vec![newval_arg], MirTy::Unit);
+                self.emit_call(callee, vec![newval_arg], MirTy::unit());
                 Some(Value::Immediate(Immediate::unit()))
             },
             // Subscript assignment: `arr(i) = v`. Concrete subscripts only —
@@ -353,7 +353,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                     let callee = Callee::method(setter, type_args, self_type);
                     let mut call_args = subscript_args;
                     call_args.push(newval_arg);
-                    self.emit_call(callee, call_args, MirTy::Unit);
+                    self.emit_call(callee, call_args, MirTy::unit());
                 } else {
                     let receiver_ty = self.resolve_expr_type(callee_expr);
                     let receiver_arg = CallArg::mutating(self.lower_expr(callee_expr));
@@ -363,7 +363,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                     let mut call_args = vec![receiver_arg];
                     call_args.append(&mut subscript_args);
                     call_args.push(newval_arg);
-                    self.emit_call(callee, call_args, MirTy::Unit);
+                    self.emit_call(callee, call_args, MirTy::unit());
                 }
                 Some(Value::Immediate(Immediate::unit()))
             },
@@ -1482,7 +1482,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 }
             }
         }
-        MirTy::Unit
+        MirTy::unit()
     }
 
     /// Simple recursive type substitution (replaces TypeParam entities in the subst map).
@@ -2499,7 +2499,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         if let Callee::Direct { func, .. } = &callee {
             self.apply_callee_param_modes(&mut args, *func);
         }
-        if result_ty == MirTy::Unit || result_ty == MirTy::Never {
+        if result_ty.is_unit() || result_ty == MirTy::Never {
             self.emit_stmt(Statement::new(StatementKind::Call {
                 dest: None,
                 callee,
@@ -2652,7 +2652,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 Value::Place(Place::local(offset_ptr_local))
             };
 
-            let write_local = self.fresh_temp(MirTy::Unit);
+            let write_local = self.fresh_temp(MirTy::unit());
             self.emit_stmt(Statement::new(StatementKind::Assign {
                 dest: Place::local(write_local),
                 rvalue: Rvalue::Op2 {
@@ -2974,7 +2974,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                     .iter()
                     .map(|p| self.resolve_local_type(p.local))
                     .collect();
-                (p, MirTy::Unit)
+                (p, MirTy::unit())
             },
         };
 
@@ -3038,7 +3038,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 type_args: env_type_args,
             }))
         } else {
-            MirTy::Pointer(Box::new(MirTy::Unit))
+            MirTy::Pointer(Box::new(MirTy::unit()))
         };
         let env_local = closure_body.add_local(LocalDef::new("env", env_ty.clone()));
         let env_param = ParamDef::new("env", env_local, env_ty);

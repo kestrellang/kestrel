@@ -39,11 +39,17 @@ pub fn compile_call(
             type_args,
             self_type,
         } => {
-            // Resolve the concrete type args
-            let concrete_type_args = common::substitute_type_args(type_args, &state.subst);
-            let concrete_self = self_type
-                .as_ref()
-                .map(|st| substitute_type(st, &state.subst));
+            // Resolve the concrete type args — substitute both type params AND
+            // SelfType using the caller's own self_type, so a callee with
+            // `SelfType` in its type_args (e.g., `Self` forwarded through a
+            // protocol extension method) becomes concrete at the call site.
+            let concrete_type_args: Vec<MirTy> = type_args
+                .iter()
+                .map(|a| substitute_type_with_self(a, &state.subst, state.self_type.as_ref()))
+                .collect();
+            let concrete_self = self_type.as_ref().map(|st| {
+                substitute_type_with_self(st, &state.subst, state.self_type.as_ref())
+            });
 
             let func_id_mir = ctx.entity_to_func.get(func).ok_or_else(|| {
                 let name = ctx.module.resolve_name(*func);
@@ -67,6 +73,7 @@ pub fn compile_call(
                 &mangled,
                 func_def,
                 &concrete_type_args,
+                concrete_self.as_ref(),
                 args,
                 dest,
             )?;
@@ -121,6 +128,7 @@ pub fn compile_call(
                 &mangled,
                 func_def,
                 &resolved.type_args,
+                resolved.self_type.as_ref(),
                 args,
                 dest,
             )?;
@@ -147,6 +155,7 @@ fn compile_resolved_call(
     mangled: &str,
     func_def: &kestrel_mir::FunctionDef,
     callee_type_args: &[MirTy],
+    callee_self_type: Option<&MirTy>,
     args: &[CallArg],
     dest: Option<&Place>,
 ) -> Result<(), CodegenError> {
@@ -185,7 +194,7 @@ fn compile_resolved_call(
 
     // If sret, allocate a stack slot for the return value.
     let sret_addr = if callee_sret {
-        let ret_ty = substitute_type(&func_def.ret, &callee_subst);
+        let ret_ty = substitute_type_with_self(&func_def.ret, &callee_subst, callee_self_type);
         let layout = ctx.layouts.layout_of(&ret_ty);
         let slot = builder.create_sized_stack_slot(StackSlotData::new(
             StackSlotKind::ExplicitSlot,
@@ -207,7 +216,7 @@ fn compile_resolved_call(
         let expected = func_def
             .params
             .get(i)
-            .map(|p| substitute_type(&p.ty, &callee_subst));
+            .map(|p| substitute_type_with_self(&p.ty, &callee_subst, callee_self_type));
         let val = compile_call_arg(ctx, state, builder, arg, expected.as_ref())?;
         cl_args.push(val);
     }
@@ -231,6 +240,7 @@ fn compile_resolved_call(
                     state.body,
                     dest_place,
                     &state.subst,
+                    state.self_type.as_ref(),
                     &ctx.layouts,
                 )?;
                 if common::is_aggregate(&dest_ty, &mut ctx.layouts) {
@@ -269,6 +279,7 @@ fn compile_indirect_call(
         state.body,
         callee_place,
         &state.subst,
+        state.self_type.as_ref(),
         &ctx.layouts,
     )?;
     let (param_tys, ret_ty) = match (&callee_ty, is_thick) {
@@ -305,7 +316,7 @@ fn compile_indirect_call(
         (callee_val, None)
     };
 
-    let callee_sret = !matches!(ret_ty, MirTy::Unit | MirTy::Never)
+    let callee_sret = !(ret_ty.is_unit() || matches!(ret_ty, MirTy::Never))
         && common::needs_sret(&ret_ty, &mut ctx.layouts);
     let mut sig = Signature::new(ctx.c_call_conv());
     if callee_sret {
@@ -319,7 +330,7 @@ fn compile_indirect_call(
         sig.params
             .push(AbiParam::new(types::translate_type(param_ty, ctx.target)));
     }
-    if !callee_sret && !matches!(ret_ty, MirTy::Unit | MirTy::Never) {
+    if !callee_sret && !(ret_ty.is_unit() || matches!(ret_ty, MirTy::Never)) {
         sig.returns
             .push(AbiParam::new(types::translate_type(&ret_ty, ctx.target)));
     }
@@ -353,7 +364,7 @@ fn compile_indirect_call(
     if let Some(dest_place) = dest {
         if callee_sret {
             place::compile_place_write(ctx, state, builder, dest_place, sret_addr.unwrap())?;
-        } else if !matches!(ret_ty, MirTy::Unit | MirTy::Never) {
+        } else if !(ret_ty.is_unit() || matches!(ret_ty, MirTy::Never)) {
             let result = builder.inst_results(inst)[0];
             if let kestrel_mir::Place::Local(id) = dest_place {
                 let dest_ty = common::get_place_type(
@@ -361,6 +372,7 @@ fn compile_indirect_call(
                     state.body,
                     dest_place,
                     &state.subst,
+                    state.self_type.as_ref(),
                     &ctx.layouts,
                 )?;
                 if common::is_aggregate(&dest_ty, &mut ctx.layouts) {

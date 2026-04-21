@@ -13,7 +13,7 @@ use cranelift_codegen::ir::condcodes::IntCC;
 use cranelift_codegen::ir::immediates::Offset32;
 use cranelift_codegen::ir::{self, InstBuilder, MemFlags, TrapCode, Value as CrValue};
 use cranelift_frontend::FunctionBuilder;
-use kestrel_codegen2::{NamedKind, substitute_type};
+use kestrel_codegen2::{NamedKind, substitute_type_with_self};
 use kestrel_mir::{MirTy, SwitchCase, Terminator, TerminatorKind, Value};
 
 /// Compile a block terminator.
@@ -56,10 +56,14 @@ fn compile_return(
     builder: &mut FunctionBuilder,
     value: &Value,
 ) -> Result<(), CodegenError> {
-    let ret_ty = substitute_type(&state.func_def.ret, &state.subst);
+    let ret_ty = substitute_type_with_self(
+        &state.func_def.ret,
+        &state.subst,
+        state.self_type.as_ref(),
+    );
 
-    // Unit return
-    if matches!(ret_ty, MirTy::Unit) {
+    // Unit return — empty tuple is the canonical unit value.
+    if ret_ty.is_unit() {
         if state.is_main {
             let zero = builder.ins().iconst(ir::types::I64, 0);
             builder.ins().return_(&[zero]);
@@ -168,6 +172,7 @@ fn compile_switch(
         state.body,
         discriminant,
         &state.subst,
+        state.self_type.as_ref(),
         &ctx.layouts,
     )?;
     let enum_id = match &disc_ty {
