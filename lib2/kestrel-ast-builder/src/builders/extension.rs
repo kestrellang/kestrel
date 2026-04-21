@@ -38,7 +38,7 @@ pub fn build_extension(
         world.set(entity, ExtensionTarget(target_ty));
     }
 
-    set_attributes(world, entity, node);
+    set_attributes(world, entity, node, file_id);
     set_conformances(world, entity, node, file_id);
     set_where_clause(world, entity, node, file_id);
 

@@ -78,7 +78,7 @@ impl LowerCtx<'_> {
             },
 
             AstPat::Literal { kind, span } => {
-                let value = lower_lit_pat(kind);
+                let value = lower_lit_pat(kind, span);
                 self.alloc_pat(HirPat::Literal {
                     value,
                     span: span.clone(),
@@ -91,8 +91,8 @@ impl LowerCtx<'_> {
                 inclusive,
                 span,
             } => {
-                let hir_start = start.as_ref().map(lower_lit_pat);
-                let hir_end = end.as_ref().map(lower_lit_pat);
+                let hir_start = start.as_ref().map(|k| lower_lit_pat(k, span));
+                let hir_end = end.as_ref().map(|k| lower_lit_pat(k, span));
 
                 // Validate: start must be <= end (inclusive) or < end (exclusive)
                 if let (Some(s), Some(e)) = (&hir_start, &hir_end) {
@@ -473,12 +473,21 @@ impl LowerCtx<'_> {
     }
 }
 
-/// Convert a literal pattern kind to an HIR literal.
-fn lower_lit_pat(kind: &LitPatKind) -> HirLiteral {
+/// Convert a literal pattern kind to an HIR literal. `span` is the span of
+/// the literal's source text, used to compute escape-error sub-spans for
+/// string patterns.
+fn lower_lit_pat(kind: &LitPatKind, span: &Span) -> HirLiteral {
     match kind {
         LitPatKind::Integer(s) => HirLiteral::Integer(parse_int(s)),
         LitPatKind::Float(s) => HirLiteral::Float(parse_float(s)),
-        LitPatKind::String(s) => HirLiteral::String(s.clone()),
+        LitPatKind::String(s) => {
+            let (value, escape_errors) =
+                crate::literal::decode_string_literal_token(s, span.file_id, span.start);
+            HirLiteral::String {
+                value,
+                escape_errors,
+            }
+        },
         LitPatKind::Bool(b) => HirLiteral::Bool(*b),
         LitPatKind::Char(s) => HirLiteral::Char(parse_char(s)),
     }

@@ -29,13 +29,13 @@ pub fn set_visibility(world: &mut World, entity: Entity, node: &SyntaxNode) {
 }
 
 /// Extract and set attributes from a declaration node.
-pub fn set_attributes(world: &mut World, entity: Entity, node: &SyntaxNode) {
+pub fn set_attributes(world: &mut World, entity: Entity, node: &SyntaxNode, file_id: usize) {
     let attr_list = find_child(node, SyntaxKind::AttributeList);
     let attrs: Vec<AstAttribute> = attr_list
         .iter()
         .flat_map(|list| list.children())
         .filter(|child| child.kind() == SyntaxKind::Attribute)
-        .filter_map(|n| extract_attribute(&n))
+        .filter_map(|n| extract_attribute(&n, file_id))
         .collect();
 
     if !attrs.is_empty() {
@@ -44,14 +44,13 @@ pub fn set_attributes(world: &mut World, entity: Entity, node: &SyntaxNode) {
 }
 
 /// Extract a single attribute from an Attribute CST node.
-fn extract_attribute(node: &SyntaxNode) -> Option<AstAttribute> {
+fn extract_attribute(node: &SyntaxNode, file_id: usize) -> Option<AstAttribute> {
     // Attribute name is the identifier token after @
-    let name = node
+    let name_token = node
         .children_with_tokens()
         .filter_map(|e| e.into_token())
-        .find(|t| t.kind() == SyntaxKind::Identifier)?
-        .text()
-        .to_string();
+        .find(|t| t.kind() == SyntaxKind::Identifier)?;
+    let name = name_token.text().to_string();
 
     // Extract args from AttributeArgs child if present
     let args = find_child(node, SyntaxKind::AttributeArgs)
@@ -64,7 +63,13 @@ fn extract_attribute(node: &SyntaxNode) -> Option<AstAttribute> {
         })
         .unwrap_or_default();
 
-    Some(AstAttribute { name, args })
+    // Use the identifier token's range — rowan Attribute nodes include leading
+    // trivia (previous line's newline), which would map the span to the wrong
+    // line for diagnostics.
+    let range = name_token.text_range();
+    let span = Span::new(file_id, (range.start().into())..(range.end().into()));
+
+    Some(AstAttribute { name, args, span })
 }
 
 /// Extract a single attribute argument.
@@ -145,15 +150,28 @@ pub fn set_conformances(world: &mut World, entity: Entity, node: &SyntaxNode, fi
         .filter_map(|child| {
             match child.kind() {
                 SyntaxKind::ConformanceItem => {
-                    // Positive conformance — find the type inside
-                    let ty = child
+                    // ConformanceItem wraps either a direct type (positive) or
+                    // a nested `NegativeConformance > <type>` (for `not Proto`).
+                    if let Some(neg) = child
                         .children()
-                        .find(|c| is_type_kind(c.kind()))
-                        .and_then(|c| ast_type_from_cst(&c, file_id))?;
-                    Some(ConformanceItem::Positive(ty, child))
+                        .find(|c| c.kind() == SyntaxKind::NegativeConformance)
+                    {
+                        let ty = neg
+                            .children()
+                            .find(|c| is_type_kind(c.kind()))
+                            .and_then(|c| ast_type_from_cst(&c, file_id))?;
+                        Some(ConformanceItem::Negative(ty, child))
+                    } else {
+                        let ty = child
+                            .children()
+                            .find(|c| is_type_kind(c.kind()))
+                            .and_then(|c| ast_type_from_cst(&c, file_id))?;
+                        Some(ConformanceItem::Positive(ty, child))
+                    }
                 },
                 SyntaxKind::NegativeConformance => {
-                    // Negative conformance — `not Protocol`
+                    // Legacy/alternate shape where NegativeConformance is a
+                    // direct child of ConformanceList.
                     let ty = child
                         .children()
                         .find(|c| is_type_kind(c.kind()))
@@ -196,9 +214,43 @@ pub fn set_where_clause(world: &mut World, entity: Entity, node: &SyntaxNode, fi
                     // Subject is a Name (simple: T) or AssociatedTypeTarget (dotted: T.Item)
                     let subject = bound_subject_to_ast_type(&child, file_id)?;
 
-                    // Protocol conformances come from Path children.
-                    // Type arguments (e.g., Factory[lang.i64]) appear as
-                    // TypeArgumentList siblings after the Path node.
+                    // Negative bound: `T: not Proto` emits
+                    //   TypeBound > { Name, NegativeConformance > Path }
+                    // — the Path lives inside NegativeConformance, not as a
+                    // direct child of TypeBound, so handle that shape first.
+                    if let Some(neg) = child
+                        .children()
+                        .find(|c| c.kind() == SyntaxKind::NegativeConformance)
+                    {
+                        let path_node = neg.children().find(|c| c.kind() == SyntaxKind::Path)?;
+                        let mut ty = path_to_ast_type(&path_node, file_id)?;
+                        if let Some(args_node) = neg
+                            .children()
+                            .find(|c| c.kind() == SyntaxKind::TypeArgumentList)
+                        {
+                            if let AstType::Named {
+                                ref mut segments, ..
+                            } = ty
+                            {
+                                let type_args: Vec<AstType> = args_node
+                                    .children()
+                                    .filter(|c| crate::ast_type::is_type_node(c.kind()))
+                                    .filter_map(|c| crate::ast_type::ast_type_from_cst(&c, file_id))
+                                    .collect();
+                                if let Some(last) = segments.last_mut() {
+                                    last.type_args = type_args;
+                                }
+                            }
+                        }
+                        return Some(WhereConstraint::NegativeBound {
+                            subject,
+                            protocol: ty,
+                            node: child,
+                        });
+                    }
+
+                    // Positive bound: protocols come from Path children, with
+                    // TypeArgumentList siblings carrying generic args.
                     let protocols: Vec<_> = {
                         let children: Vec<_> = child.children().collect();
                         let mut protos = Vec::new();
@@ -240,23 +292,11 @@ pub fn set_where_clause(world: &mut World, entity: Entity, node: &SyntaxNode, fi
                         return None;
                     }
 
-                    // Check for negative bound (`not`)
-                    let has_not = child
-                        .children_with_tokens()
-                        .any(|e| e.as_token().is_some_and(|t| t.kind() == SyntaxKind::Not));
-                    if has_not && protocols.len() == 1 {
-                        Some(WhereConstraint::NegativeBound {
-                            subject,
-                            protocol: protocols.into_iter().next().unwrap(),
-                            node: child,
-                        })
-                    } else {
-                        Some(WhereConstraint::Bound {
-                            subject,
-                            protocols,
-                            node: child,
-                        })
-                    }
+                    Some(WhereConstraint::Bound {
+                        subject,
+                        protocols,
+                        node: child,
+                    })
                 },
                 SyntaxKind::TypeEquality => {
                     // Type equality uses Ty nodes, Name/Path, or AssociatedTypeTarget (wraps a Path)

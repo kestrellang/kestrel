@@ -17,6 +17,12 @@
 //!
 //! ### E458 -- `wrong_method_return_type` (Error, Correctness)
 //! **Message:** "method '{name}' has wrong return type for protocol '{proto}'"
+//!
+//! ### E459 -- `wrong_method_receiver_kind` (Error, Correctness)
+//! **Message:** "method '{name}' has wrong receiver kind for protocol '{proto}'"
+//!
+//! ### E460 -- `missing_property_setter` (Error, Correctness)
+//! **Message:** "property '{name}' requires a setter to satisfy protocol '{proto}'"
 
 use std::collections::{HashMap, HashSet};
 
@@ -26,8 +32,8 @@ use crate::traits::{CompilationCheck, Describe};
 use crate::util;
 use kestrel_ast::AstType;
 use kestrel_ast_builder::{
-    ConformanceItem, Conformances, Name, NodeKind, QualifiedTarget, TypeAnnotation, WhereClause,
-    WhereConstraint,
+    Callable, ConformanceItem, Conformances, Name, NodeKind, QualifiedTarget, Settable,
+    TypeAnnotation, WhereClause, WhereConstraint,
 };
 use kestrel_hecs::Entity;
 use kestrel_name_res::{
@@ -62,6 +68,18 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
     DiagnosticDescriptor {
         id: "E458",
         name: "wrong_method_return_type",
+        default_severity: Severity::Error,
+        category: Category::Correctness,
+    },
+    DiagnosticDescriptor {
+        id: "E459",
+        name: "wrong_method_receiver_kind",
+        default_severity: Severity::Error,
+        category: Category::Correctness,
+    },
+    DiagnosticDescriptor {
+        id: "E460",
+        name: "missing_property_setter",
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
@@ -195,19 +213,49 @@ fn check_protocol_requirements(
 
         match child_kind {
             Some(NodeKind::Function | NodeKind::Subscript) => {
-                // Required method — check if provided
-                if let Some(&impl_method) = provided.methods.get(name.as_str()) {
-                    // Method exists — check return type matches after associated type substitution
-                    check_method_return_type(
-                        cx,
-                        child,
-                        impl_method,
-                        type_entity,
-                        protocol,
-                        name,
-                        &proto_name,
-                        diags,
-                    );
+                // Required method — look for an overload on the impl side
+                // whose signature shape (arity + labels) matches the
+                // protocol requirement. A name match with the wrong shape
+                // is treated as "not implemented" (lib1 parity: the impl
+                // only satisfies the requirement if labels + arity line up).
+                let proto_call = cx.query.get::<Callable>(child);
+                let candidates = provided.methods.get(name.as_str());
+                let sig_match = candidates.and_then(|cands| {
+                    cands
+                        .iter()
+                        .copied()
+                        .find(|&c| signatures_match(proto_call, cx.query.get::<Callable>(c)))
+                });
+
+                let mut matched_impl: Option<Entity> = None;
+                if let Some(impl_method) = sig_match {
+                    let impl_call = cx.query.get::<Callable>(impl_method);
+                    if !receivers_match(proto_call, impl_call) {
+                        let impl_span = util::entity_span(cx.query, impl_method);
+                        let expected = match proto_call.and_then(|c| c.receiver.as_ref()) {
+                            Some(_) => "instance",
+                            None => "static",
+                        };
+                        diags.push(AnalyzeDiagnostic {
+                            descriptor_id: DESCRIPTORS[5].id,
+                            severity: DESCRIPTORS[5].default_severity,
+                            message: format!(
+                                "method '{}' has wrong receiver kind for protocol '{}'",
+                                name, proto_name,
+                            ),
+                            labels: vec![DiagLabel {
+                                span: impl_span,
+                                message: format!(
+                                    "expected {} method to match protocol receiver",
+                                    expected,
+                                ),
+                                is_primary: true,
+                            }],
+                            notes: vec![],
+                        });
+                    } else {
+                        matched_impl = Some(impl_method);
+                    }
                 } else {
                     diags.push(AnalyzeDiagnostic {
                         descriptor_id: DESCRIPTORS[0].id,
@@ -223,6 +271,19 @@ fn check_protocol_requirements(
                         }],
                         notes: vec![],
                     });
+                }
+
+                if let Some(impl_method) = matched_impl {
+                    check_method_return_type(
+                        cx,
+                        child,
+                        impl_method,
+                        type_entity,
+                        protocol,
+                        name,
+                        &proto_name,
+                        diags,
+                    );
                 }
             },
             Some(NodeKind::TypeAlias) => {
@@ -254,6 +315,27 @@ fn check_protocol_requirements(
             Some(NodeKind::Field) => {
                 // Required property — check if provided with matching type
                 if let Some(&field_entity) = provided.fields.get(name.as_str()) {
+                    // Setter requirement: if the protocol declares `{ get set }`
+                    // the impl must also be settable (either a `var` stored
+                    // property or a computed property with a `set` accessor).
+                    let proto_needs_set = cx.query.get::<Settable>(child).is_some();
+                    let impl_has_set = cx.query.get::<Settable>(field_entity).is_some();
+                    if proto_needs_set && !impl_has_set {
+                        diags.push(AnalyzeDiagnostic {
+                            descriptor_id: DESCRIPTORS[6].id,
+                            severity: DESCRIPTORS[6].default_severity,
+                            message: format!(
+                                "property '{}' requires a setter to satisfy protocol '{}'",
+                                name, proto_name,
+                            ),
+                            labels: vec![DiagLabel {
+                                span: decl_span.clone(),
+                                message: format!("missing setter for '{}'", name),
+                                is_primary: true,
+                            }],
+                            notes: vec![],
+                        });
+                    }
                     // Compare types by resolving TypeAnnotation on both
                     let proto_ty = cx.query.get::<TypeAnnotation>(child);
                     let impl_ty = cx.query.get::<TypeAnnotation>(field_entity);
@@ -621,6 +703,34 @@ fn resolve_type_entity_with_self(
     }
 }
 
+/// Protocol and impl signatures agree on arity and parameter labels.
+/// Types are checked separately by `check_method_return_type`; param types
+/// aren't compared here because type-param / Self substitution isn't modeled
+/// by entity equality.
+fn signatures_match(proto: Option<&Callable>, imp: Option<&Callable>) -> bool {
+    let (Some(proto), Some(imp)) = (proto, imp) else {
+        // If either side lacks a Callable component we can't prove a mismatch —
+        // keep parity with the previous behavior and treat as matching.
+        return true;
+    };
+    if proto.params.len() != imp.params.len() {
+        return false;
+    }
+    proto
+        .params
+        .iter()
+        .zip(imp.params.iter())
+        .all(|(a, b)| a.label == b.label)
+}
+
+/// Both sides are instance methods, or both are static.
+fn receivers_match(proto: Option<&Callable>, imp: Option<&Callable>) -> bool {
+    match (proto, imp) {
+        (Some(p), Some(i)) => p.receiver.is_some() == i.receiver.is_some(),
+        _ => true,
+    }
+}
+
 /// Check if an entity has a TypeAlias child with the given name (regardless of binding).
 fn has_type_alias_by_name(cx: &CompilationContext<'_>, entity: Entity, name: &str) -> bool {
     cx.query.children_of(entity).iter().any(|&child| {
@@ -630,8 +740,10 @@ fn has_type_alias_by_name(cx: &CompilationContext<'_>, entity: Entity, name: &st
 }
 
 struct ProvidedMembers {
-    /// method name → impl entity (for signature comparison)
-    methods: HashMap<String, Entity>,
+    /// method name → candidate impl entities. A name can map to multiple
+    /// overloads that differ by labels/arity; conformance checks must match
+    /// each requirement to the overload with the right signature.
+    methods: HashMap<String, Vec<Entity>>,
     type_aliases: HashSet<String>,
     /// field name → field entity (for type comparison)
     fields: HashMap<String, Entity>,
@@ -639,7 +751,7 @@ struct ProvidedMembers {
 
 /// Collect all method names and type alias names provided by a type and its extensions.
 fn collect_provided_members(cx: &CompilationContext<'_>, type_entity: Entity) -> ProvidedMembers {
-    let mut methods = HashMap::new();
+    let mut methods: HashMap<String, Vec<Entity>> = HashMap::new();
     let mut type_aliases = HashSet::new();
     let mut fields = HashMap::new();
 
@@ -671,7 +783,7 @@ fn collect_provided_members(cx: &CompilationContext<'_>, type_entity: Entity) ->
 fn collect_from_entity(
     cx: &CompilationContext<'_>,
     entity: Entity,
-    methods: &mut HashMap<String, Entity>,
+    methods: &mut HashMap<String, Vec<Entity>>,
     type_aliases: &mut HashSet<String>,
     fields: &mut HashMap<String, Entity>,
 ) {
@@ -681,7 +793,7 @@ fn collect_from_entity(
         };
         match cx.query.get::<NodeKind>(child) {
             Some(NodeKind::Function | NodeKind::Subscript | NodeKind::Initializer) => {
-                methods.insert(name.0.clone(), child);
+                methods.entry(name.0.clone()).or_default().push(child);
             },
             Some(NodeKind::TypeAlias) => {
                 // Only count type aliases with a binding (TypeAnnotation = concrete type)

@@ -77,7 +77,7 @@ pub fn build_type_alias(
     }
 
     set_visibility(world, entity, node);
-    set_attributes(world, entity, node);
+    set_attributes(world, entity, node, file_id);
     // Associated types in protocols can have bounds: `type Iter: Iterator`
     set_conformances(world, entity, node, file_id);
     // And where clauses: `type Iter: Iterator where Iter.Item = Item`

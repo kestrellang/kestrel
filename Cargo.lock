@@ -984,10 +984,12 @@ name = "kestrel"
 version = "0.15.0"
 dependencies = [
  "clap",
- "kestrel-compiler",
- "kestrel-execution-graph-lowering",
- "kestrel-lexer",
- "kestrel-parser",
+ "kestrel-ast-builder",
+ "kestrel-codegen2",
+ "kestrel-codegen2-cranelift",
+ "kestrel-compiler-driver",
+ "kestrel-compiler2",
+ "kestrel-mir-lower",
 ]
 
 [[package]]
@@ -1073,6 +1075,7 @@ dependencies = [
  "cranelift-object 0.129.1",
  "indexmap",
  "kestrel-codegen2",
+ "kestrel-compiler-driver",
  "kestrel-compiler2",
  "kestrel-debug",
  "kestrel-hecs",
@@ -1101,6 +1104,19 @@ dependencies = [
  "kestrel-semantic-tree-builder",
  "kestrel-span",
  "kestrel-syntax-tree",
+]
+
+[[package]]
+name = "kestrel-compiler-driver"
+version = "0.15.0"
+dependencies = [
+ "codespan-reporting",
+ "kestrel-analyze",
+ "kestrel-ast-builder",
+ "kestrel-compiler2",
+ "kestrel-hecs",
+ "kestrel-reporting2",
+ "kestrel-type-infer",
 ]
 
 [[package]]
@@ -1235,6 +1251,7 @@ version = "0.15.0"
 dependencies = [
  "kestrel-ast",
  "kestrel-ast-builder",
+ "kestrel-compiler-driver",
  "kestrel-compiler2",
  "kestrel-hecs",
  "kestrel-hir",
@@ -1467,6 +1484,7 @@ dependencies = [
  "kestrel-ast-builder",
  "kestrel-codegen2",
  "kestrel-codegen2-cranelift",
+ "kestrel-compiler-driver",
  "kestrel-compiler2",
  "kestrel-hecs",
  "kestrel-mir",

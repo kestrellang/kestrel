@@ -204,6 +204,6 @@ pub fn build_field(
     }
 
     set_visibility(world, entity, node);
-    set_attributes(world, entity, node);
+    set_attributes(world, entity, node, file_id);
     set_documentation(world, entity, node);
 }

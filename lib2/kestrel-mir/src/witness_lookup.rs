@@ -6,8 +6,8 @@
 //! codegen because witness tables are MIR data — the lookup has no target-
 //! code-generation concerns.
 
-use crate::ty::MirTy;
 use crate::MirModule;
+use crate::ty::MirTy;
 use kestrel_hecs::Entity;
 use std::collections::HashMap;
 
@@ -168,4 +168,3 @@ fn substitute_params_pure(ty: &MirTy, subst: &HashMap<Entity, MirTy>) -> MirTy {
         | MirTy::Error => ty.clone(),
     }
 }
-

@@ -333,7 +333,10 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                     .typed
                     .and_then(|t| t.resolutions.get(&target_id))
                     .copied()?;
-                if self.ctx.world.get::<kestrel_ast_builder::NodeKind>(resolved)
+                if self
+                    .ctx
+                    .world
+                    .get::<kestrel_ast_builder::NodeKind>(resolved)
                     != Some(&kestrel_ast_builder::NodeKind::Subscript)
                 {
                     return None;
@@ -2212,8 +2215,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                     };
                     let mut call_args = vec![receiver_arg];
                     call_args.extend(self.lower_call_args(args));
-                    let method_type_args =
-                        self.resolve_method_type_args(expr_id, hir_type_args);
+                    let method_type_args = self.resolve_method_type_args(expr_id, hir_type_args);
                     return self.emit_method_dispatch(
                         resolved_entity,
                         field_ty,
@@ -2533,11 +2535,10 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 HirLiteral::Integer(_) => "intLiteral",
                 HirLiteral::Float(_) => "floatLiteral",
                 HirLiteral::Char(_) => "charLiteral",
-                HirLiteral::String(s) => {
+                HirLiteral::String { value: content, .. } => {
                     // String literals need a 2-arg init: init(stringLiteral: ptr, length: i64)
                     if let Some(init_entity) = self.find_string_literal_init(*entity) {
-                        let content = decode_string_literal(s);
-                        let ptr_val = Value::Immediate(Immediate::string_ptr(content.to_string()));
+                        let ptr_val = Value::Immediate(Immediate::string_ptr(content.clone()));
                         let len_val = Value::Immediate(Immediate::i64(content.len() as i64));
                         self.ctx.register_name(init_entity);
                         let call_args = vec![CallArg::copy(ptr_val), CallArg::copy(len_val)];
@@ -2587,7 +2588,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 _ => Value::Immediate(Immediate::f64(*v)),
             },
             HirLiteral::Bool(v) => Value::Immediate(Immediate::bool(*v)),
-            HirLiteral::String(s) => Value::Immediate(Immediate::string(decode_string_literal(s))),
+            HirLiteral::String { value, .. } => Value::Immediate(Immediate::string(value.clone())),
             HirLiteral::Char(c) => Value::Immediate(Immediate::i32(*c as i32)),
             HirLiteral::Null => Value::Immediate(Immediate::unit()),
         }
@@ -3553,142 +3554,6 @@ fn value_to_rvalue(value: Value) -> Rvalue {
         Value::Place(p) => Rvalue::Copy(p),
         Value::Immediate(i) => Rvalue::Const(i),
     }
-}
-
-/// Decode a HIR string literal using lib1-compatible escape handling.
-///
-/// HIR currently stores both regular and raw strings in `HirLiteral::String`,
-/// preserving the original quotes. Normal quoted strings are unescaped; raw
-/// triple-quoted strings have only their surrounding quotes stripped.
-fn decode_string_literal(raw: &str) -> String {
-    let quote_count = raw.chars().take_while(|&c| c == '"').count();
-    if quote_count >= 3 && raw.len() >= quote_count * 2 && raw.ends_with(&"\"".repeat(quote_count))
-    {
-        return raw[quote_count..raw.len() - quote_count].to_string();
-    }
-
-    if raw.len() >= 2 && raw.starts_with('"') && raw.ends_with('"') {
-        return unescape_string_literal(&raw[1..raw.len() - 1]);
-    }
-
-    unescape_string_literal(raw)
-}
-
-/// Decode string escapes with the same semantics as lib1's binder helper.
-fn unescape_string_literal(s: &str) -> String {
-    let mut result = String::with_capacity(s.len());
-    let mut chars = s.char_indices().peekable();
-
-    while let Some((_, c)) = chars.next() {
-        if c != '\\' {
-            result.push(c);
-            continue;
-        }
-
-        match chars.next() {
-            None => result.push('\\'),
-            Some((_, next_char)) => match next_char {
-                'n' => result.push('\n'),
-                'r' => result.push('\r'),
-                't' => result.push('\t'),
-                '\\' => result.push('\\'),
-                '"' => result.push('"'),
-                '\'' => result.push('\''),
-                '0' => result.push('\0'),
-                '\n' => {
-                    while let Some(&(_, ch)) = chars.peek() {
-                        if ch == ' ' || ch == '\t' {
-                            chars.next();
-                        } else {
-                            break;
-                        }
-                    }
-                },
-                '\r' => {
-                    if let Some(&(_, '\n')) = chars.peek() {
-                        chars.next();
-                    }
-                    while let Some(&(_, ch)) = chars.peek() {
-                        if ch == ' ' || ch == '\t' {
-                            chars.next();
-                        } else {
-                            break;
-                        }
-                    }
-                },
-                'x' => {
-                    let mut hex_str = String::new();
-                    for _ in 0..2 {
-                        if let Some(&(_, ch)) = chars.peek() {
-                            if ch.is_ascii_hexdigit() {
-                                hex_str.push(ch);
-                                chars.next();
-                            } else {
-                                break;
-                            }
-                        }
-                    }
-                    if hex_str.len() != 2 {
-                        result.push_str(&format!("\\x{}", hex_str));
-                    } else {
-                        let value = u8::from_str_radix(&hex_str, 16).unwrap();
-                        if value > 0x7F {
-                            result.push_str(&format!("\\x{:02X}", value));
-                        } else {
-                            result.push(value as char);
-                        }
-                    }
-                },
-                'u' => {
-                    if chars.peek().map(|&(_, c)| c) != Some('{') {
-                        result.push_str("\\u");
-                        continue;
-                    }
-                    chars.next();
-
-                    let mut hex_str = String::new();
-                    let mut found_close = false;
-                    while let Some(&(_, ch)) = chars.peek() {
-                        if ch == '}' {
-                            chars.next();
-                            found_close = true;
-                            break;
-                        } else if ch.is_ascii_hexdigit() && hex_str.len() < 6 {
-                            hex_str.push(ch);
-                            chars.next();
-                        } else if ch.is_ascii_hexdigit() {
-                            hex_str.push(ch);
-                            chars.next();
-                        } else {
-                            break;
-                        }
-                    }
-
-                    let escape_seq = format!("\\u{{{}}}", hex_str);
-                    if !found_close || hex_str.is_empty() || hex_str.len() > 6 {
-                        result.push_str(&escape_seq);
-                    } else {
-                        match u32::from_str_radix(&hex_str, 16) {
-                            Ok(code_point) if code_point <= 0x10FFFF => {
-                                if let Some(ch) = char::from_u32(code_point) {
-                                    result.push(ch);
-                                } else {
-                                    result.push_str(&escape_seq);
-                                }
-                            },
-                            _ => result.push_str(&escape_seq),
-                        }
-                    }
-                },
-                other => {
-                    result.push('\\');
-                    result.push(other);
-                },
-            },
-        }
-    }
-
-    result
 }
 
 /// Apply an access path to a place to reach a sub-value.

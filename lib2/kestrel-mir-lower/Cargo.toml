@@ -21,3 +21,4 @@ kestrel-reporting2 = { path = "../kestrel-reporting" }
 
 [dev-dependencies]
 kestrel-compiler2 = { path = "../kestrel-compiler" }
+kestrel-compiler-driver = { path = "../kestrel-compiler-driver" }

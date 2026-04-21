@@ -47,6 +47,8 @@ pub struct CodegenContext<'a> {
     pub entity_to_func: HashMap<Entity, kestrel_mir::FunctionId>,
     /// Reusable function builder context
     pub func_builder_ctx: FunctionBuilderContext,
+    /// Captured CLIF text per function, populated when `options.emit_clif` is set.
+    pub clif_outputs: Vec<(String, String)>,
 }
 
 impl<'a> CodegenContext<'a> {
@@ -101,6 +103,7 @@ impl<'a> CodegenContext<'a> {
             mono_set,
             entity_to_func,
             func_builder_ctx: FunctionBuilderContext::new(),
+            clif_outputs: Vec::new(),
         })
     }
 
@@ -394,18 +397,20 @@ impl<'a> CodegenContext<'a> {
             sig.call_conv = self.c_call_conv();
             for param in &func_def.params {
                 let ty = substitute_type_with_self(&param.ty, &subst, self_type, self.module);
-                sig.params.push(AbiParam::new(types::translate_type_with_layout(
-                    &ty,
-                    self.target,
-                    &mut self.layouts,
-                )));
+                sig.params
+                    .push(AbiParam::new(types::translate_type_with_layout(
+                        &ty,
+                        self.target,
+                        &mut self.layouts,
+                    )));
             }
             if !ret_ty.is_unit() {
-                sig.returns.push(AbiParam::new(types::translate_type_with_layout(
-                    &ret_ty,
-                    self.target,
-                    &mut self.layouts,
-                )));
+                sig.returns
+                    .push(AbiParam::new(types::translate_type_with_layout(
+                        &ret_ty,
+                        self.target,
+                        &mut self.layouts,
+                    )));
             }
             return Ok(sig);
         }

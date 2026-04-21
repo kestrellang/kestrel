@@ -1,0 +1,16 @@
+[package]
+name = "kestrel-compiler-driver"
+version.workspace = true
+edition.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+kestrel-compiler2 = { path = "../kestrel-compiler" }
+kestrel-hecs = { path = "../kestrel-hecs" }
+kestrel-ast-builder = { path = "../kestrel-ast-builder" }
+kestrel-analyze = { path = "../kestrel-analyze" }
+kestrel-type-infer = { path = "../kestrel-type-infer" }
+kestrel-reporting2 = { path = "../kestrel-reporting" }
+codespan-reporting = { workspace = true }

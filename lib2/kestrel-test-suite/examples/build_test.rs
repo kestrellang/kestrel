@@ -23,11 +23,11 @@ fn main() {
             "-o" => {
                 i += 1;
                 out_path = Some(args[i].clone());
-            }
+            },
             "-l" => {
                 i += 1;
                 libraries.push(args[i].clone());
-            }
+            },
             p => ks_paths.push(p.to_string()),
         }
         i += 1;

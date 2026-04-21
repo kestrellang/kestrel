@@ -81,7 +81,7 @@ pub fn build_function(
     }
 
     set_visibility(world, entity, node);
-    set_attributes(world, entity, node);
+    set_attributes(world, entity, node, file_id);
     set_documentation(world, entity, node);
     set_where_clause(world, entity, node, file_id);
     build_type_parameters(world, entity, node, file_entity, file_id);
@@ -125,7 +125,7 @@ pub fn build_initializer(
     }
 
     set_visibility(world, entity, node);
-    set_attributes(world, entity, node);
+    set_attributes(world, entity, node, file_id);
     set_where_clause(world, entity, node, file_id);
     build_type_parameters(world, entity, node, file_entity, file_id);
 }

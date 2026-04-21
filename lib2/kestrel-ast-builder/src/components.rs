@@ -262,6 +262,8 @@ pub struct Attributes(pub Vec<AstAttribute>);
 pub struct AstAttribute {
     pub name: String,
     pub args: Vec<AstAttributeArg>,
+    /// Span of the full attribute (including `@` and args).
+    pub span: Span,
 }
 
 /// A single argument within an attribute.

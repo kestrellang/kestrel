@@ -58,6 +58,9 @@ pub fn default_analyzers() -> AnalyzerRegistry {
     r.add_body_check(body::for_loop_pattern::ForLoopPatternAnalyzer);
     r.add_body_check(body::exhaustiveness::ExhaustivenessAnalyzer);
 
+    // Literal/lexing checks (E700-E799)
+    r.add_body_check(body::string_escape::StringEscapeAnalyzer);
+
     // Declaration checks
     r.add_decl_check(decl::function_body::FunctionBodyAnalyzer);
     r.add_decl_check(decl::protocol_method::ProtocolMethodAnalyzer);
@@ -87,12 +90,14 @@ pub fn default_analyzers() -> AnalyzerRegistry {
     // Compilation checks
     r.add_compilation_check(compilation::type_alias_cycles::TypeAliasCycleAnalyzer);
     r.add_compilation_check(compilation::struct_cycles::StructCycleAnalyzer);
+    r.add_compilation_check(compilation::protocol_cycles::ProtocolCycleAnalyzer);
     r.add_compilation_check(compilation::constraint_cycles::ConstraintCycleAnalyzer);
     r.add_compilation_check(compilation::extension_conflict::ExtensionConflictAnalyzer);
     r.add_compilation_check(compilation::conformance_completeness::ConformanceCompletenessAnalyzer);
     r.add_compilation_check(
         compilation::type_annotation_resolution::TypeAnnotationResolutionAnalyzer,
     );
+    r.add_compilation_check(compilation::unknown_attribute::UnknownAttributeAnalyzer);
 
     r
 }

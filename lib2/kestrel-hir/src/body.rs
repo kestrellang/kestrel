@@ -242,9 +242,12 @@ pub enum HirStmt {
         expr: HirExprId,
         span: Span,
     },
-    /// Destructor registration: `deinit name` binds a cleanup action to a local
+    /// Destructor registration: `deinit name` binds a cleanup action to a local.
+    /// `local` is resolved during HIR lowering; `None` means the name did not
+    /// resolve to any in-scope local (diagnostic is emitted at lowering time).
     Deinit {
         name: String,
+        local: Option<LocalId>,
         span: Span,
     },
     // GuardLet desugared: if !condition { else_body } where else_body diverges
@@ -331,22 +334,64 @@ pub enum HirPat {
 pub enum HirLiteral {
     Integer(i64),
     Float(f64),
-    String(String),
+    /// Decoded string value plus any escape-sequence errors discovered during
+    /// lowering. Errors are data on the node — a separate analyzer turns them
+    /// into diagnostics. Codegen consumes `value` directly.
+    String {
+        value: String,
+        escape_errors: Vec<EscapeError>,
+    },
     /// Unicode scalar value (must be a valid `char`, i.e. `<= 0x10FFFF` and not a surrogate)
     Char(u32),
     Bool(bool),
     Null,
 }
 
+/// An escape-sequence error discovered while decoding a string literal.
+/// Stored on `HirLiteral::String` and surfaced by the string-escape analyzer.
+#[derive(Clone, Debug, PartialEq)]
+pub struct EscapeError {
+    pub span: Span,
+    pub kind: EscapeErrorKind,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum EscapeErrorKind {
+    /// Unknown backslash escape (e.g. `\q`) or malformed `\xNN`.
+    InvalidEscape { sequence: String },
+    /// `\xNN` with value > 0x7F — strings only allow 7-bit ASCII via `\x`.
+    AsciiEscapeOutOfRange { value: u8 },
+    /// Trailing `\` at end of string.
+    IncompleteEscape,
+    /// `\u{...}` malformed in some way; `reason` distinguishes.
+    InvalidUnicodeEscape {
+        value: String,
+        reason: UnicodeEscapeErrorReason,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum UnicodeEscapeErrorReason {
+    MissingOpenBrace,
+    MissingCloseBrace,
+    EmptyBraces,
+    TooManyDigits,
+    InvalidHexDigit,
+    OutOfRange,
+}
+
 /// Manual Hash because f64 doesn't implement Hash.
 /// We hash the bit representation which is deterministic.
+/// String escape errors are derived from `value` + source spans, so we hash
+/// `value` only — two literals with the same decoded value hash equal even
+/// if their error lists differ in span detail.
 impl std::hash::Hash for HirLiteral {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         std::mem::discriminant(self).hash(state);
         match self {
             HirLiteral::Integer(v) => v.hash(state),
             HirLiteral::Float(v) => v.to_bits().hash(state),
-            HirLiteral::String(v) => v.hash(state),
+            HirLiteral::String { value, .. } => value.hash(state),
             HirLiteral::Char(v) => v.hash(state),
             HirLiteral::Bool(v) => v.hash(state),
             HirLiteral::Null => {},
@@ -788,8 +833,14 @@ mod tests {
         assert_eq!(HirLiteral::Bool(true), HirLiteral::Bool(true));
         assert_eq!(HirLiteral::Null, HirLiteral::Null);
         assert_eq!(
-            HirLiteral::String("hello".into()),
-            HirLiteral::String("hello".into())
+            HirLiteral::String {
+                value: "hello".into(),
+                escape_errors: vec![]
+            },
+            HirLiteral::String {
+                value: "hello".into(),
+                escape_errors: vec![]
+            }
         );
     }
 }

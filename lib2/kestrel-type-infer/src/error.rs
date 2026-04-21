@@ -3,6 +3,7 @@
 //! Each variant maps to a user-facing diagnostic. Every `TyKind::Error`
 //! in the system has a corresponding `InferError` (ErrorGuaranteed pattern).
 
+use kestrel_ast_builder::Vis;
 use kestrel_hecs::Entity;
 use kestrel_span2::Span;
 
@@ -48,6 +49,7 @@ pub enum InferError {
     MemberNotVisible {
         receiver: TyVar,
         name: String,
+        visibility: Vis,
         span: Span,
     },
 

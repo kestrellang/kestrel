@@ -6,6 +6,7 @@
 
 use kestrel_ast_builder::{Callable, Name, NodeKind, TypeParams};
 use kestrel_hecs::Entity;
+use kestrel_hir::Builtin;
 use kestrel_hir::body::*;
 use kestrel_hir::ty::HirTy;
 use kestrel_hir_lower::{LowerCallableReturnType, LowerCallableTypes, LowerTypeAnnotation};
@@ -57,7 +58,7 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
         HirExpr::Literal { value, .. } => match value {
             HirLiteral::Integer(_) => ctx.fresh_literal(LiteralKind::Integer),
             HirLiteral::Float(_) => ctx.fresh_literal(LiteralKind::Float),
-            HirLiteral::String(_) => ctx.fresh_literal(LiteralKind::String),
+            HirLiteral::String { .. } => ctx.fresh_literal(LiteralKind::String),
             HirLiteral::Char(_) => ctx.fresh_literal(LiteralKind::Char),
             HirLiteral::Bool(_) => ctx.fresh_literal(LiteralKind::Bool),
             HirLiteral::Null => ctx.fresh_literal(LiteralKind::Null),
@@ -152,6 +153,32 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                         span.clone(),
                     );
                     return result_tv;
+                }
+            }
+
+            // Free-function call with a single Def callee: pre-check labels +
+            // arity so mismatches surface as NoMatchingOverload (richer phrasing
+            // the tests expect) instead of the generic "wrong number of arguments"
+            // / "wrong label" from solve_call. Matching calls fall through to the
+            // regular ctx.call path, which handles parent-entity type-param
+            // substitution for path-qualified callees (e.g., Pointer[UInt8].nullPointer()).
+            if let HirExpr::Def(entity, _, _) = &hir.exprs[*callee] {
+                if ctx.query_ctx.get::<NodeKind>(*entity) == Some(&NodeKind::Function) {
+                    if let Some(callable) = ctx.query_ctx.get::<Callable>(*entity) {
+                        let arg_labels: Vec<Option<&str>> =
+                            args.iter().map(|a| a.label.as_deref()).collect();
+                        if !labels_match(&callable.params, &arg_labels) {
+                            let name = ctx
+                                .query_ctx
+                                .get::<Name>(*entity)
+                                .map(|n| n.0.clone())
+                                .unwrap_or_else(|| "<fn>".into());
+                            let span = span.clone();
+                            ctx.type_param_defs.remove(callee);
+                            let _ = gen_call_args(ctx, hir, args);
+                            return ctx.report_error(InferError::NoMatchingOverload { name, span });
+                        }
+                    }
                 }
             }
 
@@ -439,11 +466,40 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             let val_tv = ctx.fresh();
             ctx.associated(dict_tv, "Key", key_tv, span.clone());
             ctx.associated(dict_tv, "Value", val_tv, span.clone());
+            let expected_entry = ctx.expected_dict_entry.take();
+            if let Some((hint_key, hint_val)) = expected_entry {
+                ctx.equal(key_tv, hint_key, span.clone());
+                ctx.equal(val_tv, hint_val, span.clone());
+            }
             for entry in entries {
                 let k = gen_expr(ctx, hir, entry.key);
                 let v = gen_expr(ctx, hir, entry.value);
-                ctx.equal(k, key_tv, span.clone());
-                ctx.equal(v, val_tv, span.clone());
+                let key_span = expr_span(hir, entry.key);
+                let value_span = expr_span(hir, entry.value);
+                let expected_key = expected_entry
+                    .map(|(hint_key, _)| hint_key)
+                    .unwrap_or(key_tv);
+                let expected_value = expected_entry
+                    .map(|(_, hint_value)| hint_value)
+                    .unwrap_or(val_tv);
+                if !emit_dict_literal_acceptance_error(
+                    ctx,
+                    hir,
+                    expected_key,
+                    entry.key,
+                    key_span.clone(),
+                ) {
+                    ctx.equal(key_tv, k, key_span);
+                }
+                if !emit_dict_literal_acceptance_error(
+                    ctx,
+                    hir,
+                    expected_value,
+                    entry.value,
+                    value_span.clone(),
+                ) {
+                    ctx.equal(val_tv, v, value_span);
+                }
             }
             dict_tv
         },
@@ -492,8 +548,13 @@ fn gen_stmt(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirStmtId) {
                 if ty.is_some() && matches!(&hir.exprs[*val], HirExpr::Array { .. }) {
                     ctx.expected_array_elem = extract_array_elem_hint(ctx, local_tv);
                 }
+                let prev_dict_hint = ctx.expected_dict_entry;
+                if ty.is_some() && matches!(&hir.exprs[*val], HirExpr::Dict { .. }) {
+                    ctx.expected_dict_entry = extract_dict_entry_hint(ctx, local_tv);
+                }
                 let val_tv = gen_expr(ctx, hir, *val);
                 ctx.expected_array_elem = prev_hint;
+                ctx.expected_dict_entry = prev_dict_hint;
                 // Value flows to the binding (allows promotion)
                 ctx.coerce(val_tv, local_tv, *val, span.clone());
             }
@@ -1248,6 +1309,81 @@ fn extract_array_elem_hint(ctx: &InferCtx<'_>, tv: TyVar) -> Option<TyVar> {
     args.first().copied()
 }
 
+/// If `tv` resolves to `Dictionary[K, V, ...]`, return TyVars for `(K, V)`.
+/// Used by `HirStmt::Let` to feed annotated key/value types into a dictionary
+/// literal RHS before entry constraints run.
+fn extract_dict_entry_hint(ctx: &InferCtx<'_>, tv: TyVar) -> Option<(TyVar, TyVar)> {
+    let resolved = ctx.resolve(tv);
+    let TySlot::Resolved(crate::ty::TyKind::Struct { entity, args }) = ctx.slot(resolved) else {
+        return None;
+    };
+    if ctx
+        .resolver
+        .builtin(kestrel_hir::Builtin::DefaultDictionaryLiteralType)
+        != Some(*entity)
+    {
+        return None;
+    }
+    Some((*args.first()?, *args.get(1)?))
+}
+
+/// If a dictionary entry literal is already known not to be accepted by the
+/// expected key/value type, emit the literal-protocol conformance obligation
+/// directly and let the bad entry be covered by that diagnostic. Returning
+/// true tells the caller to skip the structural equality that would otherwise
+/// default the literal and cascade into "expected T got U".
+fn emit_dict_literal_acceptance_error(
+    ctx: &mut InferCtx<'_>,
+    hir: &HirBody,
+    expected: TyVar,
+    expr: HirExprId,
+    span: Span,
+) -> bool {
+    let Some(literal) = literal_kind_for_expr(hir, expr) else {
+        return false;
+    };
+    let resolved = ctx.resolve(expected);
+    let TySlot::Resolved(kind) = ctx.slot(resolved) else {
+        return false;
+    };
+    if crate::unify::conforms_to_literal_protocol(ctx, kind, literal) {
+        return false;
+    }
+    let Some(protocol) = literal_protocol(ctx, literal) else {
+        return false;
+    };
+    ctx.conforms(expected, protocol, span);
+    true
+}
+
+fn literal_kind_for_expr(hir: &HirBody, expr: HirExprId) -> Option<LiteralKind> {
+    let HirExpr::Literal { value, .. } = &hir.exprs[expr] else {
+        return None;
+    };
+    Some(match value {
+        HirLiteral::Integer(_) => LiteralKind::Integer,
+        HirLiteral::Float(_) => LiteralKind::Float,
+        HirLiteral::String { .. } => LiteralKind::String,
+        HirLiteral::Char(_) => LiteralKind::Char,
+        HirLiteral::Bool(_) => LiteralKind::Bool,
+        HirLiteral::Null => LiteralKind::Null,
+    })
+}
+
+fn literal_protocol(ctx: &InferCtx<'_>, literal: LiteralKind) -> Option<Entity> {
+    let builtin = match literal {
+        LiteralKind::Integer => Builtin::ExpressibleByIntegerLiteral,
+        LiteralKind::Float => Builtin::ExpressibleByFloatLiteral,
+        LiteralKind::String => Builtin::ExpressibleByStringLiteral,
+        LiteralKind::Bool => Builtin::ExpressibleByBoolLiteral,
+        LiteralKind::Char => Builtin::ExpressibleByCharLiteral,
+        LiteralKind::Null => Builtin::ExpressibleByNullLiteral,
+        LiteralKind::Array => Builtin::InternalExpressibleByArrayLiteral,
+        LiteralKind::Dictionary => Builtin::InternalExpressibleByDictionaryLiteral,
+    };
+    ctx.resolver.builtin(builtin)
+}
+
 /// Convert HirTy to TyVar, substituting type params found in `subs`.
 /// Used when instantiating generic entities: type params become fresh TyVars.
 /// Also substitutes associated-type entities (where-clause equalities) in subs.
@@ -1355,7 +1491,7 @@ fn literal_to_tyvar(ctx: &mut InferCtx<'_>, value: &HirLiteral) -> TyVar {
     match value {
         HirLiteral::Integer(_) => ctx.fresh_literal(LiteralKind::Integer),
         HirLiteral::Float(_) => ctx.fresh_literal(LiteralKind::Float),
-        HirLiteral::String(_) => ctx.fresh_literal(LiteralKind::String),
+        HirLiteral::String { .. } => ctx.fresh_literal(LiteralKind::String),
         HirLiteral::Char(_) => ctx.fresh_literal(LiteralKind::Char),
         HirLiteral::Bool(_) => ctx.fresh_literal(LiteralKind::Bool),
         HirLiteral::Null => ctx.fresh_literal(LiteralKind::Null),

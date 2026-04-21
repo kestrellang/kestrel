@@ -54,6 +54,7 @@ pub fn lower_module(world: &World, root: Entity) -> MirModule {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use kestrel_compiler_driver::CompilerDriver;
     use kestrel_compiler2::Compiler;
     use kestrel_mir::WitnessMethodKey;
     use std::path::PathBuf;
@@ -192,7 +193,7 @@ mod tests {
         );
 
         // Run inference so TypedBody is available
-        c.infer_all();
+        CompilerDriver::new(&c).infer_all();
 
         let mir = lower_module(c.world(), c.root());
 
@@ -226,7 +227,7 @@ mod tests {
         let mut c = Compiler::new();
         let path = stdlib_path();
         c.load_dir(&path);
-        c.infer_all();
+        CompilerDriver::new(&c).infer_all();
 
         let mir = lower_module(c.world(), c.root());
         let output = mir.display().to_string();
@@ -259,7 +260,7 @@ mod tests {
             "test.ks",
             "module Test\nfunc banner() -> String {\n  \"\\x1b[31mhello\\n\"\n}",
         );
-        c.infer_all();
+        CompilerDriver::new(&c).infer_all();
 
         let mir = lower_module(c.world(), c.root());
         let output = mir.display().to_string();
@@ -327,7 +328,7 @@ extend Bob: Greeter {
 }
 "#,
         );
-        c.infer_all();
+        CompilerDriver::new(&c).infer_all();
 
         let mir = lower_module(c.world(), c.root());
 
@@ -377,7 +378,7 @@ struct S { }
 extend S: P { }
 "#,
         );
-        c.infer_all();
+        CompilerDriver::new(&c).infer_all();
 
         let mir = lower_module(c.world(), c.root());
 

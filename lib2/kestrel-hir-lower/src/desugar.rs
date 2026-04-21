@@ -698,7 +698,10 @@ impl LowerCtx<'_> {
     ) -> HirExprId {
         if parts.is_empty() {
             return self.alloc_expr(HirExpr::Literal {
-                value: HirLiteral::String(String::new()),
+                value: HirLiteral::String {
+                    value: String::new(),
+                    escape_errors: Vec::new(),
+                },
                 span: span.clone(),
             });
         }
@@ -710,8 +713,19 @@ impl LowerCtx<'_> {
             match part {
                 StringPart::Literal(text) => {
                     if !text.is_empty() {
+                        // The parser currently emits the full interpolated string
+                        // as a single token, so this `text` may contain unparsed
+                        // `\(...)` interpolation syntax + surrounding quotes (see
+                        // ast-builder/lower.rs `lower_interpolated_string` fallback).
+                        // Skip escape decoding here — flagging `\(` as invalid
+                        // would be wrong, and decoding `\n` etc. inside an opaque
+                        // unparsed blob isn't meaningful. When the parser is taught
+                        // to split interpolations, decode the structured parts.
                         exprs.push(self.alloc_expr(HirExpr::Literal {
-                            value: HirLiteral::String(text.clone()),
+                            value: HirLiteral::String {
+                                value: text.clone(),
+                                escape_errors: Vec::new(),
+                            },
                             span: span.clone(),
                         }));
                     }
@@ -734,7 +748,10 @@ impl LowerCtx<'_> {
         // Chain with + operator (Addable protocol)
         if exprs.is_empty() {
             return self.alloc_expr(HirExpr::Literal {
-                value: HirLiteral::String(String::new()),
+                value: HirLiteral::String {
+                    value: String::new(),
+                    escape_errors: Vec::new(),
+                },
                 span: span.clone(),
             });
         }

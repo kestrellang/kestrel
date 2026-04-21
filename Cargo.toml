@@ -4,10 +4,12 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-kestrel-lexer = { path = "lib/kestrel-lexer" }
-kestrel-parser = { path = "lib/kestrel-parser" }
-kestrel-compiler = { path = "lib/kestrel-compiler" }
-kestrel-execution-graph-lowering = { path = "lib/kestrel-execution-graph-lowering" }
+kestrel-compiler2 = { path = "lib2/kestrel-compiler" }
+kestrel-compiler-driver = { path = "lib2/kestrel-compiler-driver" }
+kestrel-ast-builder = { path = "lib2/kestrel-ast-builder" }
+kestrel-mir-lower = { path = "lib2/kestrel-mir-lower" }
+kestrel-codegen2 = { path = "lib2/kestrel-codegen" }
+kestrel-codegen2-cranelift = { path = "lib2/kestrel-codegen-cranelift" }
 clap = { workspace = true }
 
 [workspace.package]
@@ -60,6 +62,7 @@ members = [
     "lib2/kestrel-syntax-tree",
     "lib2/kestrel-parser",
     "lib2/kestrel-compiler",
+    "lib2/kestrel-compiler-driver",
     "lib2/kestrel-ast",
     "lib2/kestrel-ast-builder",
     "lib2/kestrel-hir",

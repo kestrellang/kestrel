@@ -116,8 +116,10 @@ pub fn run_thunk_pass(module: &mut MirModule) {
         let mut body = MirBody::new();
 
         // Env parameter (ignored)
-        let env_local =
-            body.add_local(LocalDef::new("_env", MirTy::Pointer(Box::new(MirTy::unit()))));
+        let env_local = body.add_local(LocalDef::new(
+            "_env",
+            MirTy::Pointer(Box::new(MirTy::unit())),
+        ));
         thunk_def.params.push(ParamDef::new(
             "_env",
             env_local,

@@ -14,8 +14,8 @@ use crate::ty::{LiteralKind, TyKind, TySlot, TyVar};
 use crate::unify::{self, UnifyError};
 use kestrel_ast_builder::{Callable, Name, NodeKind, TypeParams};
 use kestrel_hecs::Entity;
-use kestrel_hir::body::{HirBody, HirExpr};
 use kestrel_hir::Builtin;
+use kestrel_hir::body::{HirBody, HirExpr};
 use kestrel_hir_lower::{LowerCallableTypes, LowerTypeAnnotation};
 use kestrel_span2::Span;
 
@@ -135,16 +135,10 @@ fn default_never_fallback(ctx: &mut InferCtx<'_>) {
 /// error already covers them.
 fn report_unresolved_slots(ctx: &mut InferCtx<'_>, hir: &HirBody) {
     // Snapshot the entries so we can mutate `ctx` while iterating.
-    let expr_entries: Vec<(kestrel_hir::body::HirExprId, TyVar)> = ctx
-        .expr_types
-        .iter()
-        .map(|(&id, &tv)| (id, tv))
-        .collect();
-    let local_entries: Vec<(kestrel_hir::res::LocalId, TyVar)> = ctx
-        .local_types
-        .iter()
-        .map(|(&id, &tv)| (id, tv))
-        .collect();
+    let expr_entries: Vec<(kestrel_hir::body::HirExprId, TyVar)> =
+        ctx.expr_types.iter().map(|(&id, &tv)| (id, tv)).collect();
+    let local_entries: Vec<(kestrel_hir::res::LocalId, TyVar)> =
+        ctx.local_types.iter().map(|(&id, &tv)| (id, tv)).collect();
 
     // Only report one diagnostic per statement/expression tree — otherwise a
     // single unresolvable subexpression produces a cascade of errors across
@@ -154,14 +148,16 @@ fn report_unresolved_slots(ctx: &mut InferCtx<'_>, hir: &HirBody) {
 
     for (id, tv) in expr_entries {
         let resolved = ctx.resolve(tv);
-        // Skip literal slots (`Unresolved { literal: Some(_) }`) — those get
-        // a primitive fallback in `apply_literal_defaults`, and when no
-        // default exists at all (stdlib absent, no lang primitive) the
-        // silent Error-lowering is what diagnostics-only tests rely on.
-        if !matches!(
+        // Skip literal root slots (`Unresolved { literal: Some(_) }`) — those
+        // get a primitive fallback in `apply_literal_defaults`, and when no
+        // default exists at all (stdlib absent, no lang primitive) the silent
+        // Error-lowering is what diagnostics-only tests rely on. Do report
+        // concrete containers with unresolved type args, e.g. `Dictionary[?, ?]`.
+        let unresolved = matches!(
             &ctx.types[resolved.0 as usize],
             TySlot::Unresolved { literal: None }
-        ) {
+        ) || contains_unresolved_type_args(ctx, resolved);
+        if !unresolved {
             continue;
         }
         // Skip expressions whose HIR is `Error` — `FromHir` already covers them.
@@ -180,10 +176,11 @@ fn report_unresolved_slots(ctx: &mut InferCtx<'_>, hir: &HirBody) {
 
     for (id, tv) in local_entries {
         let resolved = ctx.resolve(tv);
-        if !matches!(
+        let unresolved = matches!(
             &ctx.types[resolved.0 as usize],
             TySlot::Unresolved { literal: None }
-        ) {
+        ) || contains_unresolved_type_args(ctx, resolved);
+        if !unresolved {
             continue;
         }
         let local = &hir.locals[id];
@@ -195,6 +192,42 @@ fn report_unresolved_slots(ctx: &mut InferCtx<'_>, hir: &HirBody) {
             span: local.span.clone(),
         });
         ctx.poison(tv);
+    }
+}
+
+fn contains_unresolved_type_args(ctx: &InferCtx<'_>, tv: TyVar) -> bool {
+    fn walk(ctx: &InferCtx<'_>, tv: TyVar, seen: &mut std::collections::HashSet<TyVar>) -> bool {
+        let resolved = ctx.resolve(tv);
+        if !seen.insert(resolved) {
+            return false;
+        }
+        match &ctx.types[resolved.0 as usize] {
+            TySlot::Unresolved { literal: None } => true,
+            TySlot::Unresolved { literal: Some(_) } => false,
+            TySlot::Redirect(target) => walk(ctx, *target, seen),
+            TySlot::Resolved(TyKind::Struct { args, .. })
+            | TySlot::Resolved(TyKind::Enum { args, .. })
+            | TySlot::Resolved(TyKind::Protocol { args, .. })
+            | TySlot::Resolved(TyKind::TypeAlias { args, .. }) => {
+                args.iter().any(|&arg| walk(ctx, arg, seen))
+            },
+            TySlot::Resolved(TyKind::Tuple(elements)) => {
+                elements.iter().any(|&elem| walk(ctx, elem, seen))
+            },
+            TySlot::Resolved(TyKind::Function { params, ret }) => {
+                params.iter().any(|&param| walk(ctx, param, seen)) || walk(ctx, *ret, seen)
+            },
+            TySlot::Resolved(TyKind::AssocProjection { base, .. }) => walk(ctx, *base, seen),
+            TySlot::Resolved(
+                TyKind::Param { .. } | TyKind::SelfType { .. } | TyKind::Never | TyKind::Error,
+            ) => false,
+        }
+    }
+
+    let mut seen = std::collections::HashSet::new();
+    match ctx.slot(tv) {
+        TySlot::Resolved(_) => walk(ctx, tv, &mut seen),
+        _ => false,
     }
 }
 
@@ -1675,10 +1708,15 @@ fn solve_member(
                 });
             }
         },
-        Err(crate::resolve::MemberError::NotVisible) => {
+        Err(crate::resolve::MemberError::NotVisible { visibility, .. }) => {
+            // Poison the call's result TyVar so downstream constraints (e.g.
+            // the implicit block-type unification for a void function body)
+            // absorb silently instead of cascading into "could not infer type".
+            ctx.poison(result);
             return SolveResult::Error(InferError::MemberNotVisible {
                 receiver,
                 name: name.to_string(),
+                visibility,
                 span,
             });
         },

@@ -413,7 +413,7 @@ fn flatten_literal(value: &HirLiteral) -> FlatPat {
         HirLiteral::Bool(false) => Constructor::False,
         HirLiteral::Integer(n) => Constructor::IntLiteral(*n),
         HirLiteral::Char(c) => Constructor::CharLiteral(char::from_u32(*c).unwrap_or('\0')),
-        HirLiteral::String(s) => Constructor::StringLiteral(s.clone()),
+        HirLiteral::String { value, .. } => Constructor::StringLiteral(value.clone()),
         HirLiteral::Float(_) => Constructor::NonExhaustive,
         HirLiteral::Null => Constructor::NonExhaustive,
     };

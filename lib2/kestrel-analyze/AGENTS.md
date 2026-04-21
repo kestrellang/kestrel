@@ -124,6 +124,7 @@ IDs follow the pattern `E<NNN>`:
 - **E400–E499**: Declarations (conformance, duplicates, cycles, visibility)
 - **E500–E599**: Memory semantics (use-after-move, cloneable fields)
 - **E600–E699**: Functions and closures (missing body, wrong arity, FFI safety)
+- **E700–E799**: Literals and lexing (escape sequences, malformed literals)
 
 Current allocations:
 - E001: `missing_return` (exhaustive_return.rs)
@@ -137,6 +138,21 @@ Current allocations:
 - E307: `overlapping_range` (exhaustiveness.rs)
 - E308: `irrefutable_while_let` (exhaustiveness.rs)
 - E309: `irrefutable_guard_let` (exhaustiveness.rs)
+- E430: `return_type_less_visible` (decl/visibility.rs)
+- E431: `parameter_type_less_visible` (decl/visibility.rs)
+- E432: `aliased_type_less_visible` (decl/visibility.rs)
+- E433: `field_type_less_visible` (decl/visibility.rs)
+- E447: `circular_type_alias` (compilation/type_alias_cycles.rs)
+- E448: `type_alias_contains_infer` (compilation/type_alias_cycles.rs) — reserved; not emitted
+- E449: `self_containing_struct` (compilation/struct_cycles.rs)
+- E450: `circular_struct_containment` (compilation/struct_cycles.rs)
+- E451: `circular_constraint` (compilation/constraint_cycles.rs)
+- E459: `circular_protocol_inheritance` (compilation/protocol_cycles.rs)
+- E461: `unknown_attribute` (compilation/unknown_attribute.rs)
+- E700: `invalid_escape_sequence` (body/string_escape.rs)
+- E701: `ascii_escape_out_of_range` (body/string_escape.rs)
+- E702: `invalid_unicode_escape` (body/string_escape.rs)
+- E703: `incomplete_escape_sequence` (body/string_escape.rs)
 
 ## Key Conventions
 
@@ -175,6 +191,32 @@ When analyzing `HirExpr::Match`, branch on `source` first. `UserMatch`
 gets the full diagnostic suite; desugared sources get source-specific
 codes or are skipped entirely. See `MatchSource::is_desugared()` and the
 per-source dispatch in `exhaustiveness.rs`.
+
+## Errors-as-data on HIR nodes (when lowering must be the source of truth)
+
+Some checks need information that only the lowering pass has — escape
+decoding, integer parsing, etc. — and the resulting *value* must be
+canonical (codegen consumes it; we can't decode twice). Don't push
+diagnostic emission into lowering. Instead:
+
+1. Define a typed error variant in `kestrel-hir` next to the literal /
+   node it pertains to (e.g. `EscapeError` next to `HirLiteral::String`).
+2. Have lowering return `(value, Vec<Error>)` purely — no `&mut sink`,
+   no `ctx.accumulate`. Store the error list as a field on the HIR node
+   itself, not as a side-table on `HirBody` (side-tables drift from the
+   nodes they describe; see "Source-based dispatch" above for the same
+   anti-pattern).
+3. Write an analyzer that walks the relevant arena (`cx.hir.exprs`,
+   `cx.hir.pats`) and translates the per-node error list into
+   `AnalyzeDiagnostic`s.
+
+Hash impls on the carrying enum should hash the *value*, not the error
+list — errors are a derived property of the source and including them
+breaks identity-based memo keys.
+
+Precedent: `HirLiteral::String { value, escape_errors }` →
+`body/string_escape.rs` (E700-E703). Decoder lives in
+`kestrel-hir-lower/src/literal.rs`.
 
 Do not check for desugared-ness via side-tables on `HirBody`
 (`for_loop_matches` was removed for this reason). Use the enum on the

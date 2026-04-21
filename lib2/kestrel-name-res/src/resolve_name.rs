@@ -6,6 +6,7 @@
 
 use kestrel_ast_builder::{ConformanceItem, Conformances, Name, NodeKind, TypeParams};
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
+use std::collections::HashSet;
 
 use crate::extensions::ExtensionTargetEntity;
 use crate::scope::ScopeFor;
@@ -123,9 +124,14 @@ impl QueryFn for ResolveName {
             // 6. Inherited protocol members: if current is a protocol,
             //    walk conformance hierarchy for matching associated types
             if ctx.get::<NodeKind>(current) == Some(&NodeKind::Protocol) {
-                if let Some(entity) =
-                    resolve_inherited_protocol_member(ctx, current, &self.name, self.root)
-                {
+                let mut visited = HashSet::new();
+                if let Some(entity) = resolve_inherited_protocol_member(
+                    ctx,
+                    current,
+                    &self.name,
+                    self.root,
+                    &mut visited,
+                ) {
                     return NameResolution::Found(vec![entity]);
                 }
             }
@@ -195,20 +201,31 @@ fn resolve_protocol_extension_assoc(
     }
 
     // Search the protocol's direct children, then inherited protocols
-    find_assoc_type(ctx, target_entity, name)
-        .or_else(|| resolve_inherited_protocol_member(ctx, target_entity, name, root))
+    find_assoc_type(ctx, target_entity, name).or_else(|| {
+        let mut visited = HashSet::new();
+        resolve_inherited_protocol_member(ctx, target_entity, name, root, &mut visited)
+    })
 }
 
 /// Walk a protocol's conformance hierarchy to find an associated type by name.
 ///
 /// For `protocol Foo: Bar`, if we're inside Foo and look up an associated
 /// type defined in Bar, this finds it.
+///
+/// `visited` guards against self/mutual protocol-inheritance cycles; without
+/// it, `protocol Foo: Foo` (or longer cycles) would stack-overflow here. The
+/// dedicated cycle analyzer in `kestrel-analyze` reports the cycle as a
+/// diagnostic; this function just refuses to recurse through it.
 fn resolve_inherited_protocol_member(
     ctx: &QueryContext<'_>,
     protocol: Entity,
     name: &str,
     root: Entity,
+    visited: &mut HashSet<Entity>,
 ) -> Option<Entity> {
+    if !visited.insert(protocol) {
+        return None;
+    }
     let conformances = ctx.get::<Conformances>(protocol)?;
 
     for item in &conformances.0 {
@@ -249,7 +266,9 @@ fn resolve_inherited_protocol_member(
         }
 
         // Recursively check inherited protocols
-        if let Some(found) = resolve_inherited_protocol_member(ctx, proto_entity, name, root) {
+        if let Some(found) =
+            resolve_inherited_protocol_member(ctx, proto_entity, name, root, visited)
+        {
             return Some(found);
         }
     }

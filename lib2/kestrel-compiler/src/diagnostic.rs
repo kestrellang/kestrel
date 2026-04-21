@@ -100,9 +100,21 @@ impl ToDiagnostic for ResolvedInferError<'_> {
                 .with_message(format!("ambiguous member '{name}'"))
                 .with_labels(vec![Label::primary(file_id, range).with_message(detail)]),
 
-            InferError::MemberNotVisible { name, .. } => Diagnostic::error()
-                .with_message(format!("member '{name}' is not visible"))
-                .with_labels(vec![Label::primary(file_id, range).with_message(detail)]),
+            InferError::MemberNotVisible {
+                name, visibility, ..
+            } => {
+                let vis = match visibility {
+                    kestrel_ast_builder::Vis::Public => "public",
+                    kestrel_ast_builder::Vis::Internal => "internal",
+                    kestrel_ast_builder::Vis::Fileprivate => "fileprivate",
+                    kestrel_ast_builder::Vis::Private => "private",
+                };
+                Diagnostic::error()
+                    .with_message(format!(
+                        "member '{name}' is {vis} and not accessible from this scope"
+                    ))
+                    .with_labels(vec![Label::primary(file_id, range).with_message(detail)])
+            },
 
             InferError::NoAssociatedType { name, .. } => Diagnostic::error()
                 .with_message(format!("no associated type '{name}'"))

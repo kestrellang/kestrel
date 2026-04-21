@@ -22,5 +22,6 @@ stacker = { workspace = true }
 
 [dev-dependencies]
 kestrel-compiler2 = { path = "../kestrel-compiler" }
+kestrel-compiler-driver = { path = "../kestrel-compiler-driver" }
 kestrel-mir-lower = { path = "../kestrel-mir-lower" }
 kestrel-reporting2 = { path = "../kestrel-reporting" }

@@ -6,7 +6,8 @@
 
 use std::cell::OnceCell;
 
-use kestrel_compiler2::{AnalyzeSummary, Compiler, InferSummary, SourceText};
+use kestrel_compiler_driver::{AnalyzeSummary, CompilerDriver, InferSummary};
+use kestrel_compiler2::{Compiler, SourceText};
 use kestrel_hecs::Entity;
 use kestrel_mir::MirModule;
 
@@ -62,13 +63,14 @@ impl TestCompiler {
 
     /// Run type inference on all bodies.
     pub fn infer(&self) -> &InferSummary {
-        self.infer_result.get_or_init(|| self.compiler.infer_all())
+        self.infer_result
+            .get_or_init(|| CompilerDriver::new(&self.compiler).infer_all())
     }
 
     /// Run all registered analyzers.
     pub fn analyze(&self) -> &AnalyzeSummary {
         self.analyze_result
-            .get_or_init(|| self.compiler.analyze_all())
+            .get_or_init(|| CompilerDriver::new(&self.compiler).analyze_all())
     }
 
     /// Collect all diagnostics from all stages as unified TestDiagnostics.

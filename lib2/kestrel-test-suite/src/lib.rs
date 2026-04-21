@@ -22,6 +22,7 @@ pub use runner::RunResult;
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
+use kestrel_compiler_driver::CompilerDriver;
 use kestrel_compiler2::Compiler;
 
 /// Cached stdlib compiler state. Built once, cloned per test.
@@ -43,7 +44,7 @@ fn stdlib_cache() -> &'static StdlibCache {
         let mut compiler = Compiler::new();
         let std_path = find_stdlib_path();
         compiler.load_dir(&std_path);
-        compiler.infer_all();
+        CompilerDriver::new(&compiler).infer_all();
         StdlibCache { compiler }
     })
 }

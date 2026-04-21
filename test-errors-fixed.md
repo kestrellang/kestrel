@@ -2,6 +2,50 @@
 
 Tests previously listed in `test-errors.md` as failing, now passing. Grouped by their original category so the surrounding context (analyzer location, root-cause notes, regression tracking) stays intact.
 
+## Cycle detection not running
+
+Fixed 2026-04-21. Four new compilation analyzers in `lib2/kestrel-analyze/src/compilation/` — `type_alias_cycles.rs` (E447), `struct_cycles.rs` (E449/E450, span now pinned via direct/indirect opening stack), `protocol_cycles.rs` (new, E459), `constraint_cycles.rs` (E451) — share a small `cycle_util::CycleDetector` DFS helper. Also fixed a latent pre-existing bug in `kestrel-name-res/src/resolve_name.rs`: `resolve_inherited_protocol_member` now carries a `visited: &mut HashSet<Entity>` so `protocol Foo: Foo` can't stack-overflow it.
+
+### Type alias cycles
+- [x] `declarations/type_aliases/cycle_in_tuple_type.ks` — now emits E447 on line 6
+- [x] `declarations/type_aliases/mixed_valid_and_cyclic.ks` — now emits E447 on line 8
+- [x] `declarations/type_aliases/multi_way_cycles.ks` — now emits E447 on line 6
+- [x] `declarations/type_aliases/self_reference_cycle.ks` — now emits E447 on line 6
+- [x] `declarations/type_aliases/two_way_cycle.ks` — now emits E447 on line 6
+
+### Protocol cycles
+- [x] `validation/cycles/protocol_direct_self_inheritance.ks` — now emits E459 `circular protocol inheritance: Foo -> Foo`
+- [x] `validation/cycles/three_protocol_cycle.ks` — now emits E459 `circular protocol inheritance: A -> B -> C -> A`
+- [x] `validation/cycles/two_protocol_cycle.ks` — now emits E459 `circular protocol inheritance: A -> B -> A`
+
+### Struct containment cycles (span fix)
+- [x] `validation/cycles/three_struct_cycle_error.ks` — E450 now lands on line 7 (first direct Named opening, not the closing field)
+- [x] `validation/cycles/two_struct_cycle_error.ks` — E450 now lands on line 7
+
+### Generic constraint cycles
+- [x] `validation/cycles/mutual_constraint_reference_rejected.ks` — now emits E451 `circular generic constraint: T -> U -> T` on line 10
+
+## String-escape lexer diagnostics
+
+Fixed 2026-04-21. New `lib2/kestrel-hir-lower/src/literal.rs` ports lib1's `process_string_escapes` purely (input → `(value, Vec<EscapeError>)`, no diagnostic sink). `HirLiteral::String` changed from `String(String)` to `String { value, escape_errors: Vec<EscapeError> }` so errors travel as data on the node. New `lib2/kestrel-analyze/src/body/string_escape.rs` (E700-E703, "Literals/lexing" bucket) walks `cx.hir.exprs` + `cx.hir.pats` and emits `AnalyzeDiagnostic`s. The redundant decoder in `kestrel-mir-lower/src/body_lower.rs` (`decode_string_literal` + `unescape_string_literal`, ~140 lines) was deleted; MIR now consumes the pre-decoded `value` directly. `\(` is treated as a passthrough escape because the parser only converts top-level strings to `InterpolatedString` — strings nested in calls (`println("a=\(a)")`) reach the decoder with `\(` intact.
+
+- [x] `expressions/strings/ascii_escape_out_of_range.ks` — now emits E701 `ASCII escape \xNN out of range`
+- [x] `expressions/strings/incomplete_hex_escape.ks` — now emits E700 `invalid escape sequence`
+- [x] `expressions/strings/invalid_escape_sequence.ks` — now emits E700 `invalid escape sequence`
+- [x] `expressions/strings/unicode_escape_empty_braces.ks` — now emits E702 `invalid Unicode escape` (EmptyBraces)
+- [x] `expressions/strings/unicode_escape_missing_brace.ks` — now emits E702 `invalid Unicode escape` (MissingOpenBrace)
+- [x] `expressions/strings/unicode_escape_out_of_range.ks` — now emits E702 `invalid Unicode escape` (OutOfRange)
+- [x] `expressions/strings/unicode_escape_too_many_digits.ks` — now emits E702 `invalid Unicode escape` (TooManyDigits)
+
+## Unknown-attribute warning
+
+Fixed 2026-04-21. New `lib2/kestrel-analyze/src/compilation/unknown_attribute.rs` (E461, Warning). Runs as `CompilationCheck`, walks the hierarchy from root, filters by `Attributes` component presence (no `NodeKind` enumeration). Known set: `builtin`, `dummy`, `extern`, `fileconstant`, `platform`. Added `span: Span` to `AstAttribute` (populated from the name identifier's `text_range` to avoid rowan leading-trivia). Parsing tests (`attributes/parsing/*_parses*.ks`) that used fake attribute names were annotated with `// WARN: unknown attribute` to match — lib1 emitted the same warnings but its `Compiles` assertion ignored warnings, so the port needed explicit annotations under lib2's stricter matcher.
+
+- [x] `attributes/semantic/mixed_known_and_unknown_attributes.ks`
+- [x] `attributes/semantic/multiple_unknown_attributes_emit_multiple_warnings.ks`
+- [x] `attributes/semantic/unknown_attribute_emits_warning.ks`
+- [x] `attributes/semantic/unknown_attribute_with_args_emits_warning.ks`
+
 ## False Positives
 
 Compiler previously rejected valid code, produced spurious diagnostics, emitted wrong code, or ran code incorrectly.
@@ -240,6 +284,50 @@ Protocol signature for `<<`/`>>` expects unlabeled arg but source declares `by:`
 > **lib1:** `kestrel-semantic-tree-binder/src/body_resolver/patterns.rs` via `diagnostics/pattern.rs` — when lowering an or-pattern the binder joins the binding sets from each alternative and emits "inconsistent" if they differ in name or type.
 
 - [x] `expressions/match/or_patterns/or_pattern_inconsistent_bindings_error.ks` — **expected:** `inconsistent`
+
+### Overload resolution / ambiguity not diagnosed (partial)
+
+Fixed 2026-04-21: `NoMatchingOverload` machinery already existed in `kestrel-type-infer` but only fired for implicit enum cases or >1-candidate overload sets. Single-candidate free-function calls took the `TyKind::Function` branch in `solve_call` and emitted `ArgCountMismatch` / `LabelMismatch` instead. Added a pre-check in `generate.rs`'s `HirExpr::Call` branch: for a singleton `HirExpr::Def(Function)` callee, run `labels_match` against the `Callable`'s params; if the labels or arity don't match, emit `NoMatchingOverload` with the function's name. Matching calls fall through to the regular `ctx.call` path so parent-entity type-param substitution (e.g., `Pointer[UInt8].nullPointer()`) still works.
+
+- [x] `expressions/calls/function_calls/call_with_missing_required_label_error.ks` — **expected:** `no matching overload`
+- [x] `expressions/calls/function_calls/call_with_too_few_arguments_error.ks` — **expected:** `no matching overload`
+- [x] `expressions/calls/function_calls/call_with_too_many_arguments_error.ks` — **expected:** `no matching overload`
+- [x] `expressions/calls/function_calls/call_with_wrong_labeled_argument_error.ks` — **expected:** `no matching overload`
+- [x] `declarations/structs/calling_function_with_wrong_labels.ks` — **expected:** `no matching overload`
+
+### Move / ownership / use-after-move checks (partial)
+
+Move-tracker now runs across branches and loops for most cases.
+
+- [x] `memory_model/copy_semantics/maybe_moved_in_if_then_only.ks` — **expected:** `may have been moved`
+- [x] `memory_model/copy_semantics/move_in_infinite_loop_is_definitely_moved.ks` — **expected:** `use of moved value`
+- [x] `memory_model/copy_semantics/move_in_while_loop_maybe_moved.ks` — **expected:** `may have been moved`
+- [x] `memory_model/copy_semantics/move_only_in_else_branch.ks` — **expected:** `may have been moved`
+- [x] `memory_model/copy_semantics/moved_in_both_branches_is_definitely_moved.ks` — **expected:** `use of moved value`
+- [x] `memory_model/copy_semantics/multiple_uses_of_moved_value.ks` — **expected:** `use of moved value`
+- [x] `memory_model/copy_semantics/use_after_move_error_simple.ks` — **expected:** `use of moved value`
+- [x] `memory_model/copy_semantics/use_after_move_in_field_access.ks` — **expected:** `use of moved value`
+- [x] `memory_model/copy_semantics/not_copyable_move_semantics_with_stdlib.ks` — **expected at line 15:** `use of moved value`
+- [x] `memory_model/deinit/deinit_already_moved_variable_error.ks` — **expected:** `moved`
+- [x] `memory_model/deinit/deinit_undeclared_variable_error.ks` — **expected:** `undeclared`
+- [x] `memory_model/deinit/double_deinit_error.ks` — **expected:** `moved`
+- [x] `memory_model/generic_copyability/type_parameter_with_not_copyable_cannot_be_duplicated.ks` — **expected:** `use of moved value`
+- [x] `memory_model/generic_copyability/type_parameter_with_not_copyable_use_after_move.ks` — **expected:** `use of moved value`
+
+### Protocol conformance — signature + receiver-kind checks
+
+Fixed 2026-04-21: `conformance_completeness.rs` now treats a name-match with the wrong labels or arity as "not implemented" (E454), and detects instance-vs-static receiver-kind mismatches on an otherwise matching signature (new E459). Candidate-overload handling added so protocols with multiple same-named methods still resolve each requirement to the right impl.
+
+- [x] `declarations/protocols/struct_with_method_wrong_parameter_count.ks` — **expected:** `does not implement method 'compare'`
+- [x] `declarations/protocols/struct_with_wrong_label_on_method.ks` — **expected:** `does not implement method 'greet'`
+- [x] `declarations/protocol_method_linking/receiver_kind_mismatch_instance_vs_static.ks` — **expected:** `receiver`
+- [x] `declarations/protocol_method_linking/receiver_kind_mismatch_static_vs_instance.ks` — **expected:** `receiver`
+
+### Setter required by protocol but only getter provided
+
+Fixed 2026-04-21: `conformance_completeness.rs` now compares `Settable` markers between protocol fields and impl fields and emits E460 when the protocol requires `{ get set }` but the impl provides only `{ get }`.
+
+- [x] `declarations/computed_properties/protocol_requires_setter_but_only_getter_provided.ks` — **expected:** `setter`
 
 ## Stdlib
 

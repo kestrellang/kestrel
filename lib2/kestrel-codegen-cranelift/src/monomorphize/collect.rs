@@ -208,8 +208,12 @@ impl<'a> CollectionContext<'a> {
                 };
 
                 // Substitute type args using the current instantiation's substitution
-                let concrete_type_args =
-                    common::substitute_type_args(type_args, subst, parent_self.as_ref(), self.module);
+                let concrete_type_args = common::substitute_type_args(
+                    type_args,
+                    subst,
+                    parent_self.as_ref(),
+                    self.module,
+                );
 
                 // Resolve self type: only inherit parent's self_type if the callee
                 // actually uses SelfType in its signature. Static methods on other types
@@ -230,7 +234,9 @@ impl<'a> CollectionContext<'a> {
                 );
                 let concrete_self = self_type
                     .as_ref()
-                    .map(|st| substitute_type_with_self(st, subst, parent_self.as_ref(), self.module))
+                    .map(|st| {
+                        substitute_type_with_self(st, subst, parent_self.as_ref(), self.module)
+                    })
                     .or_else(|| {
                         if self.func_uses_self_type(callee_func) || callee_is_nested {
                             parent_self.clone()
@@ -415,8 +421,12 @@ impl<'a> CollectionContext<'a> {
             Rvalue::Const(imm) => {
                 if let kestrel_mir::ImmediateKind::FunctionRef { func, type_args } = &imm.kind {
                     if let Some(&func_id) = self.entity_to_func.get(func) {
-                        let concrete_type_args =
-                            common::substitute_type_args(type_args, subst, parent_self.as_ref(), self.module);
+                        let concrete_type_args = common::substitute_type_args(
+                            type_args,
+                            subst,
+                            parent_self.as_ref(),
+                            self.module,
+                        );
 
                         let inst = FunctionInstantiation {
                             func_id,
@@ -528,4 +538,3 @@ fn has_type_param(ty: &MirTy) -> bool {
         _ => false,
     }
 }
-

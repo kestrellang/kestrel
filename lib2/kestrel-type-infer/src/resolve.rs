@@ -6,7 +6,7 @@
 
 use kestrel_ast_builder::{
     AstType, Callable, ConformanceItem, Conformances, Gettable, Name, NodeKind, Settable, Static,
-    TypeParams, WhereClause as AstWhereClause, WhereConstraint,
+    TypeParams, Vis, WhereClause as AstWhereClause, WhereConstraint,
 };
 use kestrel_hecs::{Entity, QueryContext};
 use kestrel_hir::Builtin;
@@ -82,7 +82,13 @@ pub enum MemberError {
     /// extension type args. The solver picks uniquely-top-specificity candidates
     /// after filtering by compatibility; ties at the top become AmbiguousMember.
     Ambiguous(Vec<(Entity, Option<Entity>, usize)>),
-    NotVisible,
+    /// Member exists but is not visible from the requesting context. Carries
+    /// the offending entity and its declared visibility so the diagnostic can
+    /// report which access modifier blocks the access.
+    NotVisible {
+        candidate: Entity,
+        visibility: Vis,
+    },
 }
 
 /// Result of resolving an associated type.
@@ -348,6 +354,17 @@ impl TypeResolver for WorldResolver<'_> {
             .collect();
 
         if instance_candidates.is_empty() {
+            // One final probe: a matching member that was filtered out by
+            // visibility? If so, report NotVisible so diagnostics can say
+            // "is private" rather than "no member".
+            if let Some((candidate, visibility)) =
+                self.find_hidden_member(*entity, name, &extensions)
+            {
+                return Err(MemberError::NotVisible {
+                    candidate,
+                    visibility,
+                });
+            }
             return Err(MemberError::NotFound);
         }
 
@@ -637,11 +654,7 @@ impl TypeResolver for WorldResolver<'_> {
             .collect();
 
         if std::env::var("DEBUG_STATIC_MEMBER").is_ok() {
-            eprintln!(
-                "  arg_labels={:?} matches={}",
-                arg_labels,
-                matches.len()
-            );
+            eprintln!("  arg_labels={:?} matches={}", arg_labels, matches.len());
         }
 
         let member = match matches.len() {
@@ -803,6 +816,37 @@ fn extract_protocol_type_args(
 }
 
 impl WorldResolver<'_> {
+    /// Probe for a member that `VisibleChildrenByName` filtered out due to
+    /// visibility. Walks direct children of the type and its extensions for a
+    /// name match, returning the first hit along with its declared `Vis`.
+    /// Used only when normal resolution came up empty, so the diagnostic can
+    /// distinguish "is private" from "no member".
+    fn find_hidden_member(
+        &self,
+        entity: Entity,
+        name: &str,
+        extensions: &[Entity],
+    ) -> Option<(Entity, Vis)> {
+        let probe = |parent: Entity| -> Option<(Entity, Vis)> {
+            for &child in self.ctx.children_of(parent) {
+                if self.ctx.get::<Name>(child).is_some_and(|n| n.0 == name) {
+                    let vis = self.ctx.get::<Vis>(child).cloned().unwrap_or(Vis::Public);
+                    return Some((child, vis));
+                }
+            }
+            None
+        };
+        if let Some(hit) = probe(entity) {
+            return Some(hit);
+        }
+        for &ext in extensions {
+            if let Some(hit) = probe(ext) {
+                return Some(hit);
+            }
+        }
+        None
+    }
+
     /// Search children of an entity for a TypeAlias with the given name.
     fn find_associated_type_in_entity(
         &self,
@@ -1321,9 +1365,7 @@ impl WorldResolver<'_> {
         args: &[crate::constraint::CallArg],
     ) -> Result<MemberResolution, MemberError> {
         let direct_bounds = self.collect_param_direct_bounds(param_entity);
-        if direct_bounds.is_empty()
-            && self.collect_param_protocol_bounds(param_entity).is_empty()
-        {
+        if direct_bounds.is_empty() && self.collect_param_protocol_bounds(param_entity).is_empty() {
             return Err(MemberError::NotFound);
         }
 
@@ -1334,17 +1376,16 @@ impl WorldResolver<'_> {
         // conformances (e.g., Equatable.equals vs Equal.equals introduced by
         // `extend Equatable: Equal[Self]`).
         let arg_labels: Vec<Option<&str>> = args.iter().map(|a| a.label.as_deref()).collect();
-        let member = if let Some(m) =
-            self.select_bound_candidate(&direct_bounds, name, &arg_labels)?
-        {
-            m
-        } else {
-            let expanded = self.collect_param_protocol_bounds(param_entity);
-            match self.select_bound_candidate(&expanded, name, &arg_labels)? {
-                Some(m) => m,
-                None => return Err(MemberError::NotFound),
-            }
-        };
+        let member =
+            if let Some(m) = self.select_bound_candidate(&direct_bounds, name, &arg_labels)? {
+                m
+            } else {
+                let expanded = self.collect_param_protocol_bounds(param_entity);
+                match self.select_bound_candidate(&expanded, name, &arg_labels)? {
+                    Some(m) => m,
+                    None => return Err(MemberError::NotFound),
+                }
+            };
         let mut resolution = self.build_member_resolution(member)?;
 
         // Attach protocol type args from the where clause bound.
@@ -1649,7 +1690,8 @@ impl WorldResolver<'_> {
     /// where clause, and the owner hierarchy for bounds like `Iter: Iterator`
     /// or `where Item: Equatable`.
     fn collect_assoc_type_protocol_bounds(&self, alias_entity: Entity) -> Vec<Entity> {
-        let (mut protocols, mut visited) = self.collect_assoc_type_direct_bounds_inner(alias_entity);
+        let (mut protocols, mut visited) =
+            self.collect_assoc_type_direct_bounds_inner(alias_entity);
         expand_protocol_closure_in_place(self.ctx, self.root, &mut protocols, &mut visited);
         protocols
     }

@@ -36,12 +36,18 @@ pub struct CodegenOptions {
     pub library_paths: Vec<String>,
     /// macOS frameworks to link against.
     pub frameworks: Vec<String>,
+    /// Capture per-function CLIF text before Cranelift compiles it.
+    /// When true, `CompilationResult::clif_text` is populated.
+    pub emit_clif: bool,
 }
 
 /// Result of compilation.
 pub struct CompilationResult {
     /// The compiled object file bytes.
     pub object_bytes: Vec<u8>,
+    /// Per-function CLIF text, populated when `CodegenOptions::emit_clif` is set.
+    /// Each entry is `(mangled_name, clif_body)`.
+    pub clif_text: Vec<(String, String)>,
 }
 
 impl CompilationResult {
@@ -88,10 +94,14 @@ fn compile_inner(
     let mut ctx = CodegenContext::new(module, target, options, mono_set)?;
     ctx.compile_all()?;
 
-    // Phase 3: Emit object bytes
+    // Phase 3: Emit object bytes (consumes ctx but keeps captured CLIF)
+    let clif_text = std::mem::take(&mut ctx.clif_outputs);
     let object_bytes = ctx.finish()?;
 
-    Ok(CompilationResult { object_bytes })
+    Ok(CompilationResult {
+        object_bytes,
+        clif_text,
+    })
 }
 
 /// Counter for unique temp file names.
@@ -145,7 +155,7 @@ mod integration_tests {
         let mut compiler = kestrel_compiler2::Compiler::new();
         let entity = compiler.set_source("test.ks", source.into());
         compiler.build(entity);
-        compiler.infer_all();
+        kestrel_compiler_driver::CompilerDriver::new(&compiler).infer_all();
 
         let mir =
             kestrel_mir_lower::lower_module(compiler.world(), compiler.root()).with_all_passes();
@@ -209,11 +219,11 @@ mod integration_tests {
         compiler.load_dir(&stdlib_path());
         let entity = compiler.set_source("test.ks", source.into());
         compiler.build(entity);
-        compiler.infer_all();
+        kestrel_compiler_driver::CompilerDriver::new(&compiler).infer_all();
 
         // Check for diagnostics from earlier phases (parse, bind, inference)
         let diagnostics = compiler.diagnostics();
-        let _ = compiler.emit_diagnostics();
+        let _ = kestrel_compiler_driver::CompilerDriver::new(&compiler).emit_diagnostics();
         let error_count = diagnostics
             .iter()
             .filter(|d| d.severity >= kestrel_reporting2::Severity::Error)
@@ -548,7 +558,7 @@ func main() {
         compiler.load_dir(&stdlib_path());
         let entity = compiler.set_source("test.ks", "module Test\nfunc main() { }".into());
         compiler.build(entity);
-        compiler.infer_all();
+        kestrel_compiler_driver::CompilerDriver::new(&compiler).infer_all();
 
         let mir =
             kestrel_mir_lower::lower_module(compiler.world(), compiler.root()).with_all_passes();

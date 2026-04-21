@@ -111,6 +111,11 @@ pub struct InferCtx<'a> {
     /// kind and surfacing confusing "expected bool literal got integer literal"
     /// errors for mixed-type arrays.
     pub(crate) expected_array_elem: Option<TyVar>,
+
+    /// Bidirectional hint for the key/value types of the next dictionary
+    /// literal. Set by `HirStmt::Let` when the annotation is `Dictionary[K, V]`
+    /// or the `[K: V]` type operator has already lowered to Dictionary.
+    pub(crate) expected_dict_entry: Option<(TyVar, TyVar)>,
 }
 
 /// Info about a promotion inserted at a Coerce site.
@@ -157,6 +162,7 @@ impl<'a> InferCtx<'a> {
             closure_it: HashSet::new(),
             never_fallback_targets: HashSet::new(),
             expected_array_elem: None,
+            expected_dict_entry: None,
         }
     }
 
@@ -171,10 +177,12 @@ impl<'a> InferCtx<'a> {
             match self.query_ctx.get::<kestrel_ast_builder::NodeKind>(e) {
                 Some(kestrel_ast_builder::NodeKind::Protocol) => return Some(e),
                 Some(kestrel_ast_builder::NodeKind::Extension) => {
-                    let target = self.query_ctx.query(kestrel_name_res::ExtensionTargetEntity {
-                        extension: e,
-                        root: self.root,
-                    })?;
+                    let target = self
+                        .query_ctx
+                        .query(kestrel_name_res::ExtensionTargetEntity {
+                            extension: e,
+                            root: self.root,
+                        })?;
                     if matches!(
                         self.query_ctx.get::<kestrel_ast_builder::NodeKind>(target),
                         Some(kestrel_ast_builder::NodeKind::Protocol)

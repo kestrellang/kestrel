@@ -384,7 +384,6 @@ pub enum NamedKind {
 /// real-world associated-type chain but still aborts runaway lookups.
 const SUBSTITUTE_TYPE_MAX_DEPTH: u32 = 32;
 
-
 /// Substitute type parameters in a `MirTy` and resolve any resulting
 /// `AssociatedProjection`s through the witness table. Always returns a
 /// canonical (fully-reduced) type — no "substituted but not yet normalized"
@@ -396,11 +395,7 @@ const SUBSTITUTE_TYPE_MAX_DEPTH: u32 = 32;
 /// Takes `&MirModule` so it can perform witness lookups via
 /// `MirModule::resolve_associated_type`. Every codegen call site that
 /// substitutes a type already has the module in scope.
-pub fn substitute_type(
-    ty: &MirTy,
-    subst: &HashMap<Entity, MirTy>,
-    module: &MirModule,
-) -> MirTy {
+pub fn substitute_type(ty: &MirTy, subst: &HashMap<Entity, MirTy>, module: &MirModule) -> MirTy {
     substitute_type_with_self(ty, subst, None, module)
 }
 

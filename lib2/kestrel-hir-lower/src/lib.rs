@@ -12,6 +12,7 @@
 mod ctx;
 mod desugar;
 mod expr;
+pub mod literal;
 pub(crate) mod pat;
 mod stmt;
 pub mod ty;
@@ -22,8 +23,8 @@ use kestrel_hir::body::{HirBody, HirExpr, HirMatchArm, HirStmt, MatchSource};
 use kestrel_span2::Span;
 
 pub use ty::{
-    LowerCallableReturnType, LowerCallableTypes, LowerExtensionTargetTypeArgs,
-    LowerTypeAnnotation, lower_ast_type,
+    LowerCallableReturnType, LowerCallableTypes, LowerExtensionTargetTypeArgs, LowerTypeAnnotation,
+    lower_ast_type,
 };
 
 use ctx::LowerCtx;

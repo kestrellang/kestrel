@@ -26,17 +26,12 @@ pub use kestrel_reporting2::{Diagnostic, Label, Severity};
 pub use queries::{InferWithDiagnostics, LexFile, ParseFile};
 
 use std::collections::HashMap;
-use std::fmt;
-use std::panic::AssertUnwindSafe;
 use std::path::Path;
 
-use kestrel_ast_builder::{Body, TargetConfig};
+use kestrel_ast_builder::TargetConfig;
 use kestrel_hecs::{Entity, World};
 use kestrel_lexer2::SpannedToken;
 use kestrel_parser2::ParseResult;
-use kestrel_type_infer::error::InferError;
-
-use crate::diagnostic::WorldFiles;
 
 /// Compiler database backed by an ECS world.
 ///
@@ -137,20 +132,11 @@ impl Compiler {
     /// Collect all diagnostics from the current revision.
     ///
     /// Returns codespan-reporting `Diagnostic`s accumulated by lex, parse,
-    /// and type inference queries. Use `emit_diagnostics()` to render them.
+    /// and type inference queries. Use `CompilerDriver::emit_diagnostics()`
+    /// (from `kestrel-compiler-driver`) to render them to a terminal.
     pub fn diagnostics(&self) -> Vec<codespan_reporting::diagnostic::Diagnostic<usize>> {
         self.world
             .accumulated::<codespan_reporting::diagnostic::Diagnostic<usize>>()
-    }
-
-    /// Emit all accumulated diagnostics to stderr with source context.
-    pub fn emit_diagnostics(&self) -> Result<(), codespan_reporting::files::Error> {
-        let diagnostics = self.diagnostics();
-        if diagnostics.is_empty() {
-            return Ok(());
-        }
-        let files = WorldFiles::from_world(&self.world, &self.files);
-        kestrel_reporting2::emit_all(&files, &diagnostics)
     }
 
     /// Begin a new compilation cycle. Call before updating sources.
@@ -196,183 +182,17 @@ impl Compiler {
 }
 
 impl Compiler {
-    /// Run type inference on all entities that have bodies.
-    /// Returns a summary of how many succeeded, failed, panicked, etc.
-    ///
-    /// Uses `InferWithDiagnostics` so inference errors are accumulated
-    /// alongside lex/parse diagnostics.
-    pub fn infer_all(&self) -> InferSummary {
-        // Collect entities with Body component (mutation-phase API)
-        let entities: Vec<Entity> = self
-            .world
-            .iter_component::<Body>()
-            .map(|(e, _)| e)
-            .collect();
-
-        let ctx = self.world.query_context();
-        let mut summary = InferSummary::default();
-
-        for entity in entities {
-            summary.total += 1;
-            let root = self.root;
-
-            // Build entity path for error reporting (e.g. "std.core.Bool.init")
-            let entity_path = self.entity_path(entity);
-
-            match std::panic::catch_unwind(AssertUnwindSafe(|| {
-                ctx.query(InferWithDiagnostics { entity, root })
-            })) {
-                Ok(Some(typed)) => {
-                    summary.success += 1;
-                    summary.errors += typed.errors.len();
-
-                    // Classify each error by variant
-                    for (i, err) in typed.errors.iter().enumerate() {
-                        let variant = error_variant_name(err);
-                        *summary.error_breakdown.entry(variant).or_insert(0) += 1;
-                        if let InferError::NoMember { name, .. } = err {
-                            *summary.no_member_breakdown.entry(name.clone()).or_insert(0) += 1;
-                        }
-                        if let InferError::DoesNotConform { protocol, .. } = err {
-                            let proto_name = ctx
-                                .get::<kestrel_ast_builder::Name>(*protocol)
-                                .map(|n| n.0.clone())
-                                .unwrap_or_else(|| format!("{:?}", protocol));
-                            *summary
-                                .does_not_conform_breakdown
-                                .entry(proto_name)
-                                .or_insert(0) += 1;
-                        }
-                        if let InferError::TypeMismatch { .. } = err {
-                            if let Some(detail) = typed.error_details.get(i) {
-                                *summary
-                                    .type_mismatch_breakdown
-                                    .entry(detail.clone())
-                                    .or_insert(0) += 1;
-                            }
-                        }
-                    }
-
-                    // Collect samples (first 50 errors with context)
-                    if summary.error_samples.len() < 50 {
-                        for err in &typed.errors {
-                            if summary.error_samples.len() >= 50 {
-                                break;
-                            }
-                            summary.error_samples.push(ErrorSample {
-                                entity_path: entity_path.clone(),
-                                error: format_error(err),
-                            });
-                        }
-                    }
-
-                    // Track per-body error counts, with ordered detail for top bodies
-                    if !typed.errors.is_empty() {
-                        let mut details = Vec::new();
-                        if typed.errors.len() >= 15 {
-                            for (i, err) in typed.errors.iter().enumerate() {
-                                let span_info = format!("{}", err.span().start);
-                                let detail = typed
-                                    .error_details
-                                    .get(i)
-                                    .cloned()
-                                    .unwrap_or_else(|| format_error(err));
-                                details.push(format!("@{} {}", span_info, detail));
-                            }
-                        }
-                        summary
-                            .body_error_counts
-                            .push((entity_path, typed.errors.len(), details));
-                    }
-                },
-                Ok(None) => summary.skipped += 1,
-                Err(panic) => {
-                    summary.panics += 1;
-                    let msg = panic
-                        .downcast_ref::<String>()
-                        .map(|s| s.as_str())
-                        .or_else(|| panic.downcast_ref::<&str>().copied())
-                        .unwrap_or("unknown panic");
-                    summary
-                        .panic_details
-                        .push(format!("{}: {}", entity_path, msg));
-                },
-            }
-        }
-
-        summary
-    }
-
-    /// Run all registered analyzers on all applicable entities.
-    ///
-    /// Calls `Analyze(analyzer_id, entity)` sub-queries for each
-    /// (analyzer, body) pair. Results are memoized per (analyzer, entity).
-    pub fn analyze_all(&self) -> AnalyzeSummary {
-        let body_entities: Vec<Entity> = self
-            .world
-            .iter_component::<Body>()
-            .map(|(e, _)| e)
-            .collect();
-
-        let decl_entities: Vec<Entity> = self
-            .world
-            .iter_component::<kestrel_ast_builder::NodeKind>()
-            .map(|(e, _)| e)
-            .collect();
-
-        let ctx = self.world.query_context();
-        let mut diags = kestrel_analyze::analyze_bodies(&ctx, self.root, &body_entities);
-        diags.extend(kestrel_analyze::analyze_decls(
-            &ctx,
-            self.root,
-            &decl_entities,
-        ));
-        diags.extend(kestrel_analyze::analyze_compilation(&ctx, self.root));
-
-        let mut summary = AnalyzeSummary::default();
-        for d in &diags {
-            match d.severity {
-                kestrel_analyze::Severity::Error => summary.errors += 1,
-                kestrel_analyze::Severity::Warning => summary.warnings += 1,
-                kestrel_analyze::Severity::Info => summary.info += 1,
-            }
-            *summary.by_check.entry(d.descriptor_id).or_insert(0) += 1;
-        }
-        summary.diagnostics = diags;
-        summary
-    }
-
-    /// Build a human-readable path for an entity (e.g. "std.core.Bool.init")
-    fn entity_path(&self, entity: Entity) -> String {
-        let mut parts = Vec::new();
-        let mut current = Some(entity);
-        while let Some(e) = current {
-            if e == self.root {
-                break;
-            }
-            if let Some(name) = self.world.get::<kestrel_ast_builder::Name>(e) {
-                parts.push(name.0.clone());
-            }
-            current = self.world.parent_of(e);
-        }
-        parts.reverse();
-        if parts.is_empty() {
-            format!("{:?}", entity)
-        } else {
-            parts.join(".")
-        }
-    }
-
     /// Lower to MIR and run all post-lowering passes.
     ///
-    /// Call after `infer_all()`.
+    /// Call after inference has been run (e.g. via
+    /// `CompilerDriver::infer_all()` from `kestrel-compiler-driver`).
     pub fn lower_to_mir(&self) -> kestrel_mir::MirModule {
         kestrel_mir_lower::lower_module(self.world(), self.root()).with_all_passes()
     }
 
     /// Lower to MIR, run all passes, and compile to native object code.
     ///
-    /// Call after `infer_all()`. Returns the raw object file bytes.
+    /// Call after inference has been run. Returns the raw object file bytes.
     pub fn compile_to_object(
         &self,
     ) -> Result<Vec<u8>, kestrel_codegen2_cranelift::error::CodegenError> {
@@ -385,7 +205,7 @@ impl Compiler {
 
     /// Lower to MIR, run all passes, compile, and link to an executable.
     ///
-    /// Call after `infer_all()`.
+    /// Call after inference has been run.
     pub fn compile_and_link(
         &self,
         output_path: &Path,
@@ -430,286 +250,6 @@ impl Compiler {
     }
 }
 
-/// Summary of type inference results across all bodies.
-#[derive(Default)]
-pub struct InferSummary {
-    /// Total entities with bodies.
-    pub total: usize,
-    /// Successfully inferred (may still have type errors).
-    pub success: usize,
-    /// Skipped — no HIR body produced (e.g., missing Body component path).
-    pub skipped: usize,
-    /// Panicked during inference.
-    pub panics: usize,
-    /// Total type errors across all successful inferences.
-    pub errors: usize,
-    /// Error counts by variant name.
-    pub error_breakdown: HashMap<&'static str, usize>,
-    /// NoMember breakdown by member name.
-    pub no_member_breakdown: HashMap<String, usize>,
-    /// DoesNotConform breakdown by protocol name.
-    pub does_not_conform_breakdown: HashMap<String, usize>,
-    /// TypeMismatch breakdown by "expected X got Y" pattern.
-    pub type_mismatch_breakdown: HashMap<String, usize>,
-    /// Sample errors with entity context.
-    pub error_samples: Vec<ErrorSample>,
-    /// Details of panics (entity name + message).
-    pub panic_details: Vec<String>,
-    /// Per-body error counts: (entity_path, error_count, detail_descriptions).
-    pub body_error_counts: Vec<(String, usize, Vec<String>)>,
-}
-
-/// A single error sample with the entity it came from.
-pub struct ErrorSample {
-    pub entity_path: String,
-    pub error: String,
-}
-
-/// Classify an InferError into a variant name for breakdown.
-fn error_variant_name(err: &InferError) -> &'static str {
-    match err {
-        InferError::TypeMismatch { .. } => "TypeMismatch",
-        InferError::DoesNotConform { .. } => "DoesNotConform",
-        InferError::NoMember { .. } => "NoMember",
-        InferError::AmbiguousMember { .. } => "AmbiguousMember",
-        InferError::MemberNotVisible { .. } => "MemberNotVisible",
-        InferError::NoAssociatedType { .. } => "NoAssociatedType",
-        InferError::InfiniteType { .. } => "InfiniteType",
-        InferError::FromHir { .. } => "FromHir",
-        InferError::ImplicitMemberNotFound { .. } => "ImplicitMemberNotFound",
-        InferError::ArgCountMismatch { .. } => "ArgCountMismatch",
-        InferError::LabelMismatch { .. } => "LabelMismatch",
-        InferError::InstanceMethodAsStatic { .. } => "InstanceMethodAsStatic",
-        InferError::TypeParamAsValue { .. } => "TypeParamAsValue",
-        InferError::TypeArgCountMismatch { .. } => "TypeArgCountMismatch",
-        InferError::NoMatchingOverload { .. } => "NoMatchingOverload",
-        InferError::ItWrongArity { .. } => "ItWrongArity",
-        InferError::LiteralNotAccepted { .. } => "LiteralNotAccepted",
-        InferError::UnresolvedTypeParam { .. } => "UnresolvedTypeParam",
-        InferError::CannotInferType { .. } => "CannotInferType",
-    }
-}
-
-/// Format an InferError into a human-readable one-liner.
-fn format_error(err: &InferError) -> String {
-    let span = err.span();
-    match err {
-        InferError::TypeMismatch { .. } => {
-            format!("TypeMismatch at {}:{}", span.file_id, span.start)
-        },
-        InferError::DoesNotConform { .. } => {
-            format!("DoesNotConform at {}:{}", span.file_id, span.start)
-        },
-        InferError::NoMember { name, .. } => {
-            format!("NoMember '{}' at {}:{}", name, span.file_id, span.start)
-        },
-        InferError::AmbiguousMember { name, .. } => {
-            format!(
-                "AmbiguousMember '{}' at {}:{}",
-                name, span.file_id, span.start
-            )
-        },
-        InferError::MemberNotVisible { name, .. } => {
-            format!(
-                "MemberNotVisible '{}' at {}:{}",
-                name, span.file_id, span.start
-            )
-        },
-        InferError::NoAssociatedType { name, .. } => {
-            format!(
-                "NoAssociatedType '{}' at {}:{}",
-                name, span.file_id, span.start
-            )
-        },
-        InferError::InfiniteType { .. } => {
-            format!("InfiniteType at {}:{}", span.file_id, span.start)
-        },
-        InferError::FromHir { .. } => {
-            format!("FromHir at {}:{}", span.file_id, span.start)
-        },
-        InferError::ImplicitMemberNotFound { name, .. } => {
-            format!(
-                "ImplicitMemberNotFound '{}' at {}:{}",
-                name, span.file_id, span.start
-            )
-        },
-        InferError::ArgCountMismatch { expected, got, .. } => {
-            format!(
-                "ArgCountMismatch expected={} got={} at {}:{}",
-                expected, got, span.file_id, span.start
-            )
-        },
-        InferError::LabelMismatch { expected, got, .. } => {
-            format!(
-                "LabelMismatch expected={:?} got={:?} at {}:{}",
-                expected, got, span.file_id, span.start
-            )
-        },
-        InferError::InstanceMethodAsStatic { name, .. } => {
-            format!(
-                "InstanceMethodAsStatic '{}' at {}:{}",
-                name, span.file_id, span.start
-            )
-        },
-        InferError::TypeParamAsValue { .. } => {
-            format!("TypeParamAsValue at {}:{}", span.file_id, span.start)
-        },
-        InferError::TypeArgCountMismatch { expected, got, .. } => {
-            format!(
-                "TypeArgCountMismatch expected={} got={} at {}:{}",
-                expected, got, span.file_id, span.start
-            )
-        },
-        InferError::NoMatchingOverload { name, .. } => {
-            format!(
-                "NoMatchingOverload '{}' at {}:{}",
-                name, span.file_id, span.start
-            )
-        },
-        InferError::ItWrongArity { expected, .. } => {
-            format!(
-                "ItWrongArity expected={} at {}:{}",
-                expected, span.file_id, span.start
-            )
-        },
-        InferError::LiteralNotAccepted { literal, .. } => {
-            format!(
-                "LiteralNotAccepted {:?} at {}:{}",
-                literal, span.file_id, span.start
-            )
-        },
-        InferError::UnresolvedTypeParam { .. } => {
-            format!("UnresolvedTypeParam at {}:{}", span.file_id, span.start)
-        },
-        InferError::CannotInferType { .. } => {
-            format!("CannotInferType at {}:{}", span.file_id, span.start)
-        },
-    }
-}
-
-impl fmt::Display for InferSummary {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "Type Inference Summary:")?;
-        writeln!(f, "  Total bodies:  {}", self.total)?;
-        writeln!(f, "  Success:       {}", self.success)?;
-        writeln!(f, "  Skipped:       {}", self.skipped)?;
-        writeln!(f, "  Panics:        {}", self.panics)?;
-        writeln!(f, "  Type errors:   {}", self.errors)?;
-
-        if !self.error_breakdown.is_empty() {
-            writeln!(f)?;
-            writeln!(f, "  Error breakdown:")?;
-            // Sort by count descending
-            let mut breakdown: Vec<_> = self.error_breakdown.iter().collect();
-            breakdown.sort_by(|a, b| b.1.cmp(a.1));
-            for (variant, count) in &breakdown {
-                writeln!(f, "    {:30} {:>5}", variant, count)?;
-            }
-        }
-
-        if !self.no_member_breakdown.is_empty() {
-            writeln!(f)?;
-            writeln!(f, "  NoMember breakdown:")?;
-            let mut nm: Vec<_> = self.no_member_breakdown.iter().collect();
-            nm.sort_by(|a, b| b.1.cmp(a.1));
-            for (name, count) in &nm {
-                writeln!(f, "    {:30} {:>5}", name, count)?;
-            }
-        }
-
-        if !self.does_not_conform_breakdown.is_empty() {
-            writeln!(f)?;
-            writeln!(f, "  DoesNotConform breakdown:")?;
-            let mut dc: Vec<_> = self.does_not_conform_breakdown.iter().collect();
-            dc.sort_by(|a, b| b.1.cmp(a.1));
-            for (name, count) in &dc {
-                writeln!(f, "    {:30} {:>5}", name, count)?;
-            }
-        }
-
-        if !self.type_mismatch_breakdown.is_empty() {
-            writeln!(f)?;
-            writeln!(f, "  TypeMismatch breakdown (top 30):")?;
-            let mut tm: Vec<_> = self.type_mismatch_breakdown.iter().collect();
-            tm.sort_by(|a, b| b.1.cmp(a.1));
-            for (desc, count) in tm.iter().take(30) {
-                writeln!(f, "    {:50} {:>5}", desc, count)?;
-            }
-        }
-
-        if !self.error_samples.is_empty() {
-            writeln!(f)?;
-            writeln!(f, "  Error samples (first 50):")?;
-            for sample in &self.error_samples {
-                writeln!(f, "    [{}] {}", sample.entity_path, sample.error)?;
-            }
-        }
-
-        if !self.body_error_counts.is_empty() {
-            writeln!(f)?;
-            writeln!(f, "  Bodies with most errors (top 20):")?;
-            let mut bc = self.body_error_counts.clone();
-            bc.sort_by(|a, b| b.1.cmp(&a.1));
-            for (path, count, details) in bc.iter().take(20) {
-                writeln!(f, "    {:60} {:>5}", path, count)?;
-                // Show first 5 unique error details for high-error bodies
-                if !details.is_empty() {
-                    let mut seen = std::collections::HashSet::new();
-                    for d in details.iter().take(10) {
-                        if seen.insert(d.clone()) {
-                            writeln!(f, "      - {}", d)?;
-                        }
-                    }
-                }
-            }
-        }
-
-        if !self.panic_details.is_empty() {
-            writeln!(f)?;
-            writeln!(f, "  Panic details (first 10):")?;
-            for detail in self.panic_details.iter().take(10) {
-                writeln!(f, "    - {}", detail)?;
-            }
-            if self.panic_details.len() > 10 {
-                writeln!(f, "    ... and {} more", self.panic_details.len() - 10)?;
-            }
-        }
-        Ok(())
-    }
-}
-
-/// Summary of analysis results across all bodies.
-#[derive(Default)]
-pub struct AnalyzeSummary {
-    pub errors: usize,
-    pub warnings: usize,
-    pub info: usize,
-    /// Count per descriptor ID (e.g., "E001" → 3).
-    pub by_check: HashMap<&'static str, usize>,
-    /// All diagnostics produced.
-    pub diagnostics: Vec<kestrel_analyze::AnalyzeDiagnostic>,
-}
-
-impl fmt::Display for AnalyzeSummary {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "Analysis Summary:")?;
-        writeln!(f, "  Errors:   {}", self.errors)?;
-        writeln!(f, "  Warnings: {}", self.warnings)?;
-        if self.info > 0 {
-            writeln!(f, "  Info:     {}", self.info)?;
-        }
-        if !self.by_check.is_empty() {
-            writeln!(f)?;
-            let mut checks: Vec<_> = self.by_check.iter().collect();
-            checks.sort_by(|a, b| b.1.cmp(a.1));
-            for (id, count) in checks {
-                writeln!(f, "    {:20} {:>5}", id, count)?;
-            }
-        }
-        Ok(())
-    }
-}
-
 impl Default for Compiler {
     fn default() -> Self {
         Self::new()
@@ -721,15 +261,6 @@ mod tests {
     use super::*;
     use kestrel_lexer2::Token;
     use kestrel_syntax_tree2::SyntaxKind;
-    use std::path::PathBuf;
-
-    /// Path to the stdlib directory (relative to workspace root).
-    fn stdlib_path() -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../lang/std")
-            .canonicalize()
-            .expect("stdlib path should exist at lang/std")
-    }
 
     /// Helper: extract non-trivia token kinds from a token stream.
     fn structural_tokens(tokens: &[SpannedToken]) -> Vec<Token> {
@@ -1188,70 +719,5 @@ mod tests {
             2,
             "f2 should have module + struct"
         );
-    }
-
-    // ================================================================
-    // Type inference: smoke tests on stdlib
-    // ================================================================
-
-    #[test]
-    fn compile_simple_function() {
-        // Baseline: inference on a trivial function without stdlib
-        let mut c = Compiler::new();
-        let f = c.set_source(
-            "test.ks",
-            "module Test\nfunc foo() { let x = 42; x }".into(),
-        );
-        c.build(f);
-
-        let summary = c.infer_all();
-        eprintln!("{}", summary);
-        assert!(summary.total > 0, "should have at least one body");
-        assert_eq!(summary.panics, 0, "simple function should not panic");
-    }
-
-    #[test]
-    fn compile_full_stdlib() {
-        // Load the entire stdlib and see how far inference gets
-        let mut c = Compiler::new();
-        let path = stdlib_path();
-        c.load_dir(&path);
-
-        let summary = c.infer_all();
-        eprintln!("{}", summary);
-
-        // Just report — don't assert hard failures since many things
-        // are expected to fail at this stage
-        assert!(summary.total > 0, "should have found bodies in stdlib");
-    }
-
-    #[test]
-    fn analyze_full_stdlib() {
-        let mut c = Compiler::new();
-        let path = stdlib_path();
-        c.load_dir(&path);
-
-        // Run inference first (analyzers depend on it)
-        let _infer = c.infer_all();
-
-        // Run analysis
-        let summary = c.analyze_all();
-        eprintln!("{}", summary);
-    }
-
-    #[test]
-    fn compile_stdlib_bool() {
-        // A specific, small stdlib file
-        let mut c = Compiler::new();
-        let path = stdlib_path();
-
-        // Load core/bool.ks — needs core/protocols.ks for Equatable etc.
-        let core_path = path.join("core");
-        c.load_dir(&core_path);
-
-        let summary = c.infer_all();
-        eprintln!("=== Bool + core ===");
-        eprintln!("{}", summary);
-        assert!(summary.total > 0);
     }
 }

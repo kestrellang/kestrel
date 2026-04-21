@@ -192,7 +192,14 @@ impl LowerCtx<'_> {
         let value = match kind {
             AstLiteral::Integer(s) => HirLiteral::Integer(crate::pat::parse_int(s)),
             AstLiteral::Float(s) => HirLiteral::Float(crate::pat::parse_float(s)),
-            AstLiteral::String(s) | AstLiteral::RawString(s) => HirLiteral::String(s.clone()),
+            AstLiteral::String(s) | AstLiteral::RawString(s) => {
+                let (value, escape_errors) =
+                    crate::literal::decode_string_literal_token(s, span.file_id, span.start);
+                HirLiteral::String {
+                    value,
+                    escape_errors,
+                }
+            },
             AstLiteral::Char(s) => {
                 HirLiteral::Char(crate::pat::parse_char_validated(s, span, self.ctx))
             },
@@ -619,10 +626,12 @@ impl LowerCtx<'_> {
                         root: self.root,
                     });
                     let is_value_prefix = match &prefix_result {
-                        ValueResolution::Def(entity) => matches!(
-                            self.ctx.get::<NodeKind>(*entity),
-                            Some(NodeKind::Field) | Some(NodeKind::EnumCase)
-                        ) || self.ctx.has::<Gettable>(*entity),
+                        ValueResolution::Def(entity) => {
+                            matches!(
+                                self.ctx.get::<NodeKind>(*entity),
+                                Some(NodeKind::Field) | Some(NodeKind::EnumCase)
+                            ) || self.ctx.has::<Gettable>(*entity)
+                        },
                         ValueResolution::FieldValue { .. }
                         | ValueResolution::EnumCaseValue { .. } => true,
                         _ => false,
@@ -631,14 +640,14 @@ impl LowerCtx<'_> {
                         let prefix_slice = &segments[..segments.len() - 1];
                         let prefix_span = Span::new(
                             segments[0].span.file_id,
-                            segments[0].span.start
-                                ..prefix_slice.last().unwrap().span.end,
+                            segments[0].span.start..prefix_slice.last().unwrap().span.end,
                         );
                         let receiver = self.lower_path(body, prefix_slice, &prefix_span);
                         let last = &segments[segments.len() - 1];
-                        let lowered_type_args = last.type_args.as_ref().map(|args| {
-                            args.iter().map(|t| self.lower_type(t)).collect()
-                        });
+                        let lowered_type_args = last
+                            .type_args
+                            .as_ref()
+                            .map(|args| args.iter().map(|t| self.lower_type(t)).collect());
                         return self.alloc_expr(HirExpr::MethodCall {
                             receiver,
                             method: last.name.clone(),

@@ -428,6 +428,14 @@ pub fn compile_function(
         });
     }
 
+    // Capture pre-compile CLIF for dump mode. Cranelift's `ir::Function` Display
+    // emits the standard CLIF text format. Post-compile CLIF would also be
+    // interesting but requires a second format pass; leave for later.
+    if ctx.options.emit_clif {
+        ctx.clif_outputs
+            .push((mangled_name.to_string(), format!("{}", cl_func)));
+    }
+
     // Compile and define
     let mut cl_ctx = cranelift_codegen::Context::for_function(cl_func);
     stacker::maybe_grow(256 * 1024, 8 * 1024 * 1024, || {

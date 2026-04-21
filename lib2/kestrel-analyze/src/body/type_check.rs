@@ -20,6 +20,7 @@
 use crate::context::BodyContext;
 use crate::diagnostic::*;
 use crate::traits::{BodyCheck, Describe};
+use kestrel_ast_builder::Vis;
 use kestrel_type_infer::error::InferError;
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
@@ -96,10 +97,18 @@ fn format_error(err: &InferError, detail: &str) -> (String, String) {
             format!("ambiguous member '{}': {}", name, detail),
             "multiple candidates".into(),
         ),
-        InferError::MemberNotVisible { name, .. } => (
-            format!("member '{}' is not accessible: {}", name, detail),
-            "not visible".into(),
-        ),
+        InferError::MemberNotVisible {
+            name, visibility, ..
+        } => {
+            let vis = vis_label(visibility);
+            (
+                format!(
+                    "member '{}' is {} and not accessible from this scope",
+                    name, vis
+                ),
+                format!("{} member", vis),
+            )
+        },
         InferError::NoAssociatedType { name, .. } => (
             format!("no associated type '{}': {}", name, detail),
             format!("'{}' not found", name),
@@ -159,14 +168,22 @@ fn format_error(err: &InferError, detail: &str) -> (String, String) {
             format!("does not conform to protocol: {}", detail),
             "type does not accept this literal".into(),
         ),
-        InferError::UnresolvedTypeParam { .. } => (
-            "cannot infer type parameter".into(),
-            detail.to_string(),
-        ),
+        InferError::UnresolvedTypeParam { .. } => {
+            ("cannot infer type parameter".into(), detail.to_string())
+        },
         InferError::CannotInferType { .. } => (
             "could not infer type".into(),
             "add a type annotation".into(),
         ),
         InferError::FromHir { .. } => unreachable!("filtered above"),
+    }
+}
+
+fn vis_label(v: &Vis) -> &'static str {
+    match v {
+        Vis::Public => "public",
+        Vis::Internal => "internal",
+        Vis::Fileprivate => "fileprivate",
+        Vis::Private => "private",
     }
 }

@@ -5,6 +5,7 @@
 
 use kestrel_ast::ast_body::*;
 use kestrel_hir::body::*;
+use kestrel_reporting2::{Diagnostic, Label};
 use kestrel_span2::Span;
 
 use crate::ctx::LowerCtx;
@@ -36,10 +37,24 @@ impl LowerCtx<'_> {
                 span,
             } => self.lower_guard_let(body, conditions, else_body, span),
 
-            AstStmt::Deinit { name, span } => self.alloc_stmt(HirStmt::Deinit {
-                name: name.clone(),
-                span: span.clone(),
-            }),
+            AstStmt::Deinit { name, span } => {
+                let local = self.lookup_local(name);
+                if local.is_none() {
+                    self.ctx.accumulate(
+                        Diagnostic::error()
+                            .with_message(format!("undeclared variable '{name}'"))
+                            .with_labels(vec![
+                                Label::primary(span.file_id, span.range())
+                                    .with_message("no local with this name in scope"),
+                            ]),
+                    );
+                }
+                self.alloc_stmt(HirStmt::Deinit {
+                    name: name.clone(),
+                    local,
+                    span: span.clone(),
+                })
+            },
         }
     }
 

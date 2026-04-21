@@ -19,3 +19,6 @@ pub mod move_tracking;
 pub mod exhaustiveness;
 pub mod for_loop_pattern;
 pub mod refutable_pattern;
+
+// Literal/lexing checks (E700-E799)
+pub mod string_escape;

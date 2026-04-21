@@ -128,7 +128,7 @@ pub fn build_subscript(
     }
 
     set_visibility(world, entity, node);
-    set_attributes(world, entity, node);
+    set_attributes(world, entity, node, file_id);
     set_where_clause(world, entity, node, file_id);
     build_type_parameters(world, entity, node, file_entity, file_id);
 }

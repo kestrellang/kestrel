@@ -2,5 +2,5 @@
 // stdlib: false
 
 module Test
-@unknownAttribute
+@unknownAttribute // WARN: unknown attribute
 struct Foo {}

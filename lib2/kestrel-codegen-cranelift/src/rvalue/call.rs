@@ -45,7 +45,9 @@ pub fn compile_call(
             // protocol extension method) becomes concrete at the call site.
             let concrete_type_args: Vec<MirTy> = type_args
                 .iter()
-                .map(|a| substitute_type_with_self(a, &state.subst, state.self_type.as_ref(), ctx.module))
+                .map(|a| {
+                    substitute_type_with_self(a, &state.subst, state.self_type.as_ref(), ctx.module)
+                })
                 .collect();
 
             let func_id_mir = ctx.entity_to_func.get(func).ok_or_else(|| {
@@ -71,7 +73,12 @@ pub fn compile_call(
             let concrete_self = self_type
                 .as_ref()
                 .map(|st| {
-                    substitute_type_with_self(st, &state.subst, state.self_type.as_ref(), ctx.module)
+                    substitute_type_with_self(
+                        st,
+                        &state.subst,
+                        state.self_type.as_ref(),
+                        ctx.module,
+                    )
                 })
                 .or_else(|| {
                     if callee_is_nested {
@@ -108,13 +115,19 @@ pub fn compile_call(
             method_type_args,
         } => {
             // Substitute type params AND SelfType using the function's self_type
-            let mut concrete_self =
-                substitute_type_with_self(self_type, &state.subst, state.self_type.as_ref(), ctx.module);
+            let mut concrete_self = substitute_type_with_self(
+                self_type,
+                &state.subst,
+                state.self_type.as_ref(),
+                ctx.module,
+            );
             // Resolve associated types (e.g., Iterator.Item → Int64) via witness table
             concrete_self = resolve_associated_self_type(ctx, &state, *protocol, &concrete_self);
             let concrete_method_args: Vec<MirTy> = method_type_args
                 .iter()
-                .map(|a| substitute_type_with_self(a, &state.subst, state.self_type.as_ref(), ctx.module))
+                .map(|a| {
+                    substitute_type_with_self(a, &state.subst, state.self_type.as_ref(), ctx.module)
+                })
                 .collect();
 
             let resolved = witness::resolve_witness_call(
@@ -216,7 +229,8 @@ fn compile_resolved_call(
 
     // If sret, allocate a stack slot for the return value.
     let sret_addr = if callee_sret {
-        let ret_ty = substitute_type_with_self(&func_def.ret, &callee_subst, callee_self_type, ctx.module);
+        let ret_ty =
+            substitute_type_with_self(&func_def.ret, &callee_subst, callee_self_type, ctx.module);
         let layout = ctx.layouts.layout_of(&ret_ty);
         let slot = builder.create_sized_stack_slot(StackSlotData::new(
             StackSlotKind::ExplicitSlot,
