@@ -1,7 +1,7 @@
-# Test Failures — 2026-04-19
+# Test Failures — 2026-04-21
 
-Run: `file_tests --test-threads=1 --skip stdlib --skip function_as_value` on `feature/incremental-hecs`.
-Result: **2452 passed · 132 failed · 204 filtered** (stdlib + known-hanging tests skipped, 2026-04-20 after matcher multi-match + Associated-literal-cascade suppression).
+Run: `file_tests --test-threads=1` (full suite) on `feature/incremental-hecs`.
+Result: **2684 passed · 134 failed** (2026-04-21, full-suite run — no filters). stdlib/* is clean (0 failures); all 134 live in non-stdlib trees.
 
 > **Agent instructions:** When you fix a failing test (or verify that an existing entry has become passing), move it to `test-errors-fixed.md`. Move the full bullet — the `[x]` marker, the failure mode, and any explanation — preserving its subsection heading for context. If a subsection's last remaining item is being moved, move the subsection heading and its explanatory prose with it. `[x]` entries must never sit in **# False Negatives** or **# Stdlib** — those lists are for still-failing `[ ]` items only. Do not modify a test's source to make it pass; if a test is genuinely invalid (wrong syntax, etc.), note that in the entry.
 
@@ -89,11 +89,7 @@ Wrong-arity / wrong-label calls produce generic "wrong number of arguments" inst
 - [ ] `declarations/structs/calling_function_with_wrong_labels.ks` — **expected:** `no matching overload`
 - [ ] `declarations/protocol_method_linking/ambiguous_method_satisfies_multiple_protocols.ks` — **expected:** `ambiguous`
 - [ ] `declarations/associated_types/ambiguous_associated_type_without_qualification.ks` — **expected:** `ambiguous associated type`
-- [ ] `types/generics/constraint_enforcement/ambiguous_method_error.ks` — **expected:** `ambiguous`
-- [ ] `types/generics/constraint_enforcement/ambiguous_with_and_keyword.ks` — **expected:** `ambiguous`
-- [ ] `types/generics/constraint_enforcement/three_way_ambiguity.ks` — **expected:** `ambiguous`
-- [ ] `types/static_type_param/ambiguous_init.ks` — **expected:** `ambiguous`
-- [ ] `types/static_type_param/ambiguous_static_method.ks` — **expected:** `ambiguous`
+- [ ] `types/generics/constraint_enforcement/wrong_labels_on_constrained_call.ks` — **expected:** `wrong argument label` · **got:** `no member 'calculate' on type 'T'`
 
 ## Cloneable / Copyable / `not` negative-conformance rules
 
@@ -216,6 +212,7 @@ Tests expect "does not conform to protocol" (Hashable); compiler emits generic t
 Desugarings (`for`, `try`, operators, etc.) fall through to raw member-lookup errors (`no member 'iter'`, `no member 'next'`) instead of emitting the intended protocol-conformance diagnostic.
 
 - [ ] `patterns/for_loops/for_loop_over_non_iterator_without_iter_method.ks` — **expected:** `Iterable` · **got:** `no member 'iter' on type 'NotIterable'`, `does not conform to protocol: ? !: Iterator`, `no member 'next' on type '?'`
+- [ ] `expressions/control_flow/try_on_non_tryable_type.ks` — **expected:** `tryExtract` · **got:** `.Err not found on ?`, `could not infer type` (desugar cascade)
 
 ## Match-expression diagnostics
 
@@ -227,6 +224,7 @@ Desugarings (`for`, `try`, operators, etc.) fall through to raw member-lookup er
 - [ ] `expressions/match/errors/wrong_enum_arity.ks` — **expected:** any error
 - [ ] `expressions/match/errors/wrong_tuple_arity.ks` — **expected:** `arity`
 - [ ] `expressions/match/guards/guard_must_be_bool.ks` — **expected:** `Bool`
+- [ ] `expressions/match/or_patterns/or_pattern_inconsistent_bindings_error.ks` — **expected:** `inconsistent` (bindings differ across `or`-pattern alternatives) · **got:** no error (plus a spurious `unreachable pattern [E306]` warning on the following arm)
 
 ## Optional type diagnostics
 
@@ -279,6 +277,7 @@ Tests expect specific phrasing ("cannot index into non-tuple type", "out of boun
 No analyzer in lib2 detects delegating-init calls from non-init contexts. Currently falls through to ordinary member resolution and emits a label/E203 cascade.
 
 - [ ] `declarations/delegating_initializers/delegation_outside_init.ks` — **expected:** diagnostic mentioning `init` (delegating init only valid inside another init)
+- [ ] `declarations/delegating_initializers/delegation_to_nonexistent_init.ks` — **expected:** `no method 'init' on type 'Bad'` · **got:** generic `could not infer type` (init-resolution miss falls through to inference). **Regression:** previously fixed (different got-diagnostic `wrong number of arguments`); now fails via a different code path — see entry in `test-errors-fixed.md`.
 
 ## Primitive-method name-hint
 
@@ -298,12 +297,57 @@ No analyzer in lib2 detects delegating-init calls from non-init contexts. Curren
 
 - [ ] `expressions/paths/empty_array_requires_type_annotation.ks` — **expected:** `could not infer type`
 
+## `@platform(...)` exclusion — excluded decls should be dropped from name resolution
+
+When a function/struct has `@platform(...)` that doesn't match the current target, lib1 drops the decl from binding so later references produce an "unknown name" diagnostic. lib2 leaves the decl reachable (or emits the generic inference error instead of an unknown-name diagnostic).
+
+- [ ] `attributes/platform/non_matching_platform_function_excluded.ks` — **expected:** `excluded` (unknown function) · **got:** `could not infer type`
+- [ ] `attributes/platform/non_matching_platform_struct_excluded.ks` — **expected:** `ExcludedStruct` (unknown type) · **got:** `could not infer type`
+
+## Closure implicit-`it` parameter misuse
+
+`{ it }` only has an implicit `it` binding when the expected closure type has exactly one parameter. Zero- or multi-param contexts should reject references to `it`.
+
+- [ ] `expressions/closures/it_used_multi_param_context_error.ks` — **expected:** `it` (diagnostic about `it` in multi-param context) · **got:** `could not infer type`
+- [ ] `expressions/closures/it_used_zero_param_context_error.ks` — **expected:** `it` (diagnostic about `it` in zero-param context) · **got:** `could not infer type`
+
+## Protocol-extension method not visible when constraint not satisfied
+
+`extend Filterable where Self: Sortable { func combined() {} }` should make `combined()` unavailable on a `Filterable` that doesn't also conform to `Sortable`. Instead of a "method not found / constraint not satisfied" diagnostic, we surface a generic inference error.
+
+- [ ] `declarations/extensions/unconstrained_protocol_extension_not_found_when_constraint_not_met.ks` — **expected:** `member` (e.g. `no member 'combined'`) · **got:** `could not infer type`
+
+## Struct-pattern unknown field
+
+Field name in a struct pattern (`Point { x, z } => ...`) that isn't on the struct should be rejected at pattern binding.
+
+- [ ] `patterns/pattern_types/struct_pattern_unknown_field_error.ks` — **expected:** `z` (unknown field) · **got:** `could not infer type`
+
+## Compound assignment to non-lvalue
+
+`5 += 1;` should emit a "left-hand side is not assignable" diagnostic; nothing is reported.
+
+- [ ] `statements/compound_assignment/cannot_compound_assign_to_literal.ks` — **expected:** any error · **got:** no diagnostic
+
+---
+
+# False Positives
+
+Compiler rejects valid code or emits spurious diagnostics where none should fire.
+
+## Inherited associated type not resolved through parent protocol
+
+`protocol Child: Base` with `type Element` declared on `Base`: resolving `Self.Element` / `Item` from inside `Child` (or a conforming struct) fails to walk the parent chain. Shows up as spurious "no associated type" or "wrong return type" diagnostics when the protocol requirement's return type is an inherited associated type.
+
+- [ ] `declarations/associated_types/struct_conforming_to_child_provides_associated_type.ks` — **expected:** no errors · **got:** E458 `method 'prev' has wrong return type for protocol 'BidirectionalIterator'` at line 15 (impl returns `lang.i64`, matches `Item = lang.i64` but protocol-method return `Item` not substituted through the struct's associated-type binding when the requirement lives on a parent protocol)
+- [ ] `declarations/extensions/protocol_extension_uses_inherited_associated_type.ks` — **expected:** no errors · **got:** `no associated type 'Element': Self.Element no assoc type` (lines 9, 12, 12) + `could not infer type` (line 13) — extension body can't project `Self.Element` from the parent `Base` through `Child`
+
 ---
 
 # Stdlib
 
-Run: `file_tests --test-threads=1 stdlib` on `feature/incremental-hecs` (2026-04-21, fourth run).
-Result: **196 passed · 8 failed** (−13 vs. third 2026-04-21 run). Fixed in this window: the Iterator-adapter runtime bucket collapsed — `filter_map_flatten`, `flatten_iterator`, `fuse_and_cycle`, `inspect_adapter`, `intersperse_adapter`, `intersperse_with_adapter`, `map_filter_collect`, `peekable_adapter`, `take_skip_methods` all pass.
+Run: `file_tests --test-threads=1` (full suite, stdlib/* subset) on `feature/incremental-hecs` (2026-04-21, fifth run).
+Result: **203 passed · 0 failed** (full-suite extract: all stdlib/* tests pass). Fixed vs. fourth run: the remaining 8 entries in the stdlib Type-inference/bind-errors bucket cleared (`stdlib/array/init_count_generator.ks`, `stdlib/iterator/zip_chain_enumerate.ks` among them). stdlib has no tracked failures.
 
 Previously resolved categories:
 - **E205 `cannot pass temporary value to 'mutating' parameter`** — fully resolved 2026-04-20 (access-mode analyzer receiver/arg split + stdlib `mutating` → `consuming` flip). All former E205 tests reclassified below by their remaining failure.
@@ -313,11 +357,6 @@ Previously resolved categories:
 - **Codegen symbol not found: `Array.init`** — the `collect()` monomorphization miss is resolved. Nearly all former entries moved to Cranelift verifier errors (compile/link phase) or Runtime exit-code failures (runs but asserts fail); a couple now hit earlier MIR/inference errors. Only `try_fold_adapter` still links against an undeclared symbol, for a different monomorphization gap (`tryFold`).
 - **Cranelift verifier `i64`/`i8` signature mismatch** — resolved 2026-04-21 (likely by the `self_item_leaked_to_mir` fix + surrounding monomorphization work). All 9 former entries (7 `call_indirect` arg-2 mismatches across `MapIterator`/`FilterMapIterator`/`InspectIterator`/`IntersperseIterator`/`TakeWhileIterator`, plus 2 `load.i64` base-pointer mismatches in `FlattenIterator`/`IntersperseWithIterator`) now compile and link cleanly. Reclassified into the Runtime exit-code bucket, then resolved in the fourth 2026-04-21 run.
 - **Iterator-adapter runtime exit-code failures** — resolved 2026-04-21 (fourth run). 9 tests (`filter_map_flatten`, `flatten_iterator`, `fuse_and_cycle`, `inspect_adapter`, `intersperse_adapter`, `intersperse_with_adapter`, `map_filter_collect`, `peekable_adapter`, `take_skip_methods`) all pass. Mix of SIGSEGVs (Optional<I.Item> layout for nested adapters, generic-I discriminant handling) and assertion-exit failures resolved together.
-
-## Type inference / bind errors
-
-- [ ] `stdlib/array/init_count_generator.ks` — `expected i64 got (?) -> ?` + `? !: Multipliable` + `no member 'multiply' on type '?'` — closure-param type not flowed into `Array(count:generator:)` init's generator callback
-- [ ] `stdlib/iterator/zip_chain_enumerate.ks` — line 32: `type mismatch: expected Int64 got Item` — abstract `Item` leaking through where a concrete `Int64` is expected
 
 ## Runtime exit-code failures (compile OK, assert/behavior wrong)
 

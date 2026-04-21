@@ -397,3 +397,20 @@ The remaining runtime-failing iterator adapter tests all started passing togethe
 Fix (holistic): added `place::compile_place_read_scalar(ctx, state, builder, place, width) -> (CrValue, MirTy)` in `lib2/kestrel-codegen-cranelift/src/place.rs` that decides aggregate-ness from the MIR type via `is_aggregate`. `compile_switch` routes through it; new codegen needing a scalar out of a possibly-wrapped primitive place must use this helper rather than reinvent the width check. `compile_branch` still uses a raw `== I8` check (safe — I8 cannot collide with any supported target's ptr_type) but carries a doc warning pointing at the helper.
 
 - [x] `stdlib/io/io_error_types.ks` — was exit 2 (`description()` match always returned `"unknown error"`)
+
+### Ambiguity diagnostics on constrained / static-type-param calls (2026-04-21)
+
+Previously in **Overload resolution / ambiguity not diagnosed** — these 5 tests now emit the expected `ambiguous` diagnostic. The cluster cleared as a side effect of the broader method-dispatch funnel + witness-instantiation fixes landed 2026-04-20/21 (see `dispatch_funnel_pattern.md`, `witness_instantiation_collapse.md`).
+
+- [x] `types/generics/constraint_enforcement/ambiguous_method_error.ks`
+- [x] `types/generics/constraint_enforcement/ambiguous_with_and_keyword.ks`
+- [x] `types/generics/constraint_enforcement/three_way_ambiguity.ks`
+- [x] `types/static_type_param/ambiguous_init.ks`
+- [x] `types/static_type_param/ambiguous_static_method.ks`
+
+### Stdlib: Type inference / bind errors — fully cleared (2026-04-21)
+
+Previously in **Stdlib → Type inference / bind errors**. Both remaining entries now pass in the full-suite run on 2026-04-21. With these gone, the stdlib Type-inference/bind bucket is empty and stdlib/* has 0 failures.
+
+- [x] `stdlib/array/init_count_generator.ks` — was `expected i64 got (?) -> ?` + `? !: Multipliable` + `no member 'multiply' on type '?'` (closure-param type not flowed into `Array(count:generator:)`)
+- [x] `stdlib/iterator/zip_chain_enumerate.ks` — was `type mismatch: expected Int64 got Item` at line 32 (abstract `Item` leaking where concrete `Int64` expected)

@@ -385,17 +385,27 @@ impl<'a> CodegenContext<'a> {
         let ret_ty = substitute_type_with_self(&func_def.ret, &subst, self_type, self.module);
         let is_main = self.is_main_function(func_def);
 
-        // Extern functions use C calling convention
-        if let Some(extern_info) = &func_def.extern_info {
+        // Extern functions use C calling convention. Translate params and
+        // return via `translate_type_with_layout` so small Named wrappers
+        // (Int32, UInt32, Bool, etc.) flatten to their scalar ABI type —
+        // `translate_type` alone would hand C a pointer, which is never what
+        // an extern declaration actually wants.
+        if func_def.is_extern() {
             sig.call_conv = self.c_call_conv();
             for param in &func_def.params {
                 let ty = substitute_type_with_self(&param.ty, &subst, self_type, self.module);
-                sig.params
-                    .push(AbiParam::new(types::translate_type(&ty, self.target)));
+                sig.params.push(AbiParam::new(types::translate_type_with_layout(
+                    &ty,
+                    self.target,
+                    &mut self.layouts,
+                )));
             }
             if !ret_ty.is_unit() {
-                sig.returns
-                    .push(AbiParam::new(types::translate_type(&ret_ty, self.target)));
+                sig.returns.push(AbiParam::new(types::translate_type_with_layout(
+                    &ret_ty,
+                    self.target,
+                    &mut self.layouts,
+                )));
             }
             return Ok(sig);
         }

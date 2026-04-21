@@ -234,12 +234,22 @@ fn compile_resolved_call(
     // Compile each argument, threading the callee's expected param type so we
     // can correctly size stack slots and coerce FunctionRef → FuncThick when
     // a function value is passed where a thick closure is expected.
+    //
+    // For extern C calls the expected param type has already been flattened
+    // to a scalar by `create_signature`, so we must deliver a scalar value —
+    // not a pointer-to-wrapper. `compile_extern_call_arg` loads the inner
+    // primitive out of the Named wrapper when needed.
+    let is_extern = func_def.is_extern();
     for (i, arg) in args.iter().enumerate() {
         let expected = func_def
             .params
             .get(i)
             .map(|p| substitute_type_with_self(&p.ty, &callee_subst, callee_self_type, ctx.module));
-        let val = compile_call_arg(ctx, state, builder, arg, expected.as_ref())?;
+        let val = if is_extern {
+            compile_extern_call_arg(ctx, state, builder, arg, expected.as_ref())?
+        } else {
+            compile_call_arg(ctx, state, builder, arg, expected.as_ref())?
+        };
         cl_args.push(val);
     }
 
@@ -501,6 +511,42 @@ fn compile_call_arg(
             rvalue::compile_value(ctx, state, builder, &arg.value)
         },
     }
+}
+
+/// Compile a call argument for an `@extern(.C)` callee.
+///
+/// `create_signature` flattens small Named wrappers (Int32, UInt32, Bool, …)
+/// to their scalar Cranelift type for extern signatures, so the arg must be
+/// delivered as the inner primitive — not a pointer to the wrapper. Ref/Copy
+/// passing modes are ignored here; Kestrel's move/borrow semantics don't cross
+/// into C ABI. We compile the value (which yields a pointer for aggregate
+/// places) and, if the expected scalar width differs from the pointer width,
+/// load the inner scalar from that pointer.
+fn compile_extern_call_arg(
+    ctx: &mut CodegenContext,
+    state: &FunctionState,
+    builder: &mut FunctionBuilder,
+    arg: &CallArg,
+    expected_param_ty: Option<&MirTy>,
+) -> Result<CrValue, CodegenError> {
+    let val = rvalue::compile_value(ctx, state, builder, &arg.value)?;
+    let Some(expected) = expected_param_ty else {
+        return Ok(val);
+    };
+    // Only Named wrappers need unwrapping — pointers, refs, and bare scalars
+    // already compile to the right Cranelift value.
+    if !matches!(expected, MirTy::Named { .. }) {
+        return Ok(val);
+    }
+    let expected_cl = types::translate_type_with_layout(expected, ctx.target, &mut ctx.layouts);
+    let actual_cl = builder.func.dfg.value_type(val);
+    if actual_cl == expected_cl {
+        return Ok(val);
+    }
+    // `val` is a pointer to the wrapper aggregate; load the inner scalar.
+    Ok(builder
+        .ins()
+        .load(expected_cl, MemFlags::new(), val, Offset32::new(0)))
 }
 
 /// Resolve a self_type that might be an associated type (e.g., Iterable.Iter).
