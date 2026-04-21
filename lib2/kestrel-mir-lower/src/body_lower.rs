@@ -1689,28 +1689,24 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
             let explicit_count = args.len();
             let call_args = self.expand_default_args(call_args, func_entity, explicit_count);
 
+            let is_init_call = self.is_init_function(func_entity).is_some();
             let mut type_args = self.resolve_type_args(expr_id);
-            if type_args.is_empty() {
+            // For non-init calls, fall back to the callee Def's type args.
+            // Init calls skip this: emit_call_maybe_init prepends struct type
+            // args from result_ty, so picking them up from the Def would double them.
+            if type_args.is_empty() && !is_init_call {
                 type_args = self.resolve_type_args(callee_expr);
             }
             // Use explicit type args from the path (e.g., Array[Int64](...))
             // Also fall back when inference returned Error (unresolved types)
             let has_error = type_args.iter().any(|a| matches!(a, MirTy::Error));
-            if has_error || type_args.is_empty() {
+            if has_error || (type_args.is_empty() && !is_init_call) {
                 if let Some(fallback) = self.extract_explicit_type_args(callee_expr) {
                     type_args = fallback;
                 } else if has_error {
-                    let callee_hir = &self.hir.exprs[callee_expr];
-                    let func_name = &self.ctx.module.functions[self.func_id.index()].name;
-                    eprintln!("[DIAG] No fallback for Error in {} — callee variant: {}", func_name, match callee_hir {
-                        HirExpr::Def(..) => "Def",
-                        HirExpr::OverloadSet { .. } => "OverloadSet",
-                        HirExpr::MethodCall { .. } => "MethodCall",
-                        HirExpr::Call { .. } => "Call",
-                        HirExpr::Local(..) => "Local",
-                        HirExpr::Field { .. } => "Field",
-                        _ => "Other",
-                    });
+                    // Filter out Error entries rather than keeping them — they cause
+                    // monomorphizer skips and codegen link failures.
+                    type_args.retain(|a| !matches!(a, MirTy::Error));
                 }
             }
 

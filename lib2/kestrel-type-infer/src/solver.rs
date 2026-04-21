@@ -137,7 +137,7 @@ fn report_unsolved(ctx: &mut InferCtx<'_>) {
                 }
                 InferError::NoMember {
                     receiver: callee,
-                    name: "(subscript)".into(),
+                    name: "subscript".into(),
                     is_call: true,
                     span,
                 }
@@ -213,8 +213,9 @@ fn try_solve(ctx: &mut InferCtx<'_>, c: Constraint) -> SolveResult {
             expr,
             is_call,
             is_static_context,
+            explicit_type_args,
             span,
-        } => solve_member(ctx, receiver, &name, args, result, expr, is_call, is_static_context, span),
+        } => solve_member(ctx, receiver, &name, args, result, expr, is_call, is_static_context, &explicit_type_args, span),
         Constraint::OverloadedCall {
             candidates,
             type_args,
@@ -758,7 +759,7 @@ fn solve_call(
             // The init's declared return is () but the actual result is an
             // instance of the type param. Override via an equal(result, callee).
             let init_result = ctx.fresh();
-            let res = solve_member(ctx, callee, "init", args, init_result, expr, true, true, span.clone());
+            let res = solve_member(ctx, callee, "init", args, init_result, expr, true, true, &[], span.clone());
             ctx.equal(result, callee, span);
             res
         }
@@ -773,13 +774,13 @@ fn solve_call(
         | TyKind::TypeAlias { .. }
         | TyKind::AssocProjection { .. } => {
             // Instance subscript call (e.g. dict(key)).
-            solve_member(ctx, callee, "(subscript)", args, result, expr, true, false, span)
+            solve_member(ctx, callee, "subscript", args, result, expr, true, false, &[], span)
         }
         _ => {
             // Tuples, Never, etc. are not callable
             SolveResult::Error(InferError::NoMember {
                 receiver: callee,
-                name: "(subscript)".to_string(),
+                name: "subscript".to_string(),
                 is_call: true,
                 span,
             })
@@ -928,7 +929,11 @@ fn emit_resolved_call(
     }
 
     // Emit where clause constraints
-    for clause in ctx.resolver.where_clauses(entity) {
+    let where_clauses = qctx.query(crate::where_clauses::WhereClausesOf {
+        entity,
+        root,
+    });
+    for clause in where_clauses {
         match clause {
             crate::resolve::WhereClause::Bound { param, protocol, .. } => {
                 if let Some(&(_, tv)) = subs.iter().find(|(e, _)| *e == param) {
@@ -1112,6 +1117,7 @@ fn solve_member(
     expr: kestrel_hir::body::HirExprId,
     is_call: bool,
     is_static_context: bool,
+    explicit_type_args: &[kestrel_hir::ty::HirTy],
     span: Span,
 ) -> SolveResult {
     let resolved = ctx.resolve(receiver);
@@ -1132,6 +1138,7 @@ fn solve_member(
             expr,
             is_call,
             is_static_context,
+            explicit_type_args: explicit_type_args.to_vec(),
             span,
         });
     };
@@ -1168,6 +1175,7 @@ fn solve_member(
                     expr,
                     is_call,
                     is_static_context,
+                    explicit_type_args: explicit_type_args.to_vec(),
                     span,
                 });
             }
@@ -1193,6 +1201,7 @@ fn solve_member(
                 expr,
                 is_call,
                 is_static_context,
+                explicit_type_args: explicit_type_args.to_vec(),
                 span,
             });
         }
@@ -1332,8 +1341,19 @@ fn solve_member(
     // Record the resolved entity
     ctx.resolutions.insert(expr, resolution.entity);
 
-    // Instantiate the member's type parameters
-    let fresh_params: Vec<TyVar> = resolution.type_params.iter().map(|_| ctx.fresh()).collect();
+    // Instantiate the member's type parameters.
+    // Use explicit type args from the call site when they match the method's
+    // type param count (e.g., `x.flatMap[Int](...)`). Otherwise create fresh vars.
+    let fresh_params: Vec<TyVar> = if !explicit_type_args.is_empty()
+        && explicit_type_args.len() == resolution.type_params.len()
+    {
+        explicit_type_args
+            .iter()
+            .map(|t| crate::generate::lower_hir_ty(ctx, t))
+            .collect()
+    } else {
+        resolution.type_params.iter().map(|_| ctx.fresh()).collect()
+    };
 
     if !fresh_params.is_empty() {
         ctx.type_args.insert(expr, fresh_params.clone());
@@ -1398,7 +1418,11 @@ fn solve_member(
         }
     }
 
-    // Emit where clause constraints
+    // Emit where clause constraints.
+    // Where clauses may reference the method's own type params OR the
+    // receiver/extension type params (e.g. `flatten[U]() where T = Optional[U]`
+    // has T from Optional). We check method type params first, then fall back
+    // to the full subs map which includes struct/extension type params.
     for clause in &resolution.where_clauses {
         match clause {
             crate::resolve::WhereClause::Bound { param, protocol, .. } => {
@@ -1408,6 +1432,8 @@ fn solve_member(
                     .position(|&p| p == *param)
                 {
                     ctx.conforms(fresh_params[idx], *protocol, span.clone());
+                } else if let Some(&(_, tv)) = subs.iter().find(|(e, _)| e == param) {
+                    ctx.conforms(tv, *protocol, span.clone());
                 }
             }
             crate::resolve::WhereClause::TypeEquality {
@@ -1415,27 +1441,45 @@ fn solve_member(
                 assoc_name,
                 rhs,
             } => {
-                if let Some(idx) = resolution
+                let param_tv = if let Some(idx) = resolution
                     .type_params
                     .iter()
                     .position(|&p| p == *param)
                 {
+                    Some(fresh_params[idx])
+                } else {
+                    subs.iter().find(|(e, _)| e == param).map(|&(_, tv)| tv)
+                };
+                if let Some(tv) = param_tv {
                     let assoc_result = ctx.fresh();
-                    ctx.associated(fresh_params[idx], assoc_name, assoc_result, span.clone());
+                    ctx.associated(tv, assoc_name, assoc_result, span.clone());
                     let rhs_tv = lower_hir_ty_sub(ctx, rhs, None, TyVar(0), &subs);
                     ctx.equal(assoc_result, rhs_tv, span.clone());
                 }
             }
             crate::resolve::WhereClause::DirectEquality { param, rhs } => {
-                // Direct type param equality: redirect the method type param to the RHS
+                let rhs_tv = lower_hir_ty_sub(ctx, rhs, None, TyVar(0), &subs);
                 if let Some(idx) = resolution
                     .type_params
                     .iter()
                     .position(|&p| p == *param)
                 {
-                    let rhs_tv = lower_hir_ty_sub(ctx, rhs, None, TyVar(0), &subs);
+                    // Method's own type param — redirect directly
                     ctx.types[fresh_params[idx].0 as usize] =
                         crate::ty::TySlot::Redirect(rhs_tv);
+                } else if let Some(&(_, tv)) = subs.iter().find(|(e, _)| e == param) {
+                    // Struct/extension type param — equate with RHS
+                    ctx.equal(tv, rhs_tv, span.clone());
+                } else if ctx.query_ctx.get::<kestrel_ast_builder::NodeKind>(*param)
+                    == Some(&kestrel_ast_builder::NodeKind::TypeAlias)
+                {
+                    // Associated type (e.g. `Item` in `where Item = (A, B)`) —
+                    // resolve on receiver and equate with RHS
+                    if let Some(name) = ctx.query_ctx.get::<kestrel_ast_builder::Name>(*param) {
+                        let assoc_tv = ctx.fresh();
+                        ctx.associated(receiver, &name.0, assoc_tv, span.clone());
+                        ctx.equal(assoc_tv, rhs_tv, span.clone());
+                    }
                 }
             }
         }
@@ -1829,8 +1873,12 @@ fn extension_where_clauses_satisfied(
 ) -> bool {
     use crate::resolve::WhereClause;
 
-    // Resolve where clauses in the extension's own context (not the current method's context)
-    let clauses = ctx.resolver.where_clauses_in_context(extension, extension);
+    // Resolve where clauses in the extension's own scope. Scope walking from
+    // the extension entity sees its own type params and enclosing scope.
+    let clauses = ctx.query_ctx.query(crate::where_clauses::WhereClausesOf {
+        entity: extension,
+        root: ctx.root,
+    });
     if clauses.is_empty() {
         return true;
     }
@@ -2046,16 +2094,13 @@ fn emit_type_alias_where_clauses(
     alias_tv: TyVar,
     span: &Span,
 ) {
-    // Resolve where clause types in the alias's parent scope (e.g., the protocol
-    // that declares it), not the current method body. Names like `Item` in
-    // `type Iter: Iterator where Iter.Item = Item` are in scope of Iterable,
-    // not whatever method body triggered this resolution.
-    let parent = ctx.query_ctx.parent_of(alias_entity);
-    let clauses = if let Some(parent) = parent {
-        ctx.resolver.where_clauses_in_context(alias_entity, parent)
-    } else {
-        ctx.resolver.where_clauses(alias_entity)
-    };
+    // Resolve where clause names in the alias's own scope. Scope walking
+    // from the alias visits sibling associated types on the parent protocol
+    // (verified by name-res::resolve_sibling_assoc_type_from_alias_scope).
+    let clauses = ctx.query_ctx.query(crate::where_clauses::WhereClausesOf {
+        entity: alias_entity,
+        root: ctx.root,
+    });
     for clause in clauses {
         match clause {
             crate::resolve::WhereClause::Bound { protocol, .. } => {

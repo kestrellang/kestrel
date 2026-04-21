@@ -351,3 +351,51 @@ func caller(b: Bool) { collect(b) }
         offenders.iter().map(|d| &d.message).collect::<Vec<_>>()
     );
 }
+
+/// Regression: explicit type args on a method call (e.g., `x.make[Bool]()`)
+/// used to be dropped because the `Member` constraint had no field for them.
+/// The solver created a fresh TyVar for the method's `U` type param, and the
+/// return type `U` stayed unresolved → surfaced as `ResolvedTy::Error` in the
+/// caller. This caused downstream monomorphization skips and codegen link
+/// failures (see `stdlib/result/result_transforms.ks`).
+#[test]
+fn method_call_with_explicit_type_args_binds_type_param() {
+    let source = r#"
+module TestMod
+struct Marker { }
+protocol Factory {
+    func make[U]() -> U
+}
+func caller[T](f: T) where T: Factory {
+    f.make[Marker]();
+}
+"#;
+    let (world, root) = build_from_source(source);
+    let ctx = world.query_context();
+    let typed = infer_func(&ctx, root, "TestMod", "caller");
+
+    // The call expression `f.make[Marker]()` must record [Marker] as its
+    // resolved type_args — NOT a stray fresh TyVar that stays Unresolved and
+    // leaks `ResolvedTy::Error` through to MIR/codegen. Before the fix, the
+    // Member constraint had no field for explicit type args, so the solver
+    // created a fresh unconstrained TyVar for U.
+    let marker = find_child(&ctx, find_child(&ctx, root, NodeKind::Module, "TestMod"), NodeKind::Struct, "Marker");
+    let call_type_args: Vec<_> = typed
+        .type_args
+        .values()
+        .filter(|args| args.len() == 1)
+        .collect();
+    assert!(
+        !call_type_args.is_empty(),
+        "expected type_args to be recorded for f.make[Marker](); got: {:#?}",
+        typed.type_args,
+    );
+    let has_marker_arg = call_type_args.iter().any(|args| {
+        matches!(&args[0], ResolvedTy::Named { entity, args } if args.is_empty() && *entity == marker)
+    });
+    assert!(
+        has_marker_arg,
+        "explicit type arg 'Marker' should be bound to method's type param U; got: {:#?}",
+        call_type_args,
+    );
+}

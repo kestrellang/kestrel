@@ -770,4 +770,57 @@ mod tests {
         });
         assert!(matches!(result, TypeResolution::NotAType(_)));
     }
+
+    /// Verifies that resolving a name from a TypeAlias's own scope finds a
+    /// sibling associated type on the parent protocol via scope walking.
+    ///
+    /// Models `protocol Iterable { type Iter: Iterator where Iter.Item = Item;
+    /// type Item }` — when we resolve the RHS `Item` of the alias's where
+    /// clause with `context = Iter`, scope walking should walk Iter → Iterable
+    /// and find the sibling `Item` alias.
+    ///
+    /// This is the empirical evidence that `WhereClausesOf { entity }` needs
+    /// no separate `context` parameter: the entity's own scope is sufficient.
+    #[test]
+    fn resolve_sibling_assoc_type_from_alias_scope() {
+        let (mut world, root) = setup();
+
+        let myapp = world.children_of(root).iter().find(|&&e| {
+            world.get::<Name>(e).is_some_and(|n| n.0 == "MyApp")
+        }).copied().unwrap();
+
+        // protocol Iterable { type Iter; type Item }
+        let iterable = world.spawn();
+        world.set(iterable, NodeKind::Protocol);
+        world.set(iterable, Name("Iterable".into()));
+        world.set(iterable, Typed);
+        world.set_parent(iterable, myapp);
+
+        let iter_alias = world.spawn();
+        world.set(iter_alias, NodeKind::TypeAlias);
+        world.set(iter_alias, Name("Iter".into()));
+        world.set(iter_alias, Typed);
+        world.set_parent(iter_alias, iterable);
+
+        let item_alias = world.spawn();
+        world.set(item_alias, NodeKind::TypeAlias);
+        world.set(item_alias, Name("Item".into()));
+        world.set(item_alias, Typed);
+        world.set_parent(item_alias, iterable);
+
+        let ctx = world.query_context();
+        // Resolve `Item` from Iter's own scope — scope walk goes Iter →
+        // Iterable and must find the sibling Item alias.
+        let result = ctx.query(ResolveTypePath {
+            segments: vec!["Item".into()],
+            context: iter_alias,
+            root,
+        });
+        match result {
+            TypeResolution::Found(entity) => {
+                assert_eq!(entity, item_alias, "expected sibling Item, got different entity");
+            }
+            other => panic!("expected Found(Item), got {:?}", other),
+        }
+    }
 }

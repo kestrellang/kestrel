@@ -3,14 +3,18 @@
 //! For each type that conforms to a protocol, generates a witness table
 //! mapping protocol method names to implementing function entities.
 
-use kestrel_ast_builder::{Callable, NodeKind, Name, Settable, TypeParams};
+use std::collections::HashMap;
+
+use kestrel_ast::AstType;
+use kestrel_ast_builder::{Callable, Name, NodeKind, Settable, Subscript as SubscriptMarker, TypeParams};
 use kestrel_hecs::Entity;
 use kestrel_mir::{MethodBinding, MirTy, TypeParamDef, WitnessDef};
-use kestrel_name_res::conformances::ConformingProtocols;
+use kestrel_name_res::conformances::ConformingProtocolInstantiations;
 use kestrel_name_res::extensions::ExtensionsFor;
+use kestrel_name_res::{ProtocolAssociatedTypes, ProtocolMember, ProtocolMembers};
 
 use crate::context::LowerCtx;
-use crate::ty::resolve_type_annotation;
+use crate::ty::{lower_type, resolve_callable_types, resolve_type_annotation};
 
 /// Generate witness tables for all struct and enum entities.
 pub fn lower_witnesses(ctx: &mut LowerCtx) {
@@ -66,8 +70,12 @@ pub fn lower_witnesses(ctx: &mut LowerCtx) {
 
 /// Generate witnesses for a single type entity.
 fn lower_witnesses_for_type(ctx: &mut LowerCtx, type_entity: Entity, impl_ty: MirTy) {
-    // Query all protocols this type conforms to
-    let protocols = ctx.query.query(ConformingProtocols {
+    // Each (protocol, type_args) pair becomes its own witness. This is what
+    // distinguishes `Int64: Convertible[Int8]` from `Int64: Convertible[Int16]`
+    // — without it, both would collapse to a single Convertible witness with
+    // one method binding, and `Int64(from: x)` would always dispatch through
+    // the first `init(from:)` overload regardless of x's type.
+    let instantiations = ctx.query.query(ConformingProtocolInstantiations {
         entity: type_entity,
         root: ctx.root,
     });
@@ -78,9 +86,28 @@ fn lower_witnesses_for_type(ctx: &mut LowerCtx, type_entity: Entity, impl_ty: Mi
         root: ctx.root,
     });
 
-    for protocol in &protocols {
+    for (protocol, ast_type_args) in &instantiations {
+        let proto_type_args = lower_protocol_type_args(ctx, type_entity, ast_type_args);
+
         let mut witness = WitnessDef::new(impl_ty.clone(), *protocol);
         ctx.register_name(*protocol);
+
+        // Populate protocol_type_args by the protocol's type param names.
+        // `Convertible[From]` with `[Int16]` → {"From": Int16}.
+        let proto_tp_entities = protocol_type_param_entities(ctx, *protocol);
+        let proto_subst: HashMap<Entity, MirTy> = proto_tp_entities
+            .iter()
+            .zip(proto_type_args.iter())
+            .map(|(e, t)| (*e, t.clone()))
+            .collect();
+        for (tp_entity, ty) in proto_tp_entities.iter().zip(proto_type_args.iter()) {
+            let tp_name = ctx
+                .world
+                .get::<Name>(*tp_entity)
+                .map(|n| n.0.clone())
+                .unwrap_or_default();
+            witness.protocol_type_args.insert(tp_name, ty.clone());
+        }
 
         // Collect type params from the implementing type
         if let Some(tp) = ctx.world.get::<TypeParams>(type_entity) {
@@ -95,18 +122,46 @@ fn lower_witnesses_for_type(ctx: &mut LowerCtx, type_entity: Entity, impl_ty: Mi
             }
         }
 
-        // Get protocol's required methods
-        let proto_methods = collect_protocol_methods(ctx, *protocol);
+        // Every method/property requirement the protocol exposes — direct,
+        // extension defaults, inherited from parent protocols, and parents'
+        // extension defaults — all in one pass. Fields that are Settable
+        // need a second `<name>.set` entry so assignment dispatches through
+        // the witness.
+        let proto_members = ctx.query.query(ProtocolMembers {
+            protocol: *protocol,
+            root: ctx.root,
+        });
+        let method_entries: Vec<(String, ProtocolMember)> = proto_members
+            .into_iter()
+            .flat_map(|m| {
+                let name = protocol_member_name(ctx, &m);
+                let mut entries = vec![(name.clone(), m.clone())];
+                if ctx.world.get::<Settable>(m.entity).is_some() {
+                    entries.push((format!("{name}.set"), m));
+                }
+                entries
+            })
+            .collect();
 
         // Try to bind each protocol method
-        for (method_name, method_entity) in &proto_methods {
+        for (method_name, member) in &method_entries {
             // Get protocol method's parameter labels for init disambiguation
-            let proto_labels = get_init_labels(ctx, *method_entity);
+            let proto_labels = get_init_labels(ctx, member.entity);
+
+            // Compute expected param types after substituting the protocol's
+            // type args. For `Convertible[Int16].init(from: From)` this becomes
+            // `init(from: Int16)`, so we pick the right overload instead of
+            // the first one.
+            let expected_param_types = expected_param_types_for(ctx, member.entity, &proto_subst);
 
             // Search the type's own children first
-            if let Some(impl_func) =
-                find_method_by_name(ctx, type_entity, method_name, proto_labels.as_deref())
-            {
+            if let Some(impl_func) = find_method_by_name(
+                ctx,
+                type_entity,
+                method_name,
+                proto_labels.as_deref(),
+                expected_param_types.as_deref(),
+            ) {
                 ctx.register_name(impl_func);
                 witness.bind_method(
                     method_name,
@@ -118,7 +173,13 @@ fn lower_witnesses_for_type(ctx: &mut LowerCtx, type_entity: Entity, impl_ty: Mi
             // Search extensions on the type
             let mut found = false;
             for &ext in &extensions {
-                if let Some(impl_func) = find_method_by_name(ctx, ext, method_name, proto_labels.as_deref()) {
+                if let Some(impl_func) = find_method_by_name(
+                    ctx,
+                    ext,
+                    method_name,
+                    proto_labels.as_deref(),
+                    expected_param_types.as_deref(),
+                ) {
                     ctx.register_name(impl_func);
                     witness.bind_method(
                         method_name,
@@ -132,20 +193,15 @@ fn lower_witnesses_for_type(ctx: &mut LowerCtx, type_entity: Entity, impl_ty: Mi
                 continue;
             }
 
-            // Search protocol extensions for default implementations
-            let proto_extensions = ctx.query.query(ExtensionsFor {
-                target: *protocol,
-                root: ctx.root,
-            });
-            for &proto_ext in &proto_extensions {
-                if let Some(impl_func) = find_method_by_name(ctx, proto_ext, method_name, proto_labels.as_deref()) {
-                    ctx.register_name(impl_func);
-                    witness.bind_method(
-                        method_name,
-                        MethodBinding::extension(impl_func, vec![], *protocol),
-                    );
-                    break;
-                }
+            // Fall back to the protocol extension's default implementation,
+            // if this member came from one. ProtocolMembers already walked
+            // the extensions, so the default impl is right there on `member`.
+            if member.extension.is_some() {
+                ctx.register_name(member.entity);
+                witness.bind_method(
+                    method_name,
+                    MethodBinding::extension(member.entity, vec![], *protocol),
+                );
             }
         }
 
@@ -156,81 +212,114 @@ fn lower_witnesses_for_type(ctx: &mut LowerCtx, type_entity: Entity, impl_ty: Mi
     }
 }
 
-/// Collect all method names from a protocol and its parent protocols (recursively).
-/// This ensures witnesses include bindings for inherited methods (e.g., Comparable
-/// witnesses include Less.lessThan, Greater.greaterThan, etc.).
-fn collect_protocol_methods(ctx: &mut LowerCtx, protocol: Entity) -> Vec<(String, Entity)> {
-    let mut methods = Vec::new();
-    let mut seen = std::collections::HashSet::new();
-    collect_protocol_methods_recursive(ctx, protocol, &mut methods, &mut seen);
-    methods
-}
-
-fn collect_protocol_methods_recursive(
+/// Lower a list of conformance-declaration AstTypes (e.g. the `Int16` in
+/// `Convertible[Int16]`) to MirTy. Uses `type_entity` as the resolution
+/// context so names resolve relative to the conforming type's scope.
+fn lower_protocol_type_args(
     ctx: &mut LowerCtx,
-    protocol: Entity,
-    methods: &mut Vec<(String, Entity)>,
-    seen: &mut std::collections::HashSet<Entity>,
-) {
-    if !seen.insert(protocol) {
-        return; // avoid cycles
-    }
+    type_entity: Entity,
+    ast_type_args: &[AstType],
+) -> Vec<MirTy> {
+    let hir_tys: Vec<_> = ast_type_args
+        .iter()
+        .map(|ast_ty| kestrel_hir_lower::lower_ast_type(&ctx.query, type_entity, ctx.root, ast_ty))
+        .collect();
+    hir_tys.iter().map(|hir_ty| lower_type(ctx, hir_ty)).collect()
+}
 
-    // Collect this protocol's own methods (and property requirements, which
-    // dispatch through witnesses just like methods). Any Field on a protocol
-    // is a property requirement — protocols don't have stored fields.
-    for &child in ctx.world.children_of(protocol) {
-        let Some(kind) = ctx.world.get::<NodeKind>(child) else {
-            continue;
-        };
-        if *kind == NodeKind::Function
-            || *kind == NodeKind::Subscript
-            || *kind == NodeKind::Initializer
-            || *kind == NodeKind::Field
-        {
-            let name = ctx
-                .world
-                .get::<Name>(child)
-                .map(|n| n.0.clone())
-                .unwrap_or_else(|| match kind {
-                    NodeKind::Initializer => "init".to_string(),
-                    NodeKind::Subscript => "subscript".to_string(),
-                    _ => String::new(),
-                });
-            methods.push((name.clone(), child));
-            // Property requirements with a setter need a second binding so
-            // assignment (`T.prop = v`) can dispatch through the witness.
-            // Convention: `<name>.set` resolves to the conforming type's
-            // setter child entity.
-            if *kind == NodeKind::Field && ctx.world.get::<Settable>(child).is_some() {
-                methods.push((format!("{name}.set"), child));
-            }
-        }
-    }
+/// Return the protocol's declared type-parameter entities, in order.
+fn protocol_type_param_entities(ctx: &LowerCtx, protocol: Entity) -> Vec<Entity> {
+    ctx.world
+        .get::<TypeParams>(protocol)
+        .map(|tp| tp.0.clone())
+        .unwrap_or_default()
+}
 
-    // Recurse into parent protocols
-    let conformances = ctx.query.query(ConformingProtocols {
-        entity: protocol,
-        root: ctx.root,
-    });
-    for parent in conformances {
-        collect_protocol_methods_recursive(ctx, parent, methods, seen);
+/// Compute the protocol method's declared parameter types with the witness's
+/// protocol type args substituted in. Returns `None` for member kinds that
+/// aren't callable (which short-circuits the param-type check in
+/// `find_method_by_name`).
+fn expected_param_types_for(
+    ctx: &mut LowerCtx,
+    member_entity: Entity,
+    proto_subst: &HashMap<Entity, MirTy>,
+) -> Option<Vec<MirTy>> {
+    // Only Callable members have param types worth substituting. For
+    // `.set` method names the member is a Field, which we let match by
+    // label (the Field has no param list of its own).
+    ctx.world.get::<Callable>(member_entity)?;
+    let tys = resolve_callable_types(ctx, member_entity);
+    // If any param lacks a type annotation, skip the check — fall back to
+    // label-only matching so we don't spuriously reject valid impls.
+    let tys: Option<Vec<MirTy>> = tys.into_iter().collect();
+    tys.map(|v| {
+        v.into_iter()
+            .map(|t| substitute_type_params(&t, proto_subst))
+            .collect()
+    })
+}
+
+/// Minimal TypeParam → concrete substitution for MirTy. We need this inside
+/// mir-lower where `kestrel-codegen`'s `substitute_type` isn't available.
+fn substitute_type_params(ty: &MirTy, subst: &HashMap<Entity, MirTy>) -> MirTy {
+    match ty {
+        MirTy::TypeParam(e) => subst.get(e).cloned().unwrap_or_else(|| ty.clone()),
+        MirTy::Pointer(inner) => MirTy::Pointer(Box::new(substitute_type_params(inner, subst))),
+        MirTy::Ref(inner) => MirTy::Ref(Box::new(substitute_type_params(inner, subst))),
+        MirTy::RefMut(inner) => MirTy::RefMut(Box::new(substitute_type_params(inner, subst))),
+        MirTy::Tuple(elems) => MirTy::Tuple(
+            elems.iter().map(|t| substitute_type_params(t, subst)).collect(),
+        ),
+        MirTy::Named { entity, type_args } => MirTy::Named {
+            entity: *entity,
+            type_args: type_args.iter().map(|t| substitute_type_params(t, subst)).collect(),
+        },
+        MirTy::FuncThin { params, ret } => MirTy::FuncThin {
+            params: params.iter().map(|t| substitute_type_params(t, subst)).collect(),
+            ret: Box::new(substitute_type_params(ret, subst)),
+        },
+        MirTy::FuncThick { params, ret } => MirTy::FuncThick {
+            params: params.iter().map(|t| substitute_type_params(t, subst)).collect(),
+            ret: Box::new(substitute_type_params(ret, subst)),
+        },
+        _ => ty.clone(),
     }
 }
 
-/// Find a method by name among an entity's children.
-/// Find a method implementation by name. For initializers, also match by
-/// parameter labels to disambiguate between multiple inits (e.g.,
-/// init(from:) vs init(floatLiteral:) vs init(intLiteral:)).
+/// Resolve a ProtocolMember's dispatch name — `Name` component if present,
+/// else `"init"` for nameless initializers or `"subscript"` for nameless
+/// subscripts.
+fn protocol_member_name(ctx: &LowerCtx, member: &ProtocolMember) -> String {
+    ctx.world
+        .get::<Name>(member.entity)
+        .map(|n| n.0.clone())
+        .unwrap_or_else(|| {
+            if ctx.world.get::<SubscriptMarker>(member.entity).is_some() {
+                "subscript".to_string()
+            } else {
+                "init".to_string()
+            }
+        })
+}
+
+/// Find a method implementation by name among an entity's children.
+///
+/// Initializers and subscripts are disambiguated first by parameter labels,
+/// then by parameter types (when `expected_param_types` is provided). Param-
+/// type matching is what distinguishes `init(from: Int8)` from
+/// `init(from: Int16)` so witnesses for `Convertible[Int8]` and
+/// `Convertible[Int16]` pick the right overload.
 fn find_method_by_name(
-    ctx: &LowerCtx,
+    ctx: &mut LowerCtx,
     parent: Entity,
     method_name: &str,
     required_labels: Option<&[Option<String>]>,
+    expected_param_types: Option<&[MirTy]>,
 ) -> Option<Entity> {
     // `<name>.set`: locate the Field by its base name, then return its Setter child.
     if let Some(field_name) = method_name.strip_suffix(".set") {
-        for &child in ctx.world.children_of(parent) {
+        let children: Vec<Entity> = ctx.world.children_of(parent).to_vec();
+        for child in children {
             let Some(kind) = ctx.world.get::<NodeKind>(child) else {
                 continue;
             };
@@ -241,7 +330,8 @@ fn find_method_by_name(
             if name != field_name {
                 continue;
             }
-            for &gc in ctx.world.children_of(child) {
+            let grandchildren: Vec<Entity> = ctx.world.children_of(child).to_vec();
+            for gc in grandchildren {
                 if ctx.world.get::<NodeKind>(gc) == Some(&NodeKind::Setter) {
                     return Some(gc);
                 }
@@ -249,43 +339,99 @@ fn find_method_by_name(
         }
         return None;
     }
-    for &child in ctx.world.children_of(parent) {
-        let Some(kind) = ctx.world.get::<NodeKind>(child) else {
-            continue;
-        };
-        match kind {
-            NodeKind::Function | NodeKind::Subscript => {
-                let name = ctx.world.get::<Name>(child).map(|n| n.0.as_str()).unwrap_or_default();
-                if name == method_name {
-                    return Some(child);
-                }
-            }
-            // Computed property: a Field with a body (Callable) — the getter satisfies
-            // a protocol's property requirement (also a Field, but Gettable-only).
-            NodeKind::Field if ctx.world.get::<Callable>(child).is_some() => {
-                let name = ctx.world.get::<Name>(child).map(|n| n.0.as_str()).unwrap_or_default();
-                if name == method_name {
-                    return Some(child);
-                }
-            }
-            NodeKind::Initializer if method_name == "init" => {
-                // Match by parameter labels if provided
-                if let Some(labels) = required_labels {
-                    if let Some(callable) = ctx.world.get::<Callable>(child) {
-                        if callable.params.len() == labels.len()
-                            && callable.params.iter().zip(labels).all(|(p, l)| p.label.as_ref() == l.as_ref())
-                        {
-                            return Some(child);
-                        }
-                    }
-                } else {
-                    return Some(child);
-                }
-            }
-            _ => {}
+
+    let children: Vec<Entity> = ctx.world.children_of(parent).to_vec();
+
+    // Pass 1: exact match (name + labels + param types). This picks the
+    // right overload when multiple candidates share labels but differ in
+    // parameter types (e.g. `init(from: Int8)` vs `init(from: Int16)`).
+    for child in &children {
+        if matches_candidate(ctx, *child, method_name, required_labels, expected_param_types) {
+            return Some(*child);
         }
     }
+
+    // Pass 2: fall back to label-only / name-only matching. Covers members
+    // whose param types don't exist in MirTy form (e.g. associated-type
+    // params that reference the protocol's `Self`), and keeps behavior
+    // unchanged for non-overloaded methods.
+    for child in &children {
+        if matches_candidate(ctx, *child, method_name, required_labels, None) {
+            return Some(*child);
+        }
+    }
+
     None
+}
+
+/// Check whether `child` satisfies name + optional label + optional
+/// param-type constraints.
+fn matches_candidate(
+    ctx: &mut LowerCtx,
+    child: Entity,
+    method_name: &str,
+    required_labels: Option<&[Option<String>]>,
+    expected_param_types: Option<&[MirTy]>,
+) -> bool {
+    let Some(kind) = ctx.world.get::<NodeKind>(child).cloned() else {
+        return false;
+    };
+    match kind {
+        NodeKind::Function | NodeKind::Subscript => {
+            let name = ctx.world.get::<Name>(child).map(|n| n.0.clone()).unwrap_or_default();
+            name == method_name
+        }
+        // Computed property: Field with a body (Callable) — its getter
+        // satisfies the protocol's property requirement.
+        NodeKind::Field if ctx.world.get::<Callable>(child).is_some() => {
+            let name = ctx.world.get::<Name>(child).map(|n| n.0.clone()).unwrap_or_default();
+            name == method_name
+        }
+        NodeKind::Initializer if method_name == "init" => {
+            // Label check
+            let labels_ok = match required_labels {
+                Some(labels) => ctx
+                    .world
+                    .get::<Callable>(child)
+                    .map(|c| {
+                        c.params.len() == labels.len()
+                            && c.params
+                                .iter()
+                                .zip(labels)
+                                .all(|(p, l)| p.label.as_ref() == l.as_ref())
+                    })
+                    .unwrap_or(false),
+                None => true,
+            };
+            if !labels_ok {
+                return false;
+            }
+            // Param-type check (only when expected types are provided)
+            match expected_param_types {
+                Some(expected) => candidate_param_types_match(ctx, child, expected),
+                None => true,
+            }
+        }
+        _ => false,
+    }
+}
+
+/// Check whether the candidate callable's parameter types equal `expected`
+/// pairwise. Params without a type annotation don't participate (they match
+/// anything) — the expected list already carries concrete protocol substitution.
+fn candidate_param_types_match(
+    ctx: &mut LowerCtx,
+    candidate: Entity,
+    expected: &[MirTy],
+) -> bool {
+    let tys = resolve_callable_types(ctx, candidate);
+    if tys.len() != expected.len() {
+        return false;
+    }
+    tys.iter().zip(expected).all(|(got, want)| match got {
+        Some(g) => g == want,
+        None => true,
+    })
 }
 
 /// Get the parameter labels for a protocol method (used to disambiguate inits).
@@ -302,28 +448,27 @@ fn bind_associated_types(
     extensions: &[Entity],
     protocol: Entity,
 ) {
-    // Collect associated type names from the protocol
-    let assoc_types: Vec<String> = ctx
-        .world
-        .children_of(protocol)
-        .iter()
-        .filter(|&&child| {
-            ctx.world.get::<NodeKind>(child) == Some(&NodeKind::TypeAlias)
-        })
-        .filter_map(|&child| {
-            ctx.world.get::<Name>(child).map(|n| n.0.clone())
-        })
-        .collect();
+    // Associated types the protocol (and its parents/extensions) declares.
+    let assoc_members = ctx.query.query(ProtocolAssociatedTypes {
+        protocol,
+        root: ctx.root,
+    });
 
-    for assoc_name in &assoc_types {
-        // Look for a type alias child with this name on the type or its extensions
-        if let Some(ty) = find_associated_type(ctx, type_entity, assoc_name) {
-            witness.bind_type(assoc_name, ty);
+    for member in assoc_members {
+        let Some(name) = ctx.world.get::<Name>(member.entity).map(|n| n.0.clone()) else {
+            continue;
+        };
+        // The conforming type (or one of its extensions) must supply the
+        // binding — `type Item = Int64`-style. Parent-protocol extensions'
+        // default bindings are handled via the same name-lookup below since
+        // those also live on children of extensions the type carries.
+        if let Some(ty) = find_associated_type(ctx, type_entity, &name) {
+            witness.bind_type(&name, ty);
             continue;
         }
         for &ext in extensions {
-            if let Some(ty) = find_associated_type(ctx, ext, assoc_name) {
-                witness.bind_type(assoc_name, ty);
+            if let Some(ty) = find_associated_type(ctx, ext, &name) {
+                witness.bind_type(&name, ty);
                 break;
             }
         }

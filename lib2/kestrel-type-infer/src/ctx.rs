@@ -371,6 +371,33 @@ impl<'a> InferCtx<'a> {
             expr,
             is_call,
             is_static_context: false,
+            explicit_type_args: Vec::new(),
+            span,
+        });
+    }
+
+    /// Like `member` but carries explicit type args from the call site
+    /// (e.g., `x.flatMap[Int](...)`).
+    pub fn member_with_type_args(
+        &mut self,
+        receiver: TyVar,
+        name: &str,
+        args: Vec<CallArg>,
+        result: TyVar,
+        expr: HirExprId,
+        is_call: bool,
+        explicit_type_args: Vec<kestrel_hir::ty::HirTy>,
+        span: Span,
+    ) {
+        self.constraints.push(Constraint::Member {
+            receiver,
+            name: name.to_string(),
+            args,
+            result,
+            expr,
+            is_call,
+            is_static_context: false,
+            explicit_type_args,
             span,
         });
     }
@@ -395,6 +422,7 @@ impl<'a> InferCtx<'a> {
             expr,
             is_call,
             is_static_context: true,
+            explicit_type_args: Vec::new(),
             span,
         });
     }

@@ -18,6 +18,7 @@ pub mod result;
 pub mod solver;
 pub mod ty;
 pub mod unify;
+pub mod where_clauses;
 
 use std::collections::HashMap;
 
@@ -72,9 +73,10 @@ impl QueryFn for InferBody {
 
         // Create the type resolver
         let resolver = WorldResolver {
+            // see TypeResolver trait doc — body_owner is the body being inferred
             ctx: query_ctx,
             root: self.root,
-            owner: self.entity,
+            body_owner: self.entity,
         };
 
         // Create inference context
@@ -206,7 +208,10 @@ fn emit_method_where_clauses(
     query_ctx: &QueryContext<'_>,
     entity: Entity,
 ) {
-    let clauses = ctx.resolver.where_clauses(entity);
+    let clauses = query_ctx.query(crate::where_clauses::WhereClausesOf {
+        entity,
+        root: ctx.root,
+    });
     if clauses.is_empty() {
         return;
     }
@@ -327,7 +332,10 @@ fn emit_extension_where_clauses(
     // if the same associated type appears in multiple constraints
     let mut assoc_type_tvs: HashMap<Entity, ty::TyVar> = HashMap::new();
 
-    let clauses = ctx.resolver.where_clauses(extension);
+    let clauses = query_ctx.query(crate::where_clauses::WhereClausesOf {
+        entity: extension,
+        root: ctx.root,
+    });
     for clause in clauses {
         match clause {
             resolve::WhereClause::Bound { param, protocol, .. } => {
@@ -425,17 +433,14 @@ fn emit_protocol_assoc_type_where_clauses(
             continue;
         }
 
-        // Read where clauses using the protocol as resolution context (not the current method),
-        // since names like `Iter` and `Item` are in scope of the protocol, not the method.
-        let clauses = {
-            let temp_resolver = crate::resolve::WorldResolver {
-                ctx: query_ctx,
-                root: ctx.root,
-                owner: protocol, // resolve names in protocol scope
-            };
-            use crate::resolve::TypeResolver;
-            temp_resolver.where_clauses(child)
-        };
+        // Read where clauses attached to `child`. Resolution uses child's own
+        // scope (scope walks child → protocol), so siblings like `Item` are
+        // reachable without a separate context parameter.
+        let _ = protocol; // retained by outer scope; not used for resolution
+        let clauses = query_ctx.query(crate::where_clauses::WhereClausesOf {
+            entity: child,
+            root: ctx.root,
+        });
         if clauses.is_empty() {
             continue;
         }

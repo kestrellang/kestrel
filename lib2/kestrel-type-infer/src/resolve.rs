@@ -88,7 +88,7 @@ pub struct AssociatedTypeResolution {
 }
 
 /// Where clause on a declaration.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Hash)]
 pub enum WhereClause {
     /// `T: Protocol` or `T: Protocol[Args]`
     Bound {
@@ -143,11 +143,10 @@ pub trait TypeResolver {
     /// Look up a builtin entity by language feature.
     fn builtin(&self, feature: Builtin) -> Option<Entity>;
 
-    /// Get the where clauses for an entity (function, method, init).
-    fn where_clauses(&self, entity: Entity) -> Vec<WhereClause>;
-
-    /// Get where clauses resolving names in a specific context entity's scope.
-    fn where_clauses_in_context(&self, entity: Entity, context: Entity) -> Vec<WhereClause>;
+    // Note: where clauses are not exposed on this trait. Callers use
+    // `crate::where_clauses::WhereClausesOf { entity, root }` directly —
+    // that query resolves names in the entity's own scope, avoiding the
+    // "ambient owner" leak that motivated this design.
 
     /// Build a MemberResolution for a specific known member entity.
     /// Used by the solver when picking from ranked ambiguous candidates.
@@ -165,10 +164,19 @@ pub trait TypeResolver {
 // ===== WorldResolver: real implementation over QueryContext =====
 
 /// Implements TypeResolver using the ECS world.
+///
+/// `body_owner` is the body being inferred — the name-resolution context for
+/// things like member lookups and variable references. It is deliberately
+/// named with the `body_` prefix so it's obvious at the call site that any
+/// reference to it ties the lookup to "wherever this method call is written",
+/// not to a type-declaration scope. Type-declaration-scoped resolution (e.g.
+/// where clauses) must NOT use `body_owner` — use the `WhereClausesOf` query
+/// (or pass the target entity explicitly) so resolution is stable regardless
+/// of which body triggered it.
 pub struct WorldResolver<'a> {
     pub ctx: &'a QueryContext<'a>,
     pub root: Entity,
-    pub owner: Entity,
+    pub body_owner: Entity,
 }
 
 impl TypeResolver for WorldResolver<'_> {
@@ -217,7 +225,7 @@ impl TypeResolver for WorldResolver<'_> {
         let candidates = self.ctx.query(kestrel_name_res::VisibleChildrenByName {
             parent: *entity,
             name: name.to_string(),
-            context: self.owner,
+            context: self.body_owner,
         });
 
         // Also search extensions of the concrete type
@@ -232,7 +240,7 @@ impl TypeResolver for WorldResolver<'_> {
             let ext_children = self.ctx.query(kestrel_name_res::VisibleChildrenByName {
                 parent: *ext,
                 name: name.to_string(),
-                context: self.owner,
+                context: self.body_owner,
             });
             for &child in &ext_children {
                 candidate_extensions.push((child, *ext));
@@ -242,8 +250,8 @@ impl TypeResolver for WorldResolver<'_> {
 
         // Fallback: search protocol extensions for default method implementations.
         // E.g., `lessThan` lives in `extend Comparable { ... }`, not in the protocol
-        // itself. We only search extensions (not abstract protocol declarations)
-        // to avoid ambiguity between the abstract requirement and the default impl.
+        // itself. We only look at extension-provided members (not the abstract
+        // requirements themselves) to avoid ambiguity with the default impl.
         //
         // Multiple protocol extensions may provide the same method (e.g. notEquals
         // from both extend Equatable and extend Comparable). These are equivalent
@@ -253,66 +261,43 @@ impl TypeResolver for WorldResolver<'_> {
                 entity: *entity,
                 root: self.root,
             });
-            let mut proto_candidates: Vec<(Entity, Entity)> = Vec::new(); // (candidate, extension)
+            let mut seen_signatures = std::collections::HashSet::new();
             for proto in &protocols {
-                let proto_extensions = self.ctx.query(kestrel_name_res::ExtensionsFor {
-                    target: *proto,
+                let members = self.ctx.query(kestrel_name_res::ProtocolMembersByName {
+                    protocol: *proto,
+                    name: name.to_string(),
+                    context: self.body_owner,
                     root: self.root,
                 });
-                for ext in &proto_extensions {
-                    let ext_children = self.ctx.query(kestrel_name_res::VisibleChildrenByName {
-                        parent: *ext,
-                        name: name.to_string(),
-                        context: self.owner,
-                    });
-                    for &child in &ext_children {
-                        proto_candidates.push((child, *ext));
+                for m in members {
+                    let Some(ext) = m.extension else { continue };
+                    let sig = self.label_signature(m.entity);
+                    if seen_signatures.insert(sig) {
+                        all_candidates.push(m.entity);
+                        candidate_extensions.push((m.entity, ext));
                     }
-                }
-            }
-
-            // Deduplicate protocol extension candidates by label signature.
-            // Same method from different protocol extensions = equivalent default impl.
-            let mut seen_signatures = std::collections::HashSet::new();
-            for &(cand, ext) in &proto_candidates {
-                let sig = self.label_signature(cand);
-                if seen_signatures.insert(sig) {
-                    all_candidates.push(cand);
-                    candidate_extensions.push((cand, ext));
                 }
             }
         }
 
         // If receiver is a protocol and we're inside a protocol extension with
         // where clauses like `Self: Sortable`, also search those constraint protocols.
+        // `ProtocolMembersByName` walks the constraint protocol's direct children,
+        // extension defaults, parent protocols, and parents' extension defaults in
+        // one pass — so a `where Self: Comparable` extension can resolve methods
+        // declared on `Equatable` (Comparable's parent).
         if all_candidates.is_empty()
             && self.ctx.get::<NodeKind>(*entity) == Some(&NodeKind::Protocol)
         {
             let extra_protocols = self.collect_extension_where_clause_protocols(*entity);
             for proto in &extra_protocols {
-                // Search the protocol's own children
-                let proto_children = self.ctx.query(kestrel_name_res::VisibleChildrenByName {
-                    parent: *proto,
+                let members = self.ctx.query(kestrel_name_res::ProtocolMembersByName {
+                    protocol: *proto,
                     name: name.to_string(),
-                    context: self.owner,
+                    context: self.body_owner,
+                    root: self.root,
                 });
-                all_candidates.extend(proto_children);
-
-                // Also search extensions of the constraint protocol
-                if all_candidates.is_empty() {
-                    let proto_extensions = self.ctx.query(kestrel_name_res::ExtensionsFor {
-                        target: *proto,
-                        root: self.root,
-                    });
-                    for ext in &proto_extensions {
-                        let ext_children = self.ctx.query(kestrel_name_res::VisibleChildrenByName {
-                            parent: *ext,
-                            name: name.to_string(),
-                            context: self.owner,
-                        });
-                        all_candidates.extend(ext_children);
-                    }
-                }
+                all_candidates.extend(members.into_iter().map(|m| m.entity));
             }
         }
 
@@ -336,7 +321,7 @@ impl TypeResolver for WorldResolver<'_> {
 
         // Subscripts have no Name component (like initializers).
         // Search by NodeKind::Subscript when resolving a subscript call.
-        if all_candidates.is_empty() && name == "(subscript)" {
+        if all_candidates.is_empty() && name == "subscript" {
             for &child in self.ctx.children_of(*entity) {
                 if self.ctx.get::<NodeKind>(child) == Some(&NodeKind::Subscript) {
                     all_candidates.push(child);
@@ -526,7 +511,7 @@ impl TypeResolver for WorldResolver<'_> {
             let children = self.ctx.query(kestrel_name_res::VisibleChildrenByName {
                 parent: *ext,
                 name: "from".to_string(),
-                context: self.owner,
+                context: self.body_owner,
             });
 
             for &child in &children {
@@ -545,7 +530,7 @@ impl TypeResolver for WorldResolver<'_> {
         let direct = self.ctx.query(kestrel_name_res::VisibleChildrenByName {
             parent: *to_entity,
             name: "from".to_string(),
-            context: self.owner,
+            context: self.body_owner,
         });
 
         for &child in &direct {
@@ -560,73 +545,6 @@ impl TypeResolver for WorldResolver<'_> {
         }
 
         None
-    }
-
-    fn where_clauses(&self, entity: Entity) -> Vec<WhereClause> {
-        // Resolve where-clause names in the *entity's own* scope. Using
-        // `self.owner` (the body currently being inferred) can't see the
-        // method's own type params or its enclosing type's params — e.g.
-        // `func appendFrom[I](..) where I.Item = T` in Array[T].
-        self.where_clauses_in_context(entity, entity)
-    }
-
-    /// Get where clauses, resolving names in a specific context entity's scope.
-    fn where_clauses_in_context(&self, entity: Entity, context: Entity) -> Vec<WhereClause> {
-        let Some(ast_wc) = self.ctx.get::<AstWhereClause>(entity) else {
-            return Vec::new();
-        };
-        let mut result = Vec::new();
-        for constraint in &ast_wc.0 {
-            match constraint {
-                WhereConstraint::Bound {
-                    subject, protocols, ..
-                } => {
-                    // Resolve subject to a type param entity
-                    let Some(param) = self.resolve_type_entity_in_context(subject, context) else {
-                        continue;
-                    };
-
-                    // Resolve each protocol, including type arguments
-                    for protocol_ty in protocols {
-                        if let Some(protocol) = self.resolve_type_entity_in_context(protocol_ty, context) {
-                            // Extract type args from the protocol type (e.g., Factory[lang.i64])
-                            let protocol_type_args = extract_protocol_type_args(
-                                self.ctx, context, self.root, protocol_ty,
-                            );
-                            result.push(WhereClause::Bound { param, protocol, protocol_type_args });
-                        }
-                    }
-                }
-                WhereConstraint::Equality { lhs, rhs, .. } => {
-                    let rhs_hir = kestrel_hir_lower::lower_ast_type(
-                        self.ctx,
-                        context,
-                        self.root,
-                        rhs,
-                    );
-                    // Resolve the LHS and inspect what it is
-                    if let Some((param, assoc_name)) = self.extract_associated_type_path(lhs) {
-                        // 2-segment path like T.Item → associated type equality
-                        result.push(WhereClause::TypeEquality {
-                            param,
-                            assoc_name,
-                            rhs: rhs_hir,
-                        });
-                    } else if let Some(param) = self.resolve_type_param_or_assoc(lhs) {
-                        // Bare type param (V) or associated type (Item) → direct equality
-                        result.push(WhereClause::DirectEquality {
-                            param,
-                            rhs: rhs_hir,
-                        });
-                    }
-                }
-                WhereConstraint::NegativeBound { .. } => {
-                    // Negative bounds are not modeled in inference where clauses
-                }
-            }
-        }
-
-        result
     }
 
     fn resolve_static_member(
@@ -646,7 +564,7 @@ impl TypeResolver for WorldResolver<'_> {
         let children = self.ctx.query(kestrel_name_res::VisibleChildrenByName {
             parent: *entity,
             name: name.to_string(),
-            context: self.owner,
+            context: self.body_owner,
         });
         all_candidates.extend(children.iter());
 
@@ -658,7 +576,7 @@ impl TypeResolver for WorldResolver<'_> {
             let ext_children = self.ctx.query(kestrel_name_res::VisibleChildrenByName {
                 parent: *ext,
                 name: name.to_string(),
-                context: self.owner,
+                context: self.body_owner,
             });
             all_candidates.extend(ext_children.iter());
         }
@@ -756,24 +674,41 @@ impl WorldResolver<'_> {
     }
 
     /// Search protocol bounds for an associated type with the given name.
+    /// Uses `ProtocolAssociatedTypes` which walks protocol direct children,
+    /// extension defaults, parent protocols, and their extensions in one pass.
+    /// Qualified associated types (`type Equal.Output = Bool`) are excluded —
+    /// they bind a *specific* protocol's assoc type and must not leak into
+    /// unqualified `T.Output` lookups.
     fn find_associated_type_in_protocols(
         &self,
         protocols: &[Entity],
         name: &str,
     ) -> Option<AssociatedTypeResolution> {
         for &proto in protocols {
-            if let Some(result) = self.find_associated_type_in_entity(proto, name) {
-                return Some(result);
-            }
-            // Also check protocol extensions
-            let extensions = self.ctx.query(kestrel_name_res::ExtensionsFor {
-                target: proto,
+            let members = self.ctx.query(kestrel_name_res::ProtocolAssociatedTypes {
+                protocol: proto,
                 root: self.root,
             });
-            for ext in &extensions {
-                if let Some(result) = self.find_associated_type_in_entity(*ext, name) {
-                    return Some(result);
+            for m in members {
+                if !self.ctx.get::<Name>(m.entity).is_some_and(|n| n.0 == name) {
+                    continue;
                 }
+                // Concrete (has TypeAnnotation) → lower and return.
+                if let Some(hir_ty) = self.ctx.query(LowerTypeAnnotation {
+                    entity: m.entity,
+                    root: self.root,
+                }) {
+                    return Some(AssociatedTypeResolution { resolved: hir_ty });
+                }
+                // Abstract associated type — keep as AliasUse so the solver
+                // detects the missing definition and dispatches via bounds.
+                return Some(AssociatedTypeResolution {
+                    resolved: kestrel_hir::ty::HirTy::AliasUse {
+                        entity: m.entity,
+                        args: vec![],
+                        span: kestrel_span2::Span::synthetic(0),
+                    },
+                });
             }
         }
         None
@@ -857,7 +792,10 @@ impl WorldResolver<'_> {
         };
 
         // Get where clauses
-        let where_clauses = self.where_clauses(member);
+        let where_clauses = self.ctx.query(crate::where_clauses::WhereClausesOf {
+            entity: member,
+            root: self.root,
+        });
 
         // Determine self_type: what entity `Self` resolves to in this member's scope.
         // For protocol/extension methods, this is the protocol entity (needs substitution).
@@ -926,7 +864,7 @@ impl WorldResolver<'_> {
                     .filter(|&&c| self.ctx.get::<NodeKind>(c) == Some(&NodeKind::Initializer))
                     .copied()
                     .collect::<Vec<_>>()
-            } else if name == "(subscript)" {
+            } else if name == "subscript" {
                 self.ctx
                     .children_of(proto)
                     .iter()
@@ -937,7 +875,7 @@ impl WorldResolver<'_> {
                 self.ctx.query(kestrel_name_res::VisibleChildrenByName {
                     parent: proto,
                     name: name.to_string(),
-                    context: self.owner,
+                    context: self.body_owner,
                 })
             };
 
@@ -986,7 +924,10 @@ impl WorldResolver<'_> {
             })
             .unwrap_or(HirTy::Tuple(Vec::new(), Span::synthetic(0)));
 
-        let where_clauses = self.where_clauses(method);
+        let where_clauses = self.ctx.query(crate::where_clauses::WhereClausesOf {
+            entity: method,
+            root: self.root,
+        });
 
         // Determine member kind
         let kind = match self.ctx.get::<NodeKind>(method) {
@@ -1125,12 +1066,11 @@ impl WorldResolver<'_> {
         false
     }
 
-    /// Resolve an AstType to a type entity using ResolveTypePath.
+    /// Resolve an AstType to a type entity using ResolveTypePath. Resolution
+    /// starts from `self.body_owner` (the body being inferred). For type-definition-
+    /// scoped resolution (e.g. where clauses), use the `WhereClausesOf` query
+    /// instead of threading `self.body_owner` through to non-body contexts.
     fn resolve_type_entity(&self, ast_ty: &kestrel_ast_builder::AstType) -> Option<Entity> {
-        self.resolve_type_entity_in_context(ast_ty, self.owner)
-    }
-
-    fn resolve_type_entity_in_context(&self, ast_ty: &kestrel_ast_builder::AstType, context: Entity) -> Option<Entity> {
         use kestrel_ast_builder::AstType;
         match ast_ty {
             AstType::Named { segments, .. } => {
@@ -1138,11 +1078,11 @@ impl WorldResolver<'_> {
                     segments.iter().map(|s| s.name.clone()).collect();
                 match self.ctx.query(ResolveTypePath {
                     segments: seg_names,
-                    context,
+                    context: self.body_owner,
                     root: self.root,
                 }) {
                     TypeResolution::Found(entity) => Some(entity),
-                    TypeResolution::SelfType => self.resolve_self_entity_from(context),
+                    TypeResolution::SelfType => self.resolve_self_entity_from(self.body_owner),
                     _ => None,
                 }
             }
@@ -1234,8 +1174,11 @@ impl WorldResolver<'_> {
         protocol_entity: Entity,
     ) -> Vec<HirTy> {
         // Walk up from the param to find the owner (function/init that declares the where clause)
-        let owner = self.ctx.parent_of(param_entity).unwrap_or(self.owner);
-        let clauses = self.where_clauses(owner);
+        let owner = self.ctx.parent_of(param_entity).unwrap_or(self.body_owner);
+        let clauses = self.ctx.query(crate::where_clauses::WhereClausesOf {
+            entity: owner,
+            root: self.root,
+        });
 
         // Direct match: where clause says T: Protocol[Args]
         for clause in &clauses {
@@ -1275,7 +1218,7 @@ impl WorldResolver<'_> {
             let Some(resolved) = self.resolve_type_entity(ast_ty) else { continue };
             if resolved == target_protocol {
                 // Extract type args from the conformance path
-                return Some(extract_protocol_type_args(self.ctx, self.owner, self.root, ast_ty));
+                return Some(extract_protocol_type_args(self.ctx, self.body_owner, self.root, ast_ty));
             }
             // Recurse into inherited protocols
             if self.ctx.get::<NodeKind>(resolved) == Some(&NodeKind::Protocol) {
@@ -1295,66 +1238,26 @@ impl WorldResolver<'_> {
         protocols: &[Entity],
         name: &str,
     ) -> Vec<Entity> {
+        // Dedup within a protocol (inherited methods collapse to one) but not
+        // across protocols — same-signature methods from different protocols
+        // should surface as ambiguity.
+        //
+        // `ProtocolMembersByName` handles direct children, extension defaults,
+        // parent protocols, and the `"init"` / `"subscript"` sentinels for
+        // nameless Callable entities.
         let mut all_candidates = Vec::new();
-        // Dedup within a protocol (inherited methods) but not across protocols
-        // so that same-signature methods from different protocols trigger ambiguity.
-
         for proto in protocols {
             let mut seen_in_proto = std::collections::HashSet::new();
-
-            // Named members inside the protocol
-            let children = self.ctx.query(kestrel_name_res::VisibleChildrenByName {
-                parent: *proto,
+            let members = self.ctx.query(kestrel_name_res::ProtocolMembersByName {
+                protocol: *proto,
                 name: name.to_string(),
-                context: self.owner,
-            });
-            for &child in &children {
-                let sig = self.label_signature(child);
-                if seen_in_proto.insert(sig) {
-                    all_candidates.push(child);
-                }
-            }
-
-            // Default implementations in protocol extensions
-            let extensions = self.ctx.query(kestrel_name_res::ExtensionsFor {
-                target: *proto,
+                context: self.body_owner,
                 root: self.root,
             });
-            for ext in &extensions {
-                let ext_children = self.ctx.query(kestrel_name_res::VisibleChildrenByName {
-                    parent: *ext,
-                    name: name.to_string(),
-                    context: self.owner,
-                });
-                for &child in &ext_children {
-                    let sig = self.label_signature(child);
-                    if seen_in_proto.insert(sig) {
-                        all_candidates.push(child);
-                    }
-                }
-            }
-
-            // Subscripts and initializers have no Name — search by NodeKind.
-            // Check per-protocol: only search by NodeKind if no named members
-            // were found for this protocol (to avoid mixing named + NodeKind results).
-            let found_named_in_proto = !seen_in_proto.is_empty();
-            if !found_named_in_proto && (name == "(subscript)" || name == "init") {
-                let target_kind = if name == "(subscript)" {
-                    NodeKind::Subscript
-                } else {
-                    NodeKind::Initializer
-                };
-                for &child in self.ctx.children_of(*proto) {
-                    if self.ctx.get::<NodeKind>(child) == Some(&target_kind) {
-                        all_candidates.push(child);
-                    }
-                }
-                for ext in &extensions {
-                    for &child in self.ctx.children_of(*ext) {
-                        if self.ctx.get::<NodeKind>(child) == Some(&target_kind) {
-                            all_candidates.push(child);
-                        }
-                    }
+            for m in members {
+                let sig = self.label_signature(m.entity);
+                if seen_in_proto.insert(sig) {
+                    all_candidates.push(m.entity);
                 }
             }
         }
@@ -1501,7 +1404,7 @@ impl WorldResolver<'_> {
 
         // Walk from owner upward — function/extension where clauses may also
         // constrain associated types. E.g., `func contains() where Item: Equatable`
-        let mut current = Some(self.owner);
+        let mut current = Some(self.body_owner);
         while let Some(entity) = current {
             if checked.insert(entity) {
                 self.gather_bounds_from_where_clause(alias_entity, entity, &mut protocols, &mut visited);
@@ -1526,7 +1429,7 @@ impl WorldResolver<'_> {
         let mut protocols = Vec::new();
 
         // Walk from owner up to find the enclosing extension
-        let mut current = Some(self.owner);
+        let mut current = Some(self.body_owner);
         while let Some(entity) = current {
             if self.ctx.get::<NodeKind>(entity) == Some(&NodeKind::Extension) {
                 // Check if this extension targets our protocol
@@ -1536,7 +1439,11 @@ impl WorldResolver<'_> {
                 });
                 if ext_target == Some(target_protocol) {
                     // Get where clause bounds where the subject is the target protocol (Self)
-                    for clause in self.where_clauses(entity) {
+                    let clauses = self.ctx.query(crate::where_clauses::WhereClausesOf {
+                        entity,
+                        root: self.root,
+                    });
+                    for clause in clauses {
                         if let WhereClause::Bound { param, protocol, .. } = clause {
                             // `Self: Protocol` — param is the target protocol entity
                             if param == target_protocol {
@@ -1570,7 +1477,7 @@ impl WorldResolver<'_> {
         // Walk from owner upward to find extension/protocol where clauses
         // that also constrain this type param. E.g., the method being compiled
         // is inside `extend Array[T] where T: Comparable`, and T is Array's param.
-        let mut current = Some(self.owner);
+        let mut current = Some(self.body_owner);
         while let Some(entity) = current {
             if checked.insert(entity) {
                 self.gather_bounds_from_where_clause(param_entity, entity, &mut protocols, &mut visited);
@@ -1617,59 +1524,6 @@ impl WorldResolver<'_> {
         }
     }
 
-    /// Resolve a type path to a TypeParameter or TypeAlias entity
-    /// (for direct equalities like `V = Array[E]` or `Item = Optional[T]`).
-    fn resolve_type_param_or_assoc(
-        &self,
-        ast_ty: &kestrel_ast_builder::AstType,
-    ) -> Option<Entity> {
-        use kestrel_ast_builder::AstType;
-        let AstType::Named { segments, .. } = ast_ty else { return None };
-        let all_names: Vec<String> = segments.iter().map(|s| s.name.clone()).collect();
-        match self.ctx.query(ResolveTypePath {
-            segments: all_names,
-            context: self.owner,
-            root: self.root,
-        }) {
-            TypeResolution::Found(entity)
-                if matches!(
-                    self.ctx.get::<NodeKind>(entity),
-                    Some(&NodeKind::TypeParameter) | Some(&NodeKind::TypeAlias)
-                ) =>
-            {
-                Some(entity)
-            }
-            _ => None,
-        }
-    }
-
-    /// Extract (param_entity, assoc_name) from a type path like `T.Item`.
-    fn extract_associated_type_path(
-        &self,
-        ast_ty: &kestrel_ast_builder::AstType,
-    ) -> Option<(Entity, String)> {
-        use kestrel_ast_builder::AstType;
-        match ast_ty {
-            AstType::Named { segments, .. } if segments.len() == 2 => {
-                // First segment is the type param, second is the associated type name
-                let param_name = &segments[0].name;
-                let assoc_name = &segments[1].name;
-
-                // Resolve the param
-                match self.ctx.query(ResolveTypePath {
-                    segments: vec![param_name.clone()],
-                    context: self.owner,
-                    root: self.root,
-                }) {
-                    TypeResolution::Found(entity) => {
-                        Some((entity, assoc_name.clone()))
-                    }
-                    _ => None,
-                }
-            }
-            _ => None,
-        }
-    }
 
     /// Rank ambiguous candidates by extension specificity.
     /// Returns the winning candidate if one extension is strictly more specific.

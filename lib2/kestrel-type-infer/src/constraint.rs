@@ -65,6 +65,8 @@ pub enum Constraint {
         /// True when this is a static context call (e.g., `T.method()` where
         /// T is a type parameter). Only static and init members are valid.
         is_static_context: bool,
+        /// Explicit type args from the call site (e.g., `x.flatMap[Int](...)`)
+        explicit_type_args: Vec<HirTy>,
         span: Span,
     },
 

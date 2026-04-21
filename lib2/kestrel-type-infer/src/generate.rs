@@ -178,9 +178,9 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
         HirExpr::MethodCall {
             receiver,
             method,
+            type_args: explicit_targs,
             args,
             span,
-            ..
         } => {
             let recv_tv = gen_expr(ctx, hir, *receiver);
             let arg_tvs = gen_call_args(ctx, hir, args);
@@ -193,10 +193,18 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                     == Some(&NodeKind::TypeParameter)
             );
 
+            let has_explicit = explicit_targs.as_ref().map_or(false, |a| !a.is_empty());
+
             // Consuming a Def(TypeParameter) as a MethodCall receiver is valid
             if is_static_ctx {
                 ctx.type_param_defs.remove(receiver);
                 ctx.member_static(recv_tv, method, arg_tvs, result_tv, id, true, span.clone());
+            } else if has_explicit {
+                ctx.member_with_type_args(
+                    recv_tv, method, arg_tvs, result_tv, id, true,
+                    explicit_targs.clone().unwrap(),
+                    span.clone(),
+                );
             } else {
                 ctx.member(recv_tv, method, arg_tvs, result_tv, id, true, span.clone());
             }
@@ -1022,7 +1030,11 @@ fn instantiate_entity_inner(
     }
 
     // Emit where clause constraints for the type params
-    for clause in ctx.resolver.where_clauses(entity) {
+    let where_clauses = ctx.query_ctx.query(crate::where_clauses::WhereClausesOf {
+        entity,
+        root: ctx.root,
+    });
+    for clause in where_clauses {
         match clause {
             crate::resolve::WhereClause::Bound { param, protocol, .. } => {
                 if let Some(idx) = type_param_entities.iter().position(|&p| p == param) {

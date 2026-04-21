@@ -34,7 +34,8 @@ pub fn resolve_witness_call(
     // Find a witness that matches the self type and protocol, and has the method.
     // First try exact protocol, then any witness for this type that has the method
     // (handles protocol inheritance: Comparable witness contains Less.lessThan).
-    let (witness, bindings) = find_witness_with_method(module, protocol, method, self_type)?;
+    let (witness, bindings) =
+        find_witness_with_method(module, protocol, method, self_type, method_type_args)?;
 
     let method_binding = witness.method_bindings.get(method).unwrap();
 
@@ -117,30 +118,49 @@ pub fn resolve_associated_type(
 }
 
 /// Find a witness for `self_type` that has the given method.
-/// First tries exact protocol match, then falls back to any witness that
-/// has the method (handles protocol inheritance — e.g., Comparable witness
-/// contains Less.lessThan because witness generation collects inherited methods).
+///
+/// Selection considers, in order:
+/// 1. Protocol entity match
+/// 2. Self-type pattern match (via `match_pattern`, which binds the
+///    witness's implementation-type params)
+/// 3. Protocol type-args match — the first N values of `method_type_args`
+///    (where N = the protocol's type-param count) must equal the witness's
+///    `protocol_type_args.values()` pairwise. This is what distinguishes
+///    `Convertible[Int8]` from `Convertible[Int16]` on the same self type.
+/// 4. Presence of the requested method binding
+///
+/// Falls back to descendant-protocol witnesses for protocol inheritance
+/// (e.g. `Comparable` witness contains `Less.lessThan`).
 fn find_witness_with_method<'a>(
     module: &'a MirModule,
     protocol: Entity,
     method: &str,
     self_type: &MirTy,
+    method_type_args: &[MirTy],
 ) -> Result<(&'a WitnessDef, HashMap<Entity, MirTy>), MonomorphizeError> {
-    // Pass 1: exact protocol match
+    let proto_param_count = protocol_type_param_count(module, protocol);
+    let expected_proto_args = method_type_args.get(..proto_param_count).unwrap_or(&[]);
+
+    // Pass 1: exact protocol match with protocol_type_args filter
     for witness in &module.witnesses {
         if witness.protocol != protocol {
             continue;
         }
+        if !witness_protocol_args_match(witness, expected_proto_args) {
+            continue;
+        }
         let mut bindings = HashMap::new();
-        if match_pattern(&witness.implementing_type, self_type, &mut bindings) {
-            if witness.method_bindings.contains_key(method) {
-                return Ok((witness, bindings));
-            }
+        if match_pattern(&witness.implementing_type, self_type, &mut bindings)
+            && witness.method_bindings.contains_key(method)
+        {
+            return Ok((witness, bindings));
         }
     }
 
     // Pass 2: a witness for a descendant protocol on the same type that has
-    // the method (e.g. Comparable witness contains Less.lessThan).
+    // the method (e.g. Comparable witness contains Less.lessThan). The type
+    // args of the inherited protocol live on the descendant witness, so we
+    // can't filter the same way; fall back to the old first-match behavior.
     for witness in &module.witnesses {
         if witness.protocol == protocol {
             continue;
@@ -170,6 +190,35 @@ fn find_witness_with_method<'a>(
         method: method.to_string(),
         type_description: type_name,
     })
+}
+
+/// Return the number of type parameters declared on `protocol` in `module`,
+/// or 0 if the protocol isn't registered.
+fn protocol_type_param_count(module: &MirModule, protocol: Entity) -> usize {
+    module
+        .protocols
+        .iter()
+        .find(|p| p.entity == protocol)
+        .map(|p| p.type_params.len())
+        .unwrap_or(0)
+}
+
+/// Compare a witness's `protocol_type_args` values (in declaration order)
+/// against `expected` by strict equality. Empty `expected` matches any
+/// witness (back-compat for non-generic protocols and callers that don't
+/// know the protocol args).
+fn witness_protocol_args_match(witness: &WitnessDef, expected: &[MirTy]) -> bool {
+    if expected.is_empty() {
+        return true;
+    }
+    if witness.protocol_type_args.len() != expected.len() {
+        return false;
+    }
+    witness
+        .protocol_type_args
+        .values()
+        .zip(expected.iter())
+        .all(|(w, e)| w == e)
 }
 
 /// Find a witness that proves `self_type` implements `protocol`.

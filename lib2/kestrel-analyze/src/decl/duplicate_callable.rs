@@ -7,7 +7,7 @@
 //!
 //! The "duplicate key" is `(name, ordered_labels)`. For functions the name comes
 //! from the Name component; for initializers it is `"init"`; for subscripts it is
-//! `"(subscript)"`.
+//! `"subscript"`.
 //!
 //! ## Diagnostics
 //!
@@ -102,7 +102,7 @@ fn duplicate_key_for(
         )),
         NodeKind::Subscript => Some((
             DuplicateKey {
-                name: "(subscript)".into(),
+                name: "subscript".into(),
                 labels,
             },
             "subscript",

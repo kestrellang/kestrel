@@ -262,6 +262,57 @@ mod tests {
     }
 
     #[test]
+    fn witness_includes_protocol_extension_methods() {
+        let mut c = Compiler::new();
+        let path = stdlib_path();
+        c.load_dir(&path);
+        set_and_build(
+            &mut c,
+            "test.ks",
+            r#"module Test
+
+protocol Greeter {
+    func greet() -> String
+}
+
+extend Greeter {
+    func shout() -> String {
+        return self.greet()
+    }
+}
+
+struct Bob { }
+
+extend Bob: Greeter {
+    func greet() -> String { return "hi" }
+}
+"#,
+        );
+        c.infer_all();
+
+        let mir = lower_module(c.world(), c.root());
+
+        // Find the witness for Bob: Greeter
+        let bob_witness = mir
+            .witnesses
+            .iter()
+            .find(|w| {
+                let proto_name = mir.resolve_name(w.protocol);
+                proto_name.contains("Greeter")
+            })
+            .expect("should have a witness for Bob: Greeter");
+
+        assert!(
+            bob_witness.method_bindings.contains_key("greet"),
+            "witness should contain 'greet' (direct protocol method)"
+        );
+        assert!(
+            bob_witness.method_bindings.contains_key("shout"),
+            "witness should contain 'shout' (protocol extension method)"
+        );
+    }
+
+    #[test]
     fn run_all_passes() {
         let mut c = Compiler::new();
         let path = stdlib_path();

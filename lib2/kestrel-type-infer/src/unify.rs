@@ -348,6 +348,13 @@ mod tests {
         ) -> Result<MemberResolution, MemberError> {
             Err(MemberError::NotFound)
         }
+        fn resolve_single_member(
+            &self,
+            _: &TyKind,
+            _: Entity,
+        ) -> Result<MemberResolution, MemberError> {
+            Err(MemberError::NotFound)
+        }
         fn conforms_to(&self, _: &TyKind, _: Entity) -> bool {
             false
         }
@@ -356,9 +363,6 @@ mod tests {
         }
         fn builtin(&self, _: Builtin) -> Option<Entity> {
             None
-        }
-        fn where_clauses(&self, _: Entity) -> Vec<WhereClause> {
-            Vec::new()
         }
         fn check_promotion(&self, _: &TyKind, _: &TyKind) -> Option<Entity> {
             None

@@ -3,213 +3,7 @@
 Run: `file_tests --test-threads=1 --skip stdlib --skip function_as_value` on `feature/incremental-hecs`.
 Result: **2452 passed · 132 failed · 204 filtered** (stdlib + known-hanging tests skipped, 2026-04-20 after matcher multi-match + Associated-literal-cascade suppression).
 
----
-
-# False Positives
-
-Compiler rejects valid code, produces spurious diagnostics, emits wrong code, or runs code incorrectly.
-
-## Range matchable — false non-exhaustive-match on total range patterns
-
-- [x] `patterns/range_matchable/range_from.ks` — **got:** `non-exhaustive match: missing _ [E305]`
-- [x] `patterns/range_matchable/char_range_from.ks` — **got:** `non-exhaustive match: missing _ [E305]`
-- [x] `patterns/range_matchable/char_range_exclusive.ks` — **got:** `Expected exit code 0, got 1` (compiler OK, runtime fail)
-- [x] `patterns/range_matchable/char_range_inclusive.ks` — **got:** `Expected exit code 0, got 1`
-- [x] `expressions/match/never_type/match_arm_with_break_in_loop.ks` — **got:** `non-exhaustive match: missing _ [E305]` (break→Never arm not counted as covering)
-
-## `type Alias = X` init-call and assoc-type projection regressions
-
-- [x] `declarations/type_aliases/type_alias_init_call.ks` — **got:** `no member '(subscript)': C.(subscript)`, `no member 'count': ?.count`
-- [x] `declarations/wacky_inference/nested_associated_type_projections.ks` — **got:** `no member 'baseValue': T.baseValue`
-- [x] `execution_graph/protocols/static_method_on_associated_type.ks` — **got:** `no member 'create': T.create`
-- [x] `validation/type_checking/tuple_index_with_associated_type_equality.ks` — **got:** `no member '0': Item.0`, `no member '1': Item.1`
-
-## `@builtin(.Copyable)` marker-protocol check too strict
-
-E419 requires Copyable to be a marker protocol (no methods/types), but these tests declare it with methods/assoc types *expecting* the check — and E419 now fires unconditionally before the specific wording test expects.
-
-- [x] `builtins/protocols/copyable_on_protocol_with_associated_type.ks` — **got:** E419 `@builtin(.Copyable) must be a marker protocol`
-- [x] `builtins/protocols/copyable_on_protocol_with_method.ks` — **got:** E419 `@builtin(.Copyable) must be a marker protocol`
-
-## Extension type-parameter not in where-clause scope
-
-Extension's generic params (`extend S[T] where …`) don't make `T`, `U` visible inside `where` clause type references.
-
-- [x] `declarations/extensions/extension_type_param_not_in_scope.ks` — **got:** `cannot find type 'U' in this scope [E436]` at line 7
-- [x] `declarations/extensions/wrong_type_param_count.ks` — **got:** `cannot find type 'U' in this scope` at line 6
-
-## Generic `not Copyable` type param — spurious Int32/T mismatches
-
-Fixed 2026-04-20: `ScopeFor` was adding std auto-imports to *every* non-std scope (functions, structs, etc.), so name lookup for `accept` from inside a function found stdlib's `std.net.libc.accept(sockfd: Int32, ...)` via wildcard import before walking up to the local `accept` in the enclosing module. Restricted auto-imports to `NodeKind::Module` scopes only. Net effect across suite: +89 passing, -71 failing.
-
-- [x] `memory_model/generic_copyability/type_parameter_with_not_copyable_can_be_moved_once.ks`
-
-(`type_parameter_with_not_copyable_use_after_move.ks` — FP symptoms resolved by the auto-import fix, but the test still fails for a different reason: move-checker not running. Moved to False Negatives.)
-
-## Regressions on positive tests
-
-- [x] `builtins/intrinsics/panic_is_diverging.ks` — **expected:** no errors · **got:** `function 'unreachable' does not return a value on all code paths [E001]`
-- [x] `declarations/expression_bodied_functions/expression_bodied_function_with_where_clause.ks` — **expected:** no errors · **got:** `method 'double' has wrong return type for protocol 'Doubler' [E458]` — fixed 2026-04-20. `conformance_completeness::check_method_return_type` compared protocol vs impl return types with `ast_types_equal` (pure structural AST-segment compare), so the substituted `Self → Int64` (1 segment) never matched the impl's `std.num.Int64` (3 segments). Rewrote to resolve both sides to entities via `resolve_type_entity_with_self`, with a focused `resolve_expected_return` helper that projects protocol associated-type names through the impl's bindings. Deleted `build_associated_type_subs`, `substitute_ast_type`, `ast_types_equal`, `is_named_type`.
-
-## Static/`mutable var` property through type parameter read as immutable
-
-- [x] `codegen/generics/test_static_mutable_property_via_type_parameter.ks` — fixed 2026-04-20. Two parts: (1) field/subscript builders now recognize bodyless protocol requirements `{ get set }` by picking up raw `Get`/`Set` tokens inside `PropertyAccessors` (previously only wrapper `GetterClause`/`SetterClause` were checked), so the field gets `Gettable`/`Settable` and the E201 false positive disappears. (2) MIR lowering of `T.prop = v` for protocol-property assignments now dispatches through the conformance witness using a `<name>.set` convention — witnesses include a second binding that resolves to the conforming type's `Setter` child.
-
-## ExpressibleByArrayLiteral doesn't fire for user types
-
-Fixed 2026-04-20: (1) inference checked user-facing `ExpressibleByArrayLiteral` instead of the internal `_ExpressibleByArrayLiteral` the compiler actually lowers against; (2) array/dict literals didn't emit `Associated(lit_tv, "Element"/"Key"/"Value", elem_tv)` to flow target associated types into element TyVars; (3) `solve_associated` didn't substitute the container's type args through the alias annotation; (4) `resolve_associated_type` for concrete structs didn't search extensions (Dictionary's `type Key = K` lives on an `extend` block); (5) defaulting created `Array[]` with empty args instead of fresh TyVars per type param; (6) missing `@builtin(.DefaultArrayLiteralType)` marker. Also removed `ExpressibleByArrayLiteral` / `ExpressibleByDictionaryLiteral` as builtin variants — only `_ExpressibleBy*Literal` needs a builtin.
-
-- [x] `builtins/literal_protocols/custom_type_with_array_literal.ks` — **expected:** no errors · **got:** `type mismatch: expected MyList got Array`
-
-## Closure generic param inference E606 firing spuriously
-
-- [x] `expressions/closures/closure_with_generic_param_inferred.ks` — **got:** `could not infer type for closure parameter [E606]` — test was `stdlib: false` but needed stdlib integer-literal defaulting to pin `T`; flipped flag (2026-04-20)
-
-## Tuple arity error in parameter destructuring
-
-- [x] `declarations/parameter_destructuring/closure_tuple_arity_mismatch.ks` — fixed 2026-04-20. The closure-param branch in the `param_pattern` analyzer was re-walking `AstExpr::Closure` out of the `Body` component and firing E111 before HIR lowering had a chance to settle. Added `pattern: Option<HirPatId>` to `HirClosureParam`, populated from hir-lower alongside the existing destructure desugar, and rewrote the analyzer to iterate `HirExpr::Closure` params and their HIR patterns. Type check uses `HirTy` directly instead of re-reading `AstType`.
-
-## Array literal with mixed wrong types — unification goes off the rails
-
-- [x] `validation/type_checking/array_mixed_multiple_wrong.ks` — fixed 2026-04-20. Added bidirectional `expected_array_elem` hint on `InferCtx`: `HirStmt::Let` extracts the annotated `Array[E]`'s element and seeds `elem_tv = E` before element equates, so each element is compared against the target instead of the first element's literal kind. Also switched array-element equates to per-element spans and argument order `(elem_tv, e_tv)` so diagnostics read "expected <target> got <element>". Test rewritten to one element per line with `// ERROR` on each bad element.
-
-## Try-operator member lookup
-
-- [x] `expressions/try_operator/try_on_non_tryable_type.ks` — **got:** `no member 'tryExtract': NotTryable.tryExtract`, `.fromResidual not found on i64`, non-exhaustive, unreachable
-
-## Unexpected parser error in method_call_error_cases
-
-- [x] `expressions/calls/method_calls/method_call_error_cases.ks` — **got:** `expected '!', '=', or 11 others, found identifier` (line 16) — test had invalid syntax (3 consecutive expr statements without `;` between them; grammar requires them). Added semicolons + `// ERROR:` annotations on all three lines.
-
-## Inference: unresolved `?` infer-var leaks into type-mismatch diagnostic
-
-The inference apply phase is printing raw `?` placeholders in type-mismatch errors instead of the resolved type. Root cause likely in solver's apply-substitutions / type-printer path.
-
-- [x] `inference/mod/inferred_type_mismatch_in_function_arg.ks` — **expected:** `does not conform to protocol` · **got:** `type mismatch: expected str got ?`
-- [x] `inference/mod/inferred_type_mismatch_in_return.ks` — **expected:** `does not conform to protocol` · **got:** `type mismatch: expected str got ?`
-- [x] `inference/mod/inferred_type_mismatch_with_usage.ks` — **expected:** `does not conform to protocol` · **got:** `type mismatch: expected str got ?`
-- [x] `types/generics/constraint_enforcement/explicit_type_arg_conflicts_with_inferred.ks` — **got:** `type mismatch: expected str got ?`
-- [x] `types/literals/array_mixed_types_error.ks` — **got:** `type mismatch: expected ? got ?`
-- [x] `validation/type_checking/struct_init_all_fields_wrong.ks` — **got:** `type mismatch: expected i64 got ?`
-- [x] `validation/type_checking/struct_init_bool_for_int.ks` — **got:** `type mismatch: expected i1 got ?`
-- [x] `expressions/match/type_inference/match_arms_must_have_same_type.ks` — **expected:** `type` · **got:** `type mismatch: expected ? got i64`
-- [x] `patterns/if_let/type_inference/if_let_branches_same_type.ks` — **expected:** `type` · **got:** `type mismatch: expected ? got i64`, `expected i64 got ?`
-- [x] `patterns/guard_let/divergence/guard_let_else_no_return_error.ks` — **expected:** `diverge` · **got:** `type mismatch: expected ? got ()` (alongside correct E003)
-
-## Init delegation (`self.init(…)`) emits wrong diagnostics
-
-- [x] `declarations/delegating_initializers/delegation_to_nonexistent_init.ks` — **got:** `wrong number of arguments: expected 0, got 1`
-- [x] `declarations/delegating_initializers/delegation_with_wrong_types.ks` — **got:** `no member 'init': Bad.init not found`, `duplicate initializer signature: init(_:) [E426]` — test used single-name init params (which carry no label in Kestrel), collapsing both inits to `init(_:)`; switched to two-name params (2026-04-20)
-
-## Spurious unreachable-pattern / irrefutable-pattern warnings
-
-Exhaustiveness pass flags these as unreachable/irrefutable when they aren't.
-
-- [x] `patterns/if_let/warnings/irrefutable_binding_pattern_warning.ks` — **got:** `unreachable pattern [E306]`
-- [x] `patterns/if_let/warnings/irrefutable_if_let_warning.ks` — **got:** `unreachable pattern [E306]`
-- [x] `patterns/exhaustiveness/overlapping_ranges.ks` — **got:** `unreachable pattern [E306]`
-- [x] `patterns/exhaustiveness/unreachable_after_wildcard.ks` — **got:** `irrefutable pattern in match arm makes 1 subsequent arm unreachable [E303]`
-- [x] `patterns/exhaustiveness/unreachable_array_rest.ks` — **got:** `Array is not defined`, `unsupported unary operator '-'`, non-exhaustive — test was `stdlib: false` but array sugar + unary `-` need stdlib; flipped flag and replaced `-1` with `0` to avoid `Negatable` (2026-04-20)
-- [x] `patterns/pattern_types/nested_at_patterns_error.ks` — **got:** irrefutable E303 + unreachable E306 — fixed 2026-04-20. hir-lower's nested-`@` guard was still building a well-formed `HirPat::At{At{Wildcard}}` after emitting the error, which the flattener collapsed to a bare wildcard → spurious unreachable on the follow-up arm. Now replaces the subpattern with `HirPat::Error` (keeping the outer binding so arm-body references resolve), and `check_user_match` skips arms containing `HirPat::Error` (mirrors the existing `ResolvedTy::Error` skip).
-
-(`or_pattern_inconsistent_bindings_error.ks` — spurious E306 resolved, but test still fails because the "inconsistent" diagnostic is missing. Tracked as a False Negative.)
-
-## Codegen: static/computed property entity not registered in symbol table
-
-All fail during link with `unknown global entity` / `unknown function entity` for `Main.Foo._s`, `Main.Foo._v`, or `Main.globalComputedVar`. Entity(3523/3524) is the symbol id.
-
-- [x] `validation/properties_intended/enum_computed_var_get_set.ks` — **got:** `codegen/link failed: unknown global entity Entity(3524) (Main.Foo._v)`
-- [x] `validation/properties_intended/enum_static_computed_var_get_set.ks` — **got:** `unknown global entity Entity(3524) (Main.Foo._s)`
-- [x] `validation/properties_intended/enum_static_let_initial_value.ks` — **got:** `unknown global Entity(3524)`
-- [x] `validation/properties_intended/enum_static_var_mutability_and_initial_value.ks` — **got:** `unknown global Entity(3524)`
-- [x] `validation/properties_intended/global_computed_var_get_set.ks` — **got:** `call to unknown function entity Entity(3523) (Main.globalComputedVar)`
-- [x] `validation/properties_intended/struct_static_computed_var_get_set.ks` — **got:** `unknown global entity Entity(3523) (Main.Foo._s)`
-- [x] `validation/properties_intended/struct_static_let_initial_value.ks` — **got:** `unknown global Entity(3523)`
-- [x] `validation/properties_intended/struct_static_var_mutability_and_initial_value.ks` — **got:** `unknown global Entity(3523)`
-
-## Array rest-pattern bindings lower to `.count.raw` on undeclared symbol
-
-Lowering of `[a, b, ...rest]` / `[all...]` emits `<binding>.count.raw` in MIR before the binding is actually introduced. All fail with `undefined name 'X.count.raw'`.
-
-- [x] `patterns/array_matchable/capture_all_as_slice.ks` — **got:** `undefined name 'all.count.raw'`
-- [x] `patterns/array_matchable/let_array_destructure.ks` — **got:** `undefined name 'all.count.raw'`
-- [x] `patterns/array_matchable/let_with_rest.ks` — **got:** `undefined name 'rest.count.raw'`
-- [x] `patterns/array_matchable/prefix_rest_suffix.ks` — **got:** `undefined name 'middle.count.raw'`
-- [x] `patterns/array_matchable/recursive_slice_destructuring.ks` — **got:** `undefined name 'rest'`
-- [x] `patterns/array_matchable/rest_suffix_without_prefix.ks` — **got:** `undefined name 'rest.count.raw'`
-- [x] `patterns/array_matchable/rest_with_binding.ks` — **got:** `undefined name 'rest.count.raw'`
-- [x] `patterns/array_matchable/slice_array_pattern.ks` — **got:** `type mismatch: expected Slice[i64] got Array[i64]`
-
-## Mutating-init body: `self.x = …` double-flagged as E201 + E005
-
-Every init-body `self.field = value` fires both `cannot assign to immutable field 'x' [E201]` AND `initializer does not initialize all fields: 'x' [E005]`. Init-self-field assignment path is broken — both analyses see it as a no-op.
-
-- [x] `validation/duplicate_callable/different_arity_with_same_label_start_is_valid.ks` — **got:** E201+E005 on lines 8,9
-- [x] `validation/duplicate_callable/different_labels_is_valid_overload_init.ks` — **got:** E201+E005 on lines 8,9
-- [x] `validation/duplicate_callable/same_labels_is_duplicate_init.ks` — **got:** E201+E005 on lines 8,9
-- [x] `validation/duplicate_callable/two_protocols_same_init_label_different_types.ks` — **got:** E201+E005 on lines 16,17
-
-## `str.unsafePtr` / `str.length` missing on String primitive
-
-Primitive `str` lost these members somewhere; tests targeting pointer-interop fail.
-
-- [x] `types/pointer/string_length_still_works.ks` — **got:** `no member 'length': str.length not found`
-- [x] `types/pointer/string_unsafe_ptr_compiles.ks` — **got:** `no member 'unsafePtr': str.unsafePtr not found`
-- [x] `types/pointer/string_unsafe_ptr_in_struct_field.ks` — **got:** `str.unsafePtr not found`, `str.length not found`
-- [x] `types/pointer/string_unsafe_ptr_return_type.ks` — **got:** `str.unsafePtr not found`
-
-## Runtime: global / computed property wrong value
-
-The binary runs but produces wrong output. Related family to the codegen-link failures above.
-
-- [x] `validation/properties_intended/global_let_initial_value.ks` — **expected stdout:** `7` · **got:** `-256` (uninitialized storage)
-- [x] `validation/properties_intended/global_var_mutability_and_initial_value.ks` — **expected:** `0\n5` · **got:** `8663501056\n8660684288` (stack address leaked as value)
-- [x] `validation/properties_intended/struct_computed_var_get_set.ks` — **expected:** `5\n9` · **got:** `5\n5` (setter not invoked)
-
-## Dictionary default-hasher type arg leaks through unification/printer
-
-`Dictionary[K, V]` unifies with `Dictionary[K, V, DefaultHasher]` should succeed (default arg), but the printer surfaces the third arg in diagnostics.
-
-- [x] `types/type_operators/dictionary_operator/dictionary_get_value.ks` — **got:** `expected Dictionary[Int64, Int64] got Dictionary[Int64, Int64, DefaultHasher]`
-- [x] `types/type_operators/dictionary_operator/dictionary_interchangeable_with_explicit.ks` — **got:** same
-- [x] `types/type_operators/dictionary_operator/dictionary_type_basic.ks` — **got:** same
-
-## Spurious dead-code / unreachable-code warnings
-
-- [x] `expressions/returns/return_with_semicolon_followed_by_code.ks` — **got:** `unreachable code [E002]` on lines 8,9
-- [x] `validation/dead_code/code_after_return_warns.ks` — **got:** `unreachable code [E002]` on line 9 (wrong line)
-- [x] `validation/type_checking/while_with_wrong_return.ks` — **got:** `unreachable code [E002]` on line 10
-
-## Protocol subscripts require a body (E608)
-
-Subscript declarations inside protocol requirements shouldn't need a body; they should be abstract like methods.
-
-- [x] `validation/duplicate_callable/different_labels_is_valid_overload_subscript.ks` — **got:** `subscript must have a body [E608]` on both overloads
-- [x] `validation/duplicate_callable/same_labels_is_duplicate_subscript.ks` — **got:** `subscript must have a body [E608]` on both overloads
-
-## `Prelude.*` path not resolvable
-
-- [x] `builtins/matchable/generic_matchable.ks` — **got:** `cannot find type 'Prelude.Matchable' in this scope [E436]`, `no member 'matches': T.matches`
-- [x] `expressions/throw/throw_with_try_pattern.ks` — **got:** `cannot find type 'Prelude' in this scope`, `undefined 'Prelude.ControlFlow.{Continue,Break}'`
-
-## Shift operators leak `by:` label
-
-Protocol signature for `<<`/`>>` expects unlabeled arg but source declares `by:`.
-
-- [x] `expressions/protocol_operators/shift_left_operator_protocol.ks` — **got:** `wrong argument label: expected '_', got 'by'`
-- [x] `expressions/protocol_operators/shift_right_operator_protocol.ks` — **got:** `wrong argument label: expected '_', got 'by'`
-
-## `var (a, b) = tuple` destructuring — bindings reported as immutable
-
-- [x] `patterns/let_destructuring/tuple_destructuring/var_tuple_destructure_mutable.ks` — **got:** `cannot assign to immutable variable 'a' [E200]`, `cannot assign to immutable variable 'b' [E200]`
-
-## Binary-expression LHS of assignment produces wrong diagnostic
-
-- [x] `validation/mutability/assign_to_binary_expression_fails.ks` — **got:** `unsupported binary operator '+'`
-
-## Assign-to-field-on-immutable-receiver fires wrong diagnostic
-
-- [x] `validation/mutability/assign_to_field_on_immutable_receiver.ks` — **got:** `cannot assign to immutable variable 's' [E200]` (should be "immutable field 'x'")
+> **Agent instructions:** When you fix a failing test (or verify that an existing entry has become passing), move it to the **# Fixed** section at the bottom of this file. Move the full bullet — the `[x]` marker, the failure mode, and any explanation — preserving its subsection heading for context. If a subsection's last remaining item is being moved, move the subsection heading and its explanatory prose with it. `[x]` entries must never sit in **# False Negatives** or **# Stdlib** — those lists are for still-failing `[ ]` items only. Do not modify a test's source to make it pass; if a test is genuinely invalid (wrong syntax, etc.), note that in the entry.
 
 ---
 
@@ -421,11 +215,10 @@ Tests expect "does not conform to protocol" (Hashable); compiler emits generic t
 Desugarings (`for`, `try`, operators, etc.) fall through to raw member-lookup errors (`no member 'iter'`, `no member 'next'`) instead of emitting the intended protocol-conformance diagnostic.
 
 - [ ] `patterns/for_loops/for_loop_over_non_iterator_without_iter_method.ks` — **expected:** `Iterable` · **got:** `no member 'iter' on type 'NotIterable'`, `does not conform to protocol: ? !: Iterator`, `no member 'next' on type '?'`
-- [x] `expressions/protocol_operators/operator_without_protocol_conformance.ks` — **expected:** `add` · **got:** `does not conform to protocol: Number !: AddOperatorProtocol` (correct) + `no member 'add' on type 'Number'` (cascading; annotation matches the first, second is flagged unexpected)
 
 ## Match-expression diagnostics
 
-> **lib1:** duplicate-binding-in-pattern + unknown-enum-case + wrong-arity (tuple/enum) emitted during pattern binding in `kestrel-semantic-tree-binder/src/body_resolver/patterns.rs` via `diagnostics/pattern.rs`. Float-literal-in-pattern and guard-must-be-Bool reported from the same path / `type_check` analyzer respectively. The `method_call_error_cases` entry is really a parser/bind error in `kestrel-semantic-tree-binder/src/body_resolver/calls.rs`.
+> **lib1:** duplicate-binding-in-pattern + unknown-enum-case + wrong-arity (tuple/enum) emitted during pattern binding in `kestrel-semantic-tree-binder/src/body_resolver/patterns.rs` via `diagnostics/pattern.rs`. Float-literal-in-pattern and guard-must-be-Bool reported from the same path / `type_check` analyzer respectively.
 
 - [ ] `expressions/match/errors/duplicate_binding_name.ks` — **expected:** `duplicate`
 - [ ] `expressions/match/errors/float_literal_in_pattern.ks` — **expected:** `float`
@@ -433,7 +226,6 @@ Desugarings (`for`, `try`, operators, etc.) fall through to raw member-lookup er
 - [ ] `expressions/match/errors/wrong_enum_arity.ks` — **expected:** any error
 - [ ] `expressions/match/errors/wrong_tuple_arity.ks` — **expected:** `arity`
 - [ ] `expressions/match/guards/guard_must_be_bool.ks` — **expected:** `Bool`
-- [x] `expressions/calls/method_calls/method_call_error_cases.ks` — **expected at line 15:** any error (fixed together with the parser-error entry above)
 
 ## Optional type diagnostics
 
@@ -466,21 +258,13 @@ Desugarings (`for`, `try`, operators, etc.) fall through to raw member-lookup er
 
 ## Field-access / tuple-index diagnostics
 
-Tests expect specific phrasing ("no member 'z' on type 'Point'", "cannot index into non-tuple type", "out of bounds"); compiler emits the generic member-lookup error instead.
+Tests expect specific phrasing ("cannot index into non-tuple type", "out of bounds"); compiler emits the generic member-lookup error instead.
 
 > **lib1:** `kestrel-semantic-analyzers/src/analyzers/field/` + `kestrel-semantic-tree-binder/src/diagnostics/member_access.rs` — member-lookup sees the receiver's type and emits the specific phrasing. Tuple-index-out-of-bounds / non-tuple-index are in the same member-access path (tuple arity known statically).
 
 - [ ] `expressions/field_access/member_access_on_primitive_type_error.ks` — **expected:** `cannot access member on type`
-- [x] `expressions/field_access/nonexistent_field_error.ks` — **expected:** `no member 'z' on type 'Point'`
 - [ ] `validation/type_checking/tuple_index_on_non_tuple.ks` — **expected:** `cannot index into non-tuple type`
 - [ ] `validation/type_checking/tuple_index_out_of_bounds.ks` — **expected:** `out of bounds`
-
-## Field / variable mutability diagnostics on nested/field paths
-
-> **lib1:** `kestrel-semantic-analyzers/src/analyzers/assignment_validation/` — walks the LHS path; if any receiver on the chain is immutable, emits "cannot assign to immutable field". Complements `kestrel-semantic-tree-binder/src/diagnostics/assignment.rs` for the bind-time base-variable case.
-
-- [x] `validation/mutability/nested_field_assignment_outer_immutable_fails.ks` — **expected:** `cannot assign to immutable field`
-- [x] `validation/mutability/nested_field_assignment_receiver_immutable_fails.ks` — **expected:** `cannot assign to immutable field`
 
 ## Self in wrong context
 
@@ -507,117 +291,381 @@ No analyzer in lib2 detects delegating-init calls from non-init contexts. Curren
 
 - [ ] `declarations/computed_properties/protocol_requires_setter_but_only_getter_provided.ks` — **expected:** `setter`
 
-## Try-on-non-tryable-type diagnostic
-
-> **lib1:** `kestrel-semantic-analyzers/src/analyzers/type_check/mod.rs` — `try x` desugar expects `Tryable` conformance, which surfaces the `tryExtract` diagnostic when the operand type doesn't have it.
-
-- [x] `expressions/control_flow/try_on_non_tryable_type.ks` — **expected:** `tryExtract`
-
-## Or-pattern inconsistent bindings
-
-> **lib1:** `kestrel-semantic-tree-binder/src/body_resolver/patterns.rs` via `diagnostics/pattern.rs` — when lowering an or-pattern the binder joins the binding sets from each alternative and emits "inconsistent" if they differ in name or type.
-
-- [x] `expressions/match/or_patterns/or_pattern_inconsistent_bindings_error.ks` — **expected:** `inconsistent`
-
 ## Empty array literal requires type annotation
-
-- [ ] `expressions/paths/empty_array_requires_type_annotation.ks` — **expected:** `could not infer type`
 
 > **lib1:** `kestrel-semantic-analyzers/src/analyzers/type_inference/diagnostics.rs` — after inference finishes, unresolved infer-vars on array-literal element types produce the "could not infer type" diagnostic.
 
-## Move checker silent on non-Copyable double-move (with stdlib)
-
-- [x] `memory_model/copy_semantics/not_copyable_move_semantics_with_stdlib.ks` — **expected at line 15:** `use of moved value` · **got:** none (pre-existing; was never passing)
+- [ ] `expressions/paths/empty_array_requires_type_annotation.ks` — **expected:** `could not infer type`
 
 ---
 
 # Stdlib
 
 Run: `file_tests --test-threads=1 stdlib` on `feature/incremental-hecs` (2026-04-20).
-Result: **146 passed · 57 failed**.
+Result: **169 passed · 34 failed** (after witness-instantiation-collapse fix; was ~151/~52).
 
 Previously resolved categories:
 - **E205 `cannot pass temporary value to 'mutating' parameter`** — fully resolved 2026-04-20 (access-mode analyzer receiver/arg split + stdlib `mutating` → `consuming` flip). All former E205 tests reclassified below by their remaining failure.
 - **Type parameter not in scope** — fixed 2026-04-20 (`WorldResolver::where_clauses` context fix). 3 stdlib tests now pass (`append_from_iterable`, `dictionary_merge_from_pairs`, `set_insert_contents_of`); 4 others moved to derived-protocol bucket.
+- **Monomorphization witness gaps** — fixed 2026-04-20 via new `ProtocolMembers` query in `kestrel-name-res` that unifies the protocol-child + extension + parent-protocol walk. Witness generation and name-resolution consumers now call one query instead of reassembling the walk. 4 tests pass; 1 regressed to a separate pre-existing overload-collision bug; 20 others reclassified by new failure mode.
+- **Witness-instantiation collapse** — fixed 2026-04-20. `ConformingProtocols` deduped by protocol entity so `Int64: Convertible[Int8], [Int16], [Int32], ...` collapsed into a single `Convertible` witness bound to the first `init(from:)` overload — every `Int64(from: x)` silently truncated x to 8 bits. Fix: new `ConformingProtocolInstantiations` query preserves per-conformance type args; `witness_lower.rs` emits one witness per `(protocol, type_args)` with parameter-type init disambiguation; codegen's `find_witness_with_method` filters by `protocol_type_args`. Net: −23 stdlib failures (integer conversions, parse, byte-endian, bitwidth ops, float conversions).
 
-## Monomorphization witness gaps — protocol extension methods not in witness (25 tests)
+## Codegen symbol not found
 
-Dominant failure category. Methods defined in `extend Iterator` (and protocol extensions on concrete iterator/view types) are not found in the monomorphized witness table. All fail at codegen/link with `method 'X' not found in witness for Y: std.iter.Iterator`. Root cause: monomorphizer doesn't include extension-provided methods when building witness tables for concrete types.
-
-- [ ] `stdlib/iterator/filter_map_explicit.ks` — `filterMap`/`collect` not found on ArrayIterator/FilterMapIterator
-- [ ] `stdlib/iterator/flatten_iterator.ks` — `map`/`flatten`/`collect` not found
-- [ ] `stdlib/iterator/fuse_and_cycle.ks` — `fuse`/`collect`/`cycle`/`take` not found
-- [ ] `stdlib/iterator/inspect_adapter.ks` — `inspect`/`collect`/`filter` not found
-- [ ] `stdlib/iterator/intersperse_adapter.ks` — `intersperse`/`collect` not found
-- [ ] `stdlib/iterator/intersperse_with_adapter.ks` — `intersperseWith`/`collect` not found
-- [ ] `stdlib/iterator/is_sorted_by_comparator.ks` — `isSorted` not found
-- [ ] `stdlib/iterator/is_sorted_by_key.ks` — `isSortedBy` not found
-- [ ] `stdlib/iterator/is_sorted_checks.ks` — `isSorted`/`isSortedDescending` not found
-- [ ] `stdlib/iterator/map_filter_collect.ks` — `map`/`collect`/`filter` not found
-- [ ] `stdlib/iterator/min_by_max_by.ks` — `minBy`/`maxBy` not found
-- [ ] `stdlib/iterator/min_max_sorted.ks` — `min`/`max`/`sorted`/`sum`/`product` not found
-- [ ] `stdlib/iterator/peekable_adapter.ks` — `peekable` not found
-- [ ] `stdlib/iterator/reduce_adapter.ks` — `reduce` not found
-- [ ] `stdlib/iterator/take_skip_methods.ks` — `take`/`skip`/`takeWhile`/`skipWhile` not found
-- [ ] `stdlib/iterator/try_fold_adapter.ks` — `tryFold` not found
-- [ ] `stdlib/iterator/try_for_each_adapter.ks` — `tryForEach` not found
-- [ ] `stdlib/iterator/utility_adapters.ks` — `stepBy`/`scan`/`position`/`contains` not found
-- [ ] `stdlib/iterator/zip_chain_enumerate.ks` — `zip`/`enumerate`/`chain` not found
-- [ ] `stdlib/string/replacement_and_splitting.ks` — `collect` not found on SplitIterator/SplitWhereIterator
-- [ ] `stdlib/views/bytes_view_iter.ks` — `collect` not found on BytesIterator
-- [ ] `stdlib/views/chars_view_iter_and_count.ks` — `collect` not found on CharsIterator
-- [ ] `stdlib/views/graphemes_view.ks` — `collect` not found on GraphemesIterator
-- [ ] `stdlib/views/lines_view.ks` — `collect` not found on LinesIterator
-- [ ] `stdlib/views/string_iter.ks` — `collect`/`map`/`filter`/`count` not found on StringIterator
-
-Note: 8 of these (flatten_iterator, inspect_adapter, map_filter_collect, peekable_adapter, take_skip_methods, zip_chain_enumerate, plus flatten/inspect) previously showed derived-protocol errors (`NotEqual`/`Greater` on `Item`). Those type-checking errors are now resolved — tests get past inference but hit the monomorphization wall.
-
-## Derived-protocol bounds not propagated to generic params (5 tests)
-
-Generic param bound on base protocol (e.g. `Equal`) doesn't satisfy auto-derived/refinement protocols (`NotEqual`). Solver emits `? !: NotEqual` + `no member 'notEquals' on type '?'`. Reduced from 13 → 5 tests; the other 8 now get past type-checking and fail in the monomorphization bucket above.
-
-- [ ] `stdlib/iterator/filter_map_flatten.ks` — `? !: NotEqual`
-- [ ] `stdlib/iterator/unzip_iterator.ks` — `? !: NotEqual`
-- [ ] `stdlib/optional/optional_flatten.ks` — `? !: NotEqual`
-- [ ] `stdlib/memory/memory_allocator.ks` — `? !: NotEqual`
-- [ ] `stdlib/memory/memory_raw_pointer.ks` — `? !: NotEqual`
-
-## Codegen symbol not found (2 tests)
-
-Compiled but link fails with `call to undeclared function` — symbol mangling or monomorphization miss for specific functions.
+Compiled but link fails with `call to undeclared function` — symbol mangling or monomorphization miss for specific functions. The dominant sub-pattern is `Array.init` with abstract `Iterator.Item` type args not being monomorphized — this is the `collect()` path.
 
 - [ ] `stdlib/array/misc_extensions.ks` — `call to undeclared function: Array.init(count:generator:)` (was 16 NotEqual errors — derived-protocol issue resolved, now hits codegen)
-- [ ] `stdlib/result/result_transforms.ks` — `call to undeclared function: Result.isErr`
+- [ ] `stdlib/iterator/filter_map_flatten.ks` — `call to undeclared function: Array.init` (was derived-protocol `? !: NotEqual`, now hits codegen)
+- [ ] `stdlib/iterator/filter_map_explicit.ks` — `call to undeclared function: Array.init` (was witness gap)
+- [ ] `stdlib/iterator/flatten_iterator.ks` — `call to undeclared function: Array.init` (was witness gap)
+- [ ] `stdlib/iterator/fuse_and_cycle.ks` — `call to undeclared function: Array.init` (was witness gap)
+- [ ] `stdlib/iterator/inspect_adapter.ks` — `call to undeclared function: Array.init` (was witness gap)
+- [ ] `stdlib/iterator/intersperse_with_adapter.ks` — `call to undeclared function: Array.init` (was witness gap)
+- [ ] `stdlib/iterator/map_filter_collect.ks` — `call to undeclared function: Array.init` (was witness gap)
+- [ ] `stdlib/iterator/take_skip_methods.ks` — `call to undeclared function: Array.init` (was witness gap)
+- [ ] `stdlib/iterator/try_fold_adapter.ks` — `call to undeclared function: tryFold` monomorphization (was witness gap)
+- [ ] `stdlib/iterator/zip_chain_enumerate.ks` — `call to undeclared function: Array.init` (was witness gap)
+- [ ] `stdlib/views/bytes_view_iter.ks` — `call to undeclared function: Array.init` (was witness gap)
+- [ ] `stdlib/views/chars_view_iter_and_count.ks` — `call to undeclared function: Array.init` (was witness gap)
+- [ ] `stdlib/views/graphemes_view.ks` — `call to undeclared function: Array.init` (was witness gap)
+- [ ] `stdlib/views/string_iter.ks` — `call to undeclared function: Array.init` (was witness gap)
 
-## Runtime exit-code failures (compile OK, assert/behavior wrong) (20 tests)
+## Runtime exit-code failures (compile OK, assert/behavior wrong)
 
 Program compiles and links but exits non-zero — asserts failing or behavior diverging from expectation. Likely codegen or semantic issues.
 
+- [ ] `stdlib/iterator/min_by_max_by.ks` — exit 2 (was witness gap)
+- [ ] `stdlib/iterator/peekable_adapter.ks` — exit 2 (was witness gap)
+- [ ] `stdlib/iterator/reduce_adapter.ks` — exit 2 (was witness gap)
 - [ ] `stdlib/char/char_case_conversion.ks` — exit -1
-- [ ] `stdlib/dictionary/dictionary_capacity_management.ks` — exit -1
 - [ ] `stdlib/dictionary/dictionary_subscripts.ks` — exit 6
-- [ ] `stdlib/float32/float32_conversion.ks` — exit 1
-- [ ] `stdlib/float64/float64_clamp_lerp_conversion_format.ks` — exit 15
-- [ ] `stdlib/float64/float64_constructors_and_constants.ks` — exit 5
-- [ ] `stdlib/int16/int16_bitwidth_and_conversion.ks` — exit 1
-- [ ] `stdlib/int16/int16_boundaries_and_constants.ks` — exit 1
-- [ ] `stdlib/int32/int32_bitwidth_and_conversion.ks` — exit 1
-- [ ] `stdlib/int32/int32_boundaries_and_constants.ks` — exit 1
-- [ ] `stdlib/int64/int64_byte_conversion_big_endian.ks` — exit 11
-- [ ] `stdlib/int64/int64_byte_conversion_little_endian.ks` — exit 7
 - [ ] `stdlib/io/io_error_types.ks` — exit 2
 - [ ] `stdlib/string/case_conversion.ks` — exit 7
-- [ ] `stdlib/uint8/uint8_bitwidth_and_conversion.ks` — exit 17
-- [ ] `stdlib/uint16/uint16_bitwidth_and_conversion.ks` — exit 11
-- [ ] `stdlib/uint32/uint32_bitwidth_and_conversion.ks` — exit 11
 - [ ] `stdlib/uint64/uint64_bitwidth_and_conversion.ks` — exit 5
 - [ ] `stdlib/uint64/uint64_boundaries_and_constants.ks` — exit 7
 - [ ] `stdlib/uint64/uint64_overflow_behavior.ks` — exit 3
 
-## One-offs (5 tests)
+## Witness overload collision
+
+When a protocol extension declares two methods with the same name but different arities (e.g. `isSorted()` and `isSorted(by:)` on `Iterator`), the witness table stores them under the same key and `IndexMap::insert` keeps only the last one. Calls to the dropped overload fail at codegen with Cranelift arg-count errors. Needs witness keys that include the arity or label-set, not just the method name.
+
+- [ ] `stdlib/iterator/is_sorted_checks.ks` — `mismatched argument count: got 2, expected 3` — two `isSorted` methods collide; arity-0 variant is dropped
+
+## Cranelift verifier errors — extension method calling convention
+
+Extension methods dispatched through witnesses get wrong argument types. Likely the monomorphizer substitutes type args incorrectly for extension-method calls.
+
+- [ ] `stdlib/iterator/intersperse_adapter.ks` — `arg 2 has type i64, expected i8` (was witness gap)
+
+## Witness not found for abstract associated type
+
+Extension methods that require additional protocol conformances on `Iterator.Item` (e.g., `Comparable`, `Equatable`, `Addable`) fail because the monomorphizer can't find witnesses for the abstract associated type entity.
+
+- [ ] `stdlib/iterator/min_max_sorted.ks` — `method 'compare' not found in witness for std.iter.Iterator.Item: Comparable`; also `add`/`multiply` (was witness gap)
+- [ ] `stdlib/iterator/utility_adapters.ks` — `method 'equals' not found in witness for std.iter.Iterator.Item: Equatable` (was witness gap)
+
+## One-offs
 
 - [ ] `stdlib/array/init_count_generator.ks` — type mismatch: `expected i64 got (?) -> ?` + `? !: Multipliable` — closure param type not inferred for `Array(count:generator:)` init
 - [ ] `stdlib/int64/int64_parsing.ks` — `parse()` arity mismatch: test calls with 2 args, stdlib signature takes 1
 - [ ] `stdlib/array/subscript_assignment.ks` — wrong diagnostic: expected `cannot assign to temporary value`, got E202 `cannot assign to this expression`
 - [ ] `stdlib/float64/float64_exp_and_log.ks` — line 26: `no member '(subscript)' on type 'Float64'` (subscript lookup unexpectedly triggered on scalar)
-- [ ] `memory_model/copy_semantics/not_copyable_move_semantics_with_stdlib.ks` — expected `use of moved value` at line 15, not emitted (move checker not running)
+
+---
+
+# Fixed
+
+Tests previously listed above as failing, now passing. Grouped by their original category so the surrounding context (analyzer location, root-cause notes, regression tracking) stays intact.
+
+## False Positives
+
+Compiler previously rejected valid code, produced spurious diagnostics, emitted wrong code, or ran code incorrectly.
+
+### Range matchable — false non-exhaustive-match on total range patterns
+
+- [x] `patterns/range_matchable/range_from.ks` — **got:** `non-exhaustive match: missing _ [E305]`
+- [x] `patterns/range_matchable/char_range_from.ks` — **got:** `non-exhaustive match: missing _ [E305]`
+- [x] `patterns/range_matchable/char_range_exclusive.ks` — **got:** `Expected exit code 0, got 1` (compiler OK, runtime fail)
+- [x] `patterns/range_matchable/char_range_inclusive.ks` — **got:** `Expected exit code 0, got 1`
+- [x] `expressions/match/never_type/match_arm_with_break_in_loop.ks` — **got:** `non-exhaustive match: missing _ [E305]` (break→Never arm not counted as covering)
+
+### `type Alias = X` init-call and assoc-type projection regressions
+
+- [x] `declarations/type_aliases/type_alias_init_call.ks` — **got:** `no member '(subscript)': C.(subscript)`, `no member 'count': ?.count`
+- [x] `declarations/wacky_inference/nested_associated_type_projections.ks` — **got:** `no member 'baseValue': T.baseValue`
+- [x] `execution_graph/protocols/static_method_on_associated_type.ks` — **got:** `no member 'create': T.create`
+- [x] `validation/type_checking/tuple_index_with_associated_type_equality.ks` — **got:** `no member '0': Item.0`, `no member '1': Item.1`
+
+### `@builtin(.Copyable)` marker-protocol check too strict
+
+E419 requires Copyable to be a marker protocol (no methods/types), but these tests declare it with methods/assoc types *expecting* the check — and E419 now fires unconditionally before the specific wording test expects.
+
+- [x] `builtins/protocols/copyable_on_protocol_with_associated_type.ks` — **got:** E419 `@builtin(.Copyable) must be a marker protocol`
+- [x] `builtins/protocols/copyable_on_protocol_with_method.ks` — **got:** E419 `@builtin(.Copyable) must be a marker protocol`
+
+### Extension type-parameter not in where-clause scope
+
+Extension's generic params (`extend S[T] where …`) don't make `T`, `U` visible inside `where` clause type references.
+
+- [x] `declarations/extensions/extension_type_param_not_in_scope.ks` — **got:** `cannot find type 'U' in this scope [E436]` at line 7
+- [x] `declarations/extensions/wrong_type_param_count.ks` — **got:** `cannot find type 'U' in this scope` at line 6
+
+### Generic `not Copyable` type param — spurious Int32/T mismatches
+
+Fixed 2026-04-20: `ScopeFor` was adding std auto-imports to *every* non-std scope (functions, structs, etc.), so name lookup for `accept` from inside a function found stdlib's `std.net.libc.accept(sockfd: Int32, ...)` via wildcard import before walking up to the local `accept` in the enclosing module. Restricted auto-imports to `NodeKind::Module` scopes only. Net effect across suite: +89 passing, -71 failing.
+
+- [x] `memory_model/generic_copyability/type_parameter_with_not_copyable_can_be_moved_once.ks`
+
+(`type_parameter_with_not_copyable_use_after_move.ks` — FP symptoms resolved by the auto-import fix, but the test still fails for a different reason: move-checker not running. Moved to False Negatives.)
+
+### Regressions on positive tests
+
+- [x] `builtins/intrinsics/panic_is_diverging.ks` — **expected:** no errors · **got:** `function 'unreachable' does not return a value on all code paths [E001]`
+- [x] `declarations/expression_bodied_functions/expression_bodied_function_with_where_clause.ks` — **expected:** no errors · **got:** `method 'double' has wrong return type for protocol 'Doubler' [E458]` — fixed 2026-04-20. `conformance_completeness::check_method_return_type` compared protocol vs impl return types with `ast_types_equal` (pure structural AST-segment compare), so the substituted `Self → Int64` (1 segment) never matched the impl's `std.num.Int64` (3 segments). Rewrote to resolve both sides to entities via `resolve_type_entity_with_self`, with a focused `resolve_expected_return` helper that projects protocol associated-type names through the impl's bindings. Deleted `build_associated_type_subs`, `substitute_ast_type`, `ast_types_equal`, `is_named_type`.
+
+### Static/`mutable var` property through type parameter read as immutable
+
+- [x] `codegen/generics/test_static_mutable_property_via_type_parameter.ks` — fixed 2026-04-20. Two parts: (1) field/subscript builders now recognize bodyless protocol requirements `{ get set }` by picking up raw `Get`/`Set` tokens inside `PropertyAccessors` (previously only wrapper `GetterClause`/`SetterClause` were checked), so the field gets `Gettable`/`Settable` and the E201 false positive disappears. (2) MIR lowering of `T.prop = v` for protocol-property assignments now dispatches through the conformance witness using a `<name>.set` convention — witnesses include a second binding that resolves to the conforming type's `Setter` child.
+
+### ExpressibleByArrayLiteral doesn't fire for user types
+
+Fixed 2026-04-20: (1) inference checked user-facing `ExpressibleByArrayLiteral` instead of the internal `_ExpressibleByArrayLiteral` the compiler actually lowers against; (2) array/dict literals didn't emit `Associated(lit_tv, "Element"/"Key"/"Value", elem_tv)` to flow target associated types into element TyVars; (3) `solve_associated` didn't substitute the container's type args through the alias annotation; (4) `resolve_associated_type` for concrete structs didn't search extensions (Dictionary's `type Key = K` lives on an `extend` block); (5) defaulting created `Array[]` with empty args instead of fresh TyVars per type param; (6) missing `@builtin(.DefaultArrayLiteralType)` marker. Also removed `ExpressibleByArrayLiteral` / `ExpressibleByDictionaryLiteral` as builtin variants — only `_ExpressibleBy*Literal` needs a builtin.
+
+- [x] `builtins/literal_protocols/custom_type_with_array_literal.ks` — **expected:** no errors · **got:** `type mismatch: expected MyList got Array`
+
+### Closure generic param inference E606 firing spuriously
+
+- [x] `expressions/closures/closure_with_generic_param_inferred.ks` — **got:** `could not infer type for closure parameter [E606]` — test was `stdlib: false` but needed stdlib integer-literal defaulting to pin `T`; flipped flag (2026-04-20)
+
+### Tuple arity error in parameter destructuring
+
+- [x] `declarations/parameter_destructuring/closure_tuple_arity_mismatch.ks` — fixed 2026-04-20. The closure-param branch in the `param_pattern` analyzer was re-walking `AstExpr::Closure` out of the `Body` component and firing E111 before HIR lowering had a chance to settle. Added `pattern: Option<HirPatId>` to `HirClosureParam`, populated from hir-lower alongside the existing destructure desugar, and rewrote the analyzer to iterate `HirExpr::Closure` params and their HIR patterns. Type check uses `HirTy` directly instead of re-reading `AstType`.
+
+### Array literal with mixed wrong types — unification goes off the rails
+
+- [x] `validation/type_checking/array_mixed_multiple_wrong.ks` — fixed 2026-04-20. Added bidirectional `expected_array_elem` hint on `InferCtx`: `HirStmt::Let` extracts the annotated `Array[E]`'s element and seeds `elem_tv = E` before element equates, so each element is compared against the target instead of the first element's literal kind. Also switched array-element equates to per-element spans and argument order `(elem_tv, e_tv)` so diagnostics read "expected <target> got <element>". Test rewritten to one element per line with `// ERROR` on each bad element.
+
+### Try-operator member lookup
+
+- [x] `expressions/try_operator/try_on_non_tryable_type.ks` — **got:** `no member 'tryExtract': NotTryable.tryExtract`, `.fromResidual not found on i64`, non-exhaustive, unreachable
+
+### Unexpected parser error in method_call_error_cases
+
+- [x] `expressions/calls/method_calls/method_call_error_cases.ks` — **got:** `expected '!', '=', or 11 others, found identifier` (line 16) — test had invalid syntax (3 consecutive expr statements without `;` between them; grammar requires them). Added semicolons + `// ERROR:` annotations on all three lines.
+
+### Inference: unresolved `?` infer-var leaks into type-mismatch diagnostic
+
+The inference apply phase is printing raw `?` placeholders in type-mismatch errors instead of the resolved type. Root cause likely in solver's apply-substitutions / type-printer path.
+
+- [x] `inference/mod/inferred_type_mismatch_in_function_arg.ks` — **expected:** `does not conform to protocol` · **got:** `type mismatch: expected str got ?`
+- [x] `inference/mod/inferred_type_mismatch_in_return.ks` — **expected:** `does not conform to protocol` · **got:** `type mismatch: expected str got ?`
+- [x] `inference/mod/inferred_type_mismatch_with_usage.ks` — **expected:** `does not conform to protocol` · **got:** `type mismatch: expected str got ?`
+- [x] `types/generics/constraint_enforcement/explicit_type_arg_conflicts_with_inferred.ks` — **got:** `type mismatch: expected str got ?`
+- [x] `types/literals/array_mixed_types_error.ks` — **got:** `type mismatch: expected ? got ?`
+- [x] `validation/type_checking/struct_init_all_fields_wrong.ks` — **got:** `type mismatch: expected i64 got ?`
+- [x] `validation/type_checking/struct_init_bool_for_int.ks` — **got:** `type mismatch: expected i1 got ?`
+- [x] `expressions/match/type_inference/match_arms_must_have_same_type.ks` — **expected:** `type` · **got:** `type mismatch: expected ? got i64`
+- [x] `patterns/if_let/type_inference/if_let_branches_same_type.ks` — **expected:** `type` · **got:** `type mismatch: expected ? got i64`, `expected i64 got ?`
+- [x] `patterns/guard_let/divergence/guard_let_else_no_return_error.ks` — **expected:** `diverge` · **got:** `type mismatch: expected ? got ()` (alongside correct E003)
+
+### Init delegation (`self.init(…)`) emits wrong diagnostics
+
+- [x] `declarations/delegating_initializers/delegation_to_nonexistent_init.ks` — **got:** `wrong number of arguments: expected 0, got 1`
+- [x] `declarations/delegating_initializers/delegation_with_wrong_types.ks` — **got:** `no member 'init': Bad.init not found`, `duplicate initializer signature: init(_:) [E426]` — test used single-name init params (which carry no label in Kestrel), collapsing both inits to `init(_:)`; switched to two-name params (2026-04-20)
+
+### Spurious unreachable-pattern / irrefutable-pattern warnings
+
+Exhaustiveness pass flags these as unreachable/irrefutable when they aren't.
+
+- [x] `patterns/if_let/warnings/irrefutable_binding_pattern_warning.ks` — **got:** `unreachable pattern [E306]`
+- [x] `patterns/if_let/warnings/irrefutable_if_let_warning.ks` — **got:** `unreachable pattern [E306]`
+- [x] `patterns/exhaustiveness/overlapping_ranges.ks` — **got:** `unreachable pattern [E306]`
+- [x] `patterns/exhaustiveness/unreachable_after_wildcard.ks` — **got:** `irrefutable pattern in match arm makes 1 subsequent arm unreachable [E303]`
+- [x] `patterns/exhaustiveness/unreachable_array_rest.ks` — **got:** `Array is not defined`, `unsupported unary operator '-'`, non-exhaustive — test was `stdlib: false` but array sugar + unary `-` need stdlib; flipped flag and replaced `-1` with `0` to avoid `Negatable` (2026-04-20)
+- [x] `patterns/pattern_types/nested_at_patterns_error.ks` — **got:** irrefutable E303 + unreachable E306 — fixed 2026-04-20. hir-lower's nested-`@` guard was still building a well-formed `HirPat::At{At{Wildcard}}` after emitting the error, which the flattener collapsed to a bare wildcard → spurious unreachable on the follow-up arm. Now replaces the subpattern with `HirPat::Error` (keeping the outer binding so arm-body references resolve), and `check_user_match` skips arms containing `HirPat::Error` (mirrors the existing `ResolvedTy::Error` skip).
+
+(`or_pattern_inconsistent_bindings_error.ks` — spurious E306 resolved; the "inconsistent" diagnostic is now emitted too. See the False Negatives Fixed entry below.)
+
+### Codegen: static/computed property entity not registered in symbol table
+
+All fail during link with `unknown global entity` / `unknown function entity` for `Main.Foo._s`, `Main.Foo._v`, or `Main.globalComputedVar`. Entity(3523/3524) is the symbol id.
+
+- [x] `validation/properties_intended/enum_computed_var_get_set.ks` — **got:** `codegen/link failed: unknown global entity Entity(3524) (Main.Foo._v)`
+- [x] `validation/properties_intended/enum_static_computed_var_get_set.ks` — **got:** `unknown global entity Entity(3524) (Main.Foo._s)`
+- [x] `validation/properties_intended/enum_static_let_initial_value.ks` — **got:** `unknown global Entity(3524)`
+- [x] `validation/properties_intended/enum_static_var_mutability_and_initial_value.ks` — **got:** `unknown global Entity(3524)`
+- [x] `validation/properties_intended/global_computed_var_get_set.ks` — **got:** `call to unknown function entity Entity(3523) (Main.globalComputedVar)`
+- [x] `validation/properties_intended/struct_static_computed_var_get_set.ks` — **got:** `unknown global entity Entity(3523) (Main.Foo._s)`
+- [x] `validation/properties_intended/struct_static_let_initial_value.ks` — **got:** `unknown global Entity(3523)`
+- [x] `validation/properties_intended/struct_static_var_mutability_and_initial_value.ks` — **got:** `unknown global Entity(3523)`
+
+### Array rest-pattern bindings lower to `.count.raw` on undeclared symbol
+
+Lowering of `[a, b, ...rest]` / `[all...]` emits `<binding>.count.raw` in MIR before the binding is actually introduced. All fail with `undefined name 'X.count.raw'`.
+
+- [x] `patterns/array_matchable/capture_all_as_slice.ks` — **got:** `undefined name 'all.count.raw'`
+- [x] `patterns/array_matchable/let_array_destructure.ks` — **got:** `undefined name 'all.count.raw'`
+- [x] `patterns/array_matchable/let_with_rest.ks` — **got:** `undefined name 'rest.count.raw'`
+- [x] `patterns/array_matchable/prefix_rest_suffix.ks` — **got:** `undefined name 'middle.count.raw'`
+- [x] `patterns/array_matchable/recursive_slice_destructuring.ks` — **got:** `undefined name 'rest'`
+- [x] `patterns/array_matchable/rest_suffix_without_prefix.ks` — **got:** `undefined name 'rest.count.raw'`
+- [x] `patterns/array_matchable/rest_with_binding.ks` — **got:** `undefined name 'rest.count.raw'`
+- [x] `patterns/array_matchable/slice_array_pattern.ks` — **got:** `type mismatch: expected Slice[i64] got Array[i64]`
+
+### Mutating-init body: `self.x = …` double-flagged as E201 + E005
+
+Every init-body `self.field = value` fires both `cannot assign to immutable field 'x' [E201]` AND `initializer does not initialize all fields: 'x' [E005]`. Init-self-field assignment path is broken — both analyses see it as a no-op.
+
+- [x] `validation/duplicate_callable/different_arity_with_same_label_start_is_valid.ks` — **got:** E201+E005 on lines 8,9
+- [x] `validation/duplicate_callable/different_labels_is_valid_overload_init.ks` — **got:** E201+E005 on lines 8,9
+- [x] `validation/duplicate_callable/same_labels_is_duplicate_init.ks` — **got:** E201+E005 on lines 8,9
+- [x] `validation/duplicate_callable/two_protocols_same_init_label_different_types.ks` — **got:** E201+E005 on lines 16,17
+
+### `str.unsafePtr` / `str.length` missing on String primitive
+
+Primitive `str` lost these members somewhere; tests targeting pointer-interop fail.
+
+- [x] `types/pointer/string_length_still_works.ks` — **got:** `no member 'length': str.length not found`
+- [x] `types/pointer/string_unsafe_ptr_compiles.ks` — **got:** `no member 'unsafePtr': str.unsafePtr not found`
+- [x] `types/pointer/string_unsafe_ptr_in_struct_field.ks` — **got:** `str.unsafePtr not found`, `str.length not found`
+- [x] `types/pointer/string_unsafe_ptr_return_type.ks` — **got:** `str.unsafePtr not found`
+
+### Runtime: global / computed property wrong value
+
+The binary runs but produces wrong output. Related family to the codegen-link failures above.
+
+- [x] `validation/properties_intended/global_let_initial_value.ks` — **expected stdout:** `7` · **got:** `-256` (uninitialized storage)
+- [x] `validation/properties_intended/global_var_mutability_and_initial_value.ks` — **expected:** `0\n5` · **got:** `8663501056\n8660684288` (stack address leaked as value)
+- [x] `validation/properties_intended/struct_computed_var_get_set.ks` — **expected:** `5\n9` · **got:** `5\n5` (setter not invoked)
+
+### Dictionary default-hasher type arg leaks through unification/printer
+
+`Dictionary[K, V]` unifies with `Dictionary[K, V, DefaultHasher]` should succeed (default arg), but the printer surfaces the third arg in diagnostics.
+
+- [x] `types/type_operators/dictionary_operator/dictionary_get_value.ks` — **got:** `expected Dictionary[Int64, Int64] got Dictionary[Int64, Int64, DefaultHasher]`
+- [x] `types/type_operators/dictionary_operator/dictionary_interchangeable_with_explicit.ks` — **got:** same
+- [x] `types/type_operators/dictionary_operator/dictionary_type_basic.ks` — **got:** same
+
+### Spurious dead-code / unreachable-code warnings
+
+- [x] `expressions/returns/return_with_semicolon_followed_by_code.ks` — **got:** `unreachable code [E002]` on lines 8,9
+- [x] `validation/dead_code/code_after_return_warns.ks` — **got:** `unreachable code [E002]` on line 9 (wrong line)
+- [x] `validation/type_checking/while_with_wrong_return.ks` — **got:** `unreachable code [E002]` on line 10
+
+### Protocol subscripts require a body (E608)
+
+Subscript declarations inside protocol requirements shouldn't need a body; they should be abstract like methods.
+
+- [x] `validation/duplicate_callable/different_labels_is_valid_overload_subscript.ks` — **got:** `subscript must have a body [E608]` on both overloads
+- [x] `validation/duplicate_callable/same_labels_is_duplicate_subscript.ks` — **got:** `subscript must have a body [E608]` on both overloads
+
+### `Prelude.*` path not resolvable
+
+- [x] `builtins/matchable/generic_matchable.ks` — **got:** `cannot find type 'Prelude.Matchable' in this scope [E436]`, `no member 'matches': T.matches`
+- [x] `expressions/throw/throw_with_try_pattern.ks` — **got:** `cannot find type 'Prelude' in this scope`, `undefined 'Prelude.ControlFlow.{Continue,Break}'`
+
+### Shift operators leak `by:` label
+
+Protocol signature for `<<`/`>>` expects unlabeled arg but source declares `by:`.
+
+- [x] `expressions/protocol_operators/shift_left_operator_protocol.ks` — **got:** `wrong argument label: expected '_', got 'by'`
+- [x] `expressions/protocol_operators/shift_right_operator_protocol.ks` — **got:** `wrong argument label: expected '_', got 'by'`
+
+### `var (a, b) = tuple` destructuring — bindings reported as immutable
+
+- [x] `patterns/let_destructuring/tuple_destructuring/var_tuple_destructure_mutable.ks` — **got:** `cannot assign to immutable variable 'a' [E200]`, `cannot assign to immutable variable 'b' [E200]`
+
+### Binary-expression LHS of assignment produces wrong diagnostic
+
+- [x] `validation/mutability/assign_to_binary_expression_fails.ks` — **got:** `unsupported binary operator '+'`
+
+### Assign-to-field-on-immutable-receiver fires wrong diagnostic
+
+- [x] `validation/mutability/assign_to_field_on_immutable_receiver.ks` — **got:** `cannot assign to immutable variable 's' [E200]` (should be "immutable field 'x'")
+
+## False Negatives
+
+### Syntax Sugar Errors (partial)
+
+- [x] `expressions/protocol_operators/operator_without_protocol_conformance.ks` — **expected:** `add` · **got:** `does not conform to protocol: Number !: AddOperatorProtocol` (correct) + `no member 'add' on type 'Number'` (cascading; annotation matches the first, second is flagged unexpected)
+
+### Match-expression diagnostics (partial)
+
+- [x] `expressions/calls/method_calls/method_call_error_cases.ks` — **expected at line 15:** any error (fixed together with the parser-error entry in False Positives)
+
+### Field-access / tuple-index diagnostics (partial)
+
+- [x] `expressions/field_access/nonexistent_field_error.ks` — **expected:** `no member 'z' on type 'Point'`
+
+### Field / variable mutability diagnostics on nested/field paths
+
+> **lib1:** `kestrel-semantic-analyzers/src/analyzers/assignment_validation/` — walks the LHS path; if any receiver on the chain is immutable, emits "cannot assign to immutable field". Complements `kestrel-semantic-tree-binder/src/diagnostics/assignment.rs` for the bind-time base-variable case.
+
+- [x] `validation/mutability/nested_field_assignment_outer_immutable_fails.ks` — **expected:** `cannot assign to immutable field`
+- [x] `validation/mutability/nested_field_assignment_receiver_immutable_fails.ks` — **expected:** `cannot assign to immutable field`
+
+### Try-on-non-tryable-type diagnostic
+
+> **lib1:** `kestrel-semantic-analyzers/src/analyzers/type_check/mod.rs` — `try x` desugar expects `Tryable` conformance, which surfaces the `tryExtract` diagnostic when the operand type doesn't have it.
+
+- [x] `expressions/control_flow/try_on_non_tryable_type.ks` — **expected:** `tryExtract`
+
+### Or-pattern inconsistent bindings
+
+> **lib1:** `kestrel-semantic-tree-binder/src/body_resolver/patterns.rs` via `diagnostics/pattern.rs` — when lowering an or-pattern the binder joins the binding sets from each alternative and emits "inconsistent" if they differ in name or type.
+
+- [x] `expressions/match/or_patterns/or_pattern_inconsistent_bindings_error.ks` — **expected:** `inconsistent`
+
+### Move checker silent on non-Copyable double-move (with stdlib)
+
+- [x] `memory_model/copy_semantics/not_copyable_move_semantics_with_stdlib.ks` — **expected at line 15:** `use of moved value` · **got:** none (pre-existing; was never passing)
+
+## Stdlib
+
+### Monomorphization witness gaps — protocol extension methods not in witness
+
+Fixed 2026-04-20: witness generation never walked protocol extensions, so default implementations (e.g. `extend Iterator { func map(...) }`) were missing from witness tables for conforming types. Introduced a new `ProtocolMembers` / `ProtocolAssociatedTypes` / `ProtocolMembersByName` query set in `kestrel-name-res` that walks direct children, extension defaults, and inherited parent protocols (plus their extensions) in one pass. `witness_lower.rs` now calls `ProtocolMembers`; the old `collect_protocol_methods_recursive` helper and its filter-by-NodeKind logic are gone. Consumers never have to reassemble the walk from `ExtensionsFor` + `ConformingProtocols` again.
+
+- [x] `stdlib/iterator/is_sorted_by_comparator.ks`
+- [x] `stdlib/iterator/is_sorted_by_key.ks`
+- [x] `stdlib/iterator/terminal_operations.ks`
+- [x] `stdlib/iterator/try_for_each_adapter.ks`
+
+Regressed: `stdlib/iterator/is_sorted_checks.ks` — collides on the overloaded `isSorted` name (two methods in `extend Iterator` both named `isSorted`). `IndexMap::insert` in the witness table keeps only one; the query refactor flipped which overload wins. Pre-existing overload-in-witness bug, not specific to this fix — tracked in the "Witness overload collision" bucket in # Stdlib.
+
+### Derived-protocol bounds not propagated to generic params
+
+Fixed 2026-04-20: two bugs in where-clause handling during type inference. (1) `where_clauses_in_context()` resolved `Equality` LHS using `self.owner` instead of the passed `context` entity, so type params like `T` in `flatten[U]() where T = Optional[U]` couldn't be found. (2) `solve_member` where-clause handling only searched the method's own type params; struct/extension type params and associated types (e.g. `Item` in `where Item = (A, B)`) were silently skipped. Added context parameter to `resolve_type_param_or_assoc`/`extract_associated_type_path`, and fallback to full `subs` map + `Associated` constraint emission for TypeAlias params.
+
+- [x] `stdlib/optional/optional_flatten.ks`
+- [x] `stdlib/iterator/unzip_iterator.ks`
+- [x] `stdlib/iterator/filter_map_flatten.ks` — type inference fixed; now fails in the codegen bucket (listed in # Stdlib above)
+
+### Codegen symbol not found (partial — fixed by witness-instantiation-collapse)
+
+- [x] `stdlib/result/result_transforms.ks` — passes after witness-instantiation-collapse fix
+- [x] `stdlib/string/replacement_and_splitting.ks` — passes after witness-instantiation-collapse fix
+- [x] `stdlib/views/lines_view.ks` — passes after witness-instantiation-collapse fix
+
+### Runtime exit-code failures (partial — fixed by witness-instantiation-collapse)
+
+- [x] `stdlib/dictionary/dictionary_capacity_management.ks` — fixed by witness-instantiation-collapse
+- [x] `stdlib/float32/float32_conversion.ks` — fixed by witness-instantiation-collapse
+- [x] `stdlib/float64/float64_clamp_lerp_conversion_format.ks` — fixed by witness-instantiation-collapse
+- [x] `stdlib/float64/float64_constructors_and_constants.ks` — fixed by witness-instantiation-collapse
+- [x] `stdlib/int16/int16_bitwidth_and_conversion.ks` — fixed by witness-instantiation-collapse
+- [x] `stdlib/int16/int16_boundaries_and_constants.ks` — fixed by witness-instantiation-collapse
+- [x] `stdlib/int32/int32_bitwidth_and_conversion.ks` — fixed by witness-instantiation-collapse
+- [x] `stdlib/int32/int32_boundaries_and_constants.ks` — fixed by witness-instantiation-collapse
+- [x] `stdlib/int64/int64_byte_conversion_big_endian.ks` — fixed by witness-instantiation-collapse
+- [x] `stdlib/int64/int64_byte_conversion_little_endian.ks` — fixed by witness-instantiation-collapse
+- [x] `stdlib/uint8/uint8_bitwidth_and_conversion.ks` — fixed by witness-instantiation-collapse
+- [x] `stdlib/uint16/uint16_bitwidth_and_conversion.ks` — fixed by witness-instantiation-collapse
+- [x] `stdlib/uint32/uint32_bitwidth_and_conversion.ks` — fixed by witness-instantiation-collapse
+
+### Explicit type args on method calls silently dropped (all fixed)
+
+Historical: `generate.rs` discarded explicit type args from `HirExpr::MethodCall` (the `type_args` field was ignored via `..`). Methods like `cast[Int64]()` produced fresh unresolved TyVars instead of the specified types, causing `?` to leak into return types and downstream `!: NotEqual` errors. Both tests now pass after the witness-instantiation-collapse fix (2026-04-20).
+
+- [x] `stdlib/memory/memory_allocator.ks` — fixed by witness-instantiation-collapse
+- [x] `stdlib/memory/memory_raw_pointer.ks` — fixed by witness-instantiation-collapse

@@ -61,6 +61,131 @@ impl QueryFn for ConformingProtocols {
     }
 }
 
+// ===== ConformingProtocolInstantiations =====
+
+/// Query: like `ConformingProtocols`, but preserves each conformance's type
+/// arguments so distinct protocol instantiations are tracked separately.
+///
+/// `Int64: Convertible[Int8], Convertible[Int16]` produces two entries, not
+/// one. This is what witness generation needs — each `(protocol, type_args)`
+/// pair has its own witness with its own method bindings.
+///
+/// Transitive inheritance (walking each discovered protocol's own
+/// conformances and extension-added conformances) is handled like
+/// `ConformingProtocols`; inherited protocols use the type args declared
+/// on the inheritance edge (typically empty or referring to the child's
+/// own type params).
+///
+/// Deduplication is by `(protocol, type_args)` — two conformances to the
+/// same protocol with different args are both reported.
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub struct ConformingProtocolInstantiations {
+    pub entity: Entity,
+    pub root: Entity,
+}
+
+impl QueryFn for ConformingProtocolInstantiations {
+    type Output = Vec<(Entity, Vec<AstType>)>;
+
+    fn execute(&self, ctx: &QueryContext<'_>) -> Self::Output {
+        let mut instantiations: Vec<(Entity, Vec<AstType>)> = Vec::new();
+        let mut visited: HashSet<(Entity, Vec<AstType>)> = HashSet::new();
+
+        // Direct conformances on the type itself
+        gather_protocol_instantiations(
+            ctx, self.entity, self.root, &mut instantiations, &mut visited,
+        );
+
+        // Conformances declared on extensions of this type
+        let extensions = ctx.query(ExtensionsFor {
+            target: self.entity,
+            root: self.root,
+        });
+        for ext in &extensions {
+            gather_protocol_instantiations(
+                ctx, *ext, self.root, &mut instantiations, &mut visited,
+            );
+        }
+
+        // Walk inheritance: for each discovered protocol, expand its own
+        // conformances and extension-added conformances. Each protocol is
+        // expanded at most once (tracked by `proto_expanded`).
+        let mut proto_expanded: HashSet<Entity> = HashSet::new();
+        let mut i = 0;
+        while i < instantiations.len() {
+            let (proto, _) = instantiations[i].clone();
+            if proto_expanded.insert(proto) {
+                gather_protocol_instantiations(
+                    ctx, proto, self.root, &mut instantiations, &mut visited,
+                );
+                let proto_extensions = ctx.query(ExtensionsFor {
+                    target: proto,
+                    root: self.root,
+                });
+                for ext in &proto_extensions {
+                    gather_protocol_instantiations(
+                        ctx, *ext, self.root, &mut instantiations, &mut visited,
+                    );
+                }
+            }
+            i += 1;
+        }
+
+        instantiations
+    }
+
+    fn describe(&self) -> String {
+        format!("ConformingProtocolInstantiations({:?})", self.entity)
+    }
+}
+
+/// Gather `(protocol, type_args)` pairs from an entity's `Conformances`
+/// component. Mirrors `gather_protocol_conformances` but preserves the AST
+/// type args from each conformance path.
+fn gather_protocol_instantiations(
+    ctx: &QueryContext<'_>,
+    entity: Entity,
+    root: Entity,
+    instantiations: &mut Vec<(Entity, Vec<AstType>)>,
+    visited: &mut HashSet<(Entity, Vec<AstType>)>,
+) {
+    let Some(conformances) = ctx.get::<Conformances>(entity) else {
+        return;
+    };
+
+    for item in &conformances.0 {
+        let ConformanceItem::Positive(ast_ty, _) = item else { continue };
+        let Some(resolved) = resolve_conformance_entity(ctx, ast_ty, entity, root) else {
+            continue;
+        };
+
+        // Only collect protocol entities
+        if ctx.get::<NodeKind>(resolved) != Some(&NodeKind::Protocol) {
+            continue;
+        }
+
+        let type_args = extract_ast_type_args(ast_ty);
+        let key = (resolved, type_args.clone());
+        if !visited.insert(key) {
+            continue;
+        }
+
+        instantiations.push((resolved, type_args));
+    }
+}
+
+/// Extract the type arguments from the final segment of a named `AstType`.
+/// For `Convertible[Int16]` returns `[Int16]`; for bare `Equatable` returns `[]`.
+pub fn extract_ast_type_args(ast_ty: &AstType) -> Vec<AstType> {
+    match ast_ty {
+        AstType::Named { segments, .. } => segments
+            .last()
+            .map(|seg| seg.type_args.clone())
+            .unwrap_or_default(),
+        _ => Vec::new(),
+    }
+}
+
 // ===== Shared transitive-closure walk =====
 
 /// Expand `protocols` in place: for each protocol already in the list, walk

@@ -10,6 +10,7 @@
 pub mod conformances;
 pub mod extensions;
 pub mod helpers;
+pub mod protocol_members;
 pub mod resolve_builtin;
 pub mod resolve_module;
 pub mod resolve_name;
@@ -20,9 +21,13 @@ pub mod visibility;
 
 // Re-export primary query types
 pub use conformances::{
-    expand_protocol_closure, expand_protocol_closure_in_place, ConformingProtocols,
+    expand_protocol_closure, expand_protocol_closure_in_place, extract_ast_type_args,
+    ConformingProtocolInstantiations, ConformingProtocols,
 };
 pub use extensions::{ExtensionTargetEntity, ExtensionsFor, ResolvedExtensionTarget};
+pub use protocol_members::{
+    ProtocolAssociatedTypes, ProtocolMember, ProtocolMembers, ProtocolMembersByName,
+};
 pub use resolve_builtin::{BuiltinIndex, BuiltinMap, EntityBuiltin, ResolveBuiltin};
 pub use resolve_module::{ResolveModulePath, StdModules};
 pub use resolve_name::{NameResolution, ResolveName};

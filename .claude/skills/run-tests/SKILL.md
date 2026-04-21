@@ -17,7 +17,24 @@ Run the lib2 file-based test harness directly (not via `cargo test`) so output i
 
 ## Steps
 
-### 1. Build the test binary (skip if no codegen changes)
+### 1. Pick a unique output path (REQUIRED for multi-agent safety)
+
+Other agents may be running this skill concurrently. Using the shared `$OUT` would clobber their output and corrupt their watchdog. Pick a per-run path at the start and use it for the rest of the session:
+
+```bash
+OUT=$(mktemp /tmp/kts2.XXXXXX.out)
+echo "OUT=$OUT"
+```
+
+Remember the path — every later step (`nohup`, watchdog `tail`, `grep` inspection) must reference `$OUT` (or the literal path), never `$OUT`.
+
+Also check for active runs from other agents before launching a full suite:
+```bash
+pgrep -af "file_tests-|cargo test -p kestrel-test-suite2"
+```
+If another agent is running the full suite, prefer a targeted substring filter or wait.
+
+### 2. Build the test binary (skip if no codegen changes)
 
 ```bash
 cargo test -p kestrel-test-suite2 --release --no-run 2>&1 | tail -3
@@ -25,15 +42,14 @@ cargo test -p kestrel-test-suite2 --release --no-run 2>&1 | tail -3
 
 Note the path printed: `Executable tests/file_tests.rs (target/release/deps/file_tests-<hash>)`. That hash is stable for a given Cargo workspace state.
 
-### 2. Run the binary in the background, output to /tmp
+### 3. Run the binary in the background, output to $OUT
 
 The harness uses `datatest-stable`, which requires the working directory to contain `testdata/`. So `cd` into `lib2/kestrel-test-suite/` first.
 
 ```bash
-rm -f /tmp/kts2.out
 nohup /Users/dino/Documents/Projects/kestrel/target/release/deps/file_tests-<hash> \
   --test-threads=1 \
-  > /tmp/kts2.out 2>&1 &
+  > "$OUT" 2>&1 &
 echo "PID=$!"
 ```
 
@@ -44,11 +60,11 @@ BIN=$(ls /Users/dino/Documents/Projects/kestrel/target/release/deps/file_tests-*
 
 The full suite is ~2800 tests. Single-threaded, expect ~25 minutes total in clean conditions.
 
-### 3. Arm the hang watchdog (REQUIRED)
+### 4. Arm the hang watchdog (REQUIRED)
 
 Compiled `.ks` test binaries that crash trigger macOS ReportCrash, which can wedge in kernel U-state. The parent runner blocks in `waitpid()` and never returns. `kill -9` cannot reap a process in uninterruptible sleep — it just sits there forever, taking the whole suite hostage.
 
-Use Monitor with an until-loop that kills any child running >30s. This unblocks the parent so it can move on to the next test.
+Use Monitor with an until-loop that kills any child running >30s. This unblocks the parent so it can move on to the next test. The watchdog is scoped to `PARENT_PID` via `pgrep -P`, so it only touches *your* children — another agent's test run is unaffected.
 
 ```
 Monitor command:
@@ -57,7 +73,7 @@ Monitor command:
     if [ -n "$child" ]; then
       etime=$(ps -p $child -o etimes= 2>/dev/null | tr -d ' ')
       if [ -n "$etime" ] && [ "$etime" -gt 30 ]; then
-        lastline=$(tail -1 /tmp/kts2.out)
+        lastline=$(tail -1 "$OUT")
         echo "HANG: child $child running ${etime}s — last test: $lastline"
         kill -9 $child 2>/dev/null
       fi
@@ -65,41 +81,41 @@ Monitor command:
     sleep 5
   done
   echo "TEST_DONE"
-  passed=$(grep -cE "\.\.\. ok$" /tmp/kts2.out)
-  failed=$(grep -cE "\.\.\. FAILED$" /tmp/kts2.out)
+  passed=$(grep -cE "\.\.\. ok$" "$OUT")
+  failed=$(grep -cE "\.\.\. FAILED$" "$OUT")
   echo "PASSED=$passed FAILED=$failed"
 ```
 
-Set `timeout_ms` to ~3600000 (1h) and `persistent: false`.
+Set `timeout_ms` to ~3600000 (1h) and `persistent: false`. Never use `pkill -9 -f file_tests-` — it will kill other agents' runs too.
 
-### 4. Inspect output
+### 5. Inspect output
 
 While running or after:
 
 ```bash
 # Counts so far
-grep -cE "\.\.\. ok$" /tmp/kts2.out         # passed
-grep -cE "\.\.\. FAILED$" /tmp/kts2.out      # failed
-tail -3 /tmp/kts2.out                        # current test
+grep -cE "\.\.\. ok$" $OUT         # passed
+grep -cE "\.\.\. FAILED$" $OUT      # failed
+tail -3 $OUT                        # current test
 
 # All failures with their test paths
-grep "FAILED$" /tmp/kts2.out
+grep "FAILED$" $OUT
 
 # Failure messages (datatest-stable prints them at end after "failures:")
-sed -n '/^failures:$/,/^test result:/p' /tmp/kts2.out
+sed -n '/^failures:$/,/^test result:/p' $OUT
 ```
 
 ## Filtering — running a subset
 
 ```bash
 # Substring filter (positional arg — matches test name substring)
-$BIN --test-threads=1 closure_capture > /tmp/kts2.out 2>&1
+$BIN --test-threads=1 closure_capture > $OUT 2>&1
 
 # Skip a known-hanging test
-$BIN --test-threads=1 --skip function_as_value > /tmp/kts2.out 2>&1
+$BIN --test-threads=1 --skip function_as_value > $OUT 2>&1
 
 # Both
-$BIN --test-threads=1 closures --skip function_as_value > /tmp/kts2.out 2>&1
+$BIN --test-threads=1 closures --skip function_as_value > $OUT 2>&1
 ```
 
 ## Single test with output
