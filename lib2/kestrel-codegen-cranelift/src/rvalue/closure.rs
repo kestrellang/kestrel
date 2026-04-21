@@ -108,7 +108,7 @@ pub fn compile_apply_partial(
                     )));
                 }
 
-                let field_ty = substitute_type(&env_def.fields[i].ty, &env_subst);
+                let field_ty = substitute_type(&env_def.fields[i].ty, &env_subst, ctx.module);
                 let field_ptr = builder
                     .ins()
                     .iadd_imm(env_addr, env_layout.field_offsets[i] as i64);

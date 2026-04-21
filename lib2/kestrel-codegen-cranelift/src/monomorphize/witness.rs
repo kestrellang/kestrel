@@ -75,7 +75,7 @@ pub fn resolve_witness_call(
 
     // Also include the binding's own type_args
     for ta in &method_binding.type_args {
-        let substituted = substitute_type(ta, &bindings);
+        let substituted = substitute_type(ta, &bindings, module);
         type_args.push(substituted);
     }
 
@@ -98,26 +98,24 @@ pub fn resolve_witness_call(
 }
 
 /// Resolve an associated type through a witness table.
+///
+/// Thin `Result` wrapper over `MirModule::resolve_associated_type` (in
+/// `kestrel-mir`) so existing callers that need structured error info keep
+/// working. The underlying lookup logic lives in `kestrel-mir` because
+/// witness tables are MIR data.
 pub fn resolve_associated_type(
     module: &MirModule,
     protocol: Entity,
     self_type: &MirTy,
     assoc_name: &str,
 ) -> Result<MirTy, MonomorphizeError> {
-    let (witness, bindings) = find_witness(module, protocol, self_type)?;
-
-    let bound_ty =
-        witness
-            .type_bindings
-            .get(assoc_name)
-            .ok_or_else(|| MonomorphizeError::MethodNotFound {
-                protocol_name: module.resolve_name(protocol).to_string(),
-                method: assoc_name.to_string(),
-                type_description: format!("{self_type:?}"),
-            })?;
-
-    // Apply witness type param bindings to the associated type
-    Ok(substitute_type(bound_ty, &bindings))
+    module
+        .resolve_associated_type(protocol, self_type, assoc_name)
+        .ok_or_else(|| MonomorphizeError::MethodNotFound {
+            protocol_name: module.resolve_name(protocol).to_string(),
+            method: assoc_name.to_string(),
+            type_description: format!("{self_type:?}"),
+        })
 }
 
 /// Find a witness for `self_type` that has the given method.
@@ -227,28 +225,6 @@ fn witness_protocol_args_match(witness: &WitnessDef, expected: &[MirTy]) -> bool
         .values()
         .zip(expected.iter())
         .all(|(w, e)| w == e)
-}
-
-/// Find a witness that proves `self_type` implements `protocol`.
-fn find_witness<'a>(
-    module: &'a MirModule,
-    protocol: Entity,
-    self_type: &MirTy,
-) -> Result<(&'a WitnessDef, HashMap<Entity, MirTy>), MonomorphizeError> {
-    for witness in &module.witnesses {
-        if witness.protocol != protocol {
-            continue;
-        }
-        let mut bindings = HashMap::new();
-        if match_pattern(&witness.implementing_type, self_type, &mut bindings) {
-            return Ok((witness, bindings));
-        }
-    }
-
-    Err(MonomorphizeError::WitnessNotFound {
-        protocol_name: module.resolve_name(protocol).to_string(),
-        type_description: format!("{self_type:?}"),
-    })
 }
 
 fn protocol_inherits(module: &MirModule, candidate: Entity, target: Entity) -> bool {

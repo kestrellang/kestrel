@@ -209,7 +209,7 @@ impl<'a> CollectionContext<'a> {
 
                 // Substitute type args using the current instantiation's substitution
                 let concrete_type_args =
-                    common::substitute_type_args(type_args, subst, parent_self.as_ref());
+                    common::substitute_type_args(type_args, subst, parent_self.as_ref(), self.module);
 
                 // Resolve self type: only inherit parent's self_type if the callee
                 // actually uses SelfType in its signature. Static methods on other types
@@ -230,7 +230,7 @@ impl<'a> CollectionContext<'a> {
                 );
                 let concrete_self = self_type
                     .as_ref()
-                    .map(|st| substitute_type_with_self(st, subst, parent_self.as_ref()))
+                    .map(|st| substitute_type_with_self(st, subst, parent_self.as_ref(), self.module))
                     .or_else(|| {
                         if self.func_uses_self_type(callee_func) || callee_is_nested {
                             parent_self.clone()
@@ -279,7 +279,7 @@ impl<'a> CollectionContext<'a> {
             } => {
                 // Substitute type params AND SelfType using parent's self_type
                 let mut concrete_self =
-                    substitute_type_with_self(self_type, subst, parent_self.as_ref());
+                    substitute_type_with_self(self_type, subst, parent_self.as_ref(), self.module);
                 // Resolve associated types (e.g., Iterator.Item → concrete type)
                 // via witness table. Search all protocols for the owning one,
                 // not just the protocol being called (handles cross-protocol
@@ -327,7 +327,7 @@ impl<'a> CollectionContext<'a> {
                 }
                 let concrete_method_args: Vec<MirTy> = method_type_args
                     .iter()
-                    .map(|a| substitute_type_with_self(a, subst, parent_self.as_ref()))
+                    .map(|a| substitute_type_with_self(a, subst, parent_self.as_ref(), self.module))
                     .collect();
 
                 match witness::resolve_witness_call(
@@ -416,7 +416,7 @@ impl<'a> CollectionContext<'a> {
                 if let kestrel_mir::ImmediateKind::FunctionRef { func, type_args } = &imm.kind {
                     if let Some(&func_id) = self.entity_to_func.get(func) {
                         let concrete_type_args =
-                            common::substitute_type_args(type_args, subst, parent_self.as_ref());
+                            common::substitute_type_args(type_args, subst, parent_self.as_ref(), self.module);
 
                         let inst = FunctionInstantiation {
                             func_id,

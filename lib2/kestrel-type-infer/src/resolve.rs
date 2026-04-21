@@ -77,8 +77,11 @@ pub enum MemberKind {
 pub enum MemberError {
     NotFound,
     /// Ambiguous candidates, ranked by extension specificity (most specific first).
-    /// Each entry: (candidate_entity, from_extension).
-    Ambiguous(Vec<(Entity, Option<Entity>)>),
+    /// Each entry: (candidate_entity, from_extension, specificity).
+    /// Direct members have specificity 0. Higher specificity = more concrete
+    /// extension type args. The solver picks uniquely-top-specificity candidates
+    /// after filtering by compatibility; ties at the top become AmbiguousMember.
+    Ambiguous(Vec<(Entity, Option<Entity>, usize)>),
     NotVisible,
 }
 
@@ -372,7 +375,15 @@ impl TypeResolver for WorldResolver<'_> {
             1 => matches[0],
             _ => {
                 // Multiple candidates with same labels — try protocol-based resolution.
-                if let Some(proto_res) = self.try_resolve_through_protocol(*entity, name, _args) {
+                // This is only valid when every concrete match is an implementation
+                // of the same protocol requirement. Unrelated overloads sharing a
+                // label signature (e.g., Array's internal `_arrayLiteralPointer:`
+                // protocol init alongside its separate `count:generator:` overload)
+                // must fall through to genuine ambiguity, not be silently resolved
+                // to the protocol's method.
+                if let Some(proto_res) =
+                    self.try_resolve_through_protocol(*entity, name, _args, &matches)
+                {
                     return Ok(proto_res);
                 }
 
@@ -646,13 +657,124 @@ impl TypeResolver for WorldResolver<'_> {
             1 => matches[0],
             _ => {
                 return Err(MemberError::Ambiguous(
-                    matches.into_iter().map(|e| (e, None)).collect(),
+                    matches.into_iter().map(|e| (e, None, 0)).collect(),
                 ));
             },
         };
 
         self.build_member_resolution(member)
     }
+}
+
+/// Compatibility check between a protocol method's parameter types and a
+/// concrete candidate's parameter types. Type params, `Self`, `Infer`, and
+/// `Error` act as wildcards (they can stand for anything). Concrete
+/// constructors must match at every non-wildcard position.
+///
+/// This is intentionally conservative: it rejects clear mismatches (e.g.
+/// `lang.ptr[Element]` vs `Int64`, or `lang.i64` vs `(Int64) -> T`) so that
+/// unrelated overloads sharing a label signature don't collapse into a
+/// protocol requirement they don't actually implement. Full unification
+/// isn't needed here — we just need to keep genuinely-incompatible overloads
+/// out of the protocol-abstract representation.
+fn param_shapes_compatible(proto: &[HirTy], concrete: &[HirTy]) -> bool {
+    if proto.len() != concrete.len() {
+        return false;
+    }
+    proto
+        .iter()
+        .zip(concrete.iter())
+        .all(|(p, c)| ty_shape_compatible(p, c))
+}
+
+fn ty_shape_compatible(a: &HirTy, b: &HirTy) -> bool {
+    // Wildcards — a protocol param or a recovery/infer slot matches anything.
+    if is_shape_wildcard(a) || is_shape_wildcard(b) {
+        return true;
+    }
+    match (a, b) {
+        (
+            HirTy::Struct {
+                entity: ea,
+                args: aa,
+                ..
+            },
+            HirTy::Struct {
+                entity: eb,
+                args: ab,
+                ..
+            },
+        ) => ea == eb && args_compatible(aa, ab),
+        (
+            HirTy::Enum {
+                entity: ea,
+                args: aa,
+                ..
+            },
+            HirTy::Enum {
+                entity: eb,
+                args: ab,
+                ..
+            },
+        ) => ea == eb && args_compatible(aa, ab),
+        (
+            HirTy::Protocol {
+                entity: ea,
+                args: aa,
+                ..
+            },
+            HirTy::Protocol {
+                entity: eb,
+                args: ab,
+                ..
+            },
+        ) => ea == eb && args_compatible(aa, ab),
+        (
+            HirTy::AliasUse {
+                entity: ea,
+                args: aa,
+                ..
+            },
+            HirTy::AliasUse {
+                entity: eb,
+                args: ab,
+                ..
+            },
+        ) => ea == eb && args_compatible(aa, ab),
+        (HirTy::Tuple(aa, _), HirTy::Tuple(ab, _)) => args_compatible(aa, ab),
+        (
+            HirTy::Function {
+                params: pa,
+                ret: ra,
+                ..
+            },
+            HirTy::Function {
+                params: pb,
+                ret: rb,
+                ..
+            },
+        ) => args_compatible(pa, pb) && ty_shape_compatible(ra, rb),
+        (HirTy::Never(_), HirTy::Never(_)) => true,
+        _ => false,
+    }
+}
+
+fn args_compatible(a: &[HirTy], b: &[HirTy]) -> bool {
+    a.len() == b.len()
+        && a.iter()
+            .zip(b.iter())
+            .all(|(x, y)| ty_shape_compatible(x, y))
+}
+
+fn is_shape_wildcard(t: &HirTy) -> bool {
+    matches!(
+        t,
+        HirTy::Param(..)
+            | HirTy::SelfType(..)
+            | HirTy::AssocProjection { .. }
+            | HirTy::Infer(..)
+            | HirTy::Error(..)
+    )
 }
 
 /// Extract type arguments from a protocol type in a where clause.
@@ -873,14 +995,22 @@ impl WorldResolver<'_> {
     /// Try to resolve an ambiguous member through protocol conformances.
     ///
     /// When multiple candidates match the same name+labels, check if a single
-    /// protocol declares a matching method. If found, return the protocol's
-    /// abstract method signature with protocol type params as generics.
-    /// The solver creates fresh TyVars and infers them from arguments.
+    /// protocol declares a matching method. If found — and every concrete
+    /// match in `concrete_matches` is an implementation of that same protocol
+    /// requirement (same parameter bind-names, not just labels) — return the
+    /// protocol's abstract method signature with protocol type params as
+    /// generics. The solver creates fresh TyVars and infers them from args.
+    ///
+    /// If any concrete match has a different bind-name signature than the
+    /// protocol method, the matches are unrelated overloads that merely share
+    /// a label signature; this is a real ambiguity, so we return None and let
+    /// the caller propagate MemberError::Ambiguous.
     fn try_resolve_through_protocol(
         &self,
         type_entity: Entity,
         name: &str,
         args: &[crate::constraint::CallArg],
+        concrete_matches: &[Entity],
     ) -> Option<MemberResolution> {
         let protocols = self.ctx.query(ConformingProtocols {
             entity: type_entity,
@@ -931,6 +1061,26 @@ impl WorldResolver<'_> {
         }
 
         let (protocol, method) = found?;
+
+        // Verify every concrete match is structurally compatible with the
+        // protocol method — same parameter type constructors at each position,
+        // with protocol type params acting as wildcards. If any concrete
+        // match's param types differ in SHAPE from the protocol method's,
+        // the matches are unrelated overloads that merely share a label
+        // signature (e.g. Array's internal `_arrayLiteralPointer:lang.ptr[T],
+        // _arrayLiteralCount:lang.i64` vs its `count:Int64, generator:(Int64)
+        // -> T` overload), and this is a real ambiguity — not a case where
+        // the abstract protocol method can represent them all.
+        let proto_param_tys = self.param_type_shapes(method);
+        for &c in concrete_matches {
+            if c == method {
+                continue;
+            }
+            let concrete_param_tys = self.param_type_shapes(c);
+            if !param_shapes_compatible(&proto_param_tys, &concrete_param_tys) {
+                return None;
+            }
+        }
 
         // Build MemberResolution from the protocol's abstract method
         // Use the protocol's type params (not the method's) for generic resolution
@@ -1075,6 +1225,23 @@ impl WorldResolver<'_> {
         format!("{}({})", name, labels)
     }
 
+    /// Lowered parameter types (one per param position). Used to check
+    /// whether a concrete overload's shape matches a protocol requirement's
+    /// shape — see `param_shapes_compatible`.
+    fn param_type_shapes(&self, entity: Entity) -> Vec<HirTy> {
+        let lowered = self
+            .ctx
+            .query(LowerCallableTypes {
+                entity,
+                root: self.root,
+            })
+            .unwrap_or_default();
+        lowered
+            .into_iter()
+            .map(|t| t.unwrap_or(HirTy::Error(Span::synthetic(0))))
+            .collect()
+    }
+
     /// Direct-only: does this extension entity declare a conformance to
     /// `protocol` in its own `Conformances` list?
     ///
@@ -1153,40 +1320,30 @@ impl WorldResolver<'_> {
         name: &str,
         args: &[crate::constraint::CallArg],
     ) -> Result<MemberResolution, MemberError> {
-        let bound_protocols = self.collect_param_protocol_bounds(param_entity);
-        if bound_protocols.is_empty() {
+        let direct_bounds = self.collect_param_direct_bounds(param_entity);
+        if direct_bounds.is_empty()
+            && self.collect_param_protocol_bounds(param_entity).is_empty()
+        {
             return Err(MemberError::NotFound);
         }
 
-        let all_candidates = self.search_protocols_for_member(&bound_protocols, name);
-
-        // For type parameters, include both instance and static methods.
-        if all_candidates.is_empty() {
-            return Err(MemberError::NotFound);
-        }
-
-        // Filter by label/arity if args provided
+        // Prefer candidates from protocols the param is *directly* bounded by
+        // (e.g., `T: Equatable`) over candidates only reached through parent-
+        // protocol inheritance or `extend P: Q` conformance extensions. This
+        // resolves name collisions between a primary bound and its inherited
+        // conformances (e.g., Equatable.equals vs Equal.equals introduced by
+        // `extend Equatable: Equal[Self]`).
         let arg_labels: Vec<Option<&str>> = args.iter().map(|a| a.label.as_deref()).collect();
-        let matches: Vec<Entity> = all_candidates
-            .iter()
-            .copied()
-            .filter(|&c| self.matches_labels(c, &arg_labels))
-            .collect();
-
-        let member = match matches.len() {
-            0 => {
-                if all_candidates.len() == 1 {
-                    all_candidates[0]
-                } else {
-                    return Err(MemberError::NotFound);
-                }
-            },
-            1 => matches[0],
-            _ => {
-                return Err(MemberError::Ambiguous(
-                    matches.into_iter().map(|e| (e, None)).collect(),
-                ));
-            },
+        let member = if let Some(m) =
+            self.select_bound_candidate(&direct_bounds, name, &arg_labels)?
+        {
+            m
+        } else {
+            let expanded = self.collect_param_protocol_bounds(param_entity);
+            match self.select_bound_candidate(&expanded, name, &arg_labels)? {
+                Some(m) => m,
+                None => return Err(MemberError::NotFound),
+            }
         };
         let mut resolution = self.build_member_resolution(member)?;
 
@@ -1293,14 +1450,17 @@ impl WorldResolver<'_> {
     /// Handles named members via VisibleChildrenByName and subscripts/inits
     /// by NodeKind when using sentinel names.
     fn search_protocols_for_member(&self, protocols: &[Entity], name: &str) -> Vec<Entity> {
-        // Dedup within a protocol (inherited methods collapse to one) but not
-        // across protocols — same-signature methods from different protocols
-        // should surface as ambiguity.
+        // Dedup within a protocol by signature (inherited methods collapse).
+        // Across protocols, dedup by entity only: the same entity reached
+        // through two bounds (e.g., `I: Iterator, I: DoubleEndedIterator` both
+        // surfacing `Iterator.next`) is one method, not an ambiguity. Distinct
+        // entities with the same signature still surface as ambiguity.
         //
         // `ProtocolMembersByName` handles direct children, extension defaults,
         // parent protocols, and the `"init"` / `"subscript"` sentinels for
         // nameless Callable entities.
         let mut all_candidates = Vec::new();
+        let mut seen_entities = std::collections::HashSet::new();
         for proto in protocols {
             let mut seen_in_proto = std::collections::HashSet::new();
             let members = self.ctx.query(kestrel_name_res::ProtocolMembersByName {
@@ -1311,13 +1471,58 @@ impl WorldResolver<'_> {
             });
             for m in members {
                 let sig = self.label_signature(m.entity);
-                if seen_in_proto.insert(sig) {
+                if seen_in_proto.insert(sig) && seen_entities.insert(m.entity) {
                     all_candidates.push(m.entity);
                 }
             }
         }
 
         all_candidates
+    }
+
+    /// Search a list of protocols for a label-matching member. Used by
+    /// param/associated-type member resolution to try direct bounds before
+    /// falling back to transitively-expanded bounds.
+    ///
+    /// Returns:
+    ///   - `Ok(Some(entity))` — exactly one candidate matches by labels/arity.
+    ///   - `Ok(None)` — no candidates at all (caller may try a broader bound set).
+    ///   - `Err(Ambiguous)` — multiple candidates match; genuine ambiguity among
+    ///     this bound set, so the caller should propagate rather than widen.
+    fn select_bound_candidate(
+        &self,
+        protocols: &[Entity],
+        name: &str,
+        arg_labels: &[Option<&str>],
+    ) -> Result<Option<Entity>, MemberError> {
+        if protocols.is_empty() {
+            return Ok(None);
+        }
+        let all_candidates = self.search_protocols_for_member(protocols, name);
+        if all_candidates.is_empty() {
+            return Ok(None);
+        }
+        let matches: Vec<Entity> = all_candidates
+            .iter()
+            .copied()
+            .filter(|&c| self.matches_labels(c, arg_labels))
+            .collect();
+        match matches.len() {
+            0 => {
+                // If there's exactly one candidate and arity is a no-op (no args
+                // expected), accept it — preserves the pre-refactor behavior for
+                // zero-arg resolutions where label filtering is vacuous.
+                if all_candidates.len() == 1 && arg_labels.is_empty() {
+                    Ok(Some(all_candidates[0]))
+                } else {
+                    Ok(None)
+                }
+            },
+            1 => Ok(Some(matches[0])),
+            _ => Err(MemberError::Ambiguous(
+                matches.into_iter().map(|e| (e, None, 0)).collect(),
+            )),
+        }
     }
 
     /// From a list of candidates, filter by instance (non-static), match labels,
@@ -1354,7 +1559,7 @@ impl WorldResolver<'_> {
             1 => matches[0],
             _ => {
                 return Err(MemberError::Ambiguous(
-                    matches.into_iter().map(|e| (e, None)).collect(),
+                    matches.into_iter().map(|e| (e, None, 0)).collect(),
                 ));
             },
         };
@@ -1375,12 +1580,18 @@ impl WorldResolver<'_> {
         name: &str,
         args: &[crate::constraint::CallArg],
     ) -> Result<MemberResolution, MemberError> {
-        let bound_protocols = self.collect_assoc_type_protocol_bounds(alias_entity);
-        if bound_protocols.is_empty() {
+        // Prefer direct bounds over expanded bounds (same reason as
+        // resolve_param_member — see the comment there).
+        let arg_labels: Vec<Option<&str>> = args.iter().map(|a| a.label.as_deref()).collect();
+        let direct = self.collect_assoc_type_direct_bounds(alias_entity);
+        if let Some(m) = self.select_bound_candidate(&direct, name, &arg_labels)? {
+            return self.build_member_resolution(m);
+        }
+        let expanded = self.collect_assoc_type_protocol_bounds(alias_entity);
+        if expanded.is_empty() {
             return Err(MemberError::NotFound);
         }
-
-        let all_candidates = self.search_protocols_for_member(&bound_protocols, name);
+        let all_candidates = self.search_protocols_for_member(&expanded, name);
         let (_, member) = self.select_member_candidate(all_candidates, args)?;
         self.build_member_resolution(member)
     }
@@ -1424,7 +1635,7 @@ impl WorldResolver<'_> {
             1 => matches[0],
             _ => {
                 return Err(MemberError::Ambiguous(
-                    matches.into_iter().map(|e| (e, None)).collect(),
+                    matches.into_iter().map(|e| (e, None, 0)).collect(),
                 ));
             },
         };
@@ -1438,6 +1649,22 @@ impl WorldResolver<'_> {
     /// where clause, and the owner hierarchy for bounds like `Iter: Iterator`
     /// or `where Item: Equatable`.
     fn collect_assoc_type_protocol_bounds(&self, alias_entity: Entity) -> Vec<Entity> {
+        let (mut protocols, mut visited) = self.collect_assoc_type_direct_bounds_inner(alias_entity);
+        expand_protocol_closure_in_place(self.ctx, self.root, &mut protocols, &mut visited);
+        protocols
+    }
+
+    /// Direct bounds on an associated type — Conformances, parent protocol's
+    /// where clause, and owner-hierarchy where clauses — without walking
+    /// parent-protocol or conformance-extension closures.
+    fn collect_assoc_type_direct_bounds(&self, alias_entity: Entity) -> Vec<Entity> {
+        self.collect_assoc_type_direct_bounds_inner(alias_entity).0
+    }
+
+    fn collect_assoc_type_direct_bounds_inner(
+        &self,
+        alias_entity: Entity,
+    ) -> (Vec<Entity>, std::collections::HashSet<Entity>) {
         let mut protocols = Vec::new();
         let mut visited = std::collections::HashSet::new();
         let mut checked = std::collections::HashSet::new();
@@ -1485,10 +1712,7 @@ impl WorldResolver<'_> {
             current = self.ctx.parent_of(entity);
         }
 
-        // Walk inherited protocols + extension-added conformances transitively.
-        expand_protocol_closure_in_place(self.ctx, self.root, &mut protocols, &mut visited);
-
-        protocols
+        (protocols, visited)
     }
 
     /// Collect all protocol entities a type parameter is bound to,
@@ -1540,6 +1764,28 @@ impl WorldResolver<'_> {
     /// on an extension (`extend Array[T] where T: Comparable`), or on any
     /// ancestor entity of the owner being compiled.
     fn collect_param_protocol_bounds(&self, param_entity: Entity) -> Vec<Entity> {
+        let (mut protocols, mut visited) = self.collect_param_direct_bounds_inner(param_entity);
+
+        // Walk inherited protocols + extension-added conformances transitively.
+        expand_protocol_closure_in_place(self.ctx, self.root, &mut protocols, &mut visited);
+
+        protocols
+    }
+
+    /// Collect only the protocols directly listed as bounds on `param_entity`
+    /// in where clauses on the param's parent and the owner hierarchy.
+    /// Does NOT walk parent-protocol inheritance or conformance extensions.
+    /// Used to prefer direct bounds when a method name is declared on both a
+    /// direct bound and an expanded bound (e.g., Equatable.equals vs Equal.equals
+    /// reached via `extend Equatable: Equal[Self]`).
+    fn collect_param_direct_bounds(&self, param_entity: Entity) -> Vec<Entity> {
+        self.collect_param_direct_bounds_inner(param_entity).0
+    }
+
+    fn collect_param_direct_bounds_inner(
+        &self,
+        param_entity: Entity,
+    ) -> (Vec<Entity>, std::collections::HashSet<Entity>) {
         let mut protocols = Vec::new();
         let mut visited = std::collections::HashSet::new();
         let mut checked = std::collections::HashSet::new();
@@ -1571,10 +1817,7 @@ impl WorldResolver<'_> {
             current = self.ctx.parent_of(entity);
         }
 
-        // Walk inherited protocols + extension-added conformances transitively.
-        expand_protocol_closure_in_place(self.ctx, self.root, &mut protocols, &mut visited);
-
-        protocols
+        (protocols, visited)
     }
 
     /// Extract protocol bounds for `param_entity` from a single entity's WhereClause.
@@ -1619,7 +1862,7 @@ impl WorldResolver<'_> {
         &self,
         matches: &[Entity],
         candidate_extensions: &[(Entity, Entity)],
-    ) -> Vec<(Entity, Option<Entity>)> {
+    ) -> Vec<(Entity, Option<Entity>, usize)> {
         let mut scored: Vec<(Entity, Option<Entity>, usize)> = Vec::new();
 
         for &candidate in matches {
@@ -1646,6 +1889,6 @@ impl WorldResolver<'_> {
         }
 
         scored.sort_by_key(|(_, _, s)| std::cmp::Reverse(*s));
-        scored.into_iter().map(|(c, e, _)| (c, e)).collect()
+        scored
     }
 }

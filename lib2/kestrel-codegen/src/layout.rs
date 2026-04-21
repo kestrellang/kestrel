@@ -260,18 +260,19 @@ impl<'a> LayoutCache<'a> {
                 protocol,
                 name,
             } => {
-                // Try resolving through the witness table before falling back
-                // to the pointer-size placeholder. Without this, sub-i64
-                // payload types (e.g. Optional<I.Item> where Item = Int8)
-                // get sized as 8 bytes and disagree with downstream aggregate
-                // classification.
-                let normalized = normalize_projection(ty, self.module);
-                if !matches!(normalized, MirTy::AssociatedProjection { .. }) {
-                    return self.layout_of(&normalized);
-                }
+                // By the time a projection reaches layout, `substitute_type`
+                // has already tried to resolve it against the witness table.
+                // If the base is still abstract (TypeParam / SelfType), we're
+                // in a pre-monomorphization or dead-code context — fall back
+                // to the pointer-size placeholder rather than panicking.
+                debug_assert!(
+                    !is_concrete(base),
+                    "concrete-based AssociatedProjection leaked to layout: \
+                     substitute_type should have resolved it",
+                );
                 ktrace!(
                     "codegen",
-                    "AssociatedProjection reached layout: base={:?}, protocol={:?}, name={}",
+                    "AssociatedProjection with abstract base at layout: base={:?}, protocol={:?}, name={}",
                     base,
                     protocol,
                     name
@@ -315,10 +316,11 @@ impl<'a> LayoutCache<'a> {
             .collect();
 
         // Clone field types to avoid borrow conflict with &mut self
+        let module = self.module;
         let field_types: Vec<MirTy> = self.module.structs[struct_id.index()]
             .fields
             .iter()
-            .map(|f| substitute_type(&f.ty, &subst))
+            .map(|f| substitute_type(&f.ty, &subst, module))
             .collect();
 
         // Compute layout field by field
@@ -377,238 +379,57 @@ pub enum NamedKind {
     Unknown,
 }
 
-/// Maximum recursion depth when normalizing projections. Chosen large enough
-/// for deeply chained `A.B.C.D` projections but small enough to abort cycles.
-const NORMALIZE_PROJECTION_MAX_DEPTH: u32 = 32;
+/// Maximum recursion depth when resolving chained `A.B.C` projections inside
+/// `substitute_type`. Bounds cycles conservatively; 32 is deeper than any
+/// real-world associated-type chain but still aborts runaway lookups.
+const SUBSTITUTE_TYPE_MAX_DEPTH: u32 = 32;
 
-/// Walk a `MirTy` and resolve every `AssociatedProjection` whose base is a
-/// fully-concrete type by consulting the witness table in `module`.
+
+/// Substitute type parameters in a `MirTy` and resolve any resulting
+/// `AssociatedProjection`s through the witness table. Always returns a
+/// canonical (fully-reduced) type — no "substituted but not yet normalized"
+/// intermediate form exists, which structurally prevents the
+/// `intersperse_adapter`-class bug where a read site and its consumer
+/// disagreed on aggregate-vs-scalar because one saw the unresolved
+/// projection and the other saw the concrete type.
 ///
-/// Substitution alone cannot turn an `AssociatedProjection { base: ..., name }`
-/// into its bound concrete type — that requires looking up the witness for
-/// `base: Protocol`. Classification (`layout_of`, `is_aggregate`, field-type
-/// derivation) needs the concrete type so read and consume sites agree on
-/// by-value vs by-pointer handling. Callers should normalize before classifying.
-///
-/// Leaves the projection unchanged when the base still contains abstract
-/// `TypeParam` / `SelfType` / unresolved inner projections — there's nothing
-/// to resolve against, and pre-monomorphization callers rely on the no-op.
-pub fn normalize_projection(ty: &MirTy, module: &MirModule) -> MirTy {
-    normalize_projection_inner(ty, module, 0)
-}
-
-fn normalize_projection_inner(ty: &MirTy, module: &MirModule, depth: u32) -> MirTy {
-    if depth >= NORMALIZE_PROJECTION_MAX_DEPTH {
-        return ty.clone();
-    }
-    let next = depth + 1;
-    let rec = |t: &MirTy| normalize_projection_inner(t, module, next);
-
-    match ty {
-        MirTy::AssociatedProjection {
-            base,
-            protocol,
-            name,
-        } => {
-            let normalized_base = rec(base);
-            if is_concrete(&normalized_base)
-                && let Some(resolved) =
-                    resolve_assoc_type_via_witness(module, *protocol, &normalized_base, name)
-            {
-                return normalize_projection_inner(&resolved, module, next);
-            }
-            MirTy::AssociatedProjection {
-                base: Box::new(normalized_base),
-                protocol: *protocol,
-                name: name.clone(),
-            }
-        },
-
-        MirTy::Named { entity, type_args } => MirTy::Named {
-            entity: *entity,
-            type_args: type_args.iter().map(&rec).collect(),
-        },
-        MirTy::Tuple(elems) => MirTy::Tuple(elems.iter().map(&rec).collect()),
-        MirTy::Pointer(inner) => MirTy::Pointer(Box::new(rec(inner))),
-        MirTy::Ref(inner) => MirTy::Ref(Box::new(rec(inner))),
-        MirTy::RefMut(inner) => MirTy::RefMut(Box::new(rec(inner))),
-        MirTy::FuncThin { params, ret } => MirTy::FuncThin {
-            params: params.iter().map(&rec).collect(),
-            ret: Box::new(rec(ret)),
-        },
-        MirTy::FuncThick { params, ret } => MirTy::FuncThick {
-            params: params.iter().map(&rec).collect(),
-            ret: Box::new(rec(ret)),
-        },
-
-        // Leaves — nothing to normalize.
-        MirTy::I8
-        | MirTy::I16
-        | MirTy::I32
-        | MirTy::I64
-        | MirTy::F16
-        | MirTy::F32
-        | MirTy::F64
-        | MirTy::Bool
-        | MirTy::Never
-        | MirTy::Str
-        | MirTy::TypeParam(_)
-        | MirTy::SelfType
-        | MirTy::Error => ty.clone(),
-    }
-}
-
-/// A type is concrete (safe to use as a witness self-type for projection
-/// resolution) if it contains no `TypeParam`, `SelfType`, `Error`, or still-
-/// abstract `AssociatedProjection`. Witness `match_pattern` would happily
-/// bind a `TypeParam` on the implementing-type side to a `TypeParam` on the
-/// query side, producing garbage — so require concreteness up front.
-fn is_concrete(ty: &MirTy) -> bool {
-    match ty {
-        MirTy::TypeParam(_) | MirTy::SelfType | MirTy::Error => false,
-        MirTy::AssociatedProjection { base, .. } => is_concrete(base),
-        MirTy::Pointer(t) | MirTy::Ref(t) | MirTy::RefMut(t) => is_concrete(t),
-        MirTy::Tuple(elems) => elems.iter().all(is_concrete),
-        MirTy::Named { type_args, .. } => type_args.iter().all(is_concrete),
-        MirTy::FuncThin { params, ret } | MirTy::FuncThick { params, ret } => {
-            params.iter().all(is_concrete) && is_concrete(ret)
-        },
-        _ => true,
-    }
-}
-
-/// Find a witness of `protocol` that matches `self_type`, read its
-/// associated-type binding for `name`, and substitute the witness's
-/// implementation-type-param bindings into the result.
-///
-/// Returns `None` if no witness matches, no binding exists, or the witness
-/// lacks the requested name — callers fall back to leaving the projection
-/// unresolved rather than erroring (this runs during layout and must be
-/// tolerant of partially-lowered types).
-fn resolve_assoc_type_via_witness(
+/// Takes `&MirModule` so it can perform witness lookups via
+/// `MirModule::resolve_associated_type`. Every codegen call site that
+/// substitutes a type already has the module in scope.
+pub fn substitute_type(
+    ty: &MirTy,
+    subst: &HashMap<Entity, MirTy>,
     module: &MirModule,
-    protocol: Entity,
-    self_type: &MirTy,
-    name: &str,
-) -> Option<MirTy> {
-    for witness in &module.witnesses {
-        if witness.protocol != protocol {
-            continue;
-        }
-        let mut bindings = HashMap::new();
-        if !witness_match(&witness.implementing_type, self_type, &mut bindings) {
-            continue;
-        }
-        let bound = match witness.type_bindings.get(name) {
-            Some(ty) => ty,
-            None => continue,
-        };
-        return Some(substitute_type(bound, &bindings));
-    }
-    None
+) -> MirTy {
+    substitute_type_with_self(ty, subst, None, module)
 }
 
-/// Structural pattern match mirroring cranelift's `match_pattern`: a
-/// `TypeParam` on the pattern side is a wildcard that binds to the concrete
-/// counterpart; everything else must be structurally equal.
-fn witness_match(
-    pattern: &MirTy,
-    concrete: &MirTy,
-    bindings: &mut HashMap<Entity, MirTy>,
-) -> bool {
-    match (pattern, concrete) {
-        (MirTy::TypeParam(entity), _) => match bindings.get(entity) {
-            Some(existing) => existing == concrete,
-            None => {
-                bindings.insert(*entity, concrete.clone());
-                true
-            },
-        },
-        (
-            MirTy::Named {
-                entity: e1,
-                type_args: a1,
-            },
-            MirTy::Named {
-                entity: e2,
-                type_args: a2,
-            },
-        ) => {
-            e1 == e2
-                && a1.len() == a2.len()
-                && a1.iter().zip(a2).all(|(p, c)| witness_match(p, c, bindings))
-        },
-        (MirTy::Ref(a), MirTy::Ref(b))
-        | (MirTy::RefMut(a), MirTy::RefMut(b))
-        | (MirTy::Pointer(a), MirTy::Pointer(b)) => witness_match(a, b, bindings),
-        (MirTy::Tuple(a), MirTy::Tuple(b)) => {
-            a.len() == b.len() && a.iter().zip(b).all(|(p, c)| witness_match(p, c, bindings))
-        },
-        (
-            MirTy::FuncThin {
-                params: p1,
-                ret: r1,
-            },
-            MirTy::FuncThin {
-                params: p2,
-                ret: r2,
-            },
-        )
-        | (
-            MirTy::FuncThick {
-                params: p1,
-                ret: r1,
-            },
-            MirTy::FuncThick {
-                params: p2,
-                ret: r2,
-            },
-        ) => {
-            p1.len() == p2.len()
-                && p1
-                    .iter()
-                    .zip(p2)
-                    .all(|(p, c)| witness_match(p, c, bindings))
-                && witness_match(r1, r2, bindings)
-        },
-        _ => pattern == concrete,
-    }
-}
-
-
-/// Apply type parameter substitutions to a MirTy, producing a new type by value.
-///
-/// Exhaustive match — every variant is handled explicitly (no catch-all).
-pub fn substitute_type(ty: &MirTy, subst: &HashMap<Entity, MirTy>) -> MirTy {
-    substitute_type_with_self(ty, subst, None)
-}
-
-fn contains_self_type(ty: &MirTy) -> bool {
-    match ty {
-        MirTy::SelfType => true,
-        MirTy::Pointer(i) | MirTy::Ref(i) | MirTy::RefMut(i) => contains_self_type(i),
-        MirTy::Tuple(es) => es.iter().any(contains_self_type),
-        MirTy::Named { type_args, .. } => type_args.iter().any(contains_self_type),
-        MirTy::FuncThin { params, ret } | MirTy::FuncThick { params, ret } => {
-            params.iter().any(contains_self_type) || contains_self_type(ret)
-        },
-        MirTy::AssociatedProjection { base, .. } => contains_self_type(base),
-        _ => false,
-    }
-}
-
-/// Substitute type parameters and SelfType in a type.
-/// `self_type` provides the concrete type for `MirTy::SelfType` (used in protocol
-/// extension methods where Self is abstract until monomorphization).
+/// Like `substitute_type`, but also maps `MirTy::SelfType` to `self_type` —
+/// needed inside protocol extension methods where `Self` is abstract until
+/// monomorphization supplies the concrete implementing type.
 pub fn substitute_type_with_self(
     ty: &MirTy,
     subst: &HashMap<Entity, MirTy>,
     self_type: Option<&MirTy>,
+    module: &MirModule,
 ) -> MirTy {
-    let sub = |t: &MirTy| substitute_type_with_self(t, subst, self_type);
+    substitute_type_inner(ty, subst, self_type, module, 0)
+}
+
+fn substitute_type_inner(
+    ty: &MirTy,
+    subst: &HashMap<Entity, MirTy>,
+    self_type: Option<&MirTy>,
+    module: &MirModule,
+    depth: u32,
+) -> MirTy {
+    if depth >= SUBSTITUTE_TYPE_MAX_DEPTH {
+        return ty.clone();
+    }
+    let next = depth + 1;
+    let rec = |t: &MirTy| substitute_type_inner(t, subst, self_type, module, next);
 
     match ty {
-        // Primitives — no substitution needed
         MirTy::I8
         | MirTy::I16
         | MirTy::I32
@@ -628,23 +449,24 @@ pub fn substitute_type_with_self(
 
         MirTy::SelfType => self_type.cloned().unwrap_or_else(|| ty.clone()),
 
-        MirTy::Pointer(inner) => MirTy::Pointer(Box::new(sub(inner))),
-        MirTy::Ref(inner) => MirTy::Ref(Box::new(sub(inner))),
-        MirTy::RefMut(inner) => MirTy::RefMut(Box::new(sub(inner))),
+        MirTy::Pointer(inner) => MirTy::Pointer(Box::new(rec(inner))),
+        MirTy::Ref(inner) => MirTy::Ref(Box::new(rec(inner))),
+        MirTy::RefMut(inner) => MirTy::RefMut(Box::new(rec(inner))),
 
-        MirTy::Tuple(elems) => MirTy::Tuple(elems.iter().map(|e| sub(e)).collect()),
+        MirTy::Tuple(elems) => MirTy::Tuple(elems.iter().map(&rec).collect()),
 
         MirTy::Named { entity, type_args } => {
-            // Check if this Named entity is in the subst map (associated type resolution).
-            // e.g., Iterable.Iter entity → ArrayIterator[Int64]
-            if type_args.is_empty() {
-                if let Some(concrete) = subst.get(entity) {
-                    return concrete.clone();
-                }
+            // A bare `Named` entity may alias an associated type entry in the
+            // subst map (e.g. Iterator.Item entity → Int64). The codegen layer
+            // installs these mappings when it knows the concrete self-type.
+            if type_args.is_empty()
+                && let Some(concrete) = subst.get(entity)
+            {
+                return concrete.clone();
             }
             MirTy::Named {
                 entity: *entity,
-                type_args: type_args.iter().map(|a| sub(a)).collect(),
+                type_args: type_args.iter().map(&rec).collect(),
             }
         },
 
@@ -655,19 +477,27 @@ pub fn substitute_type_with_self(
         } => {
             // Associated types inside a protocol extension (e.g. `Item` in
             // `extend Iterator { func collect() -> Array[Item] }`) lower with
-            // `base = Named(protocol)` — HIR represents bare `Item` as
-            // `AssocProjection { base: self_protocol, ... }`. At monomorphization
-            // time we want that to behave like `SelfType`, so substitute it
-            // with the caller-supplied `self_type` before recursing. Without
-            // this, the projection never becomes concrete and layout defaults
-            // to ptr (8 bytes), which disagrees with the actual Item layout
-            // for sub-i64 types (UInt8, Char-as-UInt32, etc.).
-            let sub_base = match base.as_ref() {
-                MirTy::Named { entity, type_args } if type_args.is_empty() && entity == protocol => {
-                    self_type.cloned().unwrap_or_else(|| sub(base))
+            // `base = Named(protocol)`. Treat that as `SelfType` so the
+            // caller's concrete self substitutes in before we try a witness
+            // lookup — without it, the base stays abstract and the projection
+            // survives into layout where it would size as ptr (8 bytes) and
+            // disagree with the actual Item layout for sub-i64 types.
+            let raw_base = match base.as_ref() {
+                MirTy::Named { entity, type_args }
+                    if type_args.is_empty() && entity == protocol =>
+                {
+                    self_type.cloned().unwrap_or_else(|| base.as_ref().clone())
                 },
-                _ => sub(base),
+                _ => base.as_ref().clone(),
             };
+            let sub_base = rec(&raw_base);
+            if is_concrete(&sub_base)
+                && let Some(resolved) = module.resolve_associated_type(*protocol, &sub_base, name)
+            {
+                // Chained projection (I.Item.Inner): re-run the walker so the
+                // witness's bound type is itself fully reduced.
+                return rec(&resolved);
+            }
             MirTy::AssociatedProjection {
                 base: Box::new(sub_base),
                 protocol: *protocol,
@@ -676,14 +506,31 @@ pub fn substitute_type_with_self(
         },
 
         MirTy::FuncThin { params, ret } => MirTy::FuncThin {
-            params: params.iter().map(|p| sub(p)).collect(),
-            ret: Box::new(sub(ret)),
+            params: params.iter().map(&rec).collect(),
+            ret: Box::new(rec(ret)),
         },
-
         MirTy::FuncThick { params, ret } => MirTy::FuncThick {
-            params: params.iter().map(|p| sub(p)).collect(),
-            ret: Box::new(sub(ret)),
+            params: params.iter().map(&rec).collect(),
+            ret: Box::new(rec(ret)),
         },
+    }
+}
+
+/// A type is "concrete enough" to use as a witness self-type — no abstract
+/// `TypeParam`, `SelfType`, `Error`, or unresolved inner projection. The
+/// witness pattern-matcher would silently bind abstract types to abstract
+/// patterns and return garbage; require concreteness before the lookup.
+fn is_concrete(ty: &MirTy) -> bool {
+    match ty {
+        MirTy::TypeParam(_) | MirTy::SelfType | MirTy::Error => false,
+        MirTy::AssociatedProjection { base, .. } => is_concrete(base),
+        MirTy::Pointer(t) | MirTy::Ref(t) | MirTy::RefMut(t) => is_concrete(t),
+        MirTy::Tuple(elems) => elems.iter().all(is_concrete),
+        MirTy::Named { type_args, .. } => type_args.iter().all(is_concrete),
+        MirTy::FuncThin { params, ret } | MirTy::FuncThick { params, ret } => {
+            params.iter().all(is_concrete) && is_concrete(ret)
+        },
+        _ => true,
     }
 }
 
@@ -946,33 +793,36 @@ mod tests {
 
     #[test]
     fn substitute_type_basic() {
+        let module = MirModule::new("test");
         let entity = dummy_entity(1);
         let mut subst = HashMap::new();
         subst.insert(entity, MirTy::I64);
 
         assert_eq!(
-            substitute_type(&MirTy::TypeParam(entity), &subst),
+            substitute_type(&MirTy::TypeParam(entity), &subst, &module),
             MirTy::I64
         );
         // Primitives unchanged
-        assert_eq!(substitute_type(&MirTy::Bool, &subst), MirTy::Bool);
+        assert_eq!(substitute_type(&MirTy::Bool, &subst, &module), MirTy::Bool);
     }
 
     #[test]
     fn substitute_type_nested() {
+        let module = MirModule::new("test");
         let entity = dummy_entity(1);
         let mut subst = HashMap::new();
         subst.insert(entity, MirTy::I32);
 
         let ty = MirTy::Ref(Box::new(MirTy::TypeParam(entity)));
         assert_eq!(
-            substitute_type(&ty, &subst),
+            substitute_type(&ty, &subst, &module),
             MirTy::Ref(Box::new(MirTy::I32))
         );
     }
 
     #[test]
     fn substitute_type_named() {
+        let module = MirModule::new("test");
         let param = dummy_entity(1);
         let struct_e = dummy_entity(2);
         let mut subst = HashMap::new();
@@ -983,7 +833,7 @@ mod tests {
             type_args: vec![MirTy::TypeParam(param)],
         };
         assert_eq!(
-            substitute_type(&ty, &subst),
+            substitute_type(&ty, &subst, &module),
             MirTy::Named {
                 entity: struct_e,
                 type_args: vec![MirTy::I64],
@@ -993,8 +843,9 @@ mod tests {
 
     #[test]
     fn substitute_empty_is_identity() {
+        let module = MirModule::new("test");
         let ty = MirTy::Tuple(vec![MirTy::I32, MirTy::Bool]);
         let subst = HashMap::new();
-        assert_eq!(substitute_type(&ty, &subst), ty);
+        assert_eq!(substitute_type(&ty, &subst, &module), ty);
     }
 }

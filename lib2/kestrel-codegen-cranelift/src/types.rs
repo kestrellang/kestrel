@@ -6,7 +6,7 @@
 
 use crate::common;
 use cranelift_codegen::ir;
-use kestrel_codegen2::{TargetConfig, normalize_projection};
+use kestrel_codegen2::TargetConfig;
 use kestrel_mir::MirTy;
 
 /// Translate a MirTy to its Cranelift type representation.
@@ -56,23 +56,15 @@ pub fn translate_type(ty: &MirTy, target: &TargetConfig) -> ir::Type {
 
 /// Layout-aware type translation for Named types. Uses the layout to determine
 /// if a Named type should be passed by value (small) or by pointer (large).
+///
+/// Expects `ty` to be substituted-and-reduced — `substitute_type` resolves
+/// `AssociatedProjection` upstream, so classification never encounters a
+/// projection whose concrete Item type it should peek at.
 pub fn translate_type_with_layout(
     ty: &MirTy,
     target: &TargetConfig,
     layouts: &mut kestrel_codegen2::LayoutCache,
 ) -> ir::Type {
-    // Resolve any AssociatedProjection to its concrete bound type before
-    // dispatching. Without this, a projection that normalizes to Int64
-    // (etc.) would fall through the `_` arm and return `ptr`, disagreeing
-    // with the layout-aware treatment Named types get.
-    let normalized_storage;
-    let ty = if matches!(ty, MirTy::AssociatedProjection { .. }) {
-        normalized_storage = normalize_projection(ty, layouts.module());
-        &normalized_storage
-    } else {
-        ty
-    };
-
     match ty {
         MirTy::Named { .. } => {
             let layout = layouts.layout_of(ty);

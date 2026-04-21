@@ -60,6 +60,7 @@ fn compile_return(
         &state.func_def.ret,
         &state.subst,
         state.self_type.as_ref(),
+        ctx.module,
     );
 
     // Unit return — empty tuple is the canonical unit value.

@@ -24,7 +24,7 @@ pub fn compile_construct(
     fields: &[(String, Value)],
 ) -> Result<CrValue, CodegenError> {
     let ptr_ty = common::ptr_type(ctx.target);
-    let concrete_ty = substitute_type_with_self(ty, &state.subst, state.self_type.as_ref());
+    let concrete_ty = substitute_type_with_self(ty, &state.subst, state.self_type.as_ref(), ctx.module);
     let layout = ctx.layouts.layout_of(&concrete_ty);
 
     // Allocate stack slot for the struct
@@ -40,7 +40,7 @@ pub fn compile_construct(
     if let MirTy::Named { entity, type_args } = &concrete_ty {
         match ctx.layouts.resolve_named(*entity) {
             NamedKind::Struct(struct_id) => {
-                let type_args = common::substitute_type_args(type_args, &state.subst, state.self_type.as_ref());
+                let type_args = common::substitute_type_args(type_args, &state.subst, state.self_type.as_ref(), ctx.module);
 
                 for (name, value) in fields {
                     let (offset, field_ty) =
@@ -137,7 +137,7 @@ pub fn compile_enum_variant(
     payload: &[Value],
 ) -> Result<CrValue, CodegenError> {
     let ptr_ty = common::ptr_type(ctx.target);
-    let concrete_ty = substitute_type_with_self(enum_ty, &state.subst, state.self_type.as_ref());
+    let concrete_ty = substitute_type_with_self(enum_ty, &state.subst, state.self_type.as_ref(), ctx.module);
     let layout = ctx.layouts.layout_of(&concrete_ty);
 
     let slot = builder.create_sized_stack_slot(StackSlotData::new(
@@ -151,7 +151,7 @@ pub fn compile_enum_variant(
     if let MirTy::Named { entity, type_args } = &concrete_ty {
         match ctx.layouts.resolve_named(*entity) {
             NamedKind::Enum(enum_id) => {
-                let type_args = common::substitute_type_args(type_args, &state.subst, state.self_type.as_ref());
+                let type_args = common::substitute_type_args(type_args, &state.subst, state.self_type.as_ref(), ctx.module);
 
                 let enum_def = &ctx.module.enums[enum_id.index()];
                 let case = enum_def.case_by_name(variant).ok_or_else(|| {
@@ -194,7 +194,7 @@ pub fn compile_enum_variant(
                                 builder.ins().iadd_imm(payload_ptr, field_offset as i64);
 
                             let field_ty = &payload_struct.fields[i].ty;
-                            let concrete_field = substitute_type(field_ty, &enum_subst);
+                            let concrete_field = substitute_type(field_ty, &enum_subst, ctx.module);
 
                             if is_aggregate(&concrete_field, &mut ctx.layouts) {
                                 common::copy_aggregate(
@@ -236,7 +236,7 @@ pub fn compile_array_literal(
     values: &[Value],
 ) -> Result<CrValue, CodegenError> {
     let ptr_ty = common::ptr_type(ctx.target);
-    let concrete_elem = substitute_type_with_self(element_ty, &state.subst, state.self_type.as_ref());
+    let concrete_elem = substitute_type_with_self(element_ty, &state.subst, state.self_type.as_ref(), ctx.module);
     let elem_layout = ctx.layouts.layout_of(&concrete_elem);
     let total_size = elem_layout.size * values.len() as u64;
 

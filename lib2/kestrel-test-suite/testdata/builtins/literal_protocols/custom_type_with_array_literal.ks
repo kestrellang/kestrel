@@ -10,7 +10,7 @@ struct MyList: _ExpressibleByArrayLiteral {
     type Element = Int64
     var count: Int64
 
-    init(_arrayLiteralPointer: lang.ptr[Int64], _arrayLiteralCount: lang.i64) {
+    init(_arrayLiteralPointer _arrayLiteralPointer: lang.ptr[Int64], _arrayLiteralCount _arrayLiteralCount: lang.i64) {
         self.count = Int64(intLiteral: _arrayLiteralCount)
     }
 }

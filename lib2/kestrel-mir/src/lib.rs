@@ -26,6 +26,7 @@ pub mod statement;
 pub mod terminator;
 pub mod ty;
 pub mod value;
+pub mod witness_lookup;
 
 // Re-export core types
 pub use body::{BasicBlock, LocalDef, MirBody};

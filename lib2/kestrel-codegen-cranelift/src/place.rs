@@ -181,7 +181,7 @@ fn read_field(
         )));
     };
 
-    let type_args = common::substitute_type_args(type_args, &state.subst, state.self_type.as_ref());
+    let type_args = common::substitute_type_args(type_args, &state.subst, state.self_type.as_ref(), ctx.module);
     let (offset, field_ty) =
         get_field_info(ctx.module, &mut ctx.layouts, struct_id, &type_args, name)?;
     let field_ptr = builder.ins().iadd_imm(parent_val, offset as i64);
@@ -222,7 +222,7 @@ fn read_index(
                     "index on non-struct Named: {index}"
                 )));
             };
-            let type_args = common::substitute_type_args(type_args, &state.subst, state.self_type.as_ref());
+            let type_args = common::substitute_type_args(type_args, &state.subst, state.self_type.as_ref(), ctx.module);
             let (offset, field_ty) = common::get_field_by_index(
                 ctx.module,
                 &mut ctx.layouts,
@@ -261,7 +261,7 @@ fn read_downcast(
         )));
     };
 
-    let type_args = common::substitute_type_args(type_args, &state.subst, state.self_type.as_ref());
+    let type_args = common::substitute_type_args(type_args, &state.subst, state.self_type.as_ref(), ctx.module);
     let payload_offset = get_enum_payload_offset(ctx.module, &mut ctx.layouts, enum_id, &type_args);
     Ok(builder.ins().iadd_imm(parent_val, payload_offset as i64))
 }
@@ -317,7 +317,7 @@ pub fn compile_place_write(
 
             match &parent_ty {
                 MirTy::Named { entity, type_args } => {
-                    let type_args = common::substitute_type_args(type_args, &state.subst, state.self_type.as_ref());
+                    let type_args = common::substitute_type_args(type_args, &state.subst, state.self_type.as_ref(), ctx.module);
 
                     match ctx.layouts.resolve_named(*entity) {
                         NamedKind::Struct(struct_id) => {
@@ -409,7 +409,7 @@ pub fn compile_place_addr(
 
             match &parent_ty {
                 MirTy::Named { entity, type_args } => {
-                    let type_args = common::substitute_type_args(type_args, &state.subst, state.self_type.as_ref());
+                    let type_args = common::substitute_type_args(type_args, &state.subst, state.self_type.as_ref(), ctx.module);
 
                     match ctx.layouts.resolve_named(*entity) {
                         NamedKind::Struct(struct_id) => {
@@ -459,7 +459,7 @@ pub fn compile_place_addr(
                     Ok(builder.ins().iadd_imm(parent_ptr, offset as i64))
                 },
                 MirTy::Named { entity, type_args } => {
-                    let type_args = common::substitute_type_args(type_args, &state.subst, state.self_type.as_ref());
+                    let type_args = common::substitute_type_args(type_args, &state.subst, state.self_type.as_ref(), ctx.module);
                     match ctx.layouts.resolve_named(*entity) {
                         NamedKind::Struct(struct_id) => {
                             let (offset, _) = common::get_field_by_index(
@@ -489,7 +489,7 @@ pub fn compile_place_addr(
                 common::get_place_type(ctx.module, state.body, parent, &state.subst, state.self_type.as_ref(), &ctx.layouts)?;
             match &parent_ty {
                 MirTy::Named { entity, type_args } => {
-                    let type_args = common::substitute_type_args(type_args, &state.subst, state.self_type.as_ref());
+                    let type_args = common::substitute_type_args(type_args, &state.subst, state.self_type.as_ref(), ctx.module);
                     match ctx.layouts.resolve_named(*entity) {
                         NamedKind::Enum(enum_id) => {
                             let payload_offset = common::get_enum_payload_offset(

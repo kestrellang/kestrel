@@ -382,14 +382,14 @@ impl<'a> CodegenContext<'a> {
             .collect();
 
         // Resolve return type
-        let ret_ty = substitute_type_with_self(&func_def.ret, &subst, self_type);
+        let ret_ty = substitute_type_with_self(&func_def.ret, &subst, self_type, self.module);
         let is_main = self.is_main_function(func_def);
 
         // Extern functions use C calling convention
         if let Some(extern_info) = &func_def.extern_info {
             sig.call_conv = self.c_call_conv();
             for param in &func_def.params {
-                let ty = substitute_type_with_self(&param.ty, &subst, self_type);
+                let ty = substitute_type_with_self(&param.ty, &subst, self_type, self.module);
                 sig.params
                     .push(AbiParam::new(types::translate_type(&ty, self.target)));
             }
@@ -410,7 +410,7 @@ impl<'a> CodegenContext<'a> {
         // Regular parameters. `mutating` (InOut) params are passed as pointers
         // regardless of value type so the callee can write back to caller storage.
         for param in &func_def.params {
-            let ty = substitute_type_with_self(&param.ty, &subst, self_type);
+            let ty = substitute_type_with_self(&param.ty, &subst, self_type, self.module);
             let cl_ty = if matches!(param.mode, kestrel_mir::ParamMode::InOut) {
                 ptr_ty
             } else {

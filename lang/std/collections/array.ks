@@ -258,7 +258,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     }
 
     /// Internal initializer called by compiler for array literals.
-    public init(_arrayLiteralPointer: lang.ptr[T], _arrayLiteralCount: lang.i64) {
+    public init(_arrayLiteralPointer _arrayLiteralPointer: lang.ptr[T], _arrayLiteralCount _arrayLiteralCount: lang.i64) {
         self.init(arrayLiteral: LiteralSlice(pointer: _arrayLiteralPointer, count: _arrayLiteralCount))
     }
 

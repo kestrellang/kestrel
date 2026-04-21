@@ -56,7 +56,7 @@ public protocol ExpressibleByNullLiteral {
 public protocol _ExpressibleByArrayLiteral {
     type Element
     /// Creates an instance from a raw pointer to elements and count.
-    init(_arrayLiteralPointer: lang.ptr[Element], _arrayLiteralCount: lang.i64)
+    init(_arrayLiteralPointer _arrayLiteralPointer: lang.ptr[Element], _arrayLiteralCount _arrayLiteralCount: lang.i64)
 }
 
 /// User-facing protocol for array literal initialization.

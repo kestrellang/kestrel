@@ -1620,18 +1620,43 @@ fn solve_member(
             }
         },
         Err(crate::resolve::MemberError::Ambiguous(ranked_candidates)) => {
-            // Try each candidate in specificity order, picking the first compatible one
-            let compatible = ranked_candidates.iter().find(|(_, ext)| match ext {
-                Some(ext) => {
-                    extension_type_args_compatible(ctx, *ext, &recv_kind)
-                        && extension_where_clauses_satisfied(ctx, *ext, &recv_kind)
-                },
-                None => true,
-            });
-            if let Some(&(winner, ext)) = compatible {
-                match ctx.resolver.resolve_single_member(&recv_kind, winner) {
+            // Filter to candidates whose extension (if any) is compatible with
+            // the receiver type. Direct members (ext=None) always pass.
+            let compatible: Vec<(Entity, Option<Entity>, usize)> = ranked_candidates
+                .iter()
+                .copied()
+                .filter(|(_, ext, _)| match ext {
+                    Some(ext) => {
+                        extension_type_args_compatible(ctx, *ext, &recv_kind)
+                            && extension_where_clauses_satisfied(ctx, *ext, &recv_kind)
+                    },
+                    None => true,
+                })
+                .collect();
+
+            if compatible.is_empty() {
+                return SolveResult::Error(InferError::NoMember {
+                    receiver,
+                    name: name.to_string(),
+                    is_call,
+                    span,
+                });
+            }
+
+            // Keep only candidates at the highest specificity. A uniquely most-
+            // specific extension wins; ties at the top (including all-direct-
+            // member ties, which share specificity 0) are a real ambiguity.
+            let max_spec = compatible.iter().map(|(_, _, s)| *s).max().unwrap();
+            let top: Vec<(Entity, Option<Entity>)> = compatible
+                .into_iter()
+                .filter(|(_, _, s)| *s == max_spec)
+                .map(|(c, e, _)| (c, e))
+                .collect();
+
+            if let [(winner, ext)] = top.as_slice() {
+                match ctx.resolver.resolve_single_member(&recv_kind, *winner) {
                     Ok(mut res) => {
-                        res.from_extension = ext;
+                        res.from_extension = *ext;
                         res
                     },
                     Err(_) => {
@@ -1643,10 +1668,9 @@ fn solve_member(
                     },
                 }
             } else {
-                return SolveResult::Error(InferError::NoMember {
+                return SolveResult::Error(InferError::AmbiguousMember {
                     receiver,
                     name: name.to_string(),
-                    is_call,
                     span,
                 });
             }
@@ -1807,6 +1831,12 @@ fn solve_member(
     // receiver/extension type params (e.g. `flatten[U]() where T = Optional[U]`
     // has T from Optional). We check method type params first, then fall back
     // to the full subs map which includes struct/extension type params.
+    // `self_entity`/`receiver` must be threaded into RHS lowering so that
+    // `HirTy::SelfType` (e.g. bare `Item` in `extend Iterator`'s where clause
+    // lowers to `AssocProjection { base: SelfType(Iterator), .. }`) resolves
+    // against the concrete receiver rather than becoming a fresh unresolved
+    // TyVar — which would leave the Associated constraint permanently deferred.
+    let self_entity = resolution.self_type;
     for clause in &resolution.where_clauses {
         match clause {
             crate::resolve::WhereClause::Bound {
@@ -1832,12 +1862,12 @@ fn solve_member(
                 if let Some(tv) = param_tv {
                     let assoc_result = ctx.fresh();
                     ctx.associated(tv, assoc_name, assoc_result, span.clone());
-                    let rhs_tv = lower_hir_ty_sub(ctx, rhs, None, TyVar(0), &subs);
+                    let rhs_tv = lower_hir_ty_sub(ctx, rhs, self_entity, receiver, &subs);
                     ctx.equal(assoc_result, rhs_tv, span.clone());
                 }
             },
             crate::resolve::WhereClause::DirectEquality { param, rhs } => {
-                let rhs_tv = lower_hir_ty_sub(ctx, rhs, None, TyVar(0), &subs);
+                let rhs_tv = lower_hir_ty_sub(ctx, rhs, self_entity, receiver, &subs);
                 if let Some(idx) = resolution.type_params.iter().position(|&p| p == *param) {
                     // Method's own type param — redirect directly
                     ctx.types[fresh_params[idx].0 as usize] = crate::ty::TySlot::Redirect(rhs_tv);
@@ -1860,8 +1890,8 @@ fn solve_member(
     }
 
     // For protocol methods, Self in param/return types needs substitution
-    // with the actual receiver type.
-    let self_entity = resolution.self_type;
+    // with the actual receiver type. `self_entity` is bound above the
+    // where-clause loop so RHS lowering can see it too.
 
     // When resolved through a protocol conformance, emit a Conforms constraint
     // to verify the receiver conforms to this protocol with the inferred type args.

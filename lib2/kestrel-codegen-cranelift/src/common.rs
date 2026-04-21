@@ -10,8 +10,7 @@ use cranelift_codegen::ir::immediates::Offset32;
 use cranelift_codegen::ir::{self, InstBuilder, MemFlags, Value as CrValue};
 use cranelift_frontend::FunctionBuilder;
 use kestrel_codegen2::{
-    Layout, LayoutCache, TargetConfig, normalize_projection, substitute_type,
-    substitute_type_with_self,
+    Layout, LayoutCache, TargetConfig, substitute_type, substitute_type_with_self,
 };
 use kestrel_hecs::Entity;
 use kestrel_mir::{
@@ -29,10 +28,11 @@ pub fn substitute_type_args(
     type_args: &[MirTy],
     subst: &HashMap<Entity, MirTy>,
     self_type: Option<&MirTy>,
+    module: &MirModule,
 ) -> Vec<MirTy> {
     type_args
         .iter()
-        .map(|a| substitute_type_with_self(a, subst, self_type))
+        .map(|a| substitute_type_with_self(a, subst, self_type, module))
         .collect()
 }
 
@@ -49,22 +49,11 @@ pub fn short_name(qualified: &str) -> &str {
 
 /// Check if a MirTy is an aggregate type (passed by pointer, not in registers).
 ///
-/// Treats all `Named` types as aggregate (passed by pointer). This is
-/// conservative but consistent — every codegen site uses the same rule so
-/// callers and callees agree on ABI.
-///
-/// Normalizes `AssociatedProjection` through the witness table first; without
-/// this, read and consume sites can disagree on aggregate-ness when a field's
-/// declared type is a projection but the consumer sees the resolved concrete
-/// type.
-pub fn is_aggregate(ty: &MirTy, layouts: &mut LayoutCache) -> bool {
-    if matches!(ty, MirTy::AssociatedProjection { .. }) {
-        let normalized = normalize_projection(ty, layouts.module());
-        return matches!(
-            normalized,
-            MirTy::Tuple(_) | MirTy::Named { .. } | MirTy::Str | MirTy::FuncThick { .. }
-        );
-    }
+/// Treats all `Named` types as aggregate (passed by pointer). Consistent with
+/// every codegen site so callers and callees agree on ABI. Types arriving here
+/// are expected to be substituted-and-reduced (no concrete-based
+/// `AssociatedProjection` — `substitute_type` resolves those upstream).
+pub fn is_aggregate(ty: &MirTy, _layouts: &mut LayoutCache) -> bool {
     matches!(
         ty,
         MirTy::Tuple(_) | MirTy::Named { .. } | MirTy::Str | MirTy::FuncThick { .. }
@@ -238,14 +227,14 @@ pub fn get_place_type(
     match place {
         Place::Local(id) => {
             let ty = &body.locals[id.index()].ty;
-            Ok(substitute_type_with_self(ty, subst, self_type))
+            Ok(substitute_type_with_self(ty, subst, self_type, module))
         },
 
         Place::Global(entity) => {
             // Find the static by entity
             for s in &module.statics {
                 if s.entity == *entity {
-                    return Ok(substitute_type_with_self(&s.ty, subst, self_type));
+                    return Ok(substitute_type_with_self(&s.ty, subst, self_type, module));
                 }
             }
             let name = module.resolve_name(*entity);
@@ -261,7 +250,7 @@ pub fn get_place_type(
                 MirTy::Named { entity, type_args } => {
                     let type_args = type_args
                         .iter()
-                        .map(|a| substitute_type_with_self(a, subst, self_type))
+                        .map(|a| substitute_type_with_self(a, subst, self_type, module))
                         .collect::<Vec<_>>();
                     match layouts.resolve_named(*entity) {
                         kestrel_codegen2::NamedKind::Struct(struct_id) => {
@@ -283,10 +272,7 @@ pub fn get_place_type(
                                 .zip(type_args.iter())
                                 .map(|(tp, arg)| (tp.entity, arg.clone()))
                                 .collect();
-                            Ok(normalize_projection(
-                                &substitute_type(field_ty, &field_subst),
-                                module,
-                            ))
+                            Ok(substitute_type(field_ty, &field_subst, module))
                         },
                         _ => Err(CodegenError::Unsupported(format!(
                             "field access on non-struct Named type: {name}"
@@ -323,10 +309,7 @@ pub fn get_place_type(
                                 .zip(type_args.iter())
                                 .map(|(tp, arg)| (tp.entity, arg.clone()))
                                 .collect();
-                            Ok(normalize_projection(
-                                &substitute_type(field_ty, &field_subst),
-                                module,
-                            ))
+                            Ok(substitute_type(field_ty, &field_subst, module))
                         } else {
                             Err(CodegenError::Unsupported(format!(
                                 "struct index {index} out of range"
@@ -410,10 +393,8 @@ pub fn get_field_info(
     let sl = layouts.struct_layout(struct_id, type_args);
     let offset = sl.field_offsets[field_id.index()];
 
-    // Substitute type params into field type, then normalize any resulting
-    // associated-type projections (I.Item → Int64 via the ArrayIterator
-    // witness). Without the normalize step, the returned MirTy disagrees
-    // with the consumer's inferred type on aggregate-vs-scalar handling.
+    // `substitute_type` already resolves any AssociatedProjection — the
+    // returned MirTy is canonical and agrees with downstream classification.
     let field_ty = &struct_def.fields[field_id.index()].ty;
     let subst: HashMap<Entity, MirTy> = struct_def
         .type_params
@@ -421,8 +402,7 @@ pub fn get_field_info(
         .zip(type_args.iter())
         .map(|(tp, arg)| (tp.entity, arg.clone()))
         .collect();
-    let substituted = substitute_type(field_ty, &subst);
-    let concrete_ty = normalize_projection(&substituted, module);
+    let concrete_ty = substitute_type(field_ty, &subst, module);
 
     Ok((offset, concrete_ty))
 }
@@ -453,8 +433,7 @@ pub fn get_field_by_index(
         .zip(type_args.iter())
         .map(|(tp, arg)| (tp.entity, arg.clone()))
         .collect();
-    let substituted = substitute_type(field_ty, &subst);
-    let concrete_ty = normalize_projection(&substituted, module);
+    let concrete_ty = substitute_type(field_ty, &subst, module);
 
     Ok((offset, concrete_ty))
 }

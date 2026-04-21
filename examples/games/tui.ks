@@ -80,7 +80,7 @@ public struct Style: ExpressibleByArrayLiteral, _ExpressibleByArrayLiteral, Clon
     }
 
     // _ExpressibleByArrayLiteral (compiler calls this)
-    public init(_arrayLiteralPointer: lang.ptr[StyleOption], _arrayLiteralCount: lang.i64) {
+    public init(_arrayLiteralPointer _arrayLiteralPointer: lang.ptr[StyleOption], _arrayLiteralCount _arrayLiteralCount: lang.i64) {
         self.init(arrayLiteral: LiteralSlice(pointer: _arrayLiteralPointer, count: _arrayLiteralCount));
     }
 

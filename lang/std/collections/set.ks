@@ -970,7 +970,7 @@ extend Set[T, H] where T: Hash, T: Addable, T.Output = T, T: Defaultable, H: Has
 extend Set[T, H]: ExpressibleByArrayLiteral where T: Hash, H: Hasher, H: Defaultable {
     type Element = T
 
-    public init(_arrayLiteralPointer: lang.ptr[T], _arrayLiteralCount: lang.i64) {
+    public init(_arrayLiteralPointer _arrayLiteralPointer: lang.ptr[T], _arrayLiteralCount _arrayLiteralCount: lang.i64) {
         self.init(arrayLiteral: LiteralSlice(pointer: _arrayLiteralPointer, count: _arrayLiteralCount))
     }
 }
