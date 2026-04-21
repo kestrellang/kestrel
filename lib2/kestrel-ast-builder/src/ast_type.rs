@@ -4,8 +4,8 @@
 //! The data types themselves live in `kestrel_ast::ast_type`.
 
 use kestrel_span2::Span;
-use kestrel_syntax_tree2::{SyntaxKind, SyntaxNode};
 use kestrel_syntax_tree2::utils::{extract_path_segments, find_child};
+use kestrel_syntax_tree2::{SyntaxKind, SyntaxNode};
 
 pub use kestrel_ast::{AstType, PathSegment};
 
@@ -45,13 +45,17 @@ pub fn ast_type_from_cst(node: &SyntaxNode, file_id: usize) -> Option<AstType> {
                 .enumerate()
                 .map(|(i, name)| PathSegment {
                     name: name.clone(),
-                    type_args: if i == names.len() - 1 { type_args.clone() } else { vec![] },
+                    type_args: if i == names.len() - 1 {
+                        type_args.clone()
+                    } else {
+                        vec![]
+                    },
                     span: span.clone(),
                 })
                 .collect();
 
             Some(AstType::Named { segments, span })
-        }
+        },
 
         SyntaxKind::TyTuple => {
             let elements: Vec<AstType> = node
@@ -60,7 +64,7 @@ pub fn ast_type_from_cst(node: &SyntaxNode, file_id: usize) -> Option<AstType> {
                 .filter_map(|c| ast_type_from_cst(&c, file_id))
                 .collect();
             Some(AstType::Tuple(elements, span))
-        }
+        },
 
         SyntaxKind::TyFunction => {
             // CST structure: TyFunction has exactly 2 children:
@@ -69,10 +73,12 @@ pub fn ast_type_from_cst(node: &SyntaxNode, file_id: usize) -> Option<AstType> {
             let mut children = node.children();
 
             // First child: TyList with parameter types
-            let params = children.next()
+            let params = children
+                .next()
                 .filter(|c| c.kind() == SyntaxKind::TyList)
                 .map(|ty_list| {
-                    ty_list.children()
+                    ty_list
+                        .children()
                         .filter(|c| is_type_node(c.kind()))
                         .filter_map(|c| ast_type_from_cst(&c, file_id))
                         .collect::<Vec<_>>()
@@ -80,13 +86,18 @@ pub fn ast_type_from_cst(node: &SyntaxNode, file_id: usize) -> Option<AstType> {
                 .unwrap_or_default();
 
             // Second child: return type
-            let return_type = children.next()
+            let return_type = children
+                .next()
                 .filter(|c| is_type_node(c.kind()))
                 .and_then(|c| ast_type_from_cst(&c, file_id))
                 .unwrap_or(AstType::Unit(span.clone()));
 
-            Some(AstType::Function { params, return_type: Box::new(return_type), span })
-        }
+            Some(AstType::Function {
+                params,
+                return_type: Box::new(return_type),
+                span,
+            })
+        },
 
         SyntaxKind::TyArray => {
             let inner = node
@@ -94,7 +105,7 @@ pub fn ast_type_from_cst(node: &SyntaxNode, file_id: usize) -> Option<AstType> {
                 .find(|c| is_type_node(c.kind()))
                 .and_then(|c| ast_type_from_cst(&c, file_id))?;
             Some(AstType::Array(Box::new(inner), span))
-        }
+        },
 
         SyntaxKind::TyDictionary => {
             let mut types = node
@@ -104,7 +115,7 @@ pub fn ast_type_from_cst(node: &SyntaxNode, file_id: usize) -> Option<AstType> {
             let key = types.next()?;
             let value = types.next()?;
             Some(AstType::Dictionary(Box::new(key), Box::new(value), span))
-        }
+        },
 
         SyntaxKind::TyOptional => {
             let inner = node
@@ -112,7 +123,7 @@ pub fn ast_type_from_cst(node: &SyntaxNode, file_id: usize) -> Option<AstType> {
                 .find(|c| is_type_node(c.kind()))
                 .and_then(|c| ast_type_from_cst(&c, file_id))?;
             Some(AstType::Optional(Box::new(inner), span))
-        }
+        },
 
         SyntaxKind::TyResult => {
             let mut types = node
@@ -126,18 +137,17 @@ pub fn ast_type_from_cst(node: &SyntaxNode, file_id: usize) -> Option<AstType> {
                 err: Box::new(err),
                 span,
             })
-        }
+        },
 
         SyntaxKind::TyUnit => Some(AstType::Unit(span)),
         SyntaxKind::TyNever => Some(AstType::Never(span)),
         SyntaxKind::TyInferred => Some(AstType::Inferred(span)),
 
         // For wrapper nodes like Ty, recurse into the child
-        SyntaxKind::Ty => {
-            node.children()
-                .find(|c| is_type_node(c.kind()))
-                .and_then(|c| ast_type_from_cst(&c, file_id))
-        }
+        SyntaxKind::Ty => node
+            .children()
+            .find(|c| is_type_node(c.kind()))
+            .and_then(|c| ast_type_from_cst(&c, file_id)),
 
         _ => None,
     }

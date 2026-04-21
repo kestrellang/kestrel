@@ -474,7 +474,6 @@ impl<'a> CollectionContext<'a> {
                 self.scan_value(ptr, subst);
                 self.scan_value(delta, subst);
             },
-
         }
     }
 

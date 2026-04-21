@@ -9,13 +9,13 @@ use crate::common::{self, is_aggregate};
 use crate::context::CodegenContext;
 use crate::error::CodegenError;
 use crate::types;
+use cranelift_codegen::ir::Value as CrValue;
 use cranelift_codegen::ir::immediates::Offset32;
 use cranelift_codegen::ir::{self, InstBuilder, MemFlags, StackSlotData, StackSlotKind};
-use cranelift_codegen::ir::Value as CrValue;
 use cranelift_codegen::verifier::verify_function;
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext, Variable};
 use cranelift_module::Module;
-use kestrel_codegen2::{substitute_type, LayoutCache};
+use kestrel_codegen2::{LayoutCache, substitute_type};
 use kestrel_hecs::Entity;
 use kestrel_mir::{
     BlockId, FunctionDef, FunctionKind, LocalId, MirBody, MirTy, PassingMode, Place, Rvalue,
@@ -90,7 +90,10 @@ pub fn resolve_assoc_type_substs(
                     // Try resolving through each concrete type in the subst map
                     for concrete in subst.values() {
                         if let Ok(resolved) = witness::resolve_associated_type(
-                            module, proto_def.entity, concrete, &assoc.name,
+                            module,
+                            proto_def.entity,
+                            concrete,
+                            &assoc.name,
                         ) {
                             subst.insert(entity, resolved);
                             break;
@@ -120,11 +123,11 @@ fn collect_named_entities_from_func(func: &FunctionDef, out: &mut Vec<Entity>) {
                 match &stmt.kind {
                     StatementKind::Call { callee, .. } => {
                         collect_named_entities_from_callee(callee, out);
-                    }
+                    },
                     StatementKind::Assign { rvalue, .. } => {
                         collect_named_entities_from_rvalue(rvalue, out);
-                    }
-                    _ => {}
+                    },
+                    _ => {},
                 }
             }
         }
@@ -140,45 +143,53 @@ fn collect_named_entities_from_ty(ty: &MirTy, out: &mut Vec<Entity>) {
             for arg in type_args {
                 collect_named_entities_from_ty(arg, out);
             }
-        }
+        },
         MirTy::Pointer(inner) | MirTy::Ref(inner) | MirTy::RefMut(inner) => {
             collect_named_entities_from_ty(inner, out);
-        }
+        },
         MirTy::Tuple(elems) => {
             for e in elems {
                 collect_named_entities_from_ty(e, out);
             }
-        }
+        },
         MirTy::FuncThin { params, ret } | MirTy::FuncThick { params, ret } => {
             for p in params {
                 collect_named_entities_from_ty(p, out);
             }
             collect_named_entities_from_ty(ret, out);
-        }
+        },
         MirTy::AssociatedProjection { base, .. } => {
             collect_named_entities_from_ty(base, out);
-        }
-        _ => {}
+        },
+        _ => {},
     }
 }
 
 fn collect_named_entities_from_callee(callee: &kestrel_mir::Callee, out: &mut Vec<Entity>) {
     match callee {
-        kestrel_mir::Callee::Witness { self_type, method_type_args, .. } => {
+        kestrel_mir::Callee::Witness {
+            self_type,
+            method_type_args,
+            ..
+        } => {
             collect_named_entities_from_ty(self_type, out);
             for arg in method_type_args {
                 collect_named_entities_from_ty(arg, out);
             }
-        }
-        kestrel_mir::Callee::Direct { self_type, type_args, .. } => {
+        },
+        kestrel_mir::Callee::Direct {
+            self_type,
+            type_args,
+            ..
+        } => {
             if let Some(st) = self_type {
                 collect_named_entities_from_ty(st, out);
             }
             for arg in type_args {
                 collect_named_entities_from_ty(arg, out);
             }
-        }
-        _ => {}
+        },
+        _ => {},
     }
 }
 
@@ -186,11 +197,11 @@ fn collect_named_entities_from_rvalue(rvalue: &Rvalue, out: &mut Vec<Entity>) {
     match rvalue {
         Rvalue::Construct { ty, .. } => {
             collect_named_entities_from_ty(ty, out);
-        }
+        },
         Rvalue::EnumVariant { enum_ty, .. } => {
             collect_named_entities_from_ty(enum_ty, out);
-        }
-        _ => {}
+        },
+        _ => {},
     }
 }
 
@@ -212,10 +223,7 @@ pub fn compile_function(
     let is_main = ctx.is_main_function(func_def);
     let use_sret = !is_main && common::needs_sret(&ret_ty, &mut ctx.layouts);
 
-    let mut cl_func = ir::Function::with_name_signature(
-        ir::UserFuncName::user(0, 0),
-        sig.clone(),
-    );
+    let mut cl_func = ir::Function::with_name_signature(ir::UserFuncName::user(0, 0), sig.clone());
 
     let mut func_builder_ctx = FunctionBuilderContext::new();
     let mut builder = FunctionBuilder::new(&mut cl_func, &mut func_builder_ctx);
@@ -304,7 +312,9 @@ pub fn compile_function(
                 common::copy_aggregate(&mut builder, &mut ctx.layouts, &ty, addr, cl_param);
             } else {
                 // Scalar that's address-taken: store the value in the slot
-                builder.ins().store(MemFlags::new(), cl_param, addr, Offset32::new(0));
+                builder
+                    .ins()
+                    .store(MemFlags::new(), cl_param, addr, Offset32::new(0));
             }
 
             builder.def_var(local_vars[local_id.index()], addr);
@@ -381,16 +391,34 @@ pub fn compile_function(
 
     // Compile and define
     let mut cl_ctx = cranelift_codegen::Context::for_function(cl_func);
-    stacker::maybe_grow(256 * 1024, 8 * 1024 * 1024, || {
+    let ir_dump_filter = std::env::var("KESTREL_DUMP_IR").ok();
+    let should_dump = ir_dump_filter
+        .as_ref()
+        .map(|f| f == "1" || mangled_name.contains(f.as_str()))
+        .unwrap_or(false);
+    if should_dump {
+        eprintln!("=== IR for {mangled_name} ===\n{}", cl_ctx.func.display());
+    }
+    let pre_compile_ir = if !should_dump {
+        Some(format!("{}", cl_ctx.func.display()))
+    } else {
+        None
+    };
+    let compile_result = stacker::maybe_grow(256 * 1024, 8 * 1024 * 1024, || {
         cl_ctx.compile(ctx.isa.as_ref(), &mut Default::default())
-    })
-        .map_err(|e| CodegenError::FunctionCompilation {
+    });
+    compile_result.map_err(|e| {
+        if let Some(ir) = pre_compile_ir {
+            eprintln!("=== IR for failing {mangled_name} (err={e:?}) ===\n{ir}");
+        }
+        CodegenError::FunctionCompilation {
             name: mangled_name.to_string(),
             source: Box::new(std::io::Error::new(
                 std::io::ErrorKind::Other,
                 format!("{e:?}"),
             )),
-        })?;
+        }
+    })?;
 
     ctx.cl_module
         .define_function(func_id, &mut cl_ctx)
@@ -425,16 +453,15 @@ fn collect_address_taken_locals(
                                 result.insert(id);
                             }
                         }
-                    }
-                    _ => {}
+                    },
+                    _ => {},
                 },
                 StatementKind::Call { args, .. } => {
                     for arg in args {
                         if matches!(arg.mode, PassingMode::Ref | PassingMode::MutRef) {
                             if let kestrel_mir::Value::Place(place) = &arg.value {
                                 if let Some(id) = place.root_local() {
-                                    let ty =
-                                        substitute_type(&body.locals[id.index()].ty, subst);
+                                    let ty = substitute_type(&body.locals[id.index()].ty, subst);
                                     if !is_aggregate(&ty, layouts) {
                                         result.insert(id);
                                     }
@@ -442,8 +469,8 @@ fn collect_address_taken_locals(
                             }
                         }
                     }
-                }
-                _ => {}
+                },
+                _ => {},
             }
         }
     }

@@ -4,12 +4,9 @@ use kestrel_span::{Name, Span};
 use semantic_tree::symbol::{Symbol, SymbolId, SymbolMetadata, SymbolMetadataBuilder};
 
 use crate::{
-    behavior::computed_marker::ComputedPropertyMarker,
-    behavior::static_marker::StaticBehavior,
-    behavior::visibility::VisibilityBehavior,
-    language::KestrelLanguage,
-    symbol::kind::KestrelSymbolKind,
-    ty::Ty,
+    behavior::computed_marker::ComputedPropertyMarker, behavior::static_marker::StaticBehavior,
+    behavior::visibility::VisibilityBehavior, language::KestrelLanguage,
+    symbol::kind::KestrelSymbolKind, ty::Ty,
 };
 
 #[derive(Debug)]
@@ -73,7 +70,9 @@ impl FieldSymbol {
 
     /// Check if this field is a computed property
     pub fn is_computed(&self) -> bool {
-        self.metadata.get_behavior::<ComputedPropertyMarker>().is_some()
+        self.metadata
+            .get_behavior::<ComputedPropertyMarker>()
+            .is_some()
     }
 
     /// Get the field's type

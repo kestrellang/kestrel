@@ -73,7 +73,9 @@ fn resolve_deinit_body(
     // In deinit, self is read-only - we can access fields but shouldn't modify them
     // (though the language design could allow mutable access before drop)
     let parent = symbol.metadata().parent();
-    let self_type = parent.as_ref().and_then(|p| crate::binders::utils::self_type::self_type_for_parent(p, context.model));
+    let self_type = parent
+        .as_ref()
+        .and_then(|p| crate::binders::utils::self_type::self_type_for_parent(p, context.model));
     if let Some(self_type) = self_type {
         let decl_span = symbol.metadata().span().clone();
         let self_span = Span::new(decl_span.file_id, decl_span.start..decl_span.start);
@@ -102,4 +104,3 @@ fn resolve_deinit_body(
 
     resolve_body_and_attach_executable(symbol, body_node, &mut body_ctx);
 }
-

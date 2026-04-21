@@ -91,9 +91,7 @@ impl LowerCtx<'_> {
             AstExpr::Postfix { operand, op, span } => match op {
                 PostfixOp::Unwrap => self.desugar_unwrap(body, operand, &span),
             },
-            AstExpr::Binary { .. } => {
-                self.lower_binary_with_precedence(body, id)
-            },
+            AstExpr::Binary { .. } => self.lower_binary_with_precedence(body, id),
             AstExpr::Assignment { lhs, rhs, span } => {
                 let target = self.lower_expr(body, lhs);
                 let value = self.lower_expr(body, rhs);
@@ -183,7 +181,7 @@ impl LowerCtx<'_> {
                     body: lowered,
                     span: span.clone(),
                 })
-            }
+            },
             AstExpr::Paren { inner, .. } => self.lower_expr(body, inner),
             AstExpr::Error { span } => self.alloc_expr(HirExpr::Error { span }),
         }
@@ -195,7 +193,9 @@ impl LowerCtx<'_> {
             AstLiteral::Integer(s) => HirLiteral::Integer(crate::pat::parse_int(s)),
             AstLiteral::Float(s) => HirLiteral::Float(crate::pat::parse_float(s)),
             AstLiteral::String(s) | AstLiteral::RawString(s) => HirLiteral::String(s.clone()),
-            AstLiteral::Char(s) => HirLiteral::Char(crate::pat::parse_char_validated(s, span, self.ctx)),
+            AstLiteral::Char(s) => {
+                HirLiteral::Char(crate::pat::parse_char_validated(s, span, self.ctx))
+            },
             AstLiteral::Bool(b) => HirLiteral::Bool(*b),
             AstLiteral::Null => HirLiteral::Null,
             AstLiteral::Unit => {
@@ -242,11 +242,14 @@ impl LowerCtx<'_> {
             // Local variable with type args (e.g., `x[Int]`) — variables don't accept type args
             self.ctx.accumulate(
                 kestrel_reporting2::Diagnostic::error()
-                    .with_message(format!("variable '{}' does not accept type arguments", first.name))
+                    .with_message(format!(
+                        "variable '{}' does not accept type arguments",
+                        first.name
+                    ))
                     .with_labels(vec![
                         kestrel_reporting2::Label::primary(first.span.file_id, first.span.range())
                             .with_message("type arguments not allowed on variables"),
-                    ])
+                    ]),
             );
             return self.alloc_expr(HirExpr::Error { span: span.clone() });
         }
@@ -262,10 +265,16 @@ impl LowerCtx<'_> {
             });
             if let ValueResolution::TypeParameter(entity) = first_result {
                 let first_type_args: Vec<kestrel_hir::ty::HirTy> = segments[0]
-                    .type_args.iter().flatten()
+                    .type_args
+                    .iter()
+                    .flatten()
                     .map(|t| self.lower_type(t))
                     .collect();
-                let mut current = self.alloc_expr(HirExpr::Def(entity, first_type_args, segments[0].span.clone()));
+                let mut current = self.alloc_expr(HirExpr::Def(
+                    entity,
+                    first_type_args,
+                    segments[0].span.clone(),
+                ));
                 for seg in &segments[1..] {
                     current = self.alloc_expr(HirExpr::Field {
                         base: current,
@@ -293,9 +302,12 @@ impl LowerCtx<'_> {
                         kestrel_reporting2::Diagnostic::error()
                             .with_message("empty type argument list")
                             .with_labels(vec![
-                                kestrel_reporting2::Label::primary(seg.span.file_id, seg.span.range())
-                                    .with_message("expected at least one type argument"),
-                            ])
+                                kestrel_reporting2::Label::primary(
+                                    seg.span.file_id,
+                                    seg.span.range(),
+                                )
+                                .with_message("expected at least one type argument"),
+                            ]),
                     );
                     return self.alloc_expr(HirExpr::Error { span: span.clone() });
                 }
@@ -310,9 +322,12 @@ impl LowerCtx<'_> {
             .collect();
 
         match result {
-            ValueResolution::Def(entity) | ValueResolution::TypeParameter(entity) => {
-                self.alloc_expr(HirExpr::Def(entity, explicit_type_args.clone(), span.clone()))
-            },
+            ValueResolution::Def(entity) | ValueResolution::TypeParameter(entity) => self
+                .alloc_expr(HirExpr::Def(
+                    entity,
+                    explicit_type_args.clone(),
+                    span.clone(),
+                )),
             ValueResolution::Overloaded(entities) => {
                 // Preserve full overload set — type inference disambiguates at call site
                 self.alloc_expr(HirExpr::OverloadSet {
@@ -321,16 +336,21 @@ impl LowerCtx<'_> {
                     span: span.clone(),
                 })
             },
-            ValueResolution::EnumCaseValue { entity, .. } => {
-                self.alloc_expr(HirExpr::Def(entity, explicit_type_args.clone(), span.clone()))
-            },
+            ValueResolution::EnumCaseValue { entity, .. } => self.alloc_expr(HirExpr::Def(
+                entity,
+                explicit_type_args.clone(),
+                span.clone(),
+            )),
             ValueResolution::FieldValue { entity, .. } => {
                 self.alloc_expr(HirExpr::Def(entity, vec![], span.clone()))
             },
             ValueResolution::AssociatedType { entity, .. } => {
                 self.alloc_expr(HirExpr::Def(entity, vec![], span.clone()))
             },
-            ValueResolution::AssociatedTypeStaticMember { entity: _, assoc_type } => {
+            ValueResolution::AssociatedTypeStaticMember {
+                entity: _,
+                assoc_type,
+            } => {
                 // Emit Field { base: Def(assoc_type), name: member } so the solver
                 // can do Self-substitution (e.g., Item.zero → Member(Item, "zero"))
                 let member_name = segments.last().map(|s| s.name.clone()).unwrap_or_default();
@@ -342,16 +362,25 @@ impl LowerCtx<'_> {
                 })
             },
             ValueResolution::Ambiguous(entities) => {
-                let path_name = segments.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join(".");
+                let path_name = segments
+                    .iter()
+                    .map(|s| s.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(".");
                 // Primary label on the use site
-                let mut labels = vec![
-                    Label::primary(span.file_id, span.range())
-                        .with_message(format!("{} symbols with this name in scope", entities.len())),
-                ];
+                let mut labels =
+                    vec![
+                        Label::primary(span.file_id, span.range()).with_message(format!(
+                            "{} symbols with this name in scope",
+                            entities.len()
+                        )),
+                    ];
                 // Secondary labels on each candidate's declaration
                 for &entity in &entities {
                     if let Some(decl) = self.ctx.get::<DeclSpan>(entity) {
-                        let name = self.ctx.get::<Name>(entity)
+                        let name = self
+                            .ctx
+                            .get::<Name>(entity)
                             .map(|n| format!("declared here as '{}'", n.0))
                             .unwrap_or_else(|| "declared here".to_string());
                         labels.push(
@@ -362,18 +391,26 @@ impl LowerCtx<'_> {
                 let diag = Diagnostic::error()
                     .with_message(format!("ambiguous name '{path_name}'"))
                     .with_labels(labels)
-                    .with_notes(vec!["use a fully qualified path to disambiguate".to_string()]);
+                    .with_notes(vec![
+                        "use a fully qualified path to disambiguate".to_string(),
+                    ]);
                 self.ctx.accumulate(diag);
                 self.alloc_expr(HirExpr::Error { span: span.clone() })
             },
             ValueResolution::NotFound(ref seg) => {
-                let path_name = segments.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join(".");
-                self.ctx.accumulate(Diagnostic::error()
-                    .with_message(format!("undefined name '{path_name}'"))
-                    .with_labels(vec![
-                        Label::primary(span.file_id, span.range())
-                            .with_message(format!("not found (failed at '{seg}')")),
-                    ]));
+                let path_name = segments
+                    .iter()
+                    .map(|s| s.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(".");
+                self.ctx.accumulate(
+                    Diagnostic::error()
+                        .with_message(format!("undefined name '{path_name}'"))
+                        .with_labels(vec![
+                            Label::primary(span.file_id, span.range())
+                                .with_message(format!("not found (failed at '{seg}')")),
+                        ]),
+                );
                 self.alloc_expr(HirExpr::Error { span: span.clone() })
             },
         }
@@ -417,9 +454,8 @@ impl LowerCtx<'_> {
                     if let Some(ref method_args) = type_args {
                         all_type_args.extend(method_args.iter().map(|t| self.lower_type(t)));
                     }
-                    let callee = self.alloc_expr(
-                        HirExpr::Def(static_entity, all_type_args, span.clone()),
-                    );
+                    let callee =
+                        self.alloc_expr(HirExpr::Def(static_entity, all_type_args, span.clone()));
                     return self.alloc_expr(HirExpr::Call {
                         callee,
                         args: lowered_args,
@@ -455,8 +491,8 @@ impl LowerCtx<'_> {
                         // Build receiver from first N-1 segments
                         let current = self.lower_path_prefix(segments);
 
-                        let lowered_type_args = type_args
-                            .map(|args| args.iter().map(|t| self.lower_type(t)).collect());
+                        let lowered_type_args =
+                            type_args.map(|args| args.iter().map(|t| self.lower_type(t)).collect());
 
                         return self.alloc_expr(HirExpr::MethodCall {
                             receiver: current,
@@ -477,9 +513,11 @@ impl LowerCtx<'_> {
                     if let Some((static_entity, base_type_args)) =
                         self.try_resolve_static_call_from_segments(segments, &last.name)
                     {
-                        let callee = self.alloc_expr(
-                            HirExpr::Def(static_entity, base_type_args, span.clone()),
-                        );
+                        let callee = self.alloc_expr(HirExpr::Def(
+                            static_entity,
+                            base_type_args,
+                            span.clone(),
+                        ));
                         return self.alloc_expr(HirExpr::Call {
                             callee,
                             args: lowered_args,
@@ -517,14 +555,20 @@ impl LowerCtx<'_> {
                         };
                         if let Some(entity) = receiver_entity {
                             let first_type_args: Vec<kestrel_hir::ty::HirTy> = segments[0]
-                                .type_args.iter().flatten()
+                                .type_args
+                                .iter()
+                                .flatten()
                                 .map(|t| self.lower_type(t))
                                 .collect();
-                            let receiver = self.alloc_expr(
-                                HirExpr::Def(entity, first_type_args, segments[0].span.clone()),
-                            );
+                            let receiver = self.alloc_expr(HirExpr::Def(
+                                entity,
+                                first_type_args,
+                                segments[0].span.clone(),
+                            ));
                             let last = &segments[segments.len() - 1];
-                            let lowered_type_args = last.type_args.as_ref()
+                            let lowered_type_args = last
+                                .type_args
+                                .as_ref()
                                 .map(|args| args.iter().map(|t| self.lower_type(t)).collect());
                             return self.alloc_expr(HirExpr::MethodCall {
                                 receiver,
@@ -604,7 +648,9 @@ impl LowerCtx<'_> {
             if self.ctx.get::<Static>(child).is_none() {
                 continue;
             }
-            let Some(child_name) = self.ctx.get::<Name>(child) else { continue };
+            let Some(child_name) = self.ctx.get::<Name>(child) else {
+                continue;
+            };
             if child_name.0 == member {
                 // Collect struct type_args from base segments + method type_args from last segment
                 let mut type_args: Vec<kestrel_hir::ty::HirTy> = segments[..segments.len() - 1]
@@ -685,10 +731,7 @@ impl LowerCtx<'_> {
     /// Lower Path segments except the last one as receiver.
     /// For `[a, b, c]` returns `Field { base: Field { base: Local(a), name: "b" }, name: ... }`
     /// but stops before the last segment.
-    fn lower_path_prefix(
-        &mut self,
-        segments: &[ExprPathSegment],
-    ) -> HirExprId {
+    fn lower_path_prefix(&mut self, segments: &[ExprPathSegment]) -> HirExprId {
         let first = &segments[0];
         let local_id = self.lookup_local(&first.name).unwrap();
         let mut current = self.alloc_expr(HirExpr::Local(local_id, first.span.clone()));
@@ -738,10 +781,10 @@ impl LowerCtx<'_> {
                 Self::flatten_binary(body, lhs, operands, operators);
                 operators.push((op, span));
                 Self::flatten_binary(body, rhs, operands, operators);
-            }
+            },
             _ => {
                 operands.push(expr_id);
-            }
+            },
         }
     }
 
@@ -914,7 +957,7 @@ impl LowerCtx<'_> {
                         let name = format!("_cparam_{}", param_counter);
                         param_counter += 1;
                         (name, false, true)
-                    }
+                    },
                 };
                 let local = self.define_local(&name, is_mut, span.clone());
                 let ty = p.ty.as_ref().map(|t| self.lower_type(t));
@@ -1034,7 +1077,7 @@ impl LowerCtx<'_> {
                     .with_labels(vec![
                         kestrel_reporting2::Label::primary(span.file_id, span.range())
                             .with_message(format!("'{}' can only be used inside a loop", keyword)),
-                    ])
+                    ]),
             );
             return;
         }
@@ -1045,8 +1088,11 @@ impl LowerCtx<'_> {
                         .with_message(format!("undeclared label '{}'", lbl))
                         .with_labels(vec![
                             kestrel_reporting2::Label::primary(span.file_id, span.range())
-                                .with_message(format!("label '{}' not found in enclosing loops", lbl)),
-                        ])
+                                .with_message(format!(
+                                    "label '{}' not found in enclosing loops",
+                                    lbl
+                                )),
+                        ]),
                 );
             }
         }

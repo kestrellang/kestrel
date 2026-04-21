@@ -104,16 +104,18 @@ fn format_error(err: &InferError, detail: &str) -> (String, String) {
             format!("no associated type '{}': {}", name, detail),
             format!("'{}' not found", name),
         ),
-        InferError::InfiniteType { .. } => (
-            "infinite type detected".into(),
-            "recursive type".into(),
-        ),
+        InferError::InfiniteType { .. } => {
+            ("infinite type detected".into(), "recursive type".into())
+        },
         InferError::ImplicitMemberNotFound { name, .. } => (
             format!("implicit member '.{}' not found: {}", name, detail),
             format!("'.{}' not found", name),
         ),
         InferError::ArgCountMismatch { expected, got, .. } => (
-            format!("wrong number of arguments: expected {}, got {}", expected, got),
+            format!(
+                "wrong number of arguments: expected {}, got {}",
+                expected, got
+            ),
             format!("expected {} argument(s)", expected),
         ),
         InferError::LabelMismatch { expected, got, .. } => {
@@ -123,7 +125,7 @@ fn format_error(err: &InferError, detail: &str) -> (String, String) {
                 format!("wrong argument label: expected '{}', got '{}'", exp, g),
                 format!("expected '{}'", exp),
             )
-        }
+        },
         InferError::InstanceMethodAsStatic { name, .. } => (
             format!("instance method '{}' cannot be called on a type", name),
             "not a static method".into(),
@@ -144,7 +146,7 @@ fn format_error(err: &InferError, detail: &str) -> (String, String) {
                     format!("expected {expected} type argument(s)"),
                 )
             }
-        }
+        },
         InferError::NoMatchingOverload { name, .. } => (
             format!("no matching overload for '{name}'"),
             format!("no matching overload for '{name}'"),

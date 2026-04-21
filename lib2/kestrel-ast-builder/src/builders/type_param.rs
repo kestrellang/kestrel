@@ -1,12 +1,12 @@
 //! Type parameter extraction and entity creation.
 
 use kestrel_hecs::{Entity, World};
-use kestrel_syntax_tree2::{SyntaxKind, SyntaxNode};
 use kestrel_syntax_tree2::utils::{extract_name, find_child, get_decl_span};
+use kestrel_syntax_tree2::{SyntaxKind, SyntaxNode};
 
+use super::helpers::is_type_kind;
 use crate::ast_type::ast_type_from_cst;
 use crate::components::*;
-use super::helpers::is_type_kind;
 
 /// Extract type parameters from a TypeParameterList child and create entities.
 ///

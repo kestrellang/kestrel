@@ -60,7 +60,9 @@ impl TypeOracle for SemanticModel {
         // Handle type parameters - look up member in protocol bounds from where clause
         if let TyKind::TypeParameter(type_param) = receiver_ty.kind() {
             // Get bounds by walking up the parent chain to find where clauses
-            let bounds = self.query(TypeParameterBounds { param_id: type_param.metadata().id() });
+            let bounds = self.query(TypeParameterBounds {
+                param_id: type_param.metadata().id(),
+            });
 
             // If any bound is an error type, the type parameter's constraints couldn't be resolved.
             // Return UnknownType to suppress cascading error messages.
@@ -109,10 +111,17 @@ impl TypeOracle for SemanticModel {
 
                         for ext in &proto_extensions {
                             // Check extension where clause satisfaction
-                            if let Some(ext_behavior) = ext.metadata().get_behavior::<ExtensionTargetBehavior>() {
+                            if let Some(ext_behavior) =
+                                ext.metadata().get_behavior::<ExtensionTargetBehavior>()
+                            {
                                 let where_clause = ext_behavior.where_clause();
                                 if !where_clause.constraints().is_empty()
-                                    && !check_where_clause_satisfied_with_self(self, where_clause, proto_subs, Some(receiver_ty))
+                                    && !check_where_clause_satisfied_with_self(
+                                        self,
+                                        where_clause,
+                                        proto_subs,
+                                        Some(receiver_ty),
+                                    )
                                 {
                                     continue;
                                 }
@@ -199,10 +208,17 @@ impl TypeOracle for SemanticModel {
                         });
 
                         for ext in &proto_extensions {
-                            if let Some(ext_behavior) = ext.metadata().get_behavior::<ExtensionTargetBehavior>() {
+                            if let Some(ext_behavior) =
+                                ext.metadata().get_behavior::<ExtensionTargetBehavior>()
+                            {
                                 let where_clause = ext_behavior.where_clause();
                                 if !where_clause.constraints().is_empty()
-                                    && !check_where_clause_satisfied_with_self(self, where_clause, proto_subs, Some(receiver_ty))
+                                    && !check_where_clause_satisfied_with_self(
+                                        self,
+                                        where_clause,
+                                        proto_subs,
+                                        Some(receiver_ty),
+                                    )
                                 {
                                     continue;
                                 }
@@ -286,9 +302,15 @@ impl TypeOracle for SemanticModel {
                 // When multiple extensions provide the same member, prefer the most specific
                 // extension (the one with the most concrete type arguments).
                 // E.g., `extend Array[Int]` beats `extend Array[T]`.
-                let mut extension_matches: Vec<(usize, Arc<dyn Symbol<KestrelLanguage>>)> = Vec::new();
+                let mut extension_matches: Vec<(usize, Arc<dyn Symbol<KestrelLanguage>>)> =
+                    Vec::new();
                 for ext in extensions.iter() {
-                    if !is_extension_applicable_to_type(ext, &substitutions, self, Some(receiver_ty)) {
+                    if !is_extension_applicable_to_type(
+                        ext,
+                        &substitutions,
+                        self,
+                        Some(receiver_ty),
+                    ) {
                         continue;
                     }
 
@@ -433,7 +455,14 @@ impl TypeOracle for SemanticModel {
         is_static: bool,
         argument_count: usize,
     ) -> Result<MemberResolution, MemberError> {
-        resolve_member_with_arity_and_labels_impl(self, receiver_ty, member, is_static, argument_count, &[])
+        resolve_member_with_arity_and_labels_impl(
+            self,
+            receiver_ty,
+            member,
+            is_static,
+            argument_count,
+            &[],
+        )
     }
 
     fn resolve_member_with_labels(
@@ -723,9 +752,7 @@ impl SemanticModel {
             // Check for field (MemberAccessBehavior)
             for behavior in symbol.metadata().behaviors() {
                 if behavior.kind() == KestrelBehaviorKind::MemberAccess {
-                    if let Some(access) =
-                        behavior.as_ref().downcast_ref::<MemberAccessBehavior>()
-                    {
+                    if let Some(access) = behavior.as_ref().downcast_ref::<MemberAccessBehavior>() {
                         return MemberKind::Field {
                             mutable: access.is_mutable(),
                         };
@@ -828,7 +855,14 @@ impl TypeOracle for ContextualOracle<'_> {
         is_static: bool,
         labels: &[Option<String>],
     ) -> Result<MemberResolution, MemberError> {
-        resolve_member_with_context_and_labels(self.model, receiver_ty, member, is_static, Some(self.context_symbol_id), labels)
+        resolve_member_with_context_and_labels(
+            self.model,
+            receiver_ty,
+            member,
+            is_static,
+            Some(self.context_symbol_id),
+            labels,
+        )
     }
 
     fn context_symbol_id(&self) -> Option<SymbolId> {
@@ -896,7 +930,9 @@ impl TypeOracle for ContextualOracle<'_> {
 
         // Handle type parameters - include extension where-clause bounds from context
         if let TyKind::TypeParameter(type_param) = ty.kind() {
-            let mut bounds = self.model.query(TypeParameterBounds { param_id: type_param.metadata().id() });
+            let mut bounds = self.model.query(TypeParameterBounds {
+                param_id: type_param.metadata().id(),
+            });
             if let Some(ext_bounds) = self.model.query(ExtensionBoundsForParam {
                 context_id: self.context_symbol_id,
                 param_id: type_param.metadata().id(),
@@ -980,7 +1016,8 @@ impl TypeOracle for ContextualOracle<'_> {
 
     fn normalize_with_constraints(&self, ty: &Ty) -> Ty {
         use crate::queries::NormalizeWithConstraints;
-        self.model.query(NormalizeWithConstraints::new(ty, self.context_symbol_id))
+        self.model
+            .query(NormalizeWithConstraints::new(ty, self.context_symbol_id))
     }
 
     fn function_where_clause(&self, function_id: SymbolId) -> WhereClause {
@@ -997,7 +1034,13 @@ impl TypeOracle for ContextualOracle<'_> {
         labels: &[Option<String>],
         argument_types: &[Option<Ty>],
     ) -> Result<MemberResolution, MemberError> {
-        resolve_init_impl(self.model, struct_ty, Some(self.context_symbol_id), labels, argument_types)
+        resolve_init_impl(
+            self.model,
+            struct_ty,
+            Some(self.context_symbol_id),
+            labels,
+            argument_types,
+        )
     }
 
     fn resolve_subscript(
@@ -1114,10 +1157,17 @@ fn resolve_member_with_context(
 
                     for ext in &proto_extensions {
                         // Check extension where clause satisfaction
-                        if let Some(ext_behavior) = ext.metadata().get_behavior::<ExtensionTargetBehavior>() {
+                        if let Some(ext_behavior) =
+                            ext.metadata().get_behavior::<ExtensionTargetBehavior>()
+                        {
                             let where_clause = ext_behavior.where_clause();
                             if !where_clause.constraints().is_empty()
-                                && !check_where_clause_satisfied_with_self(model, where_clause, proto_subs, Some(receiver_ty))
+                                && !check_where_clause_satisfied_with_self(
+                                    model,
+                                    where_clause,
+                                    proto_subs,
+                                    Some(receiver_ty),
+                                )
                             {
                                 continue;
                             }
@@ -1159,7 +1209,9 @@ fn resolve_member_with_context(
     // Handle type parameters - look up member in protocol bounds from where clause
     if let TyKind::TypeParameter(type_param) = receiver_ty.kind() {
         // Get bounds by walking up the parent chain to find where clauses
-        let mut bounds = model.query(TypeParameterBounds { param_id: type_param.metadata().id() });
+        let mut bounds = model.query(TypeParameterBounds {
+            param_id: type_param.metadata().id(),
+        });
 
         // If we have context, also check for extension bounds
         if let Some(ctx_id) = context
@@ -1220,10 +1272,17 @@ fn resolve_member_with_context(
 
                     for ext in &proto_extensions {
                         // Check extension where clause satisfaction
-                        if let Some(ext_behavior) = ext.metadata().get_behavior::<ExtensionTargetBehavior>() {
+                        if let Some(ext_behavior) =
+                            ext.metadata().get_behavior::<ExtensionTargetBehavior>()
+                        {
                             let where_clause = ext_behavior.where_clause();
                             if !where_clause.constraints().is_empty()
-                                && !check_where_clause_satisfied_with_self(model, where_clause, proto_subs, Some(receiver_ty))
+                                && !check_where_clause_satisfied_with_self(
+                                    model,
+                                    where_clause,
+                                    proto_subs,
+                                    Some(receiver_ty),
+                                )
                             {
                                 continue;
                             }
@@ -1323,10 +1382,17 @@ fn resolve_member_with_context(
 
                     for ext in &proto_extensions {
                         // Check extension where clause satisfaction
-                        if let Some(ext_behavior) = ext.metadata().get_behavior::<ExtensionTargetBehavior>() {
+                        if let Some(ext_behavior) =
+                            ext.metadata().get_behavior::<ExtensionTargetBehavior>()
+                        {
                             let where_clause = ext_behavior.where_clause();
                             if !where_clause.constraints().is_empty()
-                                && !check_where_clause_satisfied_with_self(model, where_clause, proto_subs, Some(receiver_ty))
+                                && !check_where_clause_satisfied_with_self(
+                                    model,
+                                    where_clause,
+                                    proto_subs,
+                                    Some(receiver_ty),
+                                )
                             {
                                 continue;
                             }
@@ -1493,12 +1559,9 @@ fn resolve_member_full_impl(
 
     if scored.is_empty() {
         // Try protocol conformance fallback
-        if let Some(resolution) = resolve_member_via_protocol_conformance(
-            model,
-            receiver_ty,
-            member,
-            Some(labels.len()),
-        ) {
+        if let Some(resolution) =
+            resolve_member_via_protocol_conformance(model, receiver_ty, member, Some(labels.len()))
+        {
             return Ok(resolution);
         }
         return Err(MemberError::NotFound {
@@ -1629,9 +1692,7 @@ fn resolve_init_impl(
 
     // If multiple candidates are tied and any argument type is unknown,
     // defer — don't guess which overload to pick
-    if argument_types.iter().any(|t| t.is_none())
-        && scored.len() >= 2
-        && scored[0].0 == scored[1].0
+    if argument_types.iter().any(|t| t.is_none()) && scored.len() >= 2 && scored[0].0 == scored[1].0
     {
         return Err(MemberError::UnknownType);
     }
@@ -1771,8 +1832,8 @@ fn resolve_subscript_impl(
             .count();
 
         // Get where clause from subscript symbol
-        let where_constraints = get_where_clause_from_symbol(subscript.as_ref())
-            .unwrap_or_default();
+        let where_constraints =
+            get_where_clause_from_symbol(subscript.as_ref()).unwrap_or_default();
 
         // Score by argument types
         let mut score = 0usize;
@@ -1882,7 +1943,11 @@ fn resolve_function_impl(
                     (ty, Substitutions::new(), vec![])
                 }
             } else {
-                (Ty::unit(kestrel_span::Span::synthetic(0)), Substitutions::new(), vec![])
+                (
+                    Ty::unit(kestrel_span::Span::synthetic(0)),
+                    Substitutions::new(),
+                    vec![],
+                )
             }
         } else {
             let ty = symbol
@@ -2112,33 +2177,54 @@ fn resolve_all_members_impl(
 
     // TypeParameter: collect from all protocol bounds
     if let TyKind::TypeParameter(type_param) = receiver_ty.kind() {
-        let bounds = model.query(TypeParameterBounds { param_id: type_param.metadata().id() });
+        let bounds = model.query(TypeParameterBounds {
+            param_id: type_param.metadata().id(),
+        });
         if bounds.iter().any(|b| matches!(b.kind(), TyKind::Error)) {
             return Err(MemberError::UnknownType);
         }
         let mut results = Vec::new();
         for bound in &bounds {
             let bound = apply_protocol_defaults(bound.clone(), Some(receiver_ty));
-            if let TyKind::Protocol { symbol: proto, substitutions: proto_subs } = bound.kind() {
-                let all_protocols = collect_protocols_with_inherited(proto, proto_subs, Some(receiver_ty));
+            if let TyKind::Protocol {
+                symbol: proto,
+                substitutions: proto_subs,
+            } = bound.kind()
+            {
+                let all_protocols =
+                    collect_protocols_with_inherited(proto, proto_subs, Some(receiver_ty));
                 for (proto, proto_subs) in &all_protocols {
                     let proto_id = proto.metadata().id();
                     for child in proto.metadata().children() {
                         if child.metadata().name().value == member {
                             if let Some(resolution) = resolve_protocol_bound_member(
-                                model, child.as_ref(), child.metadata().id(),
-                                proto_subs, receiver_ty, is_static, proto_id,
+                                model,
+                                child.as_ref(),
+                                child.metadata().id(),
+                                proto_subs,
+                                receiver_ty,
+                                is_static,
+                                proto_id,
                             ) {
                                 results.push(resolution);
                             }
                         }
                     }
-                    let proto_extensions = model.query(ExtensionsFor { target_id: proto_id });
+                    let proto_extensions = model.query(ExtensionsFor {
+                        target_id: proto_id,
+                    });
                     for ext in &proto_extensions {
-                        if let Some(ext_behavior) = ext.metadata().get_behavior::<ExtensionTargetBehavior>() {
+                        if let Some(ext_behavior) =
+                            ext.metadata().get_behavior::<ExtensionTargetBehavior>()
+                        {
                             let where_clause = ext_behavior.where_clause();
                             if !where_clause.constraints().is_empty()
-                                && !check_where_clause_satisfied_with_self(model, where_clause, proto_subs, Some(receiver_ty))
+                                && !check_where_clause_satisfied_with_self(
+                                    model,
+                                    where_clause,
+                                    proto_subs,
+                                    Some(receiver_ty),
+                                )
                             {
                                 continue;
                             }
@@ -2146,8 +2232,13 @@ fn resolve_all_members_impl(
                         for child in ext.metadata().children() {
                             if child.metadata().name().value == member {
                                 if let Some(resolution) = resolve_protocol_bound_member(
-                                    model, child.as_ref(), child.metadata().id(),
-                                    proto_subs, receiver_ty, is_static, proto_id,
+                                    model,
+                                    child.as_ref(),
+                                    child.metadata().id(),
+                                    proto_subs,
+                                    receiver_ty,
+                                    is_static,
+                                    proto_id,
                                 ) {
                                     results.push(resolution);
                                 }
@@ -2184,26 +2275,45 @@ fn resolve_all_members_impl(
         let mut results = Vec::new();
         for bound in &bounds {
             let bound = apply_protocol_defaults(bound.clone(), Some(receiver_ty));
-            if let TyKind::Protocol { symbol: proto, substitutions: proto_subs } = bound.kind() {
-                let all_protocols = collect_protocols_with_inherited(proto, proto_subs, Some(receiver_ty));
+            if let TyKind::Protocol {
+                symbol: proto,
+                substitutions: proto_subs,
+            } = bound.kind()
+            {
+                let all_protocols =
+                    collect_protocols_with_inherited(proto, proto_subs, Some(receiver_ty));
                 for (proto, proto_subs) in &all_protocols {
                     let proto_id = proto.metadata().id();
                     for child in proto.metadata().children() {
                         if child.metadata().name().value == member {
                             if let Some(resolution) = resolve_protocol_bound_member(
-                                model, child.as_ref(), child.metadata().id(),
-                                proto_subs, receiver_ty, is_static, proto_id,
+                                model,
+                                child.as_ref(),
+                                child.metadata().id(),
+                                proto_subs,
+                                receiver_ty,
+                                is_static,
+                                proto_id,
                             ) {
                                 results.push(resolution);
                             }
                         }
                     }
-                    let proto_extensions = model.query(ExtensionsFor { target_id: proto_id });
+                    let proto_extensions = model.query(ExtensionsFor {
+                        target_id: proto_id,
+                    });
                     for ext in &proto_extensions {
-                        if let Some(ext_behavior) = ext.metadata().get_behavior::<ExtensionTargetBehavior>() {
+                        if let Some(ext_behavior) =
+                            ext.metadata().get_behavior::<ExtensionTargetBehavior>()
+                        {
                             let where_clause = ext_behavior.where_clause();
                             if !where_clause.constraints().is_empty()
-                                && !check_where_clause_satisfied_with_self(model, where_clause, proto_subs, Some(receiver_ty))
+                                && !check_where_clause_satisfied_with_self(
+                                    model,
+                                    where_clause,
+                                    proto_subs,
+                                    Some(receiver_ty),
+                                )
                             {
                                 continue;
                             }
@@ -2211,8 +2321,13 @@ fn resolve_all_members_impl(
                         for child in ext.metadata().children() {
                             if child.metadata().name().value == member {
                                 if let Some(resolution) = resolve_protocol_bound_member(
-                                    model, child.as_ref(), child.metadata().id(),
-                                    proto_subs, receiver_ty, is_static, proto_id,
+                                    model,
+                                    child.as_ref(),
+                                    child.metadata().id(),
+                                    proto_subs,
+                                    receiver_ty,
+                                    is_static,
+                                    proto_id,
                                 ) {
                                     results.push(resolution);
                                 }
@@ -2261,8 +2376,12 @@ fn resolve_all_members_impl(
     for child in container.metadata().children() {
         if child.metadata().name().value == member {
             if let Some(resolution) = resolve_direct_member(
-                model, child.as_ref(), child.metadata().id(),
-                &substitutions, receiver_ty, is_static,
+                model,
+                child.as_ref(),
+                child.metadata().id(),
+                &substitutions,
+                receiver_ty,
+                is_static,
             ) {
                 results.push(resolution);
             }
@@ -2271,7 +2390,9 @@ fn resolve_all_members_impl(
 
     // Extensions
     let container_id = container.metadata().id();
-    let extensions = model.query(ExtensionsFor { target_id: container_id });
+    let extensions = model.query(ExtensionsFor {
+        target_id: container_id,
+    });
     for ext in extensions.iter() {
         if !is_extension_applicable_to_type(ext, &substitutions, model, Some(receiver_ty)) {
             continue;
@@ -2279,8 +2400,12 @@ fn resolve_all_members_impl(
         for child in ext.metadata().children() {
             if child.metadata().name().value == member {
                 if let Some(resolution) = resolve_direct_member(
-                    model, child.as_ref(), child.metadata().id(),
-                    &substitutions, receiver_ty, is_static,
+                    model,
+                    child.as_ref(),
+                    child.metadata().id(),
+                    &substitutions,
+                    receiver_ty,
+                    is_static,
                 ) {
                     results.push(resolution);
                 }
@@ -2290,7 +2415,9 @@ fn resolve_all_members_impl(
 
     // Protocol conformance methods
     if results.is_empty() {
-        if let Some(resolution) = resolve_member_via_protocol_conformance(model, receiver_ty, member, None) {
+        if let Some(resolution) =
+            resolve_member_via_protocol_conformance(model, receiver_ty, member, None)
+        {
             results.push(resolution);
         }
     }
@@ -2321,8 +2448,12 @@ fn resolve_direct_member(
             && callable.is_static()
         {
             return Some(resolve_callable_member(
-                &callable, member_symbol, member_id,
-                substitutions, receiver_ty, true,
+                &callable,
+                member_symbol,
+                member_id,
+                substitutions,
+                receiver_ty,
+                true,
                 AssocTypeResolution::None,
             ));
         }
@@ -2334,8 +2465,12 @@ fn resolve_direct_member(
         && let Some(callable) = member_symbol.metadata().get_behavior::<CallableBehavior>()
     {
         return Some(resolve_callable_member(
-            &callable, member_symbol, member_id,
-            substitutions, receiver_ty, true,
+            &callable,
+            member_symbol,
+            member_id,
+            substitutions,
+            receiver_ty,
+            true,
             AssocTypeResolution::Shallow(model),
         ));
     }
@@ -2360,7 +2495,9 @@ fn resolve_direct_member(
             });
         }
         if behavior.kind() == KestrelBehaviorKind::ComputedMemberAccess
-            && let Some(access) = behavior.as_ref().downcast_ref::<ComputedMemberAccessBehavior>()
+            && let Some(access) = behavior
+                .as_ref()
+                .downcast_ref::<ComputedMemberAccessBehavior>()
         {
             let member_ty = transform_ty(model, access.member_type(), substitutions, receiver_ty);
             return Some(MemberResolution {
@@ -2621,7 +2758,11 @@ pub(crate) fn resolve_associated_type_impl(
                 {
                     let result = resolved.apply_substitutions(substitutions);
                     let mut visited = std::collections::HashSet::new();
-                    return Some(deeply_resolve_associated_types(model, &result, &mut visited));
+                    return Some(deeply_resolve_associated_types(
+                        model,
+                        &result,
+                        &mut visited,
+                    ));
                 }
             }
             for child in symbol.metadata().children() {
@@ -2632,7 +2773,11 @@ pub(crate) fn resolve_associated_type_impl(
                 {
                     let result = default_ty.apply_substitutions(substitutions);
                     let mut visited = std::collections::HashSet::new();
-                    return Some(deeply_resolve_associated_types(model, &result, &mut visited));
+                    return Some(deeply_resolve_associated_types(
+                        model,
+                        &result,
+                        &mut visited,
+                    ));
                 }
             }
 
@@ -2650,7 +2795,11 @@ pub(crate) fn resolve_associated_type_impl(
                 {
                     let result = ty.apply_substitutions(substitutions);
                     let mut visited = std::collections::HashSet::new();
-                    return Some(deeply_resolve_associated_types(model, &result, &mut visited));
+                    return Some(deeply_resolve_associated_types(
+                        model,
+                        &result,
+                        &mut visited,
+                    ));
                 }
             }
 
@@ -2674,7 +2823,11 @@ pub(crate) fn resolve_associated_type_impl(
                     {
                         let result = resolved.apply_substitutions(substitutions);
                         let mut visited = std::collections::HashSet::new();
-                        return Some(deeply_resolve_associated_types(model, &result, &mut visited));
+                        return Some(deeply_resolve_associated_types(
+                            model,
+                            &result,
+                            &mut visited,
+                        ));
                     }
                 }
                 for child in extension.metadata().children() {
@@ -2685,7 +2838,11 @@ pub(crate) fn resolve_associated_type_impl(
                     {
                         let result = default_ty.apply_substitutions(substitutions);
                         let mut visited = std::collections::HashSet::new();
-                        return Some(deeply_resolve_associated_types(model, &result, &mut visited));
+                        return Some(deeply_resolve_associated_types(
+                            model,
+                            &result,
+                            &mut visited,
+                        ));
                     }
                 }
             }
@@ -2708,7 +2865,11 @@ pub(crate) fn resolve_associated_type_impl(
                 {
                     let result = resolved.apply_substitutions(substitutions);
                     let mut visited = std::collections::HashSet::new();
-                    return Some(deeply_resolve_associated_types(model, &result, &mut visited));
+                    return Some(deeply_resolve_associated_types(
+                        model,
+                        &result,
+                        &mut visited,
+                    ));
                 }
             }
             for child in symbol.metadata().children() {
@@ -2719,7 +2880,11 @@ pub(crate) fn resolve_associated_type_impl(
                 {
                     let result = default_ty.apply_substitutions(substitutions);
                     let mut visited = std::collections::HashSet::new();
-                    return Some(deeply_resolve_associated_types(model, &result, &mut visited));
+                    return Some(deeply_resolve_associated_types(
+                        model,
+                        &result,
+                        &mut visited,
+                    ));
                 }
             }
 
@@ -2736,7 +2901,11 @@ pub(crate) fn resolve_associated_type_impl(
                 {
                     let result = ty.apply_substitutions(substitutions);
                     let mut visited = std::collections::HashSet::new();
-                    return Some(deeply_resolve_associated_types(model, &result, &mut visited));
+                    return Some(deeply_resolve_associated_types(
+                        model,
+                        &result,
+                        &mut visited,
+                    ));
                 }
             }
 
@@ -2759,7 +2928,11 @@ pub(crate) fn resolve_associated_type_impl(
                     {
                         let result = resolved.apply_substitutions(substitutions);
                         let mut visited = std::collections::HashSet::new();
-                        return Some(deeply_resolve_associated_types(model, &result, &mut visited));
+                        return Some(deeply_resolve_associated_types(
+                            model,
+                            &result,
+                            &mut visited,
+                        ));
                     }
                 }
                 for child in extension.metadata().children() {
@@ -2770,7 +2943,11 @@ pub(crate) fn resolve_associated_type_impl(
                     {
                         let result = default_ty.apply_substitutions(substitutions);
                         let mut visited = std::collections::HashSet::new();
-                        return Some(deeply_resolve_associated_types(model, &result, &mut visited));
+                        return Some(deeply_resolve_associated_types(
+                            model,
+                            &result,
+                            &mut visited,
+                        ));
                     }
                 }
             }
@@ -2808,7 +2985,10 @@ pub(crate) fn resolve_associated_type_impl(
             if let Some(base_container) = container {
                 let base_assoc_name = symbol.metadata().name().value.clone();
                 model
-                    .query(ResolveAssociatedTypeQuery::new(base_container, &base_assoc_name))
+                    .query(ResolveAssociatedTypeQuery::new(
+                        base_container,
+                        &base_assoc_name,
+                    ))
                     .and_then(|resolved_base| {
                         model.query(ResolveAssociatedTypeQuery::new(&resolved_base, assoc_name))
                     })
@@ -4053,9 +4233,12 @@ pub(crate) fn apply_protocol_defaults(ty: Ty, self_ty: Option<&Ty>) -> Ty {
     }
 }
 
-
 /// Check if protocol bounds (including transitive protocol extensions) include the target.
-pub(crate) fn bound_protocols_include(model: &SemanticModel, bounds: &[Ty], protocol_id: SymbolId) -> bool {
+pub(crate) fn bound_protocols_include(
+    model: &SemanticModel,
+    bounds: &[Ty],
+    protocol_id: SymbolId,
+) -> bool {
     let mut seed_protocols = Vec::new();
     for bound in bounds {
         if let TyKind::Protocol { symbol, .. } = bound.kind() {
@@ -4184,9 +4367,9 @@ fn resolve_all_associated_types_impl(
         TyKind::Protocol { .. } => ty.clone(),
 
         // All other types: recurse into children
-        _ => ty.map_children(&mut |child| {
-            resolve_all_associated_types_impl(oracle, child, visited)
-        }),
+        _ => {
+            ty.map_children(&mut |child| resolve_all_associated_types_impl(oracle, child, visited))
+        },
     };
 
     // Remove from visited after processing so we can visit the same type again
@@ -4253,8 +4436,7 @@ fn resolve_protocol_bound_member(
         if behavior.kind() == KestrelBehaviorKind::MemberAccess
             && let Some(access) = behavior.as_ref().downcast_ref::<MemberAccessBehavior>()
         {
-            let member_ty =
-                transform_ty(model, access.member_type(), substitutions, receiver_ty);
+            let member_ty = transform_ty(model, access.member_type(), substitutions, receiver_ty);
             return Some(MemberResolution {
                 ty: member_ty,
                 symbol_id: member_id,
@@ -4273,8 +4455,7 @@ fn resolve_protocol_bound_member(
                 .as_ref()
                 .downcast_ref::<ComputedMemberAccessBehavior>()
         {
-            let member_ty =
-                transform_ty(model, access.member_type(), substitutions, receiver_ty);
+            let member_ty = transform_ty(model, access.member_type(), substitutions, receiver_ty);
             return Some(MemberResolution {
                 ty: member_ty,
                 symbol_id: member_id,
@@ -4351,13 +4532,20 @@ fn resolve_callable_member(
         .collect();
     let where_constraints = get_where_clause_from_symbol(member_symbol).unwrap_or_default();
 
-    let method_type_param_ids = if let Some(f) = member_symbol.as_any().downcast_ref::<FunctionSymbol>() {
-        f.type_parameters().iter().map(|tp| tp.metadata().id()).collect()
-    } else if let Some(i) = member_symbol.as_any().downcast_ref::<InitializerSymbol>() {
-        i.type_parameters().iter().map(|tp| tp.metadata().id()).collect()
-    } else {
-        vec![]
-    };
+    let method_type_param_ids =
+        if let Some(f) = member_symbol.as_any().downcast_ref::<FunctionSymbol>() {
+            f.type_parameters()
+                .iter()
+                .map(|tp| tp.metadata().id())
+                .collect()
+        } else if let Some(i) = member_symbol.as_any().downcast_ref::<InitializerSymbol>() {
+            i.type_parameters()
+                .iter()
+                .map(|tp| tp.metadata().id())
+                .collect()
+        } else {
+            vec![]
+        };
 
     MemberResolution {
         ty: return_ty,
@@ -4542,7 +4730,11 @@ fn check_from_value_conformance_impl(
 /// Also handles nested associated types like `I.Iter.Item` by:
 /// 1. First collecting derived equality constraints from protocol associated types
 /// 2. Then applying all equality constraints to normalize the type
-pub(crate) fn normalize_type_with_context(model: &SemanticModel, ty: &Ty, context_id: SymbolId) -> Ty {
+pub(crate) fn normalize_type_with_context(
+    model: &SemanticModel,
+    ty: &Ty,
+    context_id: SymbolId,
+) -> Ty {
     // Collect where clauses by walking up the parent chain
     let where_clauses = model.query(WhereClausesInScope { context_id });
 
@@ -4560,24 +4752,23 @@ pub(crate) fn normalize_type_with_context(model: &SemanticModel, ty: &Ty, contex
 
     // In protocol/protocol-extension contexts, implicitly qualify unqualified associated
     // types with `Self` so constraints like `Item = (A, B)` apply to `Self.Item`.
-    let qualified_ty =
-        if !owned_equalities.is_empty()
-            && !model.query(SelfProtocolBounds { context_id }).is_empty()
-        {
-            let mut qualified = Vec::with_capacity(owned_equalities.len());
-            let self_ty = Ty::self_type(ty.span().clone());
-            for (left, right) in owned_equalities.into_iter() {
-                qualified.push((
-                    left.substitute_self(&self_ty),
-                    right.substitute_self(&self_ty),
-                ));
-            }
-            owned_equalities = qualified;
-            // Also qualify the input type so it matches against qualified constraints
-            ty.substitute_self(&self_ty)
-        } else {
-            ty.clone()
-        };
+    let qualified_ty = if !owned_equalities.is_empty()
+        && !model.query(SelfProtocolBounds { context_id }).is_empty()
+    {
+        let mut qualified = Vec::with_capacity(owned_equalities.len());
+        let self_ty = Ty::self_type(ty.span().clone());
+        for (left, right) in owned_equalities.into_iter() {
+            qualified.push((
+                left.substitute_self(&self_ty),
+                right.substitute_self(&self_ty),
+            ));
+        }
+        owned_equalities = qualified;
+        // Also qualify the input type so it matches against qualified constraints
+        ty.substitute_self(&self_ty)
+    } else {
+        ty.clone()
+    };
 
     if owned_equalities.is_empty() {
         return qualified_ty;
@@ -5093,7 +5284,8 @@ fn is_extension_applicable_to_type(
                 }
             }
         }
-        if !check_where_clause_satisfied_with_self(model, where_clause, &resolved_subs, receiver_ty) {
+        if !check_where_clause_satisfied_with_self(model, where_clause, &resolved_subs, receiver_ty)
+        {
             return false;
         }
     }

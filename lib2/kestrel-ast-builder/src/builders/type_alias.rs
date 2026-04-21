@@ -1,13 +1,13 @@
 //! TypeAlias declaration builder.
 
 use kestrel_hecs::{Entity, World};
-use kestrel_syntax_tree2::{SyntaxKind, SyntaxNode};
 use kestrel_syntax_tree2::utils::{extract_name, find_child, get_decl_span};
+use kestrel_syntax_tree2::{SyntaxKind, SyntaxNode};
 
-use crate::ast_type::ast_type_from_cst;
-use crate::components::*;
 use super::helpers::*;
 use super::type_param::build_type_parameters;
+use crate::ast_type::ast_type_from_cst;
+use crate::components::*;
 
 /// Build a type alias declaration entity from CST.
 ///
@@ -36,7 +36,8 @@ pub fn build_type_alias(
     let assoc_target = find_child(node, SyntaxKind::AssociatedTypeTarget);
     let name = if let Some(target) = &assoc_target {
         // Qualified: last Name > Identifier in the target is the alias name
-        target.children()
+        target
+            .children()
             .filter(|c| c.kind() == SyntaxKind::Name)
             .last()
             .and_then(|n| {

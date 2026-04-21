@@ -5,7 +5,7 @@
 //! is the real implementation; tests can provide mocks.
 
 use kestrel_ast_builder::{
-    AstType, Callable, Conformances, ConformanceItem, Gettable, Name, NodeKind, Settable, Static,
+    AstType, Callable, ConformanceItem, Conformances, Gettable, Name, NodeKind, Settable, Static,
     TypeParams, WhereClause as AstWhereClause, WhereConstraint,
 };
 use kestrel_hecs::{Entity, QueryContext};
@@ -13,8 +13,8 @@ use kestrel_hir::Builtin;
 use kestrel_hir::ty::HirTy;
 use kestrel_hir_lower::{LowerCallableTypes, LowerExtensionTargetTypeArgs, LowerTypeAnnotation};
 use kestrel_name_res::{
-    expand_protocol_closure_in_place, ConformingProtocols, ResolveBuiltin, ResolveTypePath,
-    TypeResolution,
+    ConformingProtocols, ResolveBuiltin, ResolveTypePath, TypeResolution,
+    expand_protocol_closure_in_place,
 };
 use kestrel_span2::Span;
 
@@ -198,7 +198,7 @@ impl TypeResolver for WorldResolver<'_> {
                 Ok(res) => return Ok(res),
                 Err(MemberError::NotFound) => {
                     return self.resolve_assoc_type_static_member_resolve(*assoc, name, _args);
-                }
+                },
                 Err(e) => return Err(e),
             }
         }
@@ -211,7 +211,7 @@ impl TypeResolver for WorldResolver<'_> {
                 Ok(res) => return Ok(res),
                 Err(MemberError::NotFound) => {
                     return self.resolve_assoc_type_static_member_resolve(*entity, name, _args);
-                }
+                },
                 Err(e) => return Err(e),
             }
         }
@@ -366,7 +366,7 @@ impl TypeResolver for WorldResolver<'_> {
                 } else {
                     return Err(MemberError::NotFound);
                 }
-            }
+            },
             1 => matches[0],
             _ => {
                 // Multiple candidates with same labels — try protocol-based resolution.
@@ -378,7 +378,7 @@ impl TypeResolver for WorldResolver<'_> {
                 // Return candidates sorted by specificity for solver-side filtering.
                 let ranked = self.rank_by_extension_specificity(&matches, &candidate_extensions);
                 return Err(MemberError::Ambiguous(ranked));
-            }
+            },
         };
 
         let mut resolution = self.build_member_resolution(member)?;
@@ -407,22 +407,22 @@ impl TypeResolver for WorldResolver<'_> {
                     root: self.root,
                 });
                 all_protocols.contains(&protocol)
-            }
+            },
             TyKind::TypeAlias { entity, .. } => {
                 // Associated-type bounds (e.g. `type Item: Equatable`) live on
                 // the TypeAlias entity itself.
                 let bound_protocols = self.collect_assoc_type_protocol_bounds(*entity);
                 bound_protocols.contains(&protocol)
-            }
+            },
             TyKind::Param { entity } => {
                 let bound_protocols = self.collect_param_protocol_bounds(*entity);
                 bound_protocols.contains(&protocol)
-            }
+            },
             TyKind::AssocProjection { assoc, .. } => {
                 // Conformance bounds on the associated type.
                 let bound_protocols = self.collect_assoc_type_protocol_bounds(*assoc);
                 bound_protocols.contains(&protocol)
-            }
+            },
             _ => false,
         }
     }
@@ -452,22 +452,22 @@ impl TypeResolver for WorldResolver<'_> {
                     }
                 }
                 None
-            }
+            },
             TyKind::TypeAlias { entity, .. } => {
                 // Protocol associated type (e.g. Iter: Iterator) —
                 // search the bound protocols for the name.
                 let bound_protocols = self.collect_assoc_type_protocol_bounds(*entity);
                 self.find_associated_type_in_protocols(&bound_protocols, name)
-            }
+            },
             TyKind::Param { entity } => {
                 let bound_protocols = self.collect_param_protocol_bounds(*entity);
                 self.find_associated_type_in_protocols(&bound_protocols, name)
-            }
+            },
             TyKind::AssocProjection { assoc, .. } => {
                 // Nested: T.Iter.Item — search Iter's bound protocols for Item.
                 let bound_protocols = self.collect_assoc_type_protocol_bounds(*assoc);
                 self.find_associated_type_in_protocols(&bound_protocols, name)
-            }
+            },
             _ => None,
         }
     }
@@ -516,10 +516,7 @@ impl TypeResolver for WorldResolver<'_> {
 
             for &child in &children {
                 if self.ctx.has::<Static>(child)
-                    && matches!(
-                        self.ctx.get::<NodeKind>(child),
-                        Some(NodeKind::Function)
-                    )
+                    && matches!(self.ctx.get::<NodeKind>(child), Some(NodeKind::Function))
                 {
                     return Some(child);
                 }
@@ -535,10 +532,7 @@ impl TypeResolver for WorldResolver<'_> {
 
         for &child in &direct {
             if self.ctx.has::<Static>(child)
-                && matches!(
-                    self.ctx.get::<NodeKind>(child),
-                    Some(NodeKind::Function)
-                )
+                && matches!(self.ctx.get::<NodeKind>(child), Some(NodeKind::Function))
             {
                 return Some(child);
             }
@@ -607,9 +601,13 @@ impl TypeResolver for WorldResolver<'_> {
                 } else {
                     return Err(MemberError::NotFound);
                 }
-            }
+            },
             1 => matches[0],
-            _ => return Err(MemberError::Ambiguous(matches.into_iter().map(|e| (e, None)).collect())),
+            _ => {
+                return Err(MemberError::Ambiguous(
+                    matches.into_iter().map(|e| (e, None)).collect(),
+                ));
+            },
         };
 
         self.build_member_resolution(member)
@@ -626,15 +624,17 @@ fn extract_protocol_type_args(
 ) -> Vec<HirTy> {
     match protocol_ty {
         AstType::Named { segments, .. } => {
-            let result: Vec<HirTy> = segments.last()
+            let result: Vec<HirTy> = segments
+                .last()
                 .map(|seg| {
-                    seg.type_args.iter()
+                    seg.type_args
+                        .iter()
                         .map(|a| kestrel_hir_lower::lower_ast_type(ctx, owner, root, a))
                         .collect()
                 })
                 .unwrap_or_default();
             result
-        }
+        },
         _ => Vec::new(),
     }
 }
@@ -723,7 +723,7 @@ impl WorldResolver<'_> {
             Some(NodeKind::Field) => {
                 let mutable = self.ctx.has::<Settable>(member);
                 MemberKind::Field { mutable }
-            }
+            },
             Some(NodeKind::Function) => MemberKind::Method,
             Some(NodeKind::Initializer) => MemberKind::Init,
             Some(NodeKind::Subscript) => MemberKind::Subscript,
@@ -745,8 +745,7 @@ impl WorldResolver<'_> {
             entity: member,
             root: self.root,
         });
-        let param_types: Vec<ParamInfo> = if let Some(callable) = self.ctx.get::<Callable>(member)
-        {
+        let param_types: Vec<ParamInfo> = if let Some(callable) = self.ctx.get::<Callable>(member) {
             let hir_tys = lowered_param_tys.as_ref();
             callable
                 .params
@@ -779,7 +778,7 @@ impl WorldResolver<'_> {
                         root: self.root,
                     })
                     .unwrap_or(HirTy::Error(Span::synthetic(0)))
-            }
+            },
             _ => {
                 // Methods/inits/subscripts: return type from annotation
                 self.ctx
@@ -788,7 +787,7 @@ impl WorldResolver<'_> {
                         root: self.root,
                     })
                     .unwrap_or_else(|| HirTy::Tuple(vec![], Span::synthetic(0)))
-            }
+            },
         };
 
         // Get where clauses
@@ -829,7 +828,7 @@ impl WorldResolver<'_> {
                     extension: parent,
                     root: self.root,
                 })
-            }
+            },
             _ => None, // Struct/Enum — Self matches receiver, no substitution needed
         }
     }
@@ -1025,7 +1024,9 @@ impl WorldResolver<'_> {
     /// Two methods with the same name and label signature are considered equivalent overloads.
     /// Includes method name to avoid collisions between different no-arg methods.
     fn label_signature(&self, entity: Entity) -> String {
-        let name = self.ctx.get::<Name>(entity)
+        let name = self
+            .ctx
+            .get::<Name>(entity)
             .map(|n| n.0.as_str())
             .unwrap_or("");
         let Some(callable) = self.ctx.get::<Callable>(entity) else {
@@ -1074,8 +1075,7 @@ impl WorldResolver<'_> {
         use kestrel_ast_builder::AstType;
         match ast_ty {
             AstType::Named { segments, .. } => {
-                let seg_names: Vec<String> =
-                    segments.iter().map(|s| s.name.clone()).collect();
+                let seg_names: Vec<String> = segments.iter().map(|s| s.name.clone()).collect();
                 match self.ctx.query(ResolveTypePath {
                     segments: seg_names,
                     context: self.body_owner,
@@ -1085,7 +1085,7 @@ impl WorldResolver<'_> {
                     TypeResolution::SelfType => self.resolve_self_entity_from(self.body_owner),
                     _ => None,
                 }
-            }
+            },
             _ => None,
         }
     }
@@ -1100,10 +1100,10 @@ impl WorldResolver<'_> {
                         extension: entity,
                         root: self.root,
                     });
-                }
+                },
                 Some(NodeKind::Struct | NodeKind::Enum | NodeKind::Protocol) => {
                     return Some(entity);
-                }
+                },
                 _ => current = self.ctx.parent_of(entity),
             }
         }
@@ -1146,9 +1146,13 @@ impl WorldResolver<'_> {
                 } else {
                     return Err(MemberError::NotFound);
                 }
-            }
+            },
             1 => matches[0],
-            _ => return Err(MemberError::Ambiguous(matches.into_iter().map(|e| (e, None)).collect())),
+            _ => {
+                return Err(MemberError::Ambiguous(
+                    matches.into_iter().map(|e| (e, None)).collect(),
+                ));
+            },
         };
         let mut resolution = self.build_member_resolution(member)?;
 
@@ -1157,9 +1161,8 @@ impl WorldResolver<'_> {
         // and its type args are [lang.i64]. These substitute the protocol's
         // type params (T → i64) in the method's return/param types.
         if let Some(self_entity) = resolution.self_type {
-            resolution.protocol_type_args = self.find_protocol_type_args_from_bounds(
-                param_entity, self_entity,
-            );
+            resolution.protocol_type_args =
+                self.find_protocol_type_args_from_bounds(param_entity, self_entity);
         }
 
         Ok(resolution)
@@ -1182,7 +1185,13 @@ impl WorldResolver<'_> {
 
         // Direct match: where clause says T: Protocol[Args]
         for clause in &clauses {
-            if let WhereClause::Bound { param, protocol, protocol_type_args, .. } = clause {
+            if let WhereClause::Bound {
+                param,
+                protocol,
+                protocol_type_args,
+                ..
+            } = clause
+            {
                 if *param == param_entity && *protocol == protocol_entity {
                     return protocol_type_args.clone();
                 }
@@ -1193,9 +1202,14 @@ impl WorldResolver<'_> {
         // ParentProtocol: Protocol[Args] in its conformance list.
         // E.g., T: IntConverter, IntConverter: Converter[i64] → find [i64] for Converter.
         for clause in &clauses {
-            if let WhereClause::Bound { param, protocol, .. } = clause {
+            if let WhereClause::Bound {
+                param, protocol, ..
+            } = clause
+            {
                 if *param == param_entity {
-                    if let Some(args) = self.find_inherited_protocol_type_args(*protocol, protocol_entity) {
+                    if let Some(args) =
+                        self.find_inherited_protocol_type_args(*protocol, protocol_entity)
+                    {
                         return args;
                     }
                 }
@@ -1214,15 +1228,26 @@ impl WorldResolver<'_> {
     ) -> Option<Vec<HirTy>> {
         let conformances = self.ctx.get::<Conformances>(from_protocol)?;
         for item in &conformances.0 {
-            let ConformanceItem::Positive(ast_ty, _) = item else { continue };
-            let Some(resolved) = self.resolve_type_entity(ast_ty) else { continue };
+            let ConformanceItem::Positive(ast_ty, _) = item else {
+                continue;
+            };
+            let Some(resolved) = self.resolve_type_entity(ast_ty) else {
+                continue;
+            };
             if resolved == target_protocol {
                 // Extract type args from the conformance path
-                return Some(extract_protocol_type_args(self.ctx, self.body_owner, self.root, ast_ty));
+                return Some(extract_protocol_type_args(
+                    self.ctx,
+                    self.body_owner,
+                    self.root,
+                    ast_ty,
+                ));
             }
             // Recurse into inherited protocols
             if self.ctx.get::<NodeKind>(resolved) == Some(&NodeKind::Protocol) {
-                if let Some(args) = self.find_inherited_protocol_type_args(resolved, target_protocol) {
+                if let Some(args) =
+                    self.find_inherited_protocol_type_args(resolved, target_protocol)
+                {
                     return Some(args);
                 }
             }
@@ -1233,11 +1258,7 @@ impl WorldResolver<'_> {
     /// Search a set of protocols (and their extensions) for a member by name.
     /// Handles named members via VisibleChildrenByName and subscripts/inits
     /// by NodeKind when using sentinel names.
-    fn search_protocols_for_member(
-        &self,
-        protocols: &[Entity],
-        name: &str,
-    ) -> Vec<Entity> {
+    fn search_protocols_for_member(&self, protocols: &[Entity], name: &str) -> Vec<Entity> {
         // Dedup within a protocol (inherited methods collapse to one) but not
         // across protocols — same-signature methods from different protocols
         // should surface as ambiguity.
@@ -1295,9 +1316,13 @@ impl WorldResolver<'_> {
                 } else {
                     return Err(MemberError::NotFound);
                 }
-            }
+            },
             1 => matches[0],
-            _ => return Err(MemberError::Ambiguous(matches.into_iter().map(|e| (e, None)).collect())),
+            _ => {
+                return Err(MemberError::Ambiguous(
+                    matches.into_iter().map(|e| (e, None)).collect(),
+                ));
+            },
         };
 
         Ok((instance_candidates, member))
@@ -1363,7 +1388,11 @@ impl WorldResolver<'_> {
             0 if static_candidates.len() == 1 => static_candidates[0],
             0 => return Err(MemberError::NotFound),
             1 => matches[0],
-            _ => return Err(MemberError::Ambiguous(matches.into_iter().map(|e| (e, None)).collect())),
+            _ => {
+                return Err(MemberError::Ambiguous(
+                    matches.into_iter().map(|e| (e, None)).collect(),
+                ));
+            },
         };
 
         self.build_member_resolution(member)
@@ -1399,7 +1428,12 @@ impl WorldResolver<'_> {
         if let Some(parent) = self.ctx.parent_of(alias_entity) {
             checked.insert(parent);
             // Reuse the same where clause extraction — it resolves subjects by entity
-            self.gather_bounds_from_where_clause(alias_entity, parent, &mut protocols, &mut visited);
+            self.gather_bounds_from_where_clause(
+                alias_entity,
+                parent,
+                &mut protocols,
+                &mut visited,
+            );
         }
 
         // Walk from owner upward — function/extension where clauses may also
@@ -1407,7 +1441,12 @@ impl WorldResolver<'_> {
         let mut current = Some(self.body_owner);
         while let Some(entity) = current {
             if checked.insert(entity) {
-                self.gather_bounds_from_where_clause(alias_entity, entity, &mut protocols, &mut visited);
+                self.gather_bounds_from_where_clause(
+                    alias_entity,
+                    entity,
+                    &mut protocols,
+                    &mut visited,
+                );
             }
             current = self.ctx.parent_of(entity);
         }
@@ -1444,7 +1483,10 @@ impl WorldResolver<'_> {
                         root: self.root,
                     });
                     for clause in clauses {
-                        if let WhereClause::Bound { param, protocol, .. } = clause {
+                        if let WhereClause::Bound {
+                            param, protocol, ..
+                        } = clause
+                        {
                             // `Self: Protocol` — param is the target protocol entity
                             if param == target_protocol {
                                 protocols.push(protocol);
@@ -1471,7 +1513,12 @@ impl WorldResolver<'_> {
         // Check param's direct parent (function/method that declares the type param)
         if let Some(parent) = self.ctx.parent_of(param_entity) {
             checked.insert(parent);
-            self.gather_bounds_from_where_clause(param_entity, parent, &mut protocols, &mut visited);
+            self.gather_bounds_from_where_clause(
+                param_entity,
+                parent,
+                &mut protocols,
+                &mut visited,
+            );
         }
 
         // Walk from owner upward to find extension/protocol where clauses
@@ -1480,7 +1527,12 @@ impl WorldResolver<'_> {
         let mut current = Some(self.body_owner);
         while let Some(entity) = current {
             if checked.insert(entity) {
-                self.gather_bounds_from_where_clause(param_entity, entity, &mut protocols, &mut visited);
+                self.gather_bounds_from_where_clause(
+                    param_entity,
+                    entity,
+                    &mut protocols,
+                    &mut visited,
+                );
             }
             current = self.ctx.parent_of(entity);
         }
@@ -1524,7 +1576,6 @@ impl WorldResolver<'_> {
         }
     }
 
-
     /// Rank ambiguous candidates by extension specificity.
     /// Returns the winning candidate if one extension is strictly more specific.
     /// Specificity = number of concrete (non-type-parameter) type args in the extension target.
@@ -1538,14 +1589,23 @@ impl WorldResolver<'_> {
         let mut scored: Vec<(Entity, Option<Entity>, usize)> = Vec::new();
 
         for &candidate in matches {
-            let ext = candidate_extensions.iter().find(|(c, _)| *c == candidate).map(|&(_, e)| e);
+            let ext = candidate_extensions
+                .iter()
+                .find(|(c, _)| *c == candidate)
+                .map(|&(_, e)| e);
 
             let specificity = ext
-                .and_then(|e| self.ctx.query(LowerExtensionTargetTypeArgs {
-                    extension: e,
-                    root: self.root,
-                }))
-                .map(|args| args.iter().filter(|t| !matches!(t, HirTy::Param(..))).count())
+                .and_then(|e| {
+                    self.ctx.query(LowerExtensionTargetTypeArgs {
+                        extension: e,
+                        root: self.root,
+                    })
+                })
+                .map(|args| {
+                    args.iter()
+                        .filter(|t| !matches!(t, HirTy::Param(..)))
+                        .count()
+                })
                 .unwrap_or(0);
 
             scored.push((candidate, ext, specificity));
@@ -1555,4 +1615,3 @@ impl WorldResolver<'_> {
         scored.into_iter().map(|(c, e, _)| (c, e)).collect()
     }
 }
-

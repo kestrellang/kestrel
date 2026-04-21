@@ -8,9 +8,7 @@
 //! Implemented as free functions (not methods on a stateful resolver) so
 //! there is no ambient `self.owner` to accidentally leak into name lookup.
 
-use kestrel_ast_builder::{
-    AstType, NodeKind, WhereClause as AstWhereClause, WhereConstraint,
-};
+use kestrel_ast_builder::{AstType, NodeKind, WhereClause as AstWhereClause, WhereConstraint};
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
 use kestrel_hir::ty::HirTy;
 use kestrel_name_res::{ResolveTypePath, TypeResolution};
@@ -54,7 +52,9 @@ pub fn resolve_where_clauses(
     let mut result = Vec::new();
     for constraint in &ast_wc.0 {
         match constraint {
-            WhereConstraint::Bound { subject, protocols, .. } => {
+            WhereConstraint::Bound {
+                subject, protocols, ..
+            } => {
                 let Some(param) = resolve_type_entity(ctx, subject, entity, root) else {
                     continue;
                 };
@@ -69,7 +69,7 @@ pub fn resolve_where_clauses(
                         });
                     }
                 }
-            }
+            },
             WhereConstraint::Equality { lhs, rhs, .. } => {
                 let rhs_hir = kestrel_hir_lower::lower_ast_type(ctx, entity, root, rhs);
                 if let Some((param, assoc_name)) =
@@ -86,10 +86,10 @@ pub fn resolve_where_clauses(
                         rhs: rhs_hir,
                     });
                 }
-            }
+            },
             WhereConstraint::NegativeBound { .. } => {
                 // Negative bounds are not modeled in inference where clauses.
-            }
+            },
         }
     }
     result
@@ -122,15 +122,12 @@ fn resolve_self_entity(ctx: &QueryContext<'_>, start: Entity, root: Entity) -> O
     while let Some(e) = current {
         match ctx.get::<NodeKind>(e) {
             Some(NodeKind::Extension) => {
-                return ctx.query(kestrel_name_res::ExtensionTargetEntity {
-                    extension: e,
-                    root,
-                });
-            }
-            Some(NodeKind::Struct)
-            | Some(NodeKind::Enum)
-            | Some(NodeKind::Protocol) => return Some(e),
-            _ => {}
+                return ctx.query(kestrel_name_res::ExtensionTargetEntity { extension: e, root });
+            },
+            Some(NodeKind::Struct) | Some(NodeKind::Enum) | Some(NodeKind::Protocol) => {
+                return Some(e);
+            },
+            _ => {},
         }
         current = ctx.parent_of(e);
     }
@@ -161,7 +158,7 @@ fn resolve_type_param_or_assoc(
             ) =>
         {
             Some(e)
-        }
+        },
         _ => None,
     }
 }

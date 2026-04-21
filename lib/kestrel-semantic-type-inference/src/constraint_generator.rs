@@ -664,9 +664,9 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
                         ctx.member_access(
                             receiver.ty.id(),
                             method_name.clone(),
-                            false,       // instance method call
-                            arg_ty_ids,  // argument types for parameter constraint generation
-                            arg_labels,  // argument labels for overload resolution
+                            false,      // instance method call
+                            arg_ty_ids, // argument types for parameter constraint generation
+                            arg_labels, // argument labels for overload resolution
                             expr.ty.id(),
                             expr.id,
                             substitutions.clone(), // pass call-site substitutions with inference vars

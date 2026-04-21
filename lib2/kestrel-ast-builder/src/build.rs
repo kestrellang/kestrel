@@ -69,57 +69,57 @@ pub fn build_declarations(
                 let (entity, body) =
                     struct_decl::build_struct(world, &node, parent, file_entity, file_id);
                 push_body_children(&mut stack, body, entity);
-            }
+            },
 
             SyntaxKind::EnumDeclaration => {
                 let (entity, body) =
                     enum_decl::build_enum(world, &node, parent, file_entity, file_id);
                 push_body_children(&mut stack, body, entity);
-            }
+            },
 
             SyntaxKind::EnumCaseDeclaration => {
                 enum_decl::build_enum_case(world, &node, parent, file_entity, file_id);
-            }
+            },
 
             SyntaxKind::ProtocolDeclaration => {
                 let (entity, body) =
                     protocol::build_protocol(world, &node, parent, file_entity, file_id);
                 push_body_children(&mut stack, body, entity);
-            }
+            },
 
             SyntaxKind::ExtensionDeclaration => {
                 let (entity, body) =
                     extension::build_extension(world, &node, parent, file_entity, file_id);
                 push_body_children(&mut stack, body, entity);
-            }
+            },
 
             SyntaxKind::FunctionDeclaration => {
                 function::build_function(world, &node, parent, file_entity, file_id);
-            }
+            },
 
             SyntaxKind::InitializerDeclaration => {
                 function::build_initializer(world, &node, parent, file_entity, file_id);
-            }
+            },
 
             SyntaxKind::DeinitDeclaration => {
                 function::build_deinit(world, &node, parent, file_entity, file_id);
-            }
+            },
 
             SyntaxKind::FieldDeclaration => {
                 field::build_field(world, &node, parent, file_entity, file_id);
-            }
+            },
 
             SyntaxKind::SubscriptDeclaration => {
                 subscript::build_subscript(world, &node, parent, file_entity, file_id);
-            }
+            },
 
             SyntaxKind::TypeAliasDeclaration => {
                 type_alias::build_type_alias(world, &node, parent, file_entity, file_id);
-            }
+            },
 
             SyntaxKind::ImportDeclaration => {
                 import::build_import(world, &node, parent, file_entity, file_id);
-            }
+            },
 
             // Transparent wrapper nodes — push children through
             SyntaxKind::DeclarationItem | SyntaxKind::SourceFile => {
@@ -127,10 +127,10 @@ pub fn build_declarations(
                 for child in children.into_iter().rev() {
                     stack.push((child, parent));
                 }
-            }
+            },
 
             // Unknown nodes — skip silently
-            _ => {}
+            _ => {},
         }
     }
 }
@@ -183,9 +183,9 @@ fn is_excluded_by_target(node: &SyntaxNode, target: Option<&TargetConfig>) -> bo
                 if is_excluded_by_platform(&attr_node, target) {
                     return true;
                 }
-            }
+            },
             // Future: "arch" => { if is_excluded_by_arch(...) { return true; } }
-            _ => {}
+            _ => {},
         }
     }
 
@@ -236,9 +236,9 @@ fn is_excluded_by_platform(attr_node: &SyntaxNode, target: &TargetConfig) -> boo
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kestrel_hecs::World;
     use crate::ast_type::AstType;
     use crate::components::*;
+    use kestrel_hecs::World;
 
     /// Helper: parse source and build declarations, returning world + root + file entity
     fn build_from_source(source: &str) -> (World, Entity, Entity) {
@@ -263,18 +263,29 @@ mod tests {
     }
 
     /// Find a child entity with matching NodeKind and Name.
-    fn find_child_by_name(world: &World, parent: Entity, kind: &NodeKind, name: &str) -> Option<Entity> {
-        world.children_of(parent).iter().find(|&&e| {
-            world.get::<NodeKind>(e) == Some(kind)
-                && world.get::<Name>(e).is_some_and(|n| n.0 == name)
-        }).copied()
+    fn find_child_by_name(
+        world: &World,
+        parent: Entity,
+        kind: &NodeKind,
+        name: &str,
+    ) -> Option<Entity> {
+        world
+            .children_of(parent)
+            .iter()
+            .find(|&&e| {
+                world.get::<NodeKind>(e) == Some(kind)
+                    && world.get::<Name>(e).is_some_and(|n| n.0 == name)
+            })
+            .copied()
     }
 
     /// Find first child entity with matching NodeKind.
     fn find_child_by_kind(world: &World, parent: Entity, kind: &NodeKind) -> Option<Entity> {
-        world.children_of(parent).iter().find(|&&e| {
-            world.get::<NodeKind>(e) == Some(kind)
-        }).copied()
+        world
+            .children_of(parent)
+            .iter()
+            .find(|&&e| world.get::<NodeKind>(e) == Some(kind))
+            .copied()
     }
 
     // ================================================================
@@ -309,7 +320,9 @@ mod tests {
         // File 1
         let f1 = world.spawn();
         let src1 = "module Shared\nstruct A {}";
-        let tokens1: Vec<_> = kestrel_lexer2::lex(src1, f1.index()).filter_map(|r| r.ok()).collect();
+        let tokens1: Vec<_> = kestrel_lexer2::lex(src1, f1.index())
+            .filter_map(|r| r.ok())
+            .collect();
         let result1 = kestrel_parser2::parse_source_file_from_source(
             src1,
             tokens1.iter().map(|t| (t.value.clone(), t.span.clone())),
@@ -319,7 +332,9 @@ mod tests {
         // File 2
         let f2 = world.spawn();
         let src2 = "module Shared\nstruct B {}";
-        let tokens2: Vec<_> = kestrel_lexer2::lex(src2, f2.index()).filter_map(|r| r.ok()).collect();
+        let tokens2: Vec<_> = kestrel_lexer2::lex(src2, f2.index())
+            .filter_map(|r| r.ok())
+            .collect();
         let result2 = kestrel_parser2::parse_source_file_from_source(
             src2,
             tokens2.iter().map(|t| (t.value.clone(), t.span.clone())),
@@ -328,7 +343,11 @@ mod tests {
 
         // Both files should share the same module entity
         let shared = find_child_by_name(&world, root, &NodeKind::Module, "Shared").unwrap();
-        assert_eq!(world.children_of(shared).len(), 2, "both structs under same module");
+        assert_eq!(
+            world.children_of(shared).len(),
+            2,
+            "both structs under same module"
+        );
 
         let a = find_child_by_name(&world, shared, &NodeKind::Struct, "A");
         let b = find_child_by_name(&world, shared, &NodeKind::Struct, "B");
@@ -389,7 +408,10 @@ mod tests {
         assert_eq!(callable.params.len(), 2);
 
         let point = find_child_by_name(&world, shape, &NodeKind::EnumCase, "point").unwrap();
-        assert!(!world.has::<Callable>(point), "case without values has no Callable");
+        assert!(
+            !world.has::<Callable>(point),
+            "case without values has no Callable"
+        );
     }
 
     // ================================================================
@@ -447,9 +469,7 @@ mod tests {
 
     #[test]
     fn type_parameters() {
-        let (world, root, _) = build_from_source(
-            "module Main\nstruct Box[T] {}",
-        );
+        let (world, root, _) = build_from_source("module Main\nstruct Box[T] {}");
 
         let main = find_child_by_name(&world, root, &NodeKind::Module, "Main").unwrap();
         let box_entity = find_child_by_name(&world, main, &NodeKind::Struct, "Box").unwrap();
@@ -469,9 +489,8 @@ mod tests {
 
     #[test]
     fn where_clause() {
-        let (world, root, _) = build_from_source(
-            "module Main\nfunc process[T](x: T) where T: Comparable {}",
-        );
+        let (world, root, _) =
+            build_from_source("module Main\nfunc process[T](x: T) where T: Comparable {}");
 
         let main = find_child_by_name(&world, root, &NodeKind::Module, "Main").unwrap();
         let func = find_child_by_name(&world, main, &NodeKind::Function, "process").unwrap();
@@ -488,9 +507,7 @@ mod tests {
 
     #[test]
     fn conformances() {
-        let (world, root, _) = build_from_source(
-            "module Main\nstruct S: Hashable, Comparable {}",
-        );
+        let (world, root, _) = build_from_source("module Main\nstruct S: Hashable, Comparable {}");
 
         let main = find_child_by_name(&world, root, &NodeKind::Module, "Main").unwrap();
         let s = find_child_by_name(&world, main, &NodeKind::Struct, "S").unwrap();
@@ -499,7 +516,11 @@ mod tests {
         assert_eq!(conf.0.len(), 2);
 
         // Both should be positive
-        assert!(conf.0.iter().all(|c| matches!(c, ConformanceItem::Positive(..))));
+        assert!(
+            conf.0
+                .iter()
+                .all(|c| matches!(c, ConformanceItem::Positive(..)))
+        );
     }
 
     // ================================================================
@@ -508,9 +529,7 @@ mod tests {
 
     #[test]
     fn extension_has_target_no_name() {
-        let (world, root, _) = build_from_source(
-            "module Main\nextend Int64: Hashable {}",
-        );
+        let (world, root, _) = build_from_source("module Main\nextend Int64: Hashable {}");
 
         let main = find_child_by_name(&world, root, &NodeKind::Module, "Main").unwrap();
         let ext = find_child_by_kind(&world, main, &NodeKind::Extension).unwrap();
@@ -526,9 +545,8 @@ mod tests {
 
     #[test]
     fn import_with_items() {
-        let (world, root, _) = build_from_source(
-            "module Main\nimport std.collections.(Array, Dictionary)",
-        );
+        let (world, root, _) =
+            build_from_source("module Main\nimport std.collections.(Array, Dictionary)");
 
         let main = find_child_by_name(&world, root, &NodeKind::Module, "Main").unwrap();
         let imp = find_child_by_kind(&world, main, &NodeKind::Import).unwrap();
@@ -548,9 +566,7 @@ mod tests {
 
     #[test]
     fn type_alias() {
-        let (world, root, _) = build_from_source(
-            "module Main\ntype IntPair = (Int64, Int64)",
-        );
+        let (world, root, _) = build_from_source("module Main\ntype IntPair = (Int64, Int64)");
 
         let main = find_child_by_name(&world, root, &NodeKind::Module, "Main").unwrap();
         let alias = find_child_by_name(&world, main, &NodeKind::TypeAlias, "IntPair").unwrap();
@@ -586,9 +602,7 @@ mod tests {
 
     #[test]
     fn attributes_parsed() {
-        let (world, root, _) = build_from_source(
-            "module Main\n@inline\nfunc fast() {}",
-        );
+        let (world, root, _) = build_from_source("module Main\n@inline\nfunc fast() {}");
 
         let main = find_child_by_name(&world, root, &NodeKind::Module, "Main").unwrap();
         let func = find_child_by_name(&world, main, &NodeKind::Function, "fast").unwrap();
@@ -604,9 +618,7 @@ mod tests {
 
     #[test]
     fn file_id_on_declarations_not_modules() {
-        let (world, root, file) = build_from_source(
-            "module Main\nstruct S {}",
-        );
+        let (world, root, file) = build_from_source("module Main\nstruct S {}");
 
         let main = find_child_by_name(&world, root, &NodeKind::Module, "Main").unwrap();
         let s = find_child_by_name(&world, main, &NodeKind::Struct, "S").unwrap();
@@ -635,7 +647,7 @@ mod tests {
                 assert_eq!(segments.len(), 1);
                 assert_eq!(segments[0].name, "Int64");
                 assert!(segments[0].type_args.is_empty());
-            }
+            },
             other => panic!("expected Named, got {:?}", other),
         }
 
@@ -646,7 +658,7 @@ mod tests {
                 assert_eq!(segments.len(), 1);
                 assert_eq!(segments[0].name, "Array");
                 assert_eq!(segments[0].type_args.len(), 1);
-            }
+            },
             other => panic!("expected Named with type args, got {:?}", other),
         }
 
@@ -655,7 +667,7 @@ mod tests {
         match &c_ty.0 {
             AstType::Tuple(elems, _) => {
                 assert_eq!(elems.len(), 2);
-            }
+            },
             other => panic!("expected Tuple, got {:?}", other),
         }
     }
@@ -666,9 +678,7 @@ mod tests {
 
     #[test]
     fn initializer() {
-        let (world, root, _) = build_from_source(
-            "module Main\nstruct S {\n  init(x: Int64) {}\n}",
-        );
+        let (world, root, _) = build_from_source("module Main\nstruct S {\n  init(x: Int64) {}\n}");
 
         let main = find_child_by_name(&world, root, &NodeKind::Module, "Main").unwrap();
         let s = find_child_by_name(&world, main, &NodeKind::Struct, "S").unwrap();
@@ -685,9 +695,7 @@ mod tests {
 
     #[test]
     fn deinit_declaration() {
-        let (world, root, _) = build_from_source(
-            "module Main\nstruct S {\n  deinit {}\n}",
-        );
+        let (world, root, _) = build_from_source("module Main\nstruct S {\n  deinit {}\n}");
 
         let main = find_child_by_name(&world, root, &NodeKind::Module, "Main").unwrap();
         let s = find_child_by_name(&world, main, &NodeKind::Struct, "S").unwrap();
@@ -748,7 +756,8 @@ mod tests {
         assert!(!world.has::<Callable>(less), "plain case has no Callable");
 
         // Methods
-        let equals_fn = find_child_by_name(&world, ordering, &NodeKind::Function, "equals").unwrap();
+        let equals_fn =
+            find_child_by_name(&world, ordering, &NodeKind::Function, "equals").unwrap();
         let callable = world.get::<Callable>(equals_fn).unwrap();
         assert_eq!(callable.params.len(), 1);
         assert_eq!(callable.params[0].name, "other");
@@ -760,11 +769,12 @@ mod tests {
             AstType::Named { segments, .. } => {
                 assert_eq!(segments.len(), 1);
                 assert_eq!(segments[0].name, "Bool");
-            }
+            },
             other => panic!("expected Named(Bool), got {:?}", other),
         }
 
-        let reverse_fn = find_child_by_name(&world, ordering, &NodeKind::Function, "reverse").unwrap();
+        let reverse_fn =
+            find_child_by_name(&world, ordering, &NodeKind::Function, "reverse").unwrap();
         let callable = world.get::<Callable>(reverse_fn).unwrap();
         assert_eq!(callable.params.len(), 0);
 
@@ -772,24 +782,42 @@ mod tests {
         let callable = world.get::<Callable>(then_fn).unwrap();
         assert_eq!(callable.params.len(), 1);
 
-        let then_with_fn = find_child_by_name(&world, ordering, &NodeKind::Function, "thenWith").unwrap();
+        let then_with_fn =
+            find_child_by_name(&world, ordering, &NodeKind::Function, "thenWith").unwrap();
         let callable = world.get::<Callable>(then_with_fn).unwrap();
         assert_eq!(callable.params.len(), 1);
         // Param type should be a function type
         let param_ty = callable.params[0].ty.as_ref().unwrap();
-        assert!(matches!(param_ty, AstType::Function { .. }), "thenWith param should be Function type, got {:?}", param_ty);
+        assert!(
+            matches!(param_ty, AstType::Function { .. }),
+            "thenWith param should be Function type, got {:?}",
+            param_ty
+        );
 
-        let format_fn = find_child_by_name(&world, ordering, &NodeKind::Function, "format").unwrap();
+        let format_fn =
+            find_child_by_name(&world, ordering, &NodeKind::Function, "format").unwrap();
         let callable = world.get::<Callable>(format_fn).unwrap();
         assert_eq!(callable.params.len(), 1);
-        assert!(callable.params[0].default_entity.is_some(), "format options has default value");
+        assert!(
+            callable.params[0].default_entity.is_some(),
+            "format options has default value"
+        );
 
         // Total entity count
         let children = world.children_of(ordering);
-        let case_count = children.iter().filter(|&&e| world.get::<NodeKind>(e) == Some(&NodeKind::EnumCase)).count();
-        let fn_count = children.iter().filter(|&&e| world.get::<NodeKind>(e) == Some(&NodeKind::Function)).count();
+        let case_count = children
+            .iter()
+            .filter(|&&e| world.get::<NodeKind>(e) == Some(&NodeKind::EnumCase))
+            .count();
+        let fn_count = children
+            .iter()
+            .filter(|&&e| world.get::<NodeKind>(e) == Some(&NodeKind::Function))
+            .count();
         assert_eq!(case_count, 3, "3 enum cases");
-        assert_eq!(fn_count, 6, "6 methods (equals, notEquals, reverse, then, thenWith, format)");
+        assert_eq!(
+            fn_count, 6,
+            "6 methods (equals, notEquals, reverse, then, thenWith, format)"
+        );
     }
 
     /// Pretty-print the entity tree for debugging.
@@ -798,40 +826,81 @@ mod tests {
         let kind = world.get::<NodeKind>(entity);
         let name = world.get::<Name>(entity);
 
-        let kind_str = kind.map(|k| format!("{:?}", k)).unwrap_or_else(|| "???".into());
+        let kind_str = kind
+            .map(|k| format!("{:?}", k))
+            .unwrap_or_else(|| "???".into());
         let name_str = name.map(|n| format!(" \"{}\"", n.0)).unwrap_or_default();
         print!("{indent}{kind_str}{name_str}");
 
         let mut tags: Vec<String> = Vec::new();
-        if world.has::<Typed>(entity) { tags.push("Typed".into()); }
-        if world.has::<Gettable>(entity) { tags.push("Gettable".into()); }
-        if world.has::<Settable>(entity) { tags.push("Settable".into()); }
-        if world.has::<Static>(entity) { tags.push("Static".into()); }
-        if world.has::<Subscript>(entity) { tags.push("Subscript".into()); }
-        if world.has::<IsIndirect>(entity) { tags.push("IsIndirect".into()); }
-        if world.has::<Valued>(entity) { tags.push("Valued".into()); }
+        if world.has::<Typed>(entity) {
+            tags.push("Typed".into());
+        }
+        if world.has::<Gettable>(entity) {
+            tags.push("Gettable".into());
+        }
+        if world.has::<Settable>(entity) {
+            tags.push("Settable".into());
+        }
+        if world.has::<Static>(entity) {
+            tags.push("Static".into());
+        }
+        if world.has::<Subscript>(entity) {
+            tags.push("Subscript".into());
+        }
+        if world.has::<IsIndirect>(entity) {
+            tags.push("IsIndirect".into());
+        }
+        if world.has::<Valued>(entity) {
+            tags.push("Valued".into());
+        }
         if let Some(vis) = world.get::<Vis>(entity) {
             tags.push(format!("{:?}", vis).to_lowercase());
         }
-        if world.has::<FileId>(entity) { tags.push("FileId".into()); }
+        if world.has::<FileId>(entity) {
+            tags.push("FileId".into());
+        }
         if let Some(conf) = world.get::<Conformances>(entity) {
-            let names: Vec<_> = conf.0.iter().map(|c| match c {
-                ConformanceItem::Positive(ty, _) => format!("+{}", type_name(ty)),
-                ConformanceItem::Negative(ty, _) => format!("-{}", type_name(ty)),
-            }).collect();
+            let names: Vec<_> = conf
+                .0
+                .iter()
+                .map(|c| match c {
+                    ConformanceItem::Positive(ty, _) => format!("+{}", type_name(ty)),
+                    ConformanceItem::Negative(ty, _) => format!("-{}", type_name(ty)),
+                })
+                .collect();
             tags.push(format!("conforms({})", names.join(", ")));
         }
         if let Some(tp) = world.get::<TypeParams>(entity) {
             tags.push(format!("TypeParams({})", tp.0.len()));
         }
         if let Some(callable) = world.get::<Callable>(entity) {
-            let params: Vec<_> = callable.params.iter().map(|p| {
-                let ty_str = p.ty.as_ref().map(|t| format!(": {}", type_name(t))).unwrap_or_default();
-                let label = p.label.as_ref().map(|l| format!("{} ", l)).unwrap_or_default();
-                let dflt = if p.default_entity.is_some() { " = ..." } else { "" };
-                format!("{label}{}{ty_str}{dflt}", p.name)
-            }).collect();
-            let recv = callable.receiver.as_ref().map(|r| format!("{:?} ", r)).unwrap_or_default();
+            let params: Vec<_> = callable
+                .params
+                .iter()
+                .map(|p| {
+                    let ty_str =
+                        p.ty.as_ref()
+                            .map(|t| format!(": {}", type_name(t)))
+                            .unwrap_or_default();
+                    let label = p
+                        .label
+                        .as_ref()
+                        .map(|l| format!("{} ", l))
+                        .unwrap_or_default();
+                    let dflt = if p.default_entity.is_some() {
+                        " = ..."
+                    } else {
+                        ""
+                    };
+                    format!("{label}{}{ty_str}{dflt}", p.name)
+                })
+                .collect();
+            let recv = callable
+                .receiver
+                .as_ref()
+                .map(|r| format!("{:?} ", r))
+                .unwrap_or_default();
             tags.push(format!("Callable({recv}({}))", params.join(", ")));
         }
         if let Some(ta) = world.get::<TypeAnnotation>(entity) {
@@ -849,7 +918,11 @@ mod tests {
         }
         if let Some(doc) = world.get::<Documentation>(entity) {
             let first = doc.0.lines().next().unwrap_or("");
-            let trunc = if first.len() > 50 { &first[..50] } else { first };
+            let trunc = if first.len() > 50 {
+                &first[..50]
+            } else {
+                first
+            };
             tags.push(format!("/// {trunc}"));
         }
         if let Some(attrs) = world.get::<Attributes>(entity) {
@@ -871,24 +944,31 @@ mod tests {
     fn type_name(ty: &AstType) -> String {
         match ty {
             AstType::Named { segments, .. } => {
-                let parts: Vec<_> = segments.iter().map(|seg| {
-                    if seg.type_args.is_empty() {
-                        seg.name.clone()
-                    } else {
-                        let args: Vec<_> = seg.type_args.iter().map(type_name).collect();
-                        format!("{}[{}]", seg.name, args.join(", "))
-                    }
-                }).collect();
+                let parts: Vec<_> = segments
+                    .iter()
+                    .map(|seg| {
+                        if seg.type_args.is_empty() {
+                            seg.name.clone()
+                        } else {
+                            let args: Vec<_> = seg.type_args.iter().map(type_name).collect();
+                            format!("{}[{}]", seg.name, args.join(", "))
+                        }
+                    })
+                    .collect();
                 parts.join(".")
-            }
+            },
             AstType::Tuple(elems, _) => {
                 let inner: Vec<_> = elems.iter().map(type_name).collect();
                 format!("({})", inner.join(", "))
-            }
-            AstType::Function { params, return_type, .. } => {
+            },
+            AstType::Function {
+                params,
+                return_type,
+                ..
+            } => {
                 let p: Vec<_> = params.iter().map(type_name).collect();
                 format!("({}) -> {}", p.join(", "), type_name(return_type))
-            }
+            },
             AstType::Array(inner, _) => format!("[{}]", type_name(inner)),
             AstType::Dictionary(k, v, _) => format!("[{}: {}]", type_name(k), type_name(v)),
             AstType::Optional(inner, _) => format!("{}?", type_name(inner)),

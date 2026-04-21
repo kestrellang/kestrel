@@ -95,15 +95,19 @@ impl DeclCheck for CloneableFieldAnalyzer {
 
             match child_kind {
                 Some(NodeKind::Field) => {
-                    if let Some(field_entity) = self.check_field_cloneable(
-                        cx, child, cloneable_entity, copyable_entity,
-                    ) {
+                    if let Some(field_entity) =
+                        self.check_field_cloneable(cx, child, cloneable_entity, copyable_entity)
+                    {
                         let field_name = util::entity_name(cx.query, field_entity);
                         return vec![self.make_diagnostic(
-                            &type_name, &field_name, kind_str, cx, field_entity,
+                            &type_name,
+                            &field_name,
+                            kind_str,
+                            cx,
+                            field_entity,
                         )];
                     }
-                }
+                },
                 Some(NodeKind::EnumCase) => {
                     // Enum cases have Field children for associated values
                     for &case_child in cx.query.children_of(child) {
@@ -111,16 +115,23 @@ impl DeclCheck for CloneableFieldAnalyzer {
                             continue;
                         }
                         if let Some(field_entity) = self.check_field_cloneable(
-                            cx, case_child, cloneable_entity, copyable_entity,
+                            cx,
+                            case_child,
+                            cloneable_entity,
+                            copyable_entity,
                         ) {
                             let field_name = util::entity_name(cx.query, field_entity);
                             return vec![self.make_diagnostic(
-                                &type_name, &field_name, kind_str, cx, field_entity,
+                                &type_name,
+                                &field_name,
+                                kind_str,
+                                cx,
+                                field_entity,
                             )];
                         }
                     }
-                }
-                _ => {}
+                },
+                _ => {},
             }
         }
 
@@ -188,9 +199,7 @@ impl CloneableFieldAnalyzer {
                 message: "this field has a Cloneable type".into(),
                 is_primary: true,
             }],
-            notes: vec![
-                "types containing Cloneable fields must conform to Cloneable".into(),
-            ],
+            notes: vec!["types containing Cloneable fields must conform to Cloneable".into()],
         }
     }
 }

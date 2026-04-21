@@ -226,5 +226,4 @@ pub enum Op {
     FloatFma(FloatBits),
     /// Op2: (magnitude, sign_source) -> value
     FloatCopysign(FloatBits),
-
 }

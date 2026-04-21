@@ -13,8 +13,12 @@ use kestrel_test_suite2::TestCompiler;
 
 fn main() {
     let mut args = std::env::args().skip(1);
-    let ks_path = args.next().expect("usage: build_test <ks-path> <output-binary>");
-    let out_path = args.next().expect("usage: build_test <ks-path> <output-binary>");
+    let ks_path = args
+        .next()
+        .expect("usage: build_test <ks-path> <output-binary>");
+    let out_path = args
+        .next()
+        .expect("usage: build_test <ks-path> <output-binary>");
 
     let source = std::fs::read_to_string(&ks_path).expect("failed to read ks file");
 
@@ -25,7 +29,12 @@ fn main() {
     let diags = tc.all_diagnostics();
     let errors: Vec<_> = diags
         .iter()
-        .filter(|d| matches!(d.severity, kestrel_test_suite2::diagnostic_matcher::TestSeverity::Error))
+        .filter(|d| {
+            matches!(
+                d.severity,
+                kestrel_test_suite2::diagnostic_matcher::TestSeverity::Error
+            )
+        })
         .collect();
     if !errors.is_empty() {
         for e in &errors {

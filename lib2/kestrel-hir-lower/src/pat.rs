@@ -5,7 +5,7 @@
 
 use kestrel_ast::ast_body::*;
 use kestrel_hir::body::*;
-use kestrel_name_res::{ResolveValuePath, TypeResolution, ResolveTypePath, ValueResolution};
+use kestrel_name_res::{ResolveTypePath, ResolveValuePath, TypeResolution, ValueResolution};
 use kestrel_span2::Span;
 
 use crate::ctx::LowerCtx;
@@ -20,16 +20,19 @@ impl LowerCtx<'_> {
     /// Lower an AST pattern, forcing all bindings mutable.
     /// Used by `var <pattern> = …` destructuring so the outer `var` propagates
     /// into every binding the pattern introduces.
-    pub fn lower_pat_forcing_mut(&mut self, body: &AstBody, id: PatId, force_mut: bool) -> HirPatId {
+    pub fn lower_pat_forcing_mut(
+        &mut self,
+        body: &AstBody,
+        id: PatId,
+        force_mut: bool,
+    ) -> HirPatId {
         self.lower_pat_inner(body, id, force_mut)
     }
 
     fn lower_pat_inner(&mut self, body: &AstBody, id: PatId, force_mut: bool) -> HirPatId {
         let pat = &body.pats[id];
         match pat {
-            AstPat::Wildcard { span } => self.alloc_pat(HirPat::Wildcard {
-                span: span.clone(),
-            }),
+            AstPat::Wildcard { span } => self.alloc_pat(HirPat::Wildcard { span: span.clone() }),
 
             AstPat::Binding { is_mut, name, span } => {
                 let local = self.define_local(name, *is_mut || force_mut, span.clone());
@@ -37,30 +40,42 @@ impl LowerCtx<'_> {
                     local,
                     span: span.clone(),
                 })
-            }
+            },
 
-            AstPat::Tuple { prefix, has_rest, multiple_rests, suffix, span } => {
+            AstPat::Tuple {
+                prefix,
+                has_rest,
+                multiple_rests,
+                suffix,
+                span,
+            } => {
                 if *multiple_rests {
                     self.ctx.accumulate(
                         kestrel_reporting2::Diagnostic::error()
-                            .with_message("only one rest pattern (`..`) is allowed per tuple pattern")
+                            .with_message(
+                                "only one rest pattern (`..`) is allowed per tuple pattern",
+                            )
                             .with_labels(vec![
                                 kestrel_reporting2::Label::primary(span.file_id, span.range())
                                     .with_message("multiple rest patterns found"),
-                            ])
+                            ]),
                     );
                 }
-                let lowered_prefix: Vec<HirPatId> =
-                    prefix.iter().map(|&id| self.lower_pat_inner(body, id, force_mut)).collect();
-                let lowered_suffix: Vec<HirPatId> =
-                    suffix.iter().map(|&id| self.lower_pat_inner(body, id, force_mut)).collect();
+                let lowered_prefix: Vec<HirPatId> = prefix
+                    .iter()
+                    .map(|&id| self.lower_pat_inner(body, id, force_mut))
+                    .collect();
+                let lowered_suffix: Vec<HirPatId> = suffix
+                    .iter()
+                    .map(|&id| self.lower_pat_inner(body, id, force_mut))
+                    .collect();
                 self.alloc_pat(HirPat::Tuple {
                     prefix: lowered_prefix,
                     has_rest: *has_rest,
                     suffix: lowered_suffix,
                     span: span.clone(),
                 })
-            }
+            },
 
             AstPat::Literal { kind, span } => {
                 let value = lower_lit_pat(kind);
@@ -68,7 +83,7 @@ impl LowerCtx<'_> {
                     value,
                     span: span.clone(),
                 })
-            }
+            },
 
             AstPat::Range {
                 start,
@@ -83,21 +98,31 @@ impl LowerCtx<'_> {
                 if let (Some(s), Some(e)) = (&hir_start, &hir_end) {
                     let invalid = match (s, e) {
                         (HirLiteral::Integer(s), HirLiteral::Integer(e)) => {
-                            if *inclusive { s > e } else { s >= e }
-                        }
+                            if *inclusive {
+                                s > e
+                            } else {
+                                s >= e
+                            }
+                        },
                         (HirLiteral::Char(s), HirLiteral::Char(e)) => {
-                            if *inclusive { s > e } else { s >= e }
-                        }
+                            if *inclusive {
+                                s > e
+                            } else {
+                                s >= e
+                            }
+                        },
                         _ => false,
                     };
                     if invalid {
                         self.ctx.accumulate(
                             kestrel_reporting2::Diagnostic::error()
-                                .with_message("invalid range bounds: start must be less than or equal to end")
+                                .with_message(
+                                    "invalid range bounds: start must be less than or equal to end",
+                                )
                                 .with_labels(vec![
                                     kestrel_reporting2::Label::primary(span.file_id, span.range())
                                         .with_message("range bounds are reversed"),
-                                ])
+                                ]),
                         );
                     }
                 }
@@ -108,7 +133,7 @@ impl LowerCtx<'_> {
                     inclusive: *inclusive,
                     span: span.clone(),
                 })
-            }
+            },
 
             AstPat::Enum {
                 case_name,
@@ -123,25 +148,36 @@ impl LowerCtx<'_> {
                 span,
             } => self.lower_struct_pat(body, name, fields, *has_rest, span, force_mut),
 
-            AstPat::Array { prefix, rest, suffix, span } => {
-                let lowered_prefix: Vec<HirPatId> =
-                    prefix.iter().map(|&id| self.lower_pat_inner(body, id, force_mut)).collect();
+            AstPat::Array {
+                prefix,
+                rest,
+                suffix,
+                span,
+            } => {
+                let lowered_prefix: Vec<HirPatId> = prefix
+                    .iter()
+                    .map(|&id| self.lower_pat_inner(body, id, force_mut))
+                    .collect();
                 // Map Option<Option<String>> → Option<Option<LocalId>>:
                 // - None → None (no rest)
                 // - Some(None) → Some(None) (bare `..`)
                 // - Some(Some(name)) → Some(Some(local)) (named `..name`, inherits outer `var`)
                 let hir_rest = rest.as_ref().map(|inner| {
-                    inner.as_ref().map(|name| self.define_local(name, force_mut, span.clone()))
+                    inner
+                        .as_ref()
+                        .map(|name| self.define_local(name, force_mut, span.clone()))
                 });
-                let lowered_suffix: Vec<HirPatId> =
-                    suffix.iter().map(|&id| self.lower_pat_inner(body, id, force_mut)).collect();
+                let lowered_suffix: Vec<HirPatId> = suffix
+                    .iter()
+                    .map(|&id| self.lower_pat_inner(body, id, force_mut))
+                    .collect();
                 self.alloc_pat(HirPat::Array {
                     prefix: lowered_prefix,
                     rest: hir_rest,
                     suffix: lowered_suffix,
                     span: span.clone(),
                 })
-            }
+            },
 
             AstPat::At {
                 is_mut,
@@ -156,17 +192,17 @@ impl LowerCtx<'_> {
                             .with_message("nested @ patterns are not allowed")
                             .with_labels(vec![
                                 kestrel_reporting2::Label::primary(span.file_id, span.range())
-                                    .with_message("use a single @ pattern with the outermost binding"),
-                            ])
+                                    .with_message(
+                                        "use a single @ pattern with the outermost binding",
+                                    ),
+                            ]),
                     );
                     // Still define the outer binding so arm-body references
                     // resolve, but replace the subpattern with Error so the
                     // exhaustiveness pass skips this arm instead of seeing
                     // an irrefutable @-over-wildcard.
                     let local = self.define_local(name, *is_mut || force_mut, span.clone());
-                    let err_sub = self.alloc_pat(HirPat::Error {
-                        span: span.clone(),
-                    });
+                    let err_sub = self.alloc_pat(HirPat::Error { span: span.clone() });
                     return self.alloc_pat(HirPat::At {
                         binding: local,
                         subpattern: err_sub,
@@ -181,7 +217,7 @@ impl LowerCtx<'_> {
                     subpattern: lowered_sub,
                     span: span.clone(),
                 })
-            }
+            },
 
             AstPat::Or { alternatives, span } => {
                 let lowered: Vec<HirPatId> = alternatives
@@ -192,18 +228,14 @@ impl LowerCtx<'_> {
                     alternatives: lowered,
                     span: span.clone(),
                 })
-            }
+            },
 
             AstPat::Rest { span } => {
                 // Rest should be absorbed by parent — standalone is an error
-                self.alloc_pat(HirPat::Error {
-                    span: span.clone(),
-                })
-            }
+                self.alloc_pat(HirPat::Error { span: span.clone() })
+            },
 
-            AstPat::Error { span } => self.alloc_pat(HirPat::Error {
-                span: span.clone(),
-            }),
+            AstPat::Error { span } => self.alloc_pat(HirPat::Error { span: span.clone() }),
         }
     }
 
@@ -251,7 +283,7 @@ impl LowerCtx<'_> {
                         span: span.clone(),
                     })
                 }
-            }
+            },
             _ => {
                 // Not found or ambiguous — leave as implicit for type inference
                 self.alloc_pat(HirPat::ImplicitVariant {
@@ -259,7 +291,7 @@ impl LowerCtx<'_> {
                     args: lowered_args,
                     span: span.clone(),
                 })
-            }
+            },
         }
     }
 
@@ -282,7 +314,10 @@ impl LowerCtx<'_> {
                     Some(self.lower_pat_inner(body, id, force_mut))
                 } else {
                     let local = self.define_local(&f.field_name, force_mut, span.clone());
-                    Some(self.alloc_pat(HirPat::Binding { local, span: span.clone() }))
+                    Some(self.alloc_pat(HirPat::Binding {
+                        local,
+                        span: span.clone(),
+                    }))
                 };
                 HirStructPatField {
                     field_name: f.field_name.clone(),
@@ -301,8 +336,9 @@ impl LowerCtx<'_> {
         match result {
             TypeResolution::Found(entity) => {
                 // Validate pattern fields against struct's actual fields
-                use kestrel_ast_builder::{NodeKind, Name};
-                let struct_field_names: Vec<String> = self.ctx
+                use kestrel_ast_builder::{Name, NodeKind};
+                let struct_field_names: Vec<String> = self
+                    .ctx
                     .children_of(entity)
                     .iter()
                     .filter(|&&c| self.ctx.get::<NodeKind>(c) == Some(&NodeKind::Field))
@@ -317,12 +353,16 @@ impl LowerCtx<'_> {
                         self.ctx.accumulate(
                             kestrel_reporting2::Diagnostic::error()
                                 .with_message(format!(
-                                    "struct `{}` has no field `{}`", name, field.field_name
+                                    "struct `{}` has no field `{}`",
+                                    name, field.field_name
                                 ))
                                 .with_labels(vec![
                                     kestrel_reporting2::Label::primary(span.file_id, span.range())
-                                        .with_message(format!("unknown field `{}`", field.field_name)),
-                                ])
+                                        .with_message(format!(
+                                            "unknown field `{}`",
+                                            field.field_name
+                                        )),
+                                ]),
                         );
                     }
                 }
@@ -349,7 +389,7 @@ impl LowerCtx<'_> {
                                 .with_labels(vec![
                                     kestrel_reporting2::Label::primary(span.file_id, span.range())
                                         .with_message("use `..` to ignore remaining fields"),
-                                ])
+                                ]),
                         );
                     }
                 }
@@ -360,10 +400,8 @@ impl LowerCtx<'_> {
                     has_rest,
                     span: span.clone(),
                 })
-            }
-            _ => self.alloc_pat(HirPat::Error {
-                span: span.clone(),
-            })
+            },
+            _ => self.alloc_pat(HirPat::Error { span: span.clone() }),
         }
     }
 
@@ -378,12 +416,15 @@ impl LowerCtx<'_> {
         match pattern {
             kestrel_ast_builder::ParamPattern::Wildcard => {
                 self.alloc_pat(HirPat::Wildcard { span: span.clone() })
-            }
+            },
 
             kestrel_ast_builder::ParamPattern::Binding { name, is_mut } => {
                 let local = self.define_local(name, *is_mut || force_mut, span.clone());
-                self.alloc_pat(HirPat::Binding { local, span: span.clone() })
-            }
+                self.alloc_pat(HirPat::Binding {
+                    local,
+                    span: span.clone(),
+                })
+            },
 
             kestrel_ast_builder::ParamPattern::Tuple { elements } => {
                 let lowered: Vec<HirPatId> = elements
@@ -396,9 +437,13 @@ impl LowerCtx<'_> {
                     suffix: vec![],
                     span: span.clone(),
                 })
-            }
+            },
 
-            kestrel_ast_builder::ParamPattern::Struct { type_name, fields, has_rest } => {
+            kestrel_ast_builder::ParamPattern::Struct {
+                type_name,
+                fields,
+                has_rest,
+            } => {
                 let lowered_fields: Vec<HirStructPatField> = fields
                     .iter()
                     .map(|f| HirStructPatField {
@@ -423,7 +468,7 @@ impl LowerCtx<'_> {
                     }),
                     _ => self.alloc_pat(HirPat::Error { span: span.clone() }),
                 }
-            }
+            },
         }
     }
 }
@@ -440,17 +485,24 @@ fn lower_lit_pat(kind: &LitPatKind) -> HirLiteral {
 }
 
 /// Parse an integer literal string to i64.
+///
+/// For values above `i64::MAX` but within `u64::MAX`, parses as `u64` and
+/// reinterprets the bit pattern as `i64` so unsigned literals like
+/// `UInt64.maxValue = 18446744073709551615` round-trip correctly.
 pub(crate) fn parse_int(s: &str) -> i64 {
     let s = s.replace('_', "");
-    if let Some(hex) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
-        i64::from_str_radix(hex, 16).unwrap_or(0)
+    let (body, radix) = if let Some(hex) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
+        (hex, 16)
     } else if let Some(oct) = s.strip_prefix("0o").or_else(|| s.strip_prefix("0O")) {
-        i64::from_str_radix(oct, 8).unwrap_or(0)
+        (oct, 8)
     } else if let Some(bin) = s.strip_prefix("0b").or_else(|| s.strip_prefix("0B")) {
-        i64::from_str_radix(bin, 2).unwrap_or(0)
+        (bin, 2)
     } else {
-        s.parse().unwrap_or(0)
-    }
+        (s.as_str(), 10)
+    };
+    i64::from_str_radix(body, radix)
+        .or_else(|_| u64::from_str_radix(body, radix).map(|u| u as i64))
+        .unwrap_or(0)
 }
 
 /// Parse a float literal string to f64.
@@ -489,7 +541,7 @@ pub(crate) fn parse_char_validated(
                 .with_labels(vec![
                     kestrel_reporting2::Label::primary(span.file_id, span.range())
                         .with_message("character literal must contain exactly one codepoint"),
-                ])
+                ]),
         );
         return 0;
     }
@@ -508,7 +560,7 @@ pub(crate) fn parse_char_validated(
                 .with_labels(vec![
                     kestrel_reporting2::Label::primary(span.file_id, span.range())
                         .with_message(format!("found {} codepoints", codepoints.len())),
-                ])
+                ]),
         );
     }
 
@@ -540,23 +592,31 @@ fn unescape_char_content(
                     let d1 = chars.next();
                     let d2 = chars.next();
                     match (d1, d2) {
-                        (Some(h1), Some(h2)) if h1.is_ascii_hexdigit() && h2.is_ascii_hexdigit() => {
+                        (Some(h1), Some(h2))
+                            if h1.is_ascii_hexdigit() && h2.is_ascii_hexdigit() =>
+                        {
                             let hex_str: String = [h1, h2].iter().collect();
                             let value = u32::from_str_radix(&hex_str, 16).unwrap_or(0);
                             if value > 0x7F {
                                 if let Some(ctx) = ctx {
                                     ctx.accumulate(
                                         kestrel_reporting2::Diagnostic::error()
-                                            .with_message(format!("ASCII escape \\x{:02X} out of range", value))
+                                            .with_message(format!(
+                                                "ASCII escape \\x{:02X} out of range",
+                                                value
+                                            ))
                                             .with_labels(vec![
-                                                kestrel_reporting2::Label::primary(span.file_id, span.range())
-                                                    .with_message("must be in range \\x00-\\x7F"),
-                                            ])
+                                                kestrel_reporting2::Label::primary(
+                                                    span.file_id,
+                                                    span.range(),
+                                                )
+                                                .with_message("must be in range \\x00-\\x7F"),
+                                            ]),
                                     );
                                 }
                             }
                             result.push(value);
-                        }
+                        },
                         _ => {
                             // Incomplete hex escape
                             if let Some(ctx) = ctx {
@@ -564,15 +624,18 @@ fn unescape_char_content(
                                     kestrel_reporting2::Diagnostic::error()
                                         .with_message("invalid escape sequence")
                                         .with_labels(vec![
-                                            kestrel_reporting2::Label::primary(span.file_id, span.range())
-                                                .with_message("incomplete hex escape (expected \\xNN)"),
-                                        ])
+                                            kestrel_reporting2::Label::primary(
+                                                span.file_id,
+                                                span.range(),
+                                            )
+                                            .with_message("incomplete hex escape (expected \\xNN)"),
+                                        ]),
                                 );
                             }
                             result.push(0);
-                        }
+                        },
                     }
-                }
+                },
                 Some('u') => {
                     // Unicode escape: \u{NNNN} (1-6 hex digits)
                     if chars.next() != Some('{') {
@@ -581,9 +644,12 @@ fn unescape_char_content(
                                 kestrel_reporting2::Diagnostic::error()
                                     .with_message("invalid Unicode escape")
                                     .with_labels(vec![
-                                        kestrel_reporting2::Label::primary(span.file_id, span.range())
-                                            .with_message("expected '{{' after \\u"),
-                                    ])
+                                        kestrel_reporting2::Label::primary(
+                                            span.file_id,
+                                            span.range(),
+                                        )
+                                        .with_message("expected '{{' after \\u"),
+                                    ]),
                             );
                         }
                         result.push(0);
@@ -591,7 +657,9 @@ fn unescape_char_content(
                     }
                     let mut hex = String::new();
                     for c in chars.by_ref() {
-                        if c == '}' { break; }
+                        if c == '}' {
+                            break;
+                        }
                         hex.push(c);
                     }
                     match u32::from_str_radix(&hex, 16) {
@@ -601,26 +669,38 @@ fn unescape_char_content(
                                     kestrel_reporting2::Diagnostic::error()
                                         .with_message("invalid Unicode escape")
                                         .with_labels(vec![
-                                            kestrel_reporting2::Label::primary(span.file_id, span.range())
-                                                .with_message(format!("\\u{{{}}} is out of range (max 10FFFF)", hex)),
-                                        ])
+                                            kestrel_reporting2::Label::primary(
+                                                span.file_id,
+                                                span.range(),
+                                            )
+                                            .with_message(format!(
+                                                "\\u{{{}}} is out of range (max 10FFFF)",
+                                                hex
+                                            )),
+                                        ]),
                                 );
                             }
                             result.push(0);
-                        }
+                        },
                         Ok(value) if (0xD800..=0xDFFF).contains(&value) => {
                             if let Some(ctx) = ctx {
                                 ctx.accumulate(
                                     kestrel_reporting2::Diagnostic::error()
                                         .with_message("invalid Unicode escape")
                                         .with_labels(vec![
-                                            kestrel_reporting2::Label::primary(span.file_id, span.range())
-                                                .with_message(format!("\\u{{{}}} is a surrogate codepoint", hex)),
-                                        ])
+                                            kestrel_reporting2::Label::primary(
+                                                span.file_id,
+                                                span.range(),
+                                            )
+                                            .with_message(format!(
+                                                "\\u{{{}}} is a surrogate codepoint",
+                                                hex
+                                            )),
+                                        ]),
                                 );
                             }
                             result.push(0);
-                        }
+                        },
                         Ok(value) => result.push(value),
                         Err(_) => {
                             if let Some(ctx) = ctx {
@@ -628,15 +708,18 @@ fn unescape_char_content(
                                     kestrel_reporting2::Diagnostic::error()
                                         .with_message("invalid Unicode escape")
                                         .with_labels(vec![
-                                            kestrel_reporting2::Label::primary(span.file_id, span.range())
-                                                .with_message("invalid hex digits"),
-                                        ])
+                                            kestrel_reporting2::Label::primary(
+                                                span.file_id,
+                                                span.range(),
+                                            )
+                                            .with_message("invalid hex digits"),
+                                        ]),
                                 );
                             }
                             result.push(0);
-                        }
+                        },
                     }
-                }
+                },
                 Some(esc) => {
                     // Unknown escape sequence
                     if let Some(ctx) = ctx {
@@ -646,15 +729,15 @@ fn unescape_char_content(
                                 .with_labels(vec![
                                     kestrel_reporting2::Label::primary(span.file_id, span.range())
                                         .with_message("unknown escape"),
-                                ])
+                                ]),
                         );
                     }
                     result.push(esc as u32);
-                }
+                },
                 None => {
                     // Backslash at end of literal
                     result.push('\\' as u32);
-                }
+                },
             }
         } else {
             result.push(c as u32);

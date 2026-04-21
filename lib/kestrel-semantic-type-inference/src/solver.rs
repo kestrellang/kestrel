@@ -1721,7 +1721,9 @@ fn resolve_function_call(
         })
         .collect();
 
-    let resolution_result = ctx.oracle().resolve_function(candidates, labels, &argument_types);
+    let resolution_result = ctx
+        .oracle()
+        .resolve_function(candidates, labels, &argument_types);
 
     match resolution_result {
         Ok(resolution) => {
@@ -1755,7 +1757,11 @@ fn resolve_function_call(
 
             // Create promotable constraints for argument types vs parameter types
             // This enables implicit Optional/Result wrapping (value promotion)
-            for (i, (arg_ty_id, param_ty)) in arguments.iter().zip(resolution.parameters.iter()).enumerate() {
+            for (i, (arg_ty_id, param_ty)) in arguments
+                .iter()
+                .zip(resolution.parameters.iter())
+                .enumerate()
+            {
                 ctx.register_type(param_ty);
                 if let Some(&arg_expr_id) = argument_expr_ids.get(i) {
                     ctx.promotable(*arg_ty_id, param_ty.id(), arg_expr_id, span.clone());
@@ -1957,7 +1963,9 @@ fn resolve_member(
             })
             .collect();
 
-        let resolution_result = ctx.oracle().resolve_init(&receiver_ty, labels, &argument_types);
+        let resolution_result = ctx
+            .oracle()
+            .resolve_init(&receiver_ty, labels, &argument_types);
 
         match resolution_result {
             Ok(resolution) => {
@@ -2168,9 +2176,17 @@ fn resolve_member(
                     count
                 )));
             },
-            Err(MemberError::NoMatchingOverload { name, provided_labels, expected_labels }) => {
+            Err(MemberError::NoMatchingOverload {
+                name,
+                provided_labels,
+                expected_labels,
+            }) => {
                 return Err(InferenceError::no_matching_overload(
-                    name, receiver_ty.clone(), provided_labels, expected_labels, span.clone(),
+                    name,
+                    receiver_ty.clone(),
+                    provided_labels,
+                    expected_labels,
+                    span.clone(),
                 ));
             },
         }
@@ -2226,9 +2242,17 @@ fn resolve_member(
                     member, count
                 )));
             },
-            Err(MemberError::NoMatchingOverload { name, provided_labels, expected_labels }) => {
+            Err(MemberError::NoMatchingOverload {
+                name,
+                provided_labels,
+                expected_labels,
+            }) => {
                 return Err(InferenceError::no_matching_overload(
-                    name, receiver_ty.clone(), provided_labels, expected_labels, span.clone(),
+                    name,
+                    receiver_ty.clone(),
+                    provided_labels,
+                    expected_labels,
+                    span.clone(),
                 ));
             },
         }
@@ -2256,10 +2280,13 @@ fn resolve_member(
             })
             .collect();
 
-        Some(
-            ctx.oracle()
-                .resolve_member_full(&receiver_ty, member, is_static, labels, &argument_types),
-        )
+        Some(ctx.oracle().resolve_member_full(
+            &receiver_ty,
+            member,
+            is_static,
+            labels,
+            &argument_types,
+        ))
     } else {
         None
     };
@@ -2377,11 +2404,17 @@ fn resolve_member(
             "ambiguous member '{}': {} candidates",
             member, count
         ))),
-        Err(MemberError::NoMatchingOverload { name, provided_labels, expected_labels }) => {
-            Err(InferenceError::no_matching_overload(
-                name, receiver_ty.clone(), provided_labels, expected_labels, span.clone(),
-            ))
-        },
+        Err(MemberError::NoMatchingOverload {
+            name,
+            provided_labels,
+            expected_labels,
+        }) => Err(InferenceError::no_matching_overload(
+            name,
+            receiver_ty.clone(),
+            provided_labels,
+            expected_labels,
+            span.clone(),
+        )),
     }
 }
 

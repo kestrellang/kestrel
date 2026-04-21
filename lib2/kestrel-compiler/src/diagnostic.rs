@@ -123,7 +123,9 @@ impl ToDiagnostic for ResolvedInferError<'_> {
                 .with_labels(vec![Label::primary(file_id, range).with_message(detail)]),
 
             InferError::ArgCountMismatch { expected, got, .. } => Diagnostic::error()
-                .with_message(format!("wrong number of arguments: expected {expected}, got {got}"))
+                .with_message(format!(
+                    "wrong number of arguments: expected {expected}, got {got}"
+                ))
                 .with_labels(vec![Label::primary(file_id, range).with_message(detail)]),
 
             InferError::LabelMismatch { .. } => Diagnostic::error()
@@ -131,12 +133,16 @@ impl ToDiagnostic for ResolvedInferError<'_> {
                 .with_labels(vec![Label::primary(file_id, range).with_message(detail)]),
 
             InferError::InstanceMethodAsStatic { name, .. } => Diagnostic::error()
-                .with_message(format!("instance method '{name}' cannot be called on a type"))
+                .with_message(format!(
+                    "instance method '{name}' cannot be called on a type"
+                ))
                 .with_labels(vec![Label::primary(file_id, range).with_message(detail)]),
 
             InferError::TypeParamAsValue { .. } => Diagnostic::error()
                 .with_message("type parameter cannot be used as a value")
-                .with_labels(vec![Label::primary(file_id, range).with_message("not a value")]),
+                .with_labels(vec![
+                    Label::primary(file_id, range).with_message("not a value"),
+                ]),
 
             InferError::TypeArgCountMismatch { expected, got, .. } => {
                 let msg = if *got < *expected {
@@ -147,7 +153,7 @@ impl ToDiagnostic for ResolvedInferError<'_> {
                 Diagnostic::error()
                     .with_message(&msg)
                     .with_labels(vec![Label::primary(file_id, range).with_message(detail)])
-            }
+            },
 
             InferError::NoMatchingOverload { name, .. } => Diagnostic::error()
                 .with_message(format!("no matching overload for '{name}'"))
@@ -155,9 +161,10 @@ impl ToDiagnostic for ResolvedInferError<'_> {
 
             InferError::ItWrongArity { expected, .. } => Diagnostic::error()
                 .with_message("implicit 'it' parameter requires single-parameter context")
-                .with_labels(vec![Label::primary(file_id, range).with_message(
-                    format!("expected {} parameter(s)", expected),
-                )]),
+                .with_labels(vec![
+                    Label::primary(file_id, range)
+                        .with_message(format!("expected {} parameter(s)", expected)),
+                ]),
 
             InferError::LiteralNotAccepted { .. } => Diagnostic::error()
                 .with_message("type mismatch: does not conform to protocol")

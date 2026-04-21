@@ -8,7 +8,6 @@ use std::sync::Arc;
 
 use kestrel_reporting::IntoDiagnostic;
 use kestrel_semantic_model::{ExtensionsFor, IsVisibleFrom, SymbolFor};
-use kestrel_semantic_type_inference::TypeOracle;
 use kestrel_semantic_tree::behavior::ComputedMemberAccessBehavior;
 use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
 use kestrel_semantic_tree::behavior::callable::CallableBehavior;
@@ -25,24 +24,22 @@ use kestrel_semantic_tree::symbol::protocol::FlattenedProtocolBehavior;
 use kestrel_semantic_tree::symbol::type_parameter::TypeParameterSymbol;
 use kestrel_semantic_tree::ty::Substitutions;
 use kestrel_semantic_tree::ty::{Ty, TyKind};
+use kestrel_semantic_type_inference::TypeOracle;
 use kestrel_span::Span;
 use semantic_tree::symbol::{Symbol, SymbolId};
 
 use crate::diagnostics::{
     AmbiguousConstrainedMethodError, CannotAccessMemberOnTypeError,
-    DelegatingInitOutsideInitializerError, MemberNotVisibleError,
-    MethodNotInBoundsError, NoSuchMemberError, NoSuchMethodError,
-    UnconstrainedAssociatedTypeMemberError, UnconstrainedTypeParameterMemberError,
+    DelegatingInitOutsideInitializerError, MemberNotVisibleError, MethodNotInBoundsError,
+    NoSuchMemberError, NoSuchMethodError, UnconstrainedAssociatedTypeMemberError,
+    UnconstrainedTypeParameterMemberError,
 };
 
-use super::calls::{
-    try_resolve_subscript_call, validate_argument_access_modes,
-};
+use super::calls::{try_resolve_subscript_call, validate_argument_access_modes};
 use super::context::BodyResolutionContext;
 use super::utils::{
-    get_associated_type_bounds_from_context,
-    get_callable_behavior, get_type_container, get_type_parameter_bounds_by_id,
-    get_type_parameter_bounds_from_context, matches_signature,
+    get_associated_type_bounds_from_context, get_callable_behavior, get_type_container,
+    get_type_parameter_bounds_by_id, get_type_parameter_bounds_from_context, matches_signature,
     resolve_associated_types,
 };
 
@@ -152,7 +149,10 @@ pub fn resolve_member_access(
         }
         // Check if the member exists in protocol bounds — emit error if definitely not found
         let resolved_base_ty = resolve_self_type_to_concrete(&effective_ty, ctx);
-        match ctx.model.resolve_member(&resolved_base_ty, member_name, false) {
+        match ctx
+            .model
+            .resolve_member(&resolved_base_ty, member_name, false)
+        {
             Ok(resolution) => {
                 let field_mutable = member_field_mutable(&resolution, ctx);
                 return Expression::deferred_member_access(
@@ -255,9 +255,8 @@ pub fn resolve_member_access(
                 let mut found = false;
                 for bound in &bounds {
                     if let TyKind::Protocol { symbol: proto, .. } = bound.kind() {
-                        if let Some(flattened) = proto
-                            .metadata()
-                            .get_behavior::<FlattenedProtocolBehavior>()
+                        if let Some(flattened) =
+                            proto.metadata().get_behavior::<FlattenedProtocolBehavior>()
                         {
                             if flattened.methods().get(member_name).is_some()
                                 || flattened.properties().get(member_name).is_some()
@@ -329,8 +328,7 @@ pub fn resolve_member_access(
                         }
                     }
                     if behavior.kind() == KestrelBehaviorKind::Callable {
-                        if let Some(callable) =
-                            behavior.as_ref().downcast_ref::<CallableBehavior>()
+                        if let Some(callable) = behavior.as_ref().downcast_ref::<CallableBehavior>()
                         {
                             return Some(callable.return_type().clone());
                         }
@@ -351,7 +349,9 @@ pub fn resolve_member_access(
     // 5. For concrete types, try the oracle. If the member exists, defer.
     // If not found, emit a binder-level error for better diagnostics.
     let resolved_base_ty = resolve_self_type_to_concrete(base_ty, ctx);
-    let oracle_result = ctx.model.resolve_member(&resolved_base_ty, member_name, false);
+    let oracle_result = ctx
+        .model
+        .resolve_member(&resolved_base_ty, member_name, false);
     match oracle_result {
         Ok(resolution) => {
             // Check visibility before deferring — the oracle doesn't filter by visibility
@@ -678,8 +678,8 @@ pub fn resolve_member_call(
                 ty = ty.substitute_self(&resolved_base_ty);
                 ty = resolve_associated_types(&ty, ctx);
                 let expanded = resolved_base_ty.expand_aliases();
-                if let TyKind::Struct { substitutions, .. }
-                | TyKind::Enum { substitutions, .. } = expanded.kind()
+                if let TyKind::Struct { substitutions, .. } | TyKind::Enum { substitutions, .. } =
+                    expanded.kind()
                 {
                     if !substitutions.is_empty() {
                         ty = ty.apply_substitutions(substitutions);
@@ -781,17 +781,16 @@ fn resolve_type_parameter_static_member(
     match ctx.model.resolve_member(&type_param_ty, member_name, true) {
         Ok(resolution) => {
             // Check if it's a callable (method) vs property
-            if let Some(sym) =
-                ctx.model.query(SymbolFor { id: resolution.symbol_id })
-                && sym.metadata().kind() == KestrelSymbolKind::Function
+            if let Some(sym) = ctx.model.query(SymbolFor {
+                id: resolution.symbol_id,
+            }) && sym.metadata().kind() == KestrelSymbolKind::Function
             {
                 // Static method - collect overloads and check ambiguity
-                let (method_ids, source_protocols) =
-                    collect_static_method_candidates_from_bounds(
-                        &bounds,
-                        member_name,
-                        resolution.symbol_id,
-                    );
+                let (method_ids, source_protocols) = collect_static_method_candidates_from_bounds(
+                    &bounds,
+                    member_name,
+                    resolution.symbol_id,
+                );
 
                 // Check for ambiguity
                 if source_protocols.len() > 1 {
@@ -986,9 +985,9 @@ fn resolve_associated_type_static_member(
             if let Some(protocol_id) = resolution.protocol_id
                 && let Some(has_setter) = resolution.has_setter
             {
-                if let Some(sym) =
-                    ctx.model.query(SymbolFor { id: resolution.symbol_id })
-                    && sym.metadata().kind() == KestrelSymbolKind::Function
+                if let Some(sym) = ctx.model.query(SymbolFor {
+                    id: resolution.symbol_id,
+                }) && sym.metadata().kind() == KestrelSymbolKind::Function
                 {
                     // Static method - collect overloads and check ambiguity
                     let (method_ids, source_protocols) =
@@ -1013,7 +1012,12 @@ fn resolve_associated_type_static_member(
                         return Expression::error(full_span);
                     }
 
-                    return Expression::method_ref(base.clone(), method_ids, member_name.to_string(), full_span);
+                    return Expression::method_ref(
+                        base.clone(),
+                        method_ids,
+                        member_name.to_string(),
+                        full_span,
+                    );
                 }
                 // Static property
                 return Expression::protocol_property_access(
@@ -1045,9 +1049,8 @@ fn resolve_associated_type_static_member(
             for bound in &bounds {
                 if let TyKind::Protocol { symbol: proto, .. } = bound.kind() {
                     bound_names.push(proto.metadata().name().value.clone());
-                    if let Some(flattened) = proto
-                        .metadata()
-                        .get_behavior::<FlattenedProtocolBehavior>()
+                    if let Some(flattened) =
+                        proto.metadata().get_behavior::<FlattenedProtocolBehavior>()
                     {
                         if let Some(methods) = flattened.methods().get(member_name) {
                             for method in methods {
@@ -1100,7 +1103,12 @@ fn resolve_associated_type_static_member(
                     ctx.diagnostics.add_diagnostic(error.into_diagnostic());
                     return Expression::error(full_span);
                 }
-                return Expression::method_ref(base.clone(), method_ids, member_name.to_string(), full_span);
+                return Expression::method_ref(
+                    base.clone(),
+                    method_ids,
+                    member_name.to_string(),
+                    full_span,
+                );
             }
 
             let error = MethodNotInBoundsError {
@@ -1135,10 +1143,7 @@ fn collect_static_method_candidates_from_bounds(
     let mut source_protocols = std::collections::HashSet::new();
     for bound in bounds {
         if let TyKind::Protocol { symbol: proto, .. } = bound.kind() {
-            if let Some(flattened) = proto
-                .metadata()
-                .get_behavior::<FlattenedProtocolBehavior>()
-            {
+            if let Some(flattened) = proto.metadata().get_behavior::<FlattenedProtocolBehavior>() {
                 if let Some(methods) = flattened.methods().get(method_name) {
                     for method in methods {
                         if let Some(callable) = get_callable_behavior(&method.symbol)
@@ -1589,7 +1594,3 @@ pub fn resolve_delegating_init(
     ctx.diagnostics.add_diagnostic(error.into_diagnostic());
     Expression::error(span)
 }
-
-
-
-

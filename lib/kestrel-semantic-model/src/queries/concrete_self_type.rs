@@ -40,7 +40,10 @@ impl Query for ConcreteSelfType {
                 return None;
             }
 
-            if symbol.metadata().get_behavior::<ConcreteTypeMarker>().is_some()
+            if symbol
+                .metadata()
+                .get_behavior::<ConcreteTypeMarker>()
+                .is_some()
                 && let Some(typed) = symbol.metadata().get_behavior::<TypedBehavior>()
             {
                 let ty = typed.ty();

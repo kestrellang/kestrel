@@ -41,8 +41,7 @@ fn walk_symbol(
     }
     if !ctx.skip_children {
         // Visit body if symbol has an executable body
-        if let Some(body) = get_executable_body(symbol)
-        {
+        if let Some(body) = get_executable_body(symbol) {
             for stmt in &body.statements {
                 walk_statement(stmt, analyzers, model, ctx);
                 if ctx.stopped {
@@ -560,10 +559,7 @@ fn get_executable_body(
         return Some(resolved.body().clone());
     }
     // Fall back to unresolved ExecutableBehavior.
-    if let Some(exec) = symbol
-        .metadata()
-        .get_behavior::<ExecutableBehavior>()
-    {
+    if let Some(exec) = symbol.metadata().get_behavior::<ExecutableBehavior>() {
         return Some(exec.body().clone());
     }
     None

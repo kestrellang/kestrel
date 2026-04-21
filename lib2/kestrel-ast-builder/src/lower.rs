@@ -4,14 +4,14 @@
 //! The resulting AST is unresolved — paths are just names, no symbols, no types.
 //! Grouping parens are dropped, for-loops are NOT desugared.
 
+use crate::ast_type::ast_type_from_cst;
+use crate::builders::helpers::is_type_kind;
+use kestrel_ast::AstType;
+use kestrel_ast::arena::Arena;
+use kestrel_ast::ast_body::*;
 use kestrel_span2::Span;
 use kestrel_syntax_tree2::utils::{find_child, get_node_span, is_trivia};
 use kestrel_syntax_tree2::{SyntaxKind, SyntaxNode};
-use kestrel_ast::arena::Arena;
-use kestrel_ast::ast_body::*;
-use kestrel_ast::AstType;
-use crate::ast_type::ast_type_from_cst;
-use crate::builders::helpers::is_type_kind;
 
 /// Lower a CodeBlock CST node into an AstBody.
 pub fn lower_body(code_block: &SyntaxNode, file_id: usize) -> AstBody {
@@ -119,7 +119,9 @@ impl LowerCtx {
                     // (statement-like expr without semicolon), promote to tail expr.
                     // This handles `if/else`, `match`, etc. at the end of a block.
                     let is_last = i == child_count - 1
-                        || children[i + 1..].iter().all(|c| c.kind() == SyntaxKind::RBrace);
+                        || children[i + 1..]
+                            .iter()
+                            .all(|c| c.kind() == SyntaxKind::RBrace);
                     if is_last && tail_expr.is_none() {
                         if let Some(inner) = child.children().next() {
                             if inner.kind() == SyntaxKind::ExpressionStatement
@@ -136,17 +138,17 @@ impl LowerCtx {
                         let stmt_id = self.lower_stmt(&inner);
                         stmts.push(stmt_id);
                     }
-                }
+                },
                 // Bare expression at end of block = tail expression
                 SyntaxKind::Expression => {
                     let expr_id = self.lower_expr(&child);
                     tail_expr = Some(expr_id);
-                }
+                },
                 _ if is_expr_kind(child.kind()) => {
                     let expr_id = self.lower_expr(&child);
                     tail_expr = Some(expr_id);
-                }
-                _ => {}
+                },
+                _ => {},
             }
         }
 
@@ -166,14 +168,17 @@ impl LowerCtx {
                 if is_expr_kind(node.kind()) {
                     let expr_id = self.lower_expr(node);
                     let span = self.span(node);
-                    self.alloc_stmt(AstStmt::Expr { expr: expr_id, span })
+                    self.alloc_stmt(AstStmt::Expr {
+                        expr: expr_id,
+                        span,
+                    })
                 } else {
                     // Unknown statement kind — emit error expression
                     let span = self.span(node);
                     let err = self.alloc_expr(AstExpr::Error { span: span.clone() });
                     self.alloc_stmt(AstStmt::Expr { expr: err, span })
                 }
-            }
+            },
         }
     }
 
@@ -205,11 +210,16 @@ impl LowerCtx {
             let mut found_equals = false;
             let mut result = None;
             for child in node.children_with_tokens() {
-                if child.as_token().is_some_and(|t| t.kind() == SyntaxKind::Equals) {
+                if child
+                    .as_token()
+                    .is_some_and(|t| t.kind() == SyntaxKind::Equals)
+                {
                     found_equals = true;
                 } else if found_equals {
                     if let Some(expr_node) = child.into_node() {
-                        if expr_node.kind() == SyntaxKind::Expression || is_expr_kind(expr_node.kind()) {
+                        if expr_node.kind() == SyntaxKind::Expression
+                            || is_expr_kind(expr_node.kind())
+                        {
                             result = Some(self.lower_expr(&expr_node));
                             break;
                         }
@@ -301,7 +311,7 @@ impl LowerCtx {
             SyntaxKind::ExprString => self.lower_literal(&node, |text| AstLiteral::String(text)),
             SyntaxKind::ExprRawString => {
                 self.lower_literal(&node, |text| AstLiteral::RawString(text))
-            }
+            },
             SyntaxKind::ExprChar => self.lower_literal(&node, |text| AstLiteral::Char(text)),
             SyntaxKind::ExprBool => {
                 let span = self.span(&node);
@@ -311,21 +321,21 @@ impl LowerCtx {
                     kind: AstLiteral::Bool(val),
                     span,
                 })
-            }
+            },
             SyntaxKind::ExprNull => {
                 let span = self.span(&node);
                 self.alloc_expr(AstExpr::Literal {
                     kind: AstLiteral::Null,
                     span,
                 })
-            }
+            },
             SyntaxKind::ExprUnit => {
                 let span = self.span(&node);
                 self.alloc_expr(AstExpr::Literal {
                     kind: AstLiteral::Unit,
                     span,
                 })
-            }
+            },
             SyntaxKind::ExprInterpolatedString => self.lower_interpolated_string(&node),
 
             // Collections
@@ -342,11 +352,14 @@ impl LowerCtx {
                 match inner {
                     Some(c) => {
                         let inner_id = self.lower_expr(&c);
-                        self.alloc_expr(AstExpr::Paren { inner: inner_id, span })
-                    }
+                        self.alloc_expr(AstExpr::Paren {
+                            inner: inner_id,
+                            span,
+                        })
+                    },
                     None => self.alloc_expr(AstExpr::Error { span }),
                 }
-            }
+            },
 
             // Path / member access
             SyntaxKind::ExprPath => self.lower_path(&node),
@@ -381,13 +394,17 @@ impl LowerCtx {
             _ => {
                 let span = self.span(&node);
                 self.alloc_expr(AstExpr::Error { span })
-            }
+            },
         }
     }
 
     // ----- Literals -----
 
-    fn lower_literal(&mut self, node: &SyntaxNode, mk: impl FnOnce(String) -> AstLiteral) -> ExprId {
+    fn lower_literal(
+        &mut self,
+        node: &SyntaxNode,
+        mk: impl FnOnce(String) -> AstLiteral,
+    ) -> ExprId {
         let span = self.span(node);
         let text = first_token_text(node).unwrap_or_default();
         self.alloc_expr(AstExpr::Literal {
@@ -412,7 +429,7 @@ impl LowerCtx {
                         .collect::<Vec<_>>()
                         .join("");
                     parts.push(StringPart::Literal(text));
-                }
+                },
                 SyntaxKind::StringInterpolation => {
                     // Contains an expression child, optional FormatSpecifier
                     let expr = child
@@ -434,8 +451,8 @@ impl LowerCtx {
                     });
 
                     parts.push(StringPart::Interpolation { expr, format });
-                }
-                _ => {}
+                },
+                _ => {},
             }
         }
 
@@ -507,9 +524,10 @@ impl LowerCtx {
             .children_with_tokens()
             .find(|e| !e.as_token().is_some_and(|t| is_trivia(t.kind())));
 
-        let has_expr_base = first_non_trivia
-            .as_ref()
-            .is_some_and(|e| e.as_node().is_some_and(|n| is_expr_kind(n.kind()) || n.kind() == SyntaxKind::Expression));
+        let has_expr_base = first_non_trivia.as_ref().is_some_and(|e| {
+            e.as_node()
+                .is_some_and(|n| is_expr_kind(n.kind()) || n.kind() == SyntaxKind::Expression)
+        });
 
         if has_expr_base {
             // Member access chain: lower base, then walk Dot+Identifier pairs
@@ -538,7 +556,8 @@ impl LowerCtx {
                     let tok_span = Span::new(self.file_id, token.text_range().into());
 
                     // Check for type arguments following this identifier
-                    let type_args = elements.get(i + 1)
+                    let type_args = elements
+                        .get(i + 1)
                         .and_then(|next| next.as_node())
                         .filter(|n| n.kind() == SyntaxKind::TypeArgumentList)
                         .map(|n| {
@@ -573,9 +592,10 @@ impl LowerCtx {
         // Find where the base expression ends
         let mut start_idx = 0;
         for (i, elem) in elements.iter().enumerate() {
-            if elem.as_node().is_some_and(|n| {
-                is_expr_kind(n.kind()) || n.kind() == SyntaxKind::Expression
-            }) {
+            if elem
+                .as_node()
+                .is_some_and(|n| is_expr_kind(n.kind()) || n.kind() == SyntaxKind::Expression)
+            {
                 start_idx = i + 1;
                 break;
             }
@@ -595,7 +615,8 @@ impl LowerCtx {
                                 i += 1;
 
                                 // Check for type arguments
-                                let type_args = elements.get(i)
+                                let type_args = elements
+                                    .get(i)
                                     .and_then(|e| e.as_node())
                                     .filter(|n| n.kind() == SyntaxKind::TypeArgumentList)
                                     .map(|n| {
@@ -663,7 +684,8 @@ impl LowerCtx {
             .unwrap_or_default();
 
         // Optional arguments
-        let arguments = find_child(node, SyntaxKind::ArgumentList).map(|al| self.lower_arguments(&al));
+        let arguments =
+            find_child(node, SyntaxKind::ArgumentList).map(|al| self.lower_arguments(&al));
 
         self.alloc_expr(AstExpr::ImplicitMember {
             member,
@@ -737,12 +759,7 @@ impl LowerCtx {
             .map(|c| self.lower_expr(&c))
             .unwrap_or_else(|| self.alloc_expr(AstExpr::Error { span: span.clone() }));
 
-        self.alloc_expr(AstExpr::Binary {
-            lhs,
-            op,
-            rhs,
-            span,
-        })
+        self.alloc_expr(AstExpr::Binary { lhs, op, rhs, span })
     }
 
     fn lower_assignment(&mut self, node: &SyntaxNode) -> ExprId {
@@ -785,12 +802,7 @@ impl LowerCtx {
             .map(|c| self.lower_expr(&c))
             .unwrap_or_else(|| self.alloc_expr(AstExpr::Error { span: span.clone() }));
 
-        self.alloc_expr(AstExpr::CompoundAssignment {
-            lhs,
-            op,
-            rhs,
-            span,
-        })
+        self.alloc_expr(AstExpr::CompoundAssignment { lhs, op, rhs, span })
     }
 
     // ----- Call -----
@@ -854,7 +866,9 @@ impl LowerCtx {
         let second = iter.next();
 
         // Label exists if: first is Identifier, second is Colon
-        if first.as_token().is_some_and(|t| t.kind() == SyntaxKind::Identifier)
+        if first
+            .as_token()
+            .is_some_and(|t| t.kind() == SyntaxKind::Identifier)
             && second
                 .as_ref()
                 .is_some_and(|s| s.as_token().is_some_and(|t| t.kind() == SyntaxKind::Colon))
@@ -923,27 +937,29 @@ impl LowerCtx {
                         pattern: pat,
                         value: val,
                     });
-                }
+                },
                 // Bare expression condition (before the CodeBlock)
-                SyntaxKind::Expression if conditions.is_empty() || !has_sibling_code_block_before(node, &child) => {
+                SyntaxKind::Expression
+                    if conditions.is_empty() || !has_sibling_code_block_before(node, &child) =>
+                {
                     // Only treat as condition if it appears before any CodeBlock
                     if appears_before_code_block(node, &child) {
                         let expr = self.lower_expr(&child);
                         conditions.push(IfCondition::Expr(expr));
                     }
-                }
+                },
                 SyntaxKind::CodeBlock => break,
-                _ => {}
+                _ => {},
             }
         }
 
         // If no explicit conditions found, look for a direct expression condition
         if conditions.is_empty() {
             // The condition might be a direct expression child (not wrapped in IfLetCondition)
-            if let Some(expr_node) = node
-                .children()
-                .find(|c| (c.kind() == SyntaxKind::Expression || is_expr_kind(c.kind())) && c.kind() != SyntaxKind::CodeBlock)
-            {
+            if let Some(expr_node) = node.children().find(|c| {
+                (c.kind() == SyntaxKind::Expression || is_expr_kind(c.kind()))
+                    && c.kind() != SyntaxKind::CodeBlock
+            }) {
                 if appears_before_code_block(node, &expr_node) {
                     let expr = self.lower_expr(&expr_node);
                     conditions.push(IfCondition::Expr(expr));
@@ -1160,7 +1176,10 @@ impl LowerCtx {
                 name: "it".to_string(),
                 span: span.clone(),
             });
-            params.push(ClosureParam { pattern: pat, ty: None });
+            params.push(ClosureParam {
+                pattern: pat,
+                ty: None,
+            });
         }
 
         // Body: the CodeBlock inside the closure, or synthesize from inner statements
@@ -1189,7 +1208,7 @@ impl LowerCtx {
                         let stmt_id = self.lower_stmt(&inner);
                         stmts.push(stmt_id);
                     }
-                }
+                },
                 SyntaxKind::Expression if !matches!(child.kind(), SyntaxKind::ClosureParams) => {
                     // Convert previous tail to statement
                     if let Some(prev) = tail_expr.take() {
@@ -1204,9 +1223,9 @@ impl LowerCtx {
                         stmts.push(stmt);
                     }
                     tail_expr = Some(self.lower_expr(&child));
-                }
+                },
                 // Skip ClosureParams, In, LBrace, RBrace
-                _ => {}
+                _ => {},
             }
         }
 
@@ -1307,7 +1326,7 @@ impl LowerCtx {
             SyntaxKind::WildcardPattern => {
                 let span = self.span(&node);
                 self.alloc_pat(AstPat::Wildcard { span })
-            }
+            },
             SyntaxKind::BindingPattern => self.lower_binding_pattern(&node),
             SyntaxKind::TuplePattern => self.lower_tuple_pattern(&node),
             SyntaxKind::LiteralPattern => self.lower_literal_pattern(&node),
@@ -1320,15 +1339,15 @@ impl LowerCtx {
             SyntaxKind::RestPattern => {
                 let span = self.span(&node);
                 self.alloc_pat(AstPat::Rest { span })
-            }
+            },
             SyntaxKind::ErrorPattern => {
                 let span = self.span(&node);
                 self.alloc_pat(AstPat::Error { span })
-            }
+            },
             _ => {
                 let span = self.span(&node);
                 self.alloc_pat(AstPat::Error { span })
-            }
+            },
         }
     }
 
@@ -1410,10 +1429,7 @@ impl LowerCtx {
                 span,
             })
         } else {
-            let prefix: Vec<PatId> = child_nodes
-                .iter()
-                .map(|c| lower_child(self, c))
-                .collect();
+            let prefix: Vec<PatId> = child_nodes.iter().map(|c| lower_child(self, c)).collect();
 
             // Single-element tuple pattern is grouping, not a 1-tuple: (pat) vs (pat,)
             if prefix.len() == 1 {
@@ -1473,7 +1489,7 @@ impl LowerCtx {
                 match token.kind() {
                     SyntaxKind::DotDotEquals | SyntaxKind::DotDotLess | SyntaxKind::DotDot => {
                         before_op = false;
-                    }
+                    },
                     kind if !is_trivia(kind) => {
                         let text = token.text().to_string();
                         let lit = match kind {
@@ -1489,8 +1505,8 @@ impl LowerCtx {
                         } else {
                             end = Some(lit);
                         }
-                    }
-                    _ => {}
+                    },
+                    _ => {},
                 }
             }
         }
@@ -1646,7 +1662,7 @@ impl LowerCtx {
                     } else {
                         prefix.push(pat);
                     }
-                }
+                },
                 SyntaxKind::ArrayPatternRest => {
                     seen_rest = true;
                     // Optional binding name
@@ -1656,8 +1672,8 @@ impl LowerCtx {
                         .find(|t| t.kind() == SyntaxKind::Identifier)
                         .map(|t| t.text().to_string());
                     rest = Some(binding);
-                }
-                _ => {}
+                },
+                _ => {},
             }
         }
 
@@ -1706,10 +1722,7 @@ impl LowerCtx {
             .map(|p| self.lower_pat(&p))
             .collect();
 
-        self.alloc_pat(AstPat::Or {
-            alternatives,
-            span,
-        })
+        self.alloc_pat(AstPat::Or { alternatives, span })
     }
 
     // ===== Shared helpers =====
@@ -1794,8 +1807,10 @@ fn unwrap_pattern(node: &SyntaxNode) -> SyntaxNode {
 /// Check if a SyntaxKind is an expression node.
 /// Check if an ExpressionStatement node has a trailing semicolon token.
 fn has_semicolon(node: &SyntaxNode) -> bool {
-    node.children_with_tokens()
-        .any(|e| e.as_token().is_some_and(|t| t.kind() == SyntaxKind::Semicolon))
+    node.children_with_tokens().any(|e| {
+        e.as_token()
+            .is_some_and(|t| t.kind() == SyntaxKind::Semicolon)
+    })
 }
 
 fn is_expr_kind(kind: SyntaxKind) -> bool {
@@ -1976,9 +1991,9 @@ fn token_to_compound_assign_op(kind: SyntaxKind) -> Option<CompoundAssignOp> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kestrel_hecs::World;
     use crate::build::build_declarations;
     use crate::components::*;
+    use kestrel_hecs::World;
 
     /// Parse source, build declarations, find the first function with a Body,
     /// and return its AstBody.
@@ -2027,7 +2042,10 @@ mod tests {
         let stmt = &body.stmts[body.statements[0]];
         if let AstStmt::Expr { expr, .. } = stmt {
             match &body.exprs[*expr] {
-                AstExpr::Literal { kind: AstLiteral::Integer(v), .. } => assert_eq!(v, "42"),
+                AstExpr::Literal {
+                    kind: AstLiteral::Integer(v),
+                    ..
+                } => assert_eq!(v, "42"),
                 other => panic!("expected Integer literal, got {:?}", other),
             }
         } else {
@@ -2042,17 +2060,35 @@ mod tests {
 
         let s0 = &body.stmts[body.statements[0]];
         if let AstStmt::Expr { expr, .. } = s0 {
-            assert!(matches!(&body.exprs[*expr], AstExpr::Literal { kind: AstLiteral::Bool(true), .. }));
+            assert!(matches!(
+                &body.exprs[*expr],
+                AstExpr::Literal {
+                    kind: AstLiteral::Bool(true),
+                    ..
+                }
+            ));
         }
 
         let s1 = &body.stmts[body.statements[1]];
         if let AstStmt::Expr { expr, .. } = s1 {
-            assert!(matches!(&body.exprs[*expr], AstExpr::Literal { kind: AstLiteral::String(_), .. }));
+            assert!(matches!(
+                &body.exprs[*expr],
+                AstExpr::Literal {
+                    kind: AstLiteral::String(_),
+                    ..
+                }
+            ));
         }
 
         let s2 = &body.stmts[body.statements[2]];
         if let AstStmt::Expr { expr, .. } = s2 {
-            assert!(matches!(&body.exprs[*expr], AstExpr::Literal { kind: AstLiteral::Null, .. }));
+            assert!(matches!(
+                &body.exprs[*expr],
+                AstExpr::Literal {
+                    kind: AstLiteral::Null,
+                    ..
+                }
+            ));
         }
     }
 
@@ -2065,13 +2101,16 @@ mod tests {
         let body = lower_func_body("func f() { let x = 1; let _ = 2; }");
         assert_eq!(body.statements.len(), 2);
 
-        if let AstStmt::Let { pattern, is_mut, .. } = &body.stmts[body.statements[0]] {
+        if let AstStmt::Let {
+            pattern, is_mut, ..
+        } = &body.stmts[body.statements[0]]
+        {
             assert!(!is_mut);
             match &body.pats[*pattern] {
                 AstPat::Binding { name, is_mut, .. } => {
                     assert_eq!(name, "x");
                     assert!(!is_mut);
-                }
+                },
                 other => panic!("expected Binding, got {:?}", other),
             }
         }
@@ -2084,7 +2123,10 @@ mod tests {
     #[test]
     fn pattern_var_binding() {
         let body = lower_func_body("func f() { var x = 1; }");
-        if let AstStmt::Let { is_mut, pattern, .. } = &body.stmts[body.statements[0]] {
+        if let AstStmt::Let {
+            is_mut, pattern, ..
+        } = &body.stmts[body.statements[0]]
+        {
             assert!(*is_mut);
             match &body.pats[*pattern] {
                 AstPat::Binding { name, .. } => assert_eq!(name, "x"),
@@ -2112,7 +2154,10 @@ mod tests {
     fn expression_statement() {
         let body = lower_func_body("func f() { foo; }");
         assert_eq!(body.statements.len(), 1);
-        assert!(matches!(&body.stmts[body.statements[0]], AstStmt::Expr { .. }));
+        assert!(matches!(
+            &body.stmts[body.statements[0]],
+            AstStmt::Expr { .. }
+        ));
     }
 
     // ================================================================
@@ -2148,7 +2193,7 @@ mod tests {
             match &body.exprs[*expr] {
                 AstExpr::CompoundAssignment { op, .. } => {
                     assert_eq!(*op, CompoundAssignOp::AddAssign);
-                }
+                },
                 other => panic!("expected CompoundAssignment, got {:?}", other),
             }
         }
@@ -2166,7 +2211,7 @@ mod tests {
                 AstExpr::Path { segments, .. } => {
                     assert_eq!(segments.len(), 1);
                     assert_eq!(segments[0].name, "foo");
-                }
+                },
                 other => panic!("expected Path, got {:?}", other),
             }
         }
@@ -2185,7 +2230,7 @@ mod tests {
                     assert_eq!(arguments.len(), 2);
                     assert_eq!(arguments[0].label.as_deref(), Some("x"));
                     assert_eq!(arguments[1].label.as_deref(), Some("y"));
-                }
+                },
                 other => panic!("expected Call, got {:?}", other),
             }
         }
@@ -2200,7 +2245,7 @@ mod tests {
                     assert_eq!(arguments.len(), 2);
                     assert!(arguments[0].label.is_none());
                     assert!(arguments[1].label.is_none());
-                }
+                },
                 other => panic!("expected Call, got {:?}", other),
             }
         }
@@ -2216,12 +2261,17 @@ mod tests {
         let body = lower_func_body("func f() { if true { 1; } else { 2; } }");
         let tail = body.tail_expr.expect("if/else should be tail expression");
         match &body.exprs[tail] {
-            AstExpr::If { conditions, then_body, else_body, .. } => {
+            AstExpr::If {
+                conditions,
+                then_body,
+                else_body,
+                ..
+            } => {
                 assert_eq!(conditions.len(), 1);
                 assert!(matches!(&conditions[0], IfCondition::Expr(_)));
                 assert!(!then_body.stmts.is_empty() || then_body.tail_expr.is_some());
                 assert!(else_body.is_some());
-            }
+            },
             other => panic!("expected If, got {:?}", other),
         }
     }
@@ -2247,7 +2297,7 @@ mod tests {
                     AstPat::Binding { name, .. } => assert_eq!(name, "x"),
                     other => panic!("expected Binding pattern, got {:?}", other),
                 }
-            }
+            },
             other => panic!("expected For, got {:?}", other),
         }
     }
@@ -2257,9 +2307,11 @@ mod tests {
         let body = lower_func_body("func f() { loop { break; continue; } }");
         let tail = body.tail_expr.expect("loop should be tail expression");
         match &body.exprs[tail] {
-            AstExpr::Loop { body: loop_body, .. } => {
+            AstExpr::Loop {
+                body: loop_body, ..
+            } => {
                 assert_eq!(loop_body.stmts.len(), 2);
-            }
+            },
             other => panic!("expected Loop, got {:?}", other),
         }
     }
@@ -2294,20 +2346,23 @@ mod tests {
     fn match_expression() {
         let body = lower_func_body("func f() { match x { .A => 1, .B => 2 } }");
         // Match may be tail expr or statement depending on parser
-        let expr_id = body.tail_expr.or_else(|| {
-            body.statements.first().and_then(|s| {
-                if let AstStmt::Expr { expr, .. } = &body.stmts[*s] {
-                    Some(*expr)
-                } else {
-                    None
-                }
+        let expr_id = body
+            .tail_expr
+            .or_else(|| {
+                body.statements.first().and_then(|s| {
+                    if let AstStmt::Expr { expr, .. } = &body.stmts[*s] {
+                        Some(*expr)
+                    } else {
+                        None
+                    }
+                })
             })
-        }).expect("match should be in body");
+            .expect("match should be in body");
 
         match &body.exprs[expr_id] {
             AstExpr::Match { arms, .. } => {
                 assert_eq!(arms.len(), 2);
-            }
+            },
             other => panic!("expected Match, got {:?}", other),
         }
     }
@@ -2359,10 +2414,12 @@ mod tests {
         let body = lower_func_body("func f() { .None; }");
         if let AstStmt::Expr { expr, .. } = &body.stmts[body.statements[0]] {
             match &body.exprs[*expr] {
-                AstExpr::ImplicitMember { member, arguments, .. } => {
+                AstExpr::ImplicitMember {
+                    member, arguments, ..
+                } => {
                     assert_eq!(member, "None");
                     assert!(arguments.is_none());
-                }
+                },
                 other => panic!("expected ImplicitMember, got {:?}", other),
             }
         }
@@ -2378,7 +2435,10 @@ mod tests {
         assert!(body.tail_expr.is_some(), "should have tail expression");
         assert!(body.statements.is_empty(), "no statements");
         match &body.exprs[body.tail_expr.unwrap()] {
-            AstExpr::Literal { kind: AstLiteral::Integer(v), .. } => assert_eq!(v, "42"),
+            AstExpr::Literal {
+                kind: AstLiteral::Integer(v),
+                ..
+            } => assert_eq!(v, "42"),
             other => panic!("expected Integer, got {:?}", other),
         }
     }
@@ -2407,9 +2467,15 @@ mod tests {
         build_declarations(&mut world, file, &result.tree, root, None);
 
         let body = find_body(&world, root).expect("field should have Body");
-        assert!(body.tail_expr.is_some(), "default value should be tail expr");
+        assert!(
+            body.tail_expr.is_some(),
+            "default value should be tail expr"
+        );
         match &body.exprs[body.tail_expr.unwrap()] {
-            AstExpr::Literal { kind: AstLiteral::Integer(v), .. } => assert_eq!(v, "42"),
+            AstExpr::Literal {
+                kind: AstLiteral::Integer(v),
+                ..
+            } => assert_eq!(v, "42"),
             other => panic!("expected Integer literal, got {:?}", other),
         }
     }
@@ -2440,7 +2506,11 @@ mod tests {
         // Count entities with Body component
         let mut body_count = 0;
         count_bodies(&world, root, &mut body_count);
-        assert!(body_count >= 6, "ordering.ks has 6 methods, got {} bodies", body_count);
+        assert!(
+            body_count >= 6,
+            "ordering.ks has 6 methods, got {} bodies",
+            body_count
+        );
 
         // Verify at least one body has non-trivial content (match expression)
         let body = find_body(&world, root).unwrap();
@@ -2516,7 +2586,8 @@ mod tests {
         out: &mut Vec<(String, AstBody)>,
     ) {
         if let Some(body) = world.get::<Body>(entity) {
-            let name = world.get::<Name>(entity)
+            let name = world
+                .get::<Name>(entity)
                 .map(|n| n.0.clone())
                 .unwrap_or_else(|| "<anon>".to_string());
             out.push((name, body.0.clone()));
@@ -2538,7 +2609,7 @@ fn closure_body_references_it(node: &SyntaxNode) -> bool {
                     if token.kind() == SyntaxKind::Identifier && token.text() == "it" {
                         return true;
                     }
-                }
+                },
                 rowan::NodeOrToken::Node(child_node) => {
                     // Don't descend into nested closures — their `it` is their own
                     if child_node.kind() == SyntaxKind::ExprClosure {
@@ -2551,7 +2622,7 @@ fn closure_body_references_it(node: &SyntaxNode) -> bool {
                     if walk(child_node) {
                         return true;
                     }
-                }
+                },
             }
         }
         false

@@ -209,7 +209,11 @@ fn validate_no_conflicting_conformances(
     use crate::diagnostics::ConflictingCopyableConformanceError;
 
     // Only validate structs and enums, not protocols
-    if symbol.metadata().get_behavior::<ConcreteTypeMarker>().is_none() {
+    if symbol
+        .metadata()
+        .get_behavior::<ConcreteTypeMarker>()
+        .is_none()
+    {
         return;
     }
 

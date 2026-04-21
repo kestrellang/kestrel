@@ -541,7 +541,9 @@ pub fn parse_platform_attribute(
 /// The `kind_check` predicate tests whether the feature's kind matches the declaration,
 /// and `registry_lookup` retrieves any existing registration for duplicate detection.
 pub fn validate_builtin_attribute(
-    symbol: &std::sync::Arc<dyn semantic_tree::symbol::Symbol<kestrel_semantic_tree::language::KestrelLanguage>>,
+    symbol: &std::sync::Arc<
+        dyn semantic_tree::symbol::Symbol<kestrel_semantic_tree::language::KestrelLanguage>,
+    >,
     attributes: &AttributesBehavior,
     source: &str,
     context: &mut crate::declaration_binder::BindingContext,

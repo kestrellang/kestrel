@@ -300,11 +300,7 @@ mod tests {
         e
     }
 
-    fn spawn_extension_of_protocol(
-        world: &mut World,
-        parent: Entity,
-        target_name: &str,
-    ) -> Entity {
+    fn spawn_extension_of_protocol(world: &mut World, parent: Entity, target_name: &str) -> Entity {
         let e = world.spawn();
         world.set(e, NodeKind::Extension);
         world.set(e, ExtensionTarget(named_ast(target_name)));

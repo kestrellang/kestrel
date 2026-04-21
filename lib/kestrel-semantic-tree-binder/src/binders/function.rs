@@ -57,7 +57,13 @@ impl FunctionBinder {
         // Handle ProtocolMethod builtins separately (only applies to functions)
         if let BuiltinKind::ProtocolMethod { protocol_feature } = &definition.kind {
             Self::process_protocol_method_builtin(
-                symbol, feature, *protocol_feature, attr_span, syntax, source, context,
+                symbol,
+                feature,
+                *protocol_feature,
+                attr_span,
+                syntax,
+                source,
+                context,
             );
             return;
         }
@@ -755,7 +761,10 @@ fn resolve_return_type_from_syntax(
 /// Returns the concrete type of the containing struct, enum, or extension target.
 /// For structs/enums, this includes type parameters (e.g., `Optional[T]`).
 /// For protocols, we use Self type which remains abstract.
-fn get_self_type(symbol: &Arc<dyn Symbol<KestrelLanguage>>, model: &kestrel_semantic_model::SemanticModel) -> Option<Ty> {
+fn get_self_type(
+    symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+    model: &kestrel_semantic_model::SemanticModel,
+) -> Option<Ty> {
     let parent = symbol.metadata().parent()?;
     crate::binders::utils::self_type::self_type_for_parent(&parent, model)
 }

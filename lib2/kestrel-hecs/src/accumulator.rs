@@ -81,9 +81,7 @@ impl AccumulatorStore {
 
     /// Iterate over all accumulated values of type T.
     pub fn all<T: Clone + 'static>(&self) -> impl Iterator<Item = &T> {
-        self.store::<T>()
-            .into_iter()
-            .flat_map(|s| s.all())
+        self.store::<T>().into_iter().flat_map(|s| s.all())
     }
 
     fn store<T: Clone + 'static>(&self) -> Option<&TypedAccumulator<T>> {

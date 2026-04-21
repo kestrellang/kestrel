@@ -57,11 +57,17 @@ pub enum SwitchCase {
     /// Exact integer literal.
     IntLiteral(i64),
     /// Integer range with inclusive bounds; `None` means the bound is open.
-    IntRange { start: Option<i64>, end: Option<i64> },
+    IntRange {
+        start: Option<i64>,
+        end: Option<i64>,
+    },
     /// Character literal as a Unicode codepoint.
     CharLiteral(u32),
     /// Character range with inclusive bounds.
-    CharRange { start: Option<u32>, end: Option<u32> },
+    CharRange {
+        start: Option<u32>,
+        end: Option<u32>,
+    },
     /// String literal (byte-equality test).
     StringLiteral(String),
 }
@@ -81,17 +87,19 @@ impl std::fmt::Display for SwitchCase {
             SwitchCase::Bool(b) => write!(f, "{}", b),
             SwitchCase::IntLiteral(n) => write!(f, "{}", n),
             SwitchCase::IntRange { start, end } => {
-                if let Some(s) = start { write!(f, "{}", s)?; }
-                write!(f, "..=")?;
-                if let Some(e) = end { write!(f, "{}", e)?; }
-                Ok(())
-            }
-            SwitchCase::CharLiteral(c) => {
-                match char::from_u32(*c) {
-                    Some(ch) => write!(f, "'{}'", ch),
-                    None => write!(f, "\\u{{{:x}}}", c),
+                if let Some(s) = start {
+                    write!(f, "{}", s)?;
                 }
-            }
+                write!(f, "..=")?;
+                if let Some(e) = end {
+                    write!(f, "{}", e)?;
+                }
+                Ok(())
+            },
+            SwitchCase::CharLiteral(c) => match char::from_u32(*c) {
+                Some(ch) => write!(f, "'{}'", ch),
+                None => write!(f, "\\u{{{:x}}}", c),
+            },
             SwitchCase::CharRange { start, end } => {
                 if let Some(s) = start {
                     if let Some(ch) = char::from_u32(*s) {
@@ -109,7 +117,7 @@ impl std::fmt::Display for SwitchCase {
                     }
                 }
                 Ok(())
-            }
+            },
             SwitchCase::StringLiteral(s) => write!(f, "{:?}", s),
         }
     }
@@ -130,11 +138,7 @@ impl Terminator {
         }
     }
 
-    pub fn branch(
-        condition: impl Into<Value>,
-        then_block: BlockId,
-        else_block: BlockId,
-    ) -> Self {
+    pub fn branch(condition: impl Into<Value>, then_block: BlockId, else_block: BlockId) -> Self {
         Self {
             kind: TerminatorKind::Branch {
                 condition: condition.into(),

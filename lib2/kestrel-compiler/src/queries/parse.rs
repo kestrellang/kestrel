@@ -19,15 +19,17 @@ impl QueryFn for ParseFile {
 
     fn execute(&self, ctx: &QueryContext<'_>) -> Self::Output {
         // Sub-query: get lexed tokens (records dependency on LexFile)
-        let tokens = ctx.query(LexFile { entity: self.entity });
+        let tokens = ctx.query(LexFile {
+            entity: self.entity,
+        });
 
-        let source = ctx.get::<SourceText>(self.entity)
+        let source = ctx
+            .get::<SourceText>(self.entity)
             .map(|s| s.0.as_str())
             .unwrap_or("");
 
         // Convert SpannedToken → (Token, Span) iterator for the parser
-        let token_iter = tokens.iter()
-            .map(|st| (st.value.clone(), st.span.clone()));
+        let token_iter = tokens.iter().map(|st| (st.value.clone(), st.span.clone()));
 
         let result = parse_source_file_from_source(source, token_iter);
 

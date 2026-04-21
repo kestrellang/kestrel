@@ -717,7 +717,14 @@ fn resolve_compound_assignment_expression(
     let arg = CallArgument::unlabeled(value.clone(), value.span.clone());
     let result_ty = Ty::unit(span.clone());
 
-    ctx.builtin_method_call(target, op.method_feature(), method_name, vec![arg], result_ty, span)
+    ctx.builtin_method_call(
+        target,
+        op.method_feature(),
+        method_name,
+        vec![arg],
+        result_ty,
+        span,
+    )
 }
 
 /// Resolve an if expression: if condition { then } else { else }
@@ -3269,7 +3276,9 @@ fn is_field_access_on_self(target: &Expression, ctx: &BodyResolutionContext) -> 
 
     match &target.kind {
         ExprKind::FieldAccess { object, .. }
-        | ExprKind::DeferredMemberAccess { receiver: object, .. } => {
+        | ExprKind::DeferredMemberAccess {
+            receiver: object, ..
+        } => {
             // Check if the object is `self`
             if let ExprKind::LocalRef(local_id) = &object.kind
                 && let Some(local) = ctx.local_scope.get_local(*local_id)

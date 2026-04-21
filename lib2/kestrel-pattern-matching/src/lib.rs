@@ -119,9 +119,9 @@ fn check_irrefutable(
         flat_pat::FlatPat::Ctor { ctor, children } => {
             // Check if this constructor is the only one for the type
             let all = constructor::Constructor::all_for_type(query, root, ty);
-            let is_sole_ctor = all.as_ref().is_some_and(|ctors| {
-                ctors.len() == 1 && ctors[0] == *ctor
-            });
+            let is_sole_ctor = all
+                .as_ref()
+                .is_some_and(|ctors| ctors.len() == 1 && ctors[0] == *ctor);
 
             if !is_sole_ctor {
                 return false;
@@ -133,12 +133,12 @@ fn check_irrefutable(
                 let child_ty = field_types.get(i).unwrap_or(&ResolvedTy::Error);
                 check_irrefutable(child, query, root, child_ty)
             })
-        }
+        },
 
         // Or-pattern is irrefutable if ANY alternative is irrefutable
-        flat_pat::FlatPat::Or(alts) => {
-            alts.iter().any(|alt| check_irrefutable(alt, query, root, ty))
-        }
+        flat_pat::FlatPat::Or(alts) => alts
+            .iter()
+            .any(|alt| check_irrefutable(alt, query, root, ty)),
     }
 }
 
@@ -157,5 +157,13 @@ pub fn compile_decision_tree(
     let arm_pat_ids: Vec<_> = arms.iter().map(|arm| arm.pattern).collect();
     let has_guards: Vec<_> = arms.iter().map(|arm| arm.guard.is_some()).collect();
 
-    decision_tree::compile(hir, query, root, &flat_pats, &arm_pat_ids, scrutinee_ty, &has_guards)
+    decision_tree::compile(
+        hir,
+        query,
+        root,
+        &flat_pats,
+        &arm_pat_ids,
+        scrutinee_ty,
+        &has_guards,
+    )
 }

@@ -7,7 +7,7 @@
 //! semicolons separating statements. Multi-line bodies with `\n`
 //! inside braces cause parse failures.
 
-use kestrel_ast_builder::{build_declarations, Name, NodeKind};
+use kestrel_ast_builder::{Name, NodeKind, build_declarations};
 use kestrel_hecs::{Entity, World};
 use kestrel_hir::body::*;
 use kestrel_hir_lower::LowerBody;
@@ -44,8 +44,7 @@ fn find_child(
     ctx.children_of(parent)
         .iter()
         .find(|&&e| {
-            ctx.get::<NodeKind>(e) == Some(&kind)
-                && ctx.get::<Name>(e).is_some_and(|n| n.0 == name)
+            ctx.get::<NodeKind>(e) == Some(&kind) && ctx.get::<Name>(e).is_some_and(|n| n.0 == name)
         })
         .copied()
         .unwrap_or_else(|| panic!("child {:?} {:?} not found under {:?}", kind, name, parent))
@@ -85,13 +84,7 @@ fn print_tree(ctx: &kestrel_hecs::QueryContext<'_>, entity: Entity, indent: usiz
         .get::<NodeKind>(entity)
         .map(|k| format!("{:?}", k))
         .unwrap_or_default();
-    eprintln!(
-        "{}{} ({}) [{:?}]",
-        " ".repeat(indent),
-        name,
-        kind,
-        entity
-    );
+    eprintln!("{}{} ({}) [{:?}]", " ".repeat(indent), name, kind, entity);
     for &child in ctx.children_of(entity) {
         print_tree(ctx, child, indent + 2);
     }
@@ -157,7 +150,7 @@ fn lower_let_with_value() {
                     ..
                 }
             ));
-        }
+        },
         other => panic!("expected Let, got {:?}", other),
     }
 }
@@ -174,7 +167,7 @@ fn lower_var_binding() {
         HirStmt::Let { local, .. } => {
             assert!(hir.locals[*local].is_mut);
             assert_eq!(hir.locals[*local].name, "x");
-        }
+        },
         other => panic!("expected Let, got {:?}", other),
     }
 }
@@ -192,7 +185,7 @@ fn lower_local_variable_reference() {
     match &hir.exprs[tail] {
         HirExpr::Local(local_id, _) => {
             assert_eq!(hir.locals[*local_id].name, "x");
-        }
+        },
         other => panic!("expected Local, got {:?}", other),
     }
 }
@@ -208,7 +201,7 @@ fn lower_function_reference() {
     match &hir.exprs[tail] {
         HirExpr::Def(entity, _, _) => {
             assert_eq!(ctx.get::<Name>(*entity).unwrap().0, "bar");
-        }
+        },
         other => panic!("expected Def, got {:?}", other),
     }
 }
@@ -227,15 +220,14 @@ fn lower_direct_call() {
         HirExpr::Call { callee, args, .. } => {
             assert!(matches!(&hir.exprs[*callee], HirExpr::Def(..)));
             assert!(args.is_empty());
-        }
+        },
         other => panic!("expected Call, got {:?}", other),
     }
 }
 
 #[test]
 fn lower_call_with_args() {
-    let source =
-        "module TestMod\nfunc add(a: lang.i64, b: lang.i64) {}\nfunc foo() { add(1, 2) }";
+    let source = "module TestMod\nfunc add(a: lang.i64, b: lang.i64) {}\nfunc foo() { add(1, 2) }";
     let (world, root) = build_from_source(source);
     let ctx = world.query_context();
     let hir = lower_func(&ctx, root, "TestMod", "foo");
@@ -244,7 +236,7 @@ fn lower_call_with_args() {
     match &hir.exprs[tail] {
         HirExpr::Call { args, .. } => {
             assert_eq!(args.len(), 2);
-        }
+        },
         other => panic!("expected Call, got {:?}", other),
     }
 }
@@ -269,15 +261,17 @@ fn lower_method_call() {
                 HirExpr::Field { name, base, .. } => {
                     assert_eq!(name, "toString");
                     assert!(matches!(&hir.exprs[*base], HirExpr::Local(..)));
-                }
+                },
                 other => panic!("expected Field callee, got {:?}", other),
             }
-        }
+        },
         // Also accept MethodCall if parser produces MemberAccess
-        HirExpr::MethodCall { method, receiver, .. } => {
+        HirExpr::MethodCall {
+            method, receiver, ..
+        } => {
             assert_eq!(method, "toString");
             assert!(matches!(&hir.exprs[*receiver], HirExpr::Local(..)));
-        }
+        },
         other => panic!("expected Call or MethodCall, got {:?}", other),
     }
 }
@@ -297,9 +291,9 @@ fn lower_return_statement() {
             &hir.stmts[s],
             HirStmt::Expr { expr, .. } if matches!(&hir.exprs[*expr], HirExpr::Return { .. })
         )
-    }) || hir.tail_expr.map_or(false, |e| {
-        matches!(&hir.exprs[e], HirExpr::Return { .. })
-    });
+    }) || hir
+        .tail_expr
+        .map_or(false, |e| matches!(&hir.exprs[e], HirExpr::Return { .. }));
     assert!(has_return, "should contain a return expression");
 }
 
@@ -331,7 +325,7 @@ fn lower_assignment_to_local() {
                         ..
                     }
                 ));
-            }
+            },
             other => panic!("expected Assign, got {:?}", other),
         },
         other => panic!("expected Expr stmt, got {:?}", other),
@@ -356,7 +350,7 @@ fn lower_array_literal() {
     match &hir.exprs[tail] {
         HirExpr::Array { elements, .. } => {
             assert_eq!(elements.len(), 3);
-        }
+        },
         other => panic!("expected Array, got {:?}", other),
     }
 }
@@ -372,7 +366,7 @@ fn lower_tuple_literal() {
     match &hir.exprs[tail] {
         HirExpr::Tuple { elements, .. } => {
             assert_eq!(elements.len(), 2);
-        }
+        },
         other => panic!("expected Tuple, got {:?}", other),
     }
 }
@@ -395,7 +389,7 @@ fn lower_function_with_params() {
     match &hir.exprs[tail] {
         HirExpr::Local(id, _) => {
             assert_eq!(hir.locals[*id].name, "a");
-        }
+        },
         other => panic!("expected Local, got {:?}", other),
     }
 }
@@ -414,7 +408,7 @@ fn lower_field_access() {
         HirExpr::Field { base, name, .. } => {
             assert_eq!(name, "count");
             assert!(matches!(&hir.exprs[*base], HirExpr::Local(..)));
-        }
+        },
         other => panic!("expected Field, got {:?}", other),
     }
 }
@@ -459,4 +453,3 @@ fn lower_multiple_statements() {
 
 // Scoped locals test: requires nested braces (if { let x... }),
 // tested in unit tests with manually constructed AstBody.
-

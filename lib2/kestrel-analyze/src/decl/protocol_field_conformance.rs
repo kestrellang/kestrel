@@ -12,10 +12,10 @@
 use crate::context::DeclContext;
 use crate::decl::extern_ffi_safe::is_ffi_safe;
 use crate::diagnostic::*;
+use crate::traits::{DeclCheck, Describe};
 use crate::util;
 use kestrel_ast_builder::{Callable, Name, NodeKind};
 use kestrel_hir::builtin::Builtin;
-use crate::traits::{DeclCheck, Describe};
 use kestrel_hir_lower::LowerTypeAnnotation;
 use kestrel_name_res::{ConformingProtocols, ResolveBuiltin};
 
@@ -62,12 +62,20 @@ impl DeclCheck for ProtocolFieldConformanceAnalyzer {
         // Check each field's type conforms to FFISafe
         let mut bad_fields = Vec::new();
         for &child in cx.query.children_of(cx.entity) {
-            let Some(kind) = cx.query.get::<NodeKind>(child) else { continue };
-            if *kind != NodeKind::Field { continue; }
+            let Some(kind) = cx.query.get::<NodeKind>(child) else {
+                continue;
+            };
+            if *kind != NodeKind::Field {
+                continue;
+            }
             // Skip computed properties — only stored fields affect layout
-            if cx.query.has::<Callable>(child) { continue; }
+            if cx.query.has::<Callable>(child) {
+                continue;
+            }
 
-            let field_name = cx.query.get::<Name>(child)
+            let field_name = cx
+                .query
+                .get::<Name>(child)
                 .map(|n| n.0.clone())
                 .unwrap_or_else(|| "<unknown>".into());
 
@@ -103,9 +111,7 @@ impl DeclCheck for ProtocolFieldConformanceAnalyzer {
                 message: "type conforms to FFISafe but has non-FFISafe fields".into(),
                 is_primary: true,
             }],
-            notes: vec![
-                "all fields must conform to FFISafe for the type to conform".into(),
-            ],
+            notes: vec!["all fields must conform to FFISafe for the type to conform".into()],
         }]
     }
 }

@@ -26,10 +26,7 @@ pub enum ImmediateKind {
     /// Unit value `()`.
     Unit,
     /// Reference to a function.
-    FunctionRef {
-        func: Entity,
-        type_args: Vec<MirTy>,
-    },
+    FunctionRef { func: Entity, type_args: Vec<MirTy> },
     /// Witness method reference for use as a function value.
     WitnessMethod {
         protocol: Entity,
@@ -133,11 +130,7 @@ impl Immediate {
     }
 
     /// Create a witness method reference.
-    pub fn witness_method(
-        protocol: Entity,
-        method: impl Into<String>,
-        for_type: MirTy,
-    ) -> Self {
+    pub fn witness_method(protocol: Entity, method: impl Into<String>, for_type: MirTy) -> Self {
         Self {
             kind: ImmediateKind::WitnessMethod {
                 protocol,

@@ -326,7 +326,8 @@ fn desugar_binary_op(
 ) -> Expression {
     // If either operand has a poison type or Never, propagate error without cascading diagnostics.
     // Never is the bottom type (unreachable code), so operations on it should not produce errors.
-    if lhs.ty.is_poison() || rhs.ty.is_poison()
+    if lhs.ty.is_poison()
+        || rhs.ty.is_poison()
         || matches!(lhs.ty.kind(), TyKind::Never)
         || matches!(rhs.ty.kind(), TyKind::Never)
     {
@@ -355,7 +356,14 @@ fn desugar_binary_op(
         CallArgument::unlabeled(rhs.clone(), rhs.span.clone())
     };
 
-    ctx.builtin_method_call(lhs, op.method_feature().unwrap(), method_name, vec![arg], result_ty, full_span)
+    ctx.builtin_method_call(
+        lhs,
+        op.method_feature().unwrap(),
+        method_name,
+        vec![arg],
+        result_ty,
+        full_span,
+    )
 }
 
 /// Desugar a unary operator into a method call: operand.method_name()
@@ -391,11 +399,25 @@ fn desugar_unary_op(
     // Try to use the MethodRef pattern with builtin registry for better error messages.
     // This produces "does not conform to X" errors instead of "no member Y".
     if let Some(feature) = op.method_feature() {
-        return ctx.builtin_method_call(operand, feature, method_name, vec![], result_ty, full_span);
+        return ctx.builtin_method_call(
+            operand,
+            feature,
+            method_name,
+            vec![],
+            result_ty,
+            full_span,
+        );
     }
 
     // Unwrap operator — no protocol method, resolve via inference
-    Expression::deferred_method_call(operand, method_name.to_string(), vec![], None, result_ty, full_span)
+    Expression::deferred_method_call(
+        operand,
+        method_name.to_string(),
+        vec![],
+        None,
+        result_ty,
+        full_span,
+    )
 }
 
 /// Check if a type is a lang intrinsic type that should not support operators.

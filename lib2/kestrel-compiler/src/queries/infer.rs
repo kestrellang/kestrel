@@ -33,11 +33,7 @@ impl QueryFn for InferWithDiagnostics {
             if matches!(err, InferError::FromHir { .. }) {
                 continue;
             }
-            let detail = typed
-                .error_details
-                .get(i)
-                .map(|s| s.as_str())
-                .unwrap_or("");
+            let detail = typed.error_details.get(i).map(|s| s.as_str()).unwrap_or("");
             ctx.throw(ResolvedInferError { error: err, detail });
         }
 

@@ -4,7 +4,7 @@
 //! chain upward to find matching declarations, imports, or wildcard
 //! import members.
 
-use kestrel_ast_builder::{Conformances, ConformanceItem, Name, NodeKind, TypeParams};
+use kestrel_ast_builder::{ConformanceItem, Conformances, Name, NodeKind, TypeParams};
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
 
 use crate::extensions::ExtensionTargetEntity;
@@ -91,9 +91,9 @@ impl QueryFn for ResolveName {
             if !wildcard_matches.is_empty() {
                 // If all matches are functions, it's overloading. Otherwise
                 // multiple non-function matches = ambiguity.
-                let all_functions = wildcard_matches.iter().all(|&e| {
-                    ctx.get::<NodeKind>(e) == Some(&NodeKind::Function)
-                });
+                let all_functions = wildcard_matches
+                    .iter()
+                    .all(|&e| ctx.get::<NodeKind>(e) == Some(&NodeKind::Function));
                 if wildcard_matches.len() > 1 && !all_functions {
                     return NameResolution::Ambiguous(wildcard_matches);
                 }
@@ -103,7 +103,9 @@ impl QueryFn for ResolveName {
             // 4. Extension type params: if current is an extension,
             //    check type params of the extension's target type
             if ctx.get::<NodeKind>(current) == Some(&NodeKind::Extension) {
-                if let Some(entity) = resolve_extension_type_param(ctx, current, &self.name, self.root) {
+                if let Some(entity) =
+                    resolve_extension_type_param(ctx, current, &self.name, self.root)
+                {
                     return NameResolution::Found(vec![entity]);
                 }
             }
@@ -111,7 +113,9 @@ impl QueryFn for ResolveName {
             // 5. Protocol extension associated types: if current is an extension
             //    targeting a protocol, check the protocol's associated types
             if ctx.get::<NodeKind>(current) == Some(&NodeKind::Extension) {
-                if let Some(entity) = resolve_protocol_extension_assoc(ctx, current, &self.name, self.root) {
+                if let Some(entity) =
+                    resolve_protocol_extension_assoc(ctx, current, &self.name, self.root)
+                {
                     return NameResolution::Found(vec![entity]);
                 }
             }
@@ -119,7 +123,9 @@ impl QueryFn for ResolveName {
             // 6. Inherited protocol members: if current is a protocol,
             //    walk conformance hierarchy for matching associated types
             if ctx.get::<NodeKind>(current) == Some(&NodeKind::Protocol) {
-                if let Some(entity) = resolve_inherited_protocol_member(ctx, current, &self.name, self.root) {
+                if let Some(entity) =
+                    resolve_inherited_protocol_member(ctx, current, &self.name, self.root)
+                {
                     return NameResolution::Found(vec![entity]);
                 }
             }
@@ -161,10 +167,7 @@ fn resolve_extension_type_param(
     root: Entity,
 ) -> Option<Entity> {
     // Resolve the extension's target to a type entity
-    let target_entity = ctx.query(ExtensionTargetEntity {
-        extension,
-        root,
-    })?;
+    let target_entity = ctx.query(ExtensionTargetEntity { extension, root })?;
 
     // Check the target type's type parameters
     let type_params = ctx.get::<TypeParams>(target_entity)?;
@@ -184,10 +187,7 @@ fn resolve_protocol_extension_assoc(
     name: &str,
     root: Entity,
 ) -> Option<Entity> {
-    let target_entity = ctx.query(ExtensionTargetEntity {
-        extension,
-        root,
-    })?;
+    let target_entity = ctx.query(ExtensionTargetEntity { extension, root })?;
 
     // Only applies if the target is a protocol
     if ctx.get::<NodeKind>(target_entity) != Some(&NodeKind::Protocol) {
@@ -249,9 +249,7 @@ fn resolve_inherited_protocol_member(
         }
 
         // Recursively check inherited protocols
-        if let Some(found) =
-            resolve_inherited_protocol_member(ctx, proto_entity, name, root)
-        {
+        if let Some(found) = resolve_inherited_protocol_member(ctx, proto_entity, name, root) {
             return Some(found);
         }
     }
@@ -259,7 +257,11 @@ fn resolve_inherited_protocol_member(
 }
 
 /// Find an associated type (TypeAlias child) in a protocol by name.
-pub(crate) fn find_assoc_type(ctx: &QueryContext<'_>, protocol: Entity, name: &str) -> Option<Entity> {
+pub(crate) fn find_assoc_type(
+    ctx: &QueryContext<'_>,
+    protocol: Entity,
+    name: &str,
+) -> Option<Entity> {
     ctx.children_of(protocol)
         .iter()
         .find(|&&child| {
@@ -359,7 +361,7 @@ mod tests {
             NameResolution::Found(entities) => {
                 assert_eq!(entities.len(), 1);
                 assert_eq!(ctx.get::<Name>(entities[0]).unwrap().0, "Foo");
-            }
+            },
             other => panic!("expected Found, got {:?}", other),
         }
     }
@@ -387,7 +389,7 @@ mod tests {
             NameResolution::Found(entities) => {
                 assert_eq!(entities.len(), 1);
                 assert_eq!(ctx.get::<Name>(entities[0]).unwrap().0, "Int64");
-            }
+            },
             other => panic!("expected Found, got {:?}", other),
         }
     }
@@ -444,7 +446,7 @@ mod tests {
                 // Should find the local one, not the import
                 assert_eq!(entities.len(), 1);
                 assert_eq!(entities[0], local_int);
-            }
+            },
             other => panic!("expected Found, got {:?}", other),
         }
     }

@@ -22,7 +22,7 @@ pub fn qualified_name(world: &World, entity: Entity) -> String {
                 Some(NodeKind::Initializer) => parts.push("init".to_string()),
                 Some(NodeKind::Subscript) => parts.push("subscript".to_string()),
                 Some(NodeKind::Deinit) => parts.push("deinit".to_string()),
-                _ => {}
+                _ => {},
             }
         }
         current = world.parent_of(e);

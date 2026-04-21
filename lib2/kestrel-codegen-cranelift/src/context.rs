@@ -17,7 +17,7 @@ use cranelift_frontend::FunctionBuilderContext;
 use cranelift_module::{DataDescription, FuncId, Linkage, Module};
 use cranelift_object::{ObjectBuilder, ObjectModule};
 use kestrel_codegen2::{
-    mangle_function_with_self, substitute_type, LayoutCache, Mangler, TargetConfig,
+    LayoutCache, Mangler, TargetConfig, mangle_function_with_self, substitute_type,
 };
 use kestrel_debug::ktrace;
 use kestrel_hecs::Entity;
@@ -72,9 +72,12 @@ impl<'a> CodegenContext<'a> {
             .finish(flags)
             .map_err(|e| CodegenError::ModuleCreation(format!("ISA finish: {e}")))?;
 
-        let obj_builder =
-            ObjectBuilder::new(isa.clone(), "kestrel_module", cranelift_module::default_libcall_names())
-                .map_err(|e| CodegenError::ModuleCreation(format!("ObjectBuilder: {e}")))?;
+        let obj_builder = ObjectBuilder::new(
+            isa.clone(),
+            "kestrel_module",
+            cranelift_module::default_libcall_names(),
+        )
+        .map_err(|e| CodegenError::ModuleCreation(format!("ObjectBuilder: {e}")))?;
 
         let cl_module = ObjectModule::new(obj_builder);
         let layouts = LayoutCache::new(module, target);
@@ -153,7 +156,10 @@ impl<'a> CodegenContext<'a> {
             let file_path = base_path.join(&file_const.relative_path);
 
             let bytes = std::fs::read(&file_path).map_err(|e| {
-                CodegenError::DataSection(format!("read file constant '{}': {e}", file_path.display()))
+                CodegenError::DataSection(format!(
+                    "read file constant '{}': {e}",
+                    file_path.display()
+                ))
             })?;
 
             // Define the raw data blob
@@ -379,10 +385,12 @@ impl<'a> CodegenContext<'a> {
             sig.call_conv = self.c_call_conv();
             for param in &func_def.params {
                 let ty = substitute_type(&param.ty, &subst);
-                sig.params.push(AbiParam::new(types::translate_type(&ty, self.target)));
+                sig.params
+                    .push(AbiParam::new(types::translate_type(&ty, self.target)));
             }
             if !matches!(ret_ty, MirTy::Unit) {
-                sig.returns.push(AbiParam::new(types::translate_type(&ret_ty, self.target)));
+                sig.returns
+                    .push(AbiParam::new(types::translate_type(&ret_ty, self.target)));
             }
             return Ok(sig);
         }

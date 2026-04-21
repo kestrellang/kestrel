@@ -138,10 +138,10 @@ fn expr_diverges(hir: &HirBody, id: HirExprId) -> bool {
                 Some(else_block) => then_div && block_diverges(hir, else_block),
                 None => false,
             }
-        }
+        },
         HirExpr::Match { arms, .. } => {
             !arms.is_empty() && arms.iter().all(|arm| expr_diverges(hir, arm.body))
-        }
+        },
         // Infinite loop (no break) diverges
         HirExpr::Loop { .. } => true,
         HirExpr::Block { body, .. } => block_diverges(hir, body),

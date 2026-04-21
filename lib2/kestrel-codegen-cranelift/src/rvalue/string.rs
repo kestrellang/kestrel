@@ -26,7 +26,9 @@ pub fn compile_string_op1(
 
     match op {
         // String is a fat pointer: (ptr, len)
-        Op::StrPtr => Ok(builder.ins().load(ptr_ty, MemFlags::new(), arg, Offset32::new(0))),
+        Op::StrPtr => Ok(builder
+            .ins()
+            .load(ptr_ty, MemFlags::new(), arg, Offset32::new(0))),
         Op::StrLen => Ok(builder.ins().load(
             ir::types::I64,
             MemFlags::new(),

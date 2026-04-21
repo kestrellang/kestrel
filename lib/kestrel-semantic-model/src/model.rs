@@ -339,10 +339,7 @@ impl SemanticModel {
             }
 
             if let Some(fd) = b.downcast_ref::<FunctionDataBehavior>() {
-                return Some(format!(
-                    "FunctionData(has_body={})",
-                    fd.has_body()
-                ));
+                return Some(format!("FunctionData(has_body={})", fd.has_body()));
             }
 
             if let Some(vb) = b.downcast_ref::<ValueBehavior>() {

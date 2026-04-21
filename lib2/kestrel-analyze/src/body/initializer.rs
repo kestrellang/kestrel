@@ -160,7 +160,10 @@ impl BodyCheck for InitializerAnalyzer {
             if let Some(cst) = cx.query.get::<CstNode>(child) {
                 use kestrel_syntax_tree2::SyntaxKind;
                 let has_body_node = cst.0.children().any(|c| {
-                    matches!(c.kind(), SyntaxKind::CodeBlock | SyntaxKind::PropertyAccessors)
+                    matches!(
+                        c.kind(),
+                        SyntaxKind::CodeBlock | SyntaxKind::PropertyAccessors
+                    )
                 });
                 if has_body_node {
                     continue;
@@ -187,8 +190,7 @@ impl BodyCheck for InitializerAnalyzer {
             diags: Vec::new(),
         };
 
-        let final_state =
-            analyze_block(cx, &cx.hir.statements, cx.hir.tail_expr, &mut vctx);
+        let final_state = analyze_block(cx, &cx.hir.statements, cx.hir.tail_expr, &mut vctx);
 
         // Check that all fields are initialized at the end (unless the body diverges)
         if !final_state.diverged {
@@ -205,10 +207,7 @@ impl BodyCheck for InitializerAnalyzer {
                 vctx.diags.push(AnalyzeDiagnostic {
                     descriptor_id: DESCRIPTORS[0].id,
                     severity: DESCRIPTORS[0].default_severity,
-                    message: format!(
-                        "initializer does not initialize all fields: {}",
-                        field_list
-                    ),
+                    message: format!("initializer does not initialize all fields: {}", field_list),
                     labels: vec![DiagLabel {
                         span: util::entity_span(cx.query, cx.entity),
                         message: "in this initializer".into(),
@@ -254,8 +253,16 @@ impl InitState {
     fn merge(self, other: InitState) -> InitState {
         if self.diverged && other.diverged {
             InitState {
-                assigned: self.assigned.intersection(&other.assigned).cloned().collect(),
-                let_assigned: self.let_assigned.union(&other.let_assigned).cloned().collect(),
+                assigned: self
+                    .assigned
+                    .intersection(&other.assigned)
+                    .cloned()
+                    .collect(),
+                let_assigned: self
+                    .let_assigned
+                    .union(&other.let_assigned)
+                    .cloned()
+                    .collect(),
                 diverged: true,
             }
         } else if self.diverged {
@@ -264,8 +271,16 @@ impl InitState {
             self
         } else {
             InitState {
-                assigned: self.assigned.intersection(&other.assigned).cloned().collect(),
-                let_assigned: self.let_assigned.union(&other.let_assigned).cloned().collect(),
+                assigned: self
+                    .assigned
+                    .intersection(&other.assigned)
+                    .cloned()
+                    .collect(),
+                let_assigned: self
+                    .let_assigned
+                    .union(&other.let_assigned)
+                    .cloned()
+                    .collect(),
                 diverged: false,
             }
         }
@@ -309,11 +324,11 @@ fn analyze_stmt(
             if let Some(val) = value {
                 state = analyze_expr(cx, *val, state, false, vctx);
             }
-        }
+        },
         HirStmt::Expr { expr, .. } => {
             state = analyze_expr(cx, *expr, state, false, vctx);
-        }
-        HirStmt::Deinit { .. } => {}
+        },
+        HirStmt::Deinit { .. } => {},
     }
     state
 }
@@ -336,10 +351,7 @@ fn analyze_expr(
                     vctx.diags.push(AnalyzeDiagnostic {
                         descriptor_id: DESCRIPTORS[2].id,
                         severity: DESCRIPTORS[2].default_severity,
-                        message: format!(
-                            "cannot read field '{}' before it is initialized",
-                            name
-                        ),
+                        message: format!("cannot read field '{}' before it is initialized", name),
                         labels: vec![DiagLabel {
                             span: util::expr_span(cx.hir, id),
                             message: "field read here".into(),
@@ -351,7 +363,7 @@ fn analyze_expr(
             } else {
                 state = analyze_expr(cx, *base, state, false, vctx);
             }
-        }
+        },
 
         // Assignment: check for self.field assignments
         HirExpr::Assign { target, value, .. } => {
@@ -361,15 +373,13 @@ fn analyze_expr(
             // (Def pointing at a field of the enclosing struct). Both initialize
             // the field.
             let assigned_field = match &cx.hir.exprs[*target] {
-                HirExpr::Field { base, name, .. } if is_self_local(cx, *base) => {
-                    Some(name.clone())
-                }
+                HirExpr::Field { base, name, .. } if is_self_local(cx, *base) => Some(name.clone()),
                 HirExpr::Def(entity, _, _)
                     if cx.query.get::<NodeKind>(*entity) == Some(&NodeKind::Field)
                         && cx.query.parent_of(*entity) == cx.query.parent_of(cx.entity) =>
                 {
                     Some(util::entity_name(cx.query, *entity))
-                }
+                },
                 _ => None,
             };
 
@@ -400,13 +410,16 @@ fn analyze_expr(
             }
 
             state = analyze_expr(cx, *target, state, true, vctx);
-        }
+        },
 
         // Method call on self: check all fields are initialized first.
         // Special case: self.init(...) is a delegating init call that
         // initializes all fields — mark everything as assigned.
         HirExpr::MethodCall {
-            receiver, method, args, ..
+            receiver,
+            method,
+            args,
+            ..
         } => {
             if is_self_local(cx, *receiver) {
                 if method == "init" {
@@ -428,8 +441,7 @@ fn analyze_expr(
                         vctx.diags.push(AnalyzeDiagnostic {
                             descriptor_id: DESCRIPTORS[3].id,
                             severity: DESCRIPTORS[3].default_severity,
-                            message: "cannot use 'self' before all fields are initialized"
-                                .into(),
+                            message: "cannot use 'self' before all fields are initialized".into(),
                             labels: vec![DiagLabel {
                                 span: util::expr_span(cx.hir, id),
                                 message: "self used here".into(),
@@ -452,7 +464,7 @@ fn analyze_expr(
                     state = analyze_expr(cx, arg.value, state, false, vctx);
                 }
             }
-        }
+        },
 
         // Return: check all fields initialized
         HirExpr::Return { value, .. } => {
@@ -475,11 +487,14 @@ fn analyze_expr(
                         message: "return here".into(),
                         is_primary: true,
                     }],
-                    notes: vec![format!("uninitialized fields: {}", uninitialized.join(", "))],
+                    notes: vec![format!(
+                        "uninitialized fields: {}",
+                        uninitialized.join(", ")
+                    )],
                 });
             }
             // diverged is set by the Never-type check at the end of analyze_expr
-        }
+        },
 
         // If/else: merge branches
         HirExpr::If {
@@ -523,10 +538,12 @@ fn analyze_expr(
             };
 
             state = then_state.merge(else_state);
-        }
+        },
 
         // Match: merge all arms
-        HirExpr::Match { scrutinee, arms, .. } => {
+        HirExpr::Match {
+            scrutinee, arms, ..
+        } => {
             state = analyze_expr(cx, *scrutinee, state, false, vctx);
             if !arms.is_empty() {
                 let mut iter = arms.iter().map(|arm| {
@@ -542,7 +559,7 @@ fn analyze_expr(
                 }
                 state = merged;
             }
-        }
+        },
 
         // Loop: analyze body but don't trust assignments (body may not fully execute)
         HirExpr::Loop { body, .. } => {
@@ -559,10 +576,10 @@ fn analyze_expr(
                 }
             }
             // Conservative: don't propagate loop body state
-        }
+        },
 
         // Break/Continue divergence is handled by the Never-type check below
-        HirExpr::Break { .. } | HirExpr::Continue { .. } => {}
+        HirExpr::Break { .. } | HirExpr::Continue { .. } => {},
 
         // Block expression
         HirExpr::Block { body, .. } => {
@@ -577,7 +594,7 @@ fn analyze_expr(
                     state = analyze_expr(cx, tail, state, false, vctx);
                 }
             }
-        }
+        },
 
         // Closures: analyze body separately, don't affect init state
         HirExpr::Closure { body, .. } => {
@@ -585,7 +602,7 @@ fn analyze_expr(
             for &stmt_id in &body.stmts {
                 let _ = analyze_stmt(cx, stmt_id, closure_state.clone(), vctx);
             }
-        }
+        },
 
         // Recurse into other sub-expressions
         HirExpr::Call { callee, args, .. } => {
@@ -593,43 +610,41 @@ fn analyze_expr(
             for arg in args {
                 state = analyze_expr(cx, arg.value, state, false, vctx);
             }
-        }
-        HirExpr::ProtocolCall {
-            receiver, args, ..
-        } => {
+        },
+        HirExpr::ProtocolCall { receiver, args, .. } => {
             state = analyze_expr(cx, *receiver, state, false, vctx);
             for arg in args {
                 state = analyze_expr(cx, arg.value, state, false, vctx);
             }
-        }
+        },
         HirExpr::TupleIndex { base, .. } => {
             state = analyze_expr(cx, *base, state, false, vctx);
-        }
+        },
         HirExpr::Tuple { elements, .. } | HirExpr::Array { elements, .. } => {
             for &elem in elements {
                 state = analyze_expr(cx, elem, state, false, vctx);
             }
-        }
+        },
         HirExpr::Dict { entries, .. } => {
             for entry in entries {
                 state = analyze_expr(cx, entry.key, state, false, vctx);
                 state = analyze_expr(cx, entry.value, state, false, vctx);
             }
-        }
+        },
         HirExpr::ImplicitMember { args, .. } => {
             if let Some(args) = args {
                 for arg in args {
                     state = analyze_expr(cx, arg.value, state, false, vctx);
                 }
             }
-        }
+        },
 
         // Leaf expressions
         HirExpr::Local(..)
         | HirExpr::Literal { .. }
         | HirExpr::Def(..)
         | HirExpr::OverloadSet { .. }
-        | HirExpr::Error { .. } => {}
+        | HirExpr::Error { .. } => {},
     }
 
     // Unified divergence detection: any expression with Never type diverges.

@@ -45,7 +45,13 @@ impl Describe for DeadCodeAnalyzer {
 impl BodyCheck for DeadCodeAnalyzer {
     fn check(&self, cx: &BodyContext<'_>) -> Vec<AnalyzeDiagnostic> {
         let mut diags = Vec::new();
-        check_block(cx.hir, &cx.hir.statements, cx.hir.tail_expr, false, &mut diags);
+        check_block(
+            cx.hir,
+            &cx.hir.statements,
+            cx.hir.tail_expr,
+            false,
+            &mut diags,
+        );
         diags
     }
 }
@@ -116,14 +122,24 @@ fn check_block(
     }
 }
 
-fn check_stmt_inner(hir: &HirBody, id: HirStmtId, in_loop: bool, diags: &mut Vec<AnalyzeDiagnostic>) {
+fn check_stmt_inner(
+    hir: &HirBody,
+    id: HirStmtId,
+    in_loop: bool,
+    diags: &mut Vec<AnalyzeDiagnostic>,
+) {
     if let HirStmt::Expr { expr, .. } = &hir.stmts[id] {
         check_expr_inner(hir, *expr, in_loop, diags);
     }
 }
 
 /// Recurse into expressions that contain blocks to find inner dead code.
-fn check_expr_inner(hir: &HirBody, id: HirExprId, in_loop: bool, diags: &mut Vec<AnalyzeDiagnostic>) {
+fn check_expr_inner(
+    hir: &HirBody,
+    id: HirExprId,
+    in_loop: bool,
+    diags: &mut Vec<AnalyzeDiagnostic>,
+) {
     match &hir.exprs[id] {
         HirExpr::If {
             then_body,
@@ -134,24 +150,24 @@ fn check_expr_inner(hir: &HirBody, id: HirExprId, in_loop: bool, diags: &mut Vec
             if let Some(else_block) = else_body {
                 check_block(hir, &else_block.stmts, else_block.tail_expr, in_loop, diags);
             }
-        }
+        },
         HirExpr::Loop { body, .. } => {
             // Inside a loop body, break/continue are valid divergence points
             check_block(hir, &body.stmts, body.tail_expr, true, diags);
-        }
+        },
         HirExpr::Match { arms, .. } => {
             for arm in arms {
                 check_expr_inner(hir, arm.body, in_loop, diags);
             }
-        }
+        },
         HirExpr::Block { body, .. } => {
             check_block(hir, &body.stmts, body.tail_expr, in_loop, diags);
-        }
+        },
         HirExpr::Closure { body, .. } => {
             // Closures start a new context — break/continue aren't valid
             check_block(hir, &body.stmts, body.tail_expr, false, diags);
-        }
-        _ => {}
+        },
+        _ => {},
     }
 }
 
@@ -174,7 +190,7 @@ fn expr_diverges(hir: &HirBody, id: HirExprId, in_loop: bool) -> bool {
         // for dead code purposes — the label might target a non-enclosing loop.
         HirExpr::Break { label, .. } | HirExpr::Continue { label, .. } => {
             in_loop && label.is_none()
-        }
+        },
 
         HirExpr::Loop { body, .. } => {
             // A loop that can exit via `break` does NOT diverge — even if another
@@ -190,7 +206,7 @@ fn expr_diverges(hir: &HirBody, id: HirExprId, in_loop: bool) -> bool {
             }
             // Otherwise it's an infinite loop — also diverges.
             true
-        }
+        },
 
         HirExpr::If {
             then_body,
@@ -202,10 +218,10 @@ fn expr_diverges(hir: &HirBody, id: HirExprId, in_loop: bool) -> bool {
                 Some(else_block) => then_div && block_part_diverges(hir, else_block),
                 None => false,
             }
-        }
+        },
         HirExpr::Match { arms, .. } => {
             !arms.is_empty() && arms.iter().all(|arm| expr_diverges(hir, arm.body, in_loop))
-        }
+        },
         HirExpr::Block { body, .. } => block_part_diverges(hir, body),
         _ => false,
     }
@@ -258,13 +274,19 @@ fn block_always_returns(hir: &HirBody, block: &HirBlock) -> bool {
 fn expr_always_returns(hir: &HirBody, id: HirExprId) -> bool {
     match &hir.exprs[id] {
         HirExpr::Return { .. } => true,
-        HirExpr::If { then_body, else_body, .. } => {
+        HirExpr::If {
+            then_body,
+            else_body,
+            ..
+        } => {
             block_always_returns(hir, then_body)
-                && else_body.as_ref().is_some_and(|e| block_always_returns(hir, e))
-        }
+                && else_body
+                    .as_ref()
+                    .is_some_and(|e| block_always_returns(hir, e))
+        },
         HirExpr::Match { arms, .. } => {
             !arms.is_empty() && arms.iter().all(|arm| expr_always_returns(hir, arm.body))
-        }
+        },
         HirExpr::Block { body, .. } => block_always_returns(hir, body),
         _ => false,
     }
@@ -306,7 +328,7 @@ fn expr_contains_break(hir: &HirBody, id: HirExprId) -> bool {
                 || else_body
                     .as_ref()
                     .is_some_and(|e| block_contains_break(hir, e))
-        }
+        },
         HirExpr::Match { arms, .. } => arms.iter().any(|arm| expr_contains_break(hir, arm.body)),
         HirExpr::Block { body, .. } => block_contains_break(hir, body),
         // Don't recurse into nested loops or closures

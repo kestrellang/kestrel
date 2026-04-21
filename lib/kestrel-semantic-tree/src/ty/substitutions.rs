@@ -188,7 +188,6 @@ impl Substitutions {
 
         true
     }
-
 }
 
 #[cfg(test)]

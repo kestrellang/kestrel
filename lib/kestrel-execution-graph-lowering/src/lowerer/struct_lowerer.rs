@@ -42,11 +42,19 @@ pub fn lower_struct(ctx: &mut LoweringContext, struct_symbol: &Arc<StructSymbol>
             && let Ok(field_symbol) = child.downcast_arc::<FieldSymbol>()
         {
             // Skip static fields - they're not part of the instance layout
-            if field_symbol.metadata().get_behavior::<StaticBehavior>().is_some() {
+            if field_symbol
+                .metadata()
+                .get_behavior::<StaticBehavior>()
+                .is_some()
+            {
                 continue;
             }
             // Skip computed properties - they have getters, not storage
-            if field_symbol.metadata().get_behavior::<ComputedPropertyMarker>().is_some() {
+            if field_symbol
+                .metadata()
+                .get_behavior::<ComputedPropertyMarker>()
+                .is_some()
+            {
                 continue;
             }
             lower_field(ctx, struct_id, &field_symbol);

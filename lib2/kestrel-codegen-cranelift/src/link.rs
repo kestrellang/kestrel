@@ -43,9 +43,9 @@ pub fn link_executable(
         cmd.arg(framework);
     }
 
-    let output = cmd.output().map_err(|e| {
-        CodegenError::LinkerError(format!("failed to run linker '{cc}': {e}"))
-    })?;
+    let output = cmd
+        .output()
+        .map_err(|e| CodegenError::LinkerError(format!("failed to run linker '{cc}': {e}")))?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);

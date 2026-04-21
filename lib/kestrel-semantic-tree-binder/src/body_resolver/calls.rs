@@ -30,30 +30,26 @@ use crate::resolution::type_resolver::TypeResolver;
 use crate::diagnostics::{
     AmbiguousTypeParameterInitError, CannotMutateThroughImmutableBindingError,
     CannotPassImmutableFieldToMutatingError, CannotPassLetToMutatingError,
-    CannotPassTemporaryToMutatingError, ClosureArityError,
-    FieldNotVisibleForInitError, ImplicitInitArityError, ImplicitInitLabelError,
-    NoInitInTypeParameterBoundsError,
+    CannotPassTemporaryToMutatingError, ClosureArityError, FieldNotVisibleForInitError,
+    ImplicitInitArityError, ImplicitInitLabelError, NoInitInTypeParameterBoundsError,
     NoMatchingTypeParameterInitError, NonCallableError, NotGenericError, OverloadDescription,
-    PrimitiveMethodArityError, TooFewTypeArgumentsError,
-    TypeArgsOnNonGenericError, UnconstrainedTypeParameterMemberError,
+    PrimitiveMethodArityError, TooFewTypeArgumentsError, TypeArgsOnNonGenericError,
+    UnconstrainedTypeParameterMemberError,
 };
 use kestrel_syntax_tree::utils::get_node_span;
 
 use super::context::BodyResolutionContext;
 use super::expressions::resolve_expression;
 use super::members::{
-    filter_applicable_extensions, resolve_delegating_init,
-    resolve_member_call, resolve_self_type_to_concrete,
+    filter_applicable_extensions, resolve_delegating_init, resolve_member_call,
+    resolve_self_type_to_concrete,
 };
 use super::utils::{
     create_generic_struct_type, create_struct_type, create_struct_type_with_type_args,
-    get_callable_behavior,
-    get_type_container, get_type_parameter_bounds_by_id, infer_type_arguments, is_expression_kind,
-    matches_signature, resolve_associated_types,
-    validate_not_standalone_type_param,
-    verify_type_argument_constraints,
+    get_callable_behavior, get_type_container, get_type_parameter_bounds_by_id,
+    infer_type_arguments, is_expression_kind, matches_signature, resolve_associated_types,
+    validate_not_standalone_type_param, verify_type_argument_constraints,
 };
-
 
 /// Resolve a call expression: callee(arg1, arg2, ...) or callee[T](arg1, ...)
 pub fn resolve_call_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> Expression {
@@ -334,7 +330,6 @@ pub fn resolve_call(
     let callee_kind = callee.kind.clone();
     let callee_ty = callee.ty.clone();
 
-
     match callee_kind {
         // Direct function/field reference
         ExprKind::SymbolRef(symbol_id) => {
@@ -388,13 +383,16 @@ pub fn resolve_call(
                     }
 
                     if !type_params.is_empty() {
-                        let arg_types: Vec<Ty> = arguments.iter().map(|a| a.value.ty.clone()).collect();
+                        let arg_types: Vec<Ty> =
+                            arguments.iter().map(|a| a.value.ty.clone()).collect();
                         let subs = infer_type_arguments(&type_params, &callable, &arg_types);
                         let inferred_args: Vec<Ty> = type_params
                             .iter()
                             .map(|tp| {
                                 let tp_id = tp.metadata().id();
-                                subs.get(tp_id).cloned().unwrap_or_else(|| Ty::infer(span.clone()))
+                                subs.get(tp_id)
+                                    .cloned()
+                                    .unwrap_or_else(|| Ty::infer(span.clone()))
                             })
                             .collect();
                         let where_clause = func_sym.where_clause();
@@ -438,11 +436,7 @@ pub fn resolve_call(
                 }
             }
             let best_effort_ty = compute_overloaded_best_effort_return_type(
-                candidates,
-                &arguments,
-                arg_labels,
-                &span,
-                ctx,
+                candidates, &arguments, arg_labels, &span, ctx,
             );
             Expression::deferred_function_call(
                 candidates.clone(),
@@ -524,11 +518,11 @@ pub fn resolve_call(
                 ExprKind::TypeRef(_) | ExprKind::TypeParameterRef(_) | ExprKind::AssociatedTypeRef
             ) {
                 let target_ty = fill_missing_type_params(&receiver.ty, &span);
-                let deferred_return_ty =
-                    match ctx.model.resolve_member(&receiver.ty, member, true) {
-                        Ok(resolution) => resolution.ty,
-                        _ => Ty::infer(span.clone()),
-                    };
+                let deferred_return_ty = match ctx.model.resolve_member(&receiver.ty, member, true)
+                {
+                    Ok(resolution) => resolution.ty,
+                    _ => Ty::infer(span.clone()),
+                };
                 Expression::deferred_static_call(
                     target_ty,
                     member.to_string(),
@@ -541,7 +535,15 @@ pub fn resolve_call(
             } else {
                 // Use resolve_member_call which tries field+subscript, callable fields,
                 // and defers method calls — exactly what we need.
-                resolve_member_call(receiver, member, arguments, arg_labels, explicit_type_args, span, ctx)
+                resolve_member_call(
+                    receiver,
+                    member,
+                    arguments,
+                    arg_labels,
+                    explicit_type_args,
+                    span,
+                    ctx,
+                )
             }
         },
 
@@ -568,7 +570,15 @@ pub fn resolve_call(
             // This could be:
             // 1. A field with callable type (first-class function)
             // 2. A method call
-            resolve_member_call(object, field, arguments, arg_labels, explicit_type_args, span, ctx)
+            resolve_member_call(
+                object,
+                field,
+                arguments,
+                arg_labels,
+                explicit_type_args,
+                span,
+                ctx,
+            )
         },
 
         // Primitive method reference - convert to a primitive method call
@@ -827,8 +837,7 @@ pub fn try_resolve_subscript_call(
             let return_type = behavior.return_type().clone();
             let return_type = return_type.substitute_self(receiver_ty);
             let return_type = match receiver_ty.expand_aliases().kind() {
-                TyKind::Struct { substitutions, .. }
-                | TyKind::Enum { substitutions, .. }
+                TyKind::Struct { substitutions, .. } | TyKind::Enum { substitutions, .. }
                     if !substitutions.is_empty() =>
                 {
                     return_type.apply_substitutions(substitutions)
@@ -941,24 +950,29 @@ fn contains_method_type_param(
         return false;
     }
     match ty.kind() {
-        TyKind::TypeParameter(tp) => {
-            method_param_ids.contains(&tp.metadata().id())
-        },
-        TyKind::Function { params, return_type } => {
-            params.iter().any(|p| contains_method_type_param(p, method_param_ids))
+        TyKind::TypeParameter(tp) => method_param_ids.contains(&tp.metadata().id()),
+        TyKind::Function {
+            params,
+            return_type,
+        } => {
+            params
+                .iter()
+                .any(|p| contains_method_type_param(p, method_param_ids))
                 || contains_method_type_param(return_type, method_param_ids)
         },
-        TyKind::Tuple(elems) => elems.iter().any(|e| contains_method_type_param(e, method_param_ids)),
+        TyKind::Tuple(elems) => elems
+            .iter()
+            .any(|e| contains_method_type_param(e, method_param_ids)),
         TyKind::Struct { substitutions, .. }
         | TyKind::Enum { substitutions, .. }
         | TyKind::Protocol { substitutions, .. }
-        | TyKind::TypeAlias { substitutions, .. } => {
-            substitutions.iter().any(|(_, t)| contains_method_type_param(t, method_param_ids))
-        },
+        | TyKind::TypeAlias { substitutions, .. } => substitutions
+            .iter()
+            .any(|(_, t)| contains_method_type_param(t, method_param_ids)),
         TyKind::Pointer(inner) => contains_method_type_param(inner, method_param_ids),
-        TyKind::AssociatedType { container, .. } => {
-            container.as_ref().is_some_and(|c| contains_method_type_param(c, method_param_ids))
-        },
+        TyKind::AssociatedType { container, .. } => container
+            .as_ref()
+            .is_some_and(|c| contains_method_type_param(c, method_param_ids)),
         _ => false,
     }
 }
@@ -973,31 +987,28 @@ fn contains_non_method_type_parameter(
 ) -> bool {
     match ty.kind() {
         TyKind::TypeParameter(tp) => !method_param_ids.contains(&tp.metadata().id()),
-        TyKind::Function { params, return_type } => {
+        TyKind::Function {
+            params,
+            return_type,
+        } => {
             params
                 .iter()
                 .any(|p| contains_non_method_type_parameter(p, method_param_ids))
                 || contains_non_method_type_parameter(return_type, method_param_ids)
         },
-        TyKind::Tuple(elems) => {
-            elems
-                .iter()
-                .any(|e| contains_non_method_type_parameter(e, method_param_ids))
-        },
+        TyKind::Tuple(elems) => elems
+            .iter()
+            .any(|e| contains_non_method_type_parameter(e, method_param_ids)),
         TyKind::Struct { substitutions, .. }
         | TyKind::Enum { substitutions, .. }
         | TyKind::Protocol { substitutions, .. }
-        | TyKind::TypeAlias { substitutions, .. } => {
-            substitutions
-                .iter()
-                .any(|(_, t)| contains_non_method_type_parameter(t, method_param_ids))
-        },
+        | TyKind::TypeAlias { substitutions, .. } => substitutions
+            .iter()
+            .any(|(_, t)| contains_non_method_type_parameter(t, method_param_ids)),
         TyKind::Pointer(inner) => contains_non_method_type_parameter(inner, method_param_ids),
-        TyKind::AssociatedType { container, .. } => {
-            container
-                .as_ref()
-                .is_some_and(|c| contains_non_method_type_parameter(c, method_param_ids))
-        },
+        TyKind::AssociatedType { container, .. } => container
+            .as_ref()
+            .is_some_and(|c| contains_non_method_type_parameter(c, method_param_ids)),
         _ => false,
     }
 }
@@ -1008,9 +1019,10 @@ fn contains_self_type(ty: &Ty) -> bool {
     match ty.kind() {
         TyKind::SelfType => true,
         TyKind::Tuple(elems) => elems.iter().any(contains_self_type),
-        TyKind::Function { params, return_type } => {
-            params.iter().any(contains_self_type) || contains_self_type(return_type)
-        },
+        TyKind::Function {
+            params,
+            return_type,
+        } => params.iter().any(contains_self_type) || contains_self_type(return_type),
         TyKind::Struct { substitutions, .. }
         | TyKind::Enum { substitutions, .. }
         | TyKind::Protocol { substitutions, .. }
@@ -1034,11 +1046,17 @@ fn try_resolve_assoc_type_from_receiver(
     ctx: &BodyResolutionContext,
 ) -> Option<Ty> {
     match ty.kind() {
-        TyKind::AssociatedType { symbol, container: None } => {
+        TyKind::AssociatedType {
+            symbol,
+            container: None,
+        } => {
             // Unqualified AssociatedType: resolve using receiver as the container.
-            ctx.model.resolve_associated_type(receiver_ty, &symbol.metadata().name().value)
+            ctx.model
+                .resolve_associated_type(receiver_ty, &symbol.metadata().name().value)
         },
-        TyKind::AssociatedType { container: Some(_), .. } => {
+        TyKind::AssociatedType {
+            container: Some(_), ..
+        } => {
             // Qualified AssociatedType: try normal resolution.
             let resolved = resolve_associated_types(ty, ctx);
             if matches!(resolved.kind(), TyKind::AssociatedType { .. }) {
@@ -1062,7 +1080,9 @@ fn infer_method_type_params(
     match pattern.kind() {
         TyKind::TypeParameter(tp) => {
             let tp_id = tp.metadata().id();
-            if method_type_params.iter().any(|p| p.metadata().id() == tp_id)
+            if method_type_params
+                .iter()
+                .any(|p| p.metadata().id() == tp_id)
                 && !subs.contains(tp_id)
             {
                 subs.insert(tp_id, concrete.clone());
@@ -1075,8 +1095,15 @@ fn infer_method_type_params(
                 }
             }
         },
-        TyKind::Struct { substitutions: pattern_subs, .. } => {
-            if let TyKind::Struct { substitutions: concrete_subs, .. } = concrete.kind() {
+        TyKind::Struct {
+            substitutions: pattern_subs,
+            ..
+        } => {
+            if let TyKind::Struct {
+                substitutions: concrete_subs,
+                ..
+            } = concrete.kind()
+            {
                 for (id, pattern_sub_ty) in pattern_subs.iter() {
                     if let Some(concrete_sub_ty) = concrete_subs.get(*id) {
                         infer_method_type_params(
@@ -1089,8 +1116,15 @@ fn infer_method_type_params(
                 }
             }
         },
-        TyKind::Enum { substitutions: pattern_subs, .. } => {
-            if let TyKind::Enum { substitutions: concrete_subs, .. } = concrete.kind() {
+        TyKind::Enum {
+            substitutions: pattern_subs,
+            ..
+        } => {
+            if let TyKind::Enum {
+                substitutions: concrete_subs,
+                ..
+            } = concrete.kind()
+            {
                 for (id, pattern_sub_ty) in pattern_subs.iter() {
                     if let Some(concrete_sub_ty) = concrete_subs.get(*id) {
                         infer_method_type_params(
@@ -1112,7 +1146,10 @@ fn infer_method_type_params(
 /// Returns the type unchanged if it already has substitutions or is non-generic.
 fn fill_missing_type_params(ty: &Ty, span: &Span) -> Ty {
     match ty.kind() {
-        TyKind::Struct { symbol, substitutions } if substitutions.is_empty() => {
+        TyKind::Struct {
+            symbol,
+            substitutions,
+        } if substitutions.is_empty() => {
             let type_params = symbol.type_parameters();
             if type_params.is_empty() {
                 return ty.clone();
@@ -1123,7 +1160,10 @@ fn fill_missing_type_params(ty: &Ty, span: &Span) -> Ty {
             }
             Ty::generic_struct(symbol.clone(), subs, span.clone())
         },
-        TyKind::Enum { symbol, substitutions } if substitutions.is_empty() => {
+        TyKind::Enum {
+            symbol,
+            substitutions,
+        } if substitutions.is_empty() => {
             let type_params = symbol.type_parameters();
             if type_params.is_empty() {
                 return ty.clone();
@@ -1168,10 +1208,13 @@ fn infer_deferred_method_return_type(
             continue;
         }
 
-        let mut callable = orig_callable.map_types(&mut |t| t.substitute_self(&resolved_receiver_ty));
+        let mut callable =
+            orig_callable.map_types(&mut |t| t.substitute_self(&resolved_receiver_ty));
         callable = callable.map_types(&mut |t| resolve_associated_types(t, ctx));
 
-        let mut candidate_return_ty = callable.return_type().substitute_self(&resolved_receiver_ty);
+        let mut candidate_return_ty = callable
+            .return_type()
+            .substitute_self(&resolved_receiver_ty);
         candidate_return_ty = resolve_associated_types(&candidate_return_ty, ctx);
         let expanded_receiver_ty = resolved_receiver_ty.expand_aliases();
         if let TyKind::Struct { substitutions, .. } | TyKind::Enum { substitutions, .. } =
@@ -1197,7 +1240,12 @@ fn infer_deferred_method_return_type(
             let method_param_ids_for_tp_check: std::collections::HashSet<_> = symbol
                 .as_any()
                 .downcast_ref::<FunctionSymbol>()
-                .map(|f| f.type_parameters().iter().map(|tp| tp.metadata().id()).collect())
+                .map(|f| {
+                    f.type_parameters()
+                        .iter()
+                        .map(|tp| tp.metadata().id())
+                        .collect()
+                })
                 .unwrap_or_default();
             if contains_non_method_type_parameter(
                 &candidate_return_ty,
@@ -1215,8 +1263,10 @@ fn infer_deferred_method_return_type(
             .unwrap_or_default();
 
         if !method_type_params.is_empty() {
-            let method_param_ids: std::collections::HashSet<_> =
-                method_type_params.iter().map(|tp| tp.metadata().id()).collect();
+            let method_param_ids: std::collections::HashSet<_> = method_type_params
+                .iter()
+                .map(|tp| tp.metadata().id())
+                .collect();
 
             if contains_method_type_param(&candidate_return_ty, &method_param_ids) {
                 // Step 0: use explicit type args if provided (handles `cast[Bucket[K, V]]`).
@@ -1228,8 +1278,7 @@ fn infer_deferred_method_return_type(
                     s
                 } else {
                     // Step 1: infer TypeParams from argument types (handles `zip[Other]`, `fold[Acc]`).
-                    let arg_types: Vec<Ty> =
-                        arguments.iter().map(|a| a.value.ty.clone()).collect();
+                    let arg_types: Vec<Ty> = arguments.iter().map(|a| a.value.ty.clone()).collect();
                     infer_type_arguments(&method_type_params, &callable, &arg_types)
                 };
 
@@ -1289,7 +1338,6 @@ fn infer_deferred_method_return_type(
 
     inferred.unwrap_or_else(|| Ty::infer(span.clone()))
 }
-
 
 /// Compute a best-effort return type for a single function call.
 ///
@@ -1525,7 +1573,10 @@ fn resolve_implicit_init(
         .filter(|c| {
             // Exclude computed and static fields from memberwise init
             use kestrel_semantic_tree::behavior::{ComputedPropertyMarker, StaticBehavior};
-            let is_computed = c.metadata().get_behavior::<ComputedPropertyMarker>().is_some();
+            let is_computed = c
+                .metadata()
+                .get_behavior::<ComputedPropertyMarker>()
+                .is_some();
             let is_static = c.metadata().get_behavior::<StaticBehavior>().is_some();
             !is_computed && !is_static
         })
@@ -1824,8 +1875,8 @@ fn collect_protocol_initializers(
             } = parent_proto_ty.kind()
             {
                 // Compose substitutions: apply our substitutions to the parent's type arguments
-                let composed_subs =
-                    parent_subs.map_values(&mut |ty| ty.apply_substitutions(protocol_substitutions));
+                let composed_subs = parent_subs
+                    .map_values(&mut |ty| ty.apply_substitutions(protocol_substitutions));
                 collect_protocol_initializers(parent, self_replacement, &composed_subs, candidates);
             }
         }
@@ -1985,7 +2036,10 @@ fn classify_field_chain_mutability(
                 && child.metadata().name().value == current_field
             {
                 use kestrel_semantic_tree::behavior::ComputedPropertyMarker;
-                let is_computed = child.metadata().get_behavior::<ComputedPropertyMarker>().is_some();
+                let is_computed = child
+                    .metadata()
+                    .get_behavior::<ComputedPropertyMarker>()
+                    .is_some();
                 if let Some(field_sym) = child.as_any().downcast_ref::<FieldSymbol>() {
                     // Computed properties with setters are assignable
                     if is_computed {
@@ -2014,7 +2068,10 @@ fn classify_field_chain_mutability(
                 && child.metadata().name().value == current_field
             {
                 use kestrel_semantic_tree::behavior::ComputedPropertyMarker;
-                let is_computed = child.metadata().get_behavior::<ComputedPropertyMarker>().is_some();
+                let is_computed = child
+                    .metadata()
+                    .get_behavior::<ComputedPropertyMarker>()
+                    .is_some();
                 if let Some(field_sym) = child.as_any().downcast_ref::<FieldSymbol>() {
                     // Computed properties with setters are assignable
                     if is_computed {

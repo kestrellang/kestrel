@@ -37,9 +37,7 @@ impl Query for WhereClausesInScope {
                 }
             }
 
-            if let Some(target_beh) =
-                symbol.metadata().get_behavior::<ExtensionTargetBehavior>()
-            {
+            if let Some(target_beh) = symbol.metadata().get_behavior::<ExtensionTargetBehavior>() {
                 let wc = target_beh.where_clause();
                 if !wc.is_empty() {
                     clauses.push(wc.clone());

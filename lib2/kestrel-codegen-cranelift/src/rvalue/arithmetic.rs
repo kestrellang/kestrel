@@ -11,7 +11,9 @@ use crate::types::{float_bits_to_type, int_bits_to_type};
 use cranelift_codegen::ir::condcodes::{FloatCC, IntCC};
 use cranelift_codegen::ir::{self, InstBuilder, Value as CrValue};
 use cranelift_frontend::FunctionBuilder;
-use kestrel_mir::{FloatBits, FloatConstantKind, FloatMathKind, FloatPredicateKind, IntBits, Op, Signedness};
+use kestrel_mir::{
+    FloatBits, FloatConstantKind, FloatMathKind, FloatPredicateKind, IntBits, Op, Signedness,
+};
 
 /// Compile a unary arithmetic/bitwise/boolean operation.
 pub fn compile_op1(
@@ -26,14 +28,14 @@ pub fn compile_op1(
         Op::FNeg(bits) => {
             let arg = coerce_float(builder, arg, *bits);
             Ok(builder.ins().fneg(arg))
-        }
+        },
 
         Op::Not(bits) => Ok(builder.ins().bnot(arg)),
 
         Op::BoolNot => {
             let one = builder.ins().iconst(ir::types::I8, 1);
             Ok(builder.ins().bxor(arg, one))
-        }
+        },
 
         Op::Popcount(_) => Ok(builder.ins().popcnt(arg)),
         Op::Clz(_) => Ok(builder.ins().clz(arg)),
@@ -48,11 +50,11 @@ pub fn compile_op1(
                 _ => return Err(CodegenError::Unsupported(format!("int_to_float: {op:?}"))),
             };
             Ok(builder.ins().fcvt_from_sint(target, arg))
-        }
+        },
         Op::FloatToInt(_, int_bits) => {
             let target = int_bits_to_type(*int_bits);
             Ok(builder.ins().fcvt_to_sint_sat(target, arg))
-        }
+        },
 
         // Float width conversions
         Op::FloatTruncate(_, _) => Ok(builder.ins().fdemote(ir::types::F32, arg)),
@@ -62,15 +64,15 @@ pub fn compile_op1(
         Op::IntWiden(_, target_bits) => {
             let target = int_bits_to_type(*target_bits);
             Ok(builder.ins().sextend(target, arg))
-        }
+        },
         Op::IntUnsignedWiden(_, target_bits) => {
             let target = int_bits_to_type(*target_bits);
             Ok(builder.ins().uextend(target, arg))
-        }
+        },
         Op::IntTruncate(_, target_bits) => {
             let target = int_bits_to_type(*target_bits);
             Ok(builder.ins().ireduce(target, arg))
-        }
+        },
 
         _ => Err(CodegenError::Unsupported(format!("unary op: {op:?}"))),
     }
@@ -113,21 +115,33 @@ pub fn compile_op2(
 
         // Float arithmetic — coerce operands to match the operation's width
         Op::FAdd(bits) => {
-            let (l, r) = (coerce_float(builder, lhs, *bits), coerce_float(builder, rhs, *bits));
+            let (l, r) = (
+                coerce_float(builder, lhs, *bits),
+                coerce_float(builder, rhs, *bits),
+            );
             Ok(builder.ins().fadd(l, r))
-        }
+        },
         Op::FSub(bits) => {
-            let (l, r) = (coerce_float(builder, lhs, *bits), coerce_float(builder, rhs, *bits));
+            let (l, r) = (
+                coerce_float(builder, lhs, *bits),
+                coerce_float(builder, rhs, *bits),
+            );
             Ok(builder.ins().fsub(l, r))
-        }
+        },
         Op::FMul(bits) => {
-            let (l, r) = (coerce_float(builder, lhs, *bits), coerce_float(builder, rhs, *bits));
+            let (l, r) = (
+                coerce_float(builder, lhs, *bits),
+                coerce_float(builder, rhs, *bits),
+            );
             Ok(builder.ins().fmul(l, r))
-        }
+        },
         Op::FDiv(bits) => {
-            let (l, r) = (coerce_float(builder, lhs, *bits), coerce_float(builder, rhs, *bits));
+            let (l, r) = (
+                coerce_float(builder, lhs, *bits),
+                coerce_float(builder, rhs, *bits),
+            );
             Ok(builder.ins().fdiv(l, r))
-        }
+        },
 
         // Bitwise
         Op::And(_) => Ok(builder.ins().band(lhs, rhs)),
@@ -141,69 +155,91 @@ pub fn compile_op2(
         Op::Eq(_) => {
             let cmp = builder.ins().icmp(IntCC::Equal, lhs, rhs);
             Ok(cmp)
-        }
+        },
         Op::Ne(_) => {
             let cmp = builder.ins().icmp(IntCC::NotEqual, lhs, rhs);
             Ok(cmp)
-        }
+        },
         Op::Lt(_, Signedness::Signed) => {
             let cmp = builder.ins().icmp(IntCC::SignedLessThan, lhs, rhs);
             Ok(cmp)
-        }
+        },
         Op::Lt(_, Signedness::Unsigned) => {
             let cmp = builder.ins().icmp(IntCC::UnsignedLessThan, lhs, rhs);
             Ok(cmp)
-        }
+        },
         Op::Le(_, Signedness::Signed) => {
             let cmp = builder.ins().icmp(IntCC::SignedLessThanOrEqual, lhs, rhs);
             Ok(cmp)
-        }
+        },
         Op::Le(_, Signedness::Unsigned) => {
             let cmp = builder.ins().icmp(IntCC::UnsignedLessThanOrEqual, lhs, rhs);
             Ok(cmp)
-        }
+        },
         Op::Gt(_, Signedness::Signed) => {
             let cmp = builder.ins().icmp(IntCC::SignedGreaterThan, lhs, rhs);
             Ok(cmp)
-        }
+        },
         Op::Gt(_, Signedness::Unsigned) => {
             let cmp = builder.ins().icmp(IntCC::UnsignedGreaterThan, lhs, rhs);
             Ok(cmp)
-        }
+        },
         Op::Ge(_, Signedness::Signed) => {
-            let cmp = builder.ins().icmp(IntCC::SignedGreaterThanOrEqual, lhs, rhs);
+            let cmp = builder
+                .ins()
+                .icmp(IntCC::SignedGreaterThanOrEqual, lhs, rhs);
             Ok(cmp)
-        }
+        },
         Op::Ge(_, Signedness::Unsigned) => {
-            let cmp = builder.ins().icmp(IntCC::UnsignedGreaterThanOrEqual, lhs, rhs);
+            let cmp = builder
+                .ins()
+                .icmp(IntCC::UnsignedGreaterThanOrEqual, lhs, rhs);
             Ok(cmp)
-        }
+        },
 
         // Float comparison — coerce operands to match the operation's width
         Op::FEq(bits) => {
-            let (l, r) = (coerce_float(builder, lhs, *bits), coerce_float(builder, rhs, *bits));
+            let (l, r) = (
+                coerce_float(builder, lhs, *bits),
+                coerce_float(builder, rhs, *bits),
+            );
             Ok(builder.ins().fcmp(FloatCC::Equal, l, r))
-        }
+        },
         Op::FNe(bits) => {
-            let (l, r) = (coerce_float(builder, lhs, *bits), coerce_float(builder, rhs, *bits));
+            let (l, r) = (
+                coerce_float(builder, lhs, *bits),
+                coerce_float(builder, rhs, *bits),
+            );
             Ok(builder.ins().fcmp(FloatCC::NotEqual, l, r))
-        }
+        },
         Op::FLt(bits) => {
-            let (l, r) = (coerce_float(builder, lhs, *bits), coerce_float(builder, rhs, *bits));
+            let (l, r) = (
+                coerce_float(builder, lhs, *bits),
+                coerce_float(builder, rhs, *bits),
+            );
             Ok(builder.ins().fcmp(FloatCC::LessThan, l, r))
-        }
+        },
         Op::FLe(bits) => {
-            let (l, r) = (coerce_float(builder, lhs, *bits), coerce_float(builder, rhs, *bits));
+            let (l, r) = (
+                coerce_float(builder, lhs, *bits),
+                coerce_float(builder, rhs, *bits),
+            );
             Ok(builder.ins().fcmp(FloatCC::LessThanOrEqual, l, r))
-        }
+        },
         Op::FGt(bits) => {
-            let (l, r) = (coerce_float(builder, lhs, *bits), coerce_float(builder, rhs, *bits));
+            let (l, r) = (
+                coerce_float(builder, lhs, *bits),
+                coerce_float(builder, rhs, *bits),
+            );
             Ok(builder.ins().fcmp(FloatCC::GreaterThan, l, r))
-        }
+        },
         Op::FGe(bits) => {
-            let (l, r) = (coerce_float(builder, lhs, *bits), coerce_float(builder, rhs, *bits));
+            let (l, r) = (
+                coerce_float(builder, lhs, *bits),
+                coerce_float(builder, rhs, *bits),
+            );
             Ok(builder.ins().fcmp(FloatCC::GreaterThanOrEqual, l, r))
-        }
+        },
 
         // Boolean ops (i8)
         Op::BoolAnd => Ok(builder.ins().band(lhs, rhs)),
@@ -211,7 +247,7 @@ pub fn compile_op2(
         Op::BoolEq => {
             let cmp = builder.ins().icmp(IntCC::Equal, lhs, rhs);
             Ok(cmp)
-        }
+        },
 
         _ => Err(CodegenError::Unsupported(format!("binary op: {op:?}"))),
     }
@@ -226,35 +262,31 @@ pub fn compile_float_intrinsic_op1(
     arg: CrValue,
 ) -> Result<CrValue, CodegenError> {
     match op {
-        Op::FloatConst(bits, kind) => {
-            match (bits, kind) {
-                (FloatBits::F16, _) => {
-                    Err(CodegenError::Unsupported("f16 constants not yet supported".into()))
-                }
-                (FloatBits::F32, FloatConstantKind::Infinity) => {
-                    Ok(builder.ins().f32const(f32::INFINITY))
-                }
-                (FloatBits::F32, FloatConstantKind::Nan) => {
-                    Ok(builder.ins().f32const(f32::NAN))
-                }
-                (FloatBits::F64, FloatConstantKind::Infinity) => {
-                    Ok(builder.ins().f64const(f64::INFINITY))
-                }
-                (FloatBits::F64, FloatConstantKind::Nan) => {
-                    Ok(builder.ins().f64const(f64::NAN))
-                }
-            }
-        }
+        Op::FloatConst(bits, kind) => match (bits, kind) {
+            (FloatBits::F16, _) => Err(CodegenError::Unsupported(
+                "f16 constants not yet supported".into(),
+            )),
+            (FloatBits::F32, FloatConstantKind::Infinity) => {
+                Ok(builder.ins().f32const(f32::INFINITY))
+            },
+            (FloatBits::F32, FloatConstantKind::Nan) => Ok(builder.ins().f32const(f32::NAN)),
+            (FloatBits::F64, FloatConstantKind::Infinity) => {
+                Ok(builder.ins().f64const(f64::INFINITY))
+            },
+            (FloatBits::F64, FloatConstantKind::Nan) => Ok(builder.ins().f64const(f64::NAN)),
+        },
 
         Op::FloatPred(bits, pred) => {
             if matches!(bits, FloatBits::F16) {
-                return Err(CodegenError::Unsupported("f16 predicates not yet supported".into()));
+                return Err(CodegenError::Unsupported(
+                    "f16 predicates not yet supported".into(),
+                ));
             }
             match pred {
                 FloatPredicateKind::IsNan => {
                     // NaN != NaN
                     Ok(builder.ins().fcmp(FloatCC::Unordered, arg, arg))
-                }
+                },
                 FloatPredicateKind::IsInfinite => {
                     // |arg| == infinity
                     let abs = builder.ins().fabs(arg);
@@ -264,9 +296,9 @@ pub fn compile_float_intrinsic_op1(
                         FloatBits::F16 => unreachable!("F16 guarded by early return above"),
                     };
                     Ok(builder.ins().fcmp(FloatCC::Equal, abs, inf))
-                }
+                },
             }
-        }
+        },
 
         Op::FloatMath(_, kind) => {
             let result = match kind {
@@ -277,7 +309,7 @@ pub fn compile_float_intrinsic_op1(
                 FloatMathKind::Sqrt => builder.ins().sqrt(arg),
             };
             Ok(result)
-        }
+        },
 
         _ => Err(CodegenError::Unsupported(format!(
             "float intrinsic op1: {op:?}"

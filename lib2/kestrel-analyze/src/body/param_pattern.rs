@@ -78,7 +78,9 @@ impl BodyCheck for ParamPatternAnalyzer {
         for (_id, expr) in cx.hir.exprs.iter() {
             if let HirExpr::Closure { params, .. } = expr {
                 for param in params {
-                    let Some(pat_id) = param.pattern else { continue };
+                    let Some(pat_id) = param.pattern else {
+                        continue;
+                    };
                     let pat = &cx.hir.pats[pat_id];
                     let span = hir_pat_span(pat).clone();
                     let mut seen = HashMap::new();
@@ -119,18 +121,18 @@ fn check_duplicate_bindings(
                     notes: vec![],
                 });
             }
-        }
+        },
         ParamPattern::Tuple { elements } => {
             for elem in elements {
                 check_duplicate_bindings(elem, seen, span, diags);
             }
-        }
+        },
         ParamPattern::Struct { fields, .. } => {
             for field in fields {
                 check_duplicate_bindings(&field.pattern, seen, span, diags);
             }
-        }
-        ParamPattern::Wildcard => {}
+        },
+        ParamPattern::Wildcard => {},
     }
 }
 
@@ -147,7 +149,7 @@ fn check_pattern_type(
                 if elements.len() != type_elems.len() {
                     emit_arity_mismatch(elements.len(), type_elems.len(), span, diags);
                 }
-            }
+            },
             _ => emit_tuple_on_non_tuple(span, diags),
         }
     }
@@ -182,12 +184,12 @@ fn check_duplicate_bindings_hir(
                     notes: vec![],
                 });
             }
-        }
+        },
         HirPat::Tuple { prefix, suffix, .. } => {
             for &elem in prefix.iter().chain(suffix.iter()) {
                 check_duplicate_bindings_hir(hir, elem, seen, span, diags);
             }
-        }
+        },
         HirPat::Struct { fields, .. } => {
             for field in fields {
                 if let Some(sub) = field.pattern {
@@ -209,8 +211,8 @@ fn check_duplicate_bindings_hir(
                     });
                 }
             }
-        }
-        _ => {}
+        },
+        _ => {},
     }
 }
 
@@ -222,7 +224,13 @@ fn check_pattern_type_hir(
     span: &kestrel_span2::Span,
     diags: &mut Vec<AnalyzeDiagnostic>,
 ) {
-    if let HirPat::Tuple { prefix, has_rest, suffix, .. } = &hir.pats[pat_id] {
+    if let HirPat::Tuple {
+        prefix,
+        has_rest,
+        suffix,
+        ..
+    } = &hir.pats[pat_id]
+    {
         match ty {
             HirTy::Tuple(type_elems, _) => {
                 let pat_count = prefix.len() + suffix.len();
@@ -233,7 +241,7 @@ fn check_pattern_type_hir(
                 } else if pat_count != type_elems.len() {
                     emit_arity_mismatch(pat_count, type_elems.len(), span, diags);
                 }
-            }
+            },
             _ => emit_tuple_on_non_tuple(span, diags),
         }
     }
@@ -281,10 +289,7 @@ fn emit_arity_mismatch(
     });
 }
 
-fn emit_tuple_on_non_tuple(
-    span: &kestrel_span2::Span,
-    diags: &mut Vec<AnalyzeDiagnostic>,
-) {
+fn emit_tuple_on_non_tuple(span: &kestrel_span2::Span, diags: &mut Vec<AnalyzeDiagnostic>) {
     diags.push(AnalyzeDiagnostic {
         descriptor_id: DESCRIPTORS[2].id,
         severity: DESCRIPTORS[2].default_severity,

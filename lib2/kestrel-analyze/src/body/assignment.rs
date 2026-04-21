@@ -118,10 +118,7 @@ fn check_target(
                 diags.push(AnalyzeDiagnostic {
                     descriptor_id: DESCRIPTORS[0].id,
                     severity: DESCRIPTORS[0].default_severity,
-                    message: format!(
-                        "cannot assign to immutable variable '{}'",
-                        local.name
-                    ),
+                    message: format!("cannot assign to immutable variable '{}'", local.name),
                     labels: vec![DiagLabel {
                         span: util::expr_span(cx.hir, target),
                         message: "declared as 'let'".into(),
@@ -130,7 +127,7 @@ fn check_target(
                     notes: vec![],
                 });
             }
-        }
+        },
 
         // Field access: check Settable component on the resolved entity.
         // In an initializer, self.field assignments are always allowed.
@@ -177,7 +174,7 @@ fn check_target(
                     notes: vec![],
                 });
             }
-        }
+        },
 
         // Tuple index: check if the base is mutable
         HirExpr::TupleIndex { base, index, .. } => {
@@ -201,7 +198,7 @@ fn check_target(
                     notes: vec![],
                 });
             }
-        }
+        },
 
         // Def references (e.g., module-level fields) — check Settable
         HirExpr::Def(entity, _, _) => {
@@ -213,9 +210,7 @@ fn check_target(
                 // Inside an initializer, bare `x = ...` resolves to a Def pointing
                 // at a field of the enclosing struct — this is field initialization
                 // and is always allowed regardless of the field's Settable marker.
-                if is_initializer
-                    && cx.query.parent_of(*entity) == cx.query.parent_of(cx.entity)
-                {
+                if is_initializer && cx.query.parent_of(*entity) == cx.query.parent_of(cx.entity) {
                     return;
                 }
                 let is_settable = cx.query.get::<Settable>(*entity).is_some();
@@ -247,7 +242,7 @@ fn check_target(
                     notes: vec![],
                 });
             }
-        }
+        },
 
         // All other expressions are invalid assignment targets
         _ => {
@@ -262,7 +257,7 @@ fn check_target(
                 }],
                 notes: vec![],
             });
-        }
+        },
     }
 }
 
@@ -288,7 +283,7 @@ fn is_mutable_base(cx: &BodyContext<'_>, expr_id: HirExprId) -> bool {
                 }
             }
             is_mutable_base(cx, *base)
-        }
+        },
         HirExpr::TupleIndex { base, .. } => is_mutable_base(cx, *base),
         // Non-place expressions (call results, literals, etc.) — conservatively
         // treat as mutable; the type inference / validation phases handle these.

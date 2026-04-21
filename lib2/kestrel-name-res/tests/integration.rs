@@ -3,7 +3,7 @@
 //! These tests parse real Kestrel source code, build declarations,
 //! and then run name resolution queries against the resulting world.
 
-use kestrel_ast_builder::{build_declarations, seed_lang_module, Name, NodeKind};
+use kestrel_ast_builder::{Name, NodeKind, build_declarations, seed_lang_module};
 use kestrel_hecs::{Entity, World};
 use kestrel_name_res::*;
 
@@ -61,12 +61,16 @@ fn build_two_files(source_a: &str, source_b: &str) -> (World, Entity) {
 }
 
 /// Find a child entity by NodeKind and Name.
-fn find_child(ctx: &kestrel_hecs::QueryContext<'_>, parent: Entity, kind: NodeKind, name: &str) -> Entity {
+fn find_child(
+    ctx: &kestrel_hecs::QueryContext<'_>,
+    parent: Entity,
+    kind: NodeKind,
+    name: &str,
+) -> Entity {
     ctx.children_of(parent)
         .iter()
         .find(|&&e| {
-            ctx.get::<NodeKind>(e) == Some(&kind)
-                && ctx.get::<Name>(e).is_some_and(|n| n.0 == name)
+            ctx.get::<NodeKind>(e) == Some(&kind) && ctx.get::<Name>(e).is_some_and(|n| n.0 == name)
         })
         .copied()
         .unwrap_or_else(|| panic!("child {:?} {:?} not found under {:?}", kind, name, parent))
@@ -75,8 +79,14 @@ fn find_child(ctx: &kestrel_hecs::QueryContext<'_>, parent: Entity, kind: NodeKi
 /// Debug helper: print entity hierarchy.
 #[allow(dead_code)]
 fn print_tree(ctx: &kestrel_hecs::QueryContext<'_>, entity: Entity, indent: usize) {
-    let name = ctx.get::<Name>(entity).map(|n| n.0.clone()).unwrap_or_default();
-    let kind = ctx.get::<NodeKind>(entity).map(|k| format!("{:?}", k)).unwrap_or_default();
+    let name = ctx
+        .get::<Name>(entity)
+        .map(|n| n.0.clone())
+        .unwrap_or_default();
+    let kind = ctx
+        .get::<NodeKind>(entity)
+        .map(|k| format!("{:?}", k))
+        .unwrap_or_default();
     eprintln!("{}{} ({}) [{:?}]", " ".repeat(indent), name, kind, entity);
     for &child in ctx.children_of(entity) {
         print_tree(ctx, child, indent + 2);
@@ -89,9 +99,7 @@ fn print_tree(ctx: &kestrel_hecs::QueryContext<'_>, entity: Entity, indent: usiz
 
 #[test]
 fn resolve_struct_type_from_same_module() {
-    let (world, root, _) = build_from_source(
-        "module MyApp\nstruct Foo {}\nstruct Bar {}",
-    );
+    let (world, root, _) = build_from_source("module MyApp\nstruct Foo {}\nstruct Bar {}");
     let ctx = world.query_context();
     let myapp = find_child(&ctx, root, NodeKind::Module, "MyApp");
 
@@ -104,16 +112,15 @@ fn resolve_struct_type_from_same_module() {
         TypeResolution::Found(e) => {
             assert_eq!(ctx.get::<Name>(e).unwrap().0, "Foo");
             assert_eq!(ctx.get::<NodeKind>(e), Some(&NodeKind::Struct));
-        }
+        },
         other => panic!("expected Found, got {:?}", other),
     }
 }
 
 #[test]
 fn resolve_enum_type() {
-    let (world, root, _) = build_from_source(
-        "module MyApp\nenum Color {\n  case Red\n  case Green\n  case Blue\n}",
-    );
+    let (world, root, _) =
+        build_from_source("module MyApp\nenum Color {\n  case Red\n  case Green\n  case Blue\n}");
     let ctx = world.query_context();
     let myapp = find_child(&ctx, root, NodeKind::Module, "MyApp");
 
@@ -126,16 +133,15 @@ fn resolve_enum_type() {
         TypeResolution::Found(e) => {
             assert_eq!(ctx.get::<Name>(e).unwrap().0, "Color");
             assert_eq!(ctx.get::<NodeKind>(e), Some(&NodeKind::Enum));
-        }
+        },
         other => panic!("expected Found, got {:?}", other),
     }
 }
 
 #[test]
 fn resolve_protocol_type() {
-    let (world, root, _) = build_from_source(
-        "module MyApp\nprotocol Printable {\n  func description() -> String\n}",
-    );
+    let (world, root, _) =
+        build_from_source("module MyApp\nprotocol Printable {\n  func description() -> String\n}");
     let ctx = world.query_context();
     let myapp = find_child(&ctx, root, NodeKind::Module, "MyApp");
 
@@ -148,7 +154,7 @@ fn resolve_protocol_type() {
         TypeResolution::Found(e) => {
             assert_eq!(ctx.get::<Name>(e).unwrap().0, "Printable");
             assert_eq!(ctx.get::<NodeKind>(e), Some(&NodeKind::Protocol));
-        }
+        },
         other => panic!("expected Found, got {:?}", other),
     }
 }
@@ -171,7 +177,7 @@ fn resolve_type_via_import() {
     match result {
         TypeResolution::Found(e) => {
             assert_eq!(ctx.get::<Name>(e).unwrap().0, "Int64");
-        }
+        },
         other => panic!("expected Found(Int64), got {:?}", other),
     }
 }
@@ -179,10 +185,7 @@ fn resolve_type_via_import() {
 #[test]
 fn resolve_type_via_auto_import() {
     // Non-std modules auto-import std leaf modules
-    let (world, root) = build_two_files(
-        "module std.core\npublic struct Int64 {}",
-        "module MyApp",
-    );
+    let (world, root) = build_two_files("module std.core\npublic struct Int64 {}", "module MyApp");
     let ctx = world.query_context();
     let myapp = find_child(&ctx, root, NodeKind::Module, "MyApp");
 
@@ -195,7 +198,7 @@ fn resolve_type_via_auto_import() {
     match result {
         TypeResolution::Found(e) => {
             assert_eq!(ctx.get::<Name>(e).unwrap().0, "Int64");
-        }
+        },
         other => panic!("expected Found(Int64), got {:?}", other),
     }
 }
@@ -248,7 +251,7 @@ fn resolve_lang_types() {
     match result {
         TypeResolution::Found(e) => {
             assert_eq!(ctx.get::<Name>(e).unwrap().0, "i64");
-        }
+        },
         other => panic!("expected Found(i64), got {:?}", other),
     }
 }
@@ -259,9 +262,8 @@ fn resolve_lang_types() {
 
 #[test]
 fn resolve_function_value() {
-    let (world, root, _) = build_from_source(
-        "module MyApp\nfunc greet() -> String {\n  return \"hello\"\n}",
-    );
+    let (world, root, _) =
+        build_from_source("module MyApp\nfunc greet() -> String {\n  return \"hello\"\n}");
     let ctx = world.query_context();
     let myapp = find_child(&ctx, root, NodeKind::Module, "MyApp");
 
@@ -274,7 +276,7 @@ fn resolve_function_value() {
         ValueResolution::Def(e) => {
             assert_eq!(ctx.get::<Name>(e).unwrap().0, "greet");
             assert_eq!(ctx.get::<NodeKind>(e), Some(&NodeKind::Function));
-        }
+        },
         other => panic!("expected Def, got {:?}", other),
     }
 }
@@ -295,10 +297,12 @@ fn resolve_overloaded_functions() {
     match result {
         ValueResolution::Overloaded(entities) => {
             assert_eq!(entities.len(), 2);
-            assert!(entities
-                .iter()
-                .all(|&e| ctx.get::<NodeKind>(e) == Some(&NodeKind::Function)));
-        }
+            assert!(
+                entities
+                    .iter()
+                    .all(|&e| ctx.get::<NodeKind>(e) == Some(&NodeKind::Function))
+            );
+        },
         other => panic!("expected Overloaded, got {:?}", other),
     }
 }
@@ -321,7 +325,7 @@ fn resolve_enum_case_via_qualified_path() {
         ValueResolution::Def(e) => {
             assert_eq!(ctx.get::<Name>(e).unwrap().0, "North");
             assert_eq!(ctx.get::<NodeKind>(e), Some(&NodeKind::EnumCase));
-        }
+        },
         other => panic!("expected Def(North), got {:?}", other),
     }
 }
@@ -346,9 +350,7 @@ fn resolve_value_not_found() {
 
 #[test]
 fn resolve_name_local_declaration() {
-    let (world, root, _) = build_from_source(
-        "module MyApp\nstruct Widget {}\nfunc process() {}",
-    );
+    let (world, root, _) = build_from_source("module MyApp\nstruct Widget {}\nfunc process() {}");
     let ctx = world.query_context();
     let myapp = find_child(&ctx, root, NodeKind::Module, "MyApp");
 
@@ -361,7 +363,7 @@ fn resolve_name_local_declaration() {
         NameResolution::Found(entities) => {
             assert_eq!(entities.len(), 1);
             assert_eq!(ctx.get::<Name>(entities[0]).unwrap().0, "Widget");
-        }
+        },
         other => panic!("expected Found, got {:?}", other),
     }
 }
@@ -387,7 +389,7 @@ fn resolve_name_local_shadows_import() {
             let e = entities[0];
             // The local one should be a child of MyApp
             assert_eq!(ctx.parent_of(e), Some(myapp));
-        }
+        },
         other => panic!("expected Found, got {:?}", other),
     }
 }
@@ -398,10 +400,7 @@ fn resolve_name_local_shadows_import() {
 
 #[test]
 fn resolve_module_path() {
-    let (world, root) = build_two_files(
-        "module std.core\npublic struct Int64 {}",
-        "module MyApp",
-    );
+    let (world, root) = build_two_files("module std.core\npublic struct Int64 {}", "module MyApp");
     let ctx = world.query_context();
 
     let result = ctx.query(ResolveModulePath {
@@ -412,7 +411,7 @@ fn resolve_module_path() {
         Some(e) => {
             assert_eq!(ctx.get::<Name>(e).unwrap().0, "core");
             assert_eq!(ctx.get::<NodeKind>(e), Some(&NodeKind::Module));
-        }
+        },
         None => panic!("expected Some, got None"),
     }
 }
@@ -435,9 +434,8 @@ fn resolve_module_path_not_found() {
 
 #[test]
 fn scope_includes_local_declarations() {
-    let (world, root, _) = build_from_source(
-        "module MyApp\nstruct Alpha {}\nstruct Beta {}\nfunc gamma() {}",
-    );
+    let (world, root, _) =
+        build_from_source("module MyApp\nstruct Alpha {}\nstruct Beta {}\nfunc gamma() {}");
     let ctx = world.query_context();
     let myapp = find_child(&ctx, root, NodeKind::Module, "MyApp");
 
@@ -472,10 +470,14 @@ fn scope_includes_wildcard_imports() {
     );
 
     // Verify that the wildcard import resolves to the core module
-    let core_module = scope.wildcard_imports.iter().find(|&&e| {
-        ctx.get::<Name>(e).is_some_and(|n| n.0 == "core")
-    });
-    assert!(core_module.is_some(), "std.core not found in wildcard imports");
+    let core_module = scope
+        .wildcard_imports
+        .iter()
+        .find(|&&e| ctx.get::<Name>(e).is_some_and(|n| n.0 == "core"));
+    assert!(
+        core_module.is_some(),
+        "std.core not found in wildcard imports"
+    );
 }
 
 #[test]
@@ -548,9 +550,7 @@ fn visibility_private_not_accessible_from_outside() {
 
 #[test]
 fn resolve_type_parameter_in_generic_struct() {
-    let (world, root, _) = build_from_source(
-        "module MyApp\nstruct Box[T] {\n  var value: T\n}",
-    );
+    let (world, root, _) = build_from_source("module MyApp\nstruct Box[T] {\n  var value: T\n}");
     let ctx = world.query_context();
     let myapp = find_child(&ctx, root, NodeKind::Module, "MyApp");
     let box_struct = find_child(&ctx, myapp, NodeKind::Struct, "Box");
@@ -565,16 +565,14 @@ fn resolve_type_parameter_in_generic_struct() {
         TypeResolution::Found(e) => {
             assert_eq!(ctx.get::<Name>(e).unwrap().0, "T");
             assert_eq!(ctx.get::<NodeKind>(e), Some(&NodeKind::TypeParameter));
-        }
+        },
         other => panic!("expected Found(T), got {:?}", other),
     }
 }
 
 #[test]
 fn resolve_type_parameter_not_visible_outside() {
-    let (world, root, _) = build_from_source(
-        "module MyApp\nstruct Box[T] {\n  var value: T\n}",
-    );
+    let (world, root, _) = build_from_source("module MyApp\nstruct Box[T] {\n  var value: T\n}");
     let ctx = world.query_context();
     let myapp = find_child(&ctx, root, NodeKind::Module, "MyApp");
 
@@ -609,7 +607,7 @@ fn cross_module_type_resolution() {
     match result {
         TypeResolution::Found(e) => {
             assert_eq!(ctx.get::<Name>(e).unwrap().0, "Array");
-        }
+        },
         other => panic!("expected Found(Array), got {:?}", other),
     }
 
@@ -622,7 +620,7 @@ fn cross_module_type_resolution() {
     match result {
         TypeResolution::Found(e) => {
             assert_eq!(ctx.get::<Name>(e).unwrap().0, "Dictionary");
-        }
+        },
         other => panic!("expected Found(Dictionary), got {:?}", other),
     }
 }
@@ -633,17 +631,13 @@ fn cross_module_type_resolution() {
 
 #[test]
 fn extension_found_for_type() {
-    let (world, root, _) = build_from_source(
-        "module MyApp\nstruct Foo {}\nextend Foo {\n  func bar() {}\n}",
-    );
+    let (world, root, _) =
+        build_from_source("module MyApp\nstruct Foo {}\nextend Foo {\n  func bar() {}\n}");
     let ctx = world.query_context();
     let myapp = find_child(&ctx, root, NodeKind::Module, "MyApp");
     let foo = find_child(&ctx, myapp, NodeKind::Struct, "Foo");
 
-    let extensions = ctx.query(ExtensionsFor {
-        target: foo,
-        root,
-    });
+    let extensions = ctx.query(ExtensionsFor { target: foo, root });
     assert!(
         !extensions.is_empty(),
         "expected at least one extension for Foo"
@@ -651,7 +645,8 @@ fn extension_found_for_type() {
 
     // The extension should contain `bar`
     let ext = extensions[0];
-    let bar_children: Vec<_> = ctx.children_of(ext)
+    let bar_children: Vec<_> = ctx
+        .children_of(ext)
         .iter()
         .filter(|&&e| ctx.get::<Name>(e).is_some_and(|n| n.0 == "bar"))
         .copied()
@@ -713,7 +708,7 @@ fn resolve_from_real_ordering_source() {
         TypeResolution::Found(e) => {
             assert_eq!(ctx.get::<Name>(e).unwrap().0, "Ordering");
             assert_eq!(ctx.get::<NodeKind>(e), Some(&NodeKind::Enum));
-        }
+        },
         other => panic!("expected Found(Ordering), got {:?}", other),
     }
 
@@ -727,7 +722,7 @@ fn resolve_from_real_ordering_source() {
         ValueResolution::Def(e) => {
             assert_eq!(ctx.get::<Name>(e).unwrap().0, "Less");
             assert_eq!(ctx.get::<NodeKind>(e), Some(&NodeKind::EnumCase));
-        }
+        },
         other => panic!("expected Def(Less), got {:?}", other),
     }
 }
@@ -738,10 +733,12 @@ fn resolve_from_real_bool_source() {
     let (world, root, _) = build_from_source(source);
     let ctx = world.query_context();
 
-    let core = ctx.query(ResolveModulePath {
-        path: vec!["std".into(), "core".into()],
-        root,
-    }).expect("std.core should exist");
+    let core = ctx
+        .query(ResolveModulePath {
+            path: vec!["std".into(), "core".into()],
+            root,
+        })
+        .expect("std.core should exist");
 
     // Bool should be resolvable
     let result = ctx.query(ResolveTypePath {
@@ -752,7 +749,7 @@ fn resolve_from_real_bool_source() {
     match result {
         TypeResolution::Found(e) => {
             assert_eq!(ctx.get::<Name>(e).unwrap().0, "Bool");
-        }
+        },
         other => panic!("expected Found(Bool), got {:?}", other),
     }
 }
@@ -770,27 +767,36 @@ fn auto_import_across_std_modules() {
     // std.core with Int64
     let f1 = world.spawn();
     let src1 = "module std.core\npublic struct Int64 {}";
-    let tokens1: Vec<_> = kestrel_lexer2::lex(src1, f1.index()).filter_map(|r| r.ok()).collect();
+    let tokens1: Vec<_> = kestrel_lexer2::lex(src1, f1.index())
+        .filter_map(|r| r.ok())
+        .collect();
     let result1 = kestrel_parser2::parse_source_file_from_source(
-        src1, tokens1.iter().map(|t| (t.value.clone(), t.span.clone())),
+        src1,
+        tokens1.iter().map(|t| (t.value.clone(), t.span.clone())),
     );
     build_declarations(&mut world, f1, &result1.tree, root, None);
 
     // std.text with String
     let f2 = world.spawn();
     let src2 = "module std.text\npublic struct String {}";
-    let tokens2: Vec<_> = kestrel_lexer2::lex(src2, f2.index()).filter_map(|r| r.ok()).collect();
+    let tokens2: Vec<_> = kestrel_lexer2::lex(src2, f2.index())
+        .filter_map(|r| r.ok())
+        .collect();
     let result2 = kestrel_parser2::parse_source_file_from_source(
-        src2, tokens2.iter().map(|t| (t.value.clone(), t.span.clone())),
+        src2,
+        tokens2.iter().map(|t| (t.value.clone(), t.span.clone())),
     );
     build_declarations(&mut world, f2, &result2.tree, root, None);
 
     // User module — no explicit imports
     let f3 = world.spawn();
     let src3 = "module MyApp";
-    let tokens3: Vec<_> = kestrel_lexer2::lex(src3, f3.index()).filter_map(|r| r.ok()).collect();
+    let tokens3: Vec<_> = kestrel_lexer2::lex(src3, f3.index())
+        .filter_map(|r| r.ok())
+        .collect();
     let result3 = kestrel_parser2::parse_source_file_from_source(
-        src3, tokens3.iter().map(|t| (t.value.clone(), t.span.clone())),
+        src3,
+        tokens3.iter().map(|t| (t.value.clone(), t.span.clone())),
     );
     build_declarations(&mut world, f3, &result3.tree, root, None);
 
@@ -803,14 +809,20 @@ fn auto_import_across_std_modules() {
         context: myapp,
         root,
     });
-    assert!(matches!(result, TypeResolution::Found(_)), "Int64 should be auto-imported");
+    assert!(
+        matches!(result, TypeResolution::Found(_)),
+        "Int64 should be auto-imported"
+    );
 
     let result = ctx.query(ResolveTypePath {
         segments: vec!["String".into()],
         context: myapp,
         root,
     });
-    assert!(matches!(result, TypeResolution::Found(_)), "String should be auto-imported");
+    assert!(
+        matches!(result, TypeResolution::Found(_)),
+        "String should be auto-imported"
+    );
 }
 
 #[test]
@@ -821,15 +833,14 @@ fn std_module_does_not_auto_import_itself() {
     );
     let ctx = world.query_context();
 
-    let core = ctx.query(ResolveModulePath {
-        path: vec!["std".into(), "core".into()],
-        root,
-    }).expect("std.core should exist");
+    let core = ctx
+        .query(ResolveModulePath {
+            path: vec!["std".into(), "core".into()],
+            root,
+        })
+        .expect("std.core should exist");
 
-    let scope = ctx.query(ScopeFor {
-        entity: core,
-        root,
-    });
+    let scope = ctx.query(ScopeFor { entity: core, root });
 
     // std.core should NOT auto-import std modules (it's inside std)
     assert!(

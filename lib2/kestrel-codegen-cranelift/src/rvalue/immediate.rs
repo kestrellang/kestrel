@@ -6,11 +6,13 @@ use crate::error::CodegenError;
 use crate::function::FunctionState;
 use crate::types;
 use cranelift_codegen::ir::immediates::Offset32;
-use cranelift_codegen::ir::{self, InstBuilder, MemFlags, StackSlotData, StackSlotKind, Value as CrValue};
+use cranelift_codegen::ir::{
+    self, InstBuilder, MemFlags, StackSlotData, StackSlotKind, Value as CrValue,
+};
 use cranelift_frontend::FunctionBuilder;
 use cranelift_module::Module;
 use kestrel_codegen2::mangle_function_with_self;
-use kestrel_mir::{FunctionKind, Immediate, ImmediateKind, IntBits, FloatBits, MirTy};
+use kestrel_mir::{FloatBits, FunctionKind, Immediate, ImmediateKind, IntBits, MirTy};
 
 /// Compile an immediate value to a Cranelift value.
 pub fn compile_immediate(
@@ -25,19 +27,17 @@ pub fn compile_immediate(
         ImmediateKind::IntLiteral { bits, value } => {
             let cl_ty = types::int_bits_to_type(*bits);
             Ok(builder.ins().iconst(cl_ty, *value as i64))
-        }
+        },
 
         ImmediateKind::FloatLiteral { bits, value } => match bits {
-            FloatBits::F16 => {
-                Err(CodegenError::Unsupported("f16 literals not yet supported".into()))
-            }
+            FloatBits::F16 => Err(CodegenError::Unsupported(
+                "f16 literals not yet supported".into(),
+            )),
             FloatBits::F32 => Ok(builder.ins().f32const(*value as f32)),
             FloatBits::F64 => Ok(builder.ins().f64const(*value)),
         },
 
-        ImmediateKind::BoolLiteral(val) => {
-            Ok(builder.ins().iconst(ir::types::I8, *val as i64))
-        }
+        ImmediateKind::BoolLiteral(val) => Ok(builder.ins().iconst(ir::types::I8, *val as i64)),
 
         ImmediateKind::StringLiteral(s) => {
             // Create a fat pointer (ptr, len) on the stack
@@ -54,7 +54,9 @@ pub fn compile_immediate(
                 common::align_to_shift(ptr_size),
             ));
             let addr = builder.ins().stack_addr(ptr_ty, slot, Offset32::new(0));
-            builder.ins().store(MemFlags::new(), str_ptr, addr, Offset32::new(0));
+            builder
+                .ins()
+                .store(MemFlags::new(), str_ptr, addr, Offset32::new(0));
             builder.ins().store(
                 MemFlags::new(),
                 str_len,
@@ -63,32 +65,36 @@ pub fn compile_immediate(
             );
 
             Ok(addr)
-        }
+        },
 
         ImmediateKind::StringPointer(s) => {
             let data_id = ctx.get_or_create_string_data(s)?;
             let gv = ctx.cl_module.declare_data_in_func(data_id, builder.func);
             Ok(builder.ins().global_value(ptr_ty, gv))
-        }
+        },
 
         ImmediateKind::Unit => {
             // Unit is zero-sized — use pointer-type zero for phi node compatibility
             let ptr_ty = common::ptr_type(ctx.target);
             Ok(builder.ins().iconst(ptr_ty, 0))
-        }
+        },
 
         ImmediateKind::FunctionRef { func, type_args } => {
             // Look up the function's mangled name and get its address
-            let func_def = ctx.entity_to_func.get(func).map(|id| &ctx.module.functions[id.index()]);
+            let func_def = ctx
+                .entity_to_func
+                .get(func)
+                .map(|id| &ctx.module.functions[id.index()]);
             let mangled = if let Some(fd) = func_def {
                 // For init/deinit/method of non-generic types, compute self_type
                 // from the parent so mangling matches the declared signature
                 let self_type = match &fd.kind {
                     FunctionKind::Initializer { parent }
                     | FunctionKind::Deinit { parent }
-                    | FunctionKind::Method { parent, .. } => {
-                        Some(MirTy::Named { entity: *parent, type_args: type_args.to_vec() })
-                    }
+                    | FunctionKind::Method { parent, .. } => Some(MirTy::Named {
+                        entity: *parent,
+                        type_args: type_args.to_vec(),
+                    }),
                     _ => None,
                 };
                 mangle_function_with_self(ctx.module, fd, type_args, self_type.as_ref())
@@ -107,7 +113,7 @@ pub fn compile_immediate(
                     "FunctionRef: undeclared function '{mangled}'"
                 )))
             }
-        }
+        },
 
         ImmediateKind::WitnessMethod {
             protocol,
@@ -118,7 +124,7 @@ pub fn compile_immediate(
             Err(CodegenError::Unsupported(
                 "WitnessMethod immediate not yet implemented".into(),
             ))
-        }
+        },
 
         ImmediateKind::NullPtr(_) => Ok(builder.ins().iconst(ptr_ty, 0)),
 

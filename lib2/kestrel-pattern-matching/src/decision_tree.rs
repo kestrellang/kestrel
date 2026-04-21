@@ -67,7 +67,10 @@ pub enum PathElement {
     IndexFromEnd(usize),
     /// Rest slice of an array pattern (the `..name` binding).
     /// MIR lowers as `matchSlice(prefix_len, matchLength() - suffix_len)`.
-    RestSlice { prefix_len: usize, suffix_len: usize },
+    RestSlice {
+        prefix_len: usize,
+        suffix_len: usize,
+    },
 }
 
 /// Path from the scrutinee root to a sub-value.
@@ -164,9 +167,9 @@ fn compile_matrix(
 
     // Check completeness
     let all_ctors = Constructor::all_for_type(query, root, col_type);
-    let is_complete = all_ctors
-        .as_ref()
-        .is_some_and(|all| head_ctors.len() >= all.len() && all.iter().all(|c| head_ctors.contains(c)));
+    let is_complete = all_ctors.as_ref().is_some_and(|all| {
+        head_ctors.len() >= all.len() && all.iter().all(|c| head_ctors.contains(c))
+    });
 
     // Build cases
     let mut cases = Vec::new();
@@ -206,7 +209,12 @@ fn compile_matrix(
 }
 
 /// Compile a leaf node (matrix width is 0).
-fn compile_leaf(hir: &HirBody, query: &QueryContext<'_>, rows: &[PatternRow], arm_pat_ids: &[HirPatId]) -> DecisionTree {
+fn compile_leaf(
+    hir: &HirBody,
+    query: &QueryContext<'_>,
+    rows: &[PatternRow],
+    arm_pat_ids: &[HirPatId],
+) -> DecisionTree {
     let Some(row) = rows.first() else {
         return DecisionTree::Failure;
     };
@@ -292,19 +300,20 @@ fn build_specialized_paths(
         match ctor {
             Constructor::Variant { entity, .. } => {
                 // Use the raw entity name, not display_name which adds "(_)" for payloads
-                let name = query.get::<Name>(*entity)
+                let name = query
+                    .get::<Name>(*entity)
                     .map(|n| n.0.clone())
                     .unwrap_or_else(|| format!("{:?}", entity));
                 field_path.push(PathElement::Downcast(name));
                 field_path.push(PathElement::Index(i));
-            }
+            },
             Constructor::Tuple { .. } | Constructor::Array { .. } => {
                 field_path.push(PathElement::Index(i));
-            }
+            },
             Constructor::Struct { .. } => {
                 field_path.push(PathElement::Index(i));
-            }
-            _ => {} // Literals have no sub-fields
+            },
+            _ => {}, // Literals have no sub-fields
         }
         new_paths.push(field_path);
     }
@@ -330,7 +339,13 @@ fn build_default_paths(col_paths: &[AccessPath], col: usize) -> Vec<AccessPath> 
 // ===== Binding collection =====
 
 /// Recursively collect bindings from a HirPat.
-fn collect_bindings(hir: &HirBody, query: &QueryContext<'_>, pat_id: HirPatId, path: &AccessPath, bindings: &mut Vec<Binding>) {
+fn collect_bindings(
+    hir: &HirBody,
+    query: &QueryContext<'_>,
+    pat_id: HirPatId,
+    path: &AccessPath,
+    bindings: &mut Vec<Binding>,
+) {
     match &hir.pats[pat_id] {
         HirPat::Binding { local, .. } => {
             let local_data = &hir.locals[*local];
@@ -341,7 +356,7 @@ fn collect_bindings(hir: &HirBody, query: &QueryContext<'_>, pat_id: HirPatId, p
                 ty: ResolvedTy::Error, // resolved later by codegen
                 path: path.clone(),
             });
-        }
+        },
 
         HirPat::At {
             binding,
@@ -357,7 +372,7 @@ fn collect_bindings(hir: &HirBody, query: &QueryContext<'_>, pat_id: HirPatId, p
                 path: path.clone(),
             });
             collect_bindings(hir, query, *subpattern, path, bindings);
-        }
+        },
 
         HirPat::Tuple { prefix, suffix, .. } => {
             // Prefix elements: index from start
@@ -373,16 +388,15 @@ fn collect_bindings(hir: &HirBody, query: &QueryContext<'_>, pat_id: HirPatId, p
                 elem_path.push(PathElement::Index(prefix.len() + j));
                 collect_bindings(hir, query, elem, &elem_path, bindings);
             }
-        }
+        },
 
         HirPat::Variant { args, .. } | HirPat::ImplicitVariant { args, .. } => {
             let case_name = match &hir.pats[pat_id] {
                 HirPat::ImplicitVariant { name, .. } => name.clone(),
-                HirPat::Variant { entity, .. } => {
-                    query.get::<Name>(*entity)
-                        .map(|n| n.0.clone())
-                        .unwrap_or_else(|| format!("{:?}", entity))
-                }
+                HirPat::Variant { entity, .. } => query
+                    .get::<Name>(*entity)
+                    .map(|n| n.0.clone())
+                    .unwrap_or_else(|| format!("{:?}", entity)),
                 _ => unreachable!(),
             };
             for (i, arg) in args.iter().enumerate() {
@@ -391,9 +405,14 @@ fn collect_bindings(hir: &HirBody, query: &QueryContext<'_>, pat_id: HirPatId, p
                 arg_path.push(PathElement::Index(i));
                 collect_bindings(hir, query, arg.pattern, &arg_path, bindings);
             }
-        }
+        },
 
-        HirPat::Array { prefix, rest, suffix, .. } => {
+        HirPat::Array {
+            prefix,
+            rest,
+            suffix,
+            ..
+        } => {
             // Prefix: indexed from the start.
             for (i, &elem) in prefix.iter().enumerate() {
                 let mut elem_path = path.clone();
@@ -430,7 +449,7 @@ fn collect_bindings(hir: &HirBody, query: &QueryContext<'_>, pat_id: HirPatId, p
                     path: rest_path,
                 });
             }
-        }
+        },
 
         HirPat::Struct { fields, .. } => {
             for field in fields {
@@ -440,20 +459,20 @@ fn collect_bindings(hir: &HirBody, query: &QueryContext<'_>, pat_id: HirPatId, p
                     collect_bindings(hir, query, pat, &field_path, bindings);
                 }
             }
-        }
+        },
 
         HirPat::Or { alternatives, .. } => {
             // Use first alternative's bindings (type checker ensures consistency)
             if let Some(&first) = alternatives.first() {
                 collect_bindings(hir, query, first, path, bindings);
             }
-        }
+        },
 
         HirPat::Wildcard { .. }
         | HirPat::Literal { .. }
         | HirPat::Range { .. }
         | HirPat::Error { .. } => {
             // No bindings
-        }
+        },
     }
 }

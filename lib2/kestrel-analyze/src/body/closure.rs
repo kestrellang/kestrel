@@ -133,7 +133,13 @@ impl BodyCheck for ClosureAnalyzer {
 
         // Walk all expressions looking for closures
         for (expr_id, expr) in cx.hir.exprs.iter() {
-            let HirExpr::Closure { params, captures, body, .. } = expr else {
+            let HirExpr::Closure {
+                params,
+                captures,
+                body,
+                ..
+            } = expr
+            else {
                 continue;
             };
 
@@ -148,7 +154,10 @@ impl BodyCheck for ClosureAnalyzer {
             if !params.is_empty() && cx.typed.errors.is_empty() {
                 let has_unresolved = params.iter().any(|p| {
                     p.ty.is_none()
-                        && cx.typed.local_types.get(&p.local)
+                        && cx
+                            .typed
+                            .local_types
+                            .get(&p.local)
                             .is_some_and(|t| matches!(t, ResolvedTy::Error))
                 });
                 if has_unresolved {
@@ -180,9 +189,9 @@ impl BodyCheck for ClosureAnalyzer {
             if !captures.is_empty() && !has_capture_mutation {
                 // Check if this closure is in return position of the function
                 let is_func_tail = cx.hir.tail_expr == Some(expr_id);
-                let is_returned = cx.hir.exprs.iter().any(|(_, e)| {
-                    matches!(e, HirExpr::Return { value: Some(v), .. } if *v == expr_id)
-                });
+                let is_returned = cx.hir.exprs.iter().any(
+                    |(_, e)| matches!(e, HirExpr::Return { value: Some(v), .. } if *v == expr_id),
+                );
                 // Check if this closure is in return position of another closure
                 let is_closure_tail = cx.hir.exprs.iter().any(|(_, e)| {
                     matches!(e, HirExpr::Closure { body: b, .. } if b.tail_expr == Some(expr_id))
@@ -202,7 +211,8 @@ impl BodyCheck for ClosureAnalyzer {
                             is_primary: true,
                         }],
                         notes: vec![
-                            "closures that capture variables cannot escape their defining function".into(),
+                            "closures that capture variables cannot escape their defining function"
+                                .into(),
                         ],
                     });
                 }
@@ -307,11 +317,11 @@ fn check_stmt_for_param_assign(
     match &cx.hir.stmts[id] {
         HirStmt::Expr { expr, .. } => {
             check_expr_for_param_assign(cx, *expr, param_locals, diags);
-        }
+        },
         HirStmt::Let { value: Some(v), .. } => {
             check_expr_for_param_assign(cx, *v, param_locals, diags);
-        }
-        _ => {}
+        },
+        _ => {},
     }
 }
 
@@ -341,7 +351,7 @@ fn check_expr_for_param_assign(
                 }
             }
             check_expr_for_param_assign(cx, *value, param_locals, diags);
-        }
+        },
 
         // Recurse into sub-expressions
         HirExpr::If {
@@ -355,11 +365,13 @@ fn check_expr_for_param_assign(
             if let Some(else_block) = else_body {
                 check_block_for_param_assign(cx, else_block, param_locals, diags);
             }
-        }
+        },
         HirExpr::Loop { body, .. } => {
             check_block_for_param_assign(cx, body, param_locals, diags);
-        }
-        HirExpr::Match { scrutinee, arms, .. } => {
+        },
+        HirExpr::Match {
+            scrutinee, arms, ..
+        } => {
             check_expr_for_param_assign(cx, *scrutinee, param_locals, diags);
             for arm in arms {
                 if let Some(guard) = arm.guard {
@@ -367,51 +379,47 @@ fn check_expr_for_param_assign(
                 }
                 check_expr_for_param_assign(cx, arm.body, param_locals, diags);
             }
-        }
+        },
         HirExpr::Block { body, .. } => {
             check_block_for_param_assign(cx, body, param_locals, diags);
-        }
+        },
         HirExpr::Call { callee, args, .. } => {
             check_expr_for_param_assign(cx, *callee, param_locals, diags);
             for arg in args {
                 check_expr_for_param_assign(cx, arg.value, param_locals, diags);
             }
-        }
-        HirExpr::MethodCall {
-            receiver, args, ..
-        }
-        | HirExpr::ProtocolCall {
-            receiver, args, ..
-        } => {
+        },
+        HirExpr::MethodCall { receiver, args, .. }
+        | HirExpr::ProtocolCall { receiver, args, .. } => {
             check_expr_for_param_assign(cx, *receiver, param_locals, diags);
             for arg in args {
                 check_expr_for_param_assign(cx, arg.value, param_locals, diags);
             }
-        }
+        },
         HirExpr::Return { value, .. } => {
             if let Some(val) = value {
                 check_expr_for_param_assign(cx, *val, param_locals, diags);
             }
-        }
+        },
         HirExpr::Field { base, .. } | HirExpr::TupleIndex { base, .. } => {
             check_expr_for_param_assign(cx, *base, param_locals, diags);
-        }
+        },
         HirExpr::Tuple { elements, .. } | HirExpr::Array { elements, .. } => {
             for &elem in elements {
                 check_expr_for_param_assign(cx, elem, param_locals, diags);
             }
-        }
+        },
         HirExpr::Dict { entries, .. } => {
             for entry in entries {
                 check_expr_for_param_assign(cx, entry.key, param_locals, diags);
                 check_expr_for_param_assign(cx, entry.value, param_locals, diags);
             }
-        }
+        },
         // Don't recurse into nested closures — they have their own param scope
-        HirExpr::Closure { .. } => {}
+        HirExpr::Closure { .. } => {},
 
         // Leaf expressions
-        _ => {}
+        _ => {},
     }
 }
 
@@ -440,11 +448,11 @@ fn check_capture_assignments(
         match &cx.hir.stmts[stmt_id] {
             HirStmt::Expr { expr, .. } => {
                 walk_for_capture_assign(cx, *expr, capture_set, diags);
-            }
+            },
             HirStmt::Let { value: Some(v), .. } => {
                 walk_for_capture_assign(cx, *v, capture_set, diags);
-            }
-            _ => {}
+            },
+            _ => {},
         }
     }
     if let Some(tail) = block.tail_expr {
@@ -477,18 +485,25 @@ fn walk_for_capture_assign(
                 }
             }
             walk_for_capture_assign(cx, *value, capture_set, diags);
-        }
-        HirExpr::If { condition, then_body, else_body, .. } => {
+        },
+        HirExpr::If {
+            condition,
+            then_body,
+            else_body,
+            ..
+        } => {
             walk_for_capture_assign(cx, *condition, capture_set, diags);
             check_capture_assignments(cx, then_body, capture_set, diags);
             if let Some(eb) = else_body {
                 check_capture_assignments(cx, eb, capture_set, diags);
             }
-        }
+        },
         HirExpr::Loop { body, .. } | HirExpr::Block { body, .. } => {
             check_capture_assignments(cx, body, capture_set, diags);
-        }
-        HirExpr::Match { scrutinee, arms, .. } => {
+        },
+        HirExpr::Match {
+            scrutinee, arms, ..
+        } => {
             walk_for_capture_assign(cx, *scrutinee, capture_set, diags);
             for arm in arms {
                 if let Some(g) = arm.guard {
@@ -496,20 +511,26 @@ fn walk_for_capture_assign(
                 }
                 walk_for_capture_assign(cx, arm.body, capture_set, diags);
             }
-        }
+        },
         HirExpr::Call { callee, args, .. } => {
             walk_for_capture_assign(cx, *callee, capture_set, diags);
-            for arg in args { walk_for_capture_assign(cx, arg.value, capture_set, diags); }
-        }
+            for arg in args {
+                walk_for_capture_assign(cx, arg.value, capture_set, diags);
+            }
+        },
         HirExpr::MethodCall { receiver, args, .. }
         | HirExpr::ProtocolCall { receiver, args, .. } => {
             walk_for_capture_assign(cx, *receiver, capture_set, diags);
-            for arg in args { walk_for_capture_assign(cx, arg.value, capture_set, diags); }
-        }
+            for arg in args {
+                walk_for_capture_assign(cx, arg.value, capture_set, diags);
+            }
+        },
         HirExpr::Return { value, .. } => {
-            if let Some(v) = value { walk_for_capture_assign(cx, *v, capture_set, diags); }
-        }
-        HirExpr::Closure { .. } => {} // nested closure has own scope
-        _ => {}
+            if let Some(v) = value {
+                walk_for_capture_assign(cx, *v, capture_set, diags);
+            }
+        },
+        HirExpr::Closure { .. } => {}, // nested closure has own scope
+        _ => {},
     }
 }

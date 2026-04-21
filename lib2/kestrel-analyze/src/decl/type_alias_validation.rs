@@ -236,7 +236,14 @@ impl DeclCheck for TypeAliasValidationAnalyzer {
 
                 if is_qualified {
                     // Check 3 & 4: Qualified binding validation
-                    check_qualified_binding(cx, cx.entity, type_entity, &alias_name, &span, &mut diags);
+                    check_qualified_binding(
+                        cx,
+                        cx.entity,
+                        type_entity,
+                        &alias_name,
+                        &span,
+                        &mut diags,
+                    );
                 } else if parent_kind == Some(NodeKind::Extension) {
                     // Check 5: Unqualified binding ambiguity (extensions only).
                     // On the type itself (struct/enum), an unqualified binding
@@ -259,7 +266,10 @@ fn is_qualified_binding(cx: &DeclContext<'_>, entity: kestrel_hecs::Entity) -> b
 /// Extract the protocol path segments from a qualified binding's QualifiedTarget.
 /// For `type Iterator.Item = Int`, returns vec!["Iterator"].
 /// For `type Add[Int].Output = Int`, returns vec!["Add"].
-fn extract_qualified_protocol_segments(cx: &DeclContext<'_>, entity: kestrel_hecs::Entity) -> Option<Vec<String>> {
+fn extract_qualified_protocol_segments(
+    cx: &DeclContext<'_>,
+    entity: kestrel_hecs::Entity,
+) -> Option<Vec<String>> {
     let target = cx.query.get::<QualifiedTarget>(entity)?;
     let kestrel_ast::AstType::Named { segments, .. } = &target.0 else {
         return None;
@@ -308,10 +318,7 @@ fn check_qualified_binding(
         diags.push(AnalyzeDiagnostic {
             descriptor_id: DESCRIPTORS[2].id,
             severity: DESCRIPTORS[2].default_severity,
-            message: format!(
-                "'{}' does not conform to '{}'",
-                type_name, proto_name,
-            ),
+            message: format!("'{}' does not conform to '{}'", type_name, proto_name,),
             labels: vec![DiagLabel {
                 span: span.clone(),
                 message: "qualified binding references non-conformed protocol".into(),
@@ -325,7 +332,10 @@ fn check_qualified_binding(
     // Check 4 (E444): Does the protocol declare this associated type?
     let has_assoc_type = cx.query.children_of(protocol_entity).iter().any(|&child| {
         cx.query.get::<NodeKind>(child) == Some(&NodeKind::TypeAlias)
-            && cx.query.get::<Name>(child).is_some_and(|n| n.0 == alias_name)
+            && cx
+                .query
+                .get::<Name>(child)
+                .is_some_and(|n| n.0 == alias_name)
     });
     if !has_assoc_type {
         diags.push(AnalyzeDiagnostic {
@@ -365,7 +375,10 @@ fn check_unqualified_ambiguity(
     for &proto in &conforming {
         let has_assoc = cx.query.children_of(proto).iter().any(|&child| {
             cx.query.get::<NodeKind>(child) == Some(&NodeKind::TypeAlias)
-                && cx.query.get::<Name>(child).is_some_and(|n| n.0 == alias_name)
+                && cx
+                    .query
+                    .get::<Name>(child)
+                    .is_some_and(|n| n.0 == alias_name)
         });
         if has_assoc {
             matching_protocols.push((proto, util::entity_name(cx.query, proto)));
@@ -451,7 +464,11 @@ fn protocols_covered_by_qualified_bindings(
                     continue;
                 }
                 // Must have the same name as the alias we're checking
-                if !cx.query.get::<Name>(child).is_some_and(|n| n.0 == alias_name) {
+                if !cx
+                    .query
+                    .get::<Name>(child)
+                    .is_some_and(|n| n.0 == alias_name)
+                {
                     continue;
                 }
                 // Must be a qualified binding (has AssociatedTypeTarget in CST)
@@ -493,21 +510,25 @@ fn protocols_declared_on_extension(
         return vec![];
     };
     let context = cx.query.parent_of(extension).unwrap_or(cx.root);
-    conformances.0.iter().filter_map(|item| {
-        let kestrel_ast_builder::ConformanceItem::Positive(ast_ty, _) = item else {
-            return None;
-        };
-        let kestrel_ast::AstType::Named { segments, .. } = ast_ty else {
-            return None;
-        };
-        let seg_names: Vec<String> = segments.iter().map(|s| s.name.clone()).collect();
-        match cx.query.query(ResolveTypePath {
-            segments: seg_names,
-            context,
-            root: cx.root,
-        }) {
-            TypeResolution::Found(entity) => Some(entity),
-            _ => None,
-        }
-    }).collect()
+    conformances
+        .0
+        .iter()
+        .filter_map(|item| {
+            let kestrel_ast_builder::ConformanceItem::Positive(ast_ty, _) = item else {
+                return None;
+            };
+            let kestrel_ast::AstType::Named { segments, .. } = ast_ty else {
+                return None;
+            };
+            let seg_names: Vec<String> = segments.iter().map(|s| s.name.clone()).collect();
+            match cx.query.query(ResolveTypePath {
+                segments: seg_names,
+                context,
+                root: cx.root,
+            }) {
+                TypeResolution::Found(entity) => Some(entity),
+                _ => None,
+            }
+        })
+        .collect()
 }

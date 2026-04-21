@@ -4,8 +4,8 @@ use crate::body::MirBody;
 use crate::id::{LocalId, StructId};
 use crate::item::TypeParamDef;
 use crate::ty::MirTy;
-use kestrel_hecs::Entity;
 use indexmap::IndexMap;
+use kestrel_hecs::Entity;
 
 /// A function definition.
 #[derive(Debug, Clone)]

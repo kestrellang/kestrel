@@ -17,9 +17,7 @@ pub fn extract_doc_comment(syntax: &SyntaxNode) -> Option<DocCommentBehavior> {
                 SyntaxKind::LineComment => {
                     let text = tok.text();
                     if text.starts_with("///") && !text.starts_with("////") {
-                        let content = text
-                            .strip_prefix("/// ")
-                            .unwrap_or_else(|| &text[3..]);
+                        let content = text.strip_prefix("/// ").unwrap_or_else(|| &text[3..]);
                         doc_lines.push(content.to_string());
                     }
                 },

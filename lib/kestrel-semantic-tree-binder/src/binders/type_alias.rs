@@ -75,7 +75,8 @@ impl DeclarationBinder for TypeAliasBinder {
                 }
 
                 // Resolve bounds if present (even for non-protocol context — the analyzer validates context)
-                let bounds = resolve_associated_type_bounds(syntax, &source, file_id, symbol_id, context);
+                let bounds =
+                    resolve_associated_type_bounds(syntax, &source, file_id, symbol_id, context);
                 if !bounds.is_empty() {
                     let bounds_behavior = AssociatedTypeBoundsBehavior::new(bounds);
                     symbol.metadata().add_behavior(bounds_behavior);
@@ -83,7 +84,9 @@ impl DeclarationBinder for TypeAliasBinder {
 
                 // Attach QualifiedBindingBehavior if this is a qualified binding (type Protocol.Item = T)
                 if let Some(qualified_name) = extract_qualified_protocol_name(syntax) {
-                    symbol.metadata().add_behavior(QualifiedBindingBehavior::new(qualified_name));
+                    symbol
+                        .metadata()
+                        .add_behavior(QualifiedBindingBehavior::new(qualified_name));
                 }
 
                 // Extract type parameters and resolve where clause bounds
@@ -248,7 +251,10 @@ fn first_identifier_from_path(path_node: &SyntaxNode) -> Option<String> {
         .find(|c| c.kind() == SyntaxKind::PathElement)
         .and_then(|elem| {
             elem.children_with_tokens()
-                .find_map(|e| e.into_token().filter(|t| t.kind() == SyntaxKind::Identifier))
+                .find_map(|e| {
+                    e.into_token()
+                        .filter(|t| t.kind() == SyntaxKind::Identifier)
+                })
                 .map(|t| t.text().to_string())
         })
 }
@@ -293,9 +299,11 @@ fn add_conforms_to_behavior(
     qualified_protocol_name: Option<&str>,
     ctx: &mut BindingContext,
 ) {
-    let conformances = ctx.model.query(kestrel_semantic_model::ConformancesForSymbol {
-        symbol_id: parent.metadata().id(),
-    });
+    let conformances = ctx
+        .model
+        .query(kestrel_semantic_model::ConformancesForSymbol {
+            symbol_id: parent.metadata().id(),
+        });
 
     let all_protocol_tys = collect_all_inherited_protocols(&conformances, ctx.model);
 
@@ -345,9 +353,8 @@ pub(crate) fn collect_all_inherited_protocols(
                 continue;
             }
             all_protocols.push(conformance.clone());
-            let inherited = model.query(kestrel_semantic_model::ConformancesForSymbol {
-                symbol_id: id,
-            });
+            let inherited =
+                model.query(kestrel_semantic_model::ConformancesForSymbol { symbol_id: id });
             to_check.extend(inherited);
         }
     }
@@ -362,7 +369,10 @@ fn process_builtin_attribute(
 ) {
     let registry = context.model.builtin_registry().clone();
     crate::binders::utils::attributes::validate_builtin_attribute(
-        symbol, attributes, source, context,
+        symbol,
+        attributes,
+        source,
+        context,
         "type alias",
         |k| k.is_type_alias(),
         |f| registry.type_alias(f),

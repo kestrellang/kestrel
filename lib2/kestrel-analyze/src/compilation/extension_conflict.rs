@@ -77,31 +77,34 @@ impl CompilationCheck for ExtensionConflictAnalyzer {
             let target_kind = cx.query.get::<NodeKind>(*target);
             let is_concrete_type = matches!(target_kind, Some(NodeKind::Struct | NodeKind::Enum));
             if is_concrete_type {
-            for (ext_name, ext_method, _ext) in &ext_methods {
-                if let Some((_, struct_method)) = target_methods.iter().find(|(n, m)| n == ext_name && same_labels(cx, *m, *ext_method)) {
-                    diags.push(AnalyzeDiagnostic {
-                        descriptor_id: DESCRIPTORS[0].id,
-                        severity: DESCRIPTORS[0].default_severity,
-                        message: format!(
-                            "duplicate method '{}': defined on both '{}' and an extension",
-                            ext_name, target_name,
-                        ),
-                        labels: vec![
-                            DiagLabel {
-                                span: util::entity_span(cx.query, *struct_method),
-                                message: "method defined here on type".into(),
-                                is_primary: false,
-                            },
-                            DiagLabel {
-                                span: util::entity_span(cx.query, *ext_method),
-                                message: "conflicting extension method".into(),
-                                is_primary: true,
-                            },
-                        ],
-                        notes: vec![],
-                    });
+                for (ext_name, ext_method, _ext) in &ext_methods {
+                    if let Some((_, struct_method)) = target_methods
+                        .iter()
+                        .find(|(n, m)| n == ext_name && same_labels(cx, *m, *ext_method))
+                    {
+                        diags.push(AnalyzeDiagnostic {
+                            descriptor_id: DESCRIPTORS[0].id,
+                            severity: DESCRIPTORS[0].default_severity,
+                            message: format!(
+                                "duplicate method '{}': defined on both '{}' and an extension",
+                                ext_name, target_name,
+                            ),
+                            labels: vec![
+                                DiagLabel {
+                                    span: util::entity_span(cx.query, *struct_method),
+                                    message: "method defined here on type".into(),
+                                    is_primary: false,
+                                },
+                                DiagLabel {
+                                    span: util::entity_span(cx.query, *ext_method),
+                                    message: "conflicting extension method".into(),
+                                    is_primary: true,
+                                },
+                            ],
+                            notes: vec![],
+                        });
+                    }
                 }
-            }
             } // is_concrete_type
 
             // Check E412: extension vs extension method (same specificity)
@@ -115,7 +118,8 @@ impl CompilationCheck for ExtensionConflictAnalyzer {
                     let (name_i, method_i, ext_i) = &ext_methods[i];
                     let (name_j, method_j, ext_j) = &ext_methods[j];
 
-                    if name_i != name_j || ext_i == ext_j || !same_labels(cx, *method_i, *method_j) {
+                    if name_i != name_j || ext_i == ext_j || !same_labels(cx, *method_i, *method_j)
+                    {
                         continue;
                     }
 
@@ -200,10 +204,14 @@ fn collect_named_children(cx: &CompilationContext<'_>, entity: Entity) -> Vec<(S
 /// Check if two callable entities have the same parameter labels.
 /// Methods with the same name but different labels are overloads, not conflicts.
 fn same_labels(cx: &CompilationContext<'_>, a: Entity, b: Entity) -> bool {
-    let labels_a: Vec<Option<String>> = cx.query.get::<Callable>(a)
+    let labels_a: Vec<Option<String>> = cx
+        .query
+        .get::<Callable>(a)
         .map(|c| c.params.iter().map(|p| p.label.clone()).collect())
         .unwrap_or_default();
-    let labels_b: Vec<Option<String>> = cx.query.get::<Callable>(b)
+    let labels_b: Vec<Option<String>> = cx
+        .query
+        .get::<Callable>(b)
         .map(|c| c.params.iter().map(|p| p.label.clone()).collect())
         .unwrap_or_default();
     labels_a == labels_b
@@ -226,6 +234,10 @@ fn extension_specificity(cx: &CompilationContext<'_>, extension: Entity) -> usiz
             extension,
             root: cx.root,
         })
-        .map(|args| args.iter().filter(|t| !matches!(t, HirTy::Param(..))).count())
+        .map(|args| {
+            args.iter()
+                .filter(|t| !matches!(t, HirTy::Param(..)))
+                .count()
+        })
         .unwrap_or(0)
 }

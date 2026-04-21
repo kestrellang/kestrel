@@ -9,8 +9,8 @@ use std::fmt;
 use kestrel_hecs::Entity;
 
 use crate::{
-    BasicBlock, Callee, EnumId, FunctionDef, FunctionId, FunctionKind, ImmediateKind,
-    MirBody, MirTy, Place, Rvalue, StatementKind, StructId, TerminatorKind, Value,
+    BasicBlock, Callee, EnumId, FunctionDef, FunctionId, FunctionKind, ImmediateKind, MirBody,
+    MirTy, Place, Rvalue, StatementKind, StructId, TerminatorKind, Value,
 };
 
 /// A single verification diagnostic.
@@ -215,8 +215,10 @@ impl<'a> VerifyCtx<'a> {
                 StatementKind::Assign { dest, rvalue } => {
                     self.verify_place(func_name, bi, dest, body);
                     self.verify_rvalue(func_name, bi, rvalue, body);
-                }
-                StatementKind::Call { dest, callee, args, .. } => {
+                },
+                StatementKind::Call {
+                    dest, callee, args, ..
+                } => {
                     if let Some(d) = dest {
                         self.verify_place(func_name, bi, d, body);
                     }
@@ -224,17 +226,17 @@ impl<'a> VerifyCtx<'a> {
                         self.verify_value(func_name, bi, &arg.value, body);
                     }
                     self.verify_callee(func_name, bi, callee);
-                }
+                },
                 StatementKind::Deinit { place } => {
                     self.verify_place(func_name, bi, place, body);
-                }
+                },
                 StatementKind::DeinitIf { place, flag } => {
                     self.verify_place(func_name, bi, place, body);
                     self.verify_local(func_name, bi, *flag, body);
-                }
+                },
                 StatementKind::SetDeinitFlag { flag, .. } => {
                     self.verify_local(func_name, bi, *flag, body);
-                }
+                },
             }
         }
 
@@ -246,7 +248,7 @@ impl<'a> VerifyCtx<'a> {
         match place {
             Place::Local(id) => {
                 self.verify_local(func, bi, *id, body);
-            }
+            },
             Place::Field { parent, name } => {
                 self.verify_place(func, bi, parent, body);
                 // Check field exists — we'd need the type of `parent` to look it up,
@@ -254,10 +256,10 @@ impl<'a> VerifyCtx<'a> {
                 if name.is_empty() {
                     self.err(func, Some(bi), "field access: empty field name".into());
                 }
-            }
+            },
             Place::Index { parent, .. } => {
                 self.verify_place(func, bi, parent, body);
-            }
+            },
             Place::Downcast { parent, variant } => {
                 self.verify_place(func, bi, parent, body);
                 // Check for common display_name bug patterns
@@ -271,21 +273,15 @@ impl<'a> VerifyCtx<'a> {
                         ),
                     );
                 }
-            }
+            },
             Place::Deref(inner) => {
                 self.verify_place(func, bi, inner, body);
-            }
-            Place::Global(_) => {}
+            },
+            Place::Global(_) => {},
         }
     }
 
-    fn verify_local(
-        &mut self,
-        func: &str,
-        bi: usize,
-        id: crate::LocalId,
-        body: &MirBody,
-    ) {
+    fn verify_local(&mut self, func: &str, bi: usize, id: crate::LocalId, body: &MirBody) {
         if id.index() >= body.locals.len() {
             self.err(
                 func,
@@ -310,55 +306,61 @@ impl<'a> VerifyCtx<'a> {
         match rvalue {
             Rvalue::Move(p) | Rvalue::Copy(p) | Rvalue::Ref(p) | Rvalue::RefMut(p) => {
                 self.verify_place(func, bi, p, body);
-            }
+            },
             Rvalue::Const(imm) => {
                 self.verify_immediate(func, bi, &imm.kind);
-            }
+            },
             Rvalue::Op1 { arg, .. } => {
                 self.verify_value(func, bi, arg, body);
-            }
+            },
             Rvalue::Op2 { lhs, rhs, .. } => {
                 self.verify_value(func, bi, lhs, body);
                 self.verify_value(func, bi, rhs, body);
-            }
+            },
             Rvalue::Op3 { a, b, c, .. } => {
                 self.verify_value(func, bi, a, body);
                 self.verify_value(func, bi, b, body);
                 self.verify_value(func, bi, c, body);
-            }
+            },
             Rvalue::Construct { fields, .. } => {
                 for (_, v) in fields {
                     self.verify_value(func, bi, v, body);
                 }
-            }
+            },
             Rvalue::Tuple(vals) => {
                 for v in vals {
                     self.verify_value(func, bi, v, body);
                 }
-            }
+            },
             Rvalue::EnumVariant { payload, .. } => {
                 for v in payload {
                     self.verify_value(func, bi, v, body);
                 }
-            }
+            },
             Rvalue::ArrayLiteral { values, .. } => {
                 for v in values {
                     self.verify_value(func, bi, v, body);
                 }
-            }
-            Rvalue::ApplyPartial { func: target, captures } => {
+            },
+            Rvalue::ApplyPartial {
+                func: target,
+                captures,
+            } => {
                 // Check the target entity is a known function
                 if self.entity_to_func.get(target).is_none() {
                     self.err(
                         func,
                         Some(bi),
-                        format!("ApplyPartial: target entity {:?} not a known function", target),
+                        format!(
+                            "ApplyPartial: target entity {:?} not a known function",
+                            target
+                        ),
                     );
                 }
                 for cap in captures {
                     self.verify_value(func, bi, cap, body);
                 }
-            }
+            },
         }
     }
 
@@ -376,15 +378,23 @@ impl<'a> VerifyCtx<'a> {
                         ),
                     );
                 }
-            }
-            Callee::Witness { protocol, method, self_type, .. } => {
+            },
+            Callee::Witness {
+                protocol,
+                method,
+                self_type,
+                ..
+            } => {
                 // Check protocol entity is known
                 let proto_name = self.module.resolve_name(*protocol);
                 if proto_name.starts_with("<entity:") {
                     self.err(
                         func,
                         Some(bi),
-                        format!("call: Witness protocol {:?} has no registered name", protocol),
+                        format!(
+                            "call: Witness protocol {:?} has no registered name",
+                            protocol
+                        ),
                     );
                 }
                 // Check self_type isn't unresolved
@@ -398,11 +408,11 @@ impl<'a> VerifyCtx<'a> {
                         ),
                     );
                 }
-            }
+            },
             Callee::Thin(p) | Callee::Thick(p) => {
                 // Can't verify much without type info, just check place is well-formed
                 let _ = p; // place check already done by caller
-            }
+            },
         }
     }
 
@@ -449,28 +459,29 @@ impl<'a> VerifyCtx<'a> {
                         ),
                     );
                 }
-            }
-            _ => {}
+            },
+            _ => {},
         }
     }
 
-    fn verify_terminator(
-        &mut self,
-        func: &str,
-        bi: usize,
-        kind: &TerminatorKind,
-        body: &MirBody,
-    ) {
+    fn verify_terminator(&mut self, func: &str, bi: usize, kind: &TerminatorKind, body: &MirBody) {
         match kind {
             TerminatorKind::Jump(target) => {
                 self.verify_block_id(func, bi, *target, body);
-            }
-            TerminatorKind::Branch { condition, then_block, else_block } => {
+            },
+            TerminatorKind::Branch {
+                condition,
+                then_block,
+                else_block,
+            } => {
                 self.verify_value(func, bi, condition, body);
                 self.verify_block_id(func, bi, *then_block, body);
                 self.verify_block_id(func, bi, *else_block, body);
-            }
-            TerminatorKind::Switch { discriminant, cases } => {
+            },
+            TerminatorKind::Switch {
+                discriminant,
+                cases,
+            } => {
                 self.verify_place(func, bi, discriminant, body);
                 for (case, target) in cases {
                     self.verify_block_id(func, bi, *target, body);
@@ -489,21 +500,15 @@ impl<'a> VerifyCtx<'a> {
                         }
                     }
                 }
-            }
+            },
             TerminatorKind::Return(val) => {
                 self.verify_value(func, bi, val, body);
-            }
-            TerminatorKind::Panic(_) | TerminatorKind::Unreachable => {}
+            },
+            TerminatorKind::Panic(_) | TerminatorKind::Unreachable => {},
         }
     }
 
-    fn verify_block_id(
-        &mut self,
-        func: &str,
-        bi: usize,
-        target: crate::BlockId,
-        body: &MirBody,
-    ) {
+    fn verify_block_id(&mut self, func: &str, bi: usize, target: crate::BlockId, body: &MirBody) {
         if target.index() >= body.blocks.len() {
             self.err(
                 func,

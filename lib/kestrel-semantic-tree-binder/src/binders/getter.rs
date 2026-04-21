@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use kestrel_semantic_model::TypeFor;
-use kestrel_semantic_tree::behavior::{NamespaceScopeMarker, StaticBehavior};
 use kestrel_semantic_tree::behavior::callable::{CallableBehavior, ReceiverKind};
+use kestrel_semantic_tree::behavior::{NamespaceScopeMarker, StaticBehavior};
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::getter::GetterSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
@@ -55,7 +55,11 @@ impl DeclarationBinder for GetterBinder {
         let is_module_level = parent
             .metadata()
             .parent()
-            .map(|gp| gp.metadata().get_behavior::<NamespaceScopeMarker>().is_some())
+            .map(|gp| {
+                gp.metadata()
+                    .get_behavior::<NamespaceScopeMarker>()
+                    .is_some()
+            })
             .unwrap_or(false);
 
         let is_static = explicit_static || is_module_level;
@@ -180,7 +184,10 @@ fn resolve_getter_body(
 ///
 /// Returns the concrete type of the containing struct/enum (grandparent of the getter).
 /// The hierarchy is: Struct/Enum -> Field -> Getter
-fn get_self_type(symbol: &Arc<dyn Symbol<KestrelLanguage>>, model: &kestrel_semantic_model::SemanticModel) -> Option<Ty> {
+fn get_self_type(
+    symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+    model: &kestrel_semantic_model::SemanticModel,
+) -> Option<Ty> {
     // Getter's parent is Field, Field's parent is the type container
     let field = symbol.metadata().parent()?;
     let type_parent = field.metadata().parent()?;

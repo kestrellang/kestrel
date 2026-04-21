@@ -108,7 +108,10 @@ pub fn resolve_path_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContex
         // e.g., `self.field[T]` or `x.member[T]` — brackets on member access are not valid.
         // BUT: skip this check if the path is the callee of a call expression (e.g., `ptr.cast[T]()`)
         // because the type args belong to the method call, handled by resolve_call_expression.
-        if path_with_spans.len() > 1 && has_type_arguments_on_last_segment(node) && !is_callee_of_call(node) {
+        if path_with_spans.len() > 1
+            && has_type_arguments_on_last_segment(node)
+            && !is_callee_of_call(node)
+        {
             ctx.diagnostics.add_diagnostic(
                 TypeArgsOnNonGenericError {
                     span: span.clone(),

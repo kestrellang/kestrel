@@ -87,7 +87,11 @@ pub fn check_match(
         let is_never = matches!(scrutinee_ty, ResolvedTy::Never);
         return ExhaustivenessResult {
             is_exhaustive: is_never,
-            missing_patterns: if is_never { vec![] } else { vec![Witness::any()] },
+            missing_patterns: if is_never {
+                vec![]
+            } else {
+                vec![Witness::any()]
+            },
             redundant_arms: vec![],
             overlapping_arms: vec![],
         };
@@ -128,8 +132,9 @@ pub fn check_match(
         if !has_guard {
             if let Some((s, e)) = extract_int_range(flat_pat) {
                 if s <= e {
-                    let has_overlap =
-                        prior_int_ranges.iter().any(|&(_, ps, pe)| s <= pe && ps <= e);
+                    let has_overlap = prior_int_ranges
+                        .iter()
+                        .any(|&(_, ps, pe)| s <= pe && ps <= e);
                     let covered = range_covered_by_union_i64(s, e, &prior_int_ranges);
                     if covered {
                         is_redundant = true;
@@ -141,8 +146,9 @@ pub fn check_match(
                 }
             } else if let Some((s, e)) = extract_char_range(flat_pat) {
                 if s <= e {
-                    let has_overlap =
-                        prior_char_ranges.iter().any(|&(_, ps, pe)| s <= pe && ps <= e);
+                    let has_overlap = prior_char_ranges
+                        .iter()
+                        .any(|&(_, ps, pe)| s <= pe && ps <= e);
                     let covered = range_covered_by_union_u32(s, e, &prior_char_ranges);
                     if covered {
                         is_redundant = true;
@@ -244,7 +250,10 @@ fn is_wildcard_useful(
     ctx: &QueryContext<'_>,
 ) -> UsefulnessResult {
     // If any row has a wildcard in this column, use the default matrix
-    let has_catch_all = matrix.rows.iter().any(|row| row.pats[col].is_wildcard_like());
+    let has_catch_all = matrix
+        .rows
+        .iter()
+        .any(|row| row.pats[col].is_wildcard_like());
     if has_catch_all {
         let default = matrix.default_matrix(col);
         let default_query = PatternRow::new(
@@ -274,7 +283,7 @@ fn is_wildcard_useful(
                 }
             }
             UsefulnessResult::not_useful()
-        }
+        },
 
         None => {
             // Range patterns (`..<0 | 0..=59 | 60..`) produce constructors on
@@ -298,7 +307,8 @@ fn is_wildcard_useful(
                 if missing.is_empty() {
                     // All covered (e.g., array with rest) — check sub-patterns
                     for ctor in &covered {
-                        let result = is_constructor_useful(matrix, query, col, ctor, col_type, root, ctx);
+                        let result =
+                            is_constructor_useful(matrix, query, col, ctor, col_type, root, ctx);
                         if result.is_useful {
                             return result;
                         }
@@ -322,7 +332,7 @@ fn is_wildcard_useful(
             } else {
                 is_useful(&default, &default_query, root, ctx)
             }
-        }
+        },
     }
 }
 
@@ -341,7 +351,8 @@ fn is_constructor_useful(
 
     // Build specialized query row: [..col] + sub_pats + [col+1..]
     let arity = ctor.arity();
-    let sub_pats = query.pats[col].decompose(ctor, arity)
+    let sub_pats = query.pats[col]
+        .decompose(ctor, arity)
         .unwrap_or_else(|| vec![FlatPat::Wildcard; arity]);
     let mut new_query_pats = Vec::with_capacity(query.pats.len() - 1 + sub_pats.len());
     new_query_pats.extend_from_slice(&query.pats[..col]);
@@ -380,7 +391,7 @@ fn wrap_witness(inner: Witness, ctor: &Constructor, ctx: &QueryContext<'_>) -> W
             } else {
                 Witness::enum_case_with_args(&name, args)
             }
-        }
+        },
         Constructor::Tuple { .. } => match inner {
             Witness::Tuple(_) => inner,
             Witness::Any => Witness::any(),
@@ -407,7 +418,7 @@ fn generate_witnesses(
             } else {
                 missing.iter().map(|c| c.to_witness(query)).collect()
             }
-        }
+        },
         None => vec![Witness::any()],
     }
 }
@@ -513,7 +524,7 @@ fn collect_int_ranges(covered: &HashSet<Constructor>) -> Option<Vec<(usize, i64,
         match c {
             Constructor::IntRange { start, end } => {
                 out.push((i, start.unwrap_or(i64::MIN), end.unwrap_or(i64::MAX)));
-            }
+            },
             Constructor::IntLiteral(v) => out.push((i, *v, *v)),
             _ => return None,
         }
@@ -532,7 +543,7 @@ fn collect_char_ranges(covered: &HashSet<Constructor>) -> Option<Vec<(usize, u32
                     start.map(|c| c as u32).unwrap_or(0),
                     end.map(|c| c as u32).unwrap_or(char::MAX as u32),
                 ));
-            }
+            },
             Constructor::CharLiteral(c) => out.push((i, *c as u32, *c as u32)),
             _ => return None,
         }

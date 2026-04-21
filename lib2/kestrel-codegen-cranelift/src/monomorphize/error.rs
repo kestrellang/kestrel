@@ -42,10 +42,10 @@ impl fmt::Display for MonomorphizeError {
             ),
             Self::FunctionNotFound { name } => {
                 write!(f, "function not found: {name}")
-            }
+            },
             Self::TypeMismatch { expected, found } => {
                 write!(f, "type mismatch: expected {expected}, found {found}")
-            }
+            },
         }
     }
 }

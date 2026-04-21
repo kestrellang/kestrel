@@ -48,12 +48,20 @@ impl Analyzer for DuplicateSymbolAnalyzer {
         ctx: &mut AnalysisContext,
     ) {
         // Check for duplicate types in scopes that can contain types
-        if symbol.metadata().get_behavior::<NamespaceScopeMarker>().is_some() {
+        if symbol
+            .metadata()
+            .get_behavior::<NamespaceScopeMarker>()
+            .is_some()
+        {
             check_duplicate_types(symbol, ctx);
         }
 
         // Check for duplicate members in types
-        if symbol.metadata().get_behavior::<HasMembersMarker>().is_some() {
+        if symbol
+            .metadata()
+            .get_behavior::<HasMembersMarker>()
+            .is_some()
+        {
             check_duplicate_members(symbol, ctx);
         }
     }

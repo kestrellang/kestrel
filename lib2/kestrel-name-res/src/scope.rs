@@ -96,10 +96,7 @@ impl QueryFn for ScopeFor {
                 );
             } else if let Some(name) = ctx.get::<Name>(child) {
                 // Non-import child with a name → local declaration
-                declarations
-                    .entry(name.0.clone())
-                    .or_default()
-                    .push(child);
+                declarations.entry(name.0.clone()).or_default().push(child);
             }
         }
 
@@ -162,10 +159,7 @@ fn process_import(
             let matches: Vec<Entity> = ctx
                 .children_of(module_entity)
                 .iter()
-                .filter(|&&child| {
-                    ctx.get::<Name>(child)
-                        .is_some_and(|n| n.0 == item.name)
-                })
+                .filter(|&&child| ctx.get::<Name>(child).is_some_and(|n| n.0 == item.name))
                 .copied()
                 .collect();
 
@@ -299,10 +293,7 @@ mod tests {
 
         let sel_import = world.spawn();
         world.set(sel_import, NodeKind::Import);
-        world.set(
-            sel_import,
-            ModulePath(vec!["std".into(), "core".into()]),
-        );
+        world.set(sel_import, ModulePath(vec!["std".into(), "core".into()]));
         world.set(
             sel_import,
             ImportItems(vec![ImportItem {
@@ -361,10 +352,7 @@ mod tests {
             .copied()
             .unwrap();
 
-        let scope = ctx.query(ScopeFor {
-            entity: core,
-            root,
-        });
+        let scope = ctx.query(ScopeFor { entity: core, root });
 
         // std.core should NOT have auto-imported wildcard modules
         // (it only has its own local declarations)

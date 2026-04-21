@@ -23,14 +23,12 @@ use kestrel_hecs::Entity;
 use kestrel_name_res::{ResolveTypePath, TypeResolution};
 use kestrel_span2::Span;
 
-static DESCRIPTORS: &[DiagnosticDescriptor] = &[
-    DiagnosticDescriptor {
-        id: "E436",
-        name: "unresolved_type_in_annotation",
-        default_severity: Severity::Error,
-        category: Category::Correctness,
-    },
-];
+static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
+    id: "E436",
+    name: "unresolved_type_in_annotation",
+    default_severity: Severity::Error,
+    category: Category::Correctness,
+}];
 
 pub struct TypeAnnotationResolutionAnalyzer;
 
@@ -56,7 +54,12 @@ impl CompilationCheck for TypeAnnotationResolutionAnalyzer {
 /// Inside protocols, only type alias defaults are checked — function/subscript
 /// signatures reference abstract types (Self, associated types) validated elsewhere.
 /// Skipping them also avoids infinite recursion on cyclic protocol inheritance.
-fn walk_entity(cx: &CompilationContext<'_>, entity: Entity, in_protocol: bool, diags: &mut Vec<AnalyzeDiagnostic>) {
+fn walk_entity(
+    cx: &CompilationContext<'_>,
+    entity: Entity,
+    in_protocol: bool,
+    diags: &mut Vec<AnalyzeDiagnostic>,
+) {
     let kind = cx.query.get::<NodeKind>(entity);
     let is_protocol = kind == Some(&NodeKind::Protocol);
 
@@ -124,30 +127,34 @@ fn check_ast_type(
                     check_ast_type(cx, arg, context, diags);
                 }
             }
-        }
+        },
         AstType::Tuple(types, _) => {
             for ty in types {
                 check_ast_type(cx, ty, context, diags);
             }
-        }
-        AstType::Function { params, return_type, .. } => {
+        },
+        AstType::Function {
+            params,
+            return_type,
+            ..
+        } => {
             for p in params {
                 check_ast_type(cx, p, context, diags);
             }
             check_ast_type(cx, return_type, context, diags);
-        }
+        },
         AstType::Array(inner, _) | AstType::Optional(inner, _) => {
             check_ast_type(cx, inner, context, diags);
-        }
+        },
         AstType::Dictionary(key, value, _) => {
             check_ast_type(cx, key, context, diags);
             check_ast_type(cx, value, context, diags);
-        }
+        },
         AstType::Result { ok, err, .. } => {
             check_ast_type(cx, ok, context, diags);
             check_ast_type(cx, err, context, diags);
-        }
+        },
         // Unit, Never, Inferred — no type references to check
-        AstType::Unit(_) | AstType::Never(_) | AstType::Inferred(_) => {}
+        AstType::Unit(_) | AstType::Never(_) | AstType::Inferred(_) => {},
     }
 }

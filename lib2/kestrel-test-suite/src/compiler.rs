@@ -62,8 +62,7 @@ impl TestCompiler {
 
     /// Run type inference on all bodies.
     pub fn infer(&self) -> &InferSummary {
-        self.infer_result
-            .get_or_init(|| self.compiler.infer_all())
+        self.infer_result.get_or_init(|| self.compiler.infer_all())
     }
 
     /// Run all registered analyzers.
@@ -108,7 +107,8 @@ impl TestCompiler {
                 c.file_id == a.file_id
                     && c.line == a.line
                     && c.severity == a.severity
-                    && (c.message == a.message || c.message.starts_with(&format!("{}: ", a.message)))
+                    && (c.message == a.message
+                        || c.message.starts_with(&format!("{}: ", a.message)))
             });
             if !duplicate {
                 result.push(a);
@@ -182,7 +182,9 @@ impl TestCompiler {
             Ok(())
         } else {
             // Build file_id → short path map for readable error output
-            let file_names: std::collections::HashMap<usize, String> = self.compiler.files()
+            let file_names: std::collections::HashMap<usize, String> = self
+                .compiler
+                .files()
                 .iter()
                 .map(|(path, entity)| {
                     // Shorten path: just keep the last 2 components (e.g. "iter/iterator.ks")
@@ -203,7 +205,8 @@ impl TestCompiler {
             let details: Vec<String> = errors
                 .iter()
                 .map(|d| {
-                    let file = file_names.get(&d.file_id)
+                    let file = file_names
+                        .get(&d.file_id)
                         .map(|s| s.as_str())
                         .unwrap_or("?");
                     format!(
@@ -245,7 +248,10 @@ impl TestCompiler {
                 .map(|d| format!("  line {}: {}", d.line, d.message))
                 .collect();
             if errors.is_empty() {
-                panic!("Expected error containing '{}', but no errors found", message);
+                panic!(
+                    "Expected error containing '{}', but no errors found",
+                    message
+                );
             } else {
                 panic!(
                     "Expected error containing '{}', but none matched.\nActual errors:\n{}",
@@ -289,7 +295,7 @@ impl TestCompiler {
                         result.exit_code, result.stdout, result.stderr
                     );
                 }
-            }
+            },
             Err(e) => panic!("Compilation/execution failed: {}", e),
         }
     }
@@ -306,7 +312,7 @@ impl TestCompiler {
                         result.stderr
                     );
                 }
-            }
+            },
             Err(e) => panic!("Compilation/execution failed: {}", e),
         }
     }
@@ -321,7 +327,7 @@ impl TestCompiler {
                         needle, result.stdout, result.stderr
                     );
                 }
-            }
+            },
             Err(e) => panic!("Compilation/execution failed: {}", e),
         }
     }
@@ -336,7 +342,7 @@ impl TestCompiler {
                         code, result.exit_code, result.stdout, result.stderr
                     );
                 }
-            }
+            },
             Err(e) => panic!("Compilation/execution failed: {}", e),
         }
     }

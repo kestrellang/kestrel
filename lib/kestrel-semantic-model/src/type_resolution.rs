@@ -13,8 +13,8 @@ use kestrel_semantic_tree::symbol::type_alias::TypeAliasSymbol;
 use kestrel_semantic_tree::symbol::type_parameter::TypeParameterSymbol;
 use kestrel_semantic_tree::ty::{FloatBits, IntBits, Substitutions, Ty, TyKind};
 use kestrel_span::Span;
-use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use kestrel_syntax_tree::utils::{extract_path_segments, get_node_span};
+use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::{Symbol, SymbolId};
 
 use crate::SemanticModel;
@@ -106,9 +106,7 @@ pub fn resolve_type_from_syntax_node(
         .children()
         .find(|child| child.kind() == SyntaxKind::TyArray)
     {
-        if let Some(element_ty_node) =
-            array_node.children().find(|c| c.kind() == SyntaxKind::Ty)
-        {
+        if let Some(element_ty_node) = array_node.children().find(|c| c.kind() == SyntaxKind::Ty) {
             let element_ty =
                 resolve_type_from_syntax_node(model, &element_ty_node, context_id, file_id);
             return resolve_type_operator(
@@ -133,10 +131,8 @@ pub fn resolve_type_from_syntax_node(
             .filter(|c| c.kind() == SyntaxKind::Ty)
             .collect();
         if ty_nodes.len() >= 2 {
-            let key_ty =
-                resolve_type_from_syntax_node(model, &ty_nodes[0], context_id, file_id);
-            let value_ty =
-                resolve_type_from_syntax_node(model, &ty_nodes[1], context_id, file_id);
+            let key_ty = resolve_type_from_syntax_node(model, &ty_nodes[0], context_id, file_id);
+            let value_ty = resolve_type_from_syntax_node(model, &ty_nodes[1], context_id, file_id);
             return resolve_type_operator(
                 model,
                 LanguageFeature::DictionaryTypeOperator,
@@ -158,8 +154,7 @@ pub fn resolve_type_from_syntax_node(
             .children()
             .find(|c| c.kind() == SyntaxKind::Ty)
         {
-            let base_ty =
-                resolve_type_from_syntax_node(model, &base_ty_node, context_id, file_id);
+            let base_ty = resolve_type_from_syntax_node(model, &base_ty_node, context_id, file_id);
             return resolve_type_operator(
                 model,
                 LanguageFeature::OptionalTypeOperator,
@@ -184,8 +179,7 @@ pub fn resolve_type_from_syntax_node(
         if ty_nodes.len() >= 2 {
             let success_ty =
                 resolve_type_from_syntax_node(model, &ty_nodes[0], context_id, file_id);
-            let error_ty =
-                resolve_type_from_syntax_node(model, &ty_nodes[1], context_id, file_id);
+            let error_ty = resolve_type_from_syntax_node(model, &ty_nodes[1], context_id, file_id);
             return resolve_type_operator(
                 model,
                 LanguageFeature::ResultTypeOperator,
@@ -234,8 +228,7 @@ fn resolve_ty_path(
     // Check for lang.* built-in primitive types
     if segments.len() == 2 && segments[0] == lang::LANG {
         if segments[1] == lang::PTR {
-            let type_args =
-                extract_type_arguments(model, ty_path_node, context_id, file_id);
+            let type_args = extract_type_arguments(model, ty_path_node, context_id, file_id);
             match type_args {
                 Some(args) if args.len() == 1 => {
                     return Ty::pointer(args.into_iter().next().unwrap(), ty_span);

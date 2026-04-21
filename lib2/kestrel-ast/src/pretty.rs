@@ -50,7 +50,13 @@ impl PrettyCtx<'_> {
     fn print_stmt(&mut self, id: StmtId, depth: usize) {
         let stmt = &self.stmts[id];
         match stmt {
-            AstStmt::Let { is_mut, pattern, ty, value, .. } => {
+            AstStmt::Let {
+                is_mut,
+                pattern,
+                ty,
+                value,
+                ..
+            } => {
                 self.indent(depth);
                 let keyword = if *is_mut { "var" } else { "let" };
                 let _ = write!(self.buf, "{keyword} ");
@@ -63,13 +69,17 @@ impl PrettyCtx<'_> {
                     self.print_expr(*val, depth);
                 }
                 self.buf.push('\n');
-            }
+            },
             AstStmt::Expr { expr, .. } => {
                 self.indent(depth);
                 self.print_expr(*expr, depth);
                 self.buf.push('\n');
-            }
-            AstStmt::GuardLet { conditions, else_body, .. } => {
+            },
+            AstStmt::GuardLet {
+                conditions,
+                else_body,
+                ..
+            } => {
                 self.indent(depth);
                 self.buf.push_str("guard ");
                 for (i, cond) in conditions.iter().enumerate() {
@@ -82,11 +92,11 @@ impl PrettyCtx<'_> {
                 self.print_block(else_body, depth + 1);
                 self.indent(depth);
                 self.buf.push_str("}\n");
-            }
+            },
             AstStmt::Deinit { name, .. } => {
                 self.indent(depth);
                 let _ = writeln!(self.buf, "deinit {name}");
-            }
+            },
         }
     }
 
@@ -95,7 +105,7 @@ impl PrettyCtx<'_> {
         match expr {
             AstExpr::Literal { kind, .. } => {
                 self.buf.push_str(&format_literal(kind));
-            }
+            },
             AstExpr::InterpolatedString { parts, .. } => {
                 self.buf.push('"');
                 for part in parts {
@@ -105,11 +115,11 @@ impl PrettyCtx<'_> {
                             self.buf.push_str("\\(");
                             self.print_expr(*expr, depth);
                             self.buf.push(')');
-                        }
+                        },
                     }
                 }
                 self.buf.push('"');
-            }
+            },
             AstExpr::Array { elements, .. } => {
                 self.buf.push('[');
                 for (i, &e) in elements.iter().enumerate() {
@@ -119,7 +129,7 @@ impl PrettyCtx<'_> {
                     self.print_expr(e, depth);
                 }
                 self.buf.push(']');
-            }
+            },
             AstExpr::Dictionary { entries, .. } => {
                 self.buf.push('[');
                 for (i, entry) in entries.iter().enumerate() {
@@ -131,7 +141,7 @@ impl PrettyCtx<'_> {
                     self.print_expr(entry.value, depth);
                 }
                 self.buf.push(']');
-            }
+            },
             AstExpr::Tuple { elements, .. } => {
                 self.buf.push('(');
                 for (i, &e) in elements.iter().enumerate() {
@@ -141,7 +151,7 @@ impl PrettyCtx<'_> {
                     self.print_expr(e, depth);
                 }
                 self.buf.push(')');
-            }
+            },
             AstExpr::Path { segments, .. } => {
                 for (i, seg) in segments.iter().enumerate() {
                     if i > 0 {
@@ -159,8 +169,13 @@ impl PrettyCtx<'_> {
                         self.buf.push(']');
                     }
                 }
-            }
-            AstExpr::MemberAccess { base, member, type_args, .. } => {
+            },
+            AstExpr::MemberAccess {
+                base,
+                member,
+                type_args,
+                ..
+            } => {
                 self.print_expr(*base, depth);
                 self.buf.push('.');
                 self.buf.push_str(member);
@@ -174,51 +189,60 @@ impl PrettyCtx<'_> {
                     }
                     self.buf.push(']');
                 }
-            }
+            },
             AstExpr::TupleIndex { base, index, .. } => {
                 self.print_expr(*base, depth);
                 let _ = write!(self.buf, ".{index}");
-            }
-            AstExpr::ImplicitMember { member, arguments, .. } => {
+            },
+            AstExpr::ImplicitMember {
+                member, arguments, ..
+            } => {
                 let _ = write!(self.buf, ".{member}");
                 if let Some(args) = arguments {
                     self.buf.push('(');
                     self.print_call_args(args, depth);
                     self.buf.push(')');
                 }
-            }
+            },
             AstExpr::Unary { op, operand, .. } => {
                 self.buf.push_str(format_unary_op(op));
                 self.print_expr(*operand, depth);
-            }
+            },
             AstExpr::Postfix { operand, op, .. } => {
                 self.print_expr(*operand, depth);
                 self.buf.push_str(format_postfix_op(op));
-            }
+            },
             AstExpr::Binary { lhs, op, rhs, .. } => {
                 self.buf.push('(');
                 self.print_expr(*lhs, depth);
                 let _ = write!(self.buf, " {} ", format_binary_op(op));
                 self.print_expr(*rhs, depth);
                 self.buf.push(')');
-            }
+            },
             AstExpr::Assignment { lhs, rhs, .. } => {
                 self.print_expr(*lhs, depth);
                 self.buf.push_str(" = ");
                 self.print_expr(*rhs, depth);
-            }
+            },
             AstExpr::CompoundAssignment { lhs, op, rhs, .. } => {
                 self.print_expr(*lhs, depth);
                 let _ = write!(self.buf, " {} ", format_compound_op(op));
                 self.print_expr(*rhs, depth);
-            }
-            AstExpr::Call { callee, arguments, .. } => {
+            },
+            AstExpr::Call {
+                callee, arguments, ..
+            } => {
                 self.print_expr(*callee, depth);
                 self.buf.push('(');
                 self.print_call_args(arguments, depth);
                 self.buf.push(')');
-            }
-            AstExpr::If { conditions, then_body, else_body, .. } => {
+            },
+            AstExpr::If {
+                conditions,
+                then_body,
+                else_body,
+                ..
+            } => {
                 self.buf.push_str("if ");
                 for (i, cond) in conditions.iter().enumerate() {
                     if i > 0 {
@@ -237,15 +261,20 @@ impl PrettyCtx<'_> {
                             self.print_block(block, depth + 1);
                             self.indent(depth);
                             self.buf.push('}');
-                        }
+                        },
                         ElseBody::ElseIf(expr) => {
                             self.buf.push_str(" else ");
                             self.print_expr(*expr, depth);
-                        }
+                        },
                     }
                 }
-            }
-            AstExpr::While { label, condition, body, .. } => {
+            },
+            AstExpr::While {
+                label,
+                condition,
+                body,
+                ..
+            } => {
                 if let Some(l) = label {
                     let _ = write!(self.buf, "{l}: ");
                 }
@@ -255,8 +284,13 @@ impl PrettyCtx<'_> {
                 self.print_block(body, depth + 1);
                 self.indent(depth);
                 self.buf.push('}');
-            }
-            AstExpr::WhileLet { label, conditions, body, .. } => {
+            },
+            AstExpr::WhileLet {
+                label,
+                conditions,
+                body,
+                ..
+            } => {
                 if let Some(l) = label {
                     let _ = write!(self.buf, "{l}: ");
                 }
@@ -271,7 +305,7 @@ impl PrettyCtx<'_> {
                 self.print_block(body, depth + 1);
                 self.indent(depth);
                 self.buf.push('}');
-            }
+            },
             AstExpr::Loop { label, body, .. } => {
                 if let Some(l) = label {
                     let _ = write!(self.buf, "{l}: ");
@@ -280,8 +314,14 @@ impl PrettyCtx<'_> {
                 self.print_block(body, depth + 1);
                 self.indent(depth);
                 self.buf.push('}');
-            }
-            AstExpr::For { label, pattern, iterable, body, .. } => {
+            },
+            AstExpr::For {
+                label,
+                pattern,
+                iterable,
+                body,
+                ..
+            } => {
                 if let Some(l) = label {
                     let _ = write!(self.buf, "{l}: ");
                 }
@@ -293,34 +333,34 @@ impl PrettyCtx<'_> {
                 self.print_block(body, depth + 1);
                 self.indent(depth);
                 self.buf.push('}');
-            }
+            },
             AstExpr::Break { label, .. } => {
                 self.buf.push_str("break");
                 if let Some(l) = label {
                     let _ = write!(self.buf, " {l}");
                 }
-            }
+            },
             AstExpr::Continue { label, .. } => {
                 self.buf.push_str("continue");
                 if let Some(l) = label {
                     let _ = write!(self.buf, " {l}");
                 }
-            }
+            },
             AstExpr::Return { value, .. } => {
                 self.buf.push_str("return");
                 if let Some(v) = value {
                     self.buf.push(' ');
                     self.print_expr(*v, depth);
                 }
-            }
+            },
             AstExpr::Throw { value, .. } => {
                 self.buf.push_str("throw ");
                 self.print_expr(*value, depth);
-            }
+            },
             AstExpr::Try { operand, .. } => {
                 self.buf.push_str("try ");
                 self.print_expr(*operand, depth);
-            }
+            },
             AstExpr::Closure { params, body, .. } => {
                 self.buf.push_str("{ ");
                 if !params.is_empty() {
@@ -339,8 +379,10 @@ impl PrettyCtx<'_> {
                 self.print_block(body, depth + 1);
                 self.indent(depth);
                 self.buf.push('}');
-            }
-            AstExpr::Match { scrutinee, arms, .. } => {
+            },
+            AstExpr::Match {
+                scrutinee, arms, ..
+            } => {
                 self.buf.push_str("match ");
                 self.print_expr(*scrutinee, depth);
                 self.buf.push_str(" {\n");
@@ -357,7 +399,7 @@ impl PrettyCtx<'_> {
                 }
                 self.indent(depth);
                 self.buf.push('}');
-            }
+            },
             AstExpr::Block { body, .. } => {
                 self.buf.push_str("{\n");
                 for &stmt in &body.stmts {
@@ -372,15 +414,15 @@ impl PrettyCtx<'_> {
                 }
                 self.indent(depth);
                 self.buf.push('}');
-            }
+            },
             AstExpr::Paren { inner, .. } => {
                 self.buf.push('(');
                 self.print_expr(*inner, depth);
                 self.buf.push(')');
-            }
+            },
             AstExpr::Error { .. } => {
                 self.buf.push_str("<error>");
-            }
+            },
         }
     }
 
@@ -393,8 +435,13 @@ impl PrettyCtx<'_> {
                     self.buf.push_str("var ");
                 }
                 self.buf.push_str(name);
-            }
-            AstPat::Tuple { prefix, has_rest, suffix, .. } => {
+            },
+            AstPat::Tuple {
+                prefix,
+                has_rest,
+                suffix,
+                ..
+            } => {
                 self.buf.push('(');
                 for (i, &e) in prefix.iter().enumerate() {
                     if i > 0 {
@@ -413,11 +460,16 @@ impl PrettyCtx<'_> {
                     }
                 }
                 self.buf.push(')');
-            }
+            },
             AstPat::Literal { kind, .. } => {
                 self.buf.push_str(&format_lit_pat(kind));
-            }
-            AstPat::Range { start, end, inclusive, .. } => {
+            },
+            AstPat::Range {
+                start,
+                end,
+                inclusive,
+                ..
+            } => {
                 if let Some(s) = start {
                     self.buf.push_str(&format_lit_pat(s));
                 }
@@ -425,8 +477,10 @@ impl PrettyCtx<'_> {
                 if let Some(e) = end {
                     self.buf.push_str(&format_lit_pat(e));
                 }
-            }
-            AstPat::Enum { case_name, args, .. } => {
+            },
+            AstPat::Enum {
+                case_name, args, ..
+            } => {
                 let _ = write!(self.buf, ".{case_name}");
                 if !args.is_empty() {
                     self.buf.push('(');
@@ -441,8 +495,13 @@ impl PrettyCtx<'_> {
                     }
                     self.buf.push(')');
                 }
-            }
-            AstPat::Struct { name, fields, has_rest, .. } => {
+            },
+            AstPat::Struct {
+                name,
+                fields,
+                has_rest,
+                ..
+            } => {
                 let _ = write!(self.buf, "{name} {{ ");
                 for (i, f) in fields.iter().enumerate() {
                     if i > 0 {
@@ -461,8 +520,13 @@ impl PrettyCtx<'_> {
                     self.buf.push_str("..");
                 }
                 self.buf.push_str(" }");
-            }
-            AstPat::Array { prefix, rest, suffix, .. } => {
+            },
+            AstPat::Array {
+                prefix,
+                rest,
+                suffix,
+                ..
+            } => {
                 self.buf.push('[');
                 let mut first = true;
                 for &p in prefix {
@@ -490,14 +554,19 @@ impl PrettyCtx<'_> {
                     self.print_pat(p);
                 }
                 self.buf.push(']');
-            }
-            AstPat::At { is_mut, name, subpattern, .. } => {
+            },
+            AstPat::At {
+                is_mut,
+                name,
+                subpattern,
+                ..
+            } => {
                 if *is_mut {
                     self.buf.push_str("var ");
                 }
                 let _ = write!(self.buf, "{name} @ ");
                 self.print_pat(*subpattern);
-            }
+            },
             AstPat::Or { alternatives, .. } => {
                 for (i, &a) in alternatives.iter().enumerate() {
                     if i > 0 {
@@ -505,7 +574,7 @@ impl PrettyCtx<'_> {
                     }
                     self.print_pat(a);
                 }
-            }
+            },
             AstPat::Rest { .. } => self.buf.push_str(".."),
             AstPat::Error { .. } => self.buf.push_str("<error>"),
         }
@@ -542,7 +611,7 @@ impl PrettyCtx<'_> {
                 self.print_pat(*pattern);
                 self.buf.push_str(" = ");
                 self.print_expr(*value, depth);
-            }
+            },
         }
     }
 }
@@ -572,28 +641,36 @@ fn format_lit_pat(lit: &LitPatKind) -> String {
 
 fn format_type(ty: &AstType) -> String {
     match ty {
-        AstType::Named { segments, .. } => {
-            segments.iter().map(|s| {
+        AstType::Named { segments, .. } => segments
+            .iter()
+            .map(|s| {
                 if s.type_args.is_empty() {
                     s.name.clone()
                 } else {
                     let args: Vec<_> = s.type_args.iter().map(format_type).collect();
                     format!("{}[{}]", s.name, args.join(", "))
                 }
-            }).collect::<Vec<_>>().join(".")
-        }
+            })
+            .collect::<Vec<_>>()
+            .join("."),
         AstType::Tuple(elems, _) => {
             let inner: Vec<_> = elems.iter().map(format_type).collect();
             format!("({})", inner.join(", "))
-        }
-        AstType::Function { params, return_type, .. } => {
+        },
+        AstType::Function {
+            params,
+            return_type,
+            ..
+        } => {
             let p: Vec<_> = params.iter().map(format_type).collect();
             format!("({}) -> {}", p.join(", "), format_type(return_type))
-        }
+        },
         AstType::Array(inner, _) => format!("[{}]", format_type(inner)),
         AstType::Dictionary(k, v, _) => format!("[{}: {}]", format_type(k), format_type(v)),
         AstType::Optional(inner, _) => format!("{}?", format_type(inner)),
-        AstType::Result { ok, err, .. } => format!("{} throws {}", format_type(ok), format_type(err)),
+        AstType::Result { ok, err, .. } => {
+            format!("{} throws {}", format_type(ok), format_type(err))
+        },
         AstType::Unit(_) => "()".into(),
         AstType::Never(_) => "Never".into(),
         AstType::Inferred(_) => "_".into(),

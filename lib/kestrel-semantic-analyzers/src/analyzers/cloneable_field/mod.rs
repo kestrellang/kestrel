@@ -119,7 +119,7 @@ impl Analyzer for CloneableFieldAnalyzer {
                         });
                         return;
                     }
-                }
+                },
                 KestrelSymbolKind::EnumCase => {
                     if let Some(callable) = child.metadata().get_behavior::<CallableBehavior>() {
                         if let Some(param) =
@@ -135,8 +135,8 @@ impl Analyzer for CloneableFieldAnalyzer {
                             return;
                         }
                     }
-                }
-                _ => {}
+                },
+                _ => {},
             }
         }
     }

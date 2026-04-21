@@ -28,7 +28,7 @@ impl LowerCtx<'_> {
                     expr: lowered,
                     span: span.clone(),
                 })
-            }
+            },
 
             AstStmt::GuardLet {
                 conditions,
@@ -68,7 +68,7 @@ impl LowerCtx<'_> {
                     value: lowered_value,
                     span: span.clone(),
                 })
-            }
+            },
             _ => {
                 // Complex pattern: allocate temp, then destructure via match
                 // Emits: { let $let_tmp = value; match $let_tmp { pattern => () } }
@@ -119,7 +119,7 @@ impl LowerCtx<'_> {
                     expr: block_expr,
                     span: span.clone(),
                 })
-            }
+            },
         }
     }
 

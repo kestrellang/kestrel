@@ -14,13 +14,13 @@
 
 use std::collections::{HashMap, HashSet};
 
+use crate::MirModule;
 use crate::body::{LocalDef, MirBody};
 use crate::id::LocalId;
 use crate::place::Place;
 use crate::statement::{Rvalue, Statement, StatementKind};
 use crate::terminator::TerminatorKind;
 use crate::ty::MirTy;
-use crate::MirModule;
 
 /// Insert destructor calls for non-copyable locals with move tracking.
 ///
@@ -54,10 +54,7 @@ pub fn run_deinit_pass(module: &mut MirModule) {
         // flag=true means "was moved, skip deinit"
         let mut flag_locals: HashMap<LocalId, LocalId> = HashMap::new();
         for &local_id in &moved_locals {
-            let flag_name = format!(
-                "_moved_{}",
-                body.locals[local_id.index()].name
-            );
+            let flag_name = format!("_moved_{}", body.locals[local_id.index()].name);
             let flag_id = body.add_local(LocalDef::new(flag_name, MirTy::Bool));
             flag_locals.insert(local_id, flag_id);
         }

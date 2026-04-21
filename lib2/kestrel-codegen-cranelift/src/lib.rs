@@ -61,7 +61,9 @@ pub fn compile(
 ) -> Result<CompilationResult, CodegenError> {
     // Codegen can be deeply recursive (Cranelift verify/compile, recursive place projections).
     // Use stacker to grow the stack on demand.
-    stacker::maybe_grow(256 * 1024, 4 * 1024 * 1024, || compile_inner(module, target, options))
+    stacker::maybe_grow(256 * 1024, 4 * 1024 * 1024, || {
+        compile_inner(module, target, options)
+    })
 }
 
 fn compile_inner(
@@ -70,11 +72,10 @@ fn compile_inner(
     options: &CodegenOptions,
 ) -> Result<CompilationResult, CodegenError> {
     // Phase 1: Collect all monomorphized function instantiations
-    let mono_set = monomorphize::collect_all(module)
-        .map_err(|errors| {
-            let msgs: Vec<String> = errors.iter().map(|e| e.to_string()).collect();
-            CodegenError::Monomorphization(msgs.join("\n"))
-        })?;
+    let mono_set = monomorphize::collect_all(module).map_err(|errors| {
+        let msgs: Vec<String> = errors.iter().map(|e| e.to_string()).collect();
+        CodegenError::Monomorphization(msgs.join("\n"))
+    })?;
 
     // Phase 2: Compile all functions
     let mut ctx = CodegenContext::new(module, target, options, mono_set)?;
@@ -139,8 +140,8 @@ mod integration_tests {
         compiler.build(entity);
         compiler.infer_all();
 
-        let mir = kestrel_mir_lower::lower_module(compiler.world(), compiler.root())
-            .with_all_passes();
+        let mir =
+            kestrel_mir_lower::lower_module(compiler.world(), compiler.root()).with_all_passes();
         let target = TargetConfig::host();
         let options = CodegenOptions::default();
         compile(&mir, &target, &options)
@@ -153,10 +154,10 @@ mod integration_tests {
             Ok(r) => {
                 eprintln!("Compilation succeeded: {} bytes", r.object_bytes.len());
                 assert!(!r.object_bytes.is_empty());
-            }
+            },
             Err(e) => {
                 eprintln!("Compilation failed (expected during development): {e}");
-            }
+            },
         }
     }
 
@@ -190,7 +191,7 @@ mod integration_tests {
             Ok(r) => {
                 eprintln!("Compiled without stdlib: {} bytes", r.object_bytes.len());
                 assert!(!r.object_bytes.is_empty());
-            }
+            },
             Err(e) => eprintln!("Compile failed: {e}"),
         }
     }
@@ -206,15 +207,19 @@ mod integration_tests {
         // Check for diagnostics from earlier phases (parse, bind, inference)
         let diagnostics = compiler.diagnostics();
         let _ = compiler.emit_diagnostics();
-        let error_count = diagnostics.iter()
+        let error_count = diagnostics
+            .iter()
             .filter(|d| d.severity >= kestrel_reporting2::Severity::Error)
             .count();
         if error_count > 0 {
-            panic!("{} error(s) during build/inference — see diagnostics above", error_count);
+            panic!(
+                "{} error(s) during build/inference — see diagnostics above",
+                error_count
+            );
         }
 
-        let mir = kestrel_mir_lower::lower_module(compiler.world(), compiler.root())
-            .with_all_passes();
+        let mir =
+            kestrel_mir_lower::lower_module(compiler.world(), compiler.root()).with_all_passes();
         let target = TargetConfig::host();
         let options = CodegenOptions::default();
 
@@ -259,13 +264,15 @@ mod integration_tests {
 
     #[test]
     fn e2e_hello_world() {
-        let (code, stdout, stderr) = compile_and_run_with_stdlib(r#"
+        let (code, stdout, stderr) = compile_and_run_with_stdlib(
+            r#"
 module Test
 
 func main() {
     print("Hello from lib2!")
 }
-"#);
+"#,
+        );
         eprintln!("exit={code} stdout={stdout:?} stderr={stderr:?}");
         assert_eq!(code, 0);
         assert!(stdout.contains("Hello from lib2!"), "stdout: {stdout:?}");
@@ -273,7 +280,8 @@ func main() {
 
     #[test]
     fn e2e_arithmetic() {
-        let (code, stdout, _) = compile_and_run_with_stdlib(r#"
+        let (code, stdout, _) = compile_and_run_with_stdlib(
+            r#"
 module Test
 
 func main() {
@@ -286,7 +294,8 @@ func main() {
         print("wrong")
     }
 }
-"#);
+"#,
+        );
         eprintln!("exit={code} stdout={stdout:?}");
         assert_eq!(code, 0);
         assert!(stdout.contains("42"), "stdout: {stdout:?}");
@@ -294,14 +303,16 @@ func main() {
 
     #[test]
     fn e2e_multiple_prints() {
-        let (code, stdout, _) = compile_and_run_with_stdlib(r#"
+        let (code, stdout, _) = compile_and_run_with_stdlib(
+            r#"
 module Test
 
 func main() {
     let _ = print("ab");
     let _ = print("cd");
 }
-"#);
+"#,
+        );
         eprintln!("exit={code} stdout={stdout:?}");
         assert_eq!(code, 0);
         assert!(stdout.contains("abcd"), "stdout: {stdout:?}");
@@ -309,7 +320,8 @@ func main() {
 
     #[test]
     fn e2e_if_else() {
-        let (code, stdout, _) = compile_and_run_with_stdlib(r#"
+        let (code, stdout, _) = compile_and_run_with_stdlib(
+            r#"
 module Test
 
 func main() {
@@ -320,7 +332,8 @@ func main() {
         print("small")
     }
 }
-"#);
+"#,
+        );
         eprintln!("exit={code} stdout={stdout:?}");
         assert_eq!(code, 0);
         assert!(stdout.contains("big"), "stdout: {stdout:?}");
@@ -328,7 +341,8 @@ func main() {
 
     #[test]
     fn e2e_nested_calls() {
-        let (code, stdout, _) = compile_and_run_with_stdlib(r#"
+        let (code, stdout, _) = compile_and_run_with_stdlib(
+            r#"
 module Test
 
 func inner() -> String {
@@ -343,7 +357,8 @@ func main() {
     let _ = print("hello ");
     print(outer())
 }
-"#);
+"#,
+        );
         eprintln!("exit={code} stdout={stdout:?}");
         assert_eq!(code, 0);
         assert!(stdout.contains("hello world"), "stdout: {stdout:?}");
@@ -351,7 +366,8 @@ func main() {
 
     #[test]
     fn e2e_function_call() {
-        let (code, stdout, _) = compile_and_run_with_stdlib(r#"
+        let (code, stdout, _) = compile_and_run_with_stdlib(
+            r#"
 module Test
 
 func greet(name: String) -> String {
@@ -361,7 +377,8 @@ func greet(name: String) -> String {
 func main() {
     print(greet("lib2"))
 }
-"#);
+"#,
+        );
         eprintln!("exit={code} stdout={stdout:?}");
         assert_eq!(code, 0);
         assert!(stdout.contains("Hello, lib2!"), "stdout: {stdout:?}");
@@ -369,7 +386,8 @@ func main() {
 
     #[test]
     fn e2e_string_length() {
-        let (code, stdout, _) = compile_and_run_with_stdlib(r#"
+        let (code, stdout, _) = compile_and_run_with_stdlib(
+            r#"
 module Test
 
 func main() {
@@ -380,7 +398,8 @@ func main() {
         print("empty")
     }
 }
-"#);
+"#,
+        );
         eprintln!("exit={code} stdout={stdout:?}");
         assert_eq!(code, 0);
         assert!(stdout.contains("has content"), "stdout: {stdout:?}");
@@ -388,7 +407,8 @@ func main() {
 
     #[test]
     fn e2e_struct_methods() {
-        let (code, stdout, _) = compile_and_run_with_stdlib(r#"
+        let (code, stdout, _) = compile_and_run_with_stdlib(
+            r#"
 module Test
 
 struct Counter {
@@ -418,7 +438,8 @@ func main() {
         print("failed")
     }
 }
-"#);
+"#,
+        );
         eprintln!("exit={code} stdout={stdout:?}");
         assert_eq!(code, 0);
         assert!(stdout.contains("passed"), "stdout: {stdout:?}");
@@ -426,7 +447,8 @@ func main() {
 
     #[test]
     fn e2e_enum_match() {
-        let (code, stdout, _) = compile_and_run_with_stdlib(r#"
+        let (code, stdout, _) = compile_and_run_with_stdlib(
+            r#"
 module Test
 
 enum Direction {
@@ -449,7 +471,8 @@ func main() {
     let d = Direction.Right;
     print(describe(d))
 }
-"#);
+"#,
+        );
         eprintln!("exit={code} stdout={stdout:?}");
         assert_eq!(code, 0);
         assert!(stdout.contains("right"), "stdout: {stdout:?}");
@@ -457,7 +480,8 @@ func main() {
 
     #[test]
     fn e2e_optional() {
-        let (code, stdout, _) = compile_and_run_with_stdlib(r#"
+        let (code, stdout, _) = compile_and_run_with_stdlib(
+            r#"
 module Test
 
 func findChar(s: String, target: String) -> Optional[Int64] {
@@ -476,7 +500,8 @@ func main() {
         print("not found")
     }
 }
-"#);
+"#,
+        );
         eprintln!("exit={code} stdout={stdout:?}");
         assert_eq!(code, 0);
         assert!(stdout.contains("found"), "stdout: {stdout:?}");
@@ -485,23 +510,27 @@ func main() {
     /// Minimal test: just allocate on the heap and return.
     #[test]
     fn e2e_minimal_return() {
-        let (code, _, _) = compile_and_run_with_stdlib(r#"
+        let (code, _, _) = compile_and_run_with_stdlib(
+            r#"
 module Test
 
 func main() { }
-"#);
+"#,
+        );
         assert_eq!(code, 0, "void main should exit 0");
     }
 
     #[test]
     fn e2e_int_return() {
-        let (code, _, _) = compile_and_run_with_stdlib(r#"
+        let (code, _, _) = compile_and_run_with_stdlib(
+            r#"
 module Test
 
 func main() {
     let x: Int64 = 42;
 }
-"#);
+"#,
+        );
         assert_eq!(code, 0);
     }
 
@@ -514,8 +543,8 @@ func main() {
         compiler.build(entity);
         compiler.infer_all();
 
-        let mir = kestrel_mir_lower::lower_module(compiler.world(), compiler.root())
-            .with_all_passes();
+        let mir =
+            kestrel_mir_lower::lower_module(compiler.world(), compiler.root()).with_all_passes();
 
         // Run MIR verification to catch structural issues
         mir.verify().dump();
@@ -526,14 +555,19 @@ func main() {
         match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             compile(&mir, &target, &options)
         })) {
-            Ok(Ok(r)) => eprintln!("Stdlib compilation succeeded: {} bytes", r.object_bytes.len()),
+            Ok(Ok(r)) => eprintln!(
+                "Stdlib compilation succeeded: {} bytes",
+                r.object_bytes.len()
+            ),
             Ok(Err(e)) => eprintln!("Stdlib compilation error (expected during development): {e}"),
             Err(p) => {
-                let msg = p.downcast_ref::<String>().map(|s| s.as_str())
+                let msg = p
+                    .downcast_ref::<String>()
+                    .map(|s| s.as_str())
                     .or_else(|| p.downcast_ref::<&str>().copied())
                     .unwrap_or("unknown");
                 eprintln!("Stdlib compilation panicked (expected during development): {msg}");
-            }
+            },
         }
     }
 }

@@ -27,13 +27,7 @@ pub fn check_mir_snapshot(
     };
 
     let snapshot_dir = test_path.parent().unwrap().join("snapshots");
-    let name = snapshot_name.unwrap_or_else(|| {
-        test_path
-            .file_stem()
-            .unwrap()
-            .to_str()
-            .unwrap()
-    });
+    let name = snapshot_name.unwrap_or_else(|| test_path.file_stem().unwrap().to_str().unwrap());
     let snapshot_path = snapshot_dir.join(format!("{}.mir", name));
 
     // Update mode: write actual output as new golden file
@@ -56,8 +50,8 @@ pub fn check_mir_snapshot(
         ));
     }
 
-    let expected =
-        std::fs::read_to_string(&snapshot_path).map_err(|e| format!("failed to read snapshot: {e}"))?;
+    let expected = std::fs::read_to_string(&snapshot_path)
+        .map_err(|e| format!("failed to read snapshot: {e}"))?;
 
     if actual.trim() == expected.trim() {
         Ok(())

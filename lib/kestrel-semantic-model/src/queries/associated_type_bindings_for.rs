@@ -35,7 +35,11 @@ impl Query for AssociatedTypeBindingsFor {
             return HashMap::new();
         };
 
-        if symbol.metadata().get_behavior::<ConcreteTypeMarker>().is_none() {
+        if symbol
+            .metadata()
+            .get_behavior::<ConcreteTypeMarker>()
+            .is_none()
+        {
             return HashMap::new();
         }
 
@@ -140,9 +144,7 @@ fn collect_protocol_extension_bindings(
             if !all_protocol_ids.contains(&proto_id) {
                 all_protocol_ids.push(proto_id);
 
-                if let Some(inherited) =
-                    symbol.metadata().get_behavior::<ConformancesBehavior>()
-                {
+                if let Some(inherited) = symbol.metadata().get_behavior::<ConformancesBehavior>() {
                     for inherited_conf in inherited.conformances() {
                         to_check.push(inherited_conf.clone());
                     }

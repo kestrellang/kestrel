@@ -48,15 +48,14 @@ impl Analyzer for ExternFFISafeAnalyzer {
         }
 
         // Only check functions with ExternBehavior
-        if symbol
-            .metadata()
-            .get_behavior::<ExternBehavior>()
-            .is_none()
-        {
+        if symbol.metadata().get_behavior::<ExternBehavior>().is_none() {
             return;
         }
 
-        let Some(ffi_safe_id) = ctx.model.builtin_registry().protocol(LanguageFeature::FFISafe)
+        let Some(ffi_safe_id) = ctx
+            .model
+            .builtin_registry()
+            .protocol(LanguageFeature::FFISafe)
         else {
             return;
         };

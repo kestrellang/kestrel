@@ -43,16 +43,12 @@ fn compile_statement(
             let value = rvalue::compile_rvalue(ctx, state, builder, rvalue)?;
             place::compile_place_write(ctx, state, builder, dest, value)?;
             Ok(())
-        }
+        },
 
-        StatementKind::Call {
-            dest,
-            callee,
-            args,
-        } => {
+        StatementKind::Call { dest, callee, args } => {
             rvalue::call::compile_call(ctx, state, builder, callee, args, dest.as_ref())?;
             Ok(())
-        }
+        },
 
         // Deinit is a no-op at the codegen level — the deinit pass has already
         // expanded this into explicit calls
@@ -64,10 +60,12 @@ fn compile_statement(
 
         // SetDeinitFlag: store a bool value into the flag local
         StatementKind::SetDeinitFlag { flag, value } => {
-            let val = builder.ins().iconst(cranelift_codegen::ir::types::I8, *value as i64);
+            let val = builder
+                .ins()
+                .iconst(cranelift_codegen::ir::types::I8, *value as i64);
             let var = state.local_vars[flag.index()];
             builder.def_var(var, val);
             Ok(())
-        }
+        },
     }
 }

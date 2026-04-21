@@ -192,10 +192,7 @@ mod tests {
     fn resolve_empty_path() {
         let (world, root) = setup();
         let ctx = world.query_context();
-        let result = ctx.query(ResolveModulePath {
-            path: vec![],
-            root,
-        });
+        let result = ctx.query(ResolveModulePath { path: vec![], root });
         assert!(result.is_none());
     }
 

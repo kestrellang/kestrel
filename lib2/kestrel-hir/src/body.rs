@@ -349,7 +349,7 @@ impl std::hash::Hash for HirLiteral {
             HirLiteral::String(v) => v.hash(state),
             HirLiteral::Char(v) => v.hash(state),
             HirLiteral::Bool(v) => v.hash(state),
-            HirLiteral::Null => {}
+            HirLiteral::Null => {},
         }
     }
 }
@@ -417,39 +417,147 @@ pub struct HirStructPatField {
 /// `Some("by")` for shift ops, `Some("to")` for range ops.
 pub const BINARY_OP_PROTOCOLS: &[(BinaryOp, Builtin, &str, Option<&str>)] = &[
     (BinaryOp::Add, Builtin::AddOperatorProtocol, "add", None),
-    (BinaryOp::Sub, Builtin::SubtractOperatorProtocol, "subtract", None),
-    (BinaryOp::Mul, Builtin::MultiplyOperatorProtocol, "multiply", None),
-    (BinaryOp::Div, Builtin::DivideOperatorProtocol, "divide", None),
-    (BinaryOp::Rem, Builtin::ModuloOperatorProtocol, "modulo", None),
-    (BinaryOp::Eq, Builtin::EqualsOperatorProtocol, "equals", None),
-    (BinaryOp::Ne, Builtin::NotEqualsOperatorProtocol, "notEquals", None),
-    (BinaryOp::Lt, Builtin::LessThanOperatorProtocol, "lessThan", None),
-    (BinaryOp::Gt, Builtin::GreaterThanOperatorProtocol, "greaterThan", None),
-    (BinaryOp::Le, Builtin::LessOrEqualOperatorProtocol, "lessThanOrEqual", None),
-    (BinaryOp::Ge, Builtin::GreaterOrEqualOperatorProtocol, "greaterThanOrEqual", None),
-    (BinaryOp::BitAnd, Builtin::BitwiseAndOperatorProtocol, "bitwiseAnd", None),
-    (BinaryOp::BitOr, Builtin::BitwiseOrOperatorProtocol, "bitwiseOr", None),
-    (BinaryOp::BitXor, Builtin::BitwiseXorOperatorProtocol, "bitwiseXor", None),
-    (BinaryOp::Shl, Builtin::ShiftLeftOperatorProtocol, "shiftLeft", Some("by")),
-    (BinaryOp::Shr, Builtin::ShiftRightOperatorProtocol, "shiftRight", Some("by")),
-    (BinaryOp::RangeInclusive, Builtin::InclusiveRangeOperatorProtocol, "inclusiveRange", Some("to")),
-    (BinaryOp::RangeExclusive, Builtin::ExclusiveRangeOperatorProtocol, "exclusiveRange", Some("to")),
+    (
+        BinaryOp::Sub,
+        Builtin::SubtractOperatorProtocol,
+        "subtract",
+        None,
+    ),
+    (
+        BinaryOp::Mul,
+        Builtin::MultiplyOperatorProtocol,
+        "multiply",
+        None,
+    ),
+    (
+        BinaryOp::Div,
+        Builtin::DivideOperatorProtocol,
+        "divide",
+        None,
+    ),
+    (
+        BinaryOp::Rem,
+        Builtin::ModuloOperatorProtocol,
+        "modulo",
+        None,
+    ),
+    (
+        BinaryOp::Eq,
+        Builtin::EqualsOperatorProtocol,
+        "equals",
+        None,
+    ),
+    (
+        BinaryOp::Ne,
+        Builtin::NotEqualsOperatorProtocol,
+        "notEquals",
+        None,
+    ),
+    (
+        BinaryOp::Lt,
+        Builtin::LessThanOperatorProtocol,
+        "lessThan",
+        None,
+    ),
+    (
+        BinaryOp::Gt,
+        Builtin::GreaterThanOperatorProtocol,
+        "greaterThan",
+        None,
+    ),
+    (
+        BinaryOp::Le,
+        Builtin::LessOrEqualOperatorProtocol,
+        "lessThanOrEqual",
+        None,
+    ),
+    (
+        BinaryOp::Ge,
+        Builtin::GreaterOrEqualOperatorProtocol,
+        "greaterThanOrEqual",
+        None,
+    ),
+    (
+        BinaryOp::BitAnd,
+        Builtin::BitwiseAndOperatorProtocol,
+        "bitwiseAnd",
+        None,
+    ),
+    (
+        BinaryOp::BitOr,
+        Builtin::BitwiseOrOperatorProtocol,
+        "bitwiseOr",
+        None,
+    ),
+    (
+        BinaryOp::BitXor,
+        Builtin::BitwiseXorOperatorProtocol,
+        "bitwiseXor",
+        None,
+    ),
+    (
+        BinaryOp::Shl,
+        Builtin::ShiftLeftOperatorProtocol,
+        "shiftLeft",
+        Some("by"),
+    ),
+    (
+        BinaryOp::Shr,
+        Builtin::ShiftRightOperatorProtocol,
+        "shiftRight",
+        Some("by"),
+    ),
+    (
+        BinaryOp::RangeInclusive,
+        Builtin::InclusiveRangeOperatorProtocol,
+        "inclusiveRange",
+        Some("to"),
+    ),
+    (
+        BinaryOp::RangeExclusive,
+        Builtin::ExclusiveRangeOperatorProtocol,
+        "exclusiveRange",
+        Some("to"),
+    ),
 ];
 
 /// Short-circuit operators: right operand is wrapped in a closure.
 /// `logicalAnd(other:)` and `logicalOr(other:)` are single-name params (no label).
 /// `coalesce(default:)` is also single-name (no label).
 pub const SHORT_CIRCUIT_OP_PROTOCOLS: &[(BinaryOp, Builtin, &str, Option<&str>)] = &[
-    (BinaryOp::And, Builtin::LogicalAndOperatorProtocol, "logicalAnd", None),
-    (BinaryOp::Or, Builtin::LogicalOrOperatorProtocol, "logicalOr", None),
-    (BinaryOp::Coalesce, Builtin::CoalesceOperatorProtocol, "coalesce", None),
+    (
+        BinaryOp::And,
+        Builtin::LogicalAndOperatorProtocol,
+        "logicalAnd",
+        None,
+    ),
+    (
+        BinaryOp::Or,
+        Builtin::LogicalOrOperatorProtocol,
+        "logicalOr",
+        None,
+    ),
+    (
+        BinaryOp::Coalesce,
+        Builtin::CoalesceOperatorProtocol,
+        "coalesce",
+        None,
+    ),
 ];
 
 /// (operator, protocol_builtin, method_name)
 pub const UNARY_OP_PROTOCOLS: &[(UnaryOp, Builtin, &str)] = &[
     (UnaryOp::Neg, Builtin::NegateOperatorProtocol, "negate"),
-    (UnaryOp::BitNot, Builtin::BitwiseNotOperatorProtocol, "bitwiseNot"),
-    (UnaryOp::LogicalNot, Builtin::LogicalNotOperatorProtocol, "logicalNot"),
+    (
+        UnaryOp::BitNot,
+        Builtin::BitwiseNotOperatorProtocol,
+        "bitwiseNot",
+    ),
+    (
+        UnaryOp::LogicalNot,
+        Builtin::LogicalNotOperatorProtocol,
+        "logicalNot",
+    ),
 ];
 
 /// (operator, protocol_builtin, method_name, arg_label)
@@ -457,23 +565,71 @@ pub const UNARY_OP_PROTOCOLS: &[(UnaryOp, Builtin, &str)] = &[
 /// Most compound assign methods use single-name params (no label).
 /// Only shift-assign ops have a `"by"` label.
 pub const COMPOUND_ASSIGN_PROTOCOLS: &[(CompoundAssignOp, Builtin, &str, Option<&str>)] = &[
-    (CompoundAssignOp::AddAssign, Builtin::AddAssignProtocol, "addAssign", None),
-    (CompoundAssignOp::SubAssign, Builtin::SubtractAssignProtocol, "subtractAssign", None),
-    (CompoundAssignOp::MulAssign, Builtin::MultiplyAssignProtocol, "multiplyAssign", None),
-    (CompoundAssignOp::DivAssign, Builtin::DivideAssignProtocol, "divideAssign", None),
-    (CompoundAssignOp::RemAssign, Builtin::ModuloAssignProtocol, "modAssign", None),
-    (CompoundAssignOp::BitAndAssign, Builtin::BitwiseAndAssignProtocol, "bitwiseAndAssign", None),
-    (CompoundAssignOp::BitOrAssign, Builtin::BitwiseOrAssignProtocol, "bitwiseOrAssign", None),
-    (CompoundAssignOp::BitXorAssign, Builtin::BitwiseXorAssignProtocol, "bitwiseXorAssign", None),
-    (CompoundAssignOp::ShlAssign, Builtin::ShiftLeftAssignProtocol, "shiftLeftAssign", Some("by")),
-    (CompoundAssignOp::ShrAssign, Builtin::ShiftRightAssignProtocol, "shiftRightAssign", Some("by")),
+    (
+        CompoundAssignOp::AddAssign,
+        Builtin::AddAssignProtocol,
+        "addAssign",
+        None,
+    ),
+    (
+        CompoundAssignOp::SubAssign,
+        Builtin::SubtractAssignProtocol,
+        "subtractAssign",
+        None,
+    ),
+    (
+        CompoundAssignOp::MulAssign,
+        Builtin::MultiplyAssignProtocol,
+        "multiplyAssign",
+        None,
+    ),
+    (
+        CompoundAssignOp::DivAssign,
+        Builtin::DivideAssignProtocol,
+        "divideAssign",
+        None,
+    ),
+    (
+        CompoundAssignOp::RemAssign,
+        Builtin::ModuloAssignProtocol,
+        "modAssign",
+        None,
+    ),
+    (
+        CompoundAssignOp::BitAndAssign,
+        Builtin::BitwiseAndAssignProtocol,
+        "bitwiseAndAssign",
+        None,
+    ),
+    (
+        CompoundAssignOp::BitOrAssign,
+        Builtin::BitwiseOrAssignProtocol,
+        "bitwiseOrAssign",
+        None,
+    ),
+    (
+        CompoundAssignOp::BitXorAssign,
+        Builtin::BitwiseXorAssignProtocol,
+        "bitwiseXorAssign",
+        None,
+    ),
+    (
+        CompoundAssignOp::ShlAssign,
+        Builtin::ShiftLeftAssignProtocol,
+        "shiftLeftAssign",
+        Some("by"),
+    ),
+    (
+        CompoundAssignOp::ShrAssign,
+        Builtin::ShiftRightAssignProtocol,
+        "shiftRightAssign",
+        Some("by"),
+    ),
 ];
 
 /// Look up the protocol for a binary operator.
 /// Returns `(protocol_builtin, method_name, arg_label)` or `None` if not found.
-pub fn lookup_binary_op(
-    op: &BinaryOp,
-) -> Option<(Builtin, &'static str, Option<&'static str>)> {
+pub fn lookup_binary_op(op: &BinaryOp) -> Option<(Builtin, &'static str, Option<&'static str>)> {
     BINARY_OP_PROTOCOLS
         .iter()
         .find(|(o, ..)| o == op)
@@ -533,8 +689,17 @@ mod tests {
         });
 
         // Verify we can index back into the arena
-        assert!(matches!(&exprs[lit], HirExpr::Literal { value: HirLiteral::Integer(42), .. }));
-        assert!(matches!(&exprs[ret], HirExpr::Return { value: Some(_), .. }));
+        assert!(matches!(
+            &exprs[lit],
+            HirExpr::Literal {
+                value: HirLiteral::Integer(42),
+                ..
+            }
+        ));
+        assert!(matches!(
+            &exprs[ret],
+            HirExpr::Return { value: Some(_), .. }
+        ));
         assert_eq!(exprs.len(), 2);
     }
 
@@ -578,8 +743,7 @@ mod tests {
         ];
 
         for op in &all_ops {
-            let found =
-                lookup_binary_op(op).is_some() || lookup_short_circuit_op(op).is_some();
+            let found = lookup_binary_op(op).is_some() || lookup_short_circuit_op(op).is_some();
             assert!(found, "BinaryOp::{op:?} has no protocol mapping");
         }
     }

@@ -91,7 +91,7 @@ pub(crate) fn check_cloneable_field_diagnostic(
                         });
                     return;
                 }
-            }
+            },
             KestrelSymbolKind::EnumCase => {
                 if let Some(callable) = child.metadata().get_behavior::<CallableBehavior>() {
                     if let Some(param) = callable.parameters().iter().find(|p| p.ty.is_cloneable())
@@ -108,8 +108,8 @@ pub(crate) fn check_cloneable_field_diagnostic(
                         return;
                     }
                 }
-            }
-            _ => {}
+            },
+            _ => {},
         }
     }
 }

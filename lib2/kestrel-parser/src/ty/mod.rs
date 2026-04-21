@@ -181,7 +181,9 @@ pub(crate) fn ty_parser<'tokens>()
                 .then(
                     // Empty parens case
                     skip_trivia()
-                        .ignore_then(just(Token::RParen).map_with(|_, e| to_kestrel_span2(e.span())))
+                        .ignore_then(
+                            just(Token::RParen).map_with(|_, e| to_kestrel_span2(e.span())),
+                        )
                         .map(|rparen| (Vec::new(), false, rparen))
                         .or(
                             // At least one type

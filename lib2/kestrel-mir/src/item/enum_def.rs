@@ -41,9 +41,7 @@ impl EnumDef {
 
     /// Look up a case by name.
     pub fn case_by_name(&self, name: &str) -> Option<&EnumCaseDef> {
-        self.cases_by_name
-            .get(name)
-            .map(|&idx| &self.cases[idx])
+        self.cases_by_name.get(name).map(|&idx| &self.cases[idx])
     }
 }
 

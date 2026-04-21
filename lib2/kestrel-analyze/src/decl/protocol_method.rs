@@ -57,8 +57,8 @@ impl DeclCheck for ProtocolMethodAnalyzer {
             }
 
             // Check if this method has a body or computed value
-            let has_body = cx.query.get::<Body>(child).is_some()
-                || cx.query.get::<Valued>(child).is_some();
+            let has_body =
+                cx.query.get::<Body>(child).is_some() || cx.query.get::<Valued>(child).is_some();
             if !has_body {
                 continue;
             }

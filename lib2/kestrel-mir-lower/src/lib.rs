@@ -21,8 +21,8 @@ mod protocol_lower;
 mod resolved_ty;
 mod static_lower;
 mod struct_lower;
-mod witness_lower;
 pub mod ty;
+mod witness_lower;
 
 pub use context::LowerCtx;
 
@@ -48,6 +48,7 @@ pub fn lower_module(world: &World, root: Entity) -> MirModule {
 mod tests {
     use super::*;
     use kestrel_compiler2::Compiler;
+    use kestrel_mir::WitnessMethodKey;
     use std::path::PathBuf;
 
     fn stdlib_path() -> PathBuf {
@@ -66,25 +67,45 @@ mod tests {
     #[test]
     fn lower_simple_struct() {
         let mut c = Compiler::new();
-        set_and_build(&mut c, "test.ks", "module Test\nstruct Point { var x: Int64; var y: Int64 }");
+        set_and_build(
+            &mut c,
+            "test.ks",
+            "module Test\nstruct Point { var x: Int64; var y: Int64 }",
+        );
 
         let mir = lower_module(c.world(), c.root());
         let output = mir.display().to_string();
 
         // Should contain the struct (types are <error> without stdlib for Int64)
-        assert!(output.contains("Point"), "MIR should contain struct Point:\n{}", output);
+        assert!(
+            output.contains("Point"),
+            "MIR should contain struct Point:\n{}",
+            output
+        );
     }
 
     #[test]
     fn lower_simple_enum() {
         let mut c = Compiler::new();
-        set_and_build(&mut c, "test.ks", "module Test\nenum Color { case Red\ncase Green\ncase Blue }");
+        set_and_build(
+            &mut c,
+            "test.ks",
+            "module Test\nenum Color { case Red\ncase Green\ncase Blue }",
+        );
 
         let mir = lower_module(c.world(), c.root());
         let output = mir.display().to_string();
 
-        assert!(output.contains("Color"), "MIR should contain enum Color:\n{}", output);
-        assert!(output.contains("Red"), "MIR should contain case Red:\n{}", output);
+        assert!(
+            output.contains("Color"),
+            "MIR should contain enum Color:\n{}",
+            output
+        );
+        assert!(
+            output.contains("Red"),
+            "MIR should contain case Red:\n{}",
+            output
+        );
     }
 
     #[test]
@@ -97,7 +118,10 @@ mod tests {
 
         // Should have lowered many items
         assert!(!mir.structs.is_empty(), "should have lowered some structs");
-        assert!(!mir.functions.is_empty(), "should have lowered some functions");
+        assert!(
+            !mir.functions.is_empty(),
+            "should have lowered some functions"
+        );
 
         // Print summary
         eprintln!(
@@ -120,13 +144,13 @@ mod tests {
         let output = mir.display().to_string();
 
         // Count <error> types vs total fields across all structs
-        let error_count = mir.structs.iter()
+        let error_count = mir
+            .structs
+            .iter()
             .flat_map(|s| &s.fields)
             .filter(|f| f.ty == kestrel_mir::MirTy::Error)
             .count();
-        let total_fields = mir.structs.iter()
-            .flat_map(|s| &s.fields)
-            .count();
+        let total_fields = mir.structs.iter().flat_map(|s| &s.fields).count();
 
         eprintln!(
             "Type resolution: {}/{} fields resolved ({} errors)",
@@ -167,7 +191,9 @@ mod tests {
 
         // Count functions with bodies
         let bodies = mir.functions.iter().filter(|f| f.body.is_some()).count();
-        let total_blocks: usize = mir.functions.iter()
+        let total_blocks: usize = mir
+            .functions
+            .iter()
             .filter_map(|f| f.body.as_ref())
             .map(|b| b.blocks.len())
             .sum();
@@ -181,7 +207,10 @@ mod tests {
 
         // At least some stdlib functions should have bodies now
         assert!(bodies > 0, "no function bodies were lowered");
-        assert!(total_blocks > bodies, "should have multiple blocks (from if/else)");
+        assert!(
+            total_blocks > bodies,
+            "should have multiple blocks (from if/else)"
+        );
     }
 
     #[test]
@@ -198,7 +227,11 @@ mod tests {
         // Count "call " occurrences in the output
         let call_count = output.matches("call ").count();
         eprintln!("Call statements in MIR: {}", call_count);
-        assert!(call_count > 100, "expected many call statements, got {}", call_count);
+        assert!(
+            call_count > 100,
+            "expected many call statements, got {}",
+            call_count
+        );
 
         // Should have witness_method calls from operator desugaring
         let witness_count = output.matches("witness_method").count();
@@ -245,14 +278,13 @@ mod tests {
         assert!(!mir.witnesses.is_empty(), "should have generated witnesses");
 
         // Count method bindings across all witnesses
-        let total_bindings: usize = mir.witnesses.iter()
-            .map(|w| w.method_bindings.len())
-            .sum();
+        let total_bindings: usize = mir.witnesses.iter().map(|w| w.method_bindings.len()).sum();
         eprintln!("Total method bindings: {}", total_bindings);
 
         // Print a few witness samples
         let output = mir.display().to_string();
-        let witness_lines: Vec<&str> = output.lines()
+        let witness_lines: Vec<&str> = output
+            .lines()
             .filter(|l| l.starts_with("witness "))
             .take(10)
             .collect();
@@ -303,12 +335,74 @@ extend Bob: Greeter {
             .expect("should have a witness for Bob: Greeter");
 
         assert!(
-            bob_witness.method_bindings.contains_key("greet"),
+            bob_witness
+                .method_bindings
+                .contains_key(&WitnessMethodKey::bare("greet")),
             "witness should contain 'greet' (direct protocol method)"
         );
         assert!(
-            bob_witness.method_bindings.contains_key("shout"),
+            bob_witness
+                .method_bindings
+                .contains_key(&WitnessMethodKey::bare("shout")),
             "witness should contain 'shout' (protocol extension method)"
+        );
+    }
+
+    #[test]
+    fn witness_keeps_overloaded_protocol_extension_methods() {
+        let mut c = Compiler::new();
+        let path = stdlib_path();
+        c.load_dir(&path);
+        set_and_build(
+            &mut c,
+            "test.ks",
+            r#"module Test
+
+protocol P { }
+
+extend P {
+    func value() -> Int64 { return 1 }
+    func value(by x: Int64) -> Int64 { return x }
+}
+
+struct S { }
+
+extend S: P { }
+"#,
+        );
+        c.infer_all();
+
+        let mir = lower_module(c.world(), c.root());
+
+        let witness = mir
+            .witnesses
+            .iter()
+            .find(|w| {
+                let protocol_name = mir.resolve_name(w.protocol);
+                let implements_p = protocol_name == "P" || protocol_name.ends_with(".P");
+                let implements_s = match &w.implementing_type {
+                    kestrel_mir::MirTy::Named { entity, .. } => {
+                        let type_name = mir.resolve_name(*entity);
+                        type_name == "S" || type_name.ends_with(".S")
+                    },
+                    _ => false,
+                };
+                implements_p && implements_s
+            })
+            .expect("should have a witness for S: P");
+
+        assert!(
+            witness
+                .method_bindings
+                .contains_key(&WitnessMethodKey::bare("value")),
+            "witness should contain value()"
+        );
+        assert!(
+            witness.method_bindings.contains_key(&WitnessMethodKey::new(
+                "value",
+                vec![Some("by".to_string())],
+            )),
+            "witness should contain value(by:)"
         );
     }
 
@@ -321,9 +415,7 @@ extend Bob: Greeter {
         let mir = lower_module(c.world(), c.root()).with_all_passes();
 
         // Layout pass should have computed some struct layouts
-        let layouts_computed = mir.structs.iter()
-            .filter(|s| s.layout.is_some())
-            .count();
+        let layouts_computed = mir.structs.iter().filter(|s| s.layout.is_some()).count();
         eprintln!(
             "Layouts: {}/{} structs have computed layouts",
             layouts_computed,
@@ -331,13 +423,17 @@ extend Bob: Greeter {
         );
 
         // Thunk pass should have generated thunk functions
-        let thunk_count = mir.functions.iter()
+        let thunk_count = mir
+            .functions
+            .iter()
             .filter(|f| matches!(f.kind, kestrel_mir::FunctionKind::Thunk { .. }))
             .count();
         eprintln!("Thunks: {}", thunk_count);
 
         // Deinit pass should have inserted deinit statements
-        let deinit_count: usize = mir.functions.iter()
+        let deinit_count: usize = mir
+            .functions
+            .iter()
             .filter_map(|f| f.body.as_ref())
             .flat_map(|b| &b.blocks)
             .flat_map(|b| &b.stmts)
@@ -346,6 +442,9 @@ extend Bob: Greeter {
         eprintln!("Deinit statements: {}", deinit_count);
 
         // All passes should complete without panic
-        assert!(layouts_computed > 0, "layout pass should compute some layouts");
+        assert!(
+            layouts_computed > 0,
+            "layout pass should compute some layouts"
+        );
     }
 }

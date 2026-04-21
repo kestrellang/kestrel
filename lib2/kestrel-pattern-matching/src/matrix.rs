@@ -209,14 +209,14 @@ fn decompose_all(pat: &FlatPat, ctor: &Constructor, arity: usize) -> Vec<Vec<Fla
                 Some(sub) => vec![sub],
                 None => vec![],
             }
-        }
+        },
 
         FlatPat::Or(alts) => {
             // Collect ALL matching alternatives, not just the first
             alts.iter()
                 .flat_map(|alt| decompose_all(alt, ctor, arity))
                 .collect()
-        }
+        },
     }
 }
 
@@ -227,16 +227,16 @@ fn collect_constructors(
     result: &mut Vec<Constructor>,
 ) {
     match pat {
-        FlatPat::Wildcard => {}
+        FlatPat::Wildcard => {},
         FlatPat::Ctor { ctor, .. } => {
             if !ctor.is_wildcard() && seen.insert(ctor.clone()) {
                 result.push(ctor.clone());
             }
-        }
+        },
         FlatPat::Or(alts) => {
             for alt in alts {
                 collect_constructors(alt, seen, result);
             }
-        }
+        },
     }
 }

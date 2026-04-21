@@ -10,9 +10,9 @@
 //! recursive types) get no layout. Codegen can fall back to its own
 //! layout computation for those cases.
 
+use crate::MirModule;
 use crate::item::StructLayout;
 use crate::ty::MirTy;
-use crate::MirModule;
 
 const PTR_SIZE: u64 = 8;
 const PTR_ALIGN: u64 = 8;

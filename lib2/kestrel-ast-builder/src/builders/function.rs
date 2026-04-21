@@ -1,15 +1,15 @@
 //! Function, initializer, and deinit declaration builders.
 
 use kestrel_hecs::{Entity, World};
-use kestrel_syntax_tree2::{SyntaxKind, SyntaxNode};
 use kestrel_syntax_tree2::utils::{extract_name, find_child, get_decl_span};
+use kestrel_syntax_tree2::{SyntaxKind, SyntaxNode};
 
-use crate::ast_type::ast_type_from_cst;
-use crate::components::*;
-use crate::lower;
 use super::helpers::*;
 use super::params::extract_params;
 use super::type_param::build_type_parameters;
+use crate::ast_type::ast_type_from_cst;
+use crate::components::*;
+use crate::lower;
 
 /// Build a function declaration entity from CST.
 ///
@@ -108,7 +108,13 @@ pub fn build_initializer(
 
     let params = extract_params(world, node, entity, file_entity, file_id);
     // Inits always have a `self` receiver (mutating — they're building the instance)
-    world.set(entity, Callable { params, receiver: Some(ReceiverKind::Mutating) });
+    world.set(
+        entity,
+        Callable {
+            params,
+            receiver: Some(ReceiverKind::Mutating),
+        },
+    );
 
     // Body — CST wraps it in FunctionBody > CodeBlock
     if let Some(fn_body) = find_child(node, SyntaxKind::FunctionBody) {
@@ -143,10 +149,13 @@ pub fn build_deinit(
     world.set_parent(entity, parent);
 
     // Deinits always have a `self` receiver (consuming — they're destroying the instance)
-    world.set(entity, Callable {
-        params: Vec::new(),
-        receiver: Some(ReceiverKind::Consuming),
-    });
+    world.set(
+        entity,
+        Callable {
+            params: Vec::new(),
+            receiver: Some(ReceiverKind::Consuming),
+        },
+    );
 
     // Body — CST wraps it in FunctionBody > CodeBlock
     if let Some(fn_body) = find_child(node, SyntaxKind::FunctionBody) {
@@ -165,7 +174,7 @@ fn extract_receiver_kind(node: &SyntaxNode) -> ReceiverKind {
             match token.kind() {
                 SyntaxKind::Mutating => return ReceiverKind::Mutating,
                 SyntaxKind::Consuming => return ReceiverKind::Consuming,
-                _ => {}
+                _ => {},
             }
         }
     }

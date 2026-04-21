@@ -45,7 +45,7 @@ pub fn stmt_span(hir: &HirBody, id: HirStmtId) -> Span {
     match &hir.stmts[id] {
         HirStmt::Let { span, .. } | HirStmt::Expr { span, .. } | HirStmt::Deinit { span, .. } => {
             span.clone()
-        }
+        },
     }
 }
 

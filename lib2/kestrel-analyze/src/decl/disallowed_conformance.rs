@@ -21,7 +21,7 @@ use crate::context::DeclContext;
 use crate::diagnostic::*;
 use crate::traits::{DeclCheck, Describe};
 use crate::util;
-use kestrel_ast_builder::{Conformances, ConformanceItem, NodeKind};
+use kestrel_ast_builder::{ConformanceItem, Conformances, NodeKind};
 use kestrel_hir::builtin::BuiltinKind;
 use kestrel_name_res::{EntityBuiltin, ResolveTypePath, TypeResolution};
 
@@ -76,10 +76,16 @@ impl DeclCheck for DisallowedConformanceAnalyzer {
             };
 
             // Check if this protocol has disallow_enum_conformance
-            let Some(builtin) = cx.query.query(EntityBuiltin { entity: proto_entity }) else {
+            let Some(builtin) = cx.query.query(EntityBuiltin {
+                entity: proto_entity,
+            }) else {
                 continue;
             };
-            if let BuiltinKind::Protocol { disallow_enum_conformance: true, .. } = builtin.kind() {
+            if let BuiltinKind::Protocol {
+                disallow_enum_conformance: true,
+                ..
+            } = builtin.kind()
+            {
                 let proto_name = util::entity_name(cx.query, proto_entity);
                 diags.push(AnalyzeDiagnostic {
                     descriptor_id: DESCRIPTORS[0].id,

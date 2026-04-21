@@ -73,9 +73,11 @@ impl DeclarationBinder for StructBinder {
         context: &mut BindingContext,
     ) {
         // Compute and attach CopySemanticsBehavior via query (unified for struct/enum)
-        let semantics = context.model.query(kestrel_semantic_model::CopySemanticsFor {
-            symbol_id: symbol.metadata().id(),
-        });
+        let semantics = context
+            .model
+            .query(kestrel_semantic_model::CopySemanticsFor {
+                symbol_id: symbol.metadata().id(),
+            });
         symbol
             .metadata()
             .add_behavior(CopySemanticsBehavior::new(semantics));
@@ -95,11 +97,13 @@ impl StructBinder {
     ) {
         let registry = context.model.builtin_registry().clone();
         crate::binders::utils::attributes::validate_builtin_attribute(
-            symbol, attributes, source, context,
+            symbol,
+            attributes,
+            source,
+            context,
             "struct",
             |k| k.is_struct(),
             |f| registry.builtin_struct(f),
         );
     }
-
 }

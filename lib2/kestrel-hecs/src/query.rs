@@ -309,9 +309,10 @@ impl<'a> QueryContext<'a> {
                 }
             }
         }
-        self.active
-            .borrow_mut()
-            .push(ActiveQuery { key: qk.clone(), label: q.describe() });
+        self.active.borrow_mut().push(ActiveQuery {
+            key: qk.clone(),
+            label: q.describe(),
+        });
 
         // Clear old accumulators for this query
         self.accumulators.borrow_mut().clear_for_query(qk);
@@ -359,9 +360,7 @@ impl<'a> QueryContext<'a> {
         let qk_for_verifier = qk.clone();
         self.queries.borrow_mut().register_verifier(
             qk.clone(),
-            Arc::new(move |ctx| {
-                ctx.ensure_fresh(&q_for_verifier, &qk_for_verifier).1
-            }),
+            Arc::new(move |ctx| ctx.ensure_fresh(&q_for_verifier, &qk_for_verifier).1),
         );
 
         (result, changed_at)
@@ -380,7 +379,7 @@ impl<'a> QueryContext<'a> {
                     if self.changes.is_changed(*entity) {
                         return false;
                     }
-                }
+                },
                 Dependency::Query(sub_qk) => {
                     // Get the verifier for this sub-query (clone Arc, drop borrow)
                     let verifier = {
@@ -401,7 +400,7 @@ impl<'a> QueryContext<'a> {
                         // Conservative: assume changed.
                         return false;
                     }
-                }
+                },
             }
         }
         true
@@ -601,7 +600,7 @@ mod tests {
                     _ => {
                         ctx.accumulate("error: name is empty".to_string());
                         false
-                    }
+                    },
                 }
             }
         }
@@ -638,7 +637,10 @@ mod tests {
             type Output = String;
 
             fn execute(&self, ctx: &QueryContext<'_>) -> Self::Output {
-                let name = ctx.get::<Name>(self.entity).map(|n| n.0.clone()).unwrap_or_default();
+                let name = ctx
+                    .get::<Name>(self.entity)
+                    .map(|n| n.0.clone())
+                    .unwrap_or_default();
                 let val = ctx.get::<Value>(self.entity).map(|v| v.0).unwrap_or(0);
                 format!("{name}={val}")
             }

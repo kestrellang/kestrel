@@ -54,15 +54,13 @@ pub fn callable_param_types_for_call(expr: &Expression, model: &SemanticModel) -
                     candidates,
                     receiver,
                     ..
-                } => {
-                    best_method_param_types_for_call(
-                        model,
-                        candidates,
-                        &receiver.ty,
-                        substitutions,
-                        arguments,
-                    )
-                },
+                } => best_method_param_types_for_call(
+                    model,
+                    candidates,
+                    &receiver.ty,
+                    substitutions,
+                    arguments,
+                ),
                 _ => None,
             }
         },
@@ -118,21 +116,20 @@ fn best_method_param_types_for_call(
             if arg.value.ty.to_string() == param_ty.to_string() {
                 score += 2;
             }
-            if arg
-                .label
-                .as_ref()
-                .is_some_and(|label| {
-                    callable
-                        .parameters()
-                        .iter()
-                        .any(|p| p.label.as_ref().is_some_and(|pl| pl.value == *label))
-                })
-            {
+            if arg.label.as_ref().is_some_and(|label| {
+                callable
+                    .parameters()
+                    .iter()
+                    .any(|p| p.label.as_ref().is_some_and(|pl| pl.value == *label))
+            }) {
                 score += 1;
             }
         }
 
-        if best.as_ref().is_none_or(|(best_score, _)| score > *best_score) {
+        if best
+            .as_ref()
+            .is_none_or(|(best_score, _)| score > *best_score)
+        {
             best = Some((score, params));
         }
     }

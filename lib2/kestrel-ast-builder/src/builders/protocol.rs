@@ -1,12 +1,12 @@
 //! Protocol declaration builder.
 
 use kestrel_hecs::{Entity, World};
-use kestrel_syntax_tree2::{SyntaxKind, SyntaxNode};
 use kestrel_syntax_tree2::utils::{extract_name, get_decl_span};
+use kestrel_syntax_tree2::{SyntaxKind, SyntaxNode};
 
-use crate::components::*;
 use super::helpers::*;
 use super::type_param::build_type_parameters;
+use crate::components::*;
 
 /// Build a protocol declaration entity from CST.
 ///

@@ -4,13 +4,13 @@ use crate::MirModule;
 use crate::body::{BasicBlock, LocalDef, MirBody};
 use crate::id::{BlockId, FunctionId, LocalId};
 use crate::immediate::Immediate;
+use crate::item::{ParamDef, WhereClause, WhereConstraint};
 use crate::op::Op;
 use crate::place::Place;
 use crate::statement::{CallArg, Callee, Rvalue, Statement, StatementKind};
 use crate::terminator::Terminator;
 use crate::ty::MirTy;
 use crate::value::Value;
-use crate::item::{ParamDef, WhereClause, WhereConstraint};
 use kestrel_hecs::Entity;
 
 /// Builder for constructing functions.
@@ -97,7 +97,10 @@ impl<'a> FunctionBuilder<'a> {
         if func.where_clause.is_none() {
             func.where_clause = Some(WhereClause::new());
         }
-        func.where_clause.as_mut().unwrap().add_constraint(constraint);
+        func.where_clause
+            .as_mut()
+            .unwrap()
+            .add_constraint(constraint);
     }
 
     /// Add a new basic block. Sets as entry block on first call.
@@ -197,7 +200,13 @@ impl<'a> BlockBuilder<'a> {
 
     /// `dest = op1 arg`
     pub fn assign_op1(&mut self, dest: Place, op: Op, arg: impl Into<Value>) {
-        self.assign(dest, Rvalue::Op1 { op, arg: arg.into() });
+        self.assign(
+            dest,
+            Rvalue::Op1 {
+                op,
+                arg: arg.into(),
+            },
+        );
     }
 
     /// `dest = op2 lhs, rhs`

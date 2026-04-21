@@ -670,4 +670,3 @@ pub(crate) fn create_local_scope_for_body(
 
     LocalScope::new(dummy_func)
 }
-

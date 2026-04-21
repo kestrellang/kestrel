@@ -328,17 +328,15 @@ pub fn compile_rvalue(
         },
 
         // Pointer/reference conversion - no-op at runtime
-        Rvalue::RefToPtr(value) => {
-            compile_value(
-                ctx,
-                func_def,
-                subst,
-                value,
-                builder,
-                local_map,
-                stack_locals,
-            )
-        },
+        Rvalue::RefToPtr(value) => compile_value(
+            ctx,
+            func_def,
+            subst,
+            value,
+            builder,
+            local_map,
+            stack_locals,
+        ),
 
         Rvalue::PtrOffset { ptr, offset } => compile_ptr_offset(
             ctx,
@@ -800,7 +798,6 @@ pub fn compile_rvalue(
                 delta_val,
             ))
         },
-
     }
 }
 

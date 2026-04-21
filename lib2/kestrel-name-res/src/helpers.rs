@@ -38,10 +38,7 @@ pub fn is_ancestor_of(ctx: &QueryContext<'_>, ancestor: Entity, descendant: Enti
 pub fn find_children_by_name(ctx: &QueryContext<'_>, parent: Entity, name: &str) -> Vec<Entity> {
     ctx.children_of(parent)
         .iter()
-        .filter(|&&child| {
-            ctx.get::<Name>(child)
-                .is_some_and(|n| n.0 == name)
-        })
+        .filter(|&&child| ctx.get::<Name>(child).is_some_and(|n| n.0 == name))
         .copied()
         .collect()
 }

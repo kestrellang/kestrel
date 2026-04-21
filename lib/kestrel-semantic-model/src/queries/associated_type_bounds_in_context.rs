@@ -21,7 +21,9 @@ impl Query for AssociatedTypeBoundsInContext {
     type Output = Vec<Ty>;
 
     fn execute(self, model: &SemanticModel) -> Self::Output {
-        let Some(symbol) = model.query(SymbolFor { id: self.assoc_type_id }) else {
+        let Some(symbol) = model.query(SymbolFor {
+            id: self.assoc_type_id,
+        }) else {
             return Vec::new();
         };
 

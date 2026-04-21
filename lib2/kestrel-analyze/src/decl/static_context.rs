@@ -56,12 +56,7 @@ impl DeclCheck for StaticContextAnalyzer {
         if let Some(parent) = cx.query.parent_of(cx.entity) {
             if matches!(
                 cx.query.get::<NodeKind>(parent),
-                Some(
-                    NodeKind::Struct
-                        | NodeKind::Enum
-                        | NodeKind::Protocol
-                        | NodeKind::Extension
-                )
+                Some(NodeKind::Struct | NodeKind::Enum | NodeKind::Protocol | NodeKind::Extension)
             ) {
                 return vec![];
             }

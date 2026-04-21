@@ -30,11 +30,7 @@ fn find_or_create_module(world: &mut World, parent: Entity, segment: &str) -> En
 
 /// Extract module path from a ModuleDeclaration node and find-or-create
 /// the module hierarchy. Returns the deepest module entity.
-pub fn resolve_module_path(
-    world: &mut World,
-    root: Entity,
-    module_node: &SyntaxNode,
-) -> Entity {
+pub fn resolve_module_path(world: &mut World, root: Entity, module_node: &SyntaxNode) -> Entity {
     // Extract path segments from the ModulePath child
     let path_node = match module_node
         .children()

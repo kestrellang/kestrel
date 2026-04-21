@@ -121,19 +121,31 @@ fn kind_to_resolved(ctx: &InferCtx<'_>, kind: &TyKind) -> ResolvedTy {
         | TyKind::Enum { entity, args }
         | TyKind::Protocol { entity, args } => ResolvedTy::Named {
             entity: *entity,
-            args: args.iter().map(|&tv| resolve_to_concrete(ctx, tv)).collect(),
+            args: args
+                .iter()
+                .map(|&tv| resolve_to_concrete(ctx, tv))
+                .collect(),
         },
         TyKind::TypeAlias { entity, args } => ResolvedTy::Named {
             entity: *entity,
-            args: args.iter().map(|&tv| resolve_to_concrete(ctx, tv)).collect(),
+            args: args
+                .iter()
+                .map(|&tv| resolve_to_concrete(ctx, tv))
+                .collect(),
         },
         TyKind::Param { entity } => ResolvedTy::Param { entity: *entity },
         TyKind::AssocProjection { .. } => ResolvedTy::Error,
-        TyKind::Tuple(elems) => {
-            ResolvedTy::Tuple(elems.iter().map(|&tv| resolve_to_concrete(ctx, tv)).collect())
-        }
+        TyKind::Tuple(elems) => ResolvedTy::Tuple(
+            elems
+                .iter()
+                .map(|&tv| resolve_to_concrete(ctx, tv))
+                .collect(),
+        ),
         TyKind::Function { params, ret } => ResolvedTy::Function {
-            params: params.iter().map(|&tv| resolve_to_concrete(ctx, tv)).collect(),
+            params: params
+                .iter()
+                .map(|&tv| resolve_to_concrete(ctx, tv))
+                .collect(),
             ret: Box::new(resolve_to_concrete(ctx, *ret)),
         },
         TyKind::Never => ResolvedTy::Never,
@@ -225,12 +237,15 @@ fn describe_tykind(ctx: &InferCtx<'_>, kind: &TyKind) -> String {
         | TyKind::Enum { entity, args }
         | TyKind::Protocol { entity, args }
         | TyKind::TypeAlias { entity, args } => {
-            let name = ctx.query_ctx
+            let name = ctx
+                .query_ctx
                 .get::<kestrel_ast_builder::Name>(*entity)
                 .map(|n| n.0.clone())
                 .unwrap_or_else(|| {
                     // Show NodeKind + entity for unnamed entities
-                    let kind = ctx.query_ctx.get::<kestrel_ast_builder::NodeKind>(*entity)
+                    let kind = ctx
+                        .query_ctx
+                        .get::<kestrel_ast_builder::NodeKind>(*entity)
                         .map(|k| format!("{:?}", k))
                         .unwrap_or_else(|| "?".into());
                     format!("{}({:?})", kind, entity)
@@ -241,21 +256,21 @@ fn describe_tykind(ctx: &InferCtx<'_>, kind: &TyKind) -> String {
                 let arg_strs: Vec<_> = args.iter().map(|&tv| describe_tyvar(ctx, tv)).collect();
                 format!("{}[{}]", name, arg_strs.join(", "))
             }
-        }
-        TyKind::Param { entity } => {
-            ctx.query_ctx
-                .get::<kestrel_ast_builder::Name>(*entity)
-                .map(|n| n.0.clone())
-                .unwrap_or("Param".into())
-        }
+        },
+        TyKind::Param { entity } => ctx
+            .query_ctx
+            .get::<kestrel_ast_builder::Name>(*entity)
+            .map(|n| n.0.clone())
+            .unwrap_or("Param".into()),
         TyKind::AssocProjection { base, assoc } => {
             let base_str = describe_tyvar(ctx, *base);
-            let assoc_name = ctx.query_ctx
+            let assoc_name = ctx
+                .query_ctx
                 .get::<kestrel_ast_builder::Name>(*assoc)
                 .map(|n| n.0.clone())
                 .unwrap_or_else(|| format!("{:?}", assoc));
             format!("{}.{}", base_str, assoc_name)
-        }
+        },
         TyKind::Tuple(elems) => {
             if elems.is_empty() {
                 "()".into()
@@ -263,11 +278,11 @@ fn describe_tykind(ctx: &InferCtx<'_>, kind: &TyKind) -> String {
                 let strs: Vec<_> = elems.iter().map(|&tv| describe_tyvar(ctx, tv)).collect();
                 format!("({})", strs.join(", "))
             }
-        }
+        },
         TyKind::Function { params, ret } => {
             let p: Vec<_> = params.iter().map(|&tv| describe_tyvar(ctx, tv)).collect();
             format!("({}) -> {}", p.join(", "), describe_tyvar(ctx, *ret))
-        }
+        },
         TyKind::Never => "Never".into(),
         TyKind::Error => "Error".into(),
     }
@@ -281,68 +296,97 @@ fn describe_tykind(ctx: &InferCtx<'_>, kind: &TyKind) -> String {
 pub(crate) fn describe_error(ctx: &InferCtx<'_>, err: &InferError) -> String {
     match err {
         InferError::TypeMismatch { expected, got, .. } => {
-            format!("expected {} got {}", describe_tyvar(ctx, *expected), describe_tyvar(ctx, *got))
-        }
+            format!(
+                "expected {} got {}",
+                describe_tyvar(ctx, *expected),
+                describe_tyvar(ctx, *got)
+            )
+        },
         InferError::DoesNotConform { ty, protocol, .. } => {
             let ty_name = describe_tyvar(ctx, *ty);
-            let proto_name = ctx.query_ctx
+            let proto_name = ctx
+                .query_ctx
                 .get::<kestrel_ast_builder::Name>(*protocol)
                 .map(|n| n.0.clone())
                 .unwrap_or_else(|| format!("{:?}", protocol));
             format!("{} !: {}", ty_name, proto_name)
-        }
-        InferError::NoMember { receiver, name, is_call, .. } => {
+        },
+        InferError::NoMember {
+            receiver,
+            name,
+            is_call,
+            ..
+        } => {
             // Wording mirrors lib1: delegating-init misses say "no method
             // 'init' on type 'T'", while all other member misses (regular
             // method calls, field/property access) say "no member 'X' on
             // type 'T'". The init wording is special-cased because lib1's
             // `resolve_delegating_init` path produced its own diagnostic.
-            let kind = if *is_call && name == "init" { "method" } else { "member" };
-            format!("no {} '{}' on type '{}'", kind, name, describe_tyvar(ctx, *receiver))
-        }
+            let kind = if *is_call && name == "init" {
+                "method"
+            } else {
+                "member"
+            };
+            format!(
+                "no {} '{}' on type '{}'",
+                kind,
+                name,
+                describe_tyvar(ctx, *receiver)
+            )
+        },
         InferError::AmbiguousMember { receiver, name, .. } => {
             format!("{}.{} ambiguous", describe_tyvar(ctx, *receiver), name)
-        }
+        },
         InferError::MemberNotVisible { receiver, name, .. } => {
             format!("{}.{} not visible", describe_tyvar(ctx, *receiver), name)
-        }
-        InferError::NoAssociatedType { container, name, .. } => {
+        },
+        InferError::NoAssociatedType {
+            container, name, ..
+        } => {
             format!("{}.{} no assoc type", describe_tyvar(ctx, *container), name)
-        }
+        },
         InferError::ImplicitMemberNotFound { expected, name, .. } => {
             format!(".{} not found on {}", name, describe_tyvar(ctx, *expected))
-        }
+        },
         InferError::InfiniteType { .. } => "infinite type".into(),
         InferError::FromHir { .. } => "from-hir".into(),
         InferError::ArgCountMismatch { expected, got, .. } => {
             format!("expected {} argument(s), got {}", expected, got)
-        }
+        },
         InferError::LabelMismatch { expected, got, .. } => {
             let exp = expected.as_deref().unwrap_or("_");
             let g = got.as_deref().unwrap_or("_");
             format!("wrong label: expected '{}', got '{}'", exp, g)
-        }
+        },
         InferError::InstanceMethodAsStatic { name, .. } => {
             format!("instance method '{}' cannot be called on a type", name)
-        }
-        InferError::TypeParamAsValue { .. } => {
-            "type parameter cannot be used as a value".into()
-        }
+        },
+        InferError::TypeParamAsValue { .. } => "type parameter cannot be used as a value".into(),
         InferError::TypeArgCountMismatch { expected, got, .. } => {
             if *got < *expected {
                 format!("too few type arguments: expected {}, got {}", expected, got)
             } else {
-                format!("too many type arguments: expected {}, got {}", expected, got)
+                format!(
+                    "too many type arguments: expected {}, got {}",
+                    expected, got
+                )
             }
-        }
+        },
         InferError::NoMatchingOverload { name, .. } => {
             format!("no matching overload for '{}'", name)
-        }
+        },
         InferError::ItWrongArity { expected, .. } => {
-            format!("implicit 'it' parameter used in {}-parameter context", expected)
-        }
+            format!(
+                "implicit 'it' parameter used in {}-parameter context",
+                expected
+            )
+        },
         InferError::LiteralNotAccepted { ty, literal, .. } => {
-            format!("type '{}' does not accept {}", describe_tyvar(ctx, *ty), literal_kind_name(*literal))
-        }
+            format!(
+                "type '{}' does not accept {}",
+                describe_tyvar(ctx, *ty),
+                literal_kind_name(*literal)
+            )
+        },
     }
 }

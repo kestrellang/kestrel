@@ -10,7 +10,9 @@ use crate::error::CodegenError;
 use crate::function::FunctionState;
 use crate::rvalue;
 use cranelift_codegen::ir::immediates::Offset32;
-use cranelift_codegen::ir::{InstBuilder, MemFlags, StackSlotData, StackSlotKind, Value as CrValue};
+use cranelift_codegen::ir::{
+    InstBuilder, MemFlags, StackSlotData, StackSlotKind, Value as CrValue,
+};
 use cranelift_frontend::FunctionBuilder;
 use cranelift_module::Module;
 use kestrel_codegen2::{mangle_function_with_self, substitute_type};
@@ -29,7 +31,9 @@ pub fn compile_apply_partial(
     let ptr_ty = common::ptr_type(ctx.target);
     let ptr_size = ctx.target.pointer_size();
     let original_func_id = *ctx.entity_to_func.get(func).ok_or_else(|| {
-        CodegenError::Unsupported(format!("ApplyPartial target is not a known function: {func:?}"))
+        CodegenError::Unsupported(format!(
+            "ApplyPartial target is not a known function: {func:?}"
+        ))
     })?;
     let original_func = &ctx.module.functions[original_func_id.index()];
     let callable_func = ctx
@@ -57,7 +61,9 @@ pub fn compile_apply_partial(
         thick_size as u32,
         common::align_to_shift(ptr_size),
     ));
-    let thick_addr = builder.ins().stack_addr(ptr_ty, thick_slot, Offset32::new(0));
+    let thick_addr = builder
+        .ins()
+        .stack_addr(ptr_ty, thick_slot, Offset32::new(0));
 
     // Store the callable entry point in the first word.
     let func_ref = ctx.cl_module.declare_func_in_func(func_id, builder.func);
@@ -114,7 +120,7 @@ pub fn compile_apply_partial(
             }
 
             env_addr
-        }
+        },
         FunctionKind::Closure => {
             if !captures.is_empty() {
                 return Err(CodegenError::Unsupported(format!(
@@ -123,14 +129,14 @@ pub fn compile_apply_partial(
                 )));
             }
             null
-        }
+        },
         _ if captures.is_empty() => null,
         _ => {
             return Err(CodegenError::Unsupported(format!(
                 "ApplyPartial with captures is only supported for closure call functions, got '{}'",
                 original_func.name
-            )))
-        }
+            )));
+        },
     };
 
     // Store env_ptr in the second word.

@@ -1,12 +1,12 @@
 //! Struct declaration builder.
 
 use kestrel_hecs::{Entity, World};
-use kestrel_syntax_tree2::{SyntaxKind, SyntaxNode};
 use kestrel_syntax_tree2::utils::get_decl_span;
+use kestrel_syntax_tree2::{SyntaxKind, SyntaxNode};
 
-use crate::components::*;
 use super::helpers::*;
 use super::type_param::build_type_parameters;
+use crate::components::*;
 
 /// Build a struct declaration entity from CST.
 ///
@@ -43,9 +43,7 @@ pub fn build_struct(
     build_type_parameters(world, entity, node, file_entity, file_id);
 
     // Find body for child processing
-    let body = node
-        .children()
-        .find(|c| c.kind() == SyntaxKind::StructBody);
+    let body = node.children().find(|c| c.kind() == SyntaxKind::StructBody);
 
     (entity, body)
 }

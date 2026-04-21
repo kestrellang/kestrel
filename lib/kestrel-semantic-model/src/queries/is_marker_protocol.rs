@@ -19,7 +19,9 @@ impl Query for IsMarkerProtocol {
     type Output = bool;
 
     fn execute(self, model: &SemanticModel) -> Self::Output {
-        let Some(symbol) = model.query(SymbolFor { id: self.protocol_id }) else {
+        let Some(symbol) = model.query(SymbolFor {
+            id: self.protocol_id,
+        }) else {
             return true;
         };
 

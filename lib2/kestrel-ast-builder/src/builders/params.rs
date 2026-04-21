@@ -14,13 +14,15 @@
 //! label identifier before the Pattern node.
 
 use kestrel_hecs::{Entity, World};
-use kestrel_syntax_tree2::{SyntaxKind, SyntaxNode};
 use kestrel_syntax_tree2::utils::find_child;
+use kestrel_syntax_tree2::{SyntaxKind, SyntaxNode};
 
 use super::helpers::is_type_kind;
 
 use crate::ast_type::ast_type_from_cst;
-use crate::components::{AstParam, Body, FileId, NodeKind, ParamPattern, StructPatternField, TypeAnnotation};
+use crate::components::{
+    AstParam, Body, FileId, NodeKind, ParamPattern, StructPatternField, TypeAnnotation,
+};
 use crate::lower;
 
 /// Extract parameters from a node containing a ParameterList child.
@@ -40,7 +42,9 @@ pub fn extract_params(
     let params: Vec<AstParam> = param_list
         .children()
         .filter(|c| c.kind() == SyntaxKind::Parameter)
-        .filter_map(|param_node| extract_single_param(world, &param_node, parent, file_entity, file_id))
+        .filter_map(|param_node| {
+            extract_single_param(world, &param_node, parent, file_entity, file_id)
+        })
         .collect();
 
     // Detect defaults that reference sibling params. Replace the body with an
@@ -48,18 +52,28 @@ pub fn extract_params(
     // component so the analyzer can emit a proper diagnostic.
     let param_names: Vec<&str> = params.iter().map(|p| p.name.as_str()).collect();
     for param in &params {
-        let Some(default_entity) = param.default_entity else { continue };
-        let Some(body) = world.get::<crate::components::Body>(default_entity) else { continue };
+        let Some(default_entity) = param.default_entity else {
+            continue;
+        };
+        let Some(body) = world.get::<crate::components::Body>(default_entity) else {
+            continue;
+        };
         if let Some(referenced) = default_body_references_param(&body.0, &param_names) {
-            world.set(default_entity, crate::components::DefaultReferencesParam(referenced.to_string()));
+            world.set(
+                default_entity,
+                crate::components::DefaultReferencesParam(referenced.to_string()),
+            );
             // Replace with empty body so inference doesn't produce "undefined name"
-            world.set(default_entity, crate::components::Body(kestrel_ast::ast_body::AstBody {
-                exprs: kestrel_ast::arena::Arena::new(),
-                pats: kestrel_ast::arena::Arena::new(),
-                stmts: kestrel_ast::arena::Arena::new(),
-                statements: Vec::new(),
-                tail_expr: None,
-            }));
+            world.set(
+                default_entity,
+                crate::components::Body(kestrel_ast::ast_body::AstBody {
+                    exprs: kestrel_ast::arena::Arena::new(),
+                    pats: kestrel_ast::arena::Arena::new(),
+                    stmts: kestrel_ast::arena::Arena::new(),
+                    statements: Vec::new(),
+                    tail_expr: None,
+                }),
+            );
         }
     }
 
@@ -83,21 +97,25 @@ fn extract_single_param(
     file_id: usize,
 ) -> Option<AstParam> {
     // Check for mutating/consuming access mode
-    let is_consuming = node.children_with_tokens()
-        .any(|e| e.as_token().is_some_and(|t| t.kind() == SyntaxKind::Consuming));
-    let is_mut = is_consuming || node.children_with_tokens()
-        .any(|e| e.as_token().is_some_and(|t| t.kind() == SyntaxKind::Mutating));
+    let is_consuming = node.children_with_tokens().any(|e| {
+        e.as_token()
+            .is_some_and(|t| t.kind() == SyntaxKind::Consuming)
+    });
+    let is_mut = is_consuming
+        || node.children_with_tokens().any(|e| {
+            e.as_token()
+                .is_some_and(|t| t.kind() == SyntaxKind::Mutating)
+        });
 
     let pattern_node = find_child(node, SyntaxKind::Pattern)?;
 
     // Try simple binding pattern first: Pattern > BindingPattern > Identifier
-    let simple_name = find_child(&pattern_node, SyntaxKind::BindingPattern)
-        .and_then(|bp| {
-            bp.children_with_tokens()
-                .filter_map(|e| e.into_token())
-                .find(|t| t.kind() == SyntaxKind::Identifier)
-                .map(|t| t.text().to_string())
-        });
+    let simple_name = find_child(&pattern_node, SyntaxKind::BindingPattern).and_then(|bp| {
+        bp.children_with_tokens()
+            .filter_map(|e| e.into_token())
+            .find(|t| t.kind() == SyntaxKind::Identifier)
+            .map(|t| t.text().to_string())
+    });
 
     // For destructured patterns (tuple, struct, wildcard), extract the pattern
     // and generate a synthetic name
@@ -121,19 +139,20 @@ fn extract_single_param(
             rowan::NodeOrToken::Node(n) if n.kind() == SyntaxKind::Pattern => break,
             rowan::NodeOrToken::Node(n) if n.kind() == SyntaxKind::Name => {
                 // Label wrapped in Name node: Name > Identifier
-                label = n.children_with_tokens()
+                label = n
+                    .children_with_tokens()
                     .filter_map(|e| e.into_token())
                     .find(|t| t.kind() == SyntaxKind::Identifier)
                     .map(|t| t.text().to_string());
-            }
+            },
             rowan::NodeOrToken::Token(t) if t.kind() == SyntaxKind::Identifier => {
                 label = Some(t.text().to_string());
-            }
+            },
             rowan::NodeOrToken::Token(t) if t.kind() == SyntaxKind::Underscore => {
                 // Explicit no-label marker — leave label as None
                 label = None;
-            }
-            _ => {}
+            },
+            _ => {},
         }
     }
 
@@ -148,7 +167,10 @@ fn extract_single_param(
         let entity = world.spawn();
         world.set(entity, NodeKind::ParamDefault);
         world.set(entity, FileId(file_entity));
-        world.set(entity, Body(lower::lower_default_value(&default_node, file_id)));
+        world.set(
+            entity,
+            Body(lower::lower_default_value(&default_node, file_id)),
+        );
         // Store the param's type annotation so inference checks the default against it
         if let Some(ref param_ty) = ty {
             world.set(entity, TypeAnnotation(param_ty.clone()));
@@ -192,7 +214,7 @@ fn extract_param_pattern(node: &SyntaxNode) -> Option<ParamPattern> {
                 .map(|t| t.text().to_string())
                 .unwrap_or_default();
             Some(ParamPattern::Binding { name, is_mut })
-        }
+        },
 
         SyntaxKind::TuplePattern => {
             let elements: Vec<ParamPattern> = inner
@@ -202,20 +224,23 @@ fn extract_param_pattern(node: &SyntaxNode) -> Option<ParamPattern> {
                     // TuplePatternElement contains a pattern node directly
                     // (BindingPattern, TuplePattern, etc.) or wrapped in Pattern
                     c.children()
-                        .find(|cc| cc.kind() == SyntaxKind::Pattern
-                            || cc.kind() == SyntaxKind::BindingPattern
-                            || cc.kind() == SyntaxKind::TuplePattern
-                            || cc.kind() == SyntaxKind::StructPattern
-                            || cc.kind() == SyntaxKind::WildcardPattern)
+                        .find(|cc| {
+                            cc.kind() == SyntaxKind::Pattern
+                                || cc.kind() == SyntaxKind::BindingPattern
+                                || cc.kind() == SyntaxKind::TuplePattern
+                                || cc.kind() == SyntaxKind::StructPattern
+                                || cc.kind() == SyntaxKind::WildcardPattern
+                        })
                         .and_then(|p| extract_param_pattern(&p))
                 })
                 .collect();
             Some(ParamPattern::Tuple { elements })
-        }
+        },
 
         SyntaxKind::StructPattern => {
             // Extract struct name
-            let type_name = inner.children()
+            let type_name = inner
+                .children()
                 .find(|c| c.kind() == SyntaxKind::ExprPath || c.kind() == SyntaxKind::TyPath)
                 .and_then(|path| {
                     path.children_with_tokens()
@@ -225,47 +250,59 @@ fn extract_param_pattern(node: &SyntaxNode) -> Option<ParamPattern> {
                 })
                 .or_else(|| {
                     // Try bare identifier
-                    inner.children_with_tokens()
+                    inner
+                        .children_with_tokens()
                         .filter_map(|e| e.into_token())
                         .find(|t| t.kind() == SyntaxKind::Identifier)
                         .map(|t| t.text().to_string())
                 })
                 .unwrap_or_default();
 
-            let has_rest = inner.children()
-                .any(|c| c.kind() == SyntaxKind::RestPattern
-                    || c.kind() == SyntaxKind::StructPatternRest);
+            let has_rest = inner.children().any(|c| {
+                c.kind() == SyntaxKind::RestPattern || c.kind() == SyntaxKind::StructPatternRest
+            });
 
             let fields: Vec<StructPatternField> = inner
                 .children()
                 .filter(|c| c.kind() == SyntaxKind::StructPatternField)
                 .filter_map(|field| {
                     // Field has: Identifier (field name), optional Pattern (binding)
-                    let field_name = field.children_with_tokens()
+                    let field_name = field
+                        .children_with_tokens()
                         .filter_map(|e| e.into_token())
                         .find(|t| t.kind() == SyntaxKind::Identifier)
                         .map(|t| t.text().to_string())?;
 
                     // Check for explicit binding pattern (field: pattern)
                     // The emitter puts the binding directly (no Pattern wrapper)
-                    let pattern = field.children()
-                        .find(|c| c.kind() == SyntaxKind::Pattern
-                            || c.kind() == SyntaxKind::BindingPattern
-                            || c.kind() == SyntaxKind::TuplePattern
-                            || c.kind() == SyntaxKind::WildcardPattern
-                            || c.kind() == SyntaxKind::StructPattern)
+                    let pattern = field
+                        .children()
+                        .find(|c| {
+                            c.kind() == SyntaxKind::Pattern
+                                || c.kind() == SyntaxKind::BindingPattern
+                                || c.kind() == SyntaxKind::TuplePattern
+                                || c.kind() == SyntaxKind::WildcardPattern
+                                || c.kind() == SyntaxKind::StructPattern
+                        })
                         .and_then(|p| extract_param_pattern(&p))
                         .unwrap_or(ParamPattern::Binding {
                             name: field_name.clone(),
                             is_mut: false,
                         });
 
-                    Some(StructPatternField { field_name, pattern })
+                    Some(StructPatternField {
+                        field_name,
+                        pattern,
+                    })
                 })
                 .collect();
 
-            Some(ParamPattern::Struct { type_name, fields, has_rest })
-        }
+            Some(ParamPattern::Struct {
+                type_name,
+                fields,
+                has_rest,
+            })
+        },
 
         _ => None,
     }
@@ -273,11 +310,17 @@ fn extract_param_pattern(node: &SyntaxNode) -> Option<ParamPattern> {
 
 /// Check if a default value body's tail expression is a single-segment path
 /// matching a sibling parameter name. Returns the matched name if found.
-fn default_body_references_param<'a>(body: &kestrel_ast::ast_body::AstBody, param_names: &[&'a str]) -> Option<&'a str> {
+fn default_body_references_param<'a>(
+    body: &kestrel_ast::ast_body::AstBody,
+    param_names: &[&'a str],
+) -> Option<&'a str> {
     let tail_id = body.tail_expr?;
     if let kestrel_ast::ast_body::AstExpr::Path { segments, .. } = &body.exprs[tail_id] {
         if segments.len() == 1 && segments[0].type_args.is_none() {
-            return param_names.iter().find(|&&p| p == segments[0].name).copied();
+            return param_names
+                .iter()
+                .find(|&&p| p == segments[0].name)
+                .copied();
         }
     }
     None

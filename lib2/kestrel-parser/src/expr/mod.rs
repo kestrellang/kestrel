@@ -732,10 +732,11 @@ pub fn expr_parser<'tokens>()
                                             )
                                             .then(expr.clone())
                                             .then(
-                                                skip_trivia()
-                                                    .ignore_then(just(Token::Colon).map_with(
-                                                        |_, e| to_kestrel_span2(e.span()),
-                                                    )),
+                                                skip_trivia().ignore_then(
+                                                    just(Token::Colon).map_with(|_, e| {
+                                                        to_kestrel_span2(e.span())
+                                                    }),
+                                                ),
                                             )
                                             .then(expr.clone())
                                             .map(|(((comma, key), colon), value)| {
@@ -790,10 +791,11 @@ pub fn expr_parser<'tokens>()
                                                     .collect::<Vec<_>>(),
                                             )
                                             .then(
-                                                skip_trivia()
-                                                    .ignore_then(just(Token::RBracket).map_with(
-                                                        |_, e| to_kestrel_span2(e.span()),
-                                                    )),
+                                                skip_trivia().ignore_then(
+                                                    just(Token::RBracket).map_with(|_, e| {
+                                                        to_kestrel_span2(e.span())
+                                                    }),
+                                                ),
                                             )
                                             .map(|((first_comma, more), rbracket)| {
                                                 BracketContentAfterFirst::ArrayMore {
@@ -901,10 +903,11 @@ pub fn expr_parser<'tokens>()
                                         // After comma: either more elements or just rparen
                                         expr.clone()
                                             .separated_by(
-                                                skip_trivia()
-                                                    .ignore_then(just(Token::Comma).map_with(
-                                                        |_, e| to_kestrel_span2(e.span()),
-                                                    )),
+                                                skip_trivia().ignore_then(
+                                                    just(Token::Comma).map_with(|_, e| {
+                                                        to_kestrel_span2(e.span())
+                                                    }),
+                                                ),
                                             )
                                             .allow_trailing()
                                             .collect::<Vec<_>>()
@@ -983,11 +986,9 @@ pub fn expr_parser<'tokens>()
             .then(
                 argument
                     .clone()
-                    .separated_by(
-                        skip_trivia().ignore_then(
-                            just(Token::Comma).map_with(|_, e| to_kestrel_span2(e.span())),
-                        ),
-                    )
+                    .separated_by(skip_trivia().ignore_then(
+                        just(Token::Comma).map_with(|_, e| to_kestrel_span2(e.span())),
+                    ))
                     .allow_trailing()
                     .collect::<Vec<_>>(),
             )
@@ -1090,8 +1091,9 @@ pub fn expr_parser<'tokens>()
                     .or_not(),
             )
             .then(
-                skip_trivia()
-                    .ignore_then(just(Token::Semicolon).map_with(|_, e| to_kestrel_span2(e.span()))),
+                skip_trivia().ignore_then(
+                    just(Token::Semicolon).map_with(|_, e| to_kestrel_span2(e.span())),
+                ),
             )
             .map(
                 |(
@@ -1703,7 +1705,9 @@ pub fn expr_parser<'tokens>()
                 let match_arm = pattern_parser()
                     .then(
                         skip_trivia()
-                            .ignore_then(just(Token::If).map_with(|_, e| to_kestrel_span2(e.span())))
+                            .ignore_then(
+                                just(Token::If).map_with(|_, e| to_kestrel_span2(e.span())),
+                            )
                             .then(condition_binary.clone())
                             .map(|(if_span, condition)| MatchGuardData {
                                 if_span,
@@ -1999,18 +2003,18 @@ pub fn expr_parser<'tokens>()
             let closure_for_trailing = closure_expr_inline.clone();
 
             // Labeled trailing closure: identifier: { closure }
-            let labeled = skip_inline_trivia()
-                .ignore_then(select! { Token::Identifier = e => to_kestrel_span2(e.span()) })
-                .then(
-                    skip_inline_trivia()
-                        .ignore_then(just(Token::Colon).map_with(|_, e| to_kestrel_span2(e.span()))),
-                )
-                .then(closure_for_trailing.clone())
-                .map(|((label, colon), closure)| CallArg {
-                    label: Some(label),
-                    colon: Some(colon),
-                    value: closure,
-                });
+            let labeled =
+                skip_inline_trivia()
+                    .ignore_then(select! { Token::Identifier = e => to_kestrel_span2(e.span()) })
+                    .then(skip_inline_trivia().ignore_then(
+                        just(Token::Colon).map_with(|_, e| to_kestrel_span2(e.span())),
+                    ))
+                    .then(closure_for_trailing.clone())
+                    .map(|((label, colon), closure)| CallArg {
+                        label: Some(label),
+                        colon: Some(colon),
+                        value: closure,
+                    });
 
             // Unlabeled trailing closure: { closure }
             let unlabeled = closure_for_trailing.map(|closure| CallArg {

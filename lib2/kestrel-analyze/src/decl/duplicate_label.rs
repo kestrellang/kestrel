@@ -74,10 +74,7 @@ impl DeclCheck for DuplicateLabelAnalyzer {
                     diags.push(AnalyzeDiagnostic {
                         descriptor_id: DESCRIPTORS[0].id,
                         severity: DESCRIPTORS[0].default_severity,
-                        message: format!(
-                            "duplicate label '{}' in case '{}'",
-                            label, case_name
-                        ),
+                        message: format!("duplicate label '{}' in case '{}'", label, case_name),
                         labels: vec![DiagLabel {
                             span,
                             message: "duplicate label".into(),

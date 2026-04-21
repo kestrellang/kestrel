@@ -36,8 +36,7 @@ impl TargetConfig {
 
     /// Create a target config from a target triple string.
     pub fn from_triple(triple: &str) -> Result<Self, String> {
-        let triple =
-            Triple::from_str(triple).map_err(|e| format!("invalid target triple: {e}"))?;
+        let triple = Triple::from_str(triple).map_err(|e| format!("invalid target triple: {e}"))?;
         let pointer_width = match triple.pointer_width() {
             Ok(PointerWidth::U16) => 2,
             Ok(PointerWidth::U32) => 4,

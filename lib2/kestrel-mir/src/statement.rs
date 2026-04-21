@@ -1,5 +1,6 @@
 //! Statements — operations within basic blocks.
 
+use crate::WitnessMethodKey;
 use crate::id::LocalId;
 use crate::immediate::Immediate;
 use crate::op::Op;
@@ -94,10 +95,7 @@ pub enum Rvalue {
     /// `tuple (v0, v1, ...)`
     Tuple(Vec<Value>),
     /// `apply partial func(captures...)` — create a thick callable from a function + captures
-    ApplyPartial {
-        func: Entity,
-        captures: Vec<Value>,
-    },
+    ApplyPartial { func: Entity, captures: Vec<Value> },
 
     /// `enum Enum.Variant` or `enum Enum.Variant(payload...)`
     EnumVariant {
@@ -136,7 +134,7 @@ pub enum Callee {
     /// Witness method dispatch — resolved at monomorphization time.
     Witness {
         protocol: Entity,
-        method: String,
+        method: WitnessMethodKey,
         self_type: MirTy,
         method_type_args: Vec<MirTy>,
     },
@@ -173,7 +171,7 @@ impl Callee {
     /// Create a witness method callee.
     pub fn witness(
         protocol: Entity,
-        method: impl Into<String>,
+        method: impl Into<WitnessMethodKey>,
         self_type: MirTy,
         method_type_args: Vec<MirTy>,
     ) -> Self {

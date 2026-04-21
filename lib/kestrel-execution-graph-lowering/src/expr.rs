@@ -10,11 +10,11 @@ use kestrel_execution_graph::{
 };
 use kestrel_semantic_model::{ResolvedAliasedType, StructFields, SymbolFor};
 use kestrel_semantic_tree::behavior::FileConstantBehavior;
-use kestrel_semantic_tree::behavior::{ComputedPropertyMarker, StaticBehavior};
 use kestrel_semantic_tree::behavior::callable::{
     CallableBehavior, ParameterAccessMode, ReceiverKind,
 };
 use kestrel_semantic_tree::behavior::executable::ResolvedExecutableBehavior;
+use kestrel_semantic_tree::behavior::{ComputedPropertyMarker, StaticBehavior};
 use kestrel_semantic_tree::expr::{
     CallArgument, ElseBranch, ExprKind, Expression, IfCondition, InterpolationPart, LiteralValue,
     PrimitiveMethod,
@@ -4336,9 +4336,15 @@ fn lower_call(
                                 );
                                 eprintln!("  receiver.ty: {:?}", receiver.ty);
                                 eprintln!("  is_type_param_call: {}", is_type_param_call);
-                                eprintln!("  is_static_type_param_call: {}", is_static_type_param_call);
+                                eprintln!(
+                                    "  is_static_type_param_call: {}",
+                                    is_static_type_param_call
+                                );
                                 eprintln!("  is_assoc_type_call: {}", is_assoc_type_call);
-                                eprintln!("  is_static_assoc_type_call: {}", is_static_assoc_type_call);
+                                eprintln!(
+                                    "  is_static_assoc_type_call: {}",
+                                    is_static_assoc_type_call
+                                );
                                 eprintln!("  is_self_type_call: {}", is_self_type_call);
                                 eprintln!("  is_protocol_type_call: {}", is_protocol_type_call);
                                 eprintln!("  is_builtin_type: {}", is_builtin_type);
@@ -4366,8 +4372,16 @@ fn lower_call(
                         // Continue debug logging
                         if verbose_debug {
                             let debug_methods = [
-                                "lessThan", "greaterThan", "equals", "add", "subtract",
-                                "multiply", "divide", "map", "filter", "next",
+                                "lessThan",
+                                "greaterThan",
+                                "equals",
+                                "add",
+                                "subtract",
+                                "multiply",
+                                "divide",
+                                "map",
+                                "filter",
+                                "next",
                             ];
                             if debug_methods.contains(&method_name.as_str()) {
                                 eprintln!("  needs_witness_dispatch: {}", needs_witness_dispatch);
@@ -5150,7 +5164,10 @@ fn lower_getter_call(
     };
 
     // Check if this is a static computed property
-    let is_static = field_sym.metadata().get_behavior::<StaticBehavior>().is_some();
+    let is_static = field_sym
+        .metadata()
+        .get_behavior::<StaticBehavior>()
+        .is_some();
 
     // Get the result type and create a temp for the result
     let result_ty = lower_type(ctx, &expr.ty);
@@ -5616,7 +5633,10 @@ fn lower_setter_call(
     };
 
     // Check if this is a static computed property
-    let is_static = field_sym.metadata().get_behavior::<StaticBehavior>().is_some();
+    let is_static = field_sym
+        .metadata()
+        .get_behavior::<StaticBehavior>()
+        .is_some();
 
     // Lower the right-hand side value
     let rhs_value = lower_expression(ctx, rhs);

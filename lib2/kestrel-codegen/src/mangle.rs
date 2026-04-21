@@ -173,7 +173,7 @@ impl<'a> Mangler<'a> {
                 } else {
                     0
                 }
-            }
+            },
             _ => 0,
         };
 
@@ -217,15 +217,15 @@ impl<'a> Mangler<'a> {
             MirTy::Pointer(inner) => {
                 self.push('P');
                 self.mangle_type(inner);
-            }
+            },
             MirTy::Ref(inner) => {
                 self.push('R');
                 self.mangle_type(inner);
-            }
+            },
             MirTy::RefMut(inner) => {
                 self.push('M');
                 self.mangle_type(inner);
-            }
+            },
 
             MirTy::Tuple(elems) => {
                 self.push('T');
@@ -233,7 +233,7 @@ impl<'a> Mangler<'a> {
                     self.mangle_type(elem);
                 }
                 self.push('E');
-            }
+            },
 
             MirTy::Named { entity, type_args } => {
                 let name = self.module.resolve_name(*entity);
@@ -247,12 +247,12 @@ impl<'a> Mangler<'a> {
                     }
                     self.push('E');
                 }
-            }
+            },
 
             MirTy::TypeParam(entity) => {
                 let name = self.module.resolve_name(*entity).to_owned();
                 self.mangle_ident(&name);
-            }
+            },
 
             MirTy::FuncThin { params, ret } => {
                 self.push('F');
@@ -263,7 +263,7 @@ impl<'a> Mangler<'a> {
                 }
                 self.mangle_type(ret);
                 self.push('E');
-            }
+            },
 
             MirTy::FuncThick { params, ret } => {
                 self.push('C');
@@ -274,7 +274,7 @@ impl<'a> Mangler<'a> {
                 }
                 self.mangle_type(ret);
                 self.push('E');
-            }
+            },
 
             MirTy::SelfType => {
                 if let Some(st) = self.self_type {
@@ -284,7 +284,7 @@ impl<'a> Mangler<'a> {
                 } else {
                     self.push('S');
                 }
-            }
+            },
 
             // Includes protocol name to prevent collisions between different
             // protocols defining the same associated type name (e.g. Iterator.Item
@@ -300,11 +300,11 @@ impl<'a> Mangler<'a> {
                 let protocol_name = self.module.resolve_name(*protocol).to_owned();
                 self.mangle_name_path(&protocol_name);
                 self.mangle_ident(name);
-            }
+            },
 
             MirTy::Error => {
                 self.push('X');
-            }
+            },
         }
     }
 }
@@ -500,8 +500,10 @@ mod tests {
     fn function_with_params() {
         let module = test_module();
         let mut func = FunctionDef::new(dummy_entity(1), "add", MirTy::I64);
-        func.params.push(ParamDef::new("x", LocalId::new(0), MirTy::I64));
-        func.params.push(ParamDef::new("y", LocalId::new(1), MirTy::I64));
+        func.params
+            .push(ParamDef::new("x", LocalId::new(0), MirTy::I64));
+        func.params
+            .push(ParamDef::new("y", LocalId::new(1), MirTy::I64));
 
         let result = mangle_function(&module, &func, &[]);
         assert_eq!(result, "_K03_addZi8i8E");
@@ -565,8 +567,7 @@ mod tests {
         let mut module_with_names = module;
         module_with_names.register_name(dummy_entity(3), "ArrayIterator");
 
-        let result =
-            mangle_function_with_self(&module_with_names, &func, &[], Some(&self_type));
+        let result = mangle_function_with_self(&module_with_names, &func, &[], Some(&self_type));
         assert_eq!(
             result,
             "_K0N3_std8_Iterator4_nextEmZES_13_ArrayIteratorIi8E"

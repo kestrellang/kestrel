@@ -3691,9 +3691,9 @@ impl Expression {
                         span: arg.span.clone(),
                     })
                     .collect(),
-                explicit_type_args: explicit_type_args.as_ref().map(|args| {
-                    args.iter().map(|ty| ty.apply_substitutions(subs)).collect()
-                }),
+                explicit_type_args: explicit_type_args
+                    .as_ref()
+                    .map(|args| args.iter().map(|ty| ty.apply_substitutions(subs)).collect()),
             },
 
             ExprKind::DeferredStaticCall {
@@ -3714,9 +3714,9 @@ impl Expression {
                     })
                     .collect(),
                 protocol_candidates: protocol_candidates.clone(),
-                explicit_type_args: explicit_type_args.as_ref().map(|args| {
-                    args.iter().map(|ty| ty.apply_substitutions(subs)).collect()
-                }),
+                explicit_type_args: explicit_type_args
+                    .as_ref()
+                    .map(|args| args.iter().map(|ty| ty.apply_substitutions(subs)).collect()),
             },
 
             ExprKind::DeferredInitCall {
@@ -3733,16 +3733,14 @@ impl Expression {
                         span: arg.span.clone(),
                     })
                     .collect(),
-                explicit_type_args: explicit_type_args.as_ref().map(|args| {
-                    args.iter().map(|ty| ty.apply_substitutions(subs)).collect()
-                }),
+                explicit_type_args: explicit_type_args
+                    .as_ref()
+                    .map(|args| args.iter().map(|ty| ty.apply_substitutions(subs)).collect()),
             },
 
-            ExprKind::DeferredMemberAccess { receiver, member } => {
-                ExprKind::DeferredMemberAccess {
-                    receiver: Box::new(receiver.apply_substitutions(subs)),
-                    member: member.clone(),
-                }
+            ExprKind::DeferredMemberAccess { receiver, member } => ExprKind::DeferredMemberAccess {
+                receiver: Box::new(receiver.apply_substitutions(subs)),
+                member: member.clone(),
             },
 
             ExprKind::DeferredSubscriptCall {
@@ -3774,9 +3772,9 @@ impl Expression {
                         span: arg.span.clone(),
                     })
                     .collect(),
-                explicit_type_args: explicit_type_args.as_ref().map(|args| {
-                    args.iter().map(|ty| ty.apply_substitutions(subs)).collect()
-                }),
+                explicit_type_args: explicit_type_args
+                    .as_ref()
+                    .map(|args| args.iter().map(|ty| ty.apply_substitutions(subs)).collect()),
             },
 
             ExprKind::ImplicitStructInit {

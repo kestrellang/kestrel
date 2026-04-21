@@ -8,8 +8,8 @@ use std::sync::Arc;
 
 use kestrel_reporting::DiagnosticContext;
 use kestrel_semantic_model::{ExtensionRegistry, SemanticModel, SymbolRegistry};
-use kestrel_semantic_tree::builtins::BuiltinRegistry;
 use kestrel_semantic_tree::behavior::extension_target::ExtensionTargetBehavior;
+use kestrel_semantic_tree::builtins::BuiltinRegistry;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::extension::ExtensionSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
@@ -218,13 +218,12 @@ impl SemanticBinder {
                 let source = Self::source_for_symbol(symbol, &self.sources);
                 // Use a scratch diagnostic context to avoid duplicate warnings
                 let mut scratch_diagnostics = DiagnosticContext::new();
-                let attributes =
-                    crate::binders::utils::attributes::resolve_attributes(
-                        syntax_node,
-                        &source,
-                        0, // file_id doesn't matter for attribute parsing
-                        &mut scratch_diagnostics,
-                    );
+                let attributes = crate::binders::utils::attributes::resolve_attributes(
+                    syntax_node,
+                    &source,
+                    0, // file_id doesn't matter for attribute parsing
+                    &mut scratch_diagnostics,
+                );
                 if let crate::binders::utils::attributes::BuiltinParseResult::Success(feature) =
                     crate::binders::utils::attributes::parse_builtin_attribute(
                         &attributes,
@@ -255,7 +254,9 @@ impl SemanticBinder {
                             let _ = self.builtin_registry.register_method(feature, symbol_id);
                         },
                         KestrelSymbolKind::TypeAlias if def_kind.is_type_alias() => {
-                            let _ = self.builtin_registry.register_type_alias(feature, symbol_id);
+                            let _ = self
+                                .builtin_registry
+                                .register_type_alias(feature, symbol_id);
                         },
                         _ => {
                             // Kind mismatch — silently skip.
@@ -306,10 +307,7 @@ impl SemanticBinder {
     }
 
     /// Get source text for a symbol by walking up to its SourceFile ancestor.
-    fn source_for_symbol(
-        symbol: &Arc<dyn Symbol<KestrelLanguage>>,
-        sources: &SourceMap,
-    ) -> String {
+    fn source_for_symbol(symbol: &Arc<dyn Symbol<KestrelLanguage>>, sources: &SourceMap) -> String {
         let mut current = Some(symbol.clone());
         while let Some(sym) = current {
             if sym.metadata().kind() == KestrelSymbolKind::SourceFile {

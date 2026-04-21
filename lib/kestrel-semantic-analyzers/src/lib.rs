@@ -19,7 +19,7 @@ pub fn default_analyzers() -> Vec<Box<dyn Analyzer>> {
         DefiniteAssignmentAnalyzer, DisallowedConformanceAnalyzer, DuplicateCallableAnalyzer,
         DuplicateCaseAnalyzer, DuplicateDeinitAnalyzer, DuplicateLabelAnalyzer,
         DuplicateSymbolAnalyzer, ExhaustiveReturnAnalyzer, ExhaustivenessAnalyzer,
-        ExternFFISafeAnalyzer, ExtensionConflictAnalyzer, FieldAnalyzer, ForLoopPatternAnalyzer,
+        ExtensionConflictAnalyzer, ExternFFISafeAnalyzer, FieldAnalyzer, ForLoopPatternAnalyzer,
         FunctionBodyAnalyzer, GenericsAnalyzer, GuardLetDivergenceAnalyzer, ImportAnalyzer,
         InitializerVerificationAnalyzer, IrrefutablePatternAnalyzer,
         ParentProtocolConformanceAnalyzer, ProtocolFieldConformanceAnalyzer,

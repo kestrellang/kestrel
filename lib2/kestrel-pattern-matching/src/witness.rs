@@ -23,10 +23,7 @@ pub enum Witness {
     /// Any value of the type (displayed as `_`)
     Any,
     /// A specific enum case (e.g., `.None`, `.Some(_)`)
-    EnumCase {
-        name: String,
-        args: Vec<Witness>,
-    },
+    EnumCase { name: String, args: Vec<Witness> },
     /// A tuple value (e.g., `(_, 42)`)
     Tuple(Vec<Witness>),
     /// A literal value (e.g., `42`, `"hello"`)
@@ -114,26 +111,28 @@ impl fmt::Display for Witness {
                     let args_str: Vec<String> = args.iter().map(|a| a.to_string()).collect();
                     write!(f, ".{}({})", name, args_str.join(", "))
                 }
-            }
+            },
             Witness::Tuple(elems) => {
                 let strs: Vec<String> = elems.iter().map(|e| e.to_string()).collect();
                 write!(f, "({})", strs.join(", "))
-            }
+            },
             Witness::Literal(s) => write!(f, "{}", s),
             Witness::Bool(b) => write!(f, "{}", b),
             Witness::Array(elems) => {
                 let strs: Vec<String> = elems.iter().map(|e| e.to_string()).collect();
                 write!(f, "[{}]", strs.join(", "))
-            }
+            },
             Witness::Struct { name, fields } => {
                 if fields.is_empty() {
                     write!(f, "{} {{ .. }}", name)
                 } else {
-                    let strs: Vec<String> =
-                        fields.iter().map(|(n, w)| format!("{}: {}", n, w)).collect();
+                    let strs: Vec<String> = fields
+                        .iter()
+                        .map(|(n, w)| format!("{}: {}", n, w))
+                        .collect();
                     write!(f, "{} {{ {} }}", name, strs.join(", "))
                 }
-            }
+            },
             Witness::Range {
                 start,
                 end,
@@ -144,7 +143,7 @@ impl fmt::Display for Witness {
                 } else {
                     write!(f, "{}..{}", start, end)
                 }
-            }
+            },
         }
     }
 }

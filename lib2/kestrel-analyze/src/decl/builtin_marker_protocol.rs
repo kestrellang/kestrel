@@ -57,7 +57,11 @@ impl DeclCheck for BuiltinMarkerProtocolAnalyzer {
         };
 
         // Check if this builtin protocol requires marker status
-        let BuiltinKind::Protocol { must_be_marker: true, .. } = builtin.kind() else {
+        let BuiltinKind::Protocol {
+            must_be_marker: true,
+            ..
+        } = builtin.kind()
+        else {
             return vec![];
         };
 

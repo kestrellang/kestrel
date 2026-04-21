@@ -147,11 +147,7 @@ impl<'a> LowerCtx<'a> {
     // ===== Capture detection =====
 
     /// Walk a closure body and collect locals defined before `entry_depth`.
-    pub fn collect_captures(
-        &self,
-        block: &HirBlock,
-        entry_depth: usize,
-    ) -> Vec<LocalId> {
+    pub fn collect_captures(&self, block: &HirBlock, entry_depth: usize) -> Vec<LocalId> {
         use std::collections::HashSet;
         let mut seen = HashSet::new();
         let mut captures = Vec::new();
@@ -184,13 +180,13 @@ impl<'a> LowerCtx<'a> {
         match &self.stmts[id] {
             HirStmt::Expr { expr, .. } => {
                 self.walk_expr_for_captures(*expr, entry_depth, seen, captures);
-            }
+            },
             HirStmt::Let { value, .. } => {
                 if let Some(v) = value {
                     self.walk_expr_for_captures(*v, entry_depth, seen, captures);
                 }
-            }
-            HirStmt::Deinit { .. } => {}
+            },
+            HirStmt::Deinit { .. } => {},
         }
     }
 
@@ -210,9 +206,9 @@ impl<'a> LowerCtx<'a> {
                         }
                     }
                 }
-            }
+            },
             // Skip nested closures — they compute their own captures
-            HirExpr::Closure { .. } => {}
+            HirExpr::Closure { .. } => {},
             // Recurse into all other expression kinds
             _ => self.walk_expr_children(id, entry_depth, seen, captures),
         }
@@ -227,66 +223,77 @@ impl<'a> LowerCtx<'a> {
         captures: &mut Vec<LocalId>,
     ) {
         match &self.exprs[id] {
-            HirExpr::Literal { .. } | HirExpr::Local(..) | HirExpr::Def(..)
-            | HirExpr::OverloadSet { .. } | HirExpr::Error { .. }
-            | HirExpr::Break { .. } | HirExpr::Continue { .. } => {}
+            HirExpr::Literal { .. }
+            | HirExpr::Local(..)
+            | HirExpr::Def(..)
+            | HirExpr::OverloadSet { .. }
+            | HirExpr::Error { .. }
+            | HirExpr::Break { .. }
+            | HirExpr::Continue { .. } => {},
 
             HirExpr::Call { callee, args, .. } => {
                 self.walk_expr_for_captures(*callee, entry_depth, seen, captures);
                 for arg in args {
                     self.walk_expr_for_captures(arg.value, entry_depth, seen, captures);
                 }
-            }
+            },
             HirExpr::MethodCall { receiver, args, .. } => {
                 self.walk_expr_for_captures(*receiver, entry_depth, seen, captures);
                 for arg in args {
                     self.walk_expr_for_captures(arg.value, entry_depth, seen, captures);
                 }
-            }
+            },
             HirExpr::ProtocolCall { receiver, args, .. } => {
                 self.walk_expr_for_captures(*receiver, entry_depth, seen, captures);
                 for arg in args {
                     self.walk_expr_for_captures(arg.value, entry_depth, seen, captures);
                 }
-            }
+            },
             HirExpr::Field { base, .. } | HirExpr::TupleIndex { base, .. } => {
                 self.walk_expr_for_captures(*base, entry_depth, seen, captures);
-            }
+            },
             HirExpr::ImplicitMember { args, .. } => {
                 if let Some(args) = args {
                     for arg in args {
                         self.walk_expr_for_captures(arg.value, entry_depth, seen, captures);
                     }
                 }
-            }
+            },
             HirExpr::Assign { target, value, .. } => {
                 self.walk_expr_for_captures(*target, entry_depth, seen, captures);
                 self.walk_expr_for_captures(*value, entry_depth, seen, captures);
-            }
+            },
             HirExpr::Tuple { elements, .. } => {
                 for &e in elements {
                     self.walk_expr_for_captures(e, entry_depth, seen, captures);
                 }
-            }
+            },
             HirExpr::Array { elements, .. } => {
                 for &e in elements {
                     self.walk_expr_for_captures(e, entry_depth, seen, captures);
                 }
-            }
+            },
             HirExpr::Dict { entries, .. } => {
                 for entry in entries {
                     self.walk_expr_for_captures(entry.key, entry_depth, seen, captures);
                     self.walk_expr_for_captures(entry.value, entry_depth, seen, captures);
                 }
-            }
-            HirExpr::If { condition, then_body, else_body, .. } => {
+            },
+            HirExpr::If {
+                condition,
+                then_body,
+                else_body,
+                ..
+            } => {
                 self.walk_expr_for_captures(*condition, entry_depth, seen, captures);
                 self.walk_block_for_captures(then_body, entry_depth, seen, captures);
                 if let Some(else_b) = else_body {
                     self.walk_block_for_captures(else_b, entry_depth, seen, captures);
                 }
-            }
-            HirExpr::Match { scrutinee, arms, .. } => {
+            },
+            HirExpr::Match {
+                scrutinee, arms, ..
+            } => {
                 self.walk_expr_for_captures(*scrutinee, entry_depth, seen, captures);
                 for arm in arms {
                     if let Some(g) = arm.guard {
@@ -294,19 +301,19 @@ impl<'a> LowerCtx<'a> {
                     }
                     self.walk_expr_for_captures(arm.body, entry_depth, seen, captures);
                 }
-            }
+            },
             HirExpr::Loop { body, .. } => {
                 self.walk_block_for_captures(body, entry_depth, seen, captures);
-            }
+            },
             HirExpr::Block { body, .. } => {
                 self.walk_block_for_captures(body, entry_depth, seen, captures);
-            }
+            },
             HirExpr::Return { value, .. } => {
                 if let Some(v) = value {
                     self.walk_expr_for_captures(*v, entry_depth, seen, captures);
                 }
-            }
-            HirExpr::Closure { .. } => {} // already handled
+            },
+            HirExpr::Closure { .. } => {}, // already handled
         }
     }
 }

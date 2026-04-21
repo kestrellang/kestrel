@@ -7,9 +7,11 @@ use crate::function::FunctionState;
 use crate::rvalue;
 use crate::types;
 use cranelift_codegen::ir::immediates::Offset32;
-use cranelift_codegen::ir::{self, InstBuilder, MemFlags, StackSlotData, StackSlotKind, Value as CrValue};
+use cranelift_codegen::ir::{
+    self, InstBuilder, MemFlags, StackSlotData, StackSlotKind, Value as CrValue,
+};
 use cranelift_frontend::FunctionBuilder;
-use kestrel_codegen2::{substitute_type, NamedKind};
+use kestrel_codegen2::{NamedKind, substitute_type};
 use kestrel_mir::{MirTy, Value};
 use std::collections::HashMap;
 
@@ -41,24 +43,31 @@ pub fn compile_construct(
                 let type_args = common::substitute_type_args(type_args, &state.subst);
 
                 for (name, value) in fields {
-                    let (offset, field_ty) = get_field_info(
-                        ctx.module, &mut ctx.layouts, struct_id, &type_args, name,
-                    )?;
+                    let (offset, field_ty) =
+                        get_field_info(ctx.module, &mut ctx.layouts, struct_id, &type_args, name)?;
                     let val = rvalue::compile_value(ctx, state, builder, value)?;
                     let field_ptr = builder.ins().iadd_imm(addr, offset as i64);
 
                     if is_aggregate(&field_ty, &mut ctx.layouts) {
-                        common::copy_aggregate(builder, &mut ctx.layouts, &field_ty, field_ptr, val);
+                        common::copy_aggregate(
+                            builder,
+                            &mut ctx.layouts,
+                            &field_ty,
+                            field_ptr,
+                            val,
+                        );
                     } else {
-                        builder.ins().store(MemFlags::new(), val, field_ptr, Offset32::new(0));
+                        builder
+                            .ins()
+                            .store(MemFlags::new(), val, field_ptr, Offset32::new(0));
                     }
                 }
-            }
+            },
             _ => {
                 return Err(CodegenError::Unsupported(
                     "construct non-struct Named type".into(),
                 ));
-            }
+            },
         }
     }
 
@@ -78,9 +87,9 @@ pub fn compile_tuple(
     let elem_types: Vec<MirTy> = values
         .iter()
         .map(|v| match v {
-            Value::Place(p) => common::get_place_type(
-                ctx.module, state.body, p, &state.subst, &ctx.layouts,
-            ),
+            Value::Place(p) => {
+                common::get_place_type(ctx.module, state.body, p, &state.subst, &ctx.layouts)
+            },
             Value::Immediate(imm) => Ok(MirTy::I64), // Approximate; ideally infer from imm
         })
         .collect::<Result<_, _>>()?;
@@ -109,7 +118,9 @@ pub fn compile_tuple(
         if is_aggregate(&elem_types[i], &mut ctx.layouts) {
             common::copy_aggregate(builder, &mut ctx.layouts, &elem_types[i], elem_ptr, val);
         } else {
-            builder.ins().store(MemFlags::new(), val, elem_ptr, Offset32::new(0));
+            builder
+                .ins()
+                .store(MemFlags::new(), val, elem_ptr, Offset32::new(0));
         }
     }
 
@@ -151,13 +162,14 @@ pub fn compile_enum_variant(
 
                 // Store discriminant at offset 0
                 let discr_val = builder.ins().iconst(ir::types::I32, discriminant as i64);
-                builder.ins().store(MemFlags::new(), discr_val, addr, Offset32::new(0));
+                builder
+                    .ins()
+                    .store(MemFlags::new(), discr_val, addr, Offset32::new(0));
 
                 // Store payload fields at payload offset
                 if !payload.is_empty() {
-                    let payload_offset = get_enum_payload_offset(
-                        ctx.module, &mut ctx.layouts, enum_id, &type_args,
-                    );
+                    let payload_offset =
+                        get_enum_payload_offset(ctx.module, &mut ctx.layouts, enum_id, &type_args);
                     let payload_ptr = builder.ins().iadd_imm(addr, payload_offset as i64);
 
                     let payload_struct = &ctx.module.structs[payload_struct_id.index()];
@@ -178,27 +190,37 @@ pub fn compile_enum_variant(
                         if i < payload_sl.field_offsets.len() {
                             let field_offset = payload_sl.field_offsets[i];
                             let val = rvalue::compile_value(ctx, state, builder, value)?;
-                            let field_ptr = builder.ins().iadd_imm(payload_ptr, field_offset as i64);
+                            let field_ptr =
+                                builder.ins().iadd_imm(payload_ptr, field_offset as i64);
 
                             let field_ty = &payload_struct.fields[i].ty;
                             let concrete_field = substitute_type(field_ty, &enum_subst);
 
                             if is_aggregate(&concrete_field, &mut ctx.layouts) {
                                 common::copy_aggregate(
-                                    builder, &mut ctx.layouts, &concrete_field, field_ptr, val,
+                                    builder,
+                                    &mut ctx.layouts,
+                                    &concrete_field,
+                                    field_ptr,
+                                    val,
                                 );
                             } else {
-                                builder.ins().store(MemFlags::new(), val, field_ptr, Offset32::new(0));
+                                builder.ins().store(
+                                    MemFlags::new(),
+                                    val,
+                                    field_ptr,
+                                    Offset32::new(0),
+                                );
                             }
                         }
                     }
                 }
-            }
+            },
             _ => {
                 return Err(CodegenError::Unsupported(
                     "enum variant on non-enum type".into(),
                 ));
-            }
+            },
         }
     }
 
@@ -233,7 +255,9 @@ pub fn compile_array_literal(
         if is_aggregate(&concrete_elem, &mut ctx.layouts) {
             common::copy_aggregate(builder, &mut ctx.layouts, &concrete_elem, elem_ptr, val);
         } else {
-            builder.ins().store(MemFlags::new(), val, elem_ptr, Offset32::new(0));
+            builder
+                .ins()
+                .store(MemFlags::new(), val, elem_ptr, Offset32::new(0));
         }
     }
 

@@ -106,8 +106,13 @@ pub struct AstParam {
 /// Used to bridge build phase (AstParam) to query phase (HIR lowering).
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum ParamPattern {
-    Binding { name: String, is_mut: bool },
-    Tuple { elements: Vec<ParamPattern> },
+    Binding {
+        name: String,
+        is_mut: bool,
+    },
+    Tuple {
+        elements: Vec<ParamPattern>,
+    },
     Struct {
         type_name: String,
         fields: Vec<StructPatternField>,

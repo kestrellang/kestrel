@@ -64,8 +64,16 @@ impl Compiler {
         kestrel_ast_builder::seed_lang_module(&mut world, root);
         // Register default analyzers on the root entity
         let registry = kestrel_analyze::default_analyzers();
-        world.set(root, kestrel_analyze::AnalyzerRegistryRef(std::sync::Arc::new(registry)));
-        Self { world, files: HashMap::new(), root, target: TargetConfig::host() }
+        world.set(
+            root,
+            kestrel_analyze::AnalyzerRegistryRef(std::sync::Arc::new(registry)),
+        );
+        Self {
+            world,
+            files: HashMap::new(),
+            root,
+            target: TargetConfig::host(),
+        }
     }
 
     /// Create a Compiler from a pre-built World snapshot.
@@ -74,7 +82,12 @@ impl Compiler {
     /// The snapshot must already have a root module with lang module
     /// seeded and analyzers registered.
     pub fn from_snapshot(world: World, root: Entity, files: HashMap<String, Entity>) -> Self {
-        Self { world, files, root, target: TargetConfig::host() }
+        Self {
+            world,
+            files,
+            root,
+            target: TargetConfig::host(),
+        }
     }
 
     /// Access the file path → entity mapping.
@@ -94,9 +107,10 @@ impl Compiler {
     /// enable change tracking and query invalidation.
     pub fn set_source(&mut self, path: &str, source: String) -> Entity {
         let world = &mut self.world;
-        let entity = *self.files.entry(path.to_string()).or_insert_with(|| {
-            world.spawn()
-        });
+        let entity = *self
+            .files
+            .entry(path.to_string())
+            .or_insert_with(|| world.spawn());
         self.world.set(entity, FilePath(path.to_string()));
         self.world.set(entity, SourceText(source));
         entity
@@ -125,7 +139,8 @@ impl Compiler {
     /// Returns codespan-reporting `Diagnostic`s accumulated by lex, parse,
     /// and type inference queries. Use `emit_diagnostics()` to render them.
     pub fn diagnostics(&self) -> Vec<codespan_reporting::diagnostic::Diagnostic<usize>> {
-        self.world.accumulated::<codespan_reporting::diagnostic::Diagnostic<usize>>()
+        self.world
+            .accumulated::<codespan_reporting::diagnostic::Diagnostic<usize>>()
     }
 
     /// Emit all accumulated diagnostics to stderr with source context.
@@ -219,14 +234,21 @@ impl Compiler {
                             *summary.no_member_breakdown.entry(name.clone()).or_insert(0) += 1;
                         }
                         if let InferError::DoesNotConform { protocol, .. } = err {
-                            let proto_name = ctx.get::<kestrel_ast_builder::Name>(*protocol)
+                            let proto_name = ctx
+                                .get::<kestrel_ast_builder::Name>(*protocol)
                                 .map(|n| n.0.clone())
                                 .unwrap_or_else(|| format!("{:?}", protocol));
-                            *summary.does_not_conform_breakdown.entry(proto_name).or_insert(0) += 1;
+                            *summary
+                                .does_not_conform_breakdown
+                                .entry(proto_name)
+                                .or_insert(0) += 1;
                         }
                         if let InferError::TypeMismatch { .. } = err {
                             if let Some(detail) = typed.error_details.get(i) {
-                                *summary.type_mismatch_breakdown.entry(detail.clone()).or_insert(0) += 1;
+                                *summary
+                                    .type_mismatch_breakdown
+                                    .entry(detail.clone())
+                                    .or_insert(0) += 1;
                             }
                         }
                     }
@@ -250,15 +272,19 @@ impl Compiler {
                         if typed.errors.len() >= 15 {
                             for (i, err) in typed.errors.iter().enumerate() {
                                 let span_info = format!("{}", err.span().start);
-                                let detail = typed.error_details.get(i)
+                                let detail = typed
+                                    .error_details
+                                    .get(i)
                                     .cloned()
                                     .unwrap_or_else(|| format_error(err));
                                 details.push(format!("@{} {}", span_info, detail));
                             }
                         }
-                        summary.body_error_counts.push((entity_path, typed.errors.len(), details));
+                        summary
+                            .body_error_counts
+                            .push((entity_path, typed.errors.len(), details));
                     }
-                }
+                },
                 Ok(None) => summary.skipped += 1,
                 Err(panic) => {
                     summary.panics += 1;
@@ -270,7 +296,7 @@ impl Compiler {
                     summary
                         .panic_details
                         .push(format!("{}: {}", entity_path, msg));
-                }
+                },
             }
         }
 
@@ -296,7 +322,11 @@ impl Compiler {
 
         let ctx = self.world.query_context();
         let mut diags = kestrel_analyze::analyze_bodies(&ctx, self.root, &body_entities);
-        diags.extend(kestrel_analyze::analyze_decls(&ctx, self.root, &decl_entities));
+        diags.extend(kestrel_analyze::analyze_decls(
+            &ctx,
+            self.root,
+            &decl_entities,
+        ));
         diags.extend(kestrel_analyze::analyze_compilation(&ctx, self.root));
 
         let mut summary = AnalyzeSummary::default();
@@ -464,55 +494,88 @@ fn format_error(err: &InferError) -> String {
     match err {
         InferError::TypeMismatch { .. } => {
             format!("TypeMismatch at {}:{}", span.file_id, span.start)
-        }
+        },
         InferError::DoesNotConform { .. } => {
             format!("DoesNotConform at {}:{}", span.file_id, span.start)
-        }
+        },
         InferError::NoMember { name, .. } => {
             format!("NoMember '{}' at {}:{}", name, span.file_id, span.start)
-        }
+        },
         InferError::AmbiguousMember { name, .. } => {
-            format!("AmbiguousMember '{}' at {}:{}", name, span.file_id, span.start)
-        }
+            format!(
+                "AmbiguousMember '{}' at {}:{}",
+                name, span.file_id, span.start
+            )
+        },
         InferError::MemberNotVisible { name, .. } => {
-            format!("MemberNotVisible '{}' at {}:{}", name, span.file_id, span.start)
-        }
+            format!(
+                "MemberNotVisible '{}' at {}:{}",
+                name, span.file_id, span.start
+            )
+        },
         InferError::NoAssociatedType { name, .. } => {
-            format!("NoAssociatedType '{}' at {}:{}", name, span.file_id, span.start)
-        }
+            format!(
+                "NoAssociatedType '{}' at {}:{}",
+                name, span.file_id, span.start
+            )
+        },
         InferError::InfiniteType { .. } => {
             format!("InfiniteType at {}:{}", span.file_id, span.start)
-        }
+        },
         InferError::FromHir { .. } => {
             format!("FromHir at {}:{}", span.file_id, span.start)
-        }
+        },
         InferError::ImplicitMemberNotFound { name, .. } => {
-            format!("ImplicitMemberNotFound '{}' at {}:{}", name, span.file_id, span.start)
-        }
+            format!(
+                "ImplicitMemberNotFound '{}' at {}:{}",
+                name, span.file_id, span.start
+            )
+        },
         InferError::ArgCountMismatch { expected, got, .. } => {
-            format!("ArgCountMismatch expected={} got={} at {}:{}", expected, got, span.file_id, span.start)
-        }
+            format!(
+                "ArgCountMismatch expected={} got={} at {}:{}",
+                expected, got, span.file_id, span.start
+            )
+        },
         InferError::LabelMismatch { expected, got, .. } => {
-            format!("LabelMismatch expected={:?} got={:?} at {}:{}", expected, got, span.file_id, span.start)
-        }
+            format!(
+                "LabelMismatch expected={:?} got={:?} at {}:{}",
+                expected, got, span.file_id, span.start
+            )
+        },
         InferError::InstanceMethodAsStatic { name, .. } => {
-            format!("InstanceMethodAsStatic '{}' at {}:{}", name, span.file_id, span.start)
-        }
+            format!(
+                "InstanceMethodAsStatic '{}' at {}:{}",
+                name, span.file_id, span.start
+            )
+        },
         InferError::TypeParamAsValue { .. } => {
             format!("TypeParamAsValue at {}:{}", span.file_id, span.start)
-        }
+        },
         InferError::TypeArgCountMismatch { expected, got, .. } => {
-            format!("TypeArgCountMismatch expected={} got={} at {}:{}", expected, got, span.file_id, span.start)
-        }
+            format!(
+                "TypeArgCountMismatch expected={} got={} at {}:{}",
+                expected, got, span.file_id, span.start
+            )
+        },
         InferError::NoMatchingOverload { name, .. } => {
-            format!("NoMatchingOverload '{}' at {}:{}", name, span.file_id, span.start)
-        }
+            format!(
+                "NoMatchingOverload '{}' at {}:{}",
+                name, span.file_id, span.start
+            )
+        },
         InferError::ItWrongArity { expected, .. } => {
-            format!("ItWrongArity expected={} at {}:{}", expected, span.file_id, span.start)
-        }
+            format!(
+                "ItWrongArity expected={} at {}:{}",
+                expected, span.file_id, span.start
+            )
+        },
         InferError::LiteralNotAccepted { literal, .. } => {
-            format!("LiteralNotAccepted {:?} at {}:{}", literal, span.file_id, span.start)
-        }
+            format!(
+                "LiteralNotAccepted {:?} at {}:{}",
+                literal, span.file_id, span.start
+            )
+        },
     }
 }
 
@@ -697,7 +760,8 @@ mod tests {
         for tok in &tokens {
             assert_eq!(
                 tok.span.file_id, entity_idx,
-                "token {:?} has wrong file_id", tok.value
+                "token {:?} has wrong file_id",
+                tok.value
             );
         }
     }
@@ -714,7 +778,10 @@ mod tests {
         assert_eq!(let_tok.span.start, 0);
         assert_eq!(let_tok.span.end, 3);
 
-        let id_tok = tokens.iter().find(|t| t.value == Token::Identifier).unwrap();
+        let id_tok = tokens
+            .iter()
+            .find(|t| t.value == Token::Identifier)
+            .unwrap();
         assert_eq!(id_tok.span.start, 4);
         assert_eq!(id_tok.span.end, 5);
     }
@@ -755,7 +822,8 @@ mod tests {
         let diags = c.diagnostics();
         assert!(
             diags.len() >= 2,
-            "expected multiple diagnostics, got {}", diags.len()
+            "expected multiple diagnostics, got {}",
+            diags.len()
         );
         assert!(diags.iter().all(|d| d.severity == Severity::Error));
     }
@@ -858,8 +926,7 @@ mod tests {
     fn parse_tree_has_correct_child_count() {
         // Each top-level declaration becomes a child of SourceFile
         let mut c = Compiler::new();
-        let f = c.set_source("t.ks",
-            "module Main\nimport Foo\nstruct Bar {}".into());
+        let f = c.set_source("t.ks", "module Main\nimport Foo\nstruct Bar {}".into());
         let result = c.parse(f);
 
         assert!(result.errors.is_empty());
@@ -870,22 +937,25 @@ mod tests {
     fn parse_tree_contains_expected_node_kinds() {
         // Verify specific declaration kinds appear in the tree
         let mut c = Compiler::new();
-        let f = c.set_source("t.ks",
-            "module Main\nstruct Point { var x: Int64 }".into());
+        let f = c.set_source("t.ks", "module Main\nstruct Point { var x: Int64 }".into());
         let result = c.parse(f);
         assert!(result.errors.is_empty());
 
-        let child_kinds: Vec<_> = result.tree.children()
-            .map(|n| n.kind())
-            .collect();
+        let child_kinds: Vec<_> = result.tree.children().map(|n| n.kind()).collect();
         // SourceFile children are module declaration + struct declaration nodes
         assert!(
-            child_kinds.iter().any(|k| *k == SyntaxKind::ModuleDeclaration),
-            "expected ModuleDeclaration, got {:?}", child_kinds
+            child_kinds
+                .iter()
+                .any(|k| *k == SyntaxKind::ModuleDeclaration),
+            "expected ModuleDeclaration, got {:?}",
+            child_kinds
         );
         assert!(
-            child_kinds.iter().any(|k| *k == SyntaxKind::StructDeclaration),
-            "expected StructDeclaration, got {:?}", child_kinds
+            child_kinds
+                .iter()
+                .any(|k| *k == SyntaxKind::StructDeclaration),
+            "expected StructDeclaration, got {:?}",
+            child_kinds
         );
     }
 
@@ -928,7 +998,9 @@ mod tests {
         let diags = c.diagnostics();
         // At least one diagnostic should have a non-empty label range
         assert!(
-            diags.iter().any(|d| !d.labels.is_empty() && d.labels[0].range.end > d.labels[0].range.start),
+            diags
+                .iter()
+                .any(|d| !d.labels.is_empty() && d.labels[0].range.end > d.labels[0].range.start),
             "expected at least one diagnostic with a non-empty label range"
         );
     }
@@ -985,7 +1057,10 @@ mod tests {
         c.set_source("t.ks", "module Main".into());
         let r2 = c.parse(f);
         assert!(r2.errors.is_empty());
-        assert!(c.diagnostics().is_empty(), "diagnostics should be cleared after fix");
+        assert!(
+            c.diagnostics().is_empty(),
+            "diagnostics should be cleared after fix"
+        );
     }
 
     // ================================================================
@@ -1024,7 +1099,8 @@ mod tests {
         );
         assert!(
             diags.len() >= 2,
-            "expected both lex and parse diagnostics, got {}", diags.len()
+            "expected both lex and parse diagnostics, got {}",
+            diags.len()
         );
     }
 
@@ -1093,12 +1169,17 @@ mod tests {
         let delta = c.query_exec_count() - after_rev1;
         assert_eq!(
             delta, 2,
-            "expected only 2 re-executions (lex+parse for changed file), got {}", delta
+            "expected only 2 re-executions (lex+parse for changed file), got {}",
+            delta
         );
 
         // Verify f2 actually got updated results
         let r2 = c.parse(f2);
-        assert_eq!(r2.tree.children().count(), 2, "f2 should have module + struct");
+        assert_eq!(
+            r2.tree.children().count(),
+            2,
+            "f2 should have module + struct"
+        );
     }
 
     // ================================================================
@@ -1109,7 +1190,10 @@ mod tests {
     fn compile_simple_function() {
         // Baseline: inference on a trivial function without stdlib
         let mut c = Compiler::new();
-        let f = c.set_source("test.ks", "module Test\nfunc foo() { let x = 42; x }".into());
+        let f = c.set_source(
+            "test.ks",
+            "module Test\nfunc foo() { let x = 42; x }".into(),
+        );
         c.build(f);
 
         let summary = c.infer_all();

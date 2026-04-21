@@ -15,9 +15,7 @@ use crate::common;
 use kestrel_codegen2::{substitute_type, substitute_type_with_self};
 use kestrel_debug::ktrace;
 use kestrel_hecs::Entity;
-use kestrel_mir::{
-    Callee, FunctionId, FunctionKind, MirModule, MirTy, Rvalue, StatementKind,
-};
+use kestrel_mir::{Callee, FunctionId, FunctionKind, MirModule, MirTy, Rvalue, StatementKind};
 use std::collections::{HashMap, VecDeque};
 
 /// Collect all function instantiations needed for compilation.
@@ -81,7 +79,9 @@ impl<'a> CollectionContext<'a> {
             // (ApplyPartial or FunctionRef), never seeded directly
             if matches!(
                 func.kind,
-                FunctionKind::ClosureCall { .. } | FunctionKind::Closure | FunctionKind::Thunk { .. }
+                FunctionKind::ClosureCall { .. }
+                    | FunctionKind::Closure
+                    | FunctionKind::Thunk { .. }
             ) {
                 continue;
             }
@@ -96,10 +96,10 @@ impl<'a> CollectionContext<'a> {
                 // Uses SelfType — for init/deinit/method of non-generic types,
                 // resolve SelfType to the parent struct/enum type
                 let parent = match &func.kind {
-                    FunctionKind::Initializer { parent } |
-                    FunctionKind::Deinit { parent } |
-                    FunctionKind::Method { parent, .. } |
-                    FunctionKind::StaticMethod { parent } => Some(*parent),
+                    FunctionKind::Initializer { parent }
+                    | FunctionKind::Deinit { parent }
+                    | FunctionKind::Method { parent, .. }
+                    | FunctionKind::StaticMethod { parent } => Some(*parent),
                     _ => None,
                 };
                 if let Some(parent_entity) = parent {
@@ -107,7 +107,11 @@ impl<'a> CollectionContext<'a> {
                     // Protocol extension methods have parent = Extension entity
                     // (not a type) — they're discovered through witness calls
                     // with concrete self_types at call sites.
-                    let is_concrete_nongeneric_type = self.module.structs.iter().any(|s| s.entity == parent_entity)
+                    let is_concrete_nongeneric_type = self
+                        .module
+                        .structs
+                        .iter()
+                        .any(|s| s.entity == parent_entity)
                         || self.module.enums.iter().any(|e| e.entity == parent_entity);
                     if !is_concrete_nongeneric_type {
                         continue;
@@ -152,19 +156,17 @@ impl<'a> CollectionContext<'a> {
                         callee, args: _, ..
                     } => {
                         self.scan_callee(callee, &subst, &inst.self_type);
-                    }
+                    },
                     StatementKind::Assign { rvalue, .. } => {
                         self.scan_rvalue(rvalue, &subst, &inst.self_type);
-                    }
-                    _ => {}
+                    },
+                    _ => {},
                 }
             }
 
             // Scan terminator for values that might contain function refs
             // (Return and Branch contain Values that could be immediate function refs)
         }
-
-
     }
 
     fn scan_callee(
@@ -228,7 +230,7 @@ impl<'a> CollectionContext<'a> {
                 if self.result.functions.insert(inst.clone()) {
                     self.queue.push_back(inst);
                 }
-            }
+            },
 
             Callee::Witness {
                 protocol,
@@ -237,20 +239,26 @@ impl<'a> CollectionContext<'a> {
                 method_type_args,
             } => {
                 // Substitute type params AND SelfType using parent's self_type
-                let mut concrete_self = substitute_type_with_self(
-                    self_type, subst, parent_self.as_ref(),
-                );
+                let mut concrete_self =
+                    substitute_type_with_self(self_type, subst, parent_self.as_ref());
                 // Resolve associated types (e.g., Iterator.Item → concrete type)
                 // via witness table. Search all protocols for the owning one,
                 // not just the protocol being called (handles cross-protocol
                 // cases like Iterable.Iter used as self_type for Iterator.next)
-                if let MirTy::Named { entity, ref type_args } = concrete_self {
+                if let MirTy::Named {
+                    entity,
+                    ref type_args,
+                } = concrete_self
+                {
                     if type_args.is_empty() {
                         let assoc_name = self.module.resolve_name(entity);
                         let short = common::short_name(&assoc_name);
 
                         // Find which protocol owns this associated type
-                        let owning_protocol = self.module.protocols.iter()
+                        let owning_protocol = self
+                            .module
+                            .protocols
+                            .iter()
                             .find(|p| p.associated_type_by_name(short).is_some())
                             .map(|p| p.entity);
 
@@ -266,7 +274,10 @@ impl<'a> CollectionContext<'a> {
                             let subst_values: Vec<&MirTy> = subst.values().collect();
                             for candidate in candidates.iter().chain(subst_values.iter()) {
                                 if let Ok(resolved) = witness::resolve_associated_type(
-                                    self.module, owner_proto, candidate, short,
+                                    self.module,
+                                    owner_proto,
+                                    candidate,
+                                    short,
                                 ) {
                                     concrete_self = resolved;
                                     break;
@@ -310,15 +321,15 @@ impl<'a> CollectionContext<'a> {
                         if self.result.functions.insert(inst.clone()) {
                             self.queue.push_back(inst);
                         }
-                    }
+                    },
                     Err(e) => {
                         self.errors.push(e);
-                    }
+                    },
                 }
-            }
+            },
 
             // Thin/Thick indirect calls don't introduce new instantiations
-            Callee::Thin(_) | Callee::Thick(_) => {}
+            Callee::Thin(_) | Callee::Thick(_) => {},
         }
     }
 
@@ -359,7 +370,7 @@ impl<'a> CollectionContext<'a> {
                         self.queue.push_back(inst);
                     }
                 }
-            }
+            },
 
             // Const with FunctionRef introduces the referenced function
             Rvalue::Const(imm) => {
@@ -378,9 +389,9 @@ impl<'a> CollectionContext<'a> {
                         }
                     }
                 }
-            }
+            },
 
-            _ => {}
+            _ => {},
         }
     }
 
@@ -400,9 +411,9 @@ impl<'a> CollectionContext<'a> {
             .iter()
             .enumerate()
             .find_map(|(i, func)| match &func.kind {
-                FunctionKind::Thunk { original: thunk_target } if *thunk_target == original => {
-                    Some(FunctionId::new(i))
-                }
+                FunctionKind::Thunk {
+                    original: thunk_target,
+                } if *thunk_target == original => Some(FunctionId::new(i)),
                 _ => None,
             })
             .or_else(|| self.entity_to_func.get(&original).copied())
@@ -411,10 +422,7 @@ impl<'a> CollectionContext<'a> {
 }
 
 /// Build a substitution map from a function's type params and concrete type args.
-fn build_subst(
-    func: &kestrel_mir::FunctionDef,
-    type_args: &[MirTy],
-) -> HashMap<Entity, MirTy> {
+fn build_subst(func: &kestrel_mir::FunctionDef, type_args: &[MirTy]) -> HashMap<Entity, MirTy> {
     func.type_params
         .iter()
         .zip(type_args.iter())
@@ -426,14 +434,12 @@ fn build_subst(
 fn type_uses_self(ty: &MirTy) -> bool {
     match ty {
         MirTy::SelfType => true,
-        MirTy::Pointer(inner) | MirTy::Ref(inner) | MirTy::RefMut(inner) => {
-            type_uses_self(inner)
-        }
+        MirTy::Pointer(inner) | MirTy::Ref(inner) | MirTy::RefMut(inner) => type_uses_self(inner),
         MirTy::Tuple(elems) => elems.iter().any(type_uses_self),
         MirTy::Named { type_args, .. } => type_args.iter().any(type_uses_self),
         MirTy::FuncThin { params, ret } | MirTy::FuncThick { params, ret } => {
             params.iter().any(type_uses_self) || type_uses_self(ret)
-        }
+        },
         MirTy::AssociatedProjection { base, .. } => type_uses_self(base),
         _ => false,
     }
@@ -459,8 +465,8 @@ fn func_body_has_type_params(func: &kestrel_mir::FunctionDef) -> bool {
                         if type_args.iter().any(has_type_param) {
                             return true;
                         }
-                    }
-                    _ => {}
+                    },
+                    _ => {},
                 }
             }
         }
@@ -472,14 +478,12 @@ fn func_body_has_type_params(func: &kestrel_mir::FunctionDef) -> bool {
 fn has_type_param(ty: &MirTy) -> bool {
     match ty {
         MirTy::TypeParam(_) | MirTy::Error => true,
-        MirTy::Pointer(inner) | MirTy::Ref(inner) | MirTy::RefMut(inner) => {
-            has_type_param(inner)
-        }
+        MirTy::Pointer(inner) | MirTy::Ref(inner) | MirTy::RefMut(inner) => has_type_param(inner),
         MirTy::Tuple(elems) => elems.iter().any(has_type_param),
         MirTy::Named { type_args, .. } => type_args.iter().any(has_type_param),
         MirTy::FuncThin { params, ret } | MirTy::FuncThick { params, ret } => {
             params.iter().any(has_type_param) || has_type_param(ret)
-        }
+        },
         MirTy::AssociatedProjection { base, .. } => has_type_param(base),
         _ => false,
     }

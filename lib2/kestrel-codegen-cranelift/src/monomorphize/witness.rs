@@ -9,7 +9,7 @@
 use super::error::MonomorphizeError;
 use kestrel_codegen2::substitute_type;
 use kestrel_hecs::Entity;
-use kestrel_mir::{MethodSource, MirModule, MirTy, WitnessDef};
+use kestrel_mir::{MethodSource, MirModule, MirTy, WitnessDef, WitnessMethodKey};
 use std::collections::HashMap;
 
 /// Result of resolving a witness method call.
@@ -27,7 +27,7 @@ pub struct ResolvedWitnessCall {
 pub fn resolve_witness_call(
     module: &MirModule,
     protocol: Entity,
-    method: &str,
+    method: &WitnessMethodKey,
     self_type: &MirTy,
     method_type_args: &[MirTy],
 ) -> Result<ResolvedWitnessCall, MonomorphizeError> {
@@ -38,7 +38,8 @@ pub fn resolve_witness_call(
         find_witness_with_method(module, protocol, method, self_type, method_type_args)?;
 
     let method_binding = witness.method_bindings.get(method).unwrap();
-
+    let proto_param_count = protocol_type_param_count(module, protocol);
+    let concrete_method_type_args = method_type_args.get(proto_param_count..).unwrap_or(&[]);
 
     // Build the type args for the concrete function.
     //
@@ -46,11 +47,11 @@ pub fn resolve_witness_call(
     // (e.g., Convertible[From] → From=Int64) and method-level type params.
     // Only the method-level ones should be passed through — protocol-level params
     // are already resolved through the witness bindings.
-    let concrete_func = module.functions.iter()
+    let concrete_func = module
+        .functions
+        .iter()
         .find(|f| f.entity == method_binding.implementation);
-    let concrete_param_count = concrete_func
-        .map(|f| f.type_params.len())
-        .unwrap_or(0);
+    let concrete_param_count = concrete_func.map(|f| f.type_params.len()).unwrap_or(0);
 
     let mut type_args = Vec::new();
 
@@ -63,13 +64,13 @@ pub fn resolve_witness_call(
                     type_args.push(bound.clone());
                 }
             }
-            type_args.extend(method_type_args.iter().cloned());
-        }
+            type_args.extend(concrete_method_type_args.iter().cloned());
+        },
         MethodSource::Extension { .. } => {
             // Extension method: only use method-level type args
             // The self_type is passed separately for mangling
-            type_args.extend(method_type_args.iter().cloned());
-        }
+            type_args.extend(concrete_method_type_args.iter().cloned());
+        },
     }
 
     // Also include the binding's own type_args
@@ -105,13 +106,15 @@ pub fn resolve_associated_type(
 ) -> Result<MirTy, MonomorphizeError> {
     let (witness, bindings) = find_witness(module, protocol, self_type)?;
 
-    let bound_ty = witness.type_bindings.get(assoc_name).ok_or_else(|| {
-        MonomorphizeError::MethodNotFound {
-            protocol_name: module.resolve_name(protocol).to_string(),
-            method: assoc_name.to_string(),
-            type_description: format!("{self_type:?}"),
-        }
-    })?;
+    let bound_ty =
+        witness
+            .type_bindings
+            .get(assoc_name)
+            .ok_or_else(|| MonomorphizeError::MethodNotFound {
+                protocol_name: module.resolve_name(protocol).to_string(),
+                method: assoc_name.to_string(),
+                type_description: format!("{self_type:?}"),
+            })?;
 
     // Apply witness type param bindings to the associated type
     Ok(substitute_type(bound_ty, &bindings))
@@ -134,7 +137,7 @@ pub fn resolve_associated_type(
 fn find_witness_with_method<'a>(
     module: &'a MirModule,
     protocol: Entity,
-    method: &str,
+    method: &WitnessMethodKey,
     self_type: &MirTy,
     method_type_args: &[MirTy],
 ) -> Result<(&'a WitnessDef, HashMap<Entity, MirTy>), MonomorphizeError> {
@@ -181,7 +184,12 @@ fn find_witness_with_method<'a>(
     let type_name = match self_type {
         MirTy::Named { entity, type_args } => {
             let name = module.resolve_name(*entity);
-            format!("{} (entity {:?}, {} type_args)", name, entity, type_args.len())
+            format!(
+                "{} (entity {:?}, {} type_args)",
+                name,
+                entity,
+                type_args.len()
+            )
         },
         other => format!("{other:?}"),
     };
@@ -272,11 +280,7 @@ fn protocol_inherits(module: &MirModule, candidate: Entity, target: Entity) -> b
 ///
 /// The `pattern` may contain `TypeParam` entries that act as wildcards,
 /// binding to the corresponding part of the `concrete` type.
-fn match_pattern(
-    pattern: &MirTy,
-    concrete: &MirTy,
-    bindings: &mut HashMap<Entity, MirTy>,
-) -> bool {
+fn match_pattern(pattern: &MirTy, concrete: &MirTy, bindings: &mut HashMap<Entity, MirTy>) -> bool {
     match (pattern, concrete) {
         // Type parameter in pattern: bind to the concrete type
         (MirTy::TypeParam(entity), _) => {
@@ -286,7 +290,7 @@ fn match_pattern(
                 bindings.insert(*entity, concrete.clone());
                 true
             }
-        }
+        },
 
         // Named types must match entity and recurse on type args
         (
@@ -305,7 +309,7 @@ fn match_pattern(
                     .iter()
                     .zip(args2)
                     .all(|(p, c)| match_pattern(p, c, bindings))
-        }
+        },
 
         // Structural types recurse element-wise
         (MirTy::Ref(a), MirTy::Ref(b))
@@ -313,11 +317,8 @@ fn match_pattern(
         | (MirTy::Pointer(a), MirTy::Pointer(b)) => match_pattern(a, b, bindings),
 
         (MirTy::Tuple(a), MirTy::Tuple(b)) => {
-            a.len() == b.len()
-                && a.iter()
-                    .zip(b)
-                    .all(|(p, c)| match_pattern(p, c, bindings))
-        }
+            a.len() == b.len() && a.iter().zip(b).all(|(p, c)| match_pattern(p, c, bindings))
+        },
 
         (
             MirTy::FuncThin {
@@ -345,7 +346,7 @@ fn match_pattern(
                     .zip(p2)
                     .all(|(p, c)| match_pattern(p, c, bindings))
                 && match_pattern(r1, r2, bindings)
-        }
+        },
 
         // Primitives and other leaves: exact equality
         _ => pattern == concrete,
@@ -355,6 +356,7 @@ fn match_pattern(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use kestrel_mir::{FunctionDef, MethodBinding, ProtocolDef, TypeParamDef};
 
     fn entity(id: u32) -> Entity {
         Entity::from_raw(id)
@@ -419,5 +421,47 @@ mod tests {
 
         // Try to match T against I32 (should fail)
         assert!(!match_pattern(&pattern1, &MirTy::I32, &mut bindings));
+    }
+
+    #[test]
+    fn witness_resolution_does_not_forward_protocol_type_args_to_method() {
+        let protocol = entity(1);
+        let protocol_param = entity(2);
+        let implementation = entity(3);
+        let method_param = entity(4);
+
+        let mut module = MirModule::new("test");
+        let mut protocol_def = ProtocolDef::new(protocol, "Factory");
+        protocol_def
+            .type_params
+            .push(TypeParamDef::new(protocol_param, "Product"));
+        module.protocols.push(protocol_def);
+
+        let mut function = FunctionDef::new(implementation, "Thing.make", MirTy::Unit);
+        function
+            .type_params
+            .push(TypeParamDef::new(method_param, "T"));
+        module.functions.push(function);
+
+        let mut witness = WitnessDef::new(MirTy::I64, protocol);
+        witness
+            .protocol_type_args
+            .insert("Product".into(), MirTy::Bool);
+        witness.bind_method(
+            WitnessMethodKey::bare("make"),
+            MethodBinding::direct(implementation, vec![]),
+        );
+        module.add_witness(witness);
+
+        let resolved = resolve_witness_call(
+            &module,
+            protocol,
+            &WitnessMethodKey::bare("make"),
+            &MirTy::I64,
+            &[MirTy::Bool, MirTy::I64],
+        )
+        .expect("witness method should resolve");
+
+        assert_eq!(resolved.type_args, vec![MirTy::I64]);
     }
 }

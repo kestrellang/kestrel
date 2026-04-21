@@ -59,7 +59,14 @@ impl BodyCheck for DefiniteAssignmentAnalyzer {
         let mut pattern_bound = HashSet::new();
         collect_pattern_bound_locals(cx.hir, &mut pattern_bound);
 
-        analyze_block(cx, &cx.hir.statements, cx.hir.tail_expr, &mut assigned, &pattern_bound, &mut diags);
+        analyze_block(
+            cx,
+            &cx.hir.statements,
+            cx.hir.tail_expr,
+            &mut assigned,
+            &pattern_bound,
+            &mut diags,
+        );
         diags
     }
 }
@@ -68,9 +75,13 @@ impl BodyCheck for DefiniteAssignmentAnalyzer {
 fn collect_pattern_bound_locals(hir: &HirBody, out: &mut HashSet<LocalId>) {
     for (_, pat) in hir.pats.iter() {
         match pat {
-            HirPat::Binding { local, .. } => { out.insert(*local); }
-            HirPat::At { binding, .. } => { out.insert(*binding); }
-            _ => {}
+            HirPat::Binding { local, .. } => {
+                out.insert(*local);
+            },
+            HirPat::At { binding, .. } => {
+                out.insert(*binding);
+            },
+            _ => {},
         }
     }
 }
@@ -136,13 +147,13 @@ fn analyze_stmt(
                 // (In HIR, let bindings are flat — each gets its own local)
             }
             // If no value, the local stays unassigned (e.g. `let x: Int`)
-        }
+        },
         HirStmt::Expr { expr, .. } => {
             state = analyze_expr(cx, *expr, state, false, pattern_bound, diags);
-        }
+        },
         HirStmt::Deinit { .. } => {
             // Deinit doesn't affect assignment state
-        }
+        },
     }
     state
 }
@@ -178,7 +189,7 @@ fn analyze_expr(
                     notes: vec![],
                 });
             }
-        }
+        },
 
         // Assignment: analyze value first, then mark target local as assigned
         HirExpr::Assign { target, value, .. } => {
@@ -188,7 +199,7 @@ fn analyze_expr(
                 state.assigned.insert(*local_id);
             }
             state = analyze_expr(cx, *target, state, true, pattern_bound, diags);
-        }
+        },
 
         // If/else: merge assigned sets from both branches (intersection)
         HirExpr::If {
@@ -249,15 +260,14 @@ fn analyze_expr(
                 state.assigned = then_assigned;
             } else {
                 // Neither diverges: intersection of both branches
-                state.assigned = then_assigned
-                    .intersection(&else_state.1)
-                    .copied()
-                    .collect();
+                state.assigned = then_assigned.intersection(&else_state.1).copied().collect();
             }
-        }
+        },
 
         // Match: intersection of all arm states
-        HirExpr::Match { scrutinee, arms, .. } => {
+        HirExpr::Match {
+            scrutinee, arms, ..
+        } => {
             state = analyze_expr(cx, *scrutinee, state, false, pattern_bound, diags);
 
             if arms.is_empty() {
@@ -285,14 +295,14 @@ fn analyze_expr(
                     None => merged_assigned = Some(arm_state.assigned.clone()),
                     Some(set) => {
                         *set = set.intersection(&arm_state.assigned).copied().collect();
-                    }
+                    },
                 }
             }
             state.diverged = all_diverge;
             if let Some(merged) = merged_assigned {
                 state.assigned = merged;
             }
-        }
+        },
 
         // Loop: body may not execute (well, it always does at least once, but
         // we conservatively don't trust loop body assignments since break can
@@ -313,7 +323,7 @@ fn analyze_expr(
                 state.diverged = true;
             }
             // Don't merge body assignments — loop body might not fully execute
-        }
+        },
 
         // Block expression
         HirExpr::Block { body, .. } => {
@@ -328,16 +338,16 @@ fn analyze_expr(
             );
             state.assigned = block_assigned;
             state.diverged = block_state.diverged;
-        }
+        },
 
         // Return: analyze value expression (divergence handled by Never check below)
         HirExpr::Return { value, .. } => {
             if let Some(val) = value {
                 state = analyze_expr(cx, *val, state, false, pattern_bound, diags);
             }
-        }
+        },
         // Break/Continue divergence handled by Never check below
-        HirExpr::Break { .. } | HirExpr::Continue { .. } => {}
+        HirExpr::Break { .. } | HirExpr::Continue { .. } => {},
 
         // Closures: analyze body separately (captures are already assigned from outer scope).
         // Closure body doesn't affect outer assignment state.
@@ -355,7 +365,7 @@ fn analyze_expr(
                 pattern_bound,
                 diags,
             );
-        }
+        },
 
         // Expressions that recurse into sub-expressions
         HirExpr::Call { callee, args, .. } => {
@@ -363,48 +373,44 @@ fn analyze_expr(
             for arg in args {
                 state = analyze_expr(cx, arg.value, state, false, pattern_bound, diags);
             }
-        }
-        HirExpr::MethodCall {
-            receiver, args, ..
-        }
-        | HirExpr::ProtocolCall {
-            receiver, args, ..
-        } => {
+        },
+        HirExpr::MethodCall { receiver, args, .. }
+        | HirExpr::ProtocolCall { receiver, args, .. } => {
             state = analyze_expr(cx, *receiver, state, false, pattern_bound, diags);
             for arg in args {
                 state = analyze_expr(cx, arg.value, state, false, pattern_bound, diags);
             }
-        }
+        },
         HirExpr::Field { base, .. } => {
             state = analyze_expr(cx, *base, state, false, pattern_bound, diags);
-        }
+        },
         HirExpr::TupleIndex { base, .. } => {
             state = analyze_expr(cx, *base, state, false, pattern_bound, diags);
-        }
+        },
         HirExpr::Tuple { elements, .. } | HirExpr::Array { elements, .. } => {
             for &elem in elements {
                 state = analyze_expr(cx, elem, state, false, pattern_bound, diags);
             }
-        }
+        },
         HirExpr::Dict { entries, .. } => {
             for entry in entries {
                 state = analyze_expr(cx, entry.key, state, false, pattern_bound, diags);
                 state = analyze_expr(cx, entry.value, state, false, pattern_bound, diags);
             }
-        }
+        },
         HirExpr::ImplicitMember { args, .. } => {
             if let Some(args) = args {
                 for arg in args {
                     state = analyze_expr(cx, arg.value, state, false, pattern_bound, diags);
                 }
             }
-        }
+        },
 
         // Leaf expressions: no sub-expressions to check
         HirExpr::Literal { .. }
         | HirExpr::Def(..)
         | HirExpr::OverloadSet { .. }
-        | HirExpr::Error { .. } => {}
+        | HirExpr::Error { .. } => {},
     }
 
     // Unified divergence detection: any expression with Never type diverges.
@@ -423,38 +429,43 @@ fn mark_pattern_assigned(hir: &HirBody, pat_id: HirPatId, assigned: &mut HashSet
     match &hir.pats[pat_id] {
         HirPat::Binding { local, .. } => {
             assigned.insert(*local);
-        }
+        },
         HirPat::Tuple { prefix, suffix, .. } => {
             for &elem in prefix.iter().chain(suffix.iter()) {
                 mark_pattern_assigned(hir, elem, assigned);
             }
-        }
-        HirPat::Array { prefix, rest, suffix, .. } => {
+        },
+        HirPat::Array {
+            prefix,
+            rest,
+            suffix,
+            ..
+        } => {
             for &elem in prefix.iter().chain(suffix.iter()) {
                 mark_pattern_assigned(hir, elem, assigned);
             }
             if let Some(Some(local)) = rest {
                 assigned.insert(*local);
             }
-        }
+        },
         HirPat::Variant { args, .. } | HirPat::ImplicitVariant { args, .. } => {
             for arg in args {
                 mark_pattern_assigned(hir, arg.pattern, assigned);
             }
-        }
+        },
         HirPat::Struct { fields, .. } => {
             for field in fields {
                 if let Some(pat) = field.pattern {
                     mark_pattern_assigned(hir, pat, assigned);
                 }
             }
-        }
+        },
         HirPat::Or { alternatives, .. } => {
             // All alternatives must bind the same locals; take from first
             if let Some(&first) = alternatives.first() {
                 mark_pattern_assigned(hir, first, assigned);
             }
-        }
+        },
         HirPat::At {
             binding,
             subpattern,
@@ -462,11 +473,11 @@ fn mark_pattern_assigned(hir: &HirBody, pat_id: HirPatId, assigned: &mut HashSet
         } => {
             assigned.insert(*binding);
             mark_pattern_assigned(hir, *subpattern, assigned);
-        }
+        },
         HirPat::Wildcard { .. }
         | HirPat::Literal { .. }
         | HirPat::Range { .. }
-        | HirPat::Error { .. } => {}
+        | HirPat::Error { .. } => {},
     }
 }
 
@@ -501,8 +512,10 @@ fn expr_contains_break(hir: &HirBody, id: HirExprId) -> bool {
             ..
         } => {
             block_contains_break(hir, then_body)
-                || else_body.as_ref().is_some_and(|e| block_contains_break(hir, e))
-        }
+                || else_body
+                    .as_ref()
+                    .is_some_and(|e| block_contains_break(hir, e))
+        },
         HirExpr::Match { arms, .. } => arms.iter().any(|arm| expr_contains_break(hir, arm.body)),
         HirExpr::Block { body, .. } => block_contains_break(hir, body),
         // Don't recurse into nested loops or closures

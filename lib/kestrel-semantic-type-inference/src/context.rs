@@ -261,12 +261,7 @@ impl<'a> InferenceContext<'a> {
         span: Span,
     ) {
         self.constraints.push(Constraint::property_access(
-            receiver,
-            member,
-            is_static,
-            result,
-            expr_id,
-            span,
+            receiver, member, is_static, result, expr_id, span,
         ));
     }
 

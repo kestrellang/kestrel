@@ -149,7 +149,10 @@ impl Query for ResolveValuePath {
             // If no direct children match, search extensions for static methods
             // This handles cases like Point.origin() where origin is a static method in an extension
             if matches.is_empty()
-                && current_symbol.metadata().get_behavior::<ConcreteTypeMarker>().is_some()
+                && current_symbol
+                    .metadata()
+                    .get_behavior::<ConcreteTypeMarker>()
+                    .is_some()
             {
                 let current_id = current_symbol.metadata().id();
                 let extensions = model.query(ExtensionsFor {

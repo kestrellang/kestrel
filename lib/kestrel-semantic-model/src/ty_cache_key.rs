@@ -95,22 +95,34 @@ impl TyCacheKey {
                 FloatBits::F64 => FloatWidth::F64,
             }),
 
-            TyKind::Struct { symbol, substitutions } => TyCacheKey::Nominal {
+            TyKind::Struct {
+                symbol,
+                substitutions,
+            } => TyCacheKey::Nominal {
                 symbol_id: symbol.metadata().id(),
                 subs: Self::subs_to_vec(substitutions),
             },
 
-            TyKind::Enum { symbol, substitutions } => TyCacheKey::Nominal {
+            TyKind::Enum {
+                symbol,
+                substitutions,
+            } => TyCacheKey::Nominal {
                 symbol_id: symbol.metadata().id(),
                 subs: Self::subs_to_vec(substitutions),
             },
 
-            TyKind::Protocol { symbol, substitutions } => TyCacheKey::Nominal {
+            TyKind::Protocol {
+                symbol,
+                substitutions,
+            } => TyCacheKey::Nominal {
                 symbol_id: symbol.metadata().id(),
                 subs: Self::subs_to_vec(substitutions),
             },
 
-            TyKind::TypeAlias { symbol, substitutions } => TyCacheKey::Nominal {
+            TyKind::TypeAlias {
+                symbol,
+                substitutions,
+            } => TyCacheKey::Nominal {
                 symbol_id: symbol.metadata().id(),
                 subs: Self::subs_to_vec(substitutions),
             },
@@ -124,13 +136,14 @@ impl TyCacheKey {
 
             TyKind::Tuple(elements) => {
                 TyCacheKey::Tuple(elements.iter().map(TyCacheKey::from_ty).collect())
-            }
+            },
 
-            TyKind::Pointer(pointee) => {
-                TyCacheKey::Pointer(Box::new(TyCacheKey::from_ty(pointee)))
-            }
+            TyKind::Pointer(pointee) => TyCacheKey::Pointer(Box::new(TyCacheKey::from_ty(pointee))),
 
-            TyKind::Function { params, return_type } => TyCacheKey::Function {
+            TyKind::Function {
+                params,
+                return_type,
+            } => TyCacheKey::Function {
                 params: params.iter().map(TyCacheKey::from_ty).collect(),
                 return_type: Box::new(TyCacheKey::from_ty(return_type)),
             },
@@ -138,7 +151,7 @@ impl TyCacheKey {
             // Unresolved types — use string fallback
             TyKind::UnresolvedFunction { .. } | TyKind::UnresolvedPath { .. } => {
                 TyCacheKey::Opaque(ty.to_string())
-            }
+            },
         }
     }
 
@@ -156,18 +169,39 @@ impl TyCacheKey {
 impl PartialEq for TyCacheKey {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (TyCacheKey::Nominal { symbol_id: a, subs: sa }, TyCacheKey::Nominal { symbol_id: b, subs: sb }) => {
-                a == b && sa == sb
-            }
+            (
+                TyCacheKey::Nominal {
+                    symbol_id: a,
+                    subs: sa,
+                },
+                TyCacheKey::Nominal {
+                    symbol_id: b,
+                    subs: sb,
+                },
+            ) => a == b && sa == sb,
             (TyCacheKey::TypeParameter(a), TyCacheKey::TypeParameter(b)) => a == b,
-            (TyCacheKey::AssociatedType { symbol_id: a, container: ca }, TyCacheKey::AssociatedType { symbol_id: b, container: cb }) => {
-                a == b && ca == cb
-            }
+            (
+                TyCacheKey::AssociatedType {
+                    symbol_id: a,
+                    container: ca,
+                },
+                TyCacheKey::AssociatedType {
+                    symbol_id: b,
+                    container: cb,
+                },
+            ) => a == b && ca == cb,
             (TyCacheKey::Tuple(a), TyCacheKey::Tuple(b)) => a == b,
             (TyCacheKey::Pointer(a), TyCacheKey::Pointer(b)) => a == b,
-            (TyCacheKey::Function { params: pa, return_type: ra }, TyCacheKey::Function { params: pb, return_type: rb }) => {
-                pa == pb && ra == rb
-            }
+            (
+                TyCacheKey::Function {
+                    params: pa,
+                    return_type: ra,
+                },
+                TyCacheKey::Function {
+                    params: pb,
+                    return_type: rb,
+                },
+            ) => pa == pb && ra == rb,
             (TyCacheKey::Unit, TyCacheKey::Unit) => true,
             (TyCacheKey::Never, TyCacheKey::Never) => true,
             (TyCacheKey::Bool, TyCacheKey::Bool) => true,
@@ -192,18 +226,24 @@ impl Hash for TyCacheKey {
             TyCacheKey::Nominal { symbol_id, subs } => {
                 symbol_id.hash(state);
                 subs.hash(state);
-            }
+            },
             TyCacheKey::TypeParameter(id) => id.hash(state),
-            TyCacheKey::AssociatedType { symbol_id, container } => {
+            TyCacheKey::AssociatedType {
+                symbol_id,
+                container,
+            } => {
                 symbol_id.hash(state);
                 container.hash(state);
-            }
+            },
             TyCacheKey::Tuple(elements) => elements.hash(state),
             TyCacheKey::Pointer(pointee) => pointee.hash(state),
-            TyCacheKey::Function { params, return_type } => {
+            TyCacheKey::Function {
+                params,
+                return_type,
+            } => {
                 params.hash(state);
                 return_type.hash(state);
-            }
+            },
             TyCacheKey::Int(w) => w.hash(state),
             TyCacheKey::Float(w) => w.hash(state),
             TyCacheKey::Opaque(s) => s.hash(state),
@@ -214,7 +254,7 @@ impl Hash for TyCacheKey {
             | TyCacheKey::StringTy
             | TyCacheKey::Error
             | TyCacheKey::SelfType
-            | TyCacheKey::Infer => {}
+            | TyCacheKey::Infer => {},
         }
     }
 }

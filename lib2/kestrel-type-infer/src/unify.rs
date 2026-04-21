@@ -7,9 +7,9 @@
 //! - Literal markers: guard against unification with non-conforming types
 
 use crate::ctx::InferCtx;
+use crate::ty::{LiteralKind, TyKind, TySlot, TyVar};
 use kestrel_ast_builder::{Intrinsic, Name, NodeKind};
 use kestrel_hir::Builtin;
-use crate::ty::{LiteralKind, TyKind, TySlot, TyVar};
 
 /// Unification failure reason.
 #[derive(Debug)]
@@ -50,10 +50,7 @@ pub fn unify(ctx: &mut InferCtx<'_>, a: TyVar, b: TyVar) -> Result<(), UnifyErro
         // Both unresolved: link them, merge literal markers.
         // If both have different literal kinds, that's a mismatch
         // (e.g., integer literal vs string literal in if/else branches).
-        (
-            TySlot::Unresolved { literal: lit_a },
-            TySlot::Unresolved { literal: lit_b },
-        ) => {
+        (TySlot::Unresolved { literal: lit_a }, TySlot::Unresolved { literal: lit_b }) => {
             if let (Some(a_kind), Some(b_kind)) = (lit_a, lit_b) {
                 if a_kind != b_kind {
                     return Err(UnifyError::Mismatch);
@@ -65,19 +62,19 @@ pub fn unify(ctx: &mut InferCtx<'_>, a: TyVar, b: TyVar) -> Result<(), UnifyErro
                 ctx.types[b.0 as usize] = TySlot::Unresolved { literal: merged };
             }
             Ok(())
-        }
+        },
 
         // Unresolved (non-literal) + Concrete: bind
         (TySlot::Unresolved { literal: None }, _) => {
             occurs_check(ctx, a, b)?;
             ctx.types[a.0 as usize] = TySlot::Redirect(b);
             Ok(())
-        }
+        },
         (_, TySlot::Unresolved { literal: None }) => {
             occurs_check(ctx, b, a)?;
             ctx.types[b.0 as usize] = TySlot::Redirect(a);
             Ok(())
-        }
+        },
 
         // Literal TyVar + Concrete: guard with ExpressibleBy* conformance
         (TySlot::Unresolved { literal: Some(lit) }, TySlot::Resolved(kind)) => {
@@ -88,7 +85,7 @@ pub fn unify(ctx: &mut InferCtx<'_>, a: TyVar, b: TyVar) -> Result<(), UnifyErro
             } else {
                 Err(UnifyError::LiteralGuard)
             }
-        }
+        },
         (TySlot::Resolved(kind), TySlot::Unresolved { literal: Some(lit) }) => {
             if conforms_to_literal_protocol(ctx, kind, *lit) {
                 occurs_check(ctx, b, a)?;
@@ -97,12 +94,10 @@ pub fn unify(ctx: &mut InferCtx<'_>, a: TyVar, b: TyVar) -> Result<(), UnifyErro
             } else {
                 Err(UnifyError::LiteralGuard)
             }
-        }
+        },
 
         // Both concrete: structural unification
-        (TySlot::Resolved(kind_a), TySlot::Resolved(kind_b)) => {
-            unify_concrete(ctx, kind_a, kind_b)
-        }
+        (TySlot::Resolved(kind_a), TySlot::Resolved(kind_b)) => unify_concrete(ctx, kind_a, kind_b),
 
         // Redirect should be resolved by resolve()
         _ => unreachable!("resolve() should have followed redirects"),
@@ -110,44 +105,63 @@ pub fn unify(ctx: &mut InferCtx<'_>, a: TyVar, b: TyVar) -> Result<(), UnifyErro
 }
 
 /// Structural unification of two concrete types.
-fn unify_concrete(
-    ctx: &mut InferCtx<'_>,
-    a: &TyKind,
-    b: &TyKind,
-) -> Result<(), UnifyError> {
+fn unify_concrete(ctx: &mut InferCtx<'_>, a: &TyKind, b: &TyKind) -> Result<(), UnifyError> {
     match (a, b) {
         // Nominal types: same entity + unify type args pairwise. Each nominal
         // category only unifies with itself (Struct with Struct, Enum with Enum, etc.).
         (
-            TyKind::Struct { entity: ea, args: aa },
-            TyKind::Struct { entity: eb, args: ab },
+            TyKind::Struct {
+                entity: ea,
+                args: aa,
+            },
+            TyKind::Struct {
+                entity: eb,
+                args: ab,
+            },
         )
         | (
-            TyKind::Enum { entity: ea, args: aa },
-            TyKind::Enum { entity: eb, args: ab },
+            TyKind::Enum {
+                entity: ea,
+                args: aa,
+            },
+            TyKind::Enum {
+                entity: eb,
+                args: ab,
+            },
         )
         | (
-            TyKind::Protocol { entity: ea, args: aa },
-            TyKind::Protocol { entity: eb, args: ab },
+            TyKind::Protocol {
+                entity: ea,
+                args: aa,
+            },
+            TyKind::Protocol {
+                entity: eb,
+                args: ab,
+            },
         ) => {
             if ea != eb || aa.len() != ab.len() {
                 return Err(UnifyError::Mismatch);
             }
-            let pairs: Vec<(TyVar, TyVar)> =
-                aa.iter().copied().zip(ab.iter().copied()).collect();
+            let pairs: Vec<(TyVar, TyVar)> = aa.iter().copied().zip(ab.iter().copied()).collect();
             for (a, b) in pairs {
                 unify(ctx, a, b)?;
             }
             Ok(())
-        }
+        },
 
         // TypeAlias vs TypeAlias: allow name-based matching as a fallback.
         // Different protocols can define associated types with the same name
         // (e.g. Iterator.Item and Iterable.Item). These are logically the same
         // when one protocol refines another. Require same arg count.
         (
-            TyKind::TypeAlias { entity: ea, args: aa },
-            TyKind::TypeAlias { entity: eb, args: ab },
+            TyKind::TypeAlias {
+                entity: ea,
+                args: aa,
+            },
+            TyKind::TypeAlias {
+                entity: eb,
+                args: ab,
+            },
         ) => {
             let same_entity = ea == eb;
             let same_name = !same_entity && {
@@ -161,42 +175,45 @@ fn unify_concrete(
             if aa.len() != ab.len() {
                 return Err(UnifyError::Mismatch);
             }
-            let pairs: Vec<(TyVar, TyVar)> =
-                aa.iter().copied().zip(ab.iter().copied()).collect();
+            let pairs: Vec<(TyVar, TyVar)> = aa.iter().copied().zip(ab.iter().copied()).collect();
             for (a, b) in pairs {
                 unify(ctx, a, b)?;
             }
             Ok(())
-        }
+        },
 
         // Tuples: same arity + unify elements pairwise
         (TyKind::Tuple(ea), TyKind::Tuple(eb)) => {
             if ea.len() != eb.len() {
                 return Err(UnifyError::Mismatch);
             }
-            let pairs: Vec<(TyVar, TyVar)> =
-                ea.iter().copied().zip(eb.iter().copied()).collect();
+            let pairs: Vec<(TyVar, TyVar)> = ea.iter().copied().zip(eb.iter().copied()).collect();
             for (a, b) in pairs {
                 unify(ctx, a, b)?;
             }
             Ok(())
-        }
+        },
 
         // Functions: same arity + unify params + unify return
         (
-            TyKind::Function { params: pa, ret: ra },
-            TyKind::Function { params: pb, ret: rb },
+            TyKind::Function {
+                params: pa,
+                ret: ra,
+            },
+            TyKind::Function {
+                params: pb,
+                ret: rb,
+            },
         ) => {
             if pa.len() != pb.len() {
                 return Err(UnifyError::Mismatch);
             }
-            let pairs: Vec<(TyVar, TyVar)> =
-                pa.iter().copied().zip(pb.iter().copied()).collect();
+            let pairs: Vec<(TyVar, TyVar)> = pa.iter().copied().zip(pb.iter().copied()).collect();
             for (a, b) in pairs {
                 unify(ctx, a, b)?;
             }
             unify(ctx, *ra, *rb)
-        }
+        },
 
         // Type params: must be the same entity
         (TyKind::Param { entity: a }, TyKind::Param { entity: b }) => {
@@ -205,32 +222,36 @@ fn unify_concrete(
             } else {
                 Err(UnifyError::Mismatch)
             }
-        }
+        },
 
         // AssocProjections: same assoc entity + unified bases
         (
-            TyKind::AssocProjection { base: ba, assoc: aa },
-            TyKind::AssocProjection { base: bb, assoc: ab },
+            TyKind::AssocProjection {
+                base: ba,
+                assoc: aa,
+            },
+            TyKind::AssocProjection {
+                base: bb,
+                assoc: ab,
+            },
         ) => {
             if aa != ab {
                 return Err(UnifyError::Mismatch);
             }
             unify(ctx, *ba, *bb)
-        }
+        },
 
         // AssocProjection vs bare TypeAlias: they refer to the same underlying
         // associated-type entity and should unify. This arises when a protocol
         // method's return type references the assoc type bare (`Self.Item` or
         // just `Item`) — the declared receiver comes back as AssocProjection
         // from a concrete receiver's projection, while the return is TypeAlias.
-        (
-            TyKind::AssocProjection { assoc: a, .. },
-            TyKind::TypeAlias { entity: e, .. },
-        )
-        | (
-            TyKind::TypeAlias { entity: e, .. },
-            TyKind::AssocProjection { assoc: a, .. },
-        ) if a == e => Ok(()),
+        (TyKind::AssocProjection { assoc: a, .. }, TyKind::TypeAlias { entity: e, .. })
+        | (TyKind::TypeAlias { entity: e, .. }, TyKind::AssocProjection { assoc: a, .. })
+            if a == e =>
+        {
+            Ok(())
+        },
 
         // Error already handled above; remaining combos are mismatches
         _ => Err(UnifyError::Mismatch),
@@ -252,32 +273,26 @@ fn occurs_check(ctx: &InferCtx<'_>, tv: TyVar, target: TyVar) -> Result<(), Unif
                 occurs_check(ctx, tv, arg)?;
             }
             Ok(())
-        }
+        },
         TySlot::Resolved(TyKind::Tuple(elems)) => {
             for &e in elems {
                 occurs_check(ctx, tv, e)?;
             }
             Ok(())
-        }
+        },
         TySlot::Resolved(TyKind::Function { params, ret }) => {
             for &p in params {
                 occurs_check(ctx, tv, p)?;
             }
             occurs_check(ctx, tv, *ret)
-        }
-        TySlot::Resolved(TyKind::AssocProjection { base, .. }) => {
-            occurs_check(ctx, tv, *base)
-        }
+        },
+        TySlot::Resolved(TyKind::AssocProjection { base, .. }) => occurs_check(ctx, tv, *base),
         _ => Ok(()),
     }
 }
 
 /// Check if a concrete type conforms to the literal's ExpressibleBy* protocol.
-pub fn conforms_to_literal_protocol(
-    ctx: &InferCtx<'_>,
-    ty: &TyKind,
-    lit: LiteralKind,
-) -> bool {
+pub fn conforms_to_literal_protocol(ctx: &InferCtx<'_>, ty: &TyKind, lit: LiteralKind) -> bool {
     // Special case: intrinsic types (lang.i32, lang.f64, etc.) don't have
     // protocol conformances but should accept matching literals directly.
     if is_intrinsic_literal_compatible(ctx, ty, lit) {
@@ -317,10 +332,7 @@ fn is_intrinsic_literal_compatible(ctx: &InferCtx<'_>, ty: &TyKind, lit: Literal
         return false;
     };
     match lit {
-        LiteralKind::Integer => matches!(
-            name.0.as_str(),
-            "i8" | "i16" | "i32" | "i64"
-        ),
+        LiteralKind::Integer => matches!(name.0.as_str(), "i8" | "i16" | "i32" | "i64"),
         LiteralKind::Float => matches!(name.0.as_str(), "f32" | "f64"),
         LiteralKind::Bool => matches!(name.0.as_str(), "i1"),
         LiteralKind::String => matches!(name.0.as_str(), "str"),
@@ -380,7 +392,10 @@ mod tests {
         world
     }
 
-    fn make_ctx<'a>(resolver: &'a dyn TypeResolver, qctx: &'a kestrel_hecs::QueryContext<'a>) -> InferCtx<'a> {
+    fn make_ctx<'a>(
+        resolver: &'a dyn TypeResolver,
+        qctx: &'a kestrel_hecs::QueryContext<'a>,
+    ) -> InferCtx<'a> {
         InferCtx::new(resolver, qctx, dummy(), dummy())
     }
 
@@ -524,7 +539,9 @@ mod tests {
         // b should now have the Integer literal marker
         let resolved = ctx.resolve(a);
         match &ctx.types[resolved.0 as usize] {
-            TySlot::Unresolved { literal: Some(LiteralKind::Integer) } => {}
+            TySlot::Unresolved {
+                literal: Some(LiteralKind::Integer),
+            } => {},
             other => panic!("expected Integer literal, got {:?}", other),
         }
     }

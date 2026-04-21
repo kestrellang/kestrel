@@ -77,7 +77,10 @@ impl Analyzer for FieldAnalyzer {
 
         // Check 2: static modifier in global context
         if field.is_static()
-            && parent.metadata().get_behavior::<NamespaceScopeMarker>().is_some()
+            && parent
+                .metadata()
+                .get_behavior::<NamespaceScopeMarker>()
+                .is_some()
         {
             ctx.report(GlobalPropertyStaticModifierError {
                 span: symbol.metadata().span().clone(),

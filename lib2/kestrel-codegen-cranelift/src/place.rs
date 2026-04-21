@@ -12,7 +12,7 @@ use cranelift_codegen::ir::immediates::Offset32;
 use cranelift_codegen::ir::{self, InstBuilder, MemFlags, Value as CrValue};
 use cranelift_frontend::FunctionBuilder;
 use cranelift_module::Module;
-use kestrel_codegen2::{substitute_type, LayoutCache, NamedKind};
+use kestrel_codegen2::{LayoutCache, NamedKind, substitute_type};
 use kestrel_hecs::Entity;
 use kestrel_mir::{MirTy, Place};
 use std::collections::HashMap;
@@ -29,7 +29,9 @@ pub fn store_scalar_to_aggregate(
 ) {
     let layout = layouts.layout_of(ty);
     if layout.size <= 8 && layout.size > 0 {
-        builder.ins().store(MemFlags::new(), value, dest, Offset32::new(0));
+        builder
+            .ins()
+            .store(MemFlags::new(), value, dest, Offset32::new(0));
     } else {
         // Shouldn't happen for non-sret returns, but fall back to copy
         common::copy_aggregate(builder, layouts, ty, dest, value);
@@ -56,9 +58,7 @@ fn compile_place_read_inner(
     place: &Place,
 ) -> Result<CrValue, CodegenError> {
     let ptr_ty = common::ptr_type(ctx.target);
-    let ty = common::get_place_type(
-        ctx.module, state.body, place, &state.subst, &ctx.layouts,
-    )?;
+    let ty = common::get_place_type(ctx.module, state.body, place, &state.subst, &ctx.layouts)?;
 
     // Unit/Never are zero-sized — return a zero constant, never load from memory
     if matches!(ty, MirTy::Unit | MirTy::Never) {
@@ -70,9 +70,7 @@ fn compile_place_read_inner(
         Place::Global(entity) => read_global(ctx, builder, entity, &ty),
         Place::Field { parent, name } => read_field(ctx, state, builder, parent, name),
         Place::Index { parent, index } => read_index(ctx, state, builder, parent, *index),
-        Place::Downcast { parent, variant } => {
-            read_downcast(ctx, state, builder, parent, variant)
-        }
+        Place::Downcast { parent, variant } => read_downcast(ctx, state, builder, parent, variant),
         Place::Deref(inner) => read_deref(ctx, state, builder, inner, &ty),
     }
 }
@@ -89,7 +87,13 @@ fn load_or_ptr(
         ptr
     } else {
         let cl_ty = types::translate_type(ty, ctx.target);
-        builder.ins().load(cl_ty, MemFlags::new(), ptr, Offset32::new(0))
+        if matches!(ty, MirTy::Error) && std::env::var("KESTREL_DEBUG_LOADS").is_ok() {
+            let bt = std::backtrace::Backtrace::force_capture();
+            eprintln!("load_or_ptr ERROR TY backtrace:\n{bt}");
+        }
+        builder
+            .ins()
+            .load(cl_ty, MemFlags::new(), ptr, Offset32::new(0))
     }
 }
 
@@ -100,7 +104,11 @@ fn read_global(
     ty: &MirTy,
 ) -> Result<CrValue, CodegenError> {
     let ptr_ty = common::ptr_type(ctx.target);
-    let static_def = ctx.module.statics.iter().find(|s| s.entity == *entity)
+    let static_def = ctx
+        .module
+        .statics
+        .iter()
+        .find(|s| s.entity == *entity)
         .ok_or_else(|| CodegenError::Unsupported(format!("unknown global {:?}", entity)))?;
 
     let mut mangler = kestrel_codegen2::Mangler::new(ctx.module);
@@ -108,7 +116,8 @@ fn read_global(
     mangler.mangle_name_path(&static_def.name);
     let mangled = mangler.finish();
 
-    let data_id = ctx.cl_module
+    let data_id = ctx
+        .cl_module
         .declare_data(&mangled, cranelift_module::Linkage::Import, false, false)
         .map_err(|e| CodegenError::DataSection(format!("declare global: {e}")))?;
 
@@ -126,21 +135,23 @@ fn read_field(
     name: &str,
 ) -> Result<CrValue, CodegenError> {
     let parent_val = compile_place_read(ctx, state, builder, parent)?;
-    let parent_ty = common::get_place_type(
-        ctx.module, state.body, parent, &state.subst, &ctx.layouts,
-    )?;
+    let parent_ty =
+        common::get_place_type(ctx.module, state.body, parent, &state.subst, &ctx.layouts)?;
 
     let MirTy::Named { entity, type_args } = &parent_ty else {
-        return Err(CodegenError::Unsupported(format!("field access on non-Named: {name}")));
+        return Err(CodegenError::Unsupported(format!(
+            "field access on non-Named: {name}"
+        )));
     };
     let NamedKind::Struct(struct_id) = ctx.layouts.resolve_named(*entity) else {
-        return Err(CodegenError::Unsupported(format!("field access on non-struct: {name}")));
+        return Err(CodegenError::Unsupported(format!(
+            "field access on non-struct: {name}"
+        )));
     };
 
     let type_args = common::substitute_type_args(type_args, &state.subst);
-    let (offset, field_ty) = get_field_info(
-        ctx.module, &mut ctx.layouts, struct_id, &type_args, name,
-    )?;
+    let (offset, field_ty) =
+        get_field_info(ctx.module, &mut ctx.layouts, struct_id, &type_args, name)?;
     let field_ptr = builder.ins().iadd_imm(parent_val, offset as i64);
     Ok(load_or_ptr(ctx, builder, &field_ty, field_ptr))
 }
@@ -153,9 +164,8 @@ fn read_index(
     index: usize,
 ) -> Result<CrValue, CodegenError> {
     let parent_val = compile_place_read(ctx, state, builder, parent)?;
-    let parent_ty = common::get_place_type(
-        ctx.module, state.body, parent, &state.subst, &ctx.layouts,
-    )?;
+    let parent_ty =
+        common::get_place_type(ctx.module, state.body, parent, &state.subst, &ctx.layouts)?;
 
     match &parent_ty {
         MirTy::Tuple(elems) => {
@@ -173,23 +183,27 @@ fn read_index(
             let field_ptr = builder.ins().iadd_imm(parent_val, offset as i64);
             let elem_ty = elems[index].clone();
             Ok(load_or_ptr(ctx, builder, &elem_ty, field_ptr))
-        }
+        },
         MirTy::Named { entity, type_args } => {
             let NamedKind::Struct(struct_id) = ctx.layouts.resolve_named(*entity) else {
-                return Err(CodegenError::Unsupported(
-                    format!("index on non-struct Named: {index}")
-                ));
+                return Err(CodegenError::Unsupported(format!(
+                    "index on non-struct Named: {index}"
+                )));
             };
             let type_args = common::substitute_type_args(type_args, &state.subst);
             let (offset, field_ty) = common::get_field_by_index(
-                ctx.module, &mut ctx.layouts, struct_id, &type_args, index,
+                ctx.module,
+                &mut ctx.layouts,
+                struct_id,
+                &type_args,
+                index,
             )?;
             let field_ptr = builder.ins().iadd_imm(parent_val, offset as i64);
             Ok(load_or_ptr(ctx, builder, &field_ty, field_ptr))
-        }
-        _ => Err(CodegenError::Unsupported(
-            format!("index on unsupported type: {index}")
-        )),
+        },
+        _ => Err(CodegenError::Unsupported(format!(
+            "index on unsupported type: {index}"
+        ))),
     }
 }
 
@@ -201,21 +215,22 @@ fn read_downcast(
     variant: &str,
 ) -> Result<CrValue, CodegenError> {
     let parent_val = compile_place_read(ctx, state, builder, parent)?;
-    let parent_ty = common::get_place_type(
-        ctx.module, state.body, parent, &state.subst, &ctx.layouts,
-    )?;
+    let parent_ty =
+        common::get_place_type(ctx.module, state.body, parent, &state.subst, &ctx.layouts)?;
 
     let MirTy::Named { entity, type_args } = &parent_ty else {
-        return Err(CodegenError::Unsupported(format!("downcast on non-Named: {variant}")));
+        return Err(CodegenError::Unsupported(format!(
+            "downcast on non-Named: {variant}"
+        )));
     };
     let NamedKind::Enum(enum_id) = ctx.layouts.resolve_named(*entity) else {
-        return Err(CodegenError::Unsupported(format!("downcast on non-enum: {variant}")));
+        return Err(CodegenError::Unsupported(format!(
+            "downcast on non-enum: {variant}"
+        )));
     };
 
     let type_args = common::substitute_type_args(type_args, &state.subst);
-    let payload_offset = get_enum_payload_offset(
-        ctx.module, &mut ctx.layouts, enum_id, &type_args,
-    );
+    let payload_offset = get_enum_payload_offset(ctx.module, &mut ctx.layouts, enum_id, &type_args);
     Ok(builder.ins().iadd_imm(parent_val, payload_offset as i64))
 }
 
@@ -238,9 +253,7 @@ pub fn compile_place_write(
     place: &Place,
     value: CrValue,
 ) -> Result<(), CodegenError> {
-    let ty = common::get_place_type(
-        ctx.module, state.body, place, &state.subst, &ctx.layouts,
-    )?;
+    let ty = common::get_place_type(ctx.module, state.body, place, &state.subst, &ctx.layouts)?;
 
     // Unit/Never are zero-sized — nothing to write
     if matches!(ty, MirTy::Unit | MirTy::Never) {
@@ -255,19 +268,20 @@ pub fn compile_place_write(
                 if is_aggregate(&ty, &mut ctx.layouts) {
                     common::copy_aggregate(builder, &mut ctx.layouts, &ty, dest_ptr, value);
                 } else {
-                    builder.ins().store(MemFlags::new(), value, dest_ptr, Offset32::new(0));
+                    builder
+                        .ins()
+                        .store(MemFlags::new(), value, dest_ptr, Offset32::new(0));
                 }
             } else {
                 builder.def_var(state.local_vars[id.index()], value);
             }
             Ok(())
-        }
+        },
 
         Place::Field { parent, name } => {
             let parent_ptr = compile_place_read(ctx, state, builder, parent)?;
-            let parent_ty = common::get_place_type(
-                ctx.module, state.body, parent, &state.subst, &ctx.layouts,
-            )?;
+            let parent_ty =
+                common::get_place_type(ctx.module, state.body, parent, &state.subst, &ctx.layouts)?;
 
             match &parent_ty {
                 MirTy::Named { entity, type_args } => {
@@ -276,37 +290,54 @@ pub fn compile_place_write(
                     match ctx.layouts.resolve_named(*entity) {
                         NamedKind::Struct(struct_id) => {
                             let (offset, field_ty) = get_field_info(
-                                ctx.module, &mut ctx.layouts, struct_id, &type_args, name,
+                                ctx.module,
+                                &mut ctx.layouts,
+                                struct_id,
+                                &type_args,
+                                name,
                             )?;
                             let field_ptr = builder.ins().iadd_imm(parent_ptr, offset as i64);
 
                             if is_aggregate(&field_ty, &mut ctx.layouts) {
-                                common::copy_aggregate(builder, &mut ctx.layouts, &field_ty, field_ptr, value);
+                                common::copy_aggregate(
+                                    builder,
+                                    &mut ctx.layouts,
+                                    &field_ty,
+                                    field_ptr,
+                                    value,
+                                );
                             } else {
-                                builder.ins().store(MemFlags::new(), value, field_ptr, Offset32::new(0));
+                                builder.ins().store(
+                                    MemFlags::new(),
+                                    value,
+                                    field_ptr,
+                                    Offset32::new(0),
+                                );
                             }
                             Ok(())
-                        }
-                        _ => Err(CodegenError::Unsupported(
-                            format!("field write on non-struct: {name}")
-                        )),
+                        },
+                        _ => Err(CodegenError::Unsupported(format!(
+                            "field write on non-struct: {name}"
+                        ))),
                     }
-                }
-                _ => Err(CodegenError::Unsupported(
-                    format!("field write on non-Named: {name}")
-                )),
+                },
+                _ => Err(CodegenError::Unsupported(format!(
+                    "field write on non-Named: {name}"
+                ))),
             }
-        }
+        },
 
         Place::Deref(inner) => {
             let ptr_val = compile_place_read(ctx, state, builder, inner)?;
             if is_aggregate(&ty, &mut ctx.layouts) {
                 common::copy_aggregate(builder, &mut ctx.layouts, &ty, ptr_val, value);
             } else {
-                builder.ins().store(MemFlags::new(), value, ptr_val, Offset32::new(0));
+                builder
+                    .ins()
+                    .store(MemFlags::new(), value, ptr_val, Offset32::new(0));
             }
             Ok(())
-        }
+        },
 
         // Index, Downcast, Global writes follow the same pattern
         _ => {
@@ -314,10 +345,12 @@ pub fn compile_place_write(
             if is_aggregate(&ty, &mut ctx.layouts) {
                 common::copy_aggregate(builder, &mut ctx.layouts, &ty, dest_ptr, value);
             } else {
-                builder.ins().store(MemFlags::new(), value, dest_ptr, Offset32::new(0));
+                builder
+                    .ins()
+                    .store(MemFlags::new(), value, dest_ptr, Offset32::new(0));
             }
             Ok(())
-        }
+        },
     }
 }
 
@@ -335,13 +368,12 @@ pub fn compile_place_addr(
             // For address-taken or aggregate locals, the var already holds a pointer
             let var = state.local_vars[id.index()];
             Ok(builder.use_var(var))
-        }
+        },
 
         Place::Field { parent, name } => {
             let parent_ptr = compile_place_addr(ctx, state, builder, parent)?;
-            let parent_ty = common::get_place_type(
-                ctx.module, state.body, parent, &state.subst, &ctx.layouts,
-            )?;
+            let parent_ty =
+                common::get_place_type(ctx.module, state.body, parent, &state.subst, &ctx.layouts)?;
 
             match &parent_ty {
                 MirTy::Named { entity, type_args } => {
@@ -350,31 +382,34 @@ pub fn compile_place_addr(
                     match ctx.layouts.resolve_named(*entity) {
                         NamedKind::Struct(struct_id) => {
                             let (offset, _) = get_field_info(
-                                ctx.module, &mut ctx.layouts, struct_id, &type_args, name,
+                                ctx.module,
+                                &mut ctx.layouts,
+                                struct_id,
+                                &type_args,
+                                name,
                             )?;
                             Ok(builder.ins().iadd_imm(parent_ptr, offset as i64))
-                        }
-                        _ => Err(CodegenError::Unsupported(
-                            format!("field addr on non-struct: {name}")
-                        )),
+                        },
+                        _ => Err(CodegenError::Unsupported(format!(
+                            "field addr on non-struct: {name}"
+                        ))),
                     }
-                }
-                _ => Err(CodegenError::Unsupported(
-                    format!("field addr on non-Named: {name}")
-                )),
+                },
+                _ => Err(CodegenError::Unsupported(format!(
+                    "field addr on non-Named: {name}"
+                ))),
             }
-        }
+        },
 
         Place::Deref(inner) => {
             // The address of *ptr is just ptr
             compile_place_read(ctx, state, builder, inner)
-        }
+        },
 
         Place::Index { parent, index } => {
             let parent_ptr = compile_place_addr(ctx, state, builder, parent)?;
-            let parent_ty = common::get_place_type(
-                ctx.module, state.body, parent, &state.subst, &ctx.layouts,
-            )?;
+            let parent_ty =
+                common::get_place_type(ctx.module, state.body, parent, &state.subst, &ctx.layouts)?;
 
             match &parent_ty {
                 MirTy::Tuple(elems) => {
@@ -390,62 +425,77 @@ pub fn compile_place_addr(
                         layout = new_layout;
                     }
                     Ok(builder.ins().iadd_imm(parent_ptr, offset as i64))
-                }
+                },
                 MirTy::Named { entity, type_args } => {
                     let type_args = common::substitute_type_args(type_args, &state.subst);
                     match ctx.layouts.resolve_named(*entity) {
                         NamedKind::Struct(struct_id) => {
                             let (offset, _) = common::get_field_by_index(
-                                ctx.module, &mut ctx.layouts, struct_id, &type_args, *index,
+                                ctx.module,
+                                &mut ctx.layouts,
+                                struct_id,
+                                &type_args,
+                                *index,
                             )?;
                             Ok(builder.ins().iadd_imm(parent_ptr, offset as i64))
-                        }
-                        _ => Err(CodegenError::Unsupported(
-                            format!("index addr on non-struct: {index}")
-                        )),
+                        },
+                        _ => Err(CodegenError::Unsupported(format!(
+                            "index addr on non-struct: {index}"
+                        ))),
                     }
-                }
-                _ => Err(CodegenError::Unsupported(
-                    format!("index addr on unsupported type: {index}")
-                )),
+                },
+                _ => Err(CodegenError::Unsupported(format!(
+                    "index addr on unsupported type: {index}"
+                ))),
             }
-        }
+        },
 
         Place::Downcast { parent, .. } => {
             // Address of a downcast is the payload address
             let parent_ptr = compile_place_addr(ctx, state, builder, parent)?;
-            let parent_ty = common::get_place_type(
-                ctx.module, state.body, parent, &state.subst, &ctx.layouts,
-            )?;
+            let parent_ty =
+                common::get_place_type(ctx.module, state.body, parent, &state.subst, &ctx.layouts)?;
             match &parent_ty {
                 MirTy::Named { entity, type_args } => {
                     let type_args = common::substitute_type_args(type_args, &state.subst);
                     match ctx.layouts.resolve_named(*entity) {
                         NamedKind::Enum(enum_id) => {
                             let payload_offset = common::get_enum_payload_offset(
-                                ctx.module, &mut ctx.layouts, enum_id, &type_args,
+                                ctx.module,
+                                &mut ctx.layouts,
+                                enum_id,
+                                &type_args,
                             );
                             Ok(builder.ins().iadd_imm(parent_ptr, payload_offset as i64))
-                        }
-                        _ => Err(CodegenError::Unsupported("downcast addr on non-enum".into())),
+                        },
+                        _ => Err(CodegenError::Unsupported(
+                            "downcast addr on non-enum".into(),
+                        )),
                     }
-                }
-                _ => Err(CodegenError::Unsupported("downcast addr on non-Named".into())),
+                },
+                _ => Err(CodegenError::Unsupported(
+                    "downcast addr on non-Named".into(),
+                )),
             }
-        }
+        },
 
         Place::Global(entity) => {
-            let static_def = ctx.module.statics.iter().find(|s| s.entity == *entity)
+            let static_def = ctx
+                .module
+                .statics
+                .iter()
+                .find(|s| s.entity == *entity)
                 .ok_or_else(|| CodegenError::Unsupported(format!("unknown global {:?}", entity)))?;
             let mut mangler = kestrel_codegen2::Mangler::new(ctx.module);
             mangler.push_prefix();
             mangler.mangle_name_path(&static_def.name);
             let mangled = mangler.finish();
-            let data_id = ctx.cl_module
+            let data_id = ctx
+                .cl_module
                 .declare_data(&mangled, cranelift_module::Linkage::Import, false, false)
                 .map_err(|e| CodegenError::DataSection(format!("declare global: {e}")))?;
             let gv = ctx.cl_module.declare_data_in_func(data_id, builder.func);
             Ok(builder.ins().global_value(ptr_ty, gv))
-        }
+        },
     }
 }

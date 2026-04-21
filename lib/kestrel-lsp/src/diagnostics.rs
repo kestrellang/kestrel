@@ -3,10 +3,7 @@
 //! Converts between Kestrel compiler types and LSP format.
 
 use kestrel_reporting::{Diagnostic, Severity};
-use tower_lsp::lsp_types::{
-    DiagnosticSeverity, Position, Range,
-    Diagnostic as LspDiagnostic,
-};
+use tower_lsp::lsp_types::{Diagnostic as LspDiagnostic, DiagnosticSeverity, Position, Range};
 
 /// Convert an LSP Position (line/column) to a byte offset.
 ///
@@ -84,17 +81,10 @@ pub fn convert_severity(severity: Severity) -> DiagnosticSeverity {
 /// Convert a codespan Diagnostic to an LSP Diagnostic.
 ///
 /// Returns None if the diagnostic has no labels (no location info).
-pub fn convert_diagnostic(
-    diagnostic: &Diagnostic<usize>,
-    source: &str,
-) -> Option<LspDiagnostic> {
+pub fn convert_diagnostic(diagnostic: &Diagnostic<usize>, source: &str) -> Option<LspDiagnostic> {
     // Get the primary label's range, or return None if no labels
     let primary_label = diagnostic.labels.first()?;
-    let range = byte_range_to_range(
-        source,
-        primary_label.range.start,
-        primary_label.range.end,
-    );
+    let range = byte_range_to_range(source, primary_label.range.start, primary_label.range.end);
 
     // Build the message, including label messages if present
     let mut message = diagnostic.message.clone();

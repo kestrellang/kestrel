@@ -126,9 +126,7 @@ impl Analyzer for TypeAliasValidationAnalyzer {
                     AliasContext::ConcreteType => {
                         Some(TypeAliasContext::ConcreteTypeWithoutConformance)
                     },
-                    AliasContext::Extension => {
-                        Some(TypeAliasContext::ExtensionWithoutConformance)
-                    },
+                    AliasContext::Extension => Some(TypeAliasContext::ExtensionWithoutConformance),
                     AliasContext::Protocol => None,
                 };
 
@@ -377,13 +375,7 @@ fn validate_constraint_satisfaction(
     }
 
     // Check inherited where clause constraints
-    validate_inherited_where_clause_constraints(
-        type_name,
-        bound_type,
-        &conformances,
-        span,
-        ctx,
-    );
+    validate_inherited_where_clause_constraints(type_name, bound_type, &conformances, span, ctx);
 }
 
 /// Check if a type satisfies a list of protocol bounds

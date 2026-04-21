@@ -535,10 +535,7 @@ fn apply_to_expression(
                         let resolved_ty =
                             resolve_type(&expr.ty, solution, oracle, &mut HashSet::new());
                         let field_mutable = *mutable;
-                        let is_mutable = if matches!(
-                            resolved_receiver.kind,
-                            ExprKind::TypeRef(_)
-                        ) {
+                        let is_mutable = if matches!(resolved_receiver.kind, ExprKind::TypeRef(_)) {
                             field_mutable
                         } else {
                             field_mutable && resolved_receiver.mutable
@@ -586,8 +583,7 @@ fn apply_to_expression(
                     }) => {
                         let resolved_ty =
                             resolve_type(&expr.ty, solution, oracle, &mut HashSet::new());
-                        let is_mutable =
-                            *has_setter && (*is_static || resolved_receiver.mutable);
+                        let is_mutable = *has_setter && (*is_static || resolved_receiver.mutable);
                         let result = Expression {
                             id: expr.id,
                             kind: ExprKind::ProtocolPropertyAccess {

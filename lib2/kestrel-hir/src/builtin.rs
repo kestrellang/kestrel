@@ -411,8 +411,12 @@ impl Builtin {
             // String interpolation
             Self::DefaultStringInterpolation => "DefaultStringInterpolation",
             Self::DefaultStringInterpolationInit => "DefaultStringInterpolationInit",
-            Self::DefaultStringInterpolationAppendLiteral => "DefaultStringInterpolationAppendLiteral",
-            Self::DefaultStringInterpolationAppendInterpolation => "DefaultStringInterpolationAppendInterpolation",
+            Self::DefaultStringInterpolationAppendLiteral => {
+                "DefaultStringInterpolationAppendLiteral"
+            },
+            Self::DefaultStringInterpolationAppendInterpolation => {
+                "DefaultStringInterpolationAppendInterpolation"
+            },
             Self::DefaultStringInterpolationBuild => "DefaultStringInterpolationBuild",
             Self::FormattableProtocol => "FormattableProtocol",
             Self::FormattableFormatMethod => "FormattableFormat",
@@ -585,8 +589,12 @@ impl Builtin {
             // String interpolation
             "DefaultStringInterpolation" => Some(Self::DefaultStringInterpolation),
             "DefaultStringInterpolationInit" => Some(Self::DefaultStringInterpolationInit),
-            "DefaultStringInterpolationAppendLiteral" => Some(Self::DefaultStringInterpolationAppendLiteral),
-            "DefaultStringInterpolationAppendInterpolation" => Some(Self::DefaultStringInterpolationAppendInterpolation),
+            "DefaultStringInterpolationAppendLiteral" => {
+                Some(Self::DefaultStringInterpolationAppendLiteral)
+            },
+            "DefaultStringInterpolationAppendInterpolation" => {
+                Some(Self::DefaultStringInterpolationAppendInterpolation)
+            },
             "DefaultStringInterpolationBuild" => Some(Self::DefaultStringInterpolationBuild),
             "FormattableProtocol" => Some(Self::FormattableProtocol),
             "FormattableFormat" => Some(Self::FormattableFormatMethod),
@@ -610,7 +618,9 @@ impl Builtin {
             Self::CloneMethod => BuiltinKind::ProtocolMethod,
 
             // Pattern matching
-            Self::Matchable | Self::RangeMatchable | Self::ArrayMatchable => BuiltinKind::protocol(),
+            Self::Matchable | Self::RangeMatchable | Self::ArrayMatchable => {
+                BuiltinKind::protocol()
+            },
             Self::RangeMatchableIsAtLeast
             | Self::RangeMatchableIsAtMost
             | Self::RangeMatchableIsBelow

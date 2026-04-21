@@ -369,9 +369,7 @@ fn analyze_expression(expr: &Expression) -> ReturnState {
             }
             ReturnState::MayFallThrough
         },
-        ExprKind::DeferredMemberAccess { receiver, .. } => {
-            analyze_expression(receiver)
-        },
+        ExprKind::DeferredMemberAccess { receiver, .. } => analyze_expression(receiver),
         ExprKind::DeferredSubscriptCall {
             receiver,
             arguments,

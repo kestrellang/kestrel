@@ -37,8 +37,8 @@ impl Query for TypeParameterBounds {
                     match bound.kind() {
                         TyKind::Protocol { .. } | TyKind::Error => {
                             bounds.push(bound.clone());
-                        }
-                        _ => {}
+                        },
+                        _ => {},
                     }
                 }
             }
@@ -50,16 +50,14 @@ impl Query for TypeParameterBounds {
                 target_id: parent_id,
             });
             for ext in &extensions {
-                if let Some(target_beh) =
-                    ext.metadata().get_behavior::<ExtensionTargetBehavior>()
-                {
+                if let Some(target_beh) = ext.metadata().get_behavior::<ExtensionTargetBehavior>() {
                     let ext_where = target_beh.where_clause();
                     for bound in ext_where.bounds_for(self.param_id) {
                         match bound.kind() {
                             TyKind::Protocol { .. } | TyKind::Error => {
                                 bounds.push(bound.clone());
-                            }
-                            _ => {}
+                            },
+                            _ => {},
                         }
                     }
                 }

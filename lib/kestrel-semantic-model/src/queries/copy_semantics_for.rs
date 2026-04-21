@@ -8,17 +8,17 @@
 
 use std::cell::RefCell;
 
-use kestrel_semantic_tree::behavior::copy_semantics::CopySemantics;
 use kestrel_semantic_tree::behavior::callable::CallableBehavior;
 use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
+use kestrel_semantic_tree::behavior::copy_semantics::CopySemantics;
 use kestrel_semantic_tree::behavior::typed::TypedBehavior;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::ty::TyKind;
 use semantic_tree::symbol::{Symbol, SymbolId};
 
 use crate::SemanticModel;
-use crate::query::Query;
 use crate::queries::SymbolFor;
+use crate::query::Query;
 
 thread_local! {
     static COMPUTING: RefCell<Vec<SymbolId>> = RefCell::new(Vec::new());
@@ -112,7 +112,9 @@ fn copy_semantics_impl(model: &SemanticModel, symbol_id: SymbolId) -> CopySemant
 /// For structs: field types (via TypedBehavior)
 /// For enums: enum case payload types (via CallableBehavior parameters)
 pub fn collect_child_types(
-    symbol: &std::sync::Arc<dyn semantic_tree::symbol::Symbol<kestrel_semantic_tree::language::KestrelLanguage>>,
+    symbol: &std::sync::Arc<
+        dyn semantic_tree::symbol::Symbol<kestrel_semantic_tree::language::KestrelLanguage>,
+    >,
 ) -> Vec<kestrel_semantic_tree::ty::Ty> {
     let mut types = Vec::new();
     for child in symbol.metadata().children().iter() {
@@ -121,15 +123,15 @@ pub fn collect_child_types(
                 if let Some(typed) = child.metadata().get_behavior::<TypedBehavior>() {
                     types.push(typed.ty().clone());
                 }
-            }
+            },
             KestrelSymbolKind::EnumCase => {
                 if let Some(callable) = child.metadata().get_behavior::<CallableBehavior>() {
                     for param in callable.parameters() {
                         types.push(param.ty.clone());
                     }
                 }
-            }
-            _ => {}
+            },
+            _ => {},
         }
     }
     types

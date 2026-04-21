@@ -75,17 +75,14 @@ pub fn get_decl_span(node: &SyntaxNode, file_id: usize) -> Span {
     let end: usize = text_range.end().into();
 
     // Find the first non-trivia, non-attribute child
-    let start = node.children_with_tokens()
-        .find_map(|child| {
-            match child {
-                SyntaxElement::Token(t) if !is_trivia(t.kind()) => {
-                    Some(t.text_range().start().into())
-                }
-                SyntaxElement::Node(n) if n.kind() != SyntaxKind::AttributeList => {
-                    find_first_non_trivia_start(&n)
-                }
-                _ => None,
-            }
+    let start = node
+        .children_with_tokens()
+        .find_map(|child| match child {
+            SyntaxElement::Token(t) if !is_trivia(t.kind()) => Some(t.text_range().start().into()),
+            SyntaxElement::Node(n) if n.kind() != SyntaxKind::AttributeList => {
+                find_first_non_trivia_start(&n)
+            },
+            _ => None,
         })
         .unwrap_or_else(|| text_range.start().into());
 

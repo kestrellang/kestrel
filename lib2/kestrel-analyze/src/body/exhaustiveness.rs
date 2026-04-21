@@ -113,7 +113,10 @@ impl BodyCheck for ExhaustivenessAnalyzer {
 
         for (expr_id, expr) in cx.hir.exprs.iter() {
             let HirExpr::Match {
-                scrutinee, arms, source, ..
+                scrutinee,
+                arms,
+                source,
+                ..
             } = expr
             else {
                 continue;
@@ -122,16 +125,16 @@ impl BodyCheck for ExhaustivenessAnalyzer {
             match source {
                 MatchSource::UserMatch => {
                     check_user_match(cx, expr_id, *scrutinee, arms, &mut diags);
-                }
+                },
                 MatchSource::IfLet => {
                     check_irrefutable_let(cx, *scrutinee, arms, "E302", &mut diags);
-                }
+                },
                 MatchSource::WhileLet => {
                     check_irrefutable_let(cx, *scrutinee, arms, "E308", &mut diags);
-                }
+                },
                 MatchSource::GuardLet => {
                     check_irrefutable_let(cx, *scrutinee, arms, "E309", &mut diags);
-                }
+                },
                 // Desugared matches whose arm shape is synthetic and always
                 // exhaustive by construction. Dedicated analyzers handle
                 // refutability concerns (for_loop_pattern, refutable_pattern).
@@ -139,7 +142,7 @@ impl BodyCheck for ExhaustivenessAnalyzer {
                 | MatchSource::LetDestructure
                 | MatchSource::ParamDestructure
                 | MatchSource::TryOp
-                | MatchSource::UnwrapOp => {}
+                | MatchSource::UnwrapOp => {},
             }
         }
 
@@ -199,8 +202,11 @@ fn check_user_match(
 
     // E305: non-exhaustive match.
     if !result.is_exhaustive {
-        let witnesses: Vec<String> =
-            result.missing_patterns.iter().map(|w| w.to_string()).collect();
+        let witnesses: Vec<String> = result
+            .missing_patterns
+            .iter()
+            .map(|w| w.to_string())
+            .collect();
         let d = descriptor("E305");
         diags.push(AnalyzeDiagnostic {
             descriptor_id: d.id,
@@ -336,10 +342,10 @@ fn pat_has_error(hir: &HirBody, pat: HirPatId) -> bool {
         HirPat::Tuple { prefix, suffix, .. } | HirPat::Array { prefix, suffix, .. } => {
             prefix.iter().any(|&p| pat_has_error(hir, p))
                 || suffix.iter().any(|&p| pat_has_error(hir, p))
-        }
+        },
         HirPat::Variant { args, .. } | HirPat::ImplicitVariant { args, .. } => {
             args.iter().any(|a| pat_has_error(hir, a.pattern))
-        }
+        },
         HirPat::Struct { fields, .. } => fields
             .iter()
             .any(|f| f.pattern.map_or(false, |p| pat_has_error(hir, p))),

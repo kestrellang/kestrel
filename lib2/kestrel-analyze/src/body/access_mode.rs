@@ -61,12 +61,10 @@ impl Describe for AccessModeAnalyzer {
 /// Result of classifying an argument expression's mutability.
 enum MutClass {
     Mutable,
-    ImmutableLocal(String),   // local name
-    ImmutableField(String),   // field name
+    ImmutableLocal(String), // local name
+    ImmutableField(String), // field name
     Temporary,
 }
-
-
 
 impl BodyCheck for AccessModeAnalyzer {
     fn check(&self, cx: &BodyContext<'_>) -> Vec<AnalyzeDiagnostic> {
@@ -83,20 +81,26 @@ impl BodyCheck for AccessModeAnalyzer {
                     if let Some(entity) = callee_entity {
                         check_call_args(cx, entity, args, None, &mut diags);
                     }
-                }
+                },
                 HirExpr::MethodCall { receiver, args, .. } => {
                     // Method resolution stored on the MethodCall expr itself
                     if let Some(&entity) = cx.typed.resolutions.get(&expr_id) {
                         check_call_args(cx, entity, args, Some(*receiver), &mut diags);
                     }
-                }
-                HirExpr::ProtocolCall { receiver, protocol, method, args, .. } => {
+                },
+                HirExpr::ProtocolCall {
+                    receiver,
+                    protocol,
+                    method,
+                    args,
+                    ..
+                } => {
                     // Find the protocol method entity
                     if let Some(method_entity) = find_protocol_method(cx, *protocol, method) {
                         check_call_args(cx, method_entity, args, Some(*receiver), &mut diags);
                     }
-                }
-                _ => {}
+                },
+                _ => {},
             }
         }
 
@@ -112,7 +116,9 @@ fn check_call_args(
     receiver: Option<HirExprId>,
     diags: &mut Vec<AnalyzeDiagnostic>,
 ) {
-    let Some(callable) = cx.query.get::<Callable>(callee) else { return };
+    let Some(callable) = cx.query.get::<Callable>(callee) else {
+        return;
+    };
 
     // Check receiver for mutating methods. Unlike argument position, a
     // receiver that is a temporary (call result, literal, if-expr, etc.) is
@@ -147,12 +153,15 @@ fn check_mutating_receiver(
 ) {
     let span = util::expr_span(cx.hir, recv_id);
     match classify_mutability(cx, recv_id) {
-        MutClass::Mutable | MutClass::Temporary => {} // ok — owned or mutable place
+        MutClass::Mutable | MutClass::Temporary => {}, // ok — owned or mutable place
         MutClass::ImmutableLocal(name) => {
             diags.push(AnalyzeDiagnostic {
                 descriptor_id: DESCRIPTORS[0].id,
                 severity: DESCRIPTORS[0].default_severity,
-                message: format!("cannot pass immutable binding '{}' to 'mutating' parameter", name),
+                message: format!(
+                    "cannot pass immutable binding '{}' to 'mutating' parameter",
+                    name
+                ),
                 labels: vec![DiagLabel {
                     span,
                     message: "cannot pass to 'mutating' parameter".into(),
@@ -160,12 +169,15 @@ fn check_mutating_receiver(
                 }],
                 notes: vec![],
             });
-        }
+        },
         MutClass::ImmutableField(name) => {
             diags.push(AnalyzeDiagnostic {
                 descriptor_id: DESCRIPTORS[1].id,
                 severity: DESCRIPTORS[1].default_severity,
-                message: format!("cannot pass immutable field '{}' to 'mutating' parameter", name),
+                message: format!(
+                    "cannot pass immutable field '{}' to 'mutating' parameter",
+                    name
+                ),
                 labels: vec![DiagLabel {
                     span,
                     message: "cannot pass to 'mutating' parameter".into(),
@@ -173,24 +185,23 @@ fn check_mutating_receiver(
                 }],
                 notes: vec![],
             });
-        }
+        },
     }
 }
 
 /// Check that an argument to a `mutating` parameter is a mutable lvalue.
-fn check_mutating_arg(
-    cx: &BodyContext<'_>,
-    arg_id: HirExprId,
-    diags: &mut Vec<AnalyzeDiagnostic>,
-) {
+fn check_mutating_arg(cx: &BodyContext<'_>, arg_id: HirExprId, diags: &mut Vec<AnalyzeDiagnostic>) {
     let span = util::expr_span(cx.hir, arg_id);
     match classify_mutability(cx, arg_id) {
-        MutClass::Mutable => {} // ok
+        MutClass::Mutable => {}, // ok
         MutClass::ImmutableLocal(name) => {
             diags.push(AnalyzeDiagnostic {
                 descriptor_id: DESCRIPTORS[0].id,
                 severity: DESCRIPTORS[0].default_severity,
-                message: format!("cannot pass immutable binding '{}' to 'mutating' parameter", name),
+                message: format!(
+                    "cannot pass immutable binding '{}' to 'mutating' parameter",
+                    name
+                ),
                 labels: vec![DiagLabel {
                     span,
                     message: "cannot pass to 'mutating' parameter".into(),
@@ -198,12 +209,15 @@ fn check_mutating_arg(
                 }],
                 notes: vec![],
             });
-        }
+        },
         MutClass::ImmutableField(name) => {
             diags.push(AnalyzeDiagnostic {
                 descriptor_id: DESCRIPTORS[1].id,
                 severity: DESCRIPTORS[1].default_severity,
-                message: format!("cannot pass immutable field '{}' to 'mutating' parameter", name),
+                message: format!(
+                    "cannot pass immutable field '{}' to 'mutating' parameter",
+                    name
+                ),
                 labels: vec![DiagLabel {
                     span,
                     message: "cannot pass to 'mutating' parameter".into(),
@@ -211,7 +225,7 @@ fn check_mutating_arg(
                 }],
                 notes: vec![],
             });
-        }
+        },
         MutClass::Temporary => {
             diags.push(AnalyzeDiagnostic {
                 descriptor_id: DESCRIPTORS[2].id,
@@ -224,7 +238,7 @@ fn check_mutating_arg(
                 }],
                 notes: vec![],
             });
-        }
+        },
     }
 }
 
@@ -239,7 +253,7 @@ fn classify_mutability(cx: &BodyContext<'_>, expr_id: HirExprId) -> MutClass {
             } else {
                 MutClass::ImmutableLocal(local.name.clone())
             }
-        }
+        },
         // Field access — walk the chain checking field settability and base mutability
         HirExpr::Field { base, name, .. } => {
             // Check if the field entity itself is immutable (let field)
@@ -250,11 +264,9 @@ fn classify_mutability(cx: &BodyContext<'_>, expr_id: HirExprId) -> MutClass {
             }
             // Field is settable — check the base
             classify_mutability(cx, *base)
-        }
+        },
         // Tuple index — like field access, check the base
-        HirExpr::TupleIndex { base, .. } => {
-            classify_mutability(cx, *base)
-        }
+        HirExpr::TupleIndex { base, .. } => classify_mutability(cx, *base),
         // Everything else is a temporary (call results, literals, if-exprs, etc.)
         _ => MutClass::Temporary,
     }
@@ -266,9 +278,15 @@ fn find_protocol_method(
     protocol: kestrel_hecs::Entity,
     method_name: &str,
 ) -> Option<kestrel_hecs::Entity> {
-    cx.query.children_of(protocol).iter().find(|&&child| {
-        cx.query.get::<NodeKind>(child) == Some(&NodeKind::Function)
-            && cx.query.get::<kestrel_ast_builder::Name>(child)
-                .is_some_and(|n| n.0 == method_name)
-    }).copied()
+    cx.query
+        .children_of(protocol)
+        .iter()
+        .find(|&&child| {
+            cx.query.get::<NodeKind>(child) == Some(&NodeKind::Function)
+                && cx
+                    .query
+                    .get::<kestrel_ast_builder::Name>(child)
+                    .is_some_and(|n| n.0 == method_name)
+        })
+        .copied()
 }

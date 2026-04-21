@@ -287,11 +287,7 @@ impl World {
 
     /// Collect all accumulated values of type T into a Vec.
     pub fn accumulated<T: Clone + 'static>(&self) -> Vec<T> {
-        self.accumulators
-            .borrow()
-            .all::<T>()
-            .cloned()
-            .collect()
+        self.accumulators.borrow().all::<T>().cloned().collect()
     }
 }
 
@@ -480,15 +476,17 @@ mod tests {
 
     #[test]
     fn snapshot_has_fresh_query_cache() {
-        use std::cell::RefCell;
         use crate::query::QueryFn;
+        use std::cell::RefCell;
 
         thread_local! {
             static SNAP_EXEC: RefCell<u32> = const { RefCell::new(0) };
         }
 
         #[derive(Clone, PartialEq, Eq, Hash)]
-        struct GetHealth { entity: Entity }
+        struct GetHealth {
+            entity: Entity,
+        }
 
         impl QueryFn for GetHealth {
             type Output = Option<i32>;
@@ -508,7 +506,9 @@ mod tests {
             let ctx = world.query_context();
             ctx.query(GetHealth { entity: e });
         }
-        SNAP_EXEC.with(|c| { c.replace(0); });
+        SNAP_EXEC.with(|c| {
+            c.replace(0);
+        });
 
         // Snapshot starts with empty cache, so query must re-execute
         let snap = world.snapshot();

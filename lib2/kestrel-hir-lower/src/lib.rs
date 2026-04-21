@@ -21,7 +21,9 @@ use kestrel_hecs::{Entity, QueryContext, QueryFn};
 use kestrel_hir::body::{HirBody, HirExpr, HirMatchArm, HirStmt, MatchSource};
 use kestrel_span2::Span;
 
-pub use ty::{lower_ast_type, LowerCallableTypes, LowerExtensionTargetTypeArgs, LowerTypeAnnotation};
+pub use ty::{
+    LowerCallableTypes, LowerExtensionTargetTypeArgs, LowerTypeAnnotation, lower_ast_type,
+};
 
 use ctx::LowerCtx;
 
@@ -58,8 +60,7 @@ impl QueryFn for LowerBody {
                     kestrel_ast_builder::ReceiverKind::Mutating
                         | kestrel_ast_builder::ReceiverKind::Consuming
                 );
-                let self_local =
-                    lower.define_local("self", is_mut, Span::synthetic(0));
+                let self_local = lower.define_local("self", is_mut, Span::synthetic(0));
                 lower.params.push(self_local);
             }
 
@@ -108,9 +109,7 @@ impl QueryFn for LowerBody {
         );
 
         // Lower tail expression
-        let tail_expr = ast_body
-            .tail_expr
-            .map(|id| lower.lower_expr(ast_body, id));
+        let tail_expr = ast_body.tail_expr.map(|id| lower.lower_expr(ast_body, id));
 
         Some(HirBody {
             exprs: lower.exprs,
@@ -170,10 +169,7 @@ mod tests {
 
         let (world, root, func) = setup_with_body(ast_body);
         let ctx = world.query_context();
-        let result = ctx.query(LowerBody {
-            entity: func,
-            root,
-        });
+        let result = ctx.query(LowerBody { entity: func, root });
 
         let hir = result.expect("should produce HirBody");
         assert!(hir.statements.is_empty());
@@ -199,12 +195,7 @@ mod tests {
 
         let (world, root, func) = setup_with_body(ast_body);
         let ctx = world.query_context();
-        let hir = ctx
-            .query(LowerBody {
-                entity: func,
-                root,
-            })
-            .unwrap();
+        let hir = ctx.query(LowerBody { entity: func, root }).unwrap();
 
         assert!(hir.tail_expr.is_some());
         let expr = &hir.exprs[hir.tail_expr.unwrap()];
@@ -252,12 +243,7 @@ mod tests {
 
         let (world, root, func) = setup_with_body(ast_body);
         let ctx = world.query_context();
-        let hir = ctx
-            .query(LowerBody {
-                entity: func,
-                root,
-            })
-            .unwrap();
+        let hir = ctx.query(LowerBody { entity: func, root }).unwrap();
 
         assert_eq!(hir.statements.len(), 1);
         assert_eq!(hir.locals.len(), 1); // one local: x
@@ -314,12 +300,7 @@ mod tests {
         world.set_parent(func, root);
 
         let ctx = world.query_context();
-        let hir = ctx
-            .query(LowerBody {
-                entity: func,
-                root,
-            })
-            .unwrap();
+        let hir = ctx.query(LowerBody { entity: func, root }).unwrap();
 
         assert_eq!(hir.params.len(), 2);
         assert_eq!(hir.locals[hir.params[0]].name, "a");
@@ -357,12 +338,7 @@ mod tests {
         world.set_parent(func, root);
 
         let ctx = world.query_context();
-        let hir = ctx
-            .query(LowerBody {
-                entity: func,
-                root,
-            })
-            .unwrap();
+        let hir = ctx.query(LowerBody { entity: func, root }).unwrap();
 
         // self + no explicit params = 1 param (self)
         assert_eq!(hir.params.len(), 1);
@@ -409,12 +385,7 @@ mod tests {
 
         let (world, root, func) = setup_with_body(ast_body);
         let ctx = world.query_context();
-        let hir = ctx
-            .query(LowerBody {
-                entity: func,
-                root,
-            })
-            .unwrap();
+        let hir = ctx.query(LowerBody { entity: func, root }).unwrap();
 
         let tail = &hir.exprs[hir.tail_expr.unwrap()];
         assert!(matches!(tail, HirExpr::If { .. }));
@@ -477,12 +448,7 @@ mod tests {
 
         let (world, root, func) = setup_with_body(ast_body);
         let ctx = world.query_context();
-        let hir = ctx
-            .query(LowerBody {
-                entity: func,
-                root,
-            })
-            .unwrap();
+        let hir = ctx.query(LowerBody { entity: func, root }).unwrap();
 
         assert_eq!(hir.statements.len(), 2);
         // The second statement should be an Assign to a local
@@ -491,7 +457,7 @@ mod tests {
             HirStmt::Expr { expr, .. } => {
                 let e = &hir.exprs[*expr];
                 assert!(matches!(e, HirExpr::Assign { .. }));
-            }
+            },
             _ => panic!("expected Expr stmt"),
         }
     }
@@ -512,10 +478,7 @@ mod tests {
         world.set_parent(func, root);
 
         let ctx = world.query_context();
-        let result = ctx.query(LowerBody {
-            entity: func,
-            root,
-        });
+        let result = ctx.query(LowerBody { entity: func, root });
         assert!(result.is_none());
     }
 }

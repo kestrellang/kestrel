@@ -60,7 +60,9 @@ impl BodyCheck for ForLoopPatternAnalyzer {
             };
 
             // First arm is .Some(user_pattern)
-            let Some(some_arm) = arms.first() else { continue };
+            let Some(some_arm) = arms.first() else {
+                continue;
+            };
 
             // Extract the user's pattern from .Some(user_pattern)
             let Some(user_pat) = extract_user_pattern(cx.hir, some_arm.pattern) else {
@@ -77,7 +79,13 @@ impl BodyCheck for ForLoopPatternAnalyzer {
             };
 
             // Type-aware irrefutability check
-            if !kestrel_pattern_matching::is_irrefutable(cx.hir, cx.query, cx.root, user_pat, &element_ty) {
+            if !kestrel_pattern_matching::is_irrefutable(
+                cx.hir,
+                cx.query,
+                cx.root,
+                user_pat,
+                &element_ty,
+            ) {
                 diags.push(make_diagnostic(cx, user_pat));
             }
         }
@@ -119,8 +127,6 @@ fn make_diagnostic(cx: &BodyContext<'_>, user_pat: HirPatId) -> AnalyzeDiagnosti
             message: "this pattern may not match all iterator elements".into(),
             is_primary: true,
         }],
-        notes: vec![
-            "help: for-loop patterns must match every element from the iterator".into(),
-        ],
+        notes: vec!["help: for-loop patterns must match every element from the iterator".into()],
     }
 }

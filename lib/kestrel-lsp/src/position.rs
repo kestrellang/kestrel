@@ -4,7 +4,9 @@
 
 use kestrel_compiler::Compilation;
 use kestrel_semantic_tree::behavior::callable::CallableBehavior;
-use kestrel_semantic_tree::behavior::executable::{CodeBlock, ExecutableBehavior, ResolvedExecutableBehavior};
+use kestrel_semantic_tree::behavior::executable::{
+    CodeBlock, ExecutableBehavior, ResolvedExecutableBehavior,
+};
 use kestrel_semantic_tree::behavior::typed::TypedBehavior;
 use kestrel_semantic_tree::behavior::valued::ValueBehavior;
 use kestrel_semantic_tree::expr::{CallArgument, ExprKind, Expression};
@@ -48,10 +50,7 @@ pub fn find_symbol_at_position(
         let name_span = &metadata.name().span;
 
         // Check if the cursor is on this symbol's name
-        if name_span.file_id == file_id
-            && offset >= name_span.start
-            && offset <= name_span.end
-        {
+        if name_span.file_id == file_id && offset >= name_span.start && offset <= name_span.end {
             let kind = format!("{:?}", metadata.kind());
             let signature = build_signature(symbol);
             let decl_span = metadata.declaration_span();
@@ -185,7 +184,11 @@ fn find_call_site_from_model(
     let body = metadata
         .get_behavior::<ResolvedExecutableBehavior>()
         .map(|b| b.body().clone())
-        .or_else(|| metadata.get_behavior::<ExecutableBehavior>().map(|b| b.body().clone()))?;
+        .or_else(|| {
+            metadata
+                .get_behavior::<ExecutableBehavior>()
+                .map(|b| b.body().clone())
+        })?;
 
     // Find the innermost call expression at the cursor position
     let call_info = find_innermost_call(&body, file_id, offset)?;
@@ -231,7 +234,9 @@ fn find_enclosing_function(
         }
 
         // This symbol contains the offset — check if it has an executable body
-        if metadata.get_behavior::<ResolvedExecutableBehavior>().is_some()
+        if metadata
+            .get_behavior::<ResolvedExecutableBehavior>()
+            .is_some()
             || metadata.get_behavior::<ExecutableBehavior>().is_some()
         {
             return Some(symbol.clone());
@@ -280,17 +285,22 @@ fn visit_statement(
     best: &mut Option<CallExprInfo>,
 ) {
     match &stmt.kind {
-        StatementKind::Binding { value: Some(expr), .. } => {
+        StatementKind::Binding {
+            value: Some(expr), ..
+        } => {
             visit_expr(expr, file_id, offset, best);
-        }
+        },
         StatementKind::Expr(expr) => {
             visit_expr(expr, file_id, offset, best);
-        }
-        StatementKind::GuardLet { conditions, else_block } => {
+        },
+        StatementKind::GuardLet {
+            conditions,
+            else_block,
+        } => {
             visit_conditions(conditions, file_id, offset, best);
             visit_code_block(else_block, file_id, offset, best);
-        }
-        _ => {}
+        },
+        _ => {},
     }
 }
 
@@ -305,10 +315,10 @@ fn visit_conditions(
         match cond {
             kestrel_semantic_tree::expr::IfCondition::Expr(expr) => {
                 visit_expr(expr, file_id, offset, best);
-            }
+            },
             kestrel_semantic_tree::expr::IfCondition::Let { value, .. } => {
                 visit_expr(value, file_id, offset, best);
-            }
+            },
         }
     }
 }
@@ -326,12 +336,7 @@ fn visit_statements(
 }
 
 /// Visit an expression, recording call expressions and recursing into children.
-fn visit_expr(
-    expr: &Expression,
-    file_id: usize,
-    offset: usize,
-    best: &mut Option<CallExprInfo>,
-) {
+fn visit_expr(expr: &Expression, file_id: usize, offset: usize, best: &mut Option<CallExprInfo>) {
     let span = &expr.span;
     let contains_cursor = span.file_id == file_id && offset >= span.start && offset <= span.end;
 
@@ -348,87 +353,124 @@ fn visit_expr(
     // Recurse into children to find a more specific (inner) call
     match &expr.kind {
         // Calls — recurse into arguments (inner calls like `foo(bar(` )
-        ExprKind::Call { callee, arguments, .. } => {
+        ExprKind::Call {
+            callee, arguments, ..
+        } => {
             visit_expr(callee, file_id, offset, best);
             visit_arguments(arguments, file_id, offset, best);
-        }
-        ExprKind::DeferredMethodCall { receiver, arguments, .. } => {
+        },
+        ExprKind::DeferredMethodCall {
+            receiver,
+            arguments,
+            ..
+        } => {
             visit_expr(receiver, file_id, offset, best);
             visit_arguments(arguments, file_id, offset, best);
-        }
+        },
         ExprKind::DeferredStaticCall { arguments, .. } => {
             visit_arguments(arguments, file_id, offset, best);
-        }
+        },
         ExprKind::DeferredInitCall { arguments, .. } => {
             visit_arguments(arguments, file_id, offset, best);
-        }
+        },
         ExprKind::DeferredFunctionCall { arguments, .. } => {
             visit_arguments(arguments, file_id, offset, best);
-        }
-        ExprKind::DeferredSubscriptCall { receiver, arguments } => {
+        },
+        ExprKind::DeferredSubscriptCall {
+            receiver,
+            arguments,
+        } => {
             visit_expr(receiver, file_id, offset, best);
             visit_arguments(arguments, file_id, offset, best);
-        }
+        },
         ExprKind::ImplicitStructInit { arguments, .. } => {
             visit_arguments(arguments, file_id, offset, best);
-        }
+        },
         ExprKind::DelegatingInit { arguments, .. } => {
             visit_arguments(arguments, file_id, offset, best);
-        }
-        ExprKind::SubscriptCall { receiver, arguments, .. } => {
+        },
+        ExprKind::SubscriptCall {
+            receiver,
+            arguments,
+            ..
+        } => {
             visit_expr(receiver, file_id, offset, best);
             visit_arguments(arguments, file_id, offset, best);
-        }
-        ExprKind::PrimitiveMethodCall { receiver, arguments, .. } => {
+        },
+        ExprKind::PrimitiveMethodCall {
+            receiver,
+            arguments,
+            ..
+        } => {
             visit_expr(receiver, file_id, offset, best);
             visit_arguments(arguments, file_id, offset, best);
-        }
+        },
         ExprKind::LangIntrinsic { arguments, .. } => {
             visit_arguments(arguments, file_id, offset, best);
-        }
-        ExprKind::ImplicitMemberAccess { arguments: Some(arguments), .. } => {
+        },
+        ExprKind::ImplicitMemberAccess {
+            arguments: Some(arguments),
+            ..
+        } => {
             visit_arguments(arguments, file_id, offset, best);
-        }
+        },
 
         // Non-call expressions with children
         ExprKind::FieldAccess { object, .. }
-        | ExprKind::ProtocolPropertyAccess { receiver: object, .. }
+        | ExprKind::ProtocolPropertyAccess {
+            receiver: object, ..
+        }
         | ExprKind::TupleIndex { tuple: object, .. }
-        | ExprKind::MethodRef { receiver: object, .. }
-        | ExprKind::PrimitiveMethodRef { receiver: object, .. }
-        | ExprKind::DeferredMemberAccess { receiver: object, .. }
+        | ExprKind::MethodRef {
+            receiver: object, ..
+        }
+        | ExprKind::PrimitiveMethodRef {
+            receiver: object, ..
+        }
+        | ExprKind::DeferredMemberAccess {
+            receiver: object, ..
+        }
         | ExprKind::Throw { value: object } => {
             visit_expr(object, file_id, offset, best);
-        }
+        },
         ExprKind::Grouping(inner) => {
             visit_expr(inner, file_id, offset, best);
-        }
+        },
         ExprKind::Assignment { target, value } => {
             visit_expr(target, file_id, offset, best);
             visit_expr(value, file_id, offset, best);
-        }
+        },
         ExprKind::Return { value: Some(v) } => {
             visit_expr(v, file_id, offset, best);
-        }
+        },
         ExprKind::Array(elems) | ExprKind::Tuple(elems) => {
             for e in elems {
                 visit_expr(e, file_id, offset, best);
             }
-        }
+        },
         ExprKind::Dictionary(pairs) => {
             for (k, v) in pairs {
                 visit_expr(k, file_id, offset, best);
                 visit_expr(v, file_id, offset, best);
             }
-        }
+        },
         ExprKind::InterpolatedString { parts } => {
             for part in parts {
-                if let kestrel_semantic_tree::expr::InterpolationPart::Interpolation { expr: e, .. } = part {
+                if let kestrel_semantic_tree::expr::InterpolationPart::Interpolation {
+                    expr: e,
+                    ..
+                } = part
+                {
                     visit_expr(e, file_id, offset, best);
                 }
             }
-        }
-        ExprKind::If { conditions, then_branch, then_value, else_branch } => {
+        },
+        ExprKind::If {
+            conditions,
+            then_branch,
+            then_value,
+            else_branch,
+        } => {
             visit_conditions(conditions, file_id, offset, best);
             visit_statements(then_branch, file_id, offset, best);
             if let Some(v) = then_value {
@@ -441,24 +483,28 @@ fn visit_expr(
                         if let Some(v) = value {
                             visit_expr(v, file_id, offset, best);
                         }
-                    }
+                    },
                     kestrel_semantic_tree::expr::ElseBranch::ElseIf(e) => {
                         visit_expr(e, file_id, offset, best);
-                    }
+                    },
                 }
             }
-        }
-        ExprKind::While { condition, body, .. } => {
+        },
+        ExprKind::While {
+            condition, body, ..
+        } => {
             visit_expr(condition, file_id, offset, best);
             visit_statements(body, file_id, offset, best);
-        }
-        ExprKind::WhileLet { conditions, body, .. } => {
+        },
+        ExprKind::WhileLet {
+            conditions, body, ..
+        } => {
             visit_conditions(conditions, file_id, offset, best);
             visit_statements(body, file_id, offset, best);
-        }
+        },
         ExprKind::Loop { body, .. } => {
             visit_statements(body, file_id, offset, best);
-        }
+        },
         ExprKind::Match { scrutinee, arms } => {
             visit_expr(scrutinee, file_id, offset, best);
             for arm in arms {
@@ -467,22 +513,24 @@ fn visit_expr(
                 }
                 visit_expr(&arm.body, file_id, offset, best);
             }
-        }
+        },
         ExprKind::Block { statements, value } => {
             visit_statements(statements, file_id, offset, best);
             if let Some(v) = value {
                 visit_expr(v, file_id, offset, best);
             }
-        }
-        ExprKind::Closure { body, tail_expr, .. } => {
+        },
+        ExprKind::Closure {
+            body, tail_expr, ..
+        } => {
             visit_statements(body, file_id, offset, best);
             if let Some(e) = tail_expr {
                 visit_expr(e, file_id, offset, best);
             }
-        }
+        },
 
         // Leaf expressions — no children to recurse into
-        _ => {}
+        _ => {},
     }
 }
 
@@ -501,79 +549,92 @@ fn visit_arguments(
 /// Extract call info from a call expression.
 fn extract_call_info(expr: &Expression) -> Option<CallExprInfo> {
     match &expr.kind {
-        ExprKind::Call { callee, arguments, .. } => {
+        ExprKind::Call {
+            callee, arguments, ..
+        } => {
             let (callee_id, name) = extract_callee_info(callee);
             Some(CallExprInfo {
                 callee_id,
                 name,
                 arguments: arguments.clone(),
-
             })
-        }
-        ExprKind::DeferredMethodCall { receiver: _, method_name, arguments, .. } => {
-            Some(CallExprInfo {
-                callee_id: None,
-                name: method_name.clone(),
-                arguments: arguments.clone(),
-            })
-        }
-        ExprKind::DeferredStaticCall { method_name, arguments, .. } => {
-            Some(CallExprInfo {
-                callee_id: None,
-                name: method_name.clone(),
-                arguments: arguments.clone(),
-            })
-        }
-        ExprKind::DeferredInitCall { struct_ty, arguments, .. } => {
-            Some(CallExprInfo {
-                callee_id: None,
-                name: format!("{}", struct_ty),
-                arguments: arguments.clone(),
-            })
-        }
-        ExprKind::DeferredFunctionCall { candidates, arguments, .. } => {
+        },
+        ExprKind::DeferredMethodCall {
+            receiver: _,
+            method_name,
+            arguments,
+            ..
+        } => Some(CallExprInfo {
+            callee_id: None,
+            name: method_name.clone(),
+            arguments: arguments.clone(),
+        }),
+        ExprKind::DeferredStaticCall {
+            method_name,
+            arguments,
+            ..
+        } => Some(CallExprInfo {
+            callee_id: None,
+            name: method_name.clone(),
+            arguments: arguments.clone(),
+        }),
+        ExprKind::DeferredInitCall {
+            struct_ty,
+            arguments,
+            ..
+        } => Some(CallExprInfo {
+            callee_id: None,
+            name: format!("{}", struct_ty),
+            arguments: arguments.clone(),
+        }),
+        ExprKind::DeferredFunctionCall {
+            candidates,
+            arguments,
+            ..
+        } => {
             let id = candidates.first().copied();
             Some(CallExprInfo {
                 callee_id: id,
                 name: String::new(), // will be filled from symbol
                 arguments: arguments.clone(),
             })
-        }
-        ExprKind::ImplicitStructInit { struct_type, arguments } => {
-            Some(CallExprInfo {
-                callee_id: None,
-                name: format!("{}", struct_type),
-                arguments: arguments.clone(),
-            })
-        }
-        ExprKind::SubscriptCall { getter, arguments, .. } => {
-            Some(CallExprInfo {
-                callee_id: Some(*getter),
-                name: "subscript".to_string(),
-                arguments: arguments.clone(),
-            })
-        }
-        ExprKind::DeferredSubscriptCall { arguments, .. } => {
-            Some(CallExprInfo {
-                callee_id: None,
-                name: "subscript".to_string(),
-                arguments: arguments.clone(),
-            })
-        }
-        ExprKind::DelegatingInit { initializer, arguments, .. } => {
-            Some(CallExprInfo {
-                callee_id: Some(*initializer),
-                name: "init".to_string(),
-                arguments: arguments.clone(),
-            })
-        }
-        ExprKind::PrimitiveMethodCall { method, arguments, .. } => {
-            Some(CallExprInfo {
-                callee_id: None,
-                name: method.name().to_string(),
-                arguments: arguments.clone(),
-            })
-        }
+        },
+        ExprKind::ImplicitStructInit {
+            struct_type,
+            arguments,
+        } => Some(CallExprInfo {
+            callee_id: None,
+            name: format!("{}", struct_type),
+            arguments: arguments.clone(),
+        }),
+        ExprKind::SubscriptCall {
+            getter, arguments, ..
+        } => Some(CallExprInfo {
+            callee_id: Some(*getter),
+            name: "subscript".to_string(),
+            arguments: arguments.clone(),
+        }),
+        ExprKind::DeferredSubscriptCall { arguments, .. } => Some(CallExprInfo {
+            callee_id: None,
+            name: "subscript".to_string(),
+            arguments: arguments.clone(),
+        }),
+        ExprKind::DelegatingInit {
+            initializer,
+            arguments,
+            ..
+        } => Some(CallExprInfo {
+            callee_id: Some(*initializer),
+            name: "init".to_string(),
+            arguments: arguments.clone(),
+        }),
+        ExprKind::PrimitiveMethodCall {
+            method, arguments, ..
+        } => Some(CallExprInfo {
+            callee_id: None,
+            name: method.name().to_string(),
+            arguments: arguments.clone(),
+        }),
         _ => None,
     }
 }
@@ -584,9 +645,11 @@ fn extract_callee_info(callee: &Expression) -> (Option<SymbolId>, String) {
         ExprKind::SymbolRef(id) => (Some(*id), String::new()),
         ExprKind::TypeRef(id) => (Some(*id), String::new()),
         ExprKind::OverloadedRef(ids) => (ids.first().copied(), String::new()),
-        ExprKind::MethodRef { candidates, method_name, .. } => {
-            (candidates.first().copied(), method_name.clone())
-        }
+        ExprKind::MethodRef {
+            candidates,
+            method_name,
+            ..
+        } => (candidates.first().copied(), method_name.clone()),
         _ => (None, String::new()),
     }
 }
@@ -656,20 +719,32 @@ fn build_call_site_info(
     if !info.name.is_empty() {
         let active = active_parameter_from_args(&info.arguments, offset);
         // Build parameter placeholders from arguments
-        let parameters: Vec<ParameterInfo> = info.arguments.iter().enumerate().map(|(i, arg)| {
-            let label = if let Some(lbl) = &arg.label {
-                format!("{}: {}", lbl, arg.value.ty)
-            } else {
-                format!("_{}: {}", i, arg.value.ty)
-            };
-            ParameterInfo { label, documentation: None }
-        }).collect();
+        let parameters: Vec<ParameterInfo> = info
+            .arguments
+            .iter()
+            .enumerate()
+            .map(|(i, arg)| {
+                let label = if let Some(lbl) = &arg.label {
+                    format!("{}: {}", lbl, arg.value.ty)
+                } else {
+                    format!("_{}: {}", i, arg.value.ty)
+                };
+                ParameterInfo {
+                    label,
+                    documentation: None,
+                }
+            })
+            .collect();
 
         return Some(CallSiteInfo {
             function_name: info.name.clone(),
             parameters: parameters.clone(),
             return_type: format!("{}", expr_type_display(&info.arguments)),
-            active_parameter: active.min(if parameters.is_empty() { 0 } else { parameters.len() - 1 }),
+            active_parameter: active.min(if parameters.is_empty() {
+                0
+            } else {
+                parameters.len() - 1
+            }),
         });
     }
 
@@ -742,9 +817,9 @@ fn find_call_site_from_text(
                     break;
                 }
                 paren_depth -= 1;
-            }
+            },
             ',' if paren_depth == 0 => comma_count += 1,
-            _ => {}
+            _ => {},
         }
     }
 
@@ -760,9 +835,7 @@ fn find_call_site_from_text(
         name: &str,
     ) -> Option<Arc<dyn Symbol<KestrelLanguage>>> {
         let metadata = symbol.metadata();
-        if metadata.name().value == name
-            && metadata.get_behavior::<CallableBehavior>().is_some()
-        {
+        if metadata.name().value == name && metadata.get_behavior::<CallableBehavior>().is_some() {
             return Some(symbol.clone());
         }
         for child in metadata.children() {
@@ -783,7 +856,9 @@ fn find_call_site_from_text(
     }
 
     let function_symbol = function_symbol?;
-    let callable = function_symbol.metadata().get_behavior::<CallableBehavior>()?;
+    let callable = function_symbol
+        .metadata()
+        .get_behavior::<CallableBehavior>()?;
     let parameters = build_parameter_list(&callable);
 
     Some(CallSiteInfo {
@@ -822,10 +897,7 @@ fn extract_identifier_before(s: &str) -> Option<String> {
 /// Find all symbol definitions in a file and return their positions.
 ///
 /// This is useful for document symbols.
-pub fn find_all_symbols_in_file(
-    compilation: &Compilation,
-    file_id: usize,
-) -> Vec<SymbolInfo> {
+pub fn find_all_symbols_in_file(compilation: &Compilation, file_id: usize) -> Vec<SymbolInfo> {
     let mut symbols = Vec::new();
 
     let Some(model) = compilation.semantic_model() else {
@@ -943,13 +1015,17 @@ pub fn find_dot_completions(
                     let detail = child
                         .metadata()
                         .get_behavior::<CallableBehavior>()
-                        .map(|c| format!("({}) -> {}",
-                            c.parameters().iter()
-                                .map(|p| p.ty.to_string())
-                                .collect::<Vec<_>>()
-                                .join(", "),
-                            c.return_type()
-                        ));
+                        .map(|c| {
+                            format!(
+                                "({}) -> {}",
+                                c.parameters()
+                                    .iter()
+                                    .map(|p| p.ty.to_string())
+                                    .collect::<Vec<_>>()
+                                    .join(", "),
+                                c.return_type()
+                            )
+                        });
                     completions.push(CompletionItem {
                         label: name.clone(),
                         kind: CompletionKind::Method,
@@ -960,7 +1036,9 @@ pub fn find_dot_completions(
             }
 
             // Add extension methods
-            let extensions = model.extension_registry().get_extensions_for(symbol.metadata().id());
+            let extensions = model
+                .extension_registry()
+                .get_extensions_for(symbol.metadata().id());
             for ext in extensions {
                 for child in ext.metadata().children() {
                     if child.metadata().kind() == KestrelSymbolKind::Function {
@@ -968,13 +1046,17 @@ pub fn find_dot_completions(
                         let detail = child
                             .metadata()
                             .get_behavior::<CallableBehavior>()
-                            .map(|c| format!("({}) -> {}",
-                                c.parameters().iter()
-                                    .map(|p| p.ty.to_string())
-                                    .collect::<Vec<_>>()
-                                    .join(", "),
-                                c.return_type()
-                            ));
+                            .map(|c| {
+                                format!(
+                                    "({}) -> {}",
+                                    c.parameters()
+                                        .iter()
+                                        .map(|p| p.ty.to_string())
+                                        .collect::<Vec<_>>()
+                                        .join(", "),
+                                    c.return_type()
+                                )
+                            });
                         completions.push(CompletionItem {
                             label: name.clone(),
                             kind: CompletionKind::Method,
@@ -984,7 +1066,7 @@ pub fn find_dot_completions(
                     }
                 }
             }
-        }
+        },
         TyKind::Enum { symbol, .. } => {
             // Add enum methods
             for child in symbol.metadata().children() {
@@ -993,13 +1075,17 @@ pub fn find_dot_completions(
                     let detail = child
                         .metadata()
                         .get_behavior::<CallableBehavior>()
-                        .map(|c| format!("({}) -> {}",
-                            c.parameters().iter()
-                                .map(|p| p.ty.to_string())
-                                .collect::<Vec<_>>()
-                                .join(", "),
-                            c.return_type()
-                        ));
+                        .map(|c| {
+                            format!(
+                                "({}) -> {}",
+                                c.parameters()
+                                    .iter()
+                                    .map(|p| p.ty.to_string())
+                                    .collect::<Vec<_>>()
+                                    .join(", "),
+                                c.return_type()
+                            )
+                        });
                     completions.push(CompletionItem {
                         label: name.clone(),
                         kind: CompletionKind::Method,
@@ -1008,12 +1094,12 @@ pub fn find_dot_completions(
                     });
                 }
             }
-        }
+        },
         TyKind::String => {
             // String is a builtin - we'd need to look up String extension methods
             // For now, just indicate it's a String
-        }
-        _ => {}
+        },
+        _ => {},
     }
 
     completions

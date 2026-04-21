@@ -9,13 +9,13 @@ pub mod param_pattern;
 pub mod type_check;
 
 // Wave 5: Complex body checks
+pub mod access_mode;
+pub mod closure;
 pub mod definite_assignment;
 pub mod initializer;
-pub mod closure;
 pub mod move_tracking;
-pub mod access_mode;
 
 // Wave 6: Pattern checks
-pub mod refutable_pattern;
-pub mod for_loop_pattern;
 pub mod exhaustiveness;
+pub mod for_loop_pattern;
+pub mod refutable_pattern;

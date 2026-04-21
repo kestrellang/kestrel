@@ -234,7 +234,10 @@ pub fn check(
     if errors.is_empty() {
         Ok(())
     } else {
-        Err(format!("Diagnostic matching failed:\n{}", errors.join("\n")))
+        Err(format!(
+            "Diagnostic matching failed:\n{}",
+            errors.join("\n")
+        ))
     }
 }
 
@@ -254,13 +257,13 @@ fn matches_annotation(ann: &Annotation, diag: &TestDiagnostic) -> bool {
             message.as_ref().map_or(true, |msg| {
                 diag.message.to_lowercase().contains(&msg.to_lowercase())
             })
-        }
+        },
         AnnotationKind::ErrorCode { code } => {
             if diag.severity != TestSeverity::Error {
                 return false;
             }
             diag.code.as_ref().is_some_and(|c| c == code)
-        }
+        },
         AnnotationKind::Warning { message } => {
             if diag.severity != TestSeverity::Warning {
                 return false;
@@ -268,7 +271,7 @@ fn matches_annotation(ann: &Annotation, diag: &TestDiagnostic) -> bool {
             message.as_ref().map_or(true, |msg| {
                 diag.message.to_lowercase().contains(&msg.to_lowercase())
             })
-        }
+        },
     }
 }
 

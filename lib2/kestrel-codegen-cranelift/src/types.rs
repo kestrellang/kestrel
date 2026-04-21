@@ -55,7 +55,11 @@ pub fn translate_type(ty: &MirTy, target: &TargetConfig) -> ir::Type {
 
 /// Layout-aware type translation for Named types. Uses the layout to determine
 /// if a Named type should be passed by value (small) or by pointer (large).
-pub fn translate_type_with_layout(ty: &MirTy, target: &TargetConfig, layouts: &mut kestrel_codegen2::LayoutCache) -> ir::Type {
+pub fn translate_type_with_layout(
+    ty: &MirTy,
+    target: &TargetConfig,
+    layouts: &mut kestrel_codegen2::LayoutCache,
+) -> ir::Type {
     match ty {
         MirTy::Named { .. } => {
             let layout = layouts.layout_of(ty);
@@ -72,7 +76,7 @@ pub fn translate_type_with_layout(ty: &MirTy, target: &TargetConfig, layouts: &m
             } else {
                 common::ptr_type(target) // Large → by pointer
             }
-        }
+        },
         _ => translate_type(ty, target),
     }
 }

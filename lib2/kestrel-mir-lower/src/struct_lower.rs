@@ -37,9 +37,7 @@ pub fn lower_struct(ctx: &mut LowerCtx, entity: Entity) -> StructId {
         // Skip computed properties (have a Callable component / getter body)
         // and static properties (class-level, not per-instance).
         // Both are lowered as separate functions, not struct fields.
-        if ctx.world.get::<Callable>(child).is_some()
-            || ctx.world.get::<Static>(child).is_some()
-        {
+        if ctx.world.get::<Callable>(child).is_some() || ctx.world.get::<Static>(child).is_some() {
             continue;
         }
 

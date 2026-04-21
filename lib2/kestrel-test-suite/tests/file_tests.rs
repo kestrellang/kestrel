@@ -5,10 +5,9 @@
 
 use std::path::Path;
 
+use kestrel_test_suite2::TestCompiler;
 use kestrel_test_suite2::annotation::{self, TestMode};
 use kestrel_test_suite2::mir_snapshot;
-use kestrel_test_suite2::TestCompiler;
-
 
 fn run_ks_test(path: &Path) -> datatest_stable::Result<()> {
     let source = std::fs::read_to_string(path)?;
@@ -44,7 +43,7 @@ fn run_ks_test(path: &Path) -> datatest_stable::Result<()> {
                 "unknown panic".to_string()
             };
             Err(format!("PANIC: {}", msg).into())
-        }
+        },
     }
 }
 
@@ -62,8 +61,9 @@ fn run_ks_test_inner(
     // Include extra source files relative to the test file's directory
     for include_path in &config.include {
         let include_file = path.parent().unwrap().join(include_path);
-        let include_source = std::fs::read_to_string(&include_file)
-            .unwrap_or_else(|e| panic!("failed to read include '{}': {}", include_file.display(), e));
+        let include_source = std::fs::read_to_string(&include_file).unwrap_or_else(|e| {
+            panic!("failed to read include '{}': {}", include_file.display(), e)
+        });
         tc.add_source(&include_file.to_string_lossy(), &include_source);
     }
 
@@ -75,7 +75,7 @@ fn run_ks_test_inner(
         TestMode::Diagnostics => {
             let annotations = annotation::parse_annotations(source);
             tc.check_annotations(&annotations, file_id)?;
-        }
+        },
 
         TestMode::Mir => {
             // Expect clean compilation before checking MIR
@@ -87,7 +87,7 @@ fn run_ks_test_inner(
                 config.mir_filter.as_deref(),
                 config.mir_snapshot.as_deref(),
             )?;
-        }
+        },
 
         TestMode::Execution => {
             // Expect clean compilation before running
@@ -128,7 +128,7 @@ fn run_ks_test_inner(
                     .into());
                 }
             }
-        }
+        },
     }
 
     Ok(())

@@ -90,11 +90,13 @@ impl ProtocolBinder {
     ) {
         let registry = context.model.builtin_registry().clone();
         crate::binders::utils::attributes::validate_builtin_attribute(
-            symbol, attributes, source, context,
+            symbol,
+            attributes,
+            source,
+            context,
             "protocol",
             |k| k.is_protocol(),
             |f| registry.protocol(f),
         );
     }
-
 }

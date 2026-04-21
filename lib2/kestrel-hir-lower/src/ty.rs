@@ -8,7 +8,9 @@
 //! for declaration-level types (Callable params, TypeAnnotation, etc.).
 
 use kestrel_ast::AstType;
-use kestrel_ast_builder::{Callable, DeclSpan, ExtensionTarget, NodeKind, TypeAnnotation, TypeParams};
+use kestrel_ast_builder::{
+    Callable, DeclSpan, ExtensionTarget, NodeKind, TypeAnnotation, TypeParams,
+};
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
 use kestrel_hir::ty::HirTy;
 use kestrel_name_res::{ExtensionTargetEntity, ResolveTypePath, TypeResolution};
@@ -23,12 +25,7 @@ use crate::ctx::LowerCtx;
 ///
 /// This is the shared core used by both body lowering (LowerCtx::lower_type)
 /// and declaration-level type queries (LowerTypeAnnotation, LowerCallableTypes).
-pub fn lower_ast_type(
-    ctx: &QueryContext<'_>,
-    owner: Entity,
-    root: Entity,
-    ty: &AstType,
-) -> HirTy {
+pub fn lower_ast_type(ctx: &QueryContext<'_>, owner: Entity, root: Entity, ty: &AstType) -> HirTy {
     match ty {
         AstType::Named { segments, span } => {
             let seg_names: Vec<String> = segments.iter().map(|s| s.name.clone()).collect();
@@ -41,37 +38,47 @@ pub fn lower_ast_type(
             match result {
                 TypeResolution::Found(entity) => {
                     build_hir_ty_for_entity(ctx, owner, root, entity, segments, span)
-                }
+                },
                 TypeResolution::SelfType => {
                     if let Some(self_entity) = find_self_type(ctx, owner, root) {
                         build_self_hir_ty(ctx, self_entity, span)
                     } else {
-                        ctx.accumulate(Diagnostic::error()
-                            .with_message("'Self' is not valid in this scope")
-                            .with_labels(vec![
-                                Label::primary(span.file_id, span.range()),
-                            ]));
+                        ctx.accumulate(
+                            Diagnostic::error()
+                                .with_message("'Self' is not valid in this scope")
+                                .with_labels(vec![Label::primary(span.file_id, span.range())]),
+                        );
                         HirTy::Error(span.clone())
                     }
-                }
+                },
                 TypeResolution::NotFound(ref seg) => {
-                    let type_name = segments.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join(".");
-                    ctx.accumulate(Diagnostic::error()
-                        .with_message(format!("cannot find type '{type_name}' in this scope"))
-                        .with_labels(vec![
-                            Label::primary(span.file_id, span.range())
-                                .with_message(format!("not found (failed at '{seg}')")),
-                        ]));
+                    let type_name = segments
+                        .iter()
+                        .map(|s| s.name.as_str())
+                        .collect::<Vec<_>>()
+                        .join(".");
+                    ctx.accumulate(
+                        Diagnostic::error()
+                            .with_message(format!("cannot find type '{type_name}' in this scope"))
+                            .with_labels(vec![
+                                Label::primary(span.file_id, span.range())
+                                    .with_message(format!("not found (failed at '{seg}')")),
+                            ]),
+                    );
                     HirTy::Error(span.clone())
-                }
+                },
                 TypeResolution::NotAType(entity) => {
-                    let type_name = segments.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join(".");
+                    let type_name = segments
+                        .iter()
+                        .map(|s| s.name.as_str())
+                        .collect::<Vec<_>>()
+                        .join(".");
                     let mut labels = vec![
-                        Label::primary(span.file_id, span.range())
-                            .with_message("expected a type"),
+                        Label::primary(span.file_id, span.range()).with_message("expected a type"),
                     ];
                     if let Some(decl) = ctx.get::<DeclSpan>(entity) {
-                        let kind = ctx.get::<NodeKind>(entity)
+                        let kind = ctx
+                            .get::<NodeKind>(entity)
                             .map(|k| format!("{k:?}"))
                             .unwrap_or_else(|| "symbol".to_string());
                         labels.push(
@@ -79,13 +86,15 @@ pub fn lower_ast_type(
                                 .with_message(format!("'{type_name}' is a {kind}, not a type")),
                         );
                     }
-                    ctx.accumulate(Diagnostic::error()
-                        .with_message(format!("'{type_name}' is not a type"))
-                        .with_labels(labels));
+                    ctx.accumulate(
+                        Diagnostic::error()
+                            .with_message(format!("'{type_name}' is not a type"))
+                            .with_labels(labels),
+                    );
                     HirTy::Error(span.clone())
-                }
+                },
             }
-        }
+        },
 
         AstType::Tuple(types, span) => {
             let lowered: Vec<HirTy> = types
@@ -93,7 +102,7 @@ pub fn lower_ast_type(
                 .map(|t| lower_ast_type(ctx, owner, root, t))
                 .collect();
             HirTy::Tuple(lowered, span.clone())
-        }
+        },
 
         AstType::Function {
             params,
@@ -110,19 +119,19 @@ pub fn lower_ast_type(
                 ret: lowered_ret,
                 span: span.clone(),
             }
-        }
+        },
 
         // Sugar types → resolve standard library entity + Struct
         AstType::Array(elem, span) => lower_sugar_type(ctx, owner, root, "Array", &[elem], span),
         AstType::Optional(inner, span) => {
             lower_sugar_type(ctx, owner, root, "Optional", &[inner], span)
-        }
+        },
         AstType::Dictionary(key, val, span) => {
             lower_sugar_type(ctx, owner, root, "Dictionary", &[key, val], span)
-        }
+        },
         AstType::Result { ok, err, span } => {
             lower_sugar_type(ctx, owner, root, "Result", &[ok, err], span)
-        }
+        },
         AstType::Unit(span) => HirTy::Tuple(Vec::new(), span.clone()),
         AstType::Never(span) => HirTy::Never(span.clone()),
         AstType::Inferred(span) => HirTy::Infer(span.clone()),
@@ -200,7 +209,7 @@ fn build_hir_ty_for_entity(
                 args,
                 span: span.clone(),
             }
-        }
+        },
         Some(NodeKind::Enum) => HirTy::Enum {
             entity,
             args,
@@ -231,10 +240,16 @@ fn is_trivial_alias(ctx: &QueryContext<'_>, entity: Entity) -> bool {
     if has_type_params {
         return false;
     }
-    if ctx.get::<kestrel_ast_builder::Conformances>(entity).is_some() {
+    if ctx
+        .get::<kestrel_ast_builder::Conformances>(entity)
+        .is_some()
+    {
         return false;
     }
-    if ctx.get::<kestrel_ast_builder::WhereClause>(entity).is_some() {
+    if ctx
+        .get::<kestrel_ast_builder::WhereClause>(entity)
+        .is_some()
+    {
         return false;
     }
     true
@@ -310,28 +325,39 @@ fn validate_arity(
         return Ok(args);
     };
     let total = tp.0.len();
-    let required = tp
-        .0
-        .iter()
-        .filter(|&&p| ctx.get::<TypeAnnotation>(p).is_none())
-        .count();
+    let required =
+        tp.0.iter()
+            .filter(|&&p| ctx.get::<TypeAnnotation>(p).is_none())
+            .count();
     if args.len() < required {
-        let type_name = segments.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join(".");
-        ctx.accumulate(Diagnostic::error()
-            .with_message(format!("too few type arguments for '{type_name}'"))
-            .with_labels(vec![
-                Label::primary(span.file_id, span.range())
-                    .with_message(format!("expected at least {required}, got {}", args.len())),
-            ]));
+        let type_name = segments
+            .iter()
+            .map(|s| s.name.as_str())
+            .collect::<Vec<_>>()
+            .join(".");
+        ctx.accumulate(
+            Diagnostic::error()
+                .with_message(format!("too few type arguments for '{type_name}'"))
+                .with_labels(vec![
+                    Label::primary(span.file_id, span.range())
+                        .with_message(format!("expected at least {required}, got {}", args.len())),
+                ]),
+        );
         Err(HirTy::Error(span.clone()))
     } else if args.len() > total {
-        let type_name = segments.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join(".");
-        ctx.accumulate(Diagnostic::error()
-            .with_message(format!("too many type arguments for '{type_name}'"))
-            .with_labels(vec![
-                Label::primary(span.file_id, span.range())
-                    .with_message(format!("expected at most {total}, got {}", args.len())),
-            ]));
+        let type_name = segments
+            .iter()
+            .map(|s| s.name.as_str())
+            .collect::<Vec<_>>()
+            .join(".");
+        ctx.accumulate(
+            Diagnostic::error()
+                .with_message(format!("too many type arguments for '{type_name}'"))
+                .with_labels(vec![
+                    Label::primary(span.file_id, span.range())
+                        .with_message(format!("expected at most {total}, got {}", args.len())),
+                ]),
+        );
         Err(HirTy::Error(span.clone()))
     } else {
         Ok(args)
@@ -356,17 +382,29 @@ fn lower_sugar_type(
         let args = fill_type_arg_defaults(ctx, root, entity, lowered_args);
         // Dispatch by NodeKind — Optional is an enum, Array/Dictionary are structs.
         match ctx.get::<NodeKind>(entity).cloned() {
-            Some(NodeKind::Enum) => HirTy::Enum { entity, args, span: span.clone() },
-            Some(NodeKind::Protocol) => HirTy::Protocol { entity, args, span: span.clone() },
-            _ => HirTy::Struct { entity, args, span: span.clone() },
+            Some(NodeKind::Enum) => HirTy::Enum {
+                entity,
+                args,
+                span: span.clone(),
+            },
+            Some(NodeKind::Protocol) => HirTy::Protocol {
+                entity,
+                args,
+                span: span.clone(),
+            },
+            _ => HirTy::Struct {
+                entity,
+                args,
+                span: span.clone(),
+            },
         }
     } else {
-        ctx.accumulate(Diagnostic::error()
-            .with_message(format!("{name} is not defined"))
-            .with_labels(vec![
-                Label::primary(span.file_id, span.range()),
-            ])
-            .with_notes(vec!["is the standard library imported?".to_string()]));
+        ctx.accumulate(
+            Diagnostic::error()
+                .with_message(format!("{name} is not defined"))
+                .with_labels(vec![Label::primary(span.file_id, span.range())])
+                .with_notes(vec!["is the standard library imported?".to_string()]),
+        );
         HirTy::Error(span.clone())
     }
 }
@@ -389,7 +427,10 @@ fn fill_type_arg_defaults(
     }
     let type_params = tp.0.clone();
     for &param in type_params.iter().skip(args.len()) {
-        match ctx.query(LowerTypeAnnotation { entity: param, root }) {
+        match ctx.query(LowerTypeAnnotation {
+            entity: param,
+            root,
+        }) {
             Some(default_ty) => args.push(default_ty),
             None => break,
         }
@@ -424,17 +465,17 @@ fn find_self_type(ctx: &QueryContext<'_>, owner: Entity, root: Entity) -> Option
         match ctx.get::<NodeKind>(entity) {
             Some(NodeKind::Struct | NodeKind::Enum | NodeKind::Protocol) => {
                 return Some(entity);
-            }
+            },
             Some(NodeKind::Extension) => {
                 // Resolve to the extension's target type, not the extension itself
                 return ctx.query(kestrel_name_res::ExtensionTargetEntity {
                     extension: entity,
                     root,
                 });
-            }
+            },
             _ => {
                 current = ctx.parent_of(entity);
-            }
+            },
         }
     }
     None
@@ -541,7 +582,10 @@ impl QueryFn for LowerExtensionTargetTypeArgs {
         // redundant noise. Args beyond the expected count become HirTy::Error
         // without triggering a name-resolution diagnostic.
         let expected_arity = ctx
-            .query(ExtensionTargetEntity { extension: self.extension, root: self.root })
+            .query(ExtensionTargetEntity {
+                extension: self.extension,
+                root: self.root,
+            })
             .and_then(|target| ctx.get::<TypeParams>(target).map(|tp| tp.0.len()));
 
         // Lower each type arg in the extension's own scope (so type params like T are visible)
@@ -637,7 +681,7 @@ mod tests {
                     HirTy::Protocol { entity, .. } => assert_eq!(entity, iter_proto),
                     other => panic!("expected Protocol base, got {other:?}"),
                 }
-            }
+            },
             other => panic!("expected AssocProjection, got {other:?}"),
         }
     }

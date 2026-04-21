@@ -71,7 +71,9 @@ use crate::diagnostic::*;
 use crate::traits::{DeclCheck, Describe};
 use crate::util;
 use kestrel_ast::AstType;
-use kestrel_ast_builder::{Name, NodeKind, TypeAnnotation, TypeParams, WhereClause as AstWhereClause, WhereConstraint};
+use kestrel_ast_builder::{
+    Name, NodeKind, TypeAnnotation, TypeParams, WhereClause as AstWhereClause, WhereConstraint,
+};
 use kestrel_name_res::{ResolveTypePath, TypeResolution};
 use kestrel_span2::Span;
 
@@ -229,17 +231,12 @@ impl DeclCheck for TypeArgArityAnalyzer {
 }
 
 /// Recursively check type argument arity in an AstType.
-fn check_type_arg_arity(
-    cx: &DeclContext<'_>,
-    ty: &AstType,
-    diags: &mut Vec<AnalyzeDiagnostic>,
-) {
+fn check_type_arg_arity(cx: &DeclContext<'_>, ty: &AstType, diags: &mut Vec<AnalyzeDiagnostic>) {
     match ty {
         AstType::Named { segments, span } => {
             // Collect all type args from segments
-            let type_args: Vec<&AstType> = segments.iter()
-                .flat_map(|s| s.type_args.iter())
-                .collect();
+            let type_args: Vec<&AstType> =
+                segments.iter().flat_map(|s| s.type_args.iter()).collect();
 
             if !type_args.is_empty() {
                 // Resolve the named type to check its type params
@@ -250,25 +247,32 @@ fn check_type_arg_arity(
                     root: cx.root,
                 });
                 if let TypeResolution::Found(entity) = result {
-                    let total = cx.query.get::<TypeParams>(entity)
+                    let total = cx
+                        .query
+                        .get::<TypeParams>(entity)
                         .map(|tp| tp.0.len())
                         .unwrap_or(0);
-                    let required = cx.query.get::<TypeParams>(entity)
-                        .map(|tp| tp.0.iter()
-                            .filter(|&&p| cx.query.get::<TypeAnnotation>(p).is_none())
-                            .count())
+                    let required = cx
+                        .query
+                        .get::<TypeParams>(entity)
+                        .map(|tp| {
+                            tp.0.iter()
+                                .filter(|&&p| cx.query.get::<TypeAnnotation>(p).is_none())
+                                .count()
+                        })
                         .unwrap_or(0);
-                    let type_name = segments.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join(".");
+                    let type_name = segments
+                        .iter()
+                        .map(|s| s.name.as_str())
+                        .collect::<Vec<_>>()
+                        .join(".");
 
                     if total == 0 {
                         // Non-generic type doesn't accept type arguments
                         diags.push(AnalyzeDiagnostic {
                             descriptor_id: "E438",
                             severity: Severity::Error,
-                            message: format!(
-                                "'{}' does not accept type arguments",
-                                type_name
-                            ),
+                            message: format!("'{}' does not accept type arguments", type_name),
                             labels: vec![DiagLabel {
                                 span: span.clone(),
                                 message: "does not accept type arguments".into(),
@@ -282,7 +286,9 @@ fn check_type_arg_arity(
                             severity: Severity::Error,
                             message: format!(
                                 "too few type arguments for '{}': expected at least {}, got {}",
-                                type_name, required, type_args.len()
+                                type_name,
+                                required,
+                                type_args.len()
                             ),
                             labels: vec![DiagLabel {
                                 span: span.clone(),
@@ -297,7 +303,9 @@ fn check_type_arg_arity(
                             severity: Severity::Error,
                             message: format!(
                                 "too many type arguments for '{}': expected at most {}, got {}",
-                                type_name, total, type_args.len()
+                                type_name,
+                                total,
+                                type_args.len()
                             ),
                             labels: vec![DiagLabel {
                                 span: span.clone(),
@@ -316,22 +324,30 @@ fn check_type_arg_arity(
                     check_type_arg_arity(cx, arg, diags);
                 }
             }
-        }
+        },
         AstType::Tuple(types, _) => {
-            for t in types { check_type_arg_arity(cx, t, diags); }
-        }
-        AstType::Function { params, return_type, .. } => {
-            for p in params { check_type_arg_arity(cx, p, diags); }
+            for t in types {
+                check_type_arg_arity(cx, t, diags);
+            }
+        },
+        AstType::Function {
+            params,
+            return_type,
+            ..
+        } => {
+            for p in params {
+                check_type_arg_arity(cx, p, diags);
+            }
             check_type_arg_arity(cx, return_type, diags);
-        }
+        },
         AstType::Array(inner, _) | AstType::Optional(inner, _) => {
             check_type_arg_arity(cx, inner, diags);
-        }
+        },
         AstType::Dictionary(k, v, _) | AstType::Result { ok: k, err: v, .. } => {
             check_type_arg_arity(cx, k, diags);
             check_type_arg_arity(cx, v, diags);
-        }
-        _ => {}
+        },
+        _ => {},
     }
 }
 
@@ -450,14 +466,19 @@ fn check_where_clause_bounds(
     };
 
     // Collect declared type param names for checking subjects
-    let declared_names: Vec<String> = params.iter()
+    let declared_names: Vec<String> = params
+        .iter()
         .filter_map(|&p| cx.query.get::<Name>(p).map(|n| n.0.clone()))
         .collect();
 
     for constraint in &wc.0 {
         let (subject, protocols) = match constraint {
-            WhereConstraint::Bound { subject, protocols, .. } => (subject, protocols.as_slice()),
-            WhereConstraint::NegativeBound { subject, protocol, .. } => (subject, std::slice::from_ref(protocol)),
+            WhereConstraint::Bound {
+                subject, protocols, ..
+            } => (subject, protocols.as_slice()),
+            WhereConstraint::NegativeBound {
+                subject, protocol, ..
+            } => (subject, std::slice::from_ref(protocol)),
             WhereConstraint::Equality { .. } => continue,
         };
 
@@ -478,7 +499,10 @@ fn check_where_clause_bounds(
                             message: "not a declared type parameter".into(),
                             is_primary: true,
                         }],
-                        notes: vec![format!("available type parameters: {}", declared_names.join(", "))],
+                        notes: vec![format!(
+                            "available type parameters: {}",
+                            declared_names.join(", ")
+                        )],
                     });
                 }
             } else if segments.len() > 1 {
@@ -495,7 +519,10 @@ fn check_where_clause_bounds(
                             message: "not a declared type parameter".into(),
                             is_primary: true,
                         }],
-                        notes: vec![format!("available type parameters: {}", declared_names.join(", "))],
+                        notes: vec![format!(
+                            "available type parameters: {}",
+                            declared_names.join(", ")
+                        )],
                     });
                 } else {
                     // Resolve the full path to check the associated type exists
@@ -530,7 +557,9 @@ fn check_where_clause_bounds(
 
         // Check each bound resolves to a protocol (E436) or exists at all
         for proto_ty in protocols {
-            let AstType::Named { segments, span } = proto_ty else { continue };
+            let AstType::Named { segments, span } = proto_ty else {
+                continue;
+            };
             let seg_names: Vec<String> = segments.iter().map(|s| s.name.clone()).collect();
             let type_name = seg_names.join(".");
 
@@ -553,13 +582,18 @@ fn check_where_clause_bounds(
                             message: format!("'{}' is not a protocol", type_name),
                             labels: vec![DiagLabel {
                                 span: span.clone(),
-                                message: format!("'{}' is a {}, not a protocol", type_name, kind_str),
+                                message: format!(
+                                    "'{}' is a {}, not a protocol",
+                                    type_name, kind_str
+                                ),
                                 is_primary: true,
                             }],
-                            notes: vec!["only protocols can be used as type bounds in where clauses".into()],
+                            notes: vec![
+                                "only protocols can be used as type bounds in where clauses".into(),
+                            ],
                         });
                     }
-                }
+                },
                 TypeResolution::NotFound(_) => {
                     diags.push(AnalyzeDiagnostic {
                         descriptor_id: "E436",
@@ -572,8 +606,8 @@ fn check_where_clause_bounds(
                         }],
                         notes: vec![],
                     });
-                }
-                _ => {}
+                },
+                _ => {},
             }
         }
     }

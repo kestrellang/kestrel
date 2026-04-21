@@ -17,8 +17,8 @@
 use kestrel_ast_builder::{Body, Settable};
 use kestrel_hecs::Entity;
 use kestrel_mir::{
-    BasicBlock, Callee, FunctionDef, FunctionId, FunctionKind, Immediate, LocalDef, MirBody,
-    MirTy, Place, Rvalue, Statement, StatementKind, StaticDef, StaticId, Terminator, Value,
+    BasicBlock, Callee, FunctionDef, FunctionId, FunctionKind, Immediate, LocalDef, MirBody, MirTy,
+    Place, Rvalue, Statement, StatementKind, StaticDef, StaticId, Terminator, Value,
 };
 
 use crate::body_lower::lower_function_body;
@@ -84,7 +84,11 @@ pub fn synthesize_static_inits(ctx: &mut LowerCtx) {
 /// The body is built by reusing `lower_function_body` on the static entity —
 /// the static's `Body` component is the initializer, and it has no `Callable`
 /// so the HIR body has no params and a tail expression that becomes a return.
-fn synthesize_init_thunk(ctx: &mut LowerCtx, static_entity: Entity, static_ty: MirTy) -> FunctionId {
+fn synthesize_init_thunk(
+    ctx: &mut LowerCtx,
+    static_entity: Entity,
+    static_ty: MirTy,
+) -> FunctionId {
     let static_name = ctx.module.resolve_name(static_entity).to_string();
     let thunk_entity = ctx.next_synthetic_entity();
     let thunk_name = format!("__init${static_name}");
@@ -106,7 +110,8 @@ fn synthesize_master_init(
     thunks: &[(Entity, FunctionId, MirTy)],
 ) -> FunctionId {
     let entity = ctx.next_synthetic_entity();
-    ctx.module.register_name(entity, INIT_STATICS_NAME.to_string());
+    ctx.module
+        .register_name(entity, INIT_STATICS_NAME.to_string());
 
     let mut def = FunctionDef::new(entity, INIT_STATICS_NAME, MirTy::Unit);
     def.kind = FunctionKind::Free;
@@ -120,18 +125,25 @@ fn synthesize_master_init(
         let thunk_entity = ctx.module.functions[thunk_id.index()].entity;
 
         // tmp = call __init$...()
-        let tmp = body.add_local(LocalDef::new(format!("_t{}", body.locals.len()), ty.clone()));
-        body.block_mut(entry).stmts.push(Statement::new(StatementKind::Call {
-            dest: Some(Place::Local(tmp)),
-            callee: Callee::direct(thunk_entity),
-            args: Vec::new(),
-        }));
+        let tmp = body.add_local(LocalDef::new(
+            format!("_t{}", body.locals.len()),
+            ty.clone(),
+        ));
+        body.block_mut(entry)
+            .stmts
+            .push(Statement::new(StatementKind::Call {
+                dest: Some(Place::Local(tmp)),
+                callee: Callee::direct(thunk_entity),
+                args: Vec::new(),
+            }));
 
         // @global = copy tmp
-        body.block_mut(entry).stmts.push(Statement::new(StatementKind::Assign {
-            dest: Place::Global(*static_entity),
-            rvalue: Rvalue::Copy(Place::Local(tmp)),
-        }));
+        body.block_mut(entry)
+            .stmts
+            .push(Statement::new(StatementKind::Assign {
+                dest: Place::Global(*static_entity),
+                rvalue: Rvalue::Copy(Place::Local(tmp)),
+            }));
     }
 
     body.block_mut(entry).terminator = Terminator::ret(Value::Immediate(Immediate::unit()));

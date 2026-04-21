@@ -11,7 +11,7 @@ use crate::body::BasicBlock;
 use crate::immediate::{Immediate, ImmediateKind};
 use crate::item::*;
 use crate::place::Place;
-use crate::statement::{Callee, CallArg, Rvalue, Statement, StatementKind};
+use crate::statement::{CallArg, Callee, Rvalue, Statement, StatementKind};
 use crate::terminator::{Terminator, TerminatorKind};
 use crate::ty::MirTy;
 use crate::value::Value;
@@ -35,10 +35,7 @@ fn write_comma_sep(
 }
 
 /// Write type parameters: `[T, U]` or nothing if empty.
-fn write_type_params(
-    f: &mut fmt::Formatter<'_>,
-    params: &[TypeParamDef],
-) -> fmt::Result {
+fn write_type_params(f: &mut fmt::Formatter<'_>, params: &[TypeParamDef]) -> fmt::Result {
     if !params.is_empty() {
         write!(f, "[")?;
         for (i, tp) in params.iter().enumerate() {
@@ -265,10 +262,7 @@ impl fmt::Display for ImmediateDisplay<'_> {
 
 impl Statement {
     pub fn display<'a>(&'a self, module: &'a MirModule) -> impl fmt::Display + 'a {
-        StatementDisplay {
-            stmt: self,
-            module,
-        }
+        StatementDisplay { stmt: self, module }
     }
 }
 
@@ -309,12 +303,7 @@ impl fmt::Display for StatementDisplay<'_> {
                 )
             },
             StatementKind::SetDeinitFlag { flag, value } => {
-                write!(
-                    f,
-                    "%{} = {}",
-                    self.module.resolve_local_name(*flag),
-                    value,
-                )
+                write!(f, "%{} = {}", self.module.resolve_local_name(*flag), value,)
             },
         }
     }
@@ -504,14 +493,8 @@ fn write_call_args(
 // === Terminator ===
 
 impl Terminator {
-    pub fn display<'a>(
-        &'a self,
-        module: &'a MirModule,
-    ) -> impl fmt::Display + 'a {
-        TerminatorDisplay {
-            term: self,
-            module,
-        }
+    pub fn display<'a>(&'a self, module: &'a MirModule) -> impl fmt::Display + 'a {
+        TerminatorDisplay { term: self, module }
     }
 }
 
@@ -561,11 +544,7 @@ impl fmt::Display for TerminatorDisplay<'_> {
 // === BasicBlock ===
 
 impl BasicBlock {
-    pub fn display<'a>(
-        &'a self,
-        module: &'a MirModule,
-        indent: &'a str,
-    ) -> impl fmt::Display + 'a {
+    pub fn display<'a>(&'a self, module: &'a MirModule, indent: &'a str) -> impl fmt::Display + 'a {
         BasicBlockDisplay {
             block: self,
             module,
@@ -585,7 +564,12 @@ impl fmt::Display for BasicBlockDisplay<'_> {
         for stmt in &self.block.stmts {
             writeln!(f, "{}{}", self.indent, stmt.display(self.module))?;
         }
-        writeln!(f, "{}{}", self.indent, self.block.terminator.display(self.module))
+        writeln!(
+            f,
+            "{}{}",
+            self.indent,
+            self.block.terminator.display(self.module)
+        )
     }
 }
 
@@ -861,12 +845,7 @@ impl fmt::Display for StaticDefDisplay<'_> {
         if self.def.is_mutable {
             write!(f, "var ")?;
         }
-        write!(
-            f,
-            "{}: {}",
-            self.def.name,
-            self.def.ty.display(self.module),
-        )?;
+        write!(f, "{}: {}", self.def.name, self.def.ty.display(self.module),)?;
         if let Some(init) = &self.def.initializer {
             write!(f, " = {}", init.display(self.module))?;
         }

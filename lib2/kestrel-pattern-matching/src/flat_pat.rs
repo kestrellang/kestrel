@@ -28,7 +28,7 @@ use kestrel_hecs::{Entity, QueryContext};
 use kestrel_hir::body::*;
 use kestrel_type_infer::result::ResolvedTy;
 
-use super::constructor::{collect_fields, Constructor};
+use super::constructor::{Constructor, collect_fields};
 
 /// A normalized pattern for matrix operations.
 ///
@@ -112,10 +112,12 @@ impl FlatPat {
                 }
 
                 Some(children.clone())
-            }
+            },
 
             // Or-pattern: try each alternative, use first compatible one
-            FlatPat::Or(alts) => alts.iter().find_map(|alt| alt.decompose(target_ctor, arity)),
+            FlatPat::Or(alts) => alts
+                .iter()
+                .find_map(|alt| alt.decompose(target_ctor, arity)),
         }
     }
 }
@@ -152,7 +154,7 @@ fn decompose_array(
                 let src_idx = total_src.saturating_sub(tgt_suffix) + i;
                 result.push(children.get(src_idx).cloned().unwrap_or(FlatPat::Wildcard));
             }
-        }
+        },
 
         // Case 2: source has rest, target doesn't — expand rest to wildcards
         (true, false) => {
@@ -166,7 +168,7 @@ fn decompose_array(
                 let src_idx = total_src.saturating_sub(tgt_suffix) + i;
                 result.push(children.get(src_idx).cloned().unwrap_or(FlatPat::Wildcard));
             }
-        }
+        },
 
         // Case 3: source doesn't have rest, target does — compress
         (false, true) => {
@@ -181,14 +183,14 @@ fn decompose_array(
                 let src_idx = total_src.saturating_sub(tgt_suffix) + i;
                 result.push(children.get(src_idx).cloned().unwrap_or(FlatPat::Wildcard));
             }
-        }
+        },
 
         // Case 4: neither has rest — direct mapping
         (false, false) => {
             for child in children {
                 result.push(child.clone());
             }
-        }
+        },
     }
 
     result
@@ -210,7 +212,7 @@ pub fn flatten(
         // Wildcards, bindings, and errors all match anything
         HirPat::Wildcard { .. } | HirPat::Binding { .. } | HirPat::Error { .. } => {
             FlatPat::Wildcard
-        }
+        },
 
         HirPat::Literal { value, .. } => flatten_literal(value),
 
@@ -221,7 +223,12 @@ pub fn flatten(
             ..
         } => flatten_range(start, end, *inclusive),
 
-        HirPat::Tuple { prefix, has_rest, suffix, .. } => {
+        HirPat::Tuple {
+            prefix,
+            has_rest,
+            suffix,
+            ..
+        } => {
             // Get element types from scrutinee
             let elem_types = match scrutinee_ty {
                 ResolvedTy::Tuple(tys) => tys.clone(),
@@ -250,7 +257,9 @@ pub fn flatten(
             // Flatten suffix elements (from the end of the tuple)
             let suffix_start = actual_arity.saturating_sub(suffix.len());
             for (j, &elem_id) in suffix.iter().enumerate() {
-                let elem_ty = elem_types.get(suffix_start + j).unwrap_or(&ResolvedTy::Error);
+                let elem_ty = elem_types
+                    .get(suffix_start + j)
+                    .unwrap_or(&ResolvedTy::Error);
                 children.push(flatten(hir, query, elem_id, elem_ty));
             }
 
@@ -260,7 +269,7 @@ pub fn flatten(
                 },
                 children,
             }
-        }
+        },
 
         // Fully resolved variant (entity known from name resolution)
         HirPat::Variant { entity, args, .. } => {
@@ -282,11 +291,12 @@ pub fn flatten(
                 },
                 children,
             }
-        }
+        },
 
         // Implicit variant — resolve entity from scrutinee type's enum cases
         HirPat::ImplicitVariant { name, args, .. } => {
-            let (entity, field_types) = resolve_implicit_variant(query, name, args.len(), scrutinee_ty);
+            let (entity, field_types) =
+                resolve_implicit_variant(query, name, args.len(), scrutinee_ty);
             let children: Vec<_> = args
                 .iter()
                 .enumerate()
@@ -303,10 +313,13 @@ pub fn flatten(
                 },
                 children,
             }
-        }
+        },
 
         HirPat::Struct {
-            entity, fields, has_rest: _, ..
+            entity,
+            fields,
+            has_rest: _,
+            ..
         } => {
             // Expand struct pattern to cover ALL fields (missing = wildcard)
             let all_fields = collect_fields(query, *entity);
@@ -342,12 +355,19 @@ pub fn flatten(
                 },
                 children,
             }
-        }
+        },
 
-        HirPat::Array { prefix, rest, suffix, .. } => {
+        HirPat::Array {
+            prefix,
+            rest,
+            suffix,
+            ..
+        } => {
             // Extract element type from scrutinee (Array[T] or Slice[T] → T)
             let elem_ty = match scrutinee_ty {
-                ResolvedTy::Named { args, .. } => args.first().cloned().unwrap_or(ResolvedTy::Error),
+                ResolvedTy::Named { args, .. } => {
+                    args.first().cloned().unwrap_or(ResolvedTy::Error)
+                },
                 _ => ResolvedTy::Error,
             };
 
@@ -369,7 +389,7 @@ pub fn flatten(
                 },
                 children,
             }
-        }
+        },
 
         HirPat::Or { alternatives, .. } => {
             let alts: Vec<_> = alternatives
@@ -377,7 +397,7 @@ pub fn flatten(
                 .map(|&alt_id| flatten(hir, query, alt_id, scrutinee_ty))
                 .collect();
             FlatPat::Or(alts)
-        }
+        },
 
         // At-pattern: the binding is irrelevant to the matrix algorithm,
         // only the subpattern determines constructor structure
@@ -403,11 +423,7 @@ fn flatten_literal(value: &HirLiteral) -> FlatPat {
     }
 }
 
-fn flatten_range(
-    start: &Option<HirLiteral>,
-    end: &Option<HirLiteral>,
-    inclusive: bool,
-) -> FlatPat {
+fn flatten_range(start: &Option<HirLiteral>, end: &Option<HirLiteral>, inclusive: bool) -> FlatPat {
     // Determine if integer or char range based on bounds
     let is_int = matches!(
         (start, end),
@@ -437,7 +453,7 @@ fn flatten_range(
                 } else {
                     char::from_u32(*v - 1).unwrap_or(c)
                 })
-            }
+            },
             _ => None,
         };
         Constructor::CharRange { start: s, end: e }

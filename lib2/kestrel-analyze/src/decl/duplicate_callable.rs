@@ -92,7 +92,7 @@ fn duplicate_key_for(
         NodeKind::Function => {
             let name = util::entity_name(cx.query, child);
             Some((DuplicateKey { name, labels }, "function"))
-        }
+        },
         NodeKind::Initializer => Some((
             DuplicateKey {
                 name: "init".into(),

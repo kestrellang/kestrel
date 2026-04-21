@@ -6,10 +6,9 @@ use crate::context::AnalysisContext;
 
 use kestrel_semantic_model::{
     AllConformancesFor, AllInitializersFor, AllMethodsFor, AssociatedTypeBindingsFor,
-    ConformancesForSymbol, ExtensionsFor, PropertyRequirement,
-    ProtocolAssociatedTypesWithDefaults, ProtocolInitializersWithDefiner,
-    ProtocolMethodsWithDefiner, ProtocolRequiredMethods, ProtocolRequiredProperties,
-    SemanticModel, StructFields, SymbolFor,
+    ConformancesForSymbol, ExtensionsFor, PropertyRequirement, ProtocolAssociatedTypesWithDefaults,
+    ProtocolInitializersWithDefiner, ProtocolMethodsWithDefiner, ProtocolRequiredMethods,
+    ProtocolRequiredProperties, SemanticModel, StructFields, SymbolFor,
 };
 use kestrel_semantic_tree::behavior::callable::CallableBehavior;
 use kestrel_semantic_tree::behavior::callable::{CallableSignature, ReceiverKind, SignatureType};
@@ -233,7 +232,9 @@ fn check_struct_conformance(
     let struct_name = &struct_sym.metadata().name().value;
     let struct_id = struct_sym.metadata().id();
 
-    let conformances = model.query(AllConformancesFor { symbol_id: struct_id });
+    let conformances = model.query(AllConformancesFor {
+        symbol_id: struct_id,
+    });
     if conformances.is_empty() {
         return;
     }
@@ -244,7 +245,9 @@ fn check_struct_conformance(
     });
     check_extension_conformances(struct_name, &extensions, model, ctx);
 
-    let associated_type_bindings = model.query(AssociatedTypeBindingsFor { symbol_id: struct_id });
+    let associated_type_bindings = model.query(AssociatedTypeBindingsFor {
+        symbol_id: struct_id,
+    });
 
     // Compute self_type first - this is used for Self substitution in struct method signatures
     let self_type = dyn_sym
@@ -253,7 +256,9 @@ fn check_struct_conformance(
         .map(|tb| SignatureType::from_ty(tb.ty()))
         .unwrap_or_else(|| SignatureType::Named(vec![struct_name.clone()]));
 
-    let all_methods = model.query(AllMethodsFor { symbol_id: struct_id });
+    let all_methods = model.query(AllMethodsFor {
+        symbol_id: struct_id,
+    });
 
     // Build struct method map with Self substituted to the concrete type
     let mut self_bindings = HashMap::new();
@@ -584,7 +589,9 @@ fn link_protocol_methods_for_struct(
     let struct_name = &struct_sym.metadata().name().value;
     let struct_id = struct_sym.metadata().id();
 
-    let conformances = model.query(AllConformancesFor { symbol_id: struct_id });
+    let conformances = model.query(AllConformancesFor {
+        symbol_id: struct_id,
+    });
     if conformances.is_empty() {
         return;
     }
@@ -618,7 +625,9 @@ fn link_protocol_methods_for_struct(
         }
     }
 
-    let all_methods = model.query(AllMethodsFor { symbol_id: struct_id });
+    let all_methods = model.query(AllMethodsFor {
+        symbol_id: struct_id,
+    });
 
     for struct_method in &all_methods {
         let struct_sig = struct_method.signature();
@@ -895,7 +904,9 @@ fn link_protocol_initializers_for_struct(
     let struct_name = &struct_sym.metadata().name().value;
     let struct_id = struct_sym.metadata().id();
 
-    let conformances = model.query(AllConformancesFor { symbol_id: struct_id });
+    let conformances = model.query(AllConformancesFor {
+        symbol_id: struct_id,
+    });
     if conformances.is_empty() {
         return;
     }
@@ -931,7 +942,9 @@ fn link_protocol_initializers_for_struct(
     }
 
     // Collect all initializers from struct and extensions
-    let all_initializers = model.query(AllInitializersFor { symbol_id: struct_id });
+    let all_initializers = model.query(AllInitializersFor {
+        symbol_id: struct_id,
+    });
 
     // Match struct initializers to protocol initializers
     for struct_init in &all_initializers {

@@ -4,8 +4,7 @@ use kestrel_span::{Name, Span};
 use semantic_tree::symbol::{Symbol, SymbolId, SymbolMetadata, SymbolMetadataBuilder};
 
 use crate::{
-    behavior::markers::AccessorMarker, language::KestrelLanguage,
-    symbol::kind::KestrelSymbolKind,
+    behavior::markers::AccessorMarker, language::KestrelLanguage, symbol::kind::KestrelSymbolKind,
 };
 
 /// Represents a synthetic getter for a computed property.

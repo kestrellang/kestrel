@@ -2,8 +2,12 @@
 //!
 //! Implements the Language Server Protocol for Kestrel using tower-lsp.
 
-use crate::diagnostics::{convert_diagnostics_for_file, position_to_byte_offset, byte_offset_to_position};
-use crate::position::{find_symbol_at_position, find_call_site_at_position, find_dot_completions, CompletionKind};
+use crate::diagnostics::{
+    byte_offset_to_position, convert_diagnostics_for_file, position_to_byte_offset,
+};
+use crate::position::{
+    CompletionKind, find_call_site_at_position, find_dot_completions, find_symbol_at_position,
+};
 use dashmap::DashMap;
 use kestrel_compiler::Compilation;
 use std::collections::HashMap;
@@ -107,11 +111,11 @@ impl Backend {
                             .collect();
 
                         Some(results)
-                    }
+                    },
                     Err(e) => {
                         eprintln!("Stdlib error: {}", e);
                         None
-                    }
+                    },
                 }
             })
             .await
@@ -126,7 +130,7 @@ impl Backend {
                         .publish_diagnostics(uri, diagnostics, None)
                         .await;
                 }
-            }
+            },
             None => {
                 // Clear diagnostics on error
                 for entry in self.documents.iter() {
@@ -134,10 +138,9 @@ impl Backend {
                         .publish_diagnostics(entry.key().clone(), vec![], None)
                         .await;
                 }
-            }
+            },
         }
     }
-
 }
 
 #[tower_lsp::async_trait]
@@ -375,7 +378,10 @@ impl LanguageServer for Backend {
             let end_pos = byte_offset_to_position(def_source, def_end);
 
             // Get URI for definition file (use current file if same, or try to find it)
-            let def_uri = file_id_to_uri.get(&def_file_id).cloned().unwrap_or(uri_clone);
+            let def_uri = file_id_to_uri
+                .get(&def_file_id)
+                .cloned()
+                .unwrap_or(uri_clone);
 
             Some(GotoDefinitionResponse::Scalar(Location {
                 uri: def_uri,

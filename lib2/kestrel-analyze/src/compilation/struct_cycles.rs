@@ -115,7 +115,10 @@ fn find_cycle(
         let mut cycle = path[cycle_start..].to_vec();
         cycle.push(entity); // close the cycle
         // closing_field will be set by the caller
-        return Some(CycleResult { cycle, closing_field: entity });
+        return Some(CycleResult {
+            cycle,
+            closing_field: entity,
+        });
     }
 
     active.insert(entity);
@@ -140,7 +143,10 @@ fn find_cycle(
         if let Some(result) = check_type_for_cycle(cx, &ann.0, entity, path, active) {
             // Only set closing_field if it hasn't been set yet (preserve innermost)
             if result.closing_field == result.cycle[0] {
-                return Some(CycleResult { closing_field: child, ..result });
+                return Some(CycleResult {
+                    closing_field: child,
+                    ..result
+                });
             }
             return Some(result);
         }
@@ -177,7 +183,7 @@ fn check_type_for_cycle(
                 }
             }
             None
-        }
+        },
         AstType::Tuple(elements, _) => {
             // Tuples are inline — recurse into each element
             for elem in elements {
@@ -186,7 +192,7 @@ fn check_type_for_cycle(
                 }
             }
             None
-        }
+        },
         // Array, Optional, Dictionary, Result, Function — heap-indirected, stop here
         _ => None,
     }
@@ -204,7 +210,9 @@ fn emit_cycle_diagnostic(
     }
 
     let origin = cycle[0];
-    let origin_name = cx.query.get::<Name>(origin)
+    let origin_name = cx
+        .query
+        .get::<Name>(origin)
         .map(|n| n.0.clone())
         .unwrap_or_else(|| "?".into());
 
@@ -226,7 +234,8 @@ fn emit_cycle_diagnostic(
         });
     } else {
         // Multi-struct cycle
-        let cycle_names: Vec<String> = cycle.iter()
+        let cycle_names: Vec<String> = cycle
+            .iter()
             .filter_map(|&e| cx.query.get::<Name>(e).map(|n| n.0.clone()))
             .collect();
         let cycle_str = cycle_names.join(" -> ");

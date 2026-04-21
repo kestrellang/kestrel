@@ -112,9 +112,7 @@ impl DeclCheck for SubscriptAnalyzer {
                     message: "add a body to this subscript".into(),
                     is_primary: true,
                 }],
-                notes: vec![
-                    "Provide a body with { expr } or { get { } set { } } syntax.".into(),
-                ],
+                notes: vec!["Provide a body with { expr } or { get { } set { } } syntax.".into()],
             });
         }
 

@@ -443,7 +443,10 @@ fn resolve_setter_body(
 ///
 /// Returns the concrete type of the containing struct, enum, or extension target.
 /// The hierarchy is: Struct/Extension/Enum -> Subscript
-fn get_self_type(symbol: &Arc<dyn Symbol<KestrelLanguage>>, model: &kestrel_semantic_model::SemanticModel) -> Option<Ty> {
+fn get_self_type(
+    symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+    model: &kestrel_semantic_model::SemanticModel,
+) -> Option<Ty> {
     let parent = symbol.metadata().parent()?;
     crate::binders::utils::self_type::self_type_for_parent(&parent, model)
 }

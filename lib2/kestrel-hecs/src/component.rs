@@ -166,9 +166,7 @@ impl ComponentStore {
 
     /// Iterate over all (entity, component) pairs for a given type.
     pub fn iter<T: Component>(&self) -> impl Iterator<Item = (Entity, &T)> {
-        self.column::<T>()
-            .into_iter()
-            .flat_map(|col| col.iter())
+        self.column::<T>().into_iter().flat_map(|col| col.iter())
     }
 
     /// Count of entities with a given component type.
@@ -200,7 +198,11 @@ impl ComponentStore {
 impl Clone for ComponentStore {
     fn clone(&self) -> Self {
         Self {
-            columns: self.columns.iter().map(|(&k, v)| (k, v.clone_box())).collect(),
+            columns: self
+                .columns
+                .iter()
+                .map(|(&k, v)| (k, v.clone_box()))
+                .collect(),
         }
     }
 }
@@ -298,7 +300,11 @@ mod tests {
         items.sort_by_key(|(e, _)| e.index());
         assert_eq!(
             items,
-            vec![(e(0), &Health(100)), (e(1), &Health(200)), (e(2), &Health(300))]
+            vec![
+                (e(0), &Health(100)),
+                (e(1), &Health(200)),
+                (e(2), &Health(300))
+            ]
         );
     }
 

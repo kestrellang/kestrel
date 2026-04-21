@@ -86,15 +86,10 @@ pub enum InferError {
     },
 
     /// Instance method called in static context (e.g., `T.instanceMethod()`).
-    InstanceMethodAsStatic {
-        name: String,
-        span: Span,
-    },
+    InstanceMethodAsStatic { name: String, span: Span },
 
     /// Type parameter used as a standalone value (e.g., `let x = T`).
-    TypeParamAsValue {
-        span: Span,
-    },
+    TypeParamAsValue { span: Span },
 
     /// Wrong number of type arguments (e.g., `identity[Int, String](42)` on a 1-param generic).
     TypeArgCountMismatch {
@@ -104,16 +99,10 @@ pub enum InferError {
     },
 
     /// No overload matches the call's labels/arity (e.g., enum case with wrong labels).
-    NoMatchingOverload {
-        name: String,
-        span: Span,
-    },
+    NoMatchingOverload { name: String, span: Span },
 
     /// Implicit `it` parameter used in a context expecting != 1 parameter.
-    ItWrongArity {
-        expected: usize,
-        span: Span,
-    },
+    ItWrongArity { expected: usize, span: Span },
 
     /// A literal of a given kind can't be accepted by the target type.
     /// Emitted when an unresolved literal TyVar meets a concrete type that

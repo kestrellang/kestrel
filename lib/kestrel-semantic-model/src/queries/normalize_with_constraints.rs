@@ -5,8 +5,8 @@
 
 use std::hash::{Hash, Hasher};
 
-use semantic_tree::symbol::SymbolId;
 use kestrel_semantic_tree::ty::Ty;
+use semantic_tree::symbol::SymbolId;
 
 use crate::SemanticModel;
 use crate::query::Query;

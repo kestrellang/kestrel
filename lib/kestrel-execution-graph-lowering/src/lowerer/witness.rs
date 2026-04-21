@@ -643,7 +643,11 @@ fn bind_property_accessors(
         };
 
         // Only process computed properties
-        if field.metadata().get_behavior::<ComputedPropertyMarker>().is_none() {
+        if field
+            .metadata()
+            .get_behavior::<ComputedPropertyMarker>()
+            .is_none()
+        {
             continue;
         }
 

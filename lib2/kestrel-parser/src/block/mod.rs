@@ -309,7 +309,8 @@ fn code_block_items_parser<'tokens>()
         .ignore_then(just(Token::Guard).map_with(|_, e| to_kestrel_span2(e.span())))
         .then(guard_conditions)
         .then(
-            skip_trivia().ignore_then(just(Token::Else).map_with(|_, e| to_kestrel_span2(e.span()))),
+            skip_trivia()
+                .ignore_then(just(Token::Else).map_with(|_, e| to_kestrel_span2(e.span()))),
         )
         .then(
             skip_trivia()

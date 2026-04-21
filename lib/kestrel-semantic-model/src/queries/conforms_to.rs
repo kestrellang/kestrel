@@ -17,8 +17,7 @@ use crate::query::Query;
 use crate::ty_cache_key::TyCacheKey;
 use crate::type_oracle::{
     bound_protocols_include, check_transitive_conformance_impl,
-    filter_applicable_extensions_for_conformance,
-    get_type_substitutions, get_type_symbol_id,
+    filter_applicable_extensions_for_conformance, get_type_substitutions, get_type_symbol_id,
 };
 
 /// Query: does `ty` conform to the protocol identified by `protocol_id`?
@@ -145,59 +144,59 @@ pub(crate) fn conforms_to_impl(model: &SemanticModel, ty: &Ty, protocol_id: Symb
         match ty.kind() {
             TyKind::Int(_) | TyKind::Float(_) | TyKind::Bool | TyKind::String => {
                 return true;
-            }
+            },
             TyKind::Pointer(pointee) => {
                 return model.query(ConformsToQuery::new(pointee, protocol_id));
-            }
-            _ => {}
+            },
+            _ => {},
         }
     }
 
     // Handle primitive types - they implicitly conform to their literal protocols
     match ty.kind() {
         TyKind::Int(_) => {
-            if let Some(lit_protocol_id) = model
-                .builtin_protocol(LanguageFeature::ExpressibleByIntLiteral)
+            if let Some(lit_protocol_id) =
+                model.builtin_protocol(LanguageFeature::ExpressibleByIntLiteral)
                 && protocol_id == lit_protocol_id
             {
                 return true;
             }
             return false;
-        }
+        },
         TyKind::Float(_) => {
-            if let Some(lit_protocol_id) = model
-                .builtin_protocol(LanguageFeature::ExpressibleByFloatLiteral)
+            if let Some(lit_protocol_id) =
+                model.builtin_protocol(LanguageFeature::ExpressibleByFloatLiteral)
                 && protocol_id == lit_protocol_id
             {
                 return true;
             }
-            if let Some(lit_protocol_id) = model
-                .builtin_protocol(LanguageFeature::ExpressibleByIntLiteral)
+            if let Some(lit_protocol_id) =
+                model.builtin_protocol(LanguageFeature::ExpressibleByIntLiteral)
                 && protocol_id == lit_protocol_id
             {
                 return true;
             }
             return false;
-        }
+        },
         TyKind::Bool => {
-            if let Some(lit_protocol_id) = model
-                .builtin_protocol(LanguageFeature::ExpressibleByBoolLiteral)
+            if let Some(lit_protocol_id) =
+                model.builtin_protocol(LanguageFeature::ExpressibleByBoolLiteral)
                 && protocol_id == lit_protocol_id
             {
                 return true;
             }
             return false;
-        }
+        },
         TyKind::String => {
-            if let Some(lit_protocol_id) = model
-                .builtin_protocol(LanguageFeature::ExpressibleByStringLiteral)
+            if let Some(lit_protocol_id) =
+                model.builtin_protocol(LanguageFeature::ExpressibleByStringLiteral)
                 && protocol_id == lit_protocol_id
             {
                 return true;
             }
             return false;
-        }
-        _ => {}
+        },
+        _ => {},
     }
 
     // Get the type's symbol ID to check conformances

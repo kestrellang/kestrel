@@ -230,9 +230,18 @@ mod tests {
             x: i32,
             y: String,
         }
-        let a = Fingerprint::of(&Foo { x: 1, y: "hi".into() });
-        let b = Fingerprint::of(&Foo { x: 1, y: "hi".into() });
-        let c = Fingerprint::of(&Foo { x: 2, y: "hi".into() });
+        let a = Fingerprint::of(&Foo {
+            x: 1,
+            y: "hi".into(),
+        });
+        let b = Fingerprint::of(&Foo {
+            x: 1,
+            y: "hi".into(),
+        });
+        let c = Fingerprint::of(&Foo {
+            x: 2,
+            y: "hi".into(),
+        });
         assert_eq!(a, b);
         assert_ne!(a, c);
     }

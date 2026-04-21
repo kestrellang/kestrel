@@ -184,7 +184,7 @@ fn expr_state(hir: &HirBody, typed: &TypedBody, id: HirExprId) -> ReturnState {
                 Some(else_block) => then_s.merge(block_part_state(hir, typed, else_block)),
                 None => ReturnState::MayFallThrough,
             }
-        }
+        },
 
         HirExpr::Match { arms, .. } => {
             if arms.is_empty() {
@@ -197,7 +197,7 @@ fn expr_state(hir: &HirBody, typed: &TypedBody, id: HirExprId) -> ReturnState {
                 }
                 combined
             }
-        }
+        },
 
         HirExpr::Loop { body, .. } => {
             // Check if the body always returns before any break could execute
@@ -211,7 +211,7 @@ fn expr_state(hir: &HirBody, typed: &TypedBody, id: HirExprId) -> ReturnState {
                 // Infinite loop with no break — diverges (never falls through)
                 ReturnState::Diverges
             }
-        }
+        },
 
         HirExpr::Block { body, .. } => block_part_state(hir, typed, body),
 
@@ -274,8 +274,10 @@ fn expr_contains_break(hir: &HirBody, id: HirExprId) -> bool {
             ..
         } => {
             block_contains_break(hir, then_body)
-                || else_body.as_ref().is_some_and(|e| block_contains_break(hir, e))
-        }
+                || else_body
+                    .as_ref()
+                    .is_some_and(|e| block_contains_break(hir, e))
+        },
         HirExpr::Match { arms, .. } => arms.iter().any(|arm| expr_contains_break(hir, arm.body)),
         HirExpr::Block { body, .. } => block_contains_break(hir, body),
 

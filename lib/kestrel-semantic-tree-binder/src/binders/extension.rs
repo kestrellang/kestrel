@@ -433,7 +433,6 @@ fn collect_referenced_type_params(type_args: &[Ty]) -> Vec<Arc<TypeParameterSymb
     params
 }
 
-
 /// Error for trying to extend a non-extendable type
 #[derive(Debug, Clone)]
 pub struct CannotExtendTypeError {

@@ -77,11 +77,11 @@ fn check_stmt(cx: &BodyContext<'_>, id: HirStmtId, diags: &mut Vec<AnalyzeDiagno
             // This check is relevant for pattern-bearing let statements,
             // which would need a pattern field on HirStmt::Let.
             // Currently all let bindings are irrefutable by construction.
-        }
+        },
         HirStmt::Expr { expr, .. } => {
             check_expr_for_lets(cx, *expr, diags);
-        }
-        HirStmt::Deinit { .. } => {}
+        },
+        HirStmt::Deinit { .. } => {},
     }
 }
 
@@ -97,22 +97,22 @@ fn check_expr_for_lets(cx: &BodyContext<'_>, id: HirExprId, diags: &mut Vec<Anal
             if let Some(else_block) = else_body {
                 check_block_for_lets(cx, else_block, diags);
             }
-        }
+        },
         HirExpr::Loop { body, .. } => {
             check_block_for_lets(cx, body, diags);
-        }
+        },
         HirExpr::Match { arms, .. } => {
             for arm in arms {
                 check_expr_for_lets(cx, arm.body, diags);
             }
-        }
+        },
         HirExpr::Block { body, .. } => {
             check_block_for_lets(cx, body, diags);
-        }
+        },
         HirExpr::Closure { body, .. } => {
             check_block_for_lets(cx, body, diags);
-        }
-        _ => {}
+        },
+        _ => {},
     }
 }
 
@@ -135,23 +135,23 @@ pub(crate) fn is_pattern_irrefutable(hir: &HirBody, pat_id: HirPatId) -> bool {
     match &hir.pats[pat_id] {
         HirPat::Wildcard { .. } => true,
         HirPat::Binding { .. } => true,
-        HirPat::Tuple { prefix, suffix, .. } => {
-            prefix.iter().chain(suffix.iter()).all(|&e| is_pattern_irrefutable(hir, e))
-        }
+        HirPat::Tuple { prefix, suffix, .. } => prefix
+            .iter()
+            .chain(suffix.iter())
+            .all(|&e| is_pattern_irrefutable(hir, e)),
         HirPat::Array { .. } => false, // Array patterns are always refutable (unknown length)
         HirPat::Literal { .. } => false,
         HirPat::Range { .. } => false,
         HirPat::Variant { .. } => false,
         HirPat::ImplicitVariant { .. } => false,
         // Struct patterns are irrefutable if all field patterns are irrefutable
-        HirPat::Struct { fields, .. } => fields.iter().all(|f| {
-            f.pattern
-                .map_or(true, |p| is_pattern_irrefutable(hir, p))
-        }),
+        HirPat::Struct { fields, .. } => fields
+            .iter()
+            .all(|f| f.pattern.map_or(true, |p| is_pattern_irrefutable(hir, p))),
         // Or-pattern is irrefutable if ANY alternative is irrefutable
         HirPat::Or { alternatives, .. } => {
             alternatives.iter().any(|&a| is_pattern_irrefutable(hir, a))
-        }
+        },
         // At-pattern is irrefutable if the subpattern is irrefutable
         HirPat::At { subpattern, .. } => is_pattern_irrefutable(hir, *subpattern),
         // Error patterns: treat as irrefutable to avoid cascading
@@ -165,14 +165,19 @@ pub(crate) fn describe_pattern(hir: &HirBody, pat_id: HirPatId) -> String {
     match &hir.pats[pat_id] {
         HirPat::Wildcard { .. } => "_".into(),
         HirPat::Binding { local, .. } => hir.locals[*local].name.clone(),
-        HirPat::Tuple { prefix, has_rest, suffix, .. } => {
+        HirPat::Tuple {
+            prefix,
+            has_rest,
+            suffix,
+            ..
+        } => {
             let mut parts: Vec<String> = prefix.iter().map(|&e| describe_pattern(hir, e)).collect();
             if *has_rest {
                 parts.push("..".into());
                 parts.extend(suffix.iter().map(|&e| describe_pattern(hir, e)));
             }
             format!("({})", parts.join(", "))
-        }
+        },
         HirPat::Literal { value, .. } => match value {
             HirLiteral::Integer(i) => i.to_string(),
             HirLiteral::Float(f) => f.to_string(),
@@ -183,7 +188,7 @@ pub(crate) fn describe_pattern(hir: &HirBody, pat_id: HirPatId) -> String {
                 } else {
                     format!("'\\u{{{:X}}}'", c)
                 }
-            }
+            },
             HirLiteral::Bool(b) => b.to_string(),
             HirLiteral::Null => "null".into(),
         },
@@ -208,7 +213,7 @@ pub(crate) fn describe_pattern(hir: &HirBody, pat_id: HirPatId) -> String {
                     .collect();
                 format!("{}({})", name, inner.join(", "))
             }
-        }
+        },
         HirPat::Range {
             start,
             end,
@@ -222,7 +227,7 @@ pub(crate) fn describe_pattern(hir: &HirBody, pat_id: HirPatId) -> String {
             let e = end.as_ref().map(|l| format!("{:?}", l)).unwrap_or_default();
             let op = if *inclusive { "..=" } else { "..<" };
             format!("{}{}{}", s, op, e)
-        }
+        },
         HirPat::Struct { fields, .. } => {
             let inner: Vec<String> = fields
                 .iter()
@@ -235,27 +240,34 @@ pub(crate) fn describe_pattern(hir: &HirBody, pat_id: HirPatId) -> String {
                 })
                 .collect();
             format!("{{ {} }}", inner.join(", "))
-        }
-        HirPat::Array { prefix, rest, suffix, .. } => {
+        },
+        HirPat::Array {
+            prefix,
+            rest,
+            suffix,
+            ..
+        } => {
             let mut parts: Vec<String> = prefix.iter().map(|&e| describe_pattern(hir, e)).collect();
             match rest {
                 Some(Some(local)) => {
                     parts.push(format!("..{}", hir.locals[*local].name));
                     parts.extend(suffix.iter().map(|&e| describe_pattern(hir, e)));
-                }
+                },
                 Some(None) => {
                     parts.push("..".into());
                     parts.extend(suffix.iter().map(|&e| describe_pattern(hir, e)));
-                }
-                None => {}
+                },
+                None => {},
             }
             format!("[{}]", parts.join(", "))
-        }
+        },
         HirPat::Or { alternatives, .. } => {
-            let parts: Vec<String> =
-                alternatives.iter().map(|&a| describe_pattern(hir, a)).collect();
+            let parts: Vec<String> = alternatives
+                .iter()
+                .map(|&a| describe_pattern(hir, a))
+                .collect();
             parts.join(" | ")
-        }
+        },
         HirPat::At {
             binding,
             subpattern,
@@ -266,7 +278,7 @@ pub(crate) fn describe_pattern(hir: &HirBody, pat_id: HirPatId) -> String {
                 hir.locals[*binding].name,
                 describe_pattern(hir, *subpattern)
             )
-        }
+        },
         HirPat::Error { .. } => "<error>".into(),
     }
 }

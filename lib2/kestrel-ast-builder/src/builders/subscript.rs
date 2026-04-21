@@ -1,15 +1,15 @@
 //! Subscript declaration builder.
 
 use kestrel_hecs::{Entity, World};
-use kestrel_syntax_tree2::{SyntaxKind, SyntaxNode};
 use kestrel_syntax_tree2::utils::{find_child, get_decl_span};
+use kestrel_syntax_tree2::{SyntaxKind, SyntaxNode};
 
-use crate::ast_type::ast_type_from_cst;
-use crate::components::*;
-use crate::lower;
 use super::helpers::*;
 use super::params::extract_params;
 use super::type_param::build_type_parameters;
+use crate::ast_type::ast_type_from_cst;
+use crate::components::*;
+use crate::lower;
 
 /// Build a subscript declaration entity from CST.
 ///
@@ -64,7 +64,8 @@ pub fn build_subscript(
             // SetterClause wraps a setter with a body; a bare `Set` token
             // appears for protocol requirements (`{ get set }`) without a body.
             let has_setter = find_child(&acc, SyntaxKind::SetterClause).is_some()
-                || acc.children_with_tokens()
+                || acc
+                    .children_with_tokens()
                     .any(|e| e.as_token().is_some_and(|t| t.kind() == SyntaxKind::Set));
             if has_setter {
                 world.set(entity, Settable);

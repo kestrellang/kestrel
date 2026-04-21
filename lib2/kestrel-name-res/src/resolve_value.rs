@@ -3,7 +3,9 @@
 //! Resolves value names (variables, functions, enum cases, etc.) to
 //! entities. Used by HIR lowering for expression paths.
 
-use kestrel_ast_builder::{Callable, Conformances, ConformanceItem, Gettable, NodeKind, Static, Typed, WhereClause, Name};
+use kestrel_ast_builder::{
+    Callable, ConformanceItem, Conformances, Gettable, Name, NodeKind, Static, Typed, WhereClause,
+};
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
 
 use crate::extensions::ExtensionsFor;
@@ -25,11 +27,20 @@ pub enum ValueResolution {
     /// Type parameter (e.g. `T` used as a value for static access)
     TypeParameter(Entity),
     /// Associated type (e.g. in protocol context)
-    AssociatedType { entity: Entity, container: Option<Entity> },
+    AssociatedType {
+        entity: Entity,
+        container: Option<Entity>,
+    },
     /// Enum case used as intermediate value (e.g. `MyEnum.caseA.method()`)
-    EnumCaseValue { entity: Entity, resolved_index: usize },
+    EnumCaseValue {
+        entity: Entity,
+        resolved_index: usize,
+    },
     /// Field/getter used as intermediate value (e.g. `obj.field.method()`)
-    FieldValue { entity: Entity, resolved_index: usize },
+    FieldValue {
+        entity: Entity,
+        resolved_index: usize,
+    },
     /// Static member accessed through associated type (e.g., `Item.zero` where `Item: Addable`)
     /// Preserves the associated type context for Self-substitution in type inference.
     AssociatedTypeStaticMember { entity: Entity, assoc_type: Entity },
@@ -93,7 +104,7 @@ fn resolve_single_segment(
                 match ctx.get::<NodeKind>(e) {
                     Some(&NodeKind::TypeParameter) => {
                         return ValueResolution::TypeParameter(e);
-                    }
+                    },
                     Some(&NodeKind::TypeAlias) => {
                         // If inside a protocol, this is an associated type
                         if let Some(parent) = ctx.parent_of(e) {
@@ -111,7 +122,9 @@ fn resolve_single_segment(
                         // segments. Walks chains (`type A = B; type B = C`).
                         let mut current = e;
                         for _ in 0..8 {
-                            let Some(target) = resolve_type_alias_target(ctx, current, context, root) else {
+                            let Some(target) =
+                                resolve_type_alias_target(ctx, current, context, root)
+                            else {
                                 break;
                             };
                             if ctx.get::<NodeKind>(target) != Some(&NodeKind::TypeAlias) {
@@ -119,12 +132,12 @@ fn resolve_single_segment(
                             }
                             current = target;
                         }
-                    }
-                    _ => {}
+                    },
+                    _ => {},
                 }
             }
             classify_value_results(ctx, entities)
-        }
+        },
         NameResolution::Ambiguous(entities) => ValueResolution::Ambiguous(entities),
         NameResolution::NotFound => ValueResolution::NotFound(name.to_string()),
     }
@@ -171,7 +184,7 @@ fn resolve_multi_segment(
                     return ValueResolution::Ambiguous(entities);
                 }
             }
-        }
+        },
         NameResolution::Ambiguous(entities) => {
             // Try to find a unique type among ambiguous results
             let types: Vec<Entity> = entities
@@ -184,10 +197,10 @@ fn resolve_multi_segment(
             } else {
                 return ValueResolution::Ambiguous(entities);
             }
-        }
+        },
         NameResolution::NotFound => {
             return ValueResolution::NotFound(first.clone());
-        }
+        },
     };
 
     // Walk remaining segments
@@ -294,7 +307,9 @@ fn resolve_multi_segment(
         // Return AssociatedTypeStaticMember to preserve the associated type
         // context for Self-substitution in type inference.
         if ctx.get::<NodeKind>(current) == Some(&NodeKind::TypeAlias) {
-            if let Some(found) = resolve_assoc_type_static_member(ctx, current, segment, context, root) {
+            if let Some(found) =
+                resolve_assoc_type_static_member(ctx, current, segment, context, root)
+            {
                 if is_last {
                     return ValueResolution::AssociatedTypeStaticMember {
                         entity: found,
@@ -315,14 +330,14 @@ fn resolve_multi_segment(
                     entity: current,
                     resolved_index: segment_index - 1,
                 };
-            }
+            },
             Some(&NodeKind::Field) if ctx.has::<Gettable>(current) => {
                 return ValueResolution::FieldValue {
                     entity: current,
                     resolved_index: segment_index - 1,
                 };
-            }
-            _ => {}
+            },
+            _ => {},
         }
 
         return ValueResolution::NotFound(segment.clone());
@@ -396,7 +411,9 @@ fn resolve_assoc_type_static_member(
     // 1. Direct conformances on the TypeAlias (e.g. `type Item: Addable`)
     if let Some(conformances) = ctx.get::<Conformances>(assoc_type) {
         for item in &conformances.0 {
-            let ConformanceItem::Positive(ast_type, _) = item else { continue };
+            let ConformanceItem::Positive(ast_type, _) = item else {
+                continue;
+            };
             if let Some(proto) = resolve_protocol_from_ast(ctx, ast_type, context, root) {
                 bound_protocols.push(proto);
             }
@@ -483,9 +500,11 @@ fn resolve_protocol_from_ast(
         root,
     });
     match result {
-        TypeResolution::Found(entity) if ctx.get::<NodeKind>(entity) == Some(&NodeKind::Protocol) => {
+        TypeResolution::Found(entity)
+            if ctx.get::<NodeKind>(entity) == Some(&NodeKind::Protocol) =>
+        {
             Some(entity)
-        }
+        },
         _ => None,
     }
 }
@@ -634,11 +653,8 @@ mod tests {
         match result {
             ValueResolution::Def(entity) => {
                 assert_eq!(ctx.get::<Name>(entity).unwrap().0, "caseA");
-                assert_eq!(
-                    ctx.get::<NodeKind>(entity),
-                    Some(&NodeKind::EnumCase)
-                );
-            }
+                assert_eq!(ctx.get::<NodeKind>(entity), Some(&NodeKind::EnumCase));
+            },
             other => panic!("expected Def, got {:?}", other),
         }
     }

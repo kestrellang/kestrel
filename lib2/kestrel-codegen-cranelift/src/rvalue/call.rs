@@ -13,12 +13,15 @@ use crate::place;
 use crate::rvalue;
 use crate::types;
 use cranelift_codegen::ir::immediates::Offset32;
-use cranelift_codegen::ir::{self, AbiParam, InstBuilder, MemFlags, Signature, StackSlotData, StackSlotKind, Value as CrValue};
+use cranelift_codegen::ir::{
+    self, AbiParam, InstBuilder, MemFlags, Signature, StackSlotData, StackSlotKind,
+    Value as CrValue,
+};
 use cranelift_frontend::FunctionBuilder;
 use cranelift_module::Module;
 use kestrel_codegen2::{mangle_function_with_self, substitute_type, substitute_type_with_self};
 use kestrel_hecs::Entity;
-use kestrel_mir::{Callee, CallArg, MirTy, PassingMode, Place, Value};
+use kestrel_mir::{CallArg, Callee, MirTy, PassingMode, Place, Value};
 use std::collections::HashMap;
 
 /// Compile a function call statement.
@@ -45,7 +48,8 @@ pub fn compile_call(
             let func_id_mir = ctx.entity_to_func.get(func).ok_or_else(|| {
                 let name = ctx.module.resolve_name(*func);
                 CodegenError::Unsupported(format!(
-                    "call to unknown function entity {:?} ({})", func, name
+                    "call to unknown function entity {:?} ({})",
+                    func, name
                 ))
             })?;
             let func_def = &ctx.module.functions[func_id_mir.index()];
@@ -56,8 +60,17 @@ pub fn compile_call(
                 concrete_self.as_ref(),
             );
 
-            compile_resolved_call(ctx, state, builder, &mangled, func_def, &concrete_type_args, args, dest)?;
-        }
+            compile_resolved_call(
+                ctx,
+                state,
+                builder,
+                &mangled,
+                func_def,
+                &concrete_type_args,
+                args,
+                dest,
+            )?;
+        },
 
         Callee::Witness {
             protocol,
@@ -66,9 +79,8 @@ pub fn compile_call(
             method_type_args,
         } => {
             // Substitute type params AND SelfType using the function's self_type
-            let mut concrete_self = substitute_type_with_self(
-                self_type, &state.subst, state.self_type.as_ref(),
-            );
+            let mut concrete_self =
+                substitute_type_with_self(self_type, &state.subst, state.self_type.as_ref());
             // Resolve associated types (e.g., Iterator.Item → Int64) via witness table
             concrete_self = resolve_associated_self_type(ctx, &state, *protocol, &concrete_self);
             let concrete_method_args: Vec<MirTy> = method_type_args
@@ -85,13 +97,15 @@ pub fn compile_call(
             )
             .map_err(|e| CodegenError::Monomorphization(format!("{e}")))?;
 
-
-            let func_id_mir = ctx.entity_to_func.get(&resolved.func_entity).ok_or_else(|| {
-                CodegenError::Unsupported(format!(
-                    "witness resolved to unknown entity {:?}",
-                    resolved.func_entity
-                ))
-            })?;
+            let func_id_mir = ctx
+                .entity_to_func
+                .get(&resolved.func_entity)
+                .ok_or_else(|| {
+                    CodegenError::Unsupported(format!(
+                        "witness resolved to unknown entity {:?}",
+                        resolved.func_entity
+                    ))
+                })?;
             let func_def = &ctx.module.functions[func_id_mir.index()];
             let mangled = mangle_function_with_self(
                 ctx.module,
@@ -100,17 +114,25 @@ pub fn compile_call(
                 resolved.self_type.as_ref(),
             );
 
-
-            compile_resolved_call(ctx, state, builder, &mangled, func_def, &resolved.type_args, args, dest)?;
-        }
+            compile_resolved_call(
+                ctx,
+                state,
+                builder,
+                &mangled,
+                func_def,
+                &resolved.type_args,
+                args,
+                dest,
+            )?;
+        },
 
         Callee::Thin(place) => {
             compile_indirect_call(ctx, state, builder, place, args, dest, false)?;
-        }
+        },
 
         Callee::Thick(place) => {
             compile_indirect_call(ctx, state, builder, place, args, dest, true)?;
-        }
+        },
     }
 
     Ok(())
@@ -141,9 +163,10 @@ fn compile_resolved_call(
     let (callee_sret, callee_has_return, _callee_param_count) = {
         let callee_sig = builder.func.dfg.ext_funcs[func_ref].signature;
         let sig_data = &builder.func.stencil.dfg.signatures[callee_sig];
-        let sret = sig_data.params.first().map_or(false, |p| {
-            p.purpose == ir::ArgumentPurpose::StructReturn
-        });
+        let sret = sig_data
+            .params
+            .first()
+            .map_or(false, |p| p.purpose == ir::ArgumentPurpose::StructReturn);
         let has_return = !sig_data.returns.is_empty();
         (sret, has_return, sig_data.params.len())
     };
@@ -204,12 +227,20 @@ fn compile_resolved_call(
             // Store the scalar value directly into the dest's stack slot.
             if let kestrel_mir::Place::Local(id) = dest_place {
                 let dest_ty = common::get_place_type(
-                    ctx.module, state.body, dest_place, &state.subst, &ctx.layouts,
+                    ctx.module,
+                    state.body,
+                    dest_place,
+                    &state.subst,
+                    &ctx.layouts,
                 )?;
                 if common::is_aggregate(&dest_ty, &mut ctx.layouts) {
                     let dest_ptr = builder.use_var(state.local_vars[id.index()]);
                     place::store_scalar_to_aggregate(
-                        builder, &mut ctx.layouts, &dest_ty, dest_ptr, result,
+                        builder,
+                        &mut ctx.layouts,
+                        &dest_ty,
+                        dest_ptr,
+                        result,
                     );
                     return Ok(());
                 }
@@ -243,19 +274,19 @@ fn compile_indirect_call(
     let (param_tys, ret_ty) = match (&callee_ty, is_thick) {
         (MirTy::FuncThin { params, ret }, false) | (MirTy::FuncThick { params, ret }, true) => {
             (params.as_slice(), ret.as_ref().clone())
-        }
+        },
         (MirTy::FuncThin { .. }, true) | (MirTy::FuncThick { .. }, false) => {
             return Err(CodegenError::Unsupported(format!(
                 "indirect call kind/type mismatch for {:?}",
                 callee_ty
-            )))
-        }
+            )));
+        },
         _ => {
             return Err(CodegenError::Unsupported(format!(
                 "indirect call on non-function type: {:?}",
                 callee_ty
-            )))
-        }
+            )));
+        },
     };
 
     let (func_ptr, env_ptr) = if is_thick {
@@ -335,7 +366,11 @@ fn compile_indirect_call(
                 if common::is_aggregate(&dest_ty, &mut ctx.layouts) {
                     let dest_ptr = builder.use_var(state.local_vars[id.index()]);
                     place::store_scalar_to_aggregate(
-                        builder, &mut ctx.layouts, &dest_ty, dest_ptr, result,
+                        builder,
+                        &mut ctx.layouts,
+                        &dest_ty,
+                        dest_ptr,
+                        result,
                     );
                     return Ok(());
                 }
@@ -388,7 +423,9 @@ fn compile_call_arg(
                             common::align_to_shift(ptr_size),
                         ));
                         let addr = builder.ins().stack_addr(ptr_ty, slot, Offset32::new(0));
-                        builder.ins().store(MemFlags::new(), func_addr, addr, Offset32::new(0));
+                        builder
+                            .ins()
+                            .store(MemFlags::new(), func_addr, addr, Offset32::new(0));
                         let null = builder.ins().iconst(ptr_ty, 0);
                         builder.ins().store(
                             MemFlags::new(),
@@ -406,7 +443,7 @@ fn compile_call_arg(
                         Some(ty) => {
                             let layout = ctx.layouts.layout_of(ty);
                             (layout.size.max(1), layout.align.max(1))
-                        }
+                        },
                         None => (ptr_size, ptr_size),
                     };
                     let slot = builder.create_sized_stack_slot(StackSlotData::new(
@@ -418,15 +455,17 @@ fn compile_call_arg(
                     if slot_size > ptr_size {
                         common::zero_memory(builder, addr, slot_size, ptr_ty);
                     }
-                    builder.ins().store(MemFlags::new(), val, addr, Offset32::new(0));
+                    builder
+                        .ins()
+                        .store(MemFlags::new(), val, addr, Offset32::new(0));
                     Ok(addr)
-                }
+                },
             }
-        }
+        },
 
         PassingMode::Copy | PassingMode::Move => {
             rvalue::compile_value(ctx, state, builder, &arg.value)
-        }
+        },
     }
 }
 
@@ -450,7 +489,10 @@ fn resolve_associated_self_type(
     let short = common::short_name(&assoc_name);
 
     // Find which protocol owns this associated type (not necessarily the one being called)
-    let owning_proto = ctx.module.protocols.iter()
+    let owning_proto = ctx
+        .module
+        .protocols
+        .iter()
         .find(|p| p.associated_type_by_name(short).is_some());
     let Some(proto_def) = owning_proto else {
         return self_type.clone();
@@ -459,18 +501,18 @@ fn resolve_associated_self_type(
     // Try resolving via concrete types from the substitution map first,
     // then fall back to the function's self_type
     for candidate in state.subst.values() {
-        if let Ok(resolved) = witness::resolve_associated_type(
-            ctx.module, proto_def.entity, candidate, short,
-        ) {
+        if let Ok(resolved) =
+            witness::resolve_associated_type(ctx.module, proto_def.entity, candidate, short)
+        {
             return resolved;
         }
     }
 
     // Fall back to function's self_type
     if let Some(base) = state.self_type.as_ref() {
-        if let Ok(resolved) = witness::resolve_associated_type(
-            ctx.module, proto_def.entity, base, short,
-        ) {
+        if let Ok(resolved) =
+            witness::resolve_associated_type(ctx.module, proto_def.entity, base, short)
+        {
             return resolved;
         }
     }

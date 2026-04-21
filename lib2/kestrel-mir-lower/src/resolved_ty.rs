@@ -3,8 +3,8 @@
 //! ResolvedTy comes from type inference results. It has the same shape as HirTy
 //! but without spans and without Infer.
 
-use kestrel_type_infer::result::ResolvedTy;
 use kestrel_mir::MirTy;
+use kestrel_type_infer::result::ResolvedTy;
 
 use crate::context::LowerCtx;
 use crate::ty::lower_named_type_from_entity;
@@ -25,7 +25,8 @@ pub fn lower_resolved_ty(ctx: &mut LowerCtx, ty: &ResolvedTy) -> MirTy {
             MirTy::Tuple(lowered)
         },
         ResolvedTy::Function { params, ret } => {
-            let lowered_params: Vec<MirTy> = params.iter().map(|t| lower_resolved_ty(ctx, t)).collect();
+            let lowered_params: Vec<MirTy> =
+                params.iter().map(|t| lower_resolved_ty(ctx, t)).collect();
             let lowered_ret = lower_resolved_ty(ctx, ret);
             MirTy::FuncThick {
                 params: lowered_params,

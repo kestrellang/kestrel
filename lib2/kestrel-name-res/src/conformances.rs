@@ -7,7 +7,7 @@
 use std::collections::HashSet;
 
 use kestrel_ast::AstType;
-use kestrel_ast_builder::{Conformances, ConformanceItem, NodeKind};
+use kestrel_ast_builder::{ConformanceItem, Conformances, NodeKind};
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
 
 use crate::extensions::ExtensionsFor;
@@ -93,7 +93,11 @@ impl QueryFn for ConformingProtocolInstantiations {
 
         // Direct conformances on the type itself
         gather_protocol_instantiations(
-            ctx, self.entity, self.root, &mut instantiations, &mut visited,
+            ctx,
+            self.entity,
+            self.root,
+            &mut instantiations,
+            &mut visited,
         );
 
         // Conformances declared on extensions of this type
@@ -102,9 +106,7 @@ impl QueryFn for ConformingProtocolInstantiations {
             root: self.root,
         });
         for ext in &extensions {
-            gather_protocol_instantiations(
-                ctx, *ext, self.root, &mut instantiations, &mut visited,
-            );
+            gather_protocol_instantiations(ctx, *ext, self.root, &mut instantiations, &mut visited);
         }
 
         // Walk inheritance: for each discovered protocol, expand its own
@@ -116,7 +118,11 @@ impl QueryFn for ConformingProtocolInstantiations {
             let (proto, _) = instantiations[i].clone();
             if proto_expanded.insert(proto) {
                 gather_protocol_instantiations(
-                    ctx, proto, self.root, &mut instantiations, &mut visited,
+                    ctx,
+                    proto,
+                    self.root,
+                    &mut instantiations,
+                    &mut visited,
                 );
                 let proto_extensions = ctx.query(ExtensionsFor {
                     target: proto,
@@ -124,7 +130,11 @@ impl QueryFn for ConformingProtocolInstantiations {
                 });
                 for ext in &proto_extensions {
                     gather_protocol_instantiations(
-                        ctx, *ext, self.root, &mut instantiations, &mut visited,
+                        ctx,
+                        *ext,
+                        self.root,
+                        &mut instantiations,
+                        &mut visited,
                     );
                 }
             }
@@ -154,7 +164,9 @@ fn gather_protocol_instantiations(
     };
 
     for item in &conformances.0 {
-        let ConformanceItem::Positive(ast_ty, _) = item else { continue };
+        let ConformanceItem::Positive(ast_ty, _) = item else {
+            continue;
+        };
         let Some(resolved) = resolve_conformance_entity(ctx, ast_ty, entity, root) else {
             continue;
         };
@@ -256,7 +268,9 @@ fn gather_protocol_conformances(
     };
 
     for item in &conformances.0 {
-        let ConformanceItem::Positive(ast_ty, _) = item else { continue };
+        let ConformanceItem::Positive(ast_ty, _) = item else {
+            continue;
+        };
         let Some(resolved) = resolve_conformance_entity(ctx, ast_ty, entity, root) else {
             continue;
         };
@@ -411,7 +425,10 @@ mod tests {
         let ctx = world.query_context();
         let protocols = ctx.query(ConformingProtocols { entity: s, root });
         assert!(protocols.contains(&equatable), "missing Equatable");
-        assert!(protocols.contains(&not_equal), "missing NotEqual from extension");
+        assert!(
+            protocols.contains(&not_equal),
+            "missing NotEqual from extension"
+        );
     }
 
     /// Chained extensions: `Ord` inherits `Eq`; `extend Ord: Greater`;
@@ -466,6 +483,9 @@ mod tests {
         let ctx = world.query_context();
         let closure = expand_protocol_closure(&ctx, root, [equatable]);
         assert!(closure.contains(&equatable));
-        assert!(closure.contains(&not_equal), "seed expansion missed NotEqual");
+        assert!(
+            closure.contains(&not_equal),
+            "seed expansion missed NotEqual"
+        );
     }
 }

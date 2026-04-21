@@ -21,8 +21,8 @@ pub mod visibility;
 
 // Re-export primary query types
 pub use conformances::{
-    expand_protocol_closure, expand_protocol_closure_in_place, extract_ast_type_args,
-    ConformingProtocolInstantiations, ConformingProtocols,
+    ConformingProtocolInstantiations, ConformingProtocols, expand_protocol_closure,
+    expand_protocol_closure_in_place, extract_ast_type_args,
 };
 pub use extensions::{ExtensionTargetEntity, ExtensionsFor, ResolvedExtensionTarget};
 pub use protocol_members::{

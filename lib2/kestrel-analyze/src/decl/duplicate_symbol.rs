@@ -161,7 +161,11 @@ fn check_duplicates(
         if *child_kind == NodeKind::TypeAlias {
             if let Some(cst) = cx.query.get::<CstNode>(child) {
                 use kestrel_syntax_tree2::SyntaxKind;
-                if cst.0.children().any(|c| c.kind() == SyntaxKind::AssociatedTypeTarget) {
+                if cst
+                    .0
+                    .children()
+                    .any(|c| c.kind() == SyntaxKind::AssociatedTypeTarget)
+                {
                     continue;
                 }
             }

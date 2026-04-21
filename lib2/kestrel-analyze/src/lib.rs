@@ -90,7 +90,9 @@ pub fn default_analyzers() -> AnalyzerRegistry {
     r.add_compilation_check(compilation::constraint_cycles::ConstraintCycleAnalyzer);
     r.add_compilation_check(compilation::extension_conflict::ExtensionConflictAnalyzer);
     r.add_compilation_check(compilation::conformance_completeness::ConformanceCompletenessAnalyzer);
-    r.add_compilation_check(compilation::type_annotation_resolution::TypeAnnotationResolutionAnalyzer);
+    r.add_compilation_check(
+        compilation::type_annotation_resolution::TypeAnnotationResolutionAnalyzer,
+    );
 
     r
 }
@@ -235,18 +237,12 @@ pub fn analyze_decls(
 ///
 /// Called from the compiler after body and decl checks. Compilation checks
 /// see all entities (e.g., for cross-entity cycle detection).
-pub fn analyze_compilation(
-    ctx: &QueryContext<'_>,
-    root: Entity,
-) -> Vec<AnalyzeDiagnostic> {
+pub fn analyze_compilation(ctx: &QueryContext<'_>, root: Entity) -> Vec<AnalyzeDiagnostic> {
     let Some(registry) = ctx.get::<AnalyzerRegistryRef>(root) else {
         return vec![];
     };
 
-    let cx = CompilationContext {
-        query: ctx,
-        root,
-    };
+    let cx = CompilationContext { query: ctx, root };
 
     let mut all_diags = Vec::new();
     for analyzer in &registry.0.compilation_checks {

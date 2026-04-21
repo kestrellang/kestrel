@@ -5,8 +5,8 @@
 //! Protocol entities are resolved via ResolveBuiltin (entity IDs, not strings).
 
 use kestrel_ast::ast_body::*;
-use kestrel_hir::body::*;
 use kestrel_hir::Builtin;
+use kestrel_hir::body::*;
 use kestrel_name_res::ResolveBuiltin;
 use kestrel_reporting2::{Diagnostic, Label};
 use kestrel_span2::Span;
@@ -140,12 +140,15 @@ impl LowerCtx<'_> {
             });
         }
 
-        self.ctx.accumulate(Diagnostic::error()
-            .with_message(format!("unsupported unary operator '{}'", unary_op_symbol(op)))
-            .with_labels(vec![
-                Label::primary(span.file_id, span.range()),
-            ])
-            .with_notes(vec!["is the standard library imported?".to_string()]));
+        self.ctx.accumulate(
+            Diagnostic::error()
+                .with_message(format!(
+                    "unsupported unary operator '{}'",
+                    unary_op_symbol(op)
+                ))
+                .with_labels(vec![Label::primary(span.file_id, span.range())])
+                .with_notes(vec!["is the standard library imported?".to_string()]),
+        );
         self.alloc_expr(HirExpr::Error { span: span.clone() })
     }
 
@@ -179,12 +182,15 @@ impl LowerCtx<'_> {
             }
         }
 
-        self.ctx.accumulate(Diagnostic::error()
-            .with_message(format!("unsupported compound assignment operator '{}'", compound_assign_op_symbol(op)))
-            .with_labels(vec![
-                Label::primary(span.file_id, span.range()),
-            ])
-            .with_notes(vec!["is the standard library imported?".to_string()]));
+        self.ctx.accumulate(
+            Diagnostic::error()
+                .with_message(format!(
+                    "unsupported compound assignment operator '{}'",
+                    compound_assign_op_symbol(op)
+                ))
+                .with_labels(vec![Label::primary(span.file_id, span.range())])
+                .with_notes(vec!["is the standard library imported?".to_string()]),
+        );
         self.alloc_expr(HirExpr::Error { span: span.clone() })
     }
 
@@ -267,18 +273,19 @@ impl LowerCtx<'_> {
         });
 
         // Negate: if !cond { break }
-        let negated = if let Some(protocol) = self.resolve_builtin(Builtin::LogicalNotOperatorProtocol) {
-            self.alloc_expr(HirExpr::ProtocolCall {
-                receiver: cond,
-                protocol,
-                method: "logicalNot".to_string(),
-                type_args: None,
-                args: Vec::new(),
-                span: span.clone(),
-            })
-        } else {
-            cond
-        };
+        let negated =
+            if let Some(protocol) = self.resolve_builtin(Builtin::LogicalNotOperatorProtocol) {
+                self.alloc_expr(HirExpr::ProtocolCall {
+                    receiver: cond,
+                    protocol,
+                    method: "logicalNot".to_string(),
+                    type_args: None,
+                    args: Vec::new(),
+                    span: span.clone(),
+                })
+            } else {
+                cond
+            };
 
         let if_break = self.alloc_expr(HirExpr::If {
             condition: negated,
@@ -769,12 +776,15 @@ impl LowerCtx<'_> {
 
     /// Emit a diagnostic for a binary operator whose protocol couldn't be resolved.
     fn emit_missing_operator_diagnostic(&self, op: &BinaryOp, span: &Span) {
-        self.ctx.accumulate(Diagnostic::error()
-            .with_message(format!("unsupported binary operator '{}'", binary_op_symbol(op)))
-            .with_labels(vec![
-                Label::primary(span.file_id, span.range()),
-            ])
-            .with_notes(vec!["is the standard library imported?".to_string()]));
+        self.ctx.accumulate(
+            Diagnostic::error()
+                .with_message(format!(
+                    "unsupported binary operator '{}'",
+                    binary_op_symbol(op)
+                ))
+                .with_labels(vec![Label::primary(span.file_id, span.range())])
+                .with_notes(vec!["is the standard library imported?".to_string()]),
+        );
     }
 }
 
@@ -786,9 +796,7 @@ fn lookup_binary_op(op: &BinaryOp) -> Option<(Builtin, &'static str, Option<&'st
 }
 
 /// Look up protocol for a short-circuit operator.
-fn lookup_short_circuit_op(
-    op: &BinaryOp,
-) -> Option<(Builtin, &'static str, Option<&'static str>)> {
+fn lookup_short_circuit_op(op: &BinaryOp) -> Option<(Builtin, &'static str, Option<&'static str>)> {
     kestrel_hir::body::lookup_short_circuit_op(op)
 }
 

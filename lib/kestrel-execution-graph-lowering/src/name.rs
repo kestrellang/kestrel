@@ -3,7 +3,9 @@
 use kestrel_execution_graph::{Id, QualifiedName, QualifiedNameData};
 use kestrel_semantic_tree::behavior::callable::CallableBehavior;
 use kestrel_semantic_tree::behavior::subscript::SubscriptBehavior;
-use kestrel_semantic_tree::behavior::{ComputedPropertyMarker, NamespaceScopeMarker, StaticBehavior};
+use kestrel_semantic_tree::behavior::{
+    ComputedPropertyMarker, NamespaceScopeMarker, StaticBehavior,
+};
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::extension::ExtensionSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
@@ -248,16 +250,17 @@ fn collect_name_segments(symbol: &Arc<dyn Symbol<KestrelLanguage>>, segments: &m
         // Instance fields don't contribute since they use getters/setters (e.g., "get:fieldName").
         KestrelSymbolKind::Field => {
             // Check if field is explicitly static
-            let explicit_static = symbol
-                .metadata()
-                .get_behavior::<StaticBehavior>()
-                .is_some();
+            let explicit_static = symbol.metadata().get_behavior::<StaticBehavior>().is_some();
 
             // Check if field is module-level (implicitly static)
             let is_module_level = symbol
                 .metadata()
                 .parent()
-                .map(|p| p.metadata().get_behavior::<NamespaceScopeMarker>().is_some())
+                .map(|p| {
+                    p.metadata()
+                        .get_behavior::<NamespaceScopeMarker>()
+                        .is_some()
+                })
                 .unwrap_or(false);
 
             let is_computed = symbol

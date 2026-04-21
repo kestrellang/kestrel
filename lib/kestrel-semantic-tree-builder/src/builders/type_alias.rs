@@ -114,7 +114,9 @@ fn determine_context(parent: Option<&Arc<dyn Symbol<KestrelLanguage>>>) -> TypeA
     match parent {
         Some(p) => match p.metadata().kind() {
             KestrelSymbolKind::Protocol => TypeAliasContext::Protocol,
-            KestrelSymbolKind::Struct | KestrelSymbolKind::Enum | KestrelSymbolKind::Extension => TypeAliasContext::ConcreteType,
+            KestrelSymbolKind::Struct | KestrelSymbolKind::Enum | KestrelSymbolKind::Extension => {
+                TypeAliasContext::ConcreteType
+            },
             _ => TypeAliasContext::Module,
         },
         None => TypeAliasContext::Module,

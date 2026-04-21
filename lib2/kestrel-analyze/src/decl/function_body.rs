@@ -61,14 +61,17 @@ impl DeclCheck for FunctionBodyAnalyzer {
 
         // Skip extern and builtin functions
         if let Some(attrs) = cx.query.get::<Attributes>(cx.entity) {
-            if attrs.0.iter().any(|a| a.name == "extern" || a.name == "builtin") {
+            if attrs
+                .0
+                .iter()
+                .any(|a| a.name == "extern" || a.name == "builtin")
+            {
                 return vec![];
             }
         }
 
         // Function has a body or computed value -- no error
-        if cx.query.get::<Body>(cx.entity).is_some()
-            || cx.query.get::<Valued>(cx.entity).is_some()
+        if cx.query.get::<Body>(cx.entity).is_some() || cx.query.get::<Valued>(cx.entity).is_some()
         {
             return vec![];
         }

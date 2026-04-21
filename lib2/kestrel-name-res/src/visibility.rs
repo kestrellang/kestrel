@@ -34,7 +34,7 @@ impl QueryFn for IsVisibleFrom {
                     return true;
                 };
                 is_ancestor_of(ctx, scope, self.context)
-            }
+            },
             Some(Vis::Fileprivate) => {
                 // Visible within the same file
                 let target_file = find_file_id(ctx, self.target);
@@ -47,9 +47,9 @@ impl QueryFn for IsVisibleFrom {
                             return true;
                         };
                         is_ancestor_of(ctx, scope, self.context)
-                    }
+                    },
                 }
-            }
+            },
             Some(Vis::Internal) => {
                 // Visible within the same top-level module subtree
                 let target_mod = ancestor_module(ctx, self.target);
@@ -60,10 +60,10 @@ impl QueryFn for IsVisibleFrom {
                         let t_top = top_level_module(ctx, t);
                         let c_top = top_level_module(ctx, c);
                         t_top == c_top
-                    }
+                    },
                     _ => true,
                 }
-            }
+            },
         }
     }
 }

@@ -85,7 +85,7 @@ fn decode_escapes(s: &str) -> String {
             Some(other) => {
                 out.push('\\');
                 out.push(other);
-            }
+            },
             None => out.push('\\'),
         }
     }
@@ -124,32 +124,32 @@ pub fn parse_test_config(source: &str) -> TestConfig {
                     "execution" => TestMode::Execution,
                     _ => TestMode::Diagnostics,
                 };
-            }
+            },
             "stdlib" => {
                 config.stdlib = value.to_lowercase() != "false";
-            }
+            },
             "include" => {
                 config.include.push(value.trim().to_string());
-            }
+            },
             "skip" => {
                 config.skip = Some(value.to_string());
-            }
+            },
             "expect-exit" => {
                 config.expect_exit = i32::from_str(value).ok();
-            }
+            },
             "expect-stdout" => {
                 config.expect_stdout = Some(decode_escapes(value));
-            }
+            },
             "stdout-contains" => {
                 config.stdout_contains = Some(decode_escapes(value));
-            }
+            },
             "mir-snapshot" => {
                 config.mir_snapshot = Some(value.to_string());
-            }
+            },
             "mir-filter" => {
                 config.mir_filter = Some(value.to_string());
-            }
-            _ => {}
+            },
+            _ => {},
         }
     }
 
@@ -284,7 +284,7 @@ module Test
         match &annotations[0].kind {
             AnnotationKind::Error { message } => {
                 assert_eq!(message.as_deref(), Some("type mismatch"));
-            }
+            },
             _ => panic!("expected Error annotation"),
         }
     }
@@ -319,7 +319,7 @@ module Test
         match &annotations[0].kind {
             AnnotationKind::Warning { message } => {
                 assert_eq!(message.as_deref(), Some("unused variable"));
-            }
+            },
             _ => panic!("expected Warning annotation"),
         }
     }

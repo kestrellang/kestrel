@@ -59,7 +59,11 @@ impl DeclCheck for RecursiveEnumAnalyzer {
         let mut visited = HashSet::new();
         if let Some(rec) = find_recursive_case(cx, entity, &mut visited) {
             // Direct recursion: primary on enum decl. Indirect: primary on case.
-            let primary_entity = if rec.is_direct { entity } else { rec.case_entity };
+            let primary_entity = if rec.is_direct {
+                entity
+            } else {
+                rec.case_entity
+            };
             let span = util::entity_span(cx.query, primary_entity);
             return vec![AnalyzeDiagnostic {
                 descriptor_id: DESCRIPTORS[0].id,
@@ -104,13 +108,19 @@ fn find_recursive_case(
             if let Some(ref ty) = param.ty {
                 // Check direct reference first
                 if type_references_directly(cx, target_enum, ty, target_enum) {
-                    return Some(RecursiveCase { case_entity: child, is_direct: true });
+                    return Some(RecursiveCase {
+                        case_entity: child,
+                        is_direct: true,
+                    });
                 }
                 // Check transitive reference
                 visited.clear();
                 visited.insert(target_enum);
                 if type_contains(cx, target_enum, ty, target_enum, visited) {
-                    return Some(RecursiveCase { case_entity: child, is_direct: false });
+                    return Some(RecursiveCase {
+                        case_entity: child,
+                        is_direct: false,
+                    });
                 }
             }
         }
@@ -134,10 +144,10 @@ fn type_references_directly(
                 root: cx.root,
             });
             matches!(resolved, TypeResolution::Found(e) if e == target_enum)
-        }
-        AstType::Tuple(elements, _) => {
-            elements.iter().any(|e| type_references_directly(cx, target_enum, e, context))
-        }
+        },
+        AstType::Tuple(elements, _) => elements
+            .iter()
+            .any(|e| type_references_directly(cx, target_enum, e, context)),
         _ => false,
     }
 }
@@ -173,7 +183,7 @@ fn entity_contains(
                     }
                 }
             }
-        }
+        },
         Some(NodeKind::Struct) => {
             // Walk stored fields
             for &child in cx.query.children_of(entity) {
@@ -191,8 +201,8 @@ fn entity_contains(
                     return true;
                 }
             }
-        }
-        _ => {}
+        },
+        _ => {},
     }
 
     false
@@ -227,24 +237,24 @@ fn type_contains(
                 match kind {
                     Some(NodeKind::Struct) => {
                         return entity_contains(cx, target_enum, entity, visited);
-                    }
+                    },
                     Some(NodeKind::Enum) => {
                         // Only follow non-indirect enums (indirect = heap allocated)
                         if cx.query.get::<IsIndirect>(entity).is_none() {
                             return entity_contains(cx, target_enum, entity, visited);
                         }
-                    }
-                    _ => {}
+                    },
+                    _ => {},
                 }
             }
             false
-        }
+        },
         AstType::Tuple(elements, _) => {
             // Tuples are inline — check each element
             elements
                 .iter()
                 .any(|elem| type_contains(cx, target_enum, elem, context, visited))
-        }
+        },
         // Array, Optional, Dictionary, Result, Function — heap-indirected, stop
         _ => false,
     }

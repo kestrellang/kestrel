@@ -5,8 +5,10 @@
 
 use kestrel_hecs::{Entity, World};
 use kestrel_span2::Span;
+use kestrel_syntax_tree2::utils::{
+    extract_path_segments, extract_visibility, find_child, get_decl_span, is_trivia,
+};
 use kestrel_syntax_tree2::{SyntaxKind, SyntaxNode};
-use kestrel_syntax_tree2::utils::{extract_path_segments, extract_visibility, find_child, get_decl_span, is_trivia};
 
 use crate::ast_type::{AstType, PathSegment, ast_type_from_cst};
 use crate::components::*;
@@ -77,10 +79,10 @@ fn extract_attribute_arg(node: &SyntaxNode) -> Option<AstAttributeArg> {
     let colon_pos = tokens.iter().position(|t| t.kind() == SyntaxKind::Colon);
 
     if let Some(pos) = colon_pos {
-        let label = tokens.get(pos.wrapping_sub(1))
+        let label = tokens
+            .get(pos.wrapping_sub(1))
             .map(|t| t.text().to_string());
-        let value = extract_value_from_tokens(&tokens[(pos + 1)..])
-            .unwrap_or_default();
+        let value = extract_value_from_tokens(&tokens[(pos + 1)..]).unwrap_or_default();
         Some(AstAttributeArg { label, value })
     } else {
         // Just a value, no label
@@ -120,7 +122,7 @@ pub fn set_documentation(world: &mut World, entity: Entity, node: &SyntaxNode) {
                     continue; // Skip non-doc comments
                 };
                 doc_lines.push(stripped.to_string());
-            }
+            },
             rowan::NodeOrToken::Token(t) if is_trivia(t.kind()) => continue,
             _ => break, // Stop at first non-trivia element
         }
@@ -149,7 +151,7 @@ pub fn set_conformances(world: &mut World, entity: Entity, node: &SyntaxNode, fi
                         .find(|c| is_type_kind(c.kind()))
                         .and_then(|c| ast_type_from_cst(&c, file_id))?;
                     Some(ConformanceItem::Positive(ty, child))
-                }
+                },
                 SyntaxKind::NegativeConformance => {
                     // Negative conformance — `not Protocol`
                     let ty = child
@@ -157,7 +159,7 @@ pub fn set_conformances(world: &mut World, entity: Entity, node: &SyntaxNode, fi
                         .find(|c| is_type_kind(c.kind()))
                         .and_then(|c| ast_type_from_cst(&c, file_id))?;
                     Some(ConformanceItem::Negative(ty, child))
-                }
+                },
                 _ => None,
             }
         })
@@ -208,11 +210,16 @@ pub fn set_where_clause(world: &mut World, entity: Entity, node: &SyntaxNode, fi
                                 if i + 1 < children.len()
                                     && children[i + 1].kind() == SyntaxKind::TypeArgumentList
                                 {
-                                    if let Some(AstType::Named { ref mut segments, .. }) = ty {
+                                    if let Some(AstType::Named {
+                                        ref mut segments, ..
+                                    }) = ty
+                                    {
                                         let type_args: Vec<AstType> = children[i + 1]
                                             .children()
                                             .filter(|c| crate::ast_type::is_type_node(c.kind()))
-                                            .filter_map(|c| crate::ast_type::ast_type_from_cst(&c, file_id))
+                                            .filter_map(|c| {
+                                                crate::ast_type::ast_type_from_cst(&c, file_id)
+                                            })
                                             .collect();
                                         if let Some(last) = segments.last_mut() {
                                             last.type_args = type_args;
@@ -250,12 +257,15 @@ pub fn set_where_clause(world: &mut World, entity: Entity, node: &SyntaxNode, fi
                             node: child,
                         })
                     }
-                }
+                },
                 SyntaxKind::TypeEquality => {
                     // Type equality uses Ty nodes, Name/Path, or AssociatedTypeTarget (wraps a Path)
-                    let mut type_children = child
-                        .children()
-                        .filter(|c| is_type_kind(c.kind()) || c.kind() == SyntaxKind::Name || c.kind() == SyntaxKind::Path || c.kind() == SyntaxKind::AssociatedTypeTarget);
+                    let mut type_children = child.children().filter(|c| {
+                        is_type_kind(c.kind())
+                            || c.kind() == SyntaxKind::Name
+                            || c.kind() == SyntaxKind::Path
+                            || c.kind() == SyntaxKind::AssociatedTypeTarget
+                    });
 
                     let lhs_node = type_children.next()?;
                     let lhs = node_to_ast_type(&lhs_node, file_id)?;
@@ -267,7 +277,7 @@ pub fn set_where_clause(world: &mut World, entity: Entity, node: &SyntaxNode, fi
                         rhs,
                         node: child,
                     })
-                }
+                },
                 _ => None,
             }
         })
@@ -298,7 +308,11 @@ fn name_to_ast_type(parent: &SyntaxNode, file_id: usize) -> Option<AstType> {
     let range = name_node.text_range();
     let span = Span::new(file_id, (range.start().into())..(range.end().into()));
     Some(AstType::Named {
-        segments: vec![PathSegment { name: ident, type_args: vec![], span: span.clone() }],
+        segments: vec![PathSegment {
+            name: ident,
+            type_args: vec![],
+            span: span.clone(),
+        }],
         span,
     })
 }
@@ -325,7 +339,8 @@ fn path_to_ast_type(path_node: &SyntaxNode, file_id: usize) -> Option<AstType> {
         .unwrap_or_default();
 
     // Type args go on the last segment
-    let segments = names.into_iter()
+    let segments = names
+        .into_iter()
         .enumerate()
         .map(|(i, name)| {
             let seg_args = if i == 0 && !type_args.is_empty() {
@@ -334,7 +349,11 @@ fn path_to_ast_type(path_node: &SyntaxNode, file_id: usize) -> Option<AstType> {
             } else {
                 vec![]
             };
-            PathSegment { name, type_args: seg_args, span: span.clone() }
+            PathSegment {
+                name,
+                type_args: seg_args,
+                span: span.clone(),
+            }
         })
         .collect::<Vec<_>>();
     // If multi-segment, put type args on last segment
@@ -355,15 +374,19 @@ fn node_to_ast_type(node: &SyntaxNode, file_id: usize) -> Option<AstType> {
             let range = node.text_range();
             let span = Span::new(file_id, (range.start().into())..(range.end().into()));
             Some(AstType::Named {
-                segments: vec![PathSegment { name: ident, type_args: vec![], span: span.clone() }],
+                segments: vec![PathSegment {
+                    name: ident,
+                    type_args: vec![],
+                    span: span.clone(),
+                }],
                 span,
             })
-        }
+        },
         SyntaxKind::Path => path_to_ast_type(node, file_id),
         // AssociatedTypeTarget wraps a Path (e.g., Item.Output in where clauses)
         SyntaxKind::AssociatedTypeTarget => {
             find_child(node, SyntaxKind::Path).and_then(|p| path_to_ast_type(&p, file_id))
-        }
+        },
         _ if is_type_kind(node.kind()) => ast_type_from_cst(node, file_id),
         _ => None,
     }

@@ -13,7 +13,7 @@ use cranelift_codegen::ir::condcodes::IntCC;
 use cranelift_codegen::ir::immediates::Offset32;
 use cranelift_codegen::ir::{self, InstBuilder, MemFlags, TrapCode, Value as CrValue};
 use cranelift_frontend::FunctionBuilder;
-use kestrel_codegen2::{substitute_type, NamedKind};
+use kestrel_codegen2::{NamedKind, substitute_type};
 use kestrel_mir::{MirTy, SwitchCase, Terminator, TerminatorKind, Value};
 
 /// Compile a block terminator.
@@ -29,7 +29,7 @@ pub fn compile_terminator(
             let cl_block = state.block_map[target];
             builder.ins().jump(cl_block, &[]);
             Ok(())
-        }
+        },
         TerminatorKind::Branch {
             condition,
             then_block,
@@ -42,11 +42,11 @@ pub fn compile_terminator(
         TerminatorKind::Panic(_msg) => {
             builder.ins().trap(TrapCode::unwrap_user(1));
             Ok(())
-        }
+        },
         TerminatorKind::Unreachable => {
             builder.ins().trap(TrapCode::unwrap_user(2));
             Ok(())
-        }
+        },
     }
 }
 
@@ -78,12 +78,9 @@ fn compile_return(
     } else if state.is_main {
         // Main returns i64 — may need to extract from wrapper struct
         if is_aggregate(&ret_ty, &mut ctx.layouts) {
-            let loaded = builder.ins().load(
-                ir::types::I64,
-                MemFlags::new(),
-                val,
-                Offset32::new(0),
-            );
+            let loaded = builder
+                .ins()
+                .load(ir::types::I64, MemFlags::new(), val, Offset32::new(0));
             builder.ins().return_(&[loaded]);
         } else {
             builder.ins().return_(&[val]);
@@ -105,7 +102,9 @@ fn compile_return(
                 common::align_to_shift(layout.align),
             ));
             let addr = builder.ins().stack_addr(ptr_ty, slot, Offset32::new(0));
-            builder.ins().store(MemFlags::new(), val, addr, Offset32::new(0));
+            builder
+                .ins()
+                .store(MemFlags::new(), val, addr, Offset32::new(0));
             builder.ins().return_(&[addr]);
         } else {
             builder.ins().return_(&[val]);
@@ -133,13 +132,13 @@ fn compile_branch(
         cond_raw // Already a scalar i8
     } else {
         // Aggregate pointer — load the i8 bool value
-        builder.ins().load(ir::types::I8, MemFlags::new(), cond_raw, Offset32::new(0))
+        builder
+            .ins()
+            .load(ir::types::I8, MemFlags::new(), cond_raw, Offset32::new(0))
     };
 
     // Convert i8 bool to branch condition
-    let cmp = builder
-        .ins()
-        .icmp_imm(IntCC::NotEqual, cond_val, 0);
+    let cmp = builder.ins().icmp_imm(IntCC::NotEqual, cond_val, 0);
 
     let then_cl = state.block_map[&then_block];
     let else_cl = state.block_map[&else_block];
@@ -199,7 +198,9 @@ fn compile_switch(
         if raw_ty == width_ty {
             disc_val_raw
         } else if raw_ty == common::ptr_type(ctx.target) {
-            builder.ins().load(width_ty, MemFlags::new(), disc_val_raw, Offset32::new(0))
+            builder
+                .ins()
+                .load(width_ty, MemFlags::new(), disc_val_raw, Offset32::new(0))
         } else {
             disc_val_raw
         }
@@ -229,19 +230,15 @@ fn compile_switch(
                     i as i64
                 };
                 builder.ins().icmp_imm(IntCC::Equal, discr_val, expected)
-            }
-            SwitchCase::Bool(b) => {
-                builder.ins().icmp_imm(IntCC::Equal, discr_val, *b as i64)
-            }
-            SwitchCase::IntLiteral(v) => {
-                builder.ins().icmp_imm(IntCC::Equal, discr_val, *v)
-            }
+            },
+            SwitchCase::Bool(b) => builder.ins().icmp_imm(IntCC::Equal, discr_val, *b as i64),
+            SwitchCase::IntLiteral(v) => builder.ins().icmp_imm(IntCC::Equal, discr_val, *v),
             SwitchCase::IntRange { start, end } => {
                 range_test(builder, discr_val, *start, *end, /*signed*/ true)
-            }
+            },
             SwitchCase::CharLiteral(c) => {
                 builder.ins().icmp_imm(IntCC::Equal, discr_val, *c as i64)
-            }
+            },
             SwitchCase::CharRange { start, end } => {
                 range_test(
                     builder,
@@ -250,11 +247,11 @@ fn compile_switch(
                     end.map(|e| e as i64),
                     /*signed*/ false,
                 )
-            }
+            },
             SwitchCase::StringLiteral(_) => {
                 // Not yet implemented — fall through to the next case.
                 builder.ins().iconst(ir::types::I8, 0)
-            }
+            },
         };
         let next_block = builder.create_block();
         builder.ins().brif(cmp, target_cl, &[], next_block, &[]);
@@ -294,9 +291,15 @@ fn range_test(
     signed: bool,
 ) -> CrValue {
     let (gte, lte) = if signed {
-        (IntCC::SignedGreaterThanOrEqual, IntCC::SignedLessThanOrEqual)
+        (
+            IntCC::SignedGreaterThanOrEqual,
+            IntCC::SignedLessThanOrEqual,
+        )
     } else {
-        (IntCC::UnsignedGreaterThanOrEqual, IntCC::UnsignedLessThanOrEqual)
+        (
+            IntCC::UnsignedGreaterThanOrEqual,
+            IntCC::UnsignedLessThanOrEqual,
+        )
     };
     let low_ok = match start {
         Some(s) => builder.ins().icmp_imm(gte, val, s),

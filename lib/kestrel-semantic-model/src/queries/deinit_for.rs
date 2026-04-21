@@ -21,9 +21,7 @@ impl Query for DeinitFor {
     type Output = Option<SymbolId>;
 
     fn execute(self, model: &SemanticModel) -> Self::Output {
-        let symbol = model.query(SymbolFor {
-            id: self.symbol_id,
-        })?;
+        let symbol = model.query(SymbolFor { id: self.symbol_id })?;
 
         symbol
             .metadata()

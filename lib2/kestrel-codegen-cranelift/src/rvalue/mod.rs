@@ -44,38 +44,37 @@ pub fn compile_rvalue(
             }
             let a = compile_value(ctx, state, builder, arg)?;
             dispatch_op1(ctx, state, builder, op, a)
-        }
+        },
         Rvalue::Op2 { op, lhs, rhs } => {
             let l = compile_value(ctx, state, builder, lhs)?;
             let r = compile_value(ctx, state, builder, rhs)?;
             dispatch_op2(ctx, state, builder, op, l, r)
-        }
+        },
         Rvalue::Op3 { op, a, b, c } => {
             let va = compile_value(ctx, state, builder, a)?;
             let vb = compile_value(ctx, state, builder, b)?;
             let vc = compile_value(ctx, state, builder, c)?;
             dispatch_op3(ctx, state, builder, op, va, vb, vc)
-        }
+        },
 
         // Composite construction
         Rvalue::Construct { ty, fields } => {
             construct::compile_construct(ctx, state, builder, ty, fields)
-        }
+        },
         Rvalue::Tuple(values) => construct::compile_tuple(ctx, state, builder, values),
         Rvalue::EnumVariant {
             enum_ty,
             variant,
             payload,
         } => construct::compile_enum_variant(ctx, state, builder, enum_ty, variant, payload),
-        Rvalue::ArrayLiteral {
-            element_ty,
-            values,
-        } => construct::compile_array_literal(ctx, state, builder, element_ty, values),
+        Rvalue::ArrayLiteral { element_ty, values } => {
+            construct::compile_array_literal(ctx, state, builder, element_ty, values)
+        },
 
         // Closures
         Rvalue::ApplyPartial { func, captures } => {
             closure::compile_apply_partial(ctx, state, builder, func, captures)
-        }
+        },
     }
 }
 
@@ -102,32 +101,36 @@ fn dispatch_op1(
 ) -> Result<CrValue, CodegenError> {
     match op {
         // Pointer ops
-        Op::PtrNull(_) | Op::PtrFromAddress(_) | Op::PtrToAddress | Op::PtrIsNull
-        | Op::PtrCast(_) | Op::PtrBitcast(_) | Op::RefToPtr | Op::PtrRead(_) => {
-            pointer::compile_pointer_op1(ctx, state, builder, op, arg)
-        }
+        Op::PtrNull(_)
+        | Op::PtrFromAddress(_)
+        | Op::PtrToAddress
+        | Op::PtrIsNull
+        | Op::PtrCast(_)
+        | Op::PtrBitcast(_)
+        | Op::RefToPtr
+        | Op::PtrRead(_) => pointer::compile_pointer_op1(ctx, state, builder, op, arg),
 
         // Memory
         Op::SizeOf(_) | Op::AlignOf(_) | Op::StackAlloc(_) => {
             pointer::compile_memory_op1(ctx, state, builder, op, arg)
-        }
+        },
 
         // String ops (StrPtr, StrLen only — IntToString is not emitted by lib2)
-        Op::StrPtr | Op::StrLen => {
-            string::compile_string_op1(ctx, state, builder, op, arg)
-        }
+        Op::StrPtr | Op::StrLen => string::compile_string_op1(ctx, state, builder, op, arg),
 
         // Float intrinsics
         Op::FloatConst(_, _) | Op::FloatPred(_, _) | Op::FloatMath(_, _) => {
             arithmetic::compile_float_intrinsic_op1(ctx, state, builder, op, arg)
-        }
+        },
 
         // Casts
-        Op::IntWiden(_, _) | Op::IntTruncate(_, _) | Op::FloatWiden(_, _)
-        | Op::FloatTruncate(_, _) | Op::IntToFloat(_, _) | Op::FloatToInt(_, _)
-        | Op::RefToImmut => {
-            cast::compile_cast_op1(ctx, state, builder, op, arg)
-        }
+        Op::IntWiden(_, _)
+        | Op::IntTruncate(_, _)
+        | Op::FloatWiden(_, _)
+        | Op::FloatTruncate(_, _)
+        | Op::IntToFloat(_, _)
+        | Op::FloatToInt(_, _)
+        | Op::RefToImmut => cast::compile_cast_op1(ctx, state, builder, op, arg),
 
         // Arithmetic / bitwise / boolean unary
         _ => arithmetic::compile_op1(ctx, state, builder, op, arg),
@@ -147,17 +150,17 @@ fn dispatch_op2(
         // Pointer ops
         Op::PtrOffset | Op::PtrWrite(_) => {
             pointer::compile_pointer_op2(ctx, state, builder, op, lhs, rhs)
-        }
+        },
 
         // Atomic
         Op::AtomicAdd | Op::AtomicSub => {
             pointer::compile_atomic_op2(ctx, state, builder, op, lhs, rhs)
-        }
+        },
 
         // Float binary
         Op::FloatCopysign(_) => {
             arithmetic::compile_float_intrinsic_op2(ctx, state, builder, op, lhs, rhs)
-        }
+        },
 
         // Arithmetic / bitwise / comparison / boolean binary
         _ => arithmetic::compile_op2(ctx, state, builder, op, lhs, rhs),

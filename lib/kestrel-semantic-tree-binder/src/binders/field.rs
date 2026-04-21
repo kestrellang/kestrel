@@ -1,12 +1,14 @@
 use std::sync::Arc;
 
 use kestrel_semantic_tree::behavior::ComputedMemberAccessBehavior;
-use kestrel_semantic_tree::behavior::{ComputedPropertyMarker, NamespaceScopeMarker, StaticBehavior};
 use kestrel_semantic_tree::behavior::FileConstantBehavior;
 use kestrel_semantic_tree::behavior::executable::ExecutableBehavior;
 use kestrel_semantic_tree::behavior::member_access::MemberAccessBehavior;
 use kestrel_semantic_tree::behavior::typed::TypedBehavior;
 use kestrel_semantic_tree::behavior::valued::ValueBehavior;
+use kestrel_semantic_tree::behavior::{
+    ComputedPropertyMarker, NamespaceScopeMarker, StaticBehavior,
+};
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::field::FieldSymbol;
 use kestrel_semantic_tree::ty::Ty;
@@ -83,7 +85,11 @@ impl DeclarationBinder for FieldBinder {
         let is_module_level = symbol
             .metadata()
             .parent()
-            .map(|p| p.metadata().get_behavior::<NamespaceScopeMarker>().is_some())
+            .map(|p| {
+                p.metadata()
+                    .get_behavior::<NamespaceScopeMarker>()
+                    .is_some()
+            })
             .unwrap_or(false);
 
         // Add appropriate member access behavior so this field can be accessed via dot notation
@@ -91,7 +97,10 @@ impl DeclarationBinder for FieldBinder {
 
         // Check field properties via marker behaviors
         let is_static = symbol.metadata().get_behavior::<StaticBehavior>().is_some();
-        let is_computed = symbol.metadata().get_behavior::<ComputedPropertyMarker>().is_some();
+        let is_computed = symbol
+            .metadata()
+            .get_behavior::<ComputedPropertyMarker>()
+            .is_some();
 
         // Add ValueBehavior for module-level or static fields
         // This allows them to be resolved as values in path expressions
@@ -145,7 +154,11 @@ impl DeclarationBinder for FieldBinder {
         }
 
         // Skip computed properties (they use getter/setter bodies instead)
-        if symbol.metadata().get_behavior::<ComputedPropertyMarker>().is_some() {
+        if symbol
+            .metadata()
+            .get_behavior::<ComputedPropertyMarker>()
+            .is_some()
+        {
             return;
         }
 
@@ -153,7 +166,11 @@ impl DeclarationBinder for FieldBinder {
         let is_module_level = symbol
             .metadata()
             .parent()
-            .map(|p| p.metadata().get_behavior::<NamespaceScopeMarker>().is_some())
+            .map(|p| {
+                p.metadata()
+                    .get_behavior::<NamespaceScopeMarker>()
+                    .is_some()
+            })
             .unwrap_or(false);
 
         // Skip non-static instance fields (their initialization is handled by constructors)

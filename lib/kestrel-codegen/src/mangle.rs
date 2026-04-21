@@ -29,7 +29,9 @@
 //! - AssociatedTypeProjection: `Q` type ident
 //! - Error: `X`
 
-use kestrel_execution_graph::{Function, Id, MirContext, MirTy, QualifiedName, ReceiverConvention, Ty};
+use kestrel_execution_graph::{
+    Function, Id, MirContext, MirTy, QualifiedName, ReceiverConvention, Ty,
+};
 
 /// Mangle a qualified name (for statics and non-function symbols).
 ///
@@ -468,8 +470,7 @@ mod tests {
     #[test]
     fn test_function_with_receiver() {
         let mut ctx = MirContext::new();
-        let name =
-            ctx.intern_name(QualifiedNameData::from_parts(&["Main", "Point", "get:x"]));
+        let name = ctx.intern_name(QualifiedNameData::from_parts(&["Main", "Point", "get:x"]));
         let i64_ty = ctx.ty_i64();
         let ref_ty = ctx.ty_ref(i64_ty); // placeholder self type
 
@@ -484,8 +485,7 @@ mod tests {
     #[test]
     fn test_function_with_refmut_receiver() {
         let mut ctx = MirContext::new();
-        let name =
-            ctx.intern_name(QualifiedNameData::from_parts(&["Main", "Point", "set:x"]));
+        let name = ctx.intern_name(QualifiedNameData::from_parts(&["Main", "Point", "set:x"]));
         let i64_ty = ctx.ty_i64();
         let ref_mut_ty = ctx.ty_ref_mut(i64_ty); // placeholder self type
         let unit_ty = ctx.ty_unit();
@@ -569,9 +569,7 @@ mod tests {
     fn test_deinit_with_consuming_receiver() {
         let mut ctx = MirContext::new();
         let name = ctx.intern_name(QualifiedNameData::from_parts(&[
-            "Main",
-            "Resource",
-            "deinit",
+            "Main", "Resource", "deinit",
         ]));
         let unit_ty = ctx.ty_unit();
         let i64_ty = ctx.ty_i64(); // placeholder self type
@@ -606,8 +604,7 @@ mod tests {
     #[test]
     fn test_init_with_labeled_params() {
         let mut ctx = MirContext::new();
-        let name =
-            ctx.intern_name(QualifiedNameData::from_parts(&["Main", "Point", "init"]));
+        let name = ctx.intern_name(QualifiedNameData::from_parts(&["Main", "Point", "init"]));
         let i64_ty = ctx.ty_i64();
         let unit_ty = ctx.ty_unit();
 

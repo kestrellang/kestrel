@@ -174,7 +174,7 @@ impl<'a> InferCtx<'a> {
                 // A type-parameter used as a Named slot: fall back to Param.
                 debug_assert!(args.is_empty(), "TypeParameter should not have args");
                 return self.param(entity);
-            }
+            },
             // Struct is the default for Typed entities without a more specific kind
             // (covers Struct, lang.* primitives seeded as leaf types, etc.).
             _ => TyKind::Struct { entity, args },
@@ -241,8 +241,7 @@ impl<'a> InferCtx<'a> {
     /// Allocate a TyVar bound to a Tuple type.
     pub fn tuple(&mut self, elements: Vec<TyVar>) -> TyVar {
         let idx = self.types.len() as u32;
-        self.types
-            .push(TySlot::Resolved(TyKind::Tuple(elements)));
+        self.types.push(TySlot::Resolved(TyKind::Tuple(elements)));
         TyVar(idx)
     }
 
@@ -272,8 +271,7 @@ impl<'a> InferCtx<'a> {
         }
         let idx = self.types.len() as u32;
         let tv = TyVar(idx);
-        self.types
-            .push(TySlot::Resolved(TyKind::Param { entity }));
+        self.types.push(TySlot::Resolved(TyKind::Param { entity }));
         self.param_tyvars.insert(entity, tv);
         tv
     }
@@ -335,8 +333,12 @@ impl<'a> InferCtx<'a> {
     }
 
     pub fn coerce(&mut self, from: TyVar, to: TyVar, expr: HirExprId, span: Span) {
-        self.constraints
-            .push(Constraint::Coerce { from, to, expr, span });
+        self.constraints.push(Constraint::Coerce {
+            from,
+            to,
+            expr,
+            span,
+        });
     }
 
     pub fn conforms(&mut self, ty: TyVar, protocol: Entity, span: Span) {
@@ -466,8 +468,11 @@ impl<'a> InferCtx<'a> {
     /// Emit a constraint that reduces a TypeAlias TyVar to its substituted
     /// definition (and emits bound obligations).
     pub fn reduce(&mut self, alias: TyVar, result: TyVar, span: Span) {
-        self.constraints
-            .push(Constraint::Reduce { alias, result, span });
+        self.constraints.push(Constraint::Reduce {
+            alias,
+            result,
+            span,
+        });
     }
 
     pub fn implicit(

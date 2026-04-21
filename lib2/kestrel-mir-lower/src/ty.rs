@@ -82,7 +82,11 @@ fn lower_named_type(ctx: &mut LowerCtx, entity: Entity, args: &[HirTy]) -> MirTy
 
 /// Lower a named type from entity + already-lowered MirTy args.
 /// Shared between the HirTy and ResolvedTy lowering paths.
-pub fn lower_named_type_from_entity(ctx: &mut LowerCtx, entity: Entity, type_args: &[MirTy]) -> MirTy {
+pub fn lower_named_type_from_entity(
+    ctx: &mut LowerCtx,
+    entity: Entity,
+    type_args: &[MirTy],
+) -> MirTy {
     // Check if this is a lang primitive
     if let Some(prim) = try_lang_primitive(ctx.world, entity, type_args) {
         return prim;

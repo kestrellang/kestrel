@@ -201,7 +201,9 @@ fn collect_static_fields_with_initializers(
 ) {
     use kestrel_semantic_tree::behavior::FileConstantBehavior;
     use kestrel_semantic_tree::behavior::executable::ExecutableBehavior;
-    use kestrel_semantic_tree::behavior::{ComputedPropertyMarker, NamespaceScopeMarker, StaticBehavior};
+    use kestrel_semantic_tree::behavior::{
+        ComputedPropertyMarker, NamespaceScopeMarker, StaticBehavior,
+    };
     use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 
     let kind = symbol.metadata().kind();
@@ -225,7 +227,11 @@ fn collect_static_fields_with_initializers(
         let is_module_level = symbol
             .metadata()
             .parent()
-            .map(|p| p.metadata().get_behavior::<NamespaceScopeMarker>().is_some())
+            .map(|p| {
+                p.metadata()
+                    .get_behavior::<NamespaceScopeMarker>()
+                    .is_some()
+            })
             .unwrap_or(false);
 
         let is_static_field =

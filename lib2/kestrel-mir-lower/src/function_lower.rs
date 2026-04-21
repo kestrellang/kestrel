@@ -5,9 +5,7 @@
 
 use kestrel_ast_builder::{Attributes, Callable, Intrinsic, NodeKind, Static, TypeParams};
 use kestrel_hecs::Entity;
-use kestrel_mir::{
-    FunctionDef, FunctionId, FunctionKind, ReceiverConvention, TypeParamDef,
-};
+use kestrel_mir::{FunctionDef, FunctionId, FunctionKind, ReceiverConvention, TypeParamDef};
 
 use crate::context::LowerCtx;
 use crate::ty::{resolve_callable_types, resolve_type_annotation};
@@ -92,7 +90,9 @@ pub fn lower_function_sig(ctx: &mut LowerCtx, entity: Entity) -> FunctionId {
     if let Some(attrs) = ctx.world.get::<Attributes>(entity) {
         for attr in &attrs.0 {
             if attr.name == "extern" {
-                let symbol_name = attr.args.iter()
+                let symbol_name = attr
+                    .args
+                    .iter()
                     .find(|a| a.label.as_deref() == Some("mangleName"))
                     .map(|a| a.value.trim_matches('"').to_string())
                     .unwrap_or_else(|| {
@@ -190,9 +190,14 @@ fn determine_function_kind(ctx: &LowerCtx, entity: Entity) -> FunctionKind {
                     let conv = match receiver {
                         kestrel_ast_builder::ReceiverKind::Borrowing => ReceiverConvention::Ref,
                         kestrel_ast_builder::ReceiverKind::Mutating => ReceiverConvention::RefMut,
-                        kestrel_ast_builder::ReceiverKind::Consuming => ReceiverConvention::Consuming,
+                        kestrel_ast_builder::ReceiverKind::Consuming => {
+                            ReceiverConvention::Consuming
+                        },
                     };
-                    FunctionKind::Method { parent, receiver: conv }
+                    FunctionKind::Method {
+                        parent,
+                        receiver: conv,
+                    }
                 } else {
                     FunctionKind::StaticMethod { parent }
                 }
@@ -222,8 +227,8 @@ fn accessor_enclosing_container(ctx: &LowerCtx, entity: Entity) -> Option<Entity
 fn collect_inherited_type_params(ctx: &mut LowerCtx, entity: Entity, def: &mut FunctionDef) {
     // Setters are children of Field/Subscript, so resolve the true enclosing
     // container one hop further up; otherwise the parent is the container.
-    let Some(parent) = accessor_enclosing_container(ctx, entity)
-        .or_else(|| ctx.world.parent_of(entity))
+    let Some(parent) =
+        accessor_enclosing_container(ctx, entity).or_else(|| ctx.world.parent_of(entity))
     else {
         return;
     };

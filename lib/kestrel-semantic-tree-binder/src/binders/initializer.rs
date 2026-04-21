@@ -187,7 +187,10 @@ fn resolve_initializer_body(
 /// Get the type of `self` for an initializer
 ///
 /// Returns the concrete type of the containing struct with type parameters.
-fn get_self_type(symbol: &Arc<dyn Symbol<KestrelLanguage>>, model: &kestrel_semantic_model::SemanticModel) -> Option<Ty> {
+fn get_self_type(
+    symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+    model: &kestrel_semantic_model::SemanticModel,
+) -> Option<Ty> {
     let parent = symbol.metadata().parent()?;
     crate::binders::utils::self_type::self_type_for_parent(&parent, model)
 }

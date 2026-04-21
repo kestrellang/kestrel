@@ -502,9 +502,7 @@ impl Ty {
                 let new_elements: Vec<Ty> = elements.iter().map(|e| f(e)).collect();
                 Ty::tuple(new_elements, self.span.clone())
             },
-            TyKind::Pointer(inner) => {
-                Ty::pointer(f(inner), self.span.clone())
-            },
+            TyKind::Pointer(inner) => Ty::pointer(f(inner), self.span.clone()),
             TyKind::Function {
                 params,
                 return_type,
@@ -541,9 +539,11 @@ impl Ty {
                 Ty::generic_type_alias(symbol.clone(), new_subs, self.span.clone())
             },
             TyKind::AssociatedType { symbol, container } => match container {
-                Some(container_ty) => {
-                    Ty::qualified_associated_type(symbol.clone(), f(container_ty), self.span.clone())
-                },
+                Some(container_ty) => Ty::qualified_associated_type(
+                    symbol.clone(),
+                    f(container_ty),
+                    self.span.clone(),
+                ),
                 None => self.clone(),
             },
             TyKind::UnresolvedFunction {

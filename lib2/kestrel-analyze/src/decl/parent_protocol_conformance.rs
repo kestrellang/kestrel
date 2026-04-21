@@ -29,7 +29,7 @@ use crate::diagnostic::*;
 use crate::traits::{DeclCheck, Describe};
 use crate::util;
 use kestrel_ast::ast_type::AstType;
-use kestrel_ast_builder::{Conformances, ConformanceItem, NodeKind};
+use kestrel_ast_builder::{ConformanceItem, Conformances, NodeKind};
 use kestrel_hecs::Entity;
 use kestrel_name_res::{ConformingProtocols, ResolveTypePath, TypeResolution};
 

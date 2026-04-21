@@ -1,13 +1,13 @@
 //! Enum and EnumCase declaration builders.
 
 use kestrel_hecs::{Entity, World};
-use kestrel_syntax_tree2::{SyntaxKind, SyntaxNode};
 use kestrel_syntax_tree2::utils::{extract_name, find_child, get_decl_span};
+use kestrel_syntax_tree2::{SyntaxKind, SyntaxNode};
 
-use crate::ast_type::ast_type_from_cst;
-use crate::components::*;
 use super::helpers::*;
 use super::type_param::build_type_parameters;
+use crate::ast_type::ast_type_from_cst;
+use crate::components::*;
 
 /// Build an enum declaration entity from CST.
 ///
@@ -103,7 +103,13 @@ pub fn build_enum_case(
             .collect();
 
         if !params.is_empty() {
-            world.set(entity, Callable { params, receiver: None });
+            world.set(
+                entity,
+                Callable {
+                    params,
+                    receiver: None,
+                },
+            );
         }
     }
 }

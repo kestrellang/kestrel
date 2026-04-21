@@ -16,11 +16,7 @@ use crate::ty::TyVar;
 pub enum Constraint {
     /// `a = b` — structural type equality.
     /// Used where types must be identical: if/match branches, array elements.
-    Equal {
-        a: TyVar,
-        b: TyVar,
-        span: Span,
-    },
+    Equal { a: TyVar, b: TyVar, span: Span },
 
     /// `from → to` — value flows from source to target.
     /// Tries Equal first; on failure, falls back to promotion (FromValue).

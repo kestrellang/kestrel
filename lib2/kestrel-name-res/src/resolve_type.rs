@@ -7,7 +7,9 @@
 //! by `seed_lang_module()` and resolved through normal name resolution.
 //! Only `Self` gets special handling as a keyword.
 
-use kestrel_ast_builder::{Conformances, ConformanceItem, Name, NodeKind, Typed, TypeParams, WhereClause, WhereConstraint};
+use kestrel_ast_builder::{
+    ConformanceItem, Conformances, Name, NodeKind, TypeParams, Typed, WhereClause, WhereConstraint,
+};
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
 
 use crate::resolve_name::{NameResolution, ResolveName};
@@ -50,7 +52,11 @@ impl QueryFn for ResolveTypePath {
     type Output = TypeResolution;
 
     fn describe(&self) -> String {
-        format!("ResolveTypePath({:?}, ctx={:?})", self.segments.join("."), self.context)
+        format!(
+            "ResolveTypePath({:?}, ctx={:?})",
+            self.segments.join("."),
+            self.context
+        )
     }
 
     fn execute(&self, ctx: &QueryContext<'_>) -> TypeResolution {
@@ -62,13 +68,20 @@ impl QueryFn for ResolveTypePath {
         if self.segments[0] == "Self" {
             // Multi-segment Self.Item — try resolving through synthetic type param
             if self.segments.len() > 1 {
-                if let Some(result) = try_resolve_self_as_type_param(ctx, &self.segments, self.context, self.root) {
+                if let Some(result) =
+                    try_resolve_self_as_type_param(ctx, &self.segments, self.context, self.root)
+                {
                     return result;
                 }
                 // Fallback: resolve Self.Item through the enclosing extension target.
                 // For `extend Iterator: Iterable { type Iterable.Item = Self.Item }`,
                 // Self resolves to Iterator, then .Item walks Iterator's children.
-                if let Some(result) = try_resolve_self_via_extension_target(ctx, &self.segments, self.context, self.root) {
+                if let Some(result) = try_resolve_self_via_extension_target(
+                    ctx,
+                    &self.segments,
+                    self.context,
+                    self.root,
+                ) {
                     return result;
                 }
             }
@@ -98,7 +111,7 @@ impl QueryFn for ResolveTypePath {
                     // Multi-segment: first can be a module or type, prefer types
                     find_type_entity(ctx, &entities).unwrap_or(entities[0])
                 }
-            }
+            },
             NameResolution::Ambiguous(entities) => {
                 if self.segments.len() == 1 {
                     match find_type_entity(ctx, &entities) {
@@ -108,10 +121,10 @@ impl QueryFn for ResolveTypePath {
                 } else {
                     find_type_entity(ctx, &entities).unwrap_or(entities[0])
                 }
-            }
+            },
             NameResolution::NotFound => {
                 return TypeResolution::NotFound(first.clone());
-            }
+            },
         };
 
         // Multi-segment: walk remaining segments
@@ -120,7 +133,9 @@ impl QueryFn for ResolveTypePath {
             // Check if current is a type parameter — look for associated types
             // in where-clause bounds (e.g. T.Item where T: Iterator)
             if ctx.get::<NodeKind>(current) == Some(&NodeKind::TypeParameter) {
-                if let Some(assoc) = resolve_type_param_assoc(ctx, current, segment, self.context, self.root) {
+                if let Some(assoc) =
+                    resolve_type_param_assoc(ctx, current, segment, self.context, self.root)
+                {
                     current = assoc;
                     continue;
                 }
@@ -130,7 +145,9 @@ impl QueryFn for ResolveTypePath {
             // Check if current is an associated type (TypeAlias in a protocol) —
             // look for nested associated types via its bounds (e.g. T.Iter.Item)
             if ctx.get::<NodeKind>(current) == Some(&NodeKind::TypeAlias) {
-                if let Some(assoc) = resolve_assoc_type_nested(ctx, current, segment, self.context, self.root) {
+                if let Some(assoc) =
+                    resolve_assoc_type_nested(ctx, current, segment, self.context, self.root)
+                {
                     current = assoc;
                     continue;
                 }
@@ -148,7 +165,7 @@ impl QueryFn for ResolveTypePath {
                 Some(e) => current = e,
                 None if visible.is_empty() => {
                     return TypeResolution::NotFound(segment.clone());
-                }
+                },
                 None => {
                     // Allow modules as intermediate segments (e.g. std.collections.Array)
                     if ctx.get::<NodeKind>(visible[0]) == Some(&NodeKind::Module) {
@@ -156,7 +173,7 @@ impl QueryFn for ResolveTypePath {
                     } else {
                         return TypeResolution::NotAType(visible[0]);
                     }
-                }
+                },
             }
         }
 
@@ -167,9 +184,10 @@ impl QueryFn for ResolveTypePath {
 /// Find the first entity in the list that is a type (has Typed marker
 /// or is a TypeParameter).
 fn find_type_entity(ctx: &QueryContext<'_>, entities: &[Entity]) -> Option<Entity> {
-    entities.iter().find(|&&e| {
-        ctx.has::<Typed>(e) || ctx.get::<NodeKind>(e) == Some(&NodeKind::TypeParameter)
-    }).copied()
+    entities
+        .iter()
+        .find(|&&e| ctx.has::<Typed>(e) || ctx.get::<NodeKind>(e) == Some(&NodeKind::TypeParameter))
+        .copied()
 }
 
 /// Try to resolve "Self" as a synthetic type parameter in protocol extensions.
@@ -205,7 +223,8 @@ fn try_resolve_self_as_type_param(
     for segment in &segments[1..] {
         if let Some(assoc) = resolve_type_param_assoc(ctx, current, segment, context, root) {
             current = assoc;
-        } else if let Some(assoc) = resolve_assoc_type_nested(ctx, current, segment, context, root) {
+        } else if let Some(assoc) = resolve_assoc_type_nested(ctx, current, segment, context, root)
+        {
             current = assoc;
         } else {
             return Some(TypeResolution::NotFound(segment.clone()));
@@ -317,10 +336,19 @@ fn search_entity_bounds(
     root: Entity,
 ) -> Option<Entity> {
     if let Some(where_clause) = ctx.get::<WhereClause>(entity) {
-        if let Some(found) = search_bounds_for_assoc(ctx, where_clause, type_param_name, assoc_name, entity, root) {
+        if let Some(found) =
+            search_bounds_for_assoc(ctx, where_clause, type_param_name, assoc_name, entity, root)
+        {
             return Some(found);
         }
-        if let Some(found) = search_inherited_assoc_bounds(ctx, where_clause, type_param_name, assoc_name, entity, root) {
+        if let Some(found) = search_inherited_assoc_bounds(
+            ctx,
+            where_clause,
+            type_param_name,
+            assoc_name,
+            entity,
+            root,
+        ) {
             return Some(found);
         }
     }
@@ -486,8 +514,11 @@ pub fn resolve_assoc_type_nested(
 
             let matches = match segments.len() {
                 1 => segments[0].name == assoc_self_name.0,
-                2 => (segments[0].name == "Self" || is_type_param_name(ctx, parent, &segments[0].name))
-                    && segments[1].name == assoc_self_name.0,
+                2 => {
+                    (segments[0].name == "Self"
+                        || is_type_param_name(ctx, parent, &segments[0].name))
+                        && segments[1].name == assoc_self_name.0
+                },
                 _ => false,
             };
 
@@ -495,7 +526,9 @@ pub fn resolve_assoc_type_nested(
                 continue;
             }
 
-            if let Some(found) = search_protocols_for_assoc(ctx, protocols, assoc_name, parent, root) {
+            if let Some(found) =
+                search_protocols_for_assoc(ctx, protocols, assoc_name, parent, root)
+            {
                 return Some(found);
             }
         }
@@ -515,7 +548,8 @@ pub fn resolve_assoc_type_nested(
             })
             .collect();
 
-        if let Some(found) = search_protocols_for_assoc(ctx, &proto_types, assoc_name, parent, root) {
+        if let Some(found) = search_protocols_for_assoc(ctx, &proto_types, assoc_name, parent, root)
+        {
             return Some(found);
         }
     }
@@ -542,7 +576,9 @@ pub fn resolve_assoc_type_nested(
                     let assoc_self_name = ctx.get::<Name>(assoc_type);
                     if let Some(name) = assoc_self_name {
                         if segments.last().map(|s| &s.name) == Some(&name.0) {
-                            if let Some(found) = search_protocols_for_assoc(ctx, protocols, assoc_name, anc, root) {
+                            if let Some(found) =
+                                search_protocols_for_assoc(ctx, protocols, assoc_name, anc, root)
+                            {
                                 return Some(found);
                             }
                         }
@@ -559,9 +595,9 @@ pub fn resolve_assoc_type_nested(
 /// Check if a name corresponds to a type parameter of the given entity.
 fn is_type_param_name(ctx: &QueryContext<'_>, entity: Entity, name: &str) -> bool {
     if let Some(tps) = ctx.get::<TypeParams>(entity) {
-        tps.0.iter().any(|&tp| {
-            ctx.get::<Name>(tp).is_some_and(|n| n.0 == name)
-        })
+        tps.0
+            .iter()
+            .any(|&tp| ctx.get::<Name>(tp).is_some_and(|n| n.0 == name))
     } else {
         false
     }
@@ -707,7 +743,7 @@ mod tests {
         match result {
             TypeResolution::Found(entity) => {
                 assert_eq!(ctx.get::<Name>(entity).unwrap().0, "i64");
-            }
+            },
             other => panic!("expected Found, got {:?}", other),
         }
     }
@@ -718,9 +754,12 @@ mod tests {
         let ctx = world.query_context();
 
         // From MyApp, Int64 should be findable via auto-import
-        let myapp = ctx.children_of(root).iter().find(|&&e| {
-            ctx.get::<Name>(e).is_some_and(|n| n.0 == "MyApp")
-        }).copied().unwrap();
+        let myapp = ctx
+            .children_of(root)
+            .iter()
+            .find(|&&e| ctx.get::<Name>(e).is_some_and(|n| n.0 == "MyApp"))
+            .copied()
+            .unwrap();
 
         let result = ctx.query(ResolveTypePath {
             segments: vec!["Int64".into()],
@@ -730,7 +769,7 @@ mod tests {
         match result {
             TypeResolution::Found(entity) => {
                 assert_eq!(ctx.get::<Name>(entity).unwrap().0, "Int64");
-            }
+            },
             other => panic!("expected Found, got {:?}", other),
         }
     }
@@ -753,9 +792,12 @@ mod tests {
         let (mut world, root) = setup();
 
         // Add a non-type entity (function) to MyApp
-        let myapp = world.children_of(root).iter().find(|&&e| {
-            world.get::<Name>(e).is_some_and(|n| n.0 == "MyApp")
-        }).copied().unwrap();
+        let myapp = world
+            .children_of(root)
+            .iter()
+            .find(|&&e| world.get::<Name>(e).is_some_and(|n| n.0 == "MyApp"))
+            .copied()
+            .unwrap();
 
         let func = world.spawn();
         world.set(func, NodeKind::Function);
@@ -785,9 +827,12 @@ mod tests {
     fn resolve_sibling_assoc_type_from_alias_scope() {
         let (mut world, root) = setup();
 
-        let myapp = world.children_of(root).iter().find(|&&e| {
-            world.get::<Name>(e).is_some_and(|n| n.0 == "MyApp")
-        }).copied().unwrap();
+        let myapp = world
+            .children_of(root)
+            .iter()
+            .find(|&&e| world.get::<Name>(e).is_some_and(|n| n.0 == "MyApp"))
+            .copied()
+            .unwrap();
 
         // protocol Iterable { type Iter; type Item }
         let iterable = world.spawn();
@@ -818,8 +863,11 @@ mod tests {
         });
         match result {
             TypeResolution::Found(entity) => {
-                assert_eq!(entity, item_alias, "expected sibling Item, got different entity");
-            }
+                assert_eq!(
+                    entity, item_alias,
+                    "expected sibling Item, got different entity"
+                );
+            },
             other => panic!("expected Found(Item), got {:?}", other),
         }
     }

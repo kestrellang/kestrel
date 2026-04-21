@@ -18,7 +18,11 @@ use crate::declaration_binder::BindingContext;
 use crate::diagnostics::{CircularProtocolInheritanceError, InheritedAssociatedTypeConflictError};
 
 /// Check if `potential_ancestor` is an ancestor of `protocol` by recursively checking parent protocols.
-fn is_ancestor_protocol(protocol: &Arc<ProtocolSymbol>, potential_ancestor_name: &str, model: &kestrel_semantic_model::SemanticModel) -> bool {
+fn is_ancestor_protocol(
+    protocol: &Arc<ProtocolSymbol>,
+    potential_ancestor_name: &str,
+    model: &kestrel_semantic_model::SemanticModel,
+) -> bool {
     // Check direct parents via query (order-independent)
     let conformances = model.query(kestrel_semantic_model::ConformancesForSymbol {
         symbol_id: protocol.metadata().id(),
@@ -122,31 +126,33 @@ fn flatten_protocol_recursive(
     let protocol_name = protocol.metadata().name().value.clone();
 
     // First recurse into inherited protocols (so we get parent definitions first)
-    let conformances_vec = ctx.model.query(kestrel_semantic_model::ConformancesForSymbol {
-        symbol_id: protocol_id,
-    });
+    let conformances_vec = ctx
+        .model
+        .query(kestrel_semantic_model::ConformancesForSymbol {
+            symbol_id: protocol_id,
+        });
     let result = {
-            let mut res = Ok(());
-            for parent_ty in &conformances_vec {
-                if let TyKind::Protocol { symbol: parent, .. } = parent_ty.kind()
-                    && let Err(e) = flatten_protocol_recursive(
-                        parent,
-                        methods,
-                        properties,
-                        associated_types,
-                        cycle_detector,
-                        visited,
-                        depth + 1,
-                        max_depth,
-                        ctx,
-                    )
-                {
-                    res = Err(e);
-                    break;
-                }
+        let mut res = Ok(());
+        for parent_ty in &conformances_vec {
+            if let TyKind::Protocol { symbol: parent, .. } = parent_ty.kind()
+                && let Err(e) = flatten_protocol_recursive(
+                    parent,
+                    methods,
+                    properties,
+                    associated_types,
+                    cycle_detector,
+                    visited,
+                    depth + 1,
+                    max_depth,
+                    ctx,
+                )
+            {
+                res = Err(e);
+                break;
             }
-            res
-        };
+        }
+        res
+    };
 
     // If recursion failed, exit and return error
     if result.is_err() {
@@ -222,7 +228,11 @@ fn flatten_protocol_recursive(
                 // Collect computed property requirements from protocol
                 if let Ok(field) = child.clone().downcast_arc::<FieldSymbol>() {
                     // Only include computed properties (those with getter/setter requirements)
-                    if child.metadata().get_behavior::<ComputedPropertyMarker>().is_some() {
+                    if child
+                        .metadata()
+                        .get_behavior::<ComputedPropertyMarker>()
+                        .is_some()
+                    {
                         let field_name = field.metadata().name().value.clone();
                         let is_static = child.metadata().get_behavior::<StaticBehavior>().is_some();
                         // Child protocol properties override inherited ones

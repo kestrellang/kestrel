@@ -10,9 +10,9 @@ use kestrel_execution_graph::{
 
 use crate::thunk::{ThunkCache, ThunkKey};
 use kestrel_reporting::{Diagnostic, IntoDiagnostic};
+use kestrel_semantic_model::DeinitFor;
 use kestrel_semantic_model::SemanticModel;
 use kestrel_semantic_tree::behavior::copy_semantics::CopySemanticsBehavior;
-use kestrel_semantic_model::DeinitFor;
 use kestrel_semantic_tree::expr::LoopId;
 use kestrel_semantic_tree::symbol::local::LocalId;
 use kestrel_semantic_tree::ty::TyKind;
@@ -1185,7 +1185,13 @@ impl<'a> LoweringContext<'a> {
                 }
 
                 // Check if has deinit child
-                if self.model.query(DeinitFor { symbol_id: meta.id() }).is_some() {
+                if self
+                    .model
+                    .query(DeinitFor {
+                        symbol_id: meta.id(),
+                    })
+                    .is_some()
+                {
                     return true;
                 }
 
@@ -1213,7 +1219,13 @@ impl<'a> LoweringContext<'a> {
                 }
 
                 // Check if has deinit child
-                if self.model.query(DeinitFor { symbol_id: meta.id() }).is_some() {
+                if self
+                    .model
+                    .query(DeinitFor {
+                        symbol_id: meta.id(),
+                    })
+                    .is_some()
+                {
                     return true;
                 }
 
@@ -1278,7 +1290,13 @@ impl<'a> LoweringContext<'a> {
                 let meta = symbol.metadata();
 
                 // 1. Call deinit function if present (body runs FIRST)
-                if self.model.query(DeinitFor { symbol_id: meta.id() }).is_some() {
+                if self
+                    .model
+                    .query(DeinitFor {
+                        symbol_id: meta.id(),
+                    })
+                    .is_some()
+                {
                     let deinit_name = self.build_struct_deinit_function_name(symbol);
                     let self_ref = Value::Place(place.clone());
                     let call_args = vec![CallArg::mutating(self_ref)];
@@ -1315,7 +1333,13 @@ impl<'a> LoweringContext<'a> {
                 let meta = symbol.metadata();
 
                 // 1. Call enum's deinit function if present (body runs FIRST)
-                if self.model.query(DeinitFor { symbol_id: meta.id() }).is_some() {
+                if self
+                    .model
+                    .query(DeinitFor {
+                        symbol_id: meta.id(),
+                    })
+                    .is_some()
+                {
                     let deinit_name = self.build_enum_deinit_function_name(symbol);
                     let self_ref = Value::Place(place.clone());
                     let call_args = vec![CallArg::mutating(self_ref)];

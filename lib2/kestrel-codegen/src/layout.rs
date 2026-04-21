@@ -209,7 +209,7 @@ impl<'a> LayoutCache<'a> {
                     (_, layout) = layout.append(field_layout);
                 }
                 layout.pad_to_align()
-            }
+            },
 
             // Named struct or enum: O(1) entity lookup
             MirTy::Named { entity, type_args } => {
@@ -220,23 +220,34 @@ impl<'a> LayoutCache<'a> {
                     NamedKind::Enum(id) => self.enum_layout(id, &type_args),
                     NamedKind::Unknown => {
                         let name = self.module.resolve_name(entity);
-                        if !name.contains("Equatable") && !name.contains("Comparable") && !name.contains("Iterator") {
-                            eprintln!("[DIAG] layout_of: unknown Named entity {:?} ({}), using pointer-size fallback", entity, name);
+                        if !name.contains("Equatable")
+                            && !name.contains("Comparable")
+                            && !name.contains("Iterator")
+                        {
+                            eprintln!(
+                                "[DIAG] layout_of: unknown Named entity {:?} ({}), using pointer-size fallback",
+                                entity, name
+                            );
                         }
                         Layout::new(ptr, ptr)
-                    }
+                    },
                 }
-            }
+            },
 
             // These must be substituted before layout computation
             MirTy::TypeParam(entity) => {
-                eprintln!("[DIAG] layout_of: TypeParam({:?}) reached layout computation without substitution", entity);
+                eprintln!(
+                    "[DIAG] layout_of: TypeParam({:?}) reached layout computation without substitution",
+                    entity
+                );
                 Layout::new(ptr, ptr)
-            }
+            },
             MirTy::SelfType => {
-                eprintln!("[DIAG] layout_of: SelfType reached layout computation without substitution");
+                eprintln!(
+                    "[DIAG] layout_of: SelfType reached layout computation without substitution"
+                );
                 Layout::new(ptr, ptr)
-            }
+            },
             MirTy::AssociatedProjection {
                 base,
                 protocol,
@@ -250,12 +261,14 @@ impl<'a> LayoutCache<'a> {
                     name
                 );
                 Layout::new(ptr, ptr)
-            }
+            },
 
             MirTy::Error => {
-                eprintln!("[DIAG] layout_of: MirTy::Error reached layout computation — unresolved type leaked into codegen");
+                eprintln!(
+                    "[DIAG] layout_of: MirTy::Error reached layout computation — unresolved type leaked into codegen"
+                );
                 Layout::zero(1)
-            }
+            },
         }
     }
 

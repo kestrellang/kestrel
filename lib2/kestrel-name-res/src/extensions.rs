@@ -108,12 +108,12 @@ fn collect_extensions(
                 if resolved == Some(target) {
                     out.push(child);
                 }
-            }
+            },
             Some(&NodeKind::Module) => {
                 // Recurse into modules
                 collect_extensions(ctx, child, target, root, out);
-            }
-            _ => {}
+            },
+            _ => {},
         }
     }
 }
@@ -121,10 +121,10 @@ fn collect_extensions(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kestrel_ast_builder::{Name, Typed, Vis};
     use kestrel_ast::{AstType, PathSegment};
-    use kestrel_hecs::World;
     use kestrel_ast_builder::ExtensionTarget;
+    use kestrel_ast_builder::{Name, Typed, Vis};
+    use kestrel_hecs::World;
     use kestrel_span2::Span;
 
     fn test_span() -> Span {
@@ -183,15 +183,24 @@ mod tests {
         let ctx = world.query_context();
 
         // Find the extension entity
-        let std = ctx.children_of(root).iter().find(|&&e| {
-            ctx.get::<Name>(e).is_some_and(|n| n.0 == "std")
-        }).copied().unwrap();
-        let core = ctx.children_of(std).iter().find(|&&e| {
-            ctx.get::<Name>(e).is_some_and(|n| n.0 == "core")
-        }).copied().unwrap();
-        let ext = ctx.children_of(core).iter().find(|&&e| {
-            ctx.get::<NodeKind>(e) == Some(&NodeKind::Extension)
-        }).copied().unwrap();
+        let std = ctx
+            .children_of(root)
+            .iter()
+            .find(|&&e| ctx.get::<Name>(e).is_some_and(|n| n.0 == "std"))
+            .copied()
+            .unwrap();
+        let core = ctx
+            .children_of(std)
+            .iter()
+            .find(|&&e| ctx.get::<Name>(e).is_some_and(|n| n.0 == "core"))
+            .copied()
+            .unwrap();
+        let ext = ctx
+            .children_of(core)
+            .iter()
+            .find(|&&e| ctx.get::<NodeKind>(e) == Some(&NodeKind::Extension))
+            .copied()
+            .unwrap();
 
         let resolved = ctx.query(ExtensionTargetEntity {
             extension: ext,

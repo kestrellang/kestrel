@@ -1,13 +1,13 @@
 //! Field declaration builder.
 
 use kestrel_hecs::{Entity, World};
-use kestrel_syntax_tree2::{SyntaxKind, SyntaxNode};
 use kestrel_syntax_tree2::utils::{extract_name, find_child, get_decl_span};
+use kestrel_syntax_tree2::{SyntaxKind, SyntaxNode};
 
+use super::helpers::*;
 use crate::ast_type::ast_type_from_cst;
 use crate::components::*;
 use crate::lower;
-use super::helpers::*;
 
 /// Build a field declaration entity from CST.
 ///
@@ -53,7 +53,11 @@ pub fn build_field(
         .any(|e| e.as_token().is_some_and(|t| t.kind() == SyntaxKind::Var));
     world.set(
         entity,
-        if is_var { FieldMutability::Var } else { FieldMutability::Let },
+        if is_var {
+            FieldMutability::Var
+        } else {
+            FieldMutability::Let
+        },
     );
 
     // Check for computed property accessors
@@ -70,10 +74,12 @@ pub fn build_field(
         // direct children for protocol requirements (`{ get set }`) where
         // accessors are declared without bodies.
         let has_getter = find_child(&accessors, SyntaxKind::GetterClause).is_some()
-            || accessors.children_with_tokens()
+            || accessors
+                .children_with_tokens()
                 .any(|e| e.as_token().is_some_and(|t| t.kind() == SyntaxKind::Get));
         let has_setter = find_child(&accessors, SyntaxKind::SetterClause).is_some()
-            || accessors.children_with_tokens()
+            || accessors
+                .children_with_tokens()
                 .any(|e| e.as_token().is_some_and(|t| t.kind() == SyntaxKind::Set));
 
         if has_getter {
@@ -102,10 +108,13 @@ pub fn build_field(
             if let Some(body) = find_child(&getter, SyntaxKind::CodeBlock) {
                 world.set(entity, Body(lower::lower_body(&body, file_id)));
                 world.set(entity, Valued(body));
-                world.set(entity, Callable {
-                    params: Vec::new(),
-                    receiver: receiver.clone(),
-                });
+                world.set(
+                    entity,
+                    Callable {
+                        params: Vec::new(),
+                        receiver: receiver.clone(),
+                    },
+                );
             }
         } else if let Some(body) = find_child(&accessors, SyntaxKind::CodeBlock) {
             // Shorthand computed property: `var foo: Type { expr }`
@@ -114,10 +123,13 @@ pub fn build_field(
             world.set(entity, Gettable);
             world.set(entity, Body(lower::lower_body(&body, file_id)));
             world.set(entity, Valued(body));
-            world.set(entity, Callable {
-                params: Vec::new(),
-                receiver: receiver.clone(),
-            });
+            world.set(
+                entity,
+                Callable {
+                    params: Vec::new(),
+                    receiver: receiver.clone(),
+                },
+            );
         }
 
         // Setter accessor: spawn a child entity with its own Callable + Body.
@@ -168,12 +180,18 @@ pub fn build_field(
         // Find the first Expression child after an Equals token.
         let mut found_equals = false;
         for child in node.children_with_tokens() {
-            if child.as_token().is_some_and(|t| t.kind() == SyntaxKind::Equals) {
+            if child
+                .as_token()
+                .is_some_and(|t| t.kind() == SyntaxKind::Equals)
+            {
                 found_equals = true;
             } else if found_equals {
                 if let Some(expr_node) = child.into_node() {
                     // The parser wraps initializer exprs in Expression nodes
-                    world.set(entity, Body(lower::lower_default_value_expr(&expr_node, file_id)));
+                    world.set(
+                        entity,
+                        Body(lower::lower_default_value_expr(&expr_node, file_id)),
+                    );
                     world.set(entity, Valued(expr_node));
                     break;
                 }

@@ -84,7 +84,12 @@ impl DeclCheck for ExtensionValidationAnalyzer {
                 // Check 1: target must be a struct, enum, or protocol (not intrinsic)
                 let kind = cx.query.get::<NodeKind>(entity);
                 let is_intrinsic = cx.query.has::<Intrinsic>(entity);
-                if is_intrinsic || !matches!(kind, Some(NodeKind::Struct | NodeKind::Enum | NodeKind::Protocol)) {
+                if is_intrinsic
+                    || !matches!(
+                        kind,
+                        Some(NodeKind::Struct | NodeKind::Enum | NodeKind::Protocol)
+                    )
+                {
                     diags.push(AnalyzeDiagnostic {
                         descriptor_id: DESCRIPTORS[0].id,
                         severity: DESCRIPTORS[0].default_severity,
@@ -100,12 +105,12 @@ impl DeclCheck for ExtensionValidationAnalyzer {
                 }
 
                 // Check 2: type parameter count must match
-                let expected_count = cx.query.get::<TypeParams>(entity)
+                let expected_count = cx
+                    .query
+                    .get::<TypeParams>(entity)
                     .map(|tp| tp.0.len())
                     .unwrap_or(0);
-                let got_count = segments.last()
-                    .map(|s| s.type_args.len())
-                    .unwrap_or(0);
+                let got_count = segments.last().map(|s| s.type_args.len()).unwrap_or(0);
 
                 // Only check if type args were explicitly provided (got > 0)
                 if got_count > 0 && got_count != expected_count {
@@ -119,13 +124,17 @@ impl DeclCheck for ExtensionValidationAnalyzer {
                         ),
                         labels: vec![DiagLabel {
                             span,
-                            message: format!("expected {} type parameter{}", expected_count, if expected_count == 1 { "" } else { "s" }),
+                            message: format!(
+                                "expected {} type parameter{}",
+                                expected_count,
+                                if expected_count == 1 { "" } else { "s" }
+                            ),
                             is_primary: true,
                         }],
                         notes: vec![],
                     });
                 }
-            }
+            },
             _ => {
                 // Target type not found
                 diags.push(AnalyzeDiagnostic {
@@ -139,7 +148,7 @@ impl DeclCheck for ExtensionValidationAnalyzer {
                     }],
                     notes: vec![],
                 });
-            }
+            },
         }
 
         diags

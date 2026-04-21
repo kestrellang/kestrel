@@ -20,8 +20,8 @@ use crate::diagnostic::*;
 use crate::traits::{BodyCheck, Describe};
 use crate::util;
 use kestrel_ast_builder::{Intrinsic, Name, NodeKind};
-use kestrel_hir::body::*;
 use kestrel_hir::Builtin;
+use kestrel_hir::body::*;
 use kestrel_name_res::{ConformingProtocols, ResolveBuiltin};
 use kestrel_type_infer::result::ResolvedTy;
 
@@ -129,8 +129,7 @@ fn is_bool(cx: &BodyContext<'_>, ty: &ResolvedTy) -> bool {
     if cx.query.get::<NodeKind>(*entity) != Some(&NodeKind::Struct) {
         return false;
     }
-    cx.query.get::<Name>(*entity)
-        .is_some_and(|n| n.0 == "i1")
+    cx.query.get::<Name>(*entity).is_some_and(|n| n.0 == "i1")
 }
 
 /// Check if a resolved type conforms to a given protocol.
@@ -152,15 +151,15 @@ fn conforms_to_protocol(
 /// Human-readable description of a resolved type for error messages.
 fn describe_type(cx: &BodyContext<'_>, ty: &ResolvedTy) -> String {
     match ty {
-        ResolvedTy::Named { entity, .. } => {
-            cx.query.get::<Name>(*entity)
-                .map(|n| n.0.clone())
-                .unwrap_or_else(|| "?".into())
-        }
+        ResolvedTy::Named { entity, .. } => cx
+            .query
+            .get::<Name>(*entity)
+            .map(|n| n.0.clone())
+            .unwrap_or_else(|| "?".into()),
         ResolvedTy::Tuple(elems) => {
             let inner: Vec<String> = elems.iter().map(|e| describe_type(cx, e)).collect();
             format!("({})", inner.join(", "))
-        }
+        },
         ResolvedTy::Never => "Never".into(),
         ResolvedTy::Error => "?".into(),
         ResolvedTy::Param { .. } => "type parameter".into(),

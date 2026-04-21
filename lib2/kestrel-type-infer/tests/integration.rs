@@ -3,11 +3,11 @@
 //! These tests parse real Kestrel source code, build declarations,
 //! lower to HIR, then run type inference.
 
-use kestrel_ast_builder::{build_declarations, Name, NodeKind};
+use kestrel_ast_builder::{Name, NodeKind, build_declarations};
 use kestrel_hecs::{Entity, World};
 use kestrel_hir_lower::LowerBody;
-use kestrel_type_infer::result::{ResolvedTy, TypedBody};
 use kestrel_type_infer::InferBody;
+use kestrel_type_infer::result::{ResolvedTy, TypedBody};
 
 // ===== Helpers =====
 
@@ -41,8 +41,7 @@ fn find_child(
     ctx.children_of(parent)
         .iter()
         .find(|&&e| {
-            ctx.get::<NodeKind>(e) == Some(&kind)
-                && ctx.get::<Name>(e).is_some_and(|n| n.0 == name)
+            ctx.get::<NodeKind>(e) == Some(&kind) && ctx.get::<Name>(e).is_some_and(|n| n.0 == name)
         })
         .copied()
         .unwrap_or_else(|| panic!("child {:?} {:?} not found under {:?}", kind, name, parent))
@@ -67,11 +66,8 @@ fn infer_func(
     func_name: &str,
 ) -> TypedBody {
     let func = find_function(ctx, root, module_name, func_name);
-    ctx.query(InferBody {
-        entity: func,
-        root,
-    })
-    .unwrap_or_else(|| panic!("InferBody returned None for {}.{}", module_name, func_name))
+    ctx.query(InferBody { entity: func, root })
+        .unwrap_or_else(|| panic!("InferBody returned None for {}.{}", module_name, func_name))
 }
 
 /// Debug helper: print entity hierarchy.
@@ -85,13 +81,7 @@ fn print_tree(ctx: &kestrel_hecs::QueryContext<'_>, entity: Entity, indent: usiz
         .get::<NodeKind>(entity)
         .map(|k| format!("{:?}", k))
         .unwrap_or_default();
-    eprintln!(
-        "{}{} ({}) [{:?}]",
-        " ".repeat(indent),
-        name,
-        kind,
-        entity
-    );
+    eprintln!("{}{} ({}) [{:?}]", " ".repeat(indent), name, kind, entity);
     for &child in ctx.children_of(entity) {
         print_tree(ctx, child, indent + 2);
     }
@@ -129,7 +119,10 @@ fn infer_multiple_lets() {
     let typed = infer_func(&ctx, root, "TestMod", "foo");
 
     // Two locals
-    assert!(typed.local_types.len() >= 2, "should have at least 2 locals");
+    assert!(
+        typed.local_types.len() >= 2,
+        "should have at least 2 locals"
+    );
 }
 
 #[test]
@@ -152,12 +145,7 @@ fn infer_tuple() {
 
     // Find the tail expression type — should be a tuple
     let func = find_function(&ctx, root, "TestMod", "foo");
-    let hir = ctx
-        .query(LowerBody {
-            entity: func,
-            root,
-        })
-        .unwrap();
+    let hir = ctx.query(LowerBody { entity: func, root }).unwrap();
     if let Some(tail) = hir.tail_expr {
         if let Some(ty) = typed.expr_types.get(&tail) {
             assert!(
@@ -198,12 +186,7 @@ fn infer_return() {
 
     // Return expression should have type Never (diverges)
     let func = find_function(&ctx, root, "TestMod", "foo");
-    let hir = ctx
-        .query(LowerBody {
-            entity: func,
-            root,
-        })
-        .unwrap();
+    let hir = ctx.query(LowerBody { entity: func, root }).unwrap();
     if let Some(tail) = hir.tail_expr {
         if let Some(ty) = typed.expr_types.get(&tail) {
             assert!(
@@ -263,7 +246,11 @@ func test() { add(x: true) }
     let ctx = world.query_context();
     let typed = infer_func(&ctx, root, "TestMod", "test");
 
-    assert!(typed.errors.is_empty(), "expected no errors, got: {:?}", typed.errors);
+    assert!(
+        typed.errors.is_empty(),
+        "expected no errors, got: {:?}",
+        typed.errors
+    );
 }
 
 #[test]
@@ -280,7 +267,11 @@ func test() { send(to: true) }
     let ctx = world.query_context();
     let typed = infer_func(&ctx, root, "TestMod", "test");
 
-    assert!(typed.errors.is_empty(), "expected no errors, got: {:?}", typed.errors);
+    assert!(
+        typed.errors.is_empty(),
+        "expected no errors, got: {:?}",
+        typed.errors
+    );
 }
 
 #[test]
@@ -296,7 +287,10 @@ func test() { send(via: true) }
     let ctx = world.query_context();
     let typed = infer_func(&ctx, root, "TestMod", "test");
 
-    assert!(!typed.errors.is_empty(), "expected an error for unresolved overload");
+    assert!(
+        !typed.errors.is_empty(),
+        "expected an error for unresolved overload"
+    );
 }
 
 #[test]
@@ -312,7 +306,10 @@ func test() { let f = foo; }
     let ctx = world.query_context();
     let typed = infer_func(&ctx, root, "TestMod", "test");
 
-    assert!(!typed.errors.is_empty(), "expected an error for bare overload reference");
+    assert!(
+        !typed.errors.is_empty(),
+        "expected an error for bare overload reference"
+    );
 }
 
 /// Regression: `WorldResolver::where_clauses(entity)` used to pass `self.owner`
@@ -339,8 +336,7 @@ func caller(b: Bool) { collect(b) }
     // Filter for `U` specifically — this test doesn't set up the lang module, so
     // ambient name-resolution noise ("cannot find type 'Bool'") is expected and
     // unrelated to the regression we're guarding against.
-    let diags = world
-        .accumulated::<codespan_reporting::diagnostic::Diagnostic<usize>>();
+    let diags = world.accumulated::<codespan_reporting::diagnostic::Diagnostic<usize>>();
     let offenders: Vec<_> = diags
         .iter()
         .filter(|d| d.message.contains("cannot find type 'U'"))
@@ -379,7 +375,12 @@ func caller[T](f: T) where T: Factory {
     // leaks `ResolvedTy::Error` through to MIR/codegen. Before the fix, the
     // Member constraint had no field for explicit type args, so the solver
     // created a fresh unconstrained TyVar for U.
-    let marker = find_child(&ctx, find_child(&ctx, root, NodeKind::Module, "TestMod"), NodeKind::Struct, "Marker");
+    let marker = find_child(
+        &ctx,
+        find_child(&ctx, root, NodeKind::Module, "TestMod"),
+        NodeKind::Struct,
+        "Marker",
+    );
     let call_type_args: Vec<_> = typed
         .type_args
         .values()

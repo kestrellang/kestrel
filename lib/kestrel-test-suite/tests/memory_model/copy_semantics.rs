@@ -1013,4 +1013,3 @@ func test() {
         .expect(HasError("use of moved value"));
     }
 }
-

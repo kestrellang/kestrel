@@ -1,5 +1,5 @@
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
-use kestrel_lexer2::{lex, SpannedToken};
+use kestrel_lexer2::{SpannedToken, lex};
 
 use crate::components::SourceText;
 use crate::diagnostic::{LexError, ThrowDiagnostic};

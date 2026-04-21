@@ -183,10 +183,7 @@ impl DeclCheck for FieldAnalyzer {
                     message: "static stored properties not supported in generic types".into(),
                     labels: vec![DiagLabel {
                         span,
-                        message: format!(
-                            "static stored property in generic type '{}'",
-                            type_name
-                        ),
+                        message: format!("static stored property in generic type '{}'", type_name),
                         is_primary: true,
                     }],
                     notes: vec![],

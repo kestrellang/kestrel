@@ -46,7 +46,11 @@ impl Describe for DefaultParamOrderingAnalyzer {
 
 impl DeclCheck for DefaultParamOrderingAnalyzer {
     fn target_kinds(&self) -> &'static [NodeKind] {
-        &[NodeKind::Function, NodeKind::Initializer, NodeKind::Subscript]
+        &[
+            NodeKind::Function,
+            NodeKind::Initializer,
+            NodeKind::Subscript,
+        ]
     }
 
     fn check(&self, cx: &DeclContext<'_>) -> Vec<AnalyzeDiagnostic> {
@@ -86,15 +90,14 @@ impl DeclCheck for DefaultParamOrderingAnalyzer {
         // Check that default expressions don't reference sibling parameters.
         // The AST builder detects this and sets a DefaultReferencesParam marker.
         for param in &callable.params {
-            let Some(default_entity) = param.default_entity else { continue };
+            let Some(default_entity) = param.default_entity else {
+                continue;
+            };
             if let Some(marker) = cx.query.get::<DefaultReferencesParam>(default_entity) {
                 diags.push(AnalyzeDiagnostic {
                     descriptor_id: "E614",
                     severity: Severity::Error,
-                    message: format!(
-                        "default value cannot reference parameter '{}'",
-                        marker.0
-                    ),
+                    message: format!("default value cannot reference parameter '{}'", marker.0),
                     labels: vec![DiagLabel {
                         span: span.clone(),
                         message: "default values are evaluated at each call site".into(),

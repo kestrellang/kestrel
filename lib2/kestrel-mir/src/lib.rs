@@ -18,9 +18,9 @@ pub mod builder;
 pub mod display;
 pub mod id;
 pub mod immediate;
-pub mod passes;
 pub mod item;
 pub mod op;
+pub mod passes;
 pub mod place;
 pub mod statement;
 pub mod terminator;
@@ -37,6 +37,7 @@ pub use item::{
     EnumDef, ExternInfo, FieldDef, FileConstantData, FunctionDef, FunctionKind, MethodBinding,
     MethodSource, ParamDef, ParamMode, ProtocolDef, ProtocolMethodDef, ReceiverConvention,
     StaticDef, StructDef, StructLayout, TypeParamDef, WhereClause, WhereConstraint, WitnessDef,
+    WitnessMethodKey,
 };
 pub use op::{
     FloatBits, FloatConstantKind, FloatMathKind, FloatPredicateKind, IntBits, Op, Signedness,
@@ -124,10 +125,10 @@ impl MirModule {
     pub fn resolve_local_name(&self, id: LocalId) -> &str {
         // Search through all functions for a body containing this local
         for func in &self.functions {
-            if let Some(body) = &func.body {
-                if id.index() < body.locals.len() {
-                    return &body.locals[id.index()].name;
-                }
+            if let Some(body) = &func.body
+                && id.index() < body.locals.len()
+            {
+                return &body.locals[id.index()].name;
             }
         }
         "<unknown_local>"
@@ -218,9 +219,7 @@ impl MirModule {
 
     /// Run all post-lowering passes in the recommended order.
     pub fn with_all_passes(self) -> Self {
-        self.with_deinits()
-            .with_thunks()
-            .with_layouts()
+        self.with_deinits().with_thunks().with_layouts()
     }
 }
 
@@ -386,10 +385,7 @@ mod tests {
             type_args: vec![],
         };
         let mut witness = WitnessDef::new(optional_ty, protocol_entity);
-        witness.bind_method(
-            "eq",
-            MethodBinding::direct(impl_entity, vec![]),
-        );
+        witness.bind_method("eq", MethodBinding::direct(impl_entity, vec![]));
         module.add_witness(witness);
 
         let output = module.display().to_string();

@@ -24,7 +24,9 @@ use std::collections::HashMap;
 
 use kestrel_ast_builder::{Callable, NodeKind, TypeParams};
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
-use kestrel_hir_lower::{LowerBody, LowerCallableTypes, LowerExtensionTargetTypeArgs, LowerTypeAnnotation};
+use kestrel_hir_lower::{
+    LowerBody, LowerCallableTypes, LowerExtensionTargetTypeArgs, LowerTypeAnnotation,
+};
 use kestrel_span2::Span;
 
 use ctx::InferCtx;
@@ -141,13 +143,17 @@ fn create_param_types(
                         let args: Vec<ty::TyVar> = if let Some(ref hir_args) = ext_type_args {
                             if !hir_args.is_empty() {
                                 // Extension has explicit type args — use them
-                                type_params.iter().enumerate().map(|(i, &param_entity)| {
-                                    if let Some(hir_ty) = hir_args.get(i) {
-                                        generate::lower_hir_ty(ctx, hir_ty)
-                                    } else {
-                                        ctx.param(param_entity)
-                                    }
-                                }).collect()
+                                type_params
+                                    .iter()
+                                    .enumerate()
+                                    .map(|(i, &param_entity)| {
+                                        if let Some(hir_ty) = hir_args.get(i) {
+                                            generate::lower_hir_ty(ctx, hir_ty)
+                                        } else {
+                                            ctx.param(param_entity)
+                                        }
+                                    })
+                                    .collect()
                             } else {
                                 fresh_type_args(ctx, query_ctx, target)
                             }
@@ -164,7 +170,7 @@ fn create_param_types(
                         );
 
                         self_tv
-                    }
+                    },
                     None => ctx.fresh(),
                 }
             } else {
@@ -203,11 +209,7 @@ fn create_param_types(
 /// Emit where clause constraints for the method entity's own type parameters.
 /// Handles bounds (`I: Iterable`), associated type equalities (`I.Item = E`),
 /// and direct type param equalities (`V = Array[E]`).
-fn emit_method_where_clauses(
-    ctx: &mut InferCtx<'_>,
-    query_ctx: &QueryContext<'_>,
-    entity: Entity,
-) {
+fn emit_method_where_clauses(ctx: &mut InferCtx<'_>, query_ctx: &QueryContext<'_>, entity: Entity) {
     let clauses = query_ctx.query(crate::where_clauses::WhereClausesOf {
         entity,
         root: ctx.root,
@@ -235,12 +237,18 @@ fn emit_method_where_clauses(
 
     for clause in clauses {
         match clause {
-            resolve::WhereClause::Bound { param, protocol, .. } => {
+            resolve::WhereClause::Bound {
+                param, protocol, ..
+            } => {
                 // Find or create a TyVar for this param
                 let tv = ctx.param(param);
                 ctx.conforms(tv, protocol, span.clone());
-            }
-            resolve::WhereClause::TypeEquality { param, assoc_name, rhs } => {
+            },
+            resolve::WhereClause::TypeEquality {
+                param,
+                assoc_name,
+                rhs,
+            } => {
                 let subject_tv = ctx.param(param);
                 let assoc_result = ctx.fresh();
                 ctx.associated(subject_tv, &assoc_name, assoc_result, span.clone());
@@ -256,7 +264,7 @@ fn emit_method_where_clauses(
                 if let Some(assoc_entity) = find_assoc_type_in_bounds(ctx, param, &assoc_name) {
                     ctx.where_clause_assoc_subs.push((assoc_entity, rhs_tv));
                 }
-            }
+            },
             resolve::WhereClause::DirectEquality { param, rhs } => {
                 let param_tv = ctx.param(param);
                 // Build subs for type params
@@ -274,11 +282,10 @@ fn emit_method_where_clauses(
                 {
                     ctx.where_clause_assoc_subs.push((param, rhs_tv));
                 }
-            }
+            },
         }
     }
 }
-
 
 /// Create return type TyVar from the TypeAnnotation component.
 fn create_return_type(
@@ -338,11 +345,18 @@ fn emit_extension_where_clauses(
     });
     for clause in clauses {
         match clause {
-            resolve::WhereClause::Bound { param, protocol, .. } => {
+            resolve::WhereClause::Bound {
+                param, protocol, ..
+            } => {
                 let span = Span::synthetic(0);
                 let subject_tv = get_or_create_subject_tv(
-                    ctx, &target_type_params, fresh_args,
-                    &mut assoc_type_tvs, param, self_tv, query_ctx,
+                    ctx,
+                    &target_type_params,
+                    fresh_args,
+                    &mut assoc_type_tvs,
+                    param,
+                    self_tv,
+                    query_ctx,
                 );
                 ctx.conforms(subject_tv, protocol, span.clone());
 
@@ -350,16 +364,31 @@ fn emit_extension_where_clauses(
                 // E.g., `type Iter: Iterator where Iter.Item = Item` on Iterable
                 // needs to emit `Associated(T.Iter, "Item", fresh) + Equal(fresh, T.Item)`.
                 emit_protocol_assoc_type_where_clauses(
-                    ctx, query_ctx, protocol, subject_tv,
-                    &target_type_params, fresh_args, &mut assoc_type_tvs,
-                    self_tv, &span,
+                    ctx,
+                    query_ctx,
+                    protocol,
+                    subject_tv,
+                    &target_type_params,
+                    fresh_args,
+                    &mut assoc_type_tvs,
+                    self_tv,
+                    &span,
                 );
-            }
-            resolve::WhereClause::TypeEquality { param, assoc_name, rhs } => {
+            },
+            resolve::WhereClause::TypeEquality {
+                param,
+                assoc_name,
+                rhs,
+            } => {
                 let span = Span::synthetic(0);
                 let subject_tv = get_or_create_subject_tv(
-                    ctx, &target_type_params, fresh_args,
-                    &mut assoc_type_tvs, param, self_tv, query_ctx,
+                    ctx,
+                    &target_type_params,
+                    fresh_args,
+                    &mut assoc_type_tvs,
+                    param,
+                    self_tv,
+                    query_ctx,
                 );
                 let assoc_result = ctx.fresh();
                 ctx.associated(subject_tv, &assoc_name, assoc_result, span.clone());
@@ -380,12 +409,10 @@ fn emit_extension_where_clauses(
                 // Register the associated type entity → rhs_tv mapping so the solver
                 // can substitute it in protocol member signatures (e.g., Output → Item).
                 // Search param's protocol bounds for a child TypeAlias named assoc_name.
-                if let Some(assoc_entity) = find_assoc_type_in_bounds(
-                    ctx, param, &assoc_name,
-                ) {
+                if let Some(assoc_entity) = find_assoc_type_in_bounds(ctx, param, &assoc_name) {
                     ctx.where_clause_assoc_subs.push((assoc_entity, rhs_tv));
                 }
-            }
+            },
             resolve::WhereClause::DirectEquality { param, rhs } => {
                 // Direct type param equality: V = Array[E]
                 // Overwrite the param's TyVar slot with the concrete RHS type.
@@ -404,7 +431,7 @@ fn emit_extension_where_clauses(
                     // Overwrite the Param slot → the param IS the RHS type in this scope
                     ctx.types[param_tv.0 as usize] = ty::TySlot::Redirect(rhs_tv);
                 }
-            }
+            },
         }
     }
 }
@@ -460,10 +487,17 @@ fn emit_protocol_assoc_type_where_clauses(
         // Emit the TypeAlias's own where clauses
         for clause in clauses {
             match clause {
-                resolve::WhereClause::Bound { protocol: bound_proto, .. } => {
+                resolve::WhereClause::Bound {
+                    protocol: bound_proto,
+                    ..
+                } => {
                     ctx.conforms(alias_tv, bound_proto, span.clone());
-                }
-                resolve::WhereClause::TypeEquality { assoc_name: inner_assoc, rhs, .. } => {
+                },
+                resolve::WhereClause::TypeEquality {
+                    assoc_name: inner_assoc,
+                    rhs,
+                    ..
+                } => {
                     let fresh = ctx.fresh();
                     ctx.associated(alias_tv, &inner_assoc, fresh, span.clone());
 
@@ -480,11 +514,12 @@ fn emit_protocol_assoc_type_where_clauses(
                     ctx.equal(fresh, rhs_tv, span.clone());
 
                     // Register so solve_associated can reuse
-                    if let Some(inner_entity) = find_assoc_type_in_bounds(ctx, child, &inner_assoc) {
+                    if let Some(inner_entity) = find_assoc_type_in_bounds(ctx, child, &inner_assoc)
+                    {
                         ctx.where_clause_assoc_subs.push((inner_entity, rhs_tv));
                     }
-                }
-                resolve::WhereClause::DirectEquality { .. } => {}
+                },
+                resolve::WhereClause::DirectEquality { .. } => {},
             }
         }
     }
@@ -540,7 +575,9 @@ fn find_assoc_type_in_bounds(
     // Resolve the associated type through the resolver's associated type mechanism.
     // Build a TyKind::Param for the param entity to query the resolver.
     let param_kind = ty::TyKind::Param { entity: param };
-    let resolved = ctx.resolver.resolve_associated_type(&param_kind, assoc_name)?;
+    let resolved = ctx
+        .resolver
+        .resolve_associated_type(&param_kind, assoc_name)?;
     // Extract the entity from whichever variant the resolver returned.
     match &resolved.resolved {
         kestrel_hir::ty::HirTy::Struct { entity, .. }

@@ -30,9 +30,7 @@
 
 use std::collections::HashSet;
 
-use kestrel_ast_builder::{
-    Callable, Intrinsic, Name, NodeKind, TypeAnnotation, TypeParams,
-};
+use kestrel_ast_builder::{Callable, Intrinsic, Name, NodeKind, TypeAnnotation, TypeParams};
 use kestrel_hecs::{Entity, QueryContext};
 use kestrel_hir::Builtin;
 use kestrel_name_res::{ConformingProtocols, ResolveBuiltin};
@@ -61,11 +59,17 @@ pub enum Constructor {
     /// Integer literal
     IntLiteral(i64),
     /// Integer range (both ends inclusive after normalization, None = unbounded)
-    IntRange { start: Option<i64>, end: Option<i64> },
+    IntRange {
+        start: Option<i64>,
+        end: Option<i64>,
+    },
     /// Character literal
     CharLiteral(char),
     /// Character range (both ends inclusive, None = unbounded)
-    CharRange { start: Option<char>, end: Option<char> },
+    CharRange {
+        start: Option<char>,
+        end: Option<char>,
+    },
     /// String literal
     StringLiteral(String),
     /// Unit value ()
@@ -123,17 +127,17 @@ impl Constructor {
             // Entity-based matching — exact entity equality
             (Constructor::Variant { entity: e1, .. }, Constructor::Variant { entity: e2, .. }) => {
                 e1 == e2
-            }
+            },
             (Constructor::Struct { entity: e1, .. }, Constructor::Struct { entity: e2, .. }) => {
                 e1 == e2
-            }
+            },
             (Constructor::Tuple { arity: a1 }, Constructor::Tuple { arity: a2 }) => a1 == a2,
 
             // Integer comparisons
             (Constructor::IntLiteral(v1), Constructor::IntLiteral(v2)) => v1 == v2,
             (Constructor::IntLiteral(v), Constructor::IntRange { start, end }) => {
                 start.map_or(true, |s| *v >= s) && end.map_or(true, |e| *v <= e)
-            }
+            },
             (
                 Constructor::IntRange { start: s1, end: e1 },
                 Constructor::IntRange { start: s2, end: e2 },
@@ -143,7 +147,7 @@ impl Constructor {
             (Constructor::CharLiteral(v1), Constructor::CharLiteral(v2)) => v1 == v2,
             (Constructor::CharLiteral(v), Constructor::CharRange { start, end }) => {
                 start.map_or(true, |s| *v >= s) && end.map_or(true, |e| *v <= e)
-            }
+            },
             (
                 Constructor::CharRange { start: s1, end: e1 },
                 Constructor::CharRange { start: s2, end: e2 },
@@ -173,7 +177,7 @@ impl Constructor {
                     (false, true) => min2 <= min1,
                     (false, false) => min1 == min2,
                 }
-            }
+            },
 
             _ => false,
         }
@@ -206,12 +210,9 @@ impl Constructor {
                         .collect();
                 }
                 vec![ResolvedTy::Error; *arity]
-            }
+            },
 
-            (
-                Constructor::Struct { entity, arity },
-                ResolvedTy::Named { args, .. },
-            ) => {
+            (Constructor::Struct { entity, arity }, ResolvedTy::Named { args, .. }) => {
                 // Get Field children and resolve their types with substitutions
                 let fields = collect_fields(query, *entity);
                 if fields.len() == *arity {
@@ -222,7 +223,7 @@ impl Constructor {
                 } else {
                     vec![parent_ty.clone(); *arity]
                 }
-            }
+            },
 
             // Array[T] — element type from type args
             (
@@ -240,7 +241,7 @@ impl Constructor {
                 }
                 types.extend(vec![elem_ty; *suffix_len]);
                 types
-            }
+            },
 
             _ => vec![parent_ty.clone(); self.arity()],
         }
@@ -271,7 +272,7 @@ impl Constructor {
             Some(all) => {
                 let missing: Vec<_> = all.into_iter().filter(|c| !covered.contains(c)).collect();
                 Some(missing)
-            }
+            },
             None => {
                 // Infinite type — check for special cases like arrays
                 if is_array_type(query, root, ty) {
@@ -279,7 +280,7 @@ impl Constructor {
                 }
                 // Need a wildcard to cover infinite types
                 Some(vec![Constructor::NonExhaustive])
-            }
+            },
         }
     }
 
@@ -295,15 +296,15 @@ impl Constructor {
                 } else {
                     format!(".{}(_)", name)
                 }
-            }
+            },
             Constructor::Tuple { arity } => {
                 let wildcards = vec!["_"; *arity].join(", ");
                 format!("({})", wildcards)
-            }
+            },
             Constructor::Struct { entity, .. } => {
                 let name = entity_name(query, *entity);
                 format!("{} {{ .. }}", name)
-            }
+            },
             Constructor::IntLiteral(n) => n.to_string(),
             Constructor::IntRange { start, end } => {
                 let s = start.map(|v| v.to_string()).unwrap_or_default();
@@ -313,7 +314,7 @@ impl Constructor {
                 } else {
                     format!("{}..={}", s, e)
                 }
-            }
+            },
             Constructor::CharLiteral(c) => format!("'{}'", c),
             Constructor::CharRange { start, end } => {
                 let s = start.map(|c| format!("'{}'", c)).unwrap_or_default();
@@ -323,12 +324,10 @@ impl Constructor {
                 } else {
                     format!("{}..={}", s, e)
                 }
-            }
+            },
             Constructor::StringLiteral(s) => format!("\"{}\"", s),
             Constructor::Unit => "()".into(),
-            Constructor::Wildcard | Constructor::NonExhaustive | Constructor::Missing => {
-                "_".into()
-            }
+            Constructor::Wildcard | Constructor::NonExhaustive | Constructor::Missing => "_".into(),
             Constructor::Array {
                 prefix_len,
                 suffix_len,
@@ -340,7 +339,7 @@ impl Constructor {
                 }
                 parts.extend(vec!["_"; *suffix_len]);
                 format!("[{}]", parts.join(", "))
-            }
+            },
         }
     }
 
@@ -356,12 +355,12 @@ impl Constructor {
                 } else {
                     Witness::enum_case_with_args(&name, vec![Witness::any(); *arity])
                 }
-            }
+            },
             Constructor::Tuple { arity } => Witness::tuple(vec![Witness::any(); *arity]),
             Constructor::Struct { entity, .. } => {
                 let name = entity_name(query, *entity);
                 Witness::struct_witness(&name, vec![])
-            }
+            },
             Constructor::IntLiteral(n) => Witness::integer(*n),
             Constructor::IntRange { start, end } => {
                 let s = start.map(|v| v.to_string()).unwrap_or_default();
@@ -371,7 +370,7 @@ impl Constructor {
                 } else {
                     Witness::range(s, e, true)
                 }
-            }
+            },
             Constructor::CharLiteral(c) => Witness::Literal(format!("'{}'", c)),
             Constructor::CharRange { start, end } => {
                 let s = start.map(|c| format!("'{}'", c)).unwrap_or_default();
@@ -381,7 +380,7 @@ impl Constructor {
                 } else {
                     Witness::range(s, e, true)
                 }
-            }
+            },
             Constructor::StringLiteral(s) => Witness::string(s),
             Constructor::Unit => Witness::tuple(vec![]),
             Constructor::Array {
@@ -391,7 +390,7 @@ impl Constructor {
             } => Witness::array(vec![Witness::any(); prefix_len + suffix_len]),
             Constructor::Wildcard | Constructor::NonExhaustive | Constructor::Missing => {
                 Witness::any()
-            }
+            },
         }
     }
 }
@@ -439,7 +438,7 @@ impl TypeShape {
                 } else {
                     TypeShape::Tuple(elems.len())
                 }
-            }
+            },
 
             ResolvedTy::Named { entity, .. } => {
                 let Some(kind) = query.get::<NodeKind>(*entity) else {
@@ -463,7 +462,7 @@ impl TypeShape {
                             })
                             .collect();
                         TypeShape::Enum { cases }
-                    }
+                    },
 
                     NodeKind::Struct => {
                         // Layer 1: lang.* intrinsic types (identified by Intrinsic marker)
@@ -482,13 +481,13 @@ impl TypeShape {
                             entity: *entity,
                             field_count,
                         }
-                    }
+                    },
 
                     // TypeAlias — resolve through to the target type
                     // For now, treat as unknown (aliases should be resolved by inference)
                     _ => TypeShape::Unknown,
                 }
-            }
+            },
 
             // Function types, type params, errors — can't enumerate constructors
             _ => TypeShape::Unknown,
@@ -556,7 +555,8 @@ fn classify_by_conformances(
     root: Entity,
     entity: Entity,
 ) -> Option<TypeShape> {
-    let conforms_to = |builtin: Builtin| -> bool { conforms_to_builtin(query, root, entity, builtin) };
+    let conforms_to =
+        |builtin: Builtin| -> bool { conforms_to_builtin(query, root, entity, builtin) };
 
     // Bool-like: two constructors (True/False)
     if conforms_to(Builtin::ExpressibleByBoolLiteral) {
@@ -606,7 +606,12 @@ fn is_array_type(query: &QueryContext<'_>, root: Entity, ty: &ResolvedTy) -> boo
     }
     // ExpressibleByArrayLiteral inherits from _ExpressibleByArrayLiteral, so
     // ConformingProtocols surfaces the internal protocol for any conforming type.
-    conforms_to_builtin(query, root, *entity, Builtin::InternalExpressibleByArrayLiteral)
+    conforms_to_builtin(
+        query,
+        root,
+        *entity,
+        Builtin::InternalExpressibleByArrayLiteral,
+    )
 }
 
 /// Collect Field children of an entity, in declaration order.
@@ -643,9 +648,7 @@ fn resolve_field_type(
     type_args: &[ResolvedTy],
 ) -> ResolvedTy {
     let subs = build_type_param_subs(query, parent_entity, type_args);
-    let ast_ty = query
-        .get::<TypeAnnotation>(field_entity)
-        .map(|ta| &ta.0);
+    let ast_ty = query.get::<TypeAnnotation>(field_entity).map(|ta| &ta.0);
     resolve_ast_type_with_subs(query, ast_ty, &subs, parent_entity)
 }
 
@@ -699,12 +702,15 @@ fn resolve_ast_type_with_subs(
                 // Try resolving as a sibling type in the parent scope
                 if let Some(entity) = resolve_name_in_scope(query, name, scope_entity) {
                     // Recurse to resolve type args on the segments
-                    return ResolvedTy::Named { entity, args: vec![] };
+                    return ResolvedTy::Named {
+                        entity,
+                        args: vec![],
+                    };
                 }
             }
             // Multi-segment or unresolved — conservative fallback
             ResolvedTy::Error
-        }
+        },
 
         AstType::Tuple(elems, _) => {
             let resolved: Vec<_> = elems
@@ -712,7 +718,7 @@ fn resolve_ast_type_with_subs(
                 .map(|e| resolve_ast_type_with_subs(query, Some(e), subs, scope_entity))
                 .collect();
             ResolvedTy::Tuple(resolved)
-        }
+        },
 
         AstType::Unit(_) => ResolvedTy::Tuple(vec![]),
 
@@ -749,12 +755,7 @@ fn resolve_name_in_scope(
 }
 
 /// Check if two optional i64 ranges overlap.
-fn ranges_overlap_i64(
-    s1: Option<i64>,
-    e1: Option<i64>,
-    s2: Option<i64>,
-    e2: Option<i64>,
-) -> bool {
+fn ranges_overlap_i64(s1: Option<i64>, e1: Option<i64>, s2: Option<i64>, e2: Option<i64>) -> bool {
     let start_ok = match (s1, e2) {
         (Some(s), Some(e)) => s <= e,
         _ => true,
