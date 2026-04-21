@@ -47,7 +47,7 @@ use crate::context::BodyContext;
 use crate::diagnostic::*;
 use crate::traits::{BodyCheck, Describe};
 use crate::util;
-use kestrel_ast_builder::{NodeKind, Settable};
+use kestrel_ast_builder::{NodeKind, Settable, Static};
 use kestrel_hir::body::*;
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[
@@ -244,21 +244,72 @@ fn check_target(
             }
         },
 
+        // Subscript assignment: `arr(i) = v`. The Call resolves to the
+        // subscript entity via typed.resolutions. Allowed when the subscript
+        // is Settable (has a `set { }` block) and the receiver chain is
+        // mutable. Non-subscript calls fall through to E202.
+        HirExpr::Call { callee, .. } => {
+            let Some(&sub_entity) = cx.typed.resolutions.get(&target) else {
+                push_assign_to_expression(cx, target, &mut *diags);
+                return;
+            };
+            if cx.query.get::<NodeKind>(sub_entity) != Some(&NodeKind::Subscript) {
+                push_assign_to_expression(cx, target, &mut *diags);
+                return;
+            }
+            if cx.query.get::<Settable>(sub_entity).is_none() {
+                diags.push(AnalyzeDiagnostic {
+                    descriptor_id: DESCRIPTORS[1].id,
+                    severity: DESCRIPTORS[1].default_severity,
+                    message: "cannot assign to read-only subscript".into(),
+                    labels: vec![DiagLabel {
+                        span: util::expr_span(cx.hir, target),
+                        message: "subscript has no setter".into(),
+                        is_primary: true,
+                    }],
+                    notes: vec![],
+                });
+                return;
+            }
+            let is_static = cx.query.get::<Static>(sub_entity).is_some();
+            if !is_static && !is_mutable_base(cx, *callee) {
+                diags.push(AnalyzeDiagnostic {
+                    descriptor_id: DESCRIPTORS[1].id,
+                    severity: DESCRIPTORS[1].default_severity,
+                    message: "cannot assign to subscript on immutable binding".into(),
+                    labels: vec![DiagLabel {
+                        span: util::expr_span(cx.hir, target),
+                        message: "cannot assign through immutable binding".into(),
+                        is_primary: true,
+                    }],
+                    notes: vec![],
+                });
+            }
+        },
+
         // All other expressions are invalid assignment targets
         _ => {
-            diags.push(AnalyzeDiagnostic {
-                descriptor_id: DESCRIPTORS[2].id,
-                severity: DESCRIPTORS[2].default_severity,
-                message: "cannot assign to this expression".into(),
-                labels: vec![DiagLabel {
-                    span: util::expr_span(cx.hir, target),
-                    message: "not a valid assignment target".into(),
-                    is_primary: true,
-                }],
-                notes: vec![],
-            });
+            push_assign_to_expression(cx, target, &mut *diags);
         },
     }
+}
+
+fn push_assign_to_expression(
+    cx: &BodyContext<'_>,
+    target: HirExprId,
+    diags: &mut Vec<AnalyzeDiagnostic>,
+) {
+    diags.push(AnalyzeDiagnostic {
+        descriptor_id: DESCRIPTORS[2].id,
+        severity: DESCRIPTORS[2].default_severity,
+        message: "cannot assign to this expression".into(),
+        labels: vec![DiagLabel {
+            span: util::expr_span(cx.hir, target),
+            message: "not a valid assignment target".into(),
+            is_primary: true,
+        }],
+        notes: vec![],
+    });
 }
 
 /// Check if an expression is a reference to `self` (first parameter, index 0).
@@ -285,6 +336,20 @@ fn is_mutable_base(cx: &BodyContext<'_>, expr_id: HirExprId) -> bool {
             is_mutable_base(cx, *base)
         },
         HirExpr::TupleIndex { base, .. } => is_mutable_base(cx, *base),
+        // Chained subscripts: `matrix(i)(j) = v`. The inner `matrix(i)` must
+        // itself be a settable subscript with a mutable base.
+        HirExpr::Call { callee, .. } => {
+            if let Some(&ent) = cx.typed.resolutions.get(&expr_id) {
+                let is_sub = cx
+                    .query
+                    .get::<NodeKind>(ent)
+                    .is_some_and(|k| *k == NodeKind::Subscript);
+                if is_sub && cx.query.get::<Settable>(ent).is_none() {
+                    return false;
+                }
+            }
+            is_mutable_base(cx, *callee)
+        },
         // Non-place expressions (call results, literals, etc.) — conservatively
         // treat as mutable; the type inference / validation phases handle these.
         _ => true,

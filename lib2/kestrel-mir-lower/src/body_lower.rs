@@ -319,6 +319,54 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 self.emit_call(callee, vec![newval_arg], MirTy::Unit);
                 Some(Value::Immediate(Immediate::unit()))
             },
+            // Subscript assignment: `arr(i) = v`. Concrete subscripts only —
+            // when the Call doesn't resolve to a NodeKind::Subscript, or the
+            // subscript has no setter child, return None so the analyzer's
+            // E202/E201 path reports the error. Protocol-witness subscript
+            // setter dispatch is deferred.
+            HirExpr::Call {
+                callee: callee_expr,
+                args,
+                ..
+            } => {
+                let resolved = self
+                    .typed
+                    .and_then(|t| t.resolutions.get(&target_id))
+                    .copied()?;
+                if self.ctx.world.get::<kestrel_ast_builder::NodeKind>(resolved)
+                    != Some(&kestrel_ast_builder::NodeKind::Subscript)
+                {
+                    return None;
+                }
+                let setter = find_setter_child(self.ctx, resolved)?;
+                self.ctx.register_name(setter);
+                let is_static = self
+                    .ctx
+                    .world
+                    .get::<kestrel_ast_builder::Static>(resolved)
+                    .is_some();
+                let mut subscript_args = self.lower_call_args(&args);
+                let newval_arg = CallArg::copy(self.lower_expr(value_id));
+                if is_static {
+                    let self_type = self.type_from_type_ref(callee_expr);
+                    let type_args = self.prepend_receiver_type_args(&self_type, vec![]);
+                    let callee = Callee::method(setter, type_args, self_type);
+                    let mut call_args = subscript_args;
+                    call_args.push(newval_arg);
+                    self.emit_call(callee, call_args, MirTy::Unit);
+                } else {
+                    let receiver_ty = self.resolve_expr_type(callee_expr);
+                    let receiver_arg = CallArg::mutating(self.lower_expr(callee_expr));
+                    let type_args = self.resolve_type_args(target_id);
+                    let type_args = self.prepend_receiver_type_args(&receiver_ty, type_args);
+                    let callee = Callee::method(setter, type_args, receiver_ty);
+                    let mut call_args = vec![receiver_arg];
+                    call_args.append(&mut subscript_args);
+                    call_args.push(newval_arg);
+                    self.emit_call(callee, call_args, MirTy::Unit);
+                }
+                Some(Value::Immediate(Immediate::unit()))
+            },
             _ => None,
         }
     }

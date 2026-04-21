@@ -14,10 +14,11 @@ module Test
             if arr(1) != 20 { return 2 }
             if arr(2) != 30 { return 3 }
 
-            // Test subscript set via setUnchecked (arr(1) = 25 syntax not yet supported)
-            // TODO: subscript assignment syntax arr(index) = value gives "cannot assign to temporary value"
-            arr.setUnchecked(1, 25);
+            // Test subscript set via arr(i) = v
+            arr(1) = 25;
             if arr(1) != 25 { return 4 }
+            // Also exercise setUnchecked for equivalence
+            arr.setUnchecked(1, 25);
 
             // Test subscript(wrapping:) with negative index
             let wrapLast = arr(wrapping: -1);
