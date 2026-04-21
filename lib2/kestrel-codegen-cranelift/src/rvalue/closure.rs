@@ -47,7 +47,11 @@ pub fn compile_apply_partial(
         .iter()
         .filter_map(|tp| state.subst.get(&tp.entity).cloned())
         .collect();
-    let mangled = mangle_function_with_self(ctx.module, callable_func, &type_args, None);
+    // Thunks/closures instantiated by the monomorphizer inherit the caller's
+    // self_type (see `collect.rs::scan_rvalue` for ApplyPartial), so the
+    // mangled reference must match by passing the same self_type through.
+    let mangled =
+        mangle_function_with_self(ctx.module, callable_func, &type_args, state.self_type.as_ref());
     let func_id = *ctx.func_ids_by_name.get(&mangled).ok_or_else(|| {
         CodegenError::Unsupported(format!(
             "ApplyPartial target callable '{mangled}' was not declared"

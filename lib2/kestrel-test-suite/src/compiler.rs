@@ -354,6 +354,15 @@ impl TestCompiler {
         test_file_id: usize,
     ) -> Result<(), String> {
         let diags = self.all_diagnostics();
+        if std::env::var("KTS_DUMP_DIAGS").is_ok() {
+            eprintln!("== DIAGS (file_id={}) ==", test_file_id);
+            for d in &diags {
+                eprintln!(
+                    "  file_id={} line={} sev={:?} msg={:?}",
+                    d.file_id, d.line, d.severity, d.message
+                );
+            }
+        }
         diagnostic_matcher::check(annotations, &diags, test_file_id)
     }
 }

@@ -130,12 +130,21 @@ fn compile_branch(
 ) -> Result<(), CodegenError> {
     let cond_raw = rvalue::compile_value(ctx, state, builder, condition)?;
 
-    // Bool is Named (aggregate) — the value is a pointer to a 1-byte stack slot.
-    // Load the actual byte before comparing.
+    // Bool is Named (aggregate) — a Place read returns a pointer; a bool
+    // immediate arrives as a scalar I8. Discriminate by the cranelift value
+    // type: I8 means scalar, anything else is the aggregate pointer and we
+    // load the byte at offset 0.
+    //
+    // This width-equality check is safe *only* because I8 can never equal
+    // any supported target's pointer size. Do NOT copy this pattern for
+    // wider primitive wrappers (Int64, UInt64, Float64) — their widths
+    // collide with 64-bit `ptr_type` and the wrong branch would be taken.
+    // For switch discriminants and anywhere else that needs a scalar out
+    // of a possibly-wrapped primitive Place, use
+    // `place::compile_place_read_scalar` instead.
     let cond_val = if builder.func.dfg.value_type(cond_raw) == ir::types::I8 {
-        cond_raw // Already a scalar i8
+        cond_raw
     } else {
-        // Aggregate pointer — load the i8 bool value
         builder
             .ins()
             .load(ir::types::I8, MemFlags::new(), cond_raw, Offset32::new(0))
@@ -166,8 +175,12 @@ fn compile_switch(
         return Ok(());
     }
 
-    // Resolve the discriminant type to decide how to read it.
-    let disc_ty = common::get_place_type(
+    // Probe the discriminant's type to decide the scalar width we need.
+    //   - Enum: always I32 (the discriminant tag at offset 0).
+    //   - Everything else: the primitive width of the type (I8 for Bool, I64
+    //     for Int64, …). `compile_place_read_scalar` centralizes the
+    //     aggregate-vs-scalar load — do NOT reinvent that decision here.
+    let probe_ty = common::get_place_type(
         ctx.module,
         state.body,
         discriminant,
@@ -175,41 +188,21 @@ fn compile_switch(
         state.self_type.as_ref(),
         &ctx.layouts,
     )?;
-    let enum_id = match &disc_ty {
+    let enum_id = match &probe_ty {
         MirTy::Named { entity, .. } => match ctx.layouts.resolve_named(*entity) {
             NamedKind::Enum(id) => Some(id),
             _ => None,
         },
         _ => None,
     };
-
-    let disc_val_raw = place::compile_place_read(ctx, state, builder, discriminant)?;
-
-    // Build the scalar we compare against.
-    //   - Enum: load the i32 discriminant from offset 0 of the enum pointer.
-    //   - Primitive / primitive-wrapped struct (Bool, Char, Int64, …): use
-    //     the value directly if already a scalar of the right width, or
-    //     load it from offset 0 if we have a pointer to the struct.
-    let discr_val = if enum_id.is_some() {
-        builder.ins().load(
-            ir::types::I32,
-            MemFlags::new(),
-            disc_val_raw,
-            Offset32::new(0),
-        )
+    let width_ty = if enum_id.is_some() {
+        ir::types::I32
     } else {
-        let width_ty = primitive_width_ty(ctx, &disc_ty);
-        let raw_ty = builder.func.dfg.value_type(disc_val_raw);
-        if raw_ty == width_ty {
-            disc_val_raw
-        } else if raw_ty == common::ptr_type(ctx.target) {
-            builder
-                .ins()
-                .load(width_ty, MemFlags::new(), disc_val_raw, Offset32::new(0))
-        } else {
-            disc_val_raw
-        }
+        primitive_width_ty(ctx, &probe_ty)
     };
+
+    let (discr_val, _) =
+        place::compile_place_read_scalar(ctx, state, builder, discriminant, width_ty)?;
 
     for (i, (case, target_block)) in cases.iter().enumerate() {
         let target_cl = state.block_map[target_block];

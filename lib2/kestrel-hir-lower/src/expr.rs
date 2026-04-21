@@ -446,16 +446,27 @@ impl LowerCtx<'_> {
                 // Check if this is a static method call on a type: Type[Args].staticMethod()
                 // Resolve directly as Call(Def) instead of MethodCall so type inference
                 // doesn't filter out the static method during member resolution.
-                if let Some((static_entity, base_type_args)) =
+                // Multiple overloads become an OverloadSet the solver disambiguates.
+                if let Some((static_candidates, base_type_args)) =
                     self.try_resolve_static_call(body, base, &member)
                 {
-                    // Include both struct type_args and method's own type_args
                     let mut all_type_args = base_type_args;
                     if let Some(ref method_args) = type_args {
                         all_type_args.extend(method_args.iter().map(|t| self.lower_type(t)));
                     }
-                    let callee =
-                        self.alloc_expr(HirExpr::Def(static_entity, all_type_args, span.clone()));
+                    let callee = if static_candidates.len() == 1 {
+                        self.alloc_expr(HirExpr::Def(
+                            static_candidates[0],
+                            all_type_args,
+                            span.clone(),
+                        ))
+                    } else {
+                        self.alloc_expr(HirExpr::OverloadSet {
+                            candidates: static_candidates,
+                            type_args: all_type_args,
+                            span: span.clone(),
+                        })
+                    };
                     return self.alloc_expr(HirExpr::Call {
                         callee,
                         args: lowered_args,
@@ -507,17 +518,26 @@ impl LowerCtx<'_> {
                 // Not a local-based path — check for static method call.
                 // For Type[Args].staticMethod() or mod.Type[Args].staticMethod(),
                 // resolve the static method directly so type inference doesn't need
-                // to handle it as a member constraint.
+                // to handle it as a member constraint. Multiple overloads become
+                // an OverloadSet the solver disambiguates.
                 {
                     let last = &segments[segments.len() - 1];
-                    if let Some((static_entity, base_type_args)) =
+                    if let Some((static_candidates, base_type_args)) =
                         self.try_resolve_static_call_from_segments(segments, &last.name)
                     {
-                        let callee = self.alloc_expr(HirExpr::Def(
-                            static_entity,
-                            base_type_args,
-                            span.clone(),
-                        ));
+                        let callee = if static_candidates.len() == 1 {
+                            self.alloc_expr(HirExpr::Def(
+                                static_candidates[0],
+                                base_type_args,
+                                span.clone(),
+                            ))
+                        } else {
+                            self.alloc_expr(HirExpr::OverloadSet {
+                                candidates: static_candidates,
+                                type_args: base_type_args,
+                                span: span.clone(),
+                            })
+                        };
                         return self.alloc_expr(HirExpr::Call {
                             callee,
                             args: lowered_args,
@@ -581,6 +601,54 @@ impl LowerCtx<'_> {
                     }
                 }
 
+                // Value-prefix method call: `Type.staticProp.instanceMethod(args)`.
+                // If the first N-1 segments resolve to a value (Gettable field,
+                // enum-case value, field-through-field chain), the last segment
+                // is an instance method on that value. Emit MethodCall so type
+                // inference sees the correct receiver + method shape instead of
+                // treating the path as a namespace lookup that falls off a field.
+                {
+                    use kestrel_ast_builder::{Gettable, NodeKind};
+                    let prefix_names: Vec<String> = segments[..segments.len() - 1]
+                        .iter()
+                        .map(|s| s.name.clone())
+                        .collect();
+                    let prefix_result = self.ctx.query(ResolveValuePath {
+                        segments: prefix_names,
+                        context: self.owner,
+                        root: self.root,
+                    });
+                    let is_value_prefix = match &prefix_result {
+                        ValueResolution::Def(entity) => matches!(
+                            self.ctx.get::<NodeKind>(*entity),
+                            Some(NodeKind::Field) | Some(NodeKind::EnumCase)
+                        ) || self.ctx.has::<Gettable>(*entity),
+                        ValueResolution::FieldValue { .. }
+                        | ValueResolution::EnumCaseValue { .. } => true,
+                        _ => false,
+                    };
+                    if is_value_prefix {
+                        let prefix_slice = &segments[..segments.len() - 1];
+                        let prefix_span = Span::new(
+                            segments[0].span.file_id,
+                            segments[0].span.start
+                                ..prefix_slice.last().unwrap().span.end,
+                        );
+                        let receiver = self.lower_path(body, prefix_slice, &prefix_span);
+                        let last = &segments[segments.len() - 1];
+                        let lowered_type_args = last.type_args.as_ref().map(|args| {
+                            args.iter().map(|t| self.lower_type(t)).collect()
+                        });
+                        return self.alloc_expr(HirExpr::MethodCall {
+                            receiver,
+                            method: last.name.clone(),
+                            type_args: lowered_type_args,
+                            args: lowered_args,
+                            span: span.clone(),
+                        });
+                    }
+                }
+
                 // Regular direct call (lowered as-is)
                 let lowered_callee = self.lower_expr(body, callee);
                 self.alloc_expr(HirExpr::Call {
@@ -603,13 +671,13 @@ impl LowerCtx<'_> {
     }
 
     /// Check if a multi-segment path ending in `member` is a static method call.
-    /// Resolves all segments except the last as a type, then searches for a static
-    /// method named `member` on that type.
+    /// Resolves all segments except the last as a type, then collects ALL static
+    /// methods named `member` on that type (one entity per overload).
     fn try_resolve_static_call_from_segments(
         &mut self,
         segments: &[ExprPathSegment],
         member: &str,
-    ) -> Option<(kestrel_hecs::Entity, Vec<kestrel_hir::ty::HirTy>)> {
+    ) -> Option<(Vec<kestrel_hecs::Entity>, Vec<kestrel_hir::ty::HirTy>)> {
         use kestrel_ast_builder::{Name, NodeKind, Static};
 
         if segments.len() < 2 {
@@ -639,9 +707,10 @@ impl LowerCtx<'_> {
             return None;
         }
 
-        // Search children for a static function matching the member name
-        let children: Vec<_> = self.ctx.children_of(type_entity).to_vec();
-        for &child in &children {
+        // Collect every static-function child matching `member` — multiple
+        // entities mean overloads, which the solver disambiguates by labels/arity.
+        let mut matches: Vec<kestrel_hecs::Entity> = Vec::new();
+        for &child in self.ctx.children_of(type_entity) {
             if self.ctx.get::<NodeKind>(child) != Some(&NodeKind::Function) {
                 continue;
             }
@@ -652,33 +721,36 @@ impl LowerCtx<'_> {
                 continue;
             };
             if child_name.0 == member {
-                // Collect struct type_args from base segments + method type_args from last segment
-                let mut type_args: Vec<kestrel_hir::ty::HirTy> = segments[..segments.len() - 1]
-                    .iter()
-                    .flat_map(|s| s.type_args.iter().flatten())
-                    .map(|t| self.lower_type(t))
-                    .collect();
-                // Append the method's own type_args (e.g., [T] in Layout.array[T])
-                let last = &segments[segments.len() - 1];
-                if let Some(ref method_args) = last.type_args {
-                    type_args.extend(method_args.iter().map(|t| self.lower_type(t)));
-                }
-                return Some((child, type_args));
+                matches.push(child);
             }
         }
 
-        None
+        if matches.is_empty() {
+            return None;
+        }
+
+        // Collect struct type_args from base segments + method type_args from last segment
+        let mut type_args: Vec<kestrel_hir::ty::HirTy> = segments[..segments.len() - 1]
+            .iter()
+            .flat_map(|s| s.type_args.iter().flatten())
+            .map(|t| self.lower_type(t))
+            .collect();
+        let last = &segments[segments.len() - 1];
+        if let Some(ref method_args) = last.type_args {
+            type_args.extend(method_args.iter().map(|t| self.lower_type(t)));
+        }
+        Some((matches, type_args))
     }
 
     /// Check if `base_expr.member` is a static method call on a type.
-    /// Returns `Some((static_method_entity, type_args))` if the base resolves to
-    /// a struct/enum and the member is a static method on it.
+    /// Returns `Some((candidates, type_args))` where `candidates` collects every
+    /// static overload named `member` — the solver disambiguates by labels/arity.
     fn try_resolve_static_call(
         &mut self,
         body: &AstBody,
         base_expr: ExprId,
         member: &str,
-    ) -> Option<(kestrel_hecs::Entity, Vec<kestrel_hir::ty::HirTy>)> {
+    ) -> Option<(Vec<kestrel_hecs::Entity>, Vec<kestrel_hir::ty::HirTy>)> {
         use kestrel_ast_builder::{Name, NodeKind, Static};
 
         // Base must be a Path expression (type reference)
@@ -705,7 +777,8 @@ impl LowerCtx<'_> {
             return None;
         }
 
-        // Search children for a static function matching the member name
+        // Collect every static-function child matching `member`
+        let mut matches: Vec<kestrel_hecs::Entity> = Vec::new();
         for &child in self.ctx.children_of(base_entity) {
             if self.ctx.get::<NodeKind>(child) != Some(&NodeKind::Function) {
                 continue;
@@ -713,19 +786,24 @@ impl LowerCtx<'_> {
             if self.ctx.get::<Static>(child).is_none() {
                 continue;
             }
-            let child_name = self.ctx.get::<Name>(child)?;
+            let Some(child_name) = self.ctx.get::<Name>(child) else {
+                continue;
+            };
             if child_name.0 == member {
-                // Collect type args from the base path segments
-                let type_args: Vec<kestrel_hir::ty::HirTy> = segments
-                    .iter()
-                    .flat_map(|s| s.type_args.iter().flatten())
-                    .map(|t| self.lower_type(t))
-                    .collect();
-                return Some((child, type_args));
+                matches.push(child);
             }
         }
 
-        None
+        if matches.is_empty() {
+            return None;
+        }
+
+        let type_args: Vec<kestrel_hir::ty::HirTy> = segments
+            .iter()
+            .flat_map(|s| s.type_args.iter().flatten())
+            .map(|t| self.lower_type(t))
+            .collect();
+        Some((matches, type_args))
     }
 
     /// Lower Path segments except the last one as receiver.

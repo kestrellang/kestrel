@@ -215,12 +215,24 @@ impl<'a> CollectionContext<'a> {
                 // actually uses SelfType in its signature. Static methods on other types
                 // (e.g., Pointer[T].nullPointer() called from a TcpListener method)
                 // should NOT inherit the caller's self_type.
+                //
+                // Closures/thunks are lexically nested in the parent's Self scope
+                // even when their signatures don't syntactically reference
+                // SelfType — their bodies can still mention protocol associated
+                // types (e.g. `Iterator.Item`) that need the parent's self_type
+                // to resolve via the witness table.
                 let callee_func = &self.module.functions[func_id.index()];
+                let callee_is_nested = matches!(
+                    callee_func.kind,
+                    FunctionKind::Closure
+                        | FunctionKind::ClosureCall { .. }
+                        | FunctionKind::Thunk { .. }
+                );
                 let concrete_self = self_type
                     .as_ref()
                     .map(|st| substitute_type_with_self(st, subst, parent_self.as_ref()))
                     .or_else(|| {
-                        if self.func_uses_self_type(callee_func) {
+                        if self.func_uses_self_type(callee_func) || callee_is_nested {
                             parent_self.clone()
                         } else {
                             None
@@ -376,21 +388,21 @@ impl<'a> CollectionContext<'a> {
                 {
                     // Infer type args from the parent's substitution
                     let target = &self.module.functions[original_func_id.index()];
-                    let callable = &self.module.functions[callable_func_id.index()];
                     let type_args: Vec<MirTy> = target
                         .type_params
                         .iter()
                         .filter_map(|tp| subst.get(&tp.entity).cloned())
                         .collect();
 
+                    // Always propagate parent's self_type: closures created
+                    // inside an extension method inherit the enclosing Self
+                    // scope, which is needed to resolve protocol associated
+                    // types (e.g. `Item` in `extend Iterator where Item: ...`)
+                    // against the concrete receiver via the witness table.
                     let inst = FunctionInstantiation {
                         func_id: callable_func_id,
                         type_args,
-                        self_type: if self.func_uses_self_type(callable) {
-                            parent_self.clone()
-                        } else {
-                            None
-                        },
+                        self_type: parent_self.clone(),
                     };
 
                     if self.result.functions.insert(inst.clone()) {

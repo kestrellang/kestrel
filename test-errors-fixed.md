@@ -356,3 +356,44 @@ Two of the nine 2026-04-21 SIGSEGV iterator adapter tests now pass (`filter_map_
 
 - [x] `stdlib/iterator/filter_map_explicit.ks` — was SIGSEGV in `FilterMapIterator.next` (Cranelift verifier `i64`/`i8` mismatch in the original report)
 - [x] `stdlib/views/string_iter.ks` — was SIGSEGV in `MapIterator<StringIterator, Char>.next`
+
+### Witness not found for abstract associated type — closures inside `extend Protocol where Item: X` (2026-04-21)
+
+Extension methods like `extend Iterator where Item: Comparable { func min() { self.reduce({ (a, b) in a.compare(b) }) } }` failed in monomorphization: `method 'compare(_:)' not found in witness for std.iter.Iterator.Item: Comparable`. The `a.compare(b)` call sits inside a closure passed to `reduce`; the closure was lowered as a standalone MIR function whose signature carried `MirTy::Named(Item_alias, [])` rather than anything referencing `MirTy::SelfType`. `func_uses_self_type(closure)` therefore returned false, so the monomorphizer's `ApplyPartial`/Direct-call paths never propagated `parent_self` to the closure's instantiation — `Iterator.Item` leaked to the witness lookup as an abstract entity.
+
+Fix: same family as the `Self in extend Protocol` entry above. With `HirTy::SelfType` now preserved through inference, bare `Item` inside `extend Iterator` lowers to `MirTy::AssociatedProjection { base: MirTy::SelfType, protocol: Iterator, name: "Item" }`. The closure's signature transitively contains `SelfType`, so `type_uses_self` (which recurses into `AssociatedProjection.base`) returns true, the enclosing function's self_type propagates to the closure instance, and `substitute_type_with_self` resolves the projection per-instantiation via witness lookup. Also required: `closure.rs::compile_apply_partial` now passes `state.self_type.as_ref()` to the mangler so callsite and declaration mangled names match.
+
+- [x] `stdlib/iterator/min_max_sorted.ks` — was `method 'compare'/'add'/'multiply' not found in witness for std.iter.Iterator.Item`
+- [x] `stdlib/iterator/utility_adapters.ks` — was `method 'equals' not found in witness for std.iter.Iterator.Item`
+
+### Iterator-adapter runtime exit-code failures (2026-04-21, fourth run)
+
+The remaining runtime-failing iterator adapter tests all started passing together. Mix of SIGSEGVs from `Optional<I.Item>` layout / generic-I discriminant construction for nested adapters, and downstream assertion-exit failures. Section in `test-errors.md` collapsed to just `io_error_types`.
+
+- [x] `stdlib/iterator/filter_map_flatten.ks` — was SIGSEGV (Optional payload layout for nested adapters)
+- [x] `stdlib/iterator/flatten_iterator.ks` — was SIGSEGV (`Pointer.read` deref of 0x1 inside `FlattenIterator`'s `ArrayIterator.next`)
+- [x] `stdlib/iterator/fuse_and_cycle.ks` — was exit 1
+- [x] `stdlib/iterator/inspect_adapter.ks` — was exit 2 (`result(unchecked: 0) != 1` assert)
+- [x] `stdlib/iterator/intersperse_adapter.ks` — was SIGSEGV at `IntersperseIterator.next` +300 deref of 0x2 (pendingItem discriminant wrong for generic I)
+- [x] `stdlib/iterator/intersperse_with_adapter.ks` — was SIGSEGV (same class as intersperse_adapter)
+- [x] `stdlib/iterator/map_filter_collect.ks` — was exit 5 (assertion failure)
+- [x] `stdlib/iterator/peekable_adapter.ks` — was exit 2
+- [x] `stdlib/iterator/take_skip_methods.ks` — was exit 2 (`TakeWhileIterator.next` chain assert)
+
+### Static-method overloads on qualified paths truncated to the first match (2026-04-21)
+
+`Type.method(...)` and `mod.Type.method(...)` went through `try_resolve_static_call` / `try_resolve_static_call_from_segments` in `lib2/kestrel-hir-lower/src/expr.rs`, which iterated the struct's children and returned the **first** static child whose `Name` matched — silently discarding every other overload. So `Int64.parse("42", 10)` resolved to the 1-arg `parse(string:)` and tripped `ArgCountMismatch`, even though `parse(string:, radix:)` existed as a sibling static. Fix: collect every matching static child and return `Vec<Entity>`. Callers in `lower_call` emit `HirExpr::Def` when there's a single candidate and `HirExpr::OverloadSet` otherwise, so `solve_overloaded_call` can disambiguate by labels/arity.
+
+- [x] `stdlib/int64/int64_parsing.ks` — was `wrong number of arguments: expected 1, got 2` at `Int64.parse("42", 10)` and `Int64.parse("ff", 16)`
+
+### Diagnostic-wording mismatches (stdlib)
+
+- [x] `stdlib/array/subscript_assignment.ks` — line 10 expected `cannot assign to temporary value`, got E202 `cannot assign to this expression`
+
+### Match on Int64 compared scrutinee pointer against literal (2026-04-21)
+
+`compile_switch` in `lib2/kestrel-codegen-cranelift/src/terminator.rs` inferred "scalar vs pointer" from cranelift SSA value-type equality: `raw_ty == width_ty` → use directly, else if `raw_ty == ptr_type` → load from offset 0. On 64-bit targets, `Int64`'s wrapper width (I64) equals `ptr_type` (I64), so the scrutinee pointer was compared against int literals directly — all concrete arms missed and every match fell through to the default `_` arm. Width-based discrimination was fragile for any aggregate whose primitive width collides with pointer size (Int64, UInt64, Float64 on 64-bit).
+
+Fix (holistic): added `place::compile_place_read_scalar(ctx, state, builder, place, width) -> (CrValue, MirTy)` in `lib2/kestrel-codegen-cranelift/src/place.rs` that decides aggregate-ness from the MIR type via `is_aggregate`. `compile_switch` routes through it; new codegen needing a scalar out of a possibly-wrapped primitive place must use this helper rather than reinvent the width check. `compile_branch` still uses a raw `== I8` check (safe — I8 cannot collide with any supported target's ptr_type) but carries a doc warning pointing at the helper.
+
+- [x] `stdlib/io/io_error_types.ks` — was exit 2 (`description()` match always returned `"unknown error"`)

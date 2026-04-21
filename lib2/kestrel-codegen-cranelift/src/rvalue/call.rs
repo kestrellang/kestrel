@@ -47,9 +47,6 @@ pub fn compile_call(
                 .iter()
                 .map(|a| substitute_type_with_self(a, &state.subst, state.self_type.as_ref()))
                 .collect();
-            let concrete_self = self_type.as_ref().map(|st| {
-                substitute_type_with_self(st, &state.subst, state.self_type.as_ref())
-            });
 
             let func_id_mir = ctx.entity_to_func.get(func).ok_or_else(|| {
                 let name = ctx.module.resolve_name(*func);
@@ -59,6 +56,31 @@ pub fn compile_call(
                 ))
             })?;
             let func_def = &ctx.module.functions[func_id_mir.index()];
+
+            // Mirror the monomorphizer: nested functions (closures/thunks)
+            // inherit the caller's self_type when their own
+            // Callee::Direct::self_type is None. Keep this in lockstep with
+            // `collect.rs::scan_callee` for Direct so the mangled name matches
+            // the declared instantiation.
+            let callee_is_nested = matches!(
+                func_def.kind,
+                kestrel_mir::FunctionKind::Closure
+                    | kestrel_mir::FunctionKind::ClosureCall { .. }
+                    | kestrel_mir::FunctionKind::Thunk { .. }
+            );
+            let concrete_self = self_type
+                .as_ref()
+                .map(|st| {
+                    substitute_type_with_self(st, &state.subst, state.self_type.as_ref())
+                })
+                .or_else(|| {
+                    if callee_is_nested {
+                        state.self_type.clone()
+                    } else {
+                        None
+                    }
+                });
+
             let mangled = mangle_function_with_self(
                 ctx.module,
                 func_def,

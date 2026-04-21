@@ -1341,11 +1341,13 @@ fn emit_resolved_call(
         }
     }
 
-    // Equate result with return type
+    // Equate result with return type. A function with no return annotation
+    // returns `()` (Swift/Rust semantics) — defaulting to a fresh TyVar would
+    // leak an unresolved slot at every no-return-type call site.
     let ret_tv = qctx
         .query(LowerTypeAnnotation { entity, root })
         .map(|hir_ty| lower_hir_ty_sub(ctx, &hir_ty, None, TyVar(0), &subs))
-        .unwrap_or_else(|| ctx.fresh());
+        .unwrap_or_else(|| ctx.tuple(Vec::new()));
 
     // For inits and enum cases, result type is the parent type
     if matches!(kind, Some(NodeKind::Initializer | NodeKind::EnumCase)) {
@@ -2414,40 +2416,15 @@ fn apply_literal_defaults(ctx: &mut InferCtx<'_>) {
             let args: Vec<TyVar> = (0..type_param_count).map(|_| ctx.fresh()).collect();
             let default_tv = ctx.named(entity, args);
             ctx.types[resolved.0 as usize] = TySlot::Redirect(default_tv);
-        } else if let Some(prim_entity) = lang_primitive_for_literal(ctx, literal) {
-            // Stdlib absent: mirror lib1's fallback to `lang.<primitive>` so tests
-            // with `// stdlib: false` still pin literals (Integer→i64, Bool→i1, …).
-            // Null/Array/Dict have no primitive equivalent and stay unresolved.
-            let default_tv = ctx.named(prim_entity, Vec::new());
-            ctx.types[resolved.0 as usize] = TySlot::Redirect(default_tv);
         }
+        // Without the `Default<Kind>LiteralType` builtin (e.g. `// stdlib: false`
+        // tests), leave the literal as `Unresolved { literal: Some(_) }`. Phase
+        // 4.5 (`report_unresolved_slots`) already skips literal-marked slots, so
+        // orphan literals don't surface a spurious "could not infer type", and
+        // any deferred `Equal`/`Coerce` against a concrete non-conforming type
+        // produces the preferred "does not conform to protocol" / "type mismatch"
+        // wording via `try_literal_mismatch` in `mismatch_error`.
     }
-}
-
-/// Look up a `lang.<name>` intrinsic struct entity for a literal kind.
-/// Used as a fallback when the `Default<Kind>LiteralType` builtin isn't
-/// registered (e.g. `// stdlib: false` tests).
-fn lang_primitive_for_literal(ctx: &InferCtx<'_>, lit: LiteralKind) -> Option<Entity> {
-    let prim_name = match lit {
-        LiteralKind::Integer => "i64",
-        LiteralKind::Float => "f64",
-        LiteralKind::Bool => "i1",
-        LiteralKind::String => "str",
-        LiteralKind::Char => "i32",
-        // No lang primitive for these literal kinds.
-        LiteralKind::Null | LiteralKind::Array | LiteralKind::Dictionary => return None,
-    };
-    let lang = ctx
-        .query_ctx
-        .children_of(ctx.root)
-        .iter()
-        .copied()
-        .find(|&e| ctx.query_ctx.get::<Name>(e).is_some_and(|n| n.0 == "lang"))?;
-    ctx.query_ctx
-        .children_of(lang)
-        .iter()
-        .copied()
-        .find(|&e| ctx.query_ctx.get::<Name>(e).is_some_and(|n| n.0 == prim_name))
 }
 
 // ===== Helpers =====

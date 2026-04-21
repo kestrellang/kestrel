@@ -72,6 +72,15 @@ pub fn resolve_assoc_type_substs(
     let mut candidate_entities: Vec<Entity> = Vec::new();
     collect_named_entities_from_func(func, &mut candidate_entities);
 
+    let debug = std::env::var("DEBUG_ASSOC").is_ok()
+        && (func.name.contains("min") || func.name.contains("closure"));
+    if debug {
+        eprintln!(
+            "\n=== resolve_assoc_type_substs for {} ===\n  self_type={:?}\n  initial subst={:?}",
+            func.name, self_type, subst
+        );
+    }
+
     for entity in candidate_entities {
         if subst.contains_key(&entity) {
             continue; // Already resolved
@@ -80,6 +89,10 @@ pub fn resolve_assoc_type_substs(
         let name = module.resolve_name(entity);
         if name == "<unknown>" {
             continue;
+        }
+
+        if debug {
+            eprintln!("  candidate entity {:?} name={}", entity, name);
         }
 
         // Check if this entity's name matches <protocol_name>.<assoc_type_name>
@@ -99,14 +112,30 @@ pub fn resolve_assoc_type_substs(
                     let subst_candidates = subst.values();
                     let self_candidate = self_type.into_iter();
                     for concrete in subst_candidates.chain(self_candidate) {
-                        if let Ok(resolved) = witness::resolve_associated_type(
+                        if debug {
+                            eprintln!(
+                                "    trying resolve {}.{} with concrete={:?}",
+                                proto_def.name, assoc.name, concrete
+                            );
+                        }
+                        match witness::resolve_associated_type(
                             module,
                             proto_def.entity,
                             concrete,
                             &assoc.name,
                         ) {
-                            subst.insert(entity, resolved);
-                            break;
+                            Ok(resolved) => {
+                                if debug {
+                                    eprintln!("    ✓ resolved to {:?}", resolved);
+                                }
+                                subst.insert(entity, resolved);
+                                break;
+                            },
+                            Err(e) => {
+                                if debug {
+                                    eprintln!("    ✗ failed: {:?}", e);
+                                }
+                            },
                         }
                     }
                 }

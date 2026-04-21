@@ -3,7 +3,7 @@
 //! These tests parse real Kestrel source code, build declarations,
 //! lower to HIR, then run type inference.
 
-use kestrel_ast_builder::{Name, NodeKind, build_declarations};
+use kestrel_ast_builder::{Name, NodeKind, build_declarations, seed_lang_module};
 use kestrel_hecs::{Entity, World};
 use kestrel_hir_lower::LowerBody;
 use kestrel_type_infer::InferBody;
@@ -19,6 +19,10 @@ fn build_from_source(source: &str) -> (World, Entity) {
     let root = world.spawn();
     world.set(root, NodeKind::Module);
     world.set(root, Name("<root>".to_string()));
+    // Seed `lang.*` primitives so literal fallback in `apply_literal_defaults`
+    // has `lang.i1` / `lang.i64` / `lang.str` / `lang.f64` to bind to when
+    // the test source doesn't load stdlib's `Default<Kind>LiteralType`.
+    seed_lang_module(&mut world, root);
 
     let file_entity = world.spawn();
     let tokens: Vec<_> = kestrel_lexer2::lex(source, file_entity.index())

@@ -51,6 +51,42 @@ pub fn compile_place_read(
     })
 }
 
+/// Read a place whose MIR type is a primitive (bare `lang.iN`/`lang.fN`) or a
+/// single-field wrapper aggregate around one (Bool, Char, Int64, …) and
+/// return the primitive scalar value at `width`.
+///
+/// Aggregate-ness is decided from the MIR type — **never** from the cranelift
+/// SSA value type. On 64-bit targets `Int64`'s wrapper width (I64) collides
+/// with `ptr_type` (I64), so a bare `raw_ty == width` check would treat the
+/// scrutinee pointer as the value itself and silently compare addresses
+/// against literals. Any new code that needs a scalar out of a
+/// possibly-wrapped primitive must go through this helper.
+pub fn compile_place_read_scalar(
+    ctx: &mut CodegenContext,
+    state: &FunctionState,
+    builder: &mut FunctionBuilder,
+    place: &Place,
+    width: ir::Type,
+) -> Result<(CrValue, MirTy), CodegenError> {
+    let ty = common::get_place_type(
+        ctx.module,
+        state.body,
+        place,
+        &state.subst,
+        state.self_type.as_ref(),
+        &ctx.layouts,
+    )?;
+    let raw = compile_place_read(ctx, state, builder, place)?;
+    let val = if is_aggregate(&ty, &mut ctx.layouts) {
+        builder
+            .ins()
+            .load(width, MemFlags::new(), raw, Offset32::new(0))
+    } else {
+        raw
+    };
+    Ok((val, ty))
+}
+
 fn compile_place_read_inner(
     ctx: &mut CodegenContext,
     state: &FunctionState,

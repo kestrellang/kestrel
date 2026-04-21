@@ -302,8 +302,8 @@ No analyzer in lib2 detects delegating-init calls from non-init contexts. Curren
 
 # Stdlib
 
-Run: `file_tests --test-threads=1 stdlib` on `feature/incremental-hecs` (2026-04-21, third run).
-Result: **183 passed · 21 failed** (−3 vs. second 2026-04-21 run). Fixed in this window: `@fileconstant` MIR-lowering drop (−3: `char_case_conversion`, `string/case_conversion`, `views/graphemes_view`).
+Run: `file_tests --test-threads=1 stdlib` on `feature/incremental-hecs` (2026-04-21, fourth run).
+Result: **196 passed · 8 failed** (−13 vs. third 2026-04-21 run). Fixed in this window: the Iterator-adapter runtime bucket collapsed — `filter_map_flatten`, `flatten_iterator`, `fuse_and_cycle`, `inspect_adapter`, `intersperse_adapter`, `intersperse_with_adapter`, `map_filter_collect`, `peekable_adapter`, `take_skip_methods` all pass.
 
 Previously resolved categories:
 - **E205 `cannot pass temporary value to 'mutating' parameter`** — fully resolved 2026-04-20 (access-mode analyzer receiver/arg split + stdlib `mutating` → `consuming` flip). All former E205 tests reclassified below by their remaining failure.
@@ -311,38 +311,17 @@ Previously resolved categories:
 - **Monomorphization witness gaps** — fixed 2026-04-20 via new `ProtocolMembers` query in `kestrel-name-res` that unifies the protocol-child + extension + parent-protocol walk. Witness generation and name-resolution consumers now call one query instead of reassembling the walk. 4 tests pass; 1 regressed to a separate pre-existing overload-collision bug; 20 others reclassified by new failure mode.
 - **Witness-instantiation collapse** — fixed 2026-04-20. `ConformingProtocols` deduped by protocol entity so `Int64: Convertible[Int8], [Int16], [Int32], ...` collapsed into a single `Convertible` witness bound to the first `init(from:)` overload — every `Int64(from: x)` silently truncated x to 8 bits. Fix: new `ConformingProtocolInstantiations` query preserves per-conformance type args; `witness_lower.rs` emits one witness per `(protocol, type_args)` with parameter-type init disambiguation; codegen's `find_witness_with_method` filters by `protocol_type_args`. Net: −23 stdlib failures (integer conversions, parse, byte-endian, bitwidth ops, float conversions).
 - **Codegen symbol not found: `Array.init`** — the `collect()` monomorphization miss is resolved. Nearly all former entries moved to Cranelift verifier errors (compile/link phase) or Runtime exit-code failures (runs but asserts fail); a couple now hit earlier MIR/inference errors. Only `try_fold_adapter` still links against an undeclared symbol, for a different monomorphization gap (`tryFold`).
-- **Cranelift verifier `i64`/`i8` signature mismatch** — resolved 2026-04-21 (likely by the `self_item_leaked_to_mir` fix + surrounding monomorphization work). All 9 former entries (7 `call_indirect` arg-2 mismatches across `MapIterator`/`FilterMapIterator`/`InspectIterator`/`IntersperseIterator`/`TakeWhileIterator`, plus 2 `load.i64` base-pointer mismatches in `FlattenIterator`/`IntersperseWithIterator`) now compile and link cleanly. Reclassified into the Runtime exit-code bucket below by their new failure mode (8 SIGSEGV, 1 assert-failure exit 1).
-
-## Witness not found for abstract associated type
-
-Extension methods that require additional protocol conformances on `Iterator.Item` (e.g., `Comparable`, `Equatable`, `Addable`) fail because the monomorphizer can't find witnesses for the abstract associated type entity.
-
-- [ ] `stdlib/iterator/min_max_sorted.ks` — `method 'compare' not found in witness for std.iter.Iterator.Item: Comparable`; also `add`/`multiply`
-- [ ] `stdlib/iterator/utility_adapters.ks` — `method 'equals' not found in witness for std.iter.Iterator.Item: Equatable`
+- **Cranelift verifier `i64`/`i8` signature mismatch** — resolved 2026-04-21 (likely by the `self_item_leaked_to_mir` fix + surrounding monomorphization work). All 9 former entries (7 `call_indirect` arg-2 mismatches across `MapIterator`/`FilterMapIterator`/`InspectIterator`/`IntersperseIterator`/`TakeWhileIterator`, plus 2 `load.i64` base-pointer mismatches in `FlattenIterator`/`IntersperseWithIterator`) now compile and link cleanly. Reclassified into the Runtime exit-code bucket, then resolved in the fourth 2026-04-21 run.
+- **Iterator-adapter runtime exit-code failures** — resolved 2026-04-21 (fourth run). 9 tests (`filter_map_flatten`, `flatten_iterator`, `fuse_and_cycle`, `inspect_adapter`, `intersperse_adapter`, `intersperse_with_adapter`, `map_filter_collect`, `peekable_adapter`, `take_skip_methods`) all pass. Mix of SIGSEGVs (Optional<I.Item> layout for nested adapters, generic-I discriminant handling) and assertion-exit failures resolved together.
 
 ## Type inference / bind errors
 
 - [ ] `stdlib/array/init_count_generator.ks` — `expected i64 got (?) -> ?` + `? !: Multipliable` + `no member 'multiply' on type '?'` — closure-param type not flowed into `Array(count:generator:)` init's generator callback
-- [ ] `stdlib/float64/float64_exp_and_log.ks` — line 26: `no member '(subscript)' on type 'Float64'` (a call is being parsed/lowered as a subscript on a scalar)
-- [ ] `stdlib/int64/int64_parsing.ks` — `parse(s, 10)` arity mismatch: test passes a radix but stdlib `parse` takes 1 arg; cascades into 10 diagnostics (no `isNone`/`unwrap`/`notEquals` on the `?`-typed result)
 - [ ] `stdlib/iterator/zip_chain_enumerate.ks` — line 32: `type mismatch: expected Int64 got Item` — abstract `Item` leaking through where a concrete `Int64` is expected
-
-## Diagnostic-wording mismatches
-
-- [x] `stdlib/array/subscript_assignment.ks` — line 10 expected `cannot assign to temporary value`, got E202 `cannot assign to this expression`
 
 ## Runtime exit-code failures (compile OK, assert/behavior wrong)
 
 Program compiles and links but exits non-zero — asserts failing or behavior diverging from expectation.
 
-- [ ] `stdlib/io/io_error_types.ks` — exit 2
-- [ ] `stdlib/iterator/filter_map_flatten.ks` — SIGSEGV (was Cranelift verifier mismatch, Optional payload)
-- [ ] `stdlib/iterator/flatten_iterator.ks` — SIGSEGV (was Cranelift verifier `load.i64 v79` where `v79 has type i8` in `FlattenIterator.next`); after the 2026-04-21 SelfType-through-inference fix, init now mangles per-concrete-I but `Pointer.read` deref still hits address 0x1 in `ArrayIterator.next` inside `FlattenIterator` — Optional<I.Item> layout still wrong for nested adapters
-- [ ] `stdlib/iterator/fuse_and_cycle.ks` — exit 1 (was `Array.init` codegen-link failure)
-- [ ] `stdlib/iterator/inspect_adapter.ks` — exit 2 (was SIGSEGV; init is now monomorphized per concrete `I` after the SelfType fix, but assertion `result(unchecked: 0) != 1` still fails — closure dispatch through inspector field needs further investigation)
-- [ ] `stdlib/iterator/intersperse_adapter.ks` — SIGSEGV at `IntersperseIterator.next` +300 deref of address 0x2 (init writes pendingItem discriminant=1 instead of 0 — Optional<I.Item> .None construction broken for generic I)
-- [ ] `stdlib/iterator/intersperse_with_adapter.ks` — SIGSEGV (similar to intersperse_adapter)
-- [ ] `stdlib/iterator/map_filter_collect.ks` — exit 5 (was SIGSEGV; assertion failure now)
-- [ ] `stdlib/iterator/peekable_adapter.ks` — exit 2
-- [ ] `stdlib/iterator/take_skip_methods.ks` — exit 2 (was exit 1; assertion in `TakeWhileIterator.next` chain)
+_(none currently tracked — see `test-errors-fixed.md` for resolved entries)_
 
